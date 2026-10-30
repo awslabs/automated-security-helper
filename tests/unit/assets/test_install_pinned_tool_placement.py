@@ -383,7 +383,12 @@ class TestTwoInstallsOfOneTool:
             if Path(dst) == final and Path(src).name == "incoming":
                 final.mkdir()
                 (final / "LICENSE").write_bytes(_LICENSE)
-                (final / "SOURCE").write_bytes(b"demo notice\n")
+                # The installer writes SOURCE with write_text, which ends a line
+                # with the platform's newline (CRLF on Windows). The other install
+                # is the same installer, so its file is written the same way; LF
+                # bytes would differ from this call's copy on Windows and the
+                # identical-entry check would refuse a loser that is in fact done.
+                (final / "SOURCE").write_text("demo notice\n", encoding="utf-8")
             return real(src, dst, *args, **kwargs)
 
         monkeypatch.setattr(os, "replace", other_install_publishes_first)
