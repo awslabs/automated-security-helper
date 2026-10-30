@@ -26,6 +26,10 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.report_conte
     coverage_shortfall_text,
 )
 from automated_security_helper.core.unified_metrics import format_duration
+from automated_security_helper.utils.sarif_utils import (
+    is_result_suppressed,
+    suppressions_in_effect,
+)
 from automated_security_helper.utils.severity_ladder import SEVERITIES, result_severity
 from automated_security_helper.utils.terminal_text import (
     commands_broken,
@@ -514,8 +518,15 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     @staticmethod
     def _is_suppressed(result: Result) -> bool:
-        """Return True if the result carries a non-empty suppressions list."""
-        return bool(result.suppressions)
+        """Whether the result carries a suppression that is in effect.
+
+        Read through ``sarif_utils.is_result_suppressed``, the one answer every
+        consumer gives: a suppression ``rejected`` by the reviewer or still
+        ``underReview`` has not taken effect (SARIF 3.35.4), the gate still fails
+        the scan on the finding, and the report used to file it under Suppressed
+        on the presence of the entry alone.
+        """
+        return is_result_suppressed(result)
 
     def _group_results_by_severity(
         self, results: List[Result]
@@ -644,12 +655,15 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 severity = result_severity(finding)
                 severity_class = f"severity-{severity.lower()}"
                 location_str = self._location_str(finding)
-                reason = ""
-                if finding.suppressions:
-                    reasons = [
-                        s.justification for s in finding.suppressions if s.justification
-                    ]
-                    reason = "; ".join(reasons) if reasons else ""
+                # The reasons of the suppressions in effect: a rejected one did
+                # not hide the finding, so its justification is not why the row
+                # is here.
+                reasons = [
+                    s.justification
+                    for s in suppressions_in_effect(finding.suppressions)
+                    if getattr(s, "justification", None)
+                ]
+                reason = "; ".join(reasons) if reasons else ""
 
                 table += f"""
                 <tr>
