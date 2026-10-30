@@ -2511,12 +2511,15 @@ def _resolved_reference_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
     resolver reads plain scalars only), so a written key that is itself a key
     of ``resolved`` came to itself. Otherwise the key is resolved by the
     loader's own rule, read quietly (_quietly_resolved), and looked up by the
-    merge's spelling rule (_record_key without its plugin-section fold: ``-``
-    for ``_``, the twin environment_record_read folds a plugin section's
-    canonical spelling by too; a key resolving to another plugin's name is
-    not this mapping's entry). A key that still names no key of ``resolved``
-    (the variable unset, or set to a name the mapping does not hold) is None,
-    and _paired_keys pairs it by position."""
+    merge's spelling rule alone (_record_key: ``-`` and ``_`` are one key, the
+    rule environment_record_read folds a plugin section's spelling by too).
+    _record_key's plugin-section fold (two names of one plugin are one
+    section) is left off here on purpose: ``resolved`` is this file's own
+    mapping, in which the loader keeps a key that resolves to another spelling
+    of a plugin's name as its own key, so folding it would pair the reference
+    with another entry of the mapping. A key that still names no key of
+    ``resolved`` (the variable unset, or set to a name the mapping does not
+    hold) is None, and _paired_keys pairs it by position."""
     text = _without_env_tag(written_key)
     if text in resolved:
         return text

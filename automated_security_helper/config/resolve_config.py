@@ -302,15 +302,18 @@ def _needs_a_working_directory(override: str) -> bool:
     absolute path, a ``~`` path, a URL and a value holding ``$`` come back as
     written (``operator_paths.anchored_path``), and so does a rules option
     (semgrep's and opengrep's ``config``) that names nothing under the
-    directory. Probed at the real root, such a rules value that happens to name
-    a directory of the host (``etc``) read as anchored and was refused; under
-    the placeholder roots it names nothing and comes back as written. The two
+    directory. Probed at the real root, a rules value that happened to name a
+    directory of the host (``etc``) read as anchored while one naming nothing
+    there read as written, so what was refused depended on the host's own
+    directories; under the placeholder roots every rules value names nothing,
+    the probe reads it as written, and the rules rule below decides it. The two
     probes are compared with the written override, not with each other: a
     value that climbs out of its root (``../bandit.yaml``) normalizes to the
     same path under both roots and still needs the directory. A rules value
     that is a relative path and no registry form needs the directory too
-    (``_rules_value_needs_the_directory``): under a live directory the probe
-    reads the disk for it, and under a gone one there is no disk to read.
+    (``_rules_value_needs_the_directory``), ``etc`` included: under a live
+    directory the anchoring reads the disk for it, and under a gone one there
+    is no disk to read.
     """
     probe = [override]
     if any(anchor_override_paths(probe, root) != probe for root in _PLACEHOLDER_ROOTS):
@@ -3998,10 +4001,13 @@ def _with_reporter_overrides(
     section a future plugin reads. The overrides are applied together first;
     when one of them does not apply to the trusted base, they are applied
     again one reporter section at a time, all or nothing per section: a
-    section with a failing override is dropped whole, with one warning, so an
-    ``enabled=true`` never lands without the destination override written
-    beside it (which would send findings to the base's or the default
-    destination), and the other sections' overrides still apply. A
+    section with a failing override is dropped whole, with one warning, so for
+    a section the trusted base's model declares an ``enabled=true`` never lands
+    without the destination override written beside it (which would send
+    findings to the base's or the default destination), and the other
+    sections' overrides still apply. An undeclared section has no model for an
+    override to fail against, so its overrides land as written, as said
+    above. A
     ``reporters.<section>.enabled=<false>``, in every spelling the field reads
     as False (``false``, ``0``, ``off``, ``no``, ``f``, ``n``), is applied
     whatever else its section asked for: a disable fails closed both ways. For
@@ -4082,13 +4088,28 @@ def _with_reporter_overrides(
                     f" except the disable '{disable_keys}', which is applied on "
                     "its own,"
                 )
+            # An override of ``reporters`` itself puts every override in one
+            # group (_reporter_overrides_by_section), so there is no other
+            # section whose overrides still apply, and the warning says so.
+            whole_set = any(
+                len(override.partition("=")[0].removesuffix("+").strip().split(".")) < 2
+                for override in section_overrides
+            )
+            scope = (
+                "none of the reporters overrides is applied"
+                if whole_set
+                else "none of that section's overrides is applied"
+            )
+            others = (
+                ""
+                if whole_set
+                else "; the other reporters sections' overrides still apply"
+            )
             ASH_LOGGER.warning(
                 "The --config-overrides under reporters do not apply to the "
                 f"operator's own configuration for '{keys}' ({described}), so "
-                f"none of that section's overrides is applied{kept} and a "
-                "reporter that sends findings off the host keeps that "
-                "configuration's settings for it; the other reporters sections' "
-                "overrides still apply.",
+                f"{scope}{kept} and a reporter that sends findings off the host "
+                f"keeps that configuration's settings for it{others}.",
                 extra=NO_MARKUP,
             )
         return view
