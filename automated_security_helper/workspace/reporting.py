@@ -133,7 +133,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from automated_security_helper.base.plugin_config import (
     declared_config_model,
@@ -945,6 +945,7 @@ def emit_workspace_reports(
     ignore_suppressions: bool = False,
     reporter_classes: Optional[Sequence[type]] = None,
     plugin_modules: Sequence[str] = (),
+    completed_projects: Optional[Iterable[str]] = None,
 ) -> WorkspaceReportOutcome:
     """Run the workspace-level report step and write the manifest.
 
@@ -969,6 +970,13 @@ def emit_workspace_reports(
             (``execution.workspace_plugin_modules``). With ``reporter_classes``
             unset, only ASH's built-in reporters and those of these modules are
             considered.
+        completed_projects: The keys of the projects this run scanned to
+            completion, which the caller holds in memory (each project's
+            ``outcome.status``). A per-project artefact on disk is this run's
+            only for such a project (:func:`_per_project_artifacts`). ``None``
+            reads them from the results file instead
+            (:func:`_projects_with_a_completed_run`), a whole-file parse per
+            report step that a caller with the outcomes in hand never needs.
 
     Returns:
         What was written, what was withheld, and what refused. The caller passes
@@ -1037,13 +1045,26 @@ def emit_workspace_reports(
     # before any reporter writes, so a previous run's file never outlives it.
     _remove_previous_workspace_reports(reports_dir, selection)
 
-    # Which projects this run scanned to completion, read once from the results
-    # file on the first per-project reporter that needs it.
+    # Which projects this run scanned to completion: what the caller holds, or
+    # else read once from the results file on the first per-project reporter
+    # that needs it. The file read is the fallback for a caller without the
+    # outcomes (a test, a tool reading an output directory back): it parses the
+    # whole unified file for one field, and a file of another shape answers
+    # None, which turns the stale-artefact check off, so that is said.
     completed_runs: List[Optional[set]] = []
+    if completed_projects is not None:
+        completed_runs.append({str(key) for key in completed_projects})
 
     def completed() -> Optional[set]:
         if not completed_runs:
-            completed_runs.append(_projects_with_a_completed_run(Path(results_path)))
+            from_file = _projects_with_a_completed_run(Path(results_path))
+            if from_file is None:
+                ASH_LOGGER.verbose(
+                    "The unified results file does not say which projects "
+                    "completed, so every per-project artefact on disk is listed "
+                    "as this run's."
+                )
+            completed_runs.append(from_file)
         return completed_runs[0]
 
     for key, failure in construction_failures.items():

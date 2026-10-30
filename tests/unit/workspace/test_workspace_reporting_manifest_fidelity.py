@@ -185,6 +185,33 @@ class TestAPerProjectArtefactBelongsToTheRunThatWroteIt:
         entry = _manifest(output_dir)["reporters"]["fake-per-project"]
         assert entry["missing_per_project_artifacts"] == []
 
+    def test_the_callers_completed_set_governs_over_the_file(self, workspace):
+        """The results file in this fixture says both projects completed; the
+        caller, which holds every outcome in memory, says only ``api`` did."""
+        _, output_dir, _ = workspace
+
+        _emit(workspace, FakePerProjectReporter, completed_projects=["api"])
+
+        entry = _manifest(output_dir)["reporters"]["fake-per-project"]
+        assert entry["missing_per_project_artifacts"] == ["web"]
+
+    def test_with_the_callers_set_the_results_file_is_not_parsed_for_it(
+        self, workspace, monkeypatch
+    ):
+        """Every report step parsed the whole unified file for one field, on
+        a default run's six disabled reporters too; the caller's set spares it."""
+        _, output_dir, _ = workspace
+
+        def never(results_path):  # pragma: no cover - the assertion is the point
+            raise AssertionError("the results file was parsed for the completed set")
+
+        monkeypatch.setattr(reporting, "_projects_with_a_completed_run", never)
+
+        _emit(workspace, FakePerProjectReporter, completed_projects=["api", "web"])
+
+        entry = _manifest(output_dir)["reporters"]["fake-per-project"]
+        assert entry["missing_per_project_artifacts"] == []
+
 
 class TestAPreviousRunsWorkspaceReportDoesNotOutliveThisRun:
     def _stale(self, output_dir: Path, name: str) -> Path:
