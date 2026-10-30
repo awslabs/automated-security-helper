@@ -6,7 +6,9 @@
 * The https requirement was checked on the URL the script was given. urllib
   follows a redirect to ``http://`` as readily as one to ``https://``, so a pinned
   https URL could be fetched over plain http. The opener ``download`` builds now
-  refuses a redirect that leaves https.
+  refuses a redirect that leaves https, and the refusal exits ``_EXIT_INTEGRITY``
+  with one line on standard error. It used to escape as an ``HTTPError``
+  traceback with status 1, which with-retry repeats.
 * Two installs of one rules bundle into one directory raced on the last rename: the
   loser failed with "Directory not empty" although the bundle was in place, or with
   "No such file" when the winner had already moved the old directory aside.
@@ -27,7 +29,6 @@ import os
 import sys
 import threading
 import types
-import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -77,14 +78,50 @@ class TestARedirectLeavingHttpsIsRefused:
             request, io.BytesIO(b""), 302, "Found", {}, newurl
         )
 
-    def test_a_redirect_to_plain_http_raises(self):
-        with pytest.raises(urllib.error.HTTPError) as raised:
+    def test_a_redirect_to_plain_http_exits_with_the_integrity_status(self):
+        with pytest.raises(SystemExit) as raised:
             self._redirect("http://example.invalid/asset.tar.gz")
-        assert "non-https" in str(raised.value.msg)
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert "non-https" in str(raised.value)
 
-    def test_a_redirect_to_another_scheme_raises(self):
-        with pytest.raises(urllib.error.HTTPError):
+    def test_a_redirect_to_another_scheme_exits_with_the_integrity_status(self):
+        with pytest.raises(SystemExit) as raised:
             self._redirect("ftp://example.invalid/asset.tar.gz")
+        assert raised.value.code == installer._EXIT_INTEGRITY
+
+    def test_the_refusal_prints_one_line_without_the_query_string(self, capsys):
+        with pytest.raises(SystemExit):
+            self._redirect("http://example.invalid/asset.tar.gz?sig=SECRET-TOKEN")
+        printed = capsys.readouterr().err
+        assert "http://example.invalid/asset.tar.gz" in printed
+        assert "SECRET-TOKEN" not in printed
+        assert len(printed.strip().splitlines()) == 1
+
+    def test_the_refusal_leaves_download_with_the_integrity_status(
+        self, monkeypatch, tmp_path
+    ):
+        """Not an HTTPError traceback with status 1, which with-retry would repeat."""
+
+        class _Opener:
+            def open(self, url, data=None, timeout=None):
+                return installer._HttpsOnlyRedirects().redirect_request(
+                    urllib.request.Request(url),
+                    io.BytesIO(b""),
+                    302,
+                    "Found",
+                    {},
+                    "http://example.invalid/x",
+                )
+
+        monkeypatch.setattr(
+            installer.urllib.request, "build_opener", lambda *handlers: _Opener()
+        )
+
+        with pytest.raises(SystemExit) as raised:
+            installer.download("https://example.invalid/x", tmp_path / "x")
+
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not (tmp_path / "x").exists()
 
     def test_a_redirect_to_https_is_followed(self):
         """Control: GitHub's 302 to its object host is the redirect this exists for."""

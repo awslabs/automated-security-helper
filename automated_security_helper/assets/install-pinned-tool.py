@@ -110,7 +110,6 @@ import sysconfig
 import tarfile
 import tempfile
 import threading
-import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -128,6 +127,10 @@ _EXCEPTIONS_MODULE = ("core", "exceptions.py")
 # _EXIT_USAGE marks a request that cannot succeed as written: a tool or bundle
 # the table does not pin, a platform it has no asset for, a table entry that is
 # half-applied. A second attempt gets the same answer.
+#
+# _EXIT_INTEGRITY marks bytes or a transport that is not what the table pinned: a
+# digest mismatch, an archive layout the installer refuses, a redirect off https.
+# with-retry's default no-retry list is exactly these two statuses.
 _EXIT_USAGE = 2
 _EXIT_INTEGRITY = 3
 # Seconds a download socket may stay silent before the attempt fails. Per read,
@@ -285,16 +288,20 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
     Every URL this script fetches is checked for https before the request. A
     redirect is a second request the check never saw, and urllib follows one to
     http:// as readily as to https://.
+
+    A refused redirect leaves with ``_EXIT_INTEGRITY``. It used to escape as an
+    ``HTTPError``, a traceback with status 1, which with-retry answers by fetching
+    the same URL, and being sent to plain http, again. The target is printed without
+    its query string, which for a signed download URL is a credential.
     """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
-            raise urllib.error.HTTPError(
-                req.full_url,
-                code,
-                f"{msg}: refusing a redirect to the non-https URL {newurl}",
-                headers,
-                fp,
+        target = urllib.parse.urlsplit(newurl)
+        if target.scheme.lower() != "https":
+            raise _refuse(
+                f"{req.full_url} answered {code} {msg}: refusing a redirect to the "
+                f"non-https URL {target.scheme}://{target.hostname or ''}{target.path}",
+                _EXIT_INTEGRITY,
             )
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -306,7 +313,8 @@ def download(url: str, target: Path) -> str:
     lacked: a GitHub release download always answers 302 to
     objects.githubusercontent.com, and treating that as an error is what left the
     build with no tarball and a checksum failure against a missing file. Only
-    redirects to https are followed (``_HttpsOnlyRedirects``).
+    redirects to https are followed; one to anything else exits
+    ``_EXIT_INTEGRITY`` (``_HttpsOnlyRedirects``).
 
     Hashed while streaming rather than by re-reading the file, so the digest
     describes the bytes that were written and not whatever is at the path
@@ -1869,7 +1877,8 @@ def main(argv: "list[str] | None" = None) -> int:
         action="store_true",
         help=(
             "with --rules-bundle, install nothing: exit 0 when the rule files under "
-            "--rules-dir match the bundle's pinned contents, 1 otherwise"
+            "--rules-dir match the bundle's pinned contents, 1 otherwise (2 for a "
+            "bundle the table does not pin)"
         ),
     )
     args = parser.parse_args(argv)
