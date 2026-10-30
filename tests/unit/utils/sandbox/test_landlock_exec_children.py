@@ -289,6 +289,70 @@ def test_a_walk_inside_its_deadline_reads_the_whole_tree(procfs, monkeypatch):
     assert landlock_exec._descendants() == [11, 21, 31]
 
 
+@pytest.fixture
+def reap_calls(monkeypatch):
+    """Run ``_reap_leftovers`` with the walk, the kills and the clock stood in for.
+
+    The walk returns the given leftovers lists in turn, then empty lists; the
+    arguments each walk was called with and every kill are recorded.
+    """
+
+    def run(deadline_value: float, leftovers: List[List[int]]):
+        walks: List[object] = []
+        kills: List[int] = []
+        remaining = list(leftovers)
+
+        def walk(until=None):
+            walks.append(until)
+            return remaining.pop(0) if remaining else []
+
+        def kill(pid, tree):
+            kills.append(pid)
+            return True
+
+        fake_os = _Recording(os, set(), [])
+        fake_os.waitpid = lambda pid, options: (0, 0)
+        monkeypatch.setattr(landlock_exec, "_descendants", walk)
+        monkeypatch.setattr(landlock_exec, "_kill_descendant", kill)
+        monkeypatch.setattr(landlock_exec, "os", fake_os)
+        monkeypatch.setattr(
+            landlock_exec,
+            "time",
+            types.SimpleNamespace(monotonic=lambda: 10.0, sleep=lambda seconds: None),
+        )
+        deadline = lambda: deadline_value  # noqa: E731 - the callable under test
+        survivors = landlock_exec._reap_leftovers(deadline)
+        return walks, kills, deadline, survivors
+
+    return run
+
+
+def test_the_first_reap_pass_walks_the_whole_tree_when_the_deadline_is_behind(
+    reap_calls,
+):
+    """A stop that left the scanner's exit past the deadline still gets one
+    complete pass: the walk is not given the deadline, and what it finds is
+    killed; no second pass follows, and what that pass found is reported as the
+    survivors of the deadline."""
+    walks, kills, _deadline, survivors = reap_calls(5.0, [[11, 21, 31]])
+
+    assert walks == [None]
+    assert kills == [11, 21, 31]
+    assert survivors == [11, 21, 31]
+
+
+def test_later_reap_passes_carry_the_deadline(reap_calls):
+    """With time left, the passes after the first are bounded by the deadline
+    they are handed, and the loop ends once five passes find nothing."""
+    walks, kills, deadline, survivors = reap_calls(20.0, [[11], [21]])
+
+    assert walks[0] is None
+    assert walks[1:] and all(until is deadline for until in walks[1:])
+    assert kills == [11, 21]
+    assert len(walks) == 2 + 5
+    assert survivors == []
+
+
 class _Recording:
     """A module whose named functions record their calls and return ``returns``;
     every other attribute is the real module's."""

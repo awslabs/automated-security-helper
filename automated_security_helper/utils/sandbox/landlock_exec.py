@@ -757,15 +757,18 @@ def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
     trail the scanner's exit, so "no children" has to hold for a short while.
     Every pass kills the whole remaining tree at once, so depth costs nothing;
     bounded by time rather than by a pass count, and inside the grace ASH gives a
-    stopping process before it SIGKILLs this wrapper. At least one pass is made,
-    however late a stop left the scanner's exit.
+    stopping process before it SIGKILLs this wrapper. The first pass walks the
+    whole tree whatever the clock says, so a stop that left the scanner's exit
+    past the deadline still gets one complete reap (on the fallback path, as much
+    as PROC_SCAN_LIMIT entries of /proc hold, newest first); later passes end at
+    the deadline, which they ask again before every read.
     """
     quiet = 0
     passes = 0
     leftovers: List[int] = []
     while passes == 0 or time.monotonic() < deadline():
         passes += 1
-        leftovers = _descendants(until=deadline)
+        leftovers = _descendants(until=None if passes == 1 else deadline)
         if not leftovers:
             quiet += 1
             if quiet >= 5:
