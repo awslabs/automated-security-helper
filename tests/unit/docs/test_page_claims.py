@@ -6928,10 +6928,13 @@ def test_ash_offline_turns_offline_mode_on_for_yes_true_and_1(
     assert is_offline_mode() is offline
 
 
-#: The start of grype's offline warning when the cache it would read is missing;
-#: the rest names the directory (plugin_modules/ash_builtin/scanners/grype_scanner.py,
-#: ``_check_offline_cache``).
-_OFFLINE_GRYPE_WARNING = "Grype offline mode: the database directory"
+#: Grype's offline warning when the cache it would read is missing, with the
+#: directory it names in between (plugin_modules/ash_builtin/scanners/grype_scanner.py,
+#: ``_check_offline_cache``). The whole shape, so a warning about a directory that
+#: exists but holds no database cannot stand in for it.
+_OFFLINE_GRYPE_WARNING = re.compile(
+    r"Grype offline mode: the database directory .+ does not exist"
+)
 
 
 @pytest.mark.parametrize(
@@ -6982,7 +6985,7 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
     assert result.returncode == 2, (
         f"exit {result.returncode}, expected 2:\n{_output_tail(result)}"
     )
-    assert (_OFFLINE_GRYPE_WARNING in _config_scan_log(tree)) is warned, (
+    assert bool(_OFFLINE_GRYPE_WARNING.search(_config_scan_log(tree))) is warned, (
         f"the grype warning is {'missing from' if warned else 'in'} ash.log"
     )
 
@@ -7184,8 +7187,11 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
             "    message: m\n    severity: INFO\n    pattern: $X == $X\n",
             encoding="utf-8",
         )
+        # Stamped now: the table has an age bound, and a fixed date would cross it
+        # one day with no code change.
         (cache / RULESET_FETCHED_AT_FILE).write_text(
-            "2026-01-01T00:00:00Z\n", encoding="utf-8"
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ\n"),
+            encoding="utf-8",
         )
         return cache
 
@@ -7201,31 +7207,35 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
         for reader in readers:
             assert reader in shipped, f"{reader} is not a scanner ASH ships"
             for offline in (False, True):
-                if offline:
-                    monkeypatch.setenv("ASH_OFFLINE", "YES")
-                else:
-                    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+                # One environment per pass: the rule cache an offline pass points
+                # a reader at must not reach the next pass, whose online build is
+                # the control that the online reader declares no such database.
+                with monkeypatch.context() as pass_env:
+                    if offline:
+                        pass_env.setenv("ASH_OFFLINE", "YES")
+                    else:
+                        pass_env.delenv("ASH_OFFLINE", raising=False)
 
-                def _build():
-                    context = PluginContext(
-                        source_dir=tmp_path / "source",
-                        output_dir=tmp_path / "output",
-                        work_dir=tmp_path / "output" / "converted",
-                        config=config,
-                    )
-                    return shipped[reader](
-                        config=config.get_plugin_config(
-                            plugin_type="scanner", plugin_name=reader
-                        ),
-                        context=context,
-                    )
+                    def _build():
+                        context = PluginContext(
+                            source_dir=tmp_path / "source",
+                            output_dir=tmp_path / "output",
+                            work_dir=tmp_path / "output" / "converted",
+                            config=config,
+                        )
+                        return shipped[reader](
+                            config=config.get_plugin_config(
+                                plugin_type="scanner", plugin_name=reader
+                            ),
+                            context=context,
+                        )
 
-                scanner = _build()
-                cache_env = getattr(scanner, "cache_dir_env_var", None)
-                if offline and callable(cache_env):
-                    monkeypatch.setenv(cache_env(), str(_rule_cache(reader)))
                     scanner = _build()
-                reads = [e.name for e in scanner.content_databases_in_use()]
+                    cache_env = getattr(scanner, "cache_dir_env_var", None)
+                    if offline and callable(cache_env):
+                        pass_env.setenv(cache_env(), str(_rule_cache(reader)))
+                        scanner = _build()
+                    reads = [e.name for e in scanner.content_databases_in_use()]
                 expected = offline or not offline_only
                 assert (name in reads) is expected, (
                     f"{reader} {'offline' if offline else 'online'} reads {reads}"
@@ -10360,9 +10370,15 @@ def test_a_session_write_during_the_sweeps_wait_for_the_lock_is_accepted(
     use. The sweep then gives the lock up within about a second and removes nothing,
     so the stale session's workspace is still there once the sweep has returned.
 
+    Two tells say the write landed during the wait and not around it: the request
+    that set off the sweep is still open when the write returns (the sweep did not
+    give up before the write, and the wait did not block the server's loop until
+    the sweep returned), and that request took about the page's second (the sweep
+    waited for the lock at all).
+
     The page's ``session_workspace_busy`` refusal is the removal window, which opens
     only once the lock is held; no deterministic probe of it from outside the
-    server exists, so that sentence is pinned by its words alone here.
+    server exists, so the in-process test below holds the remover open and pins it.
     """
     assert_on_page(MCP_SERVER, _SWEEP_LOCK_WAIT_IS_BOUNDED)
     assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
@@ -10388,17 +10404,111 @@ def test_a_session_write_during_the_sweeps_wait_for_the_lock_is_accepted(
                 )
             else:
                 accepted = stale.tool(tool, profile_name="page-claims")
+            assert sweeping.is_alive(), (
+                "the request that set off the sweep was answered before the stale "
+                "session's write returned, so the write did not land during the wait"
+            )
             sweeping.join(timeout=_SWEEP_LOCK_WAIT_SECONDS + 3)
             assert not sweeping.is_alive(), (
                 "the request that set off the sweep was not answered within "
                 f"{_SWEEP_LOCK_WAIT_SECONDS + 3} s while another server held the lock"
             )
             assert "error" not in result, result
+            assert result["seconds"] >= _SWEEP_LOCK_WAIT_SECONDS * 0.8, (
+                f"the request that set off the sweep took {result['seconds']:.2f} s, "
+                "so the sweep did not wait for the lock"
+            )
             assert workspace.is_dir(), f"the sweep removed {workspace} without the lock"
     finally:
         _stop_server(process)
 
     assert accepted.get("success") is True, accepted
+
+
+@pytest.mark.unit
+def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mcp-server.md (Deliver source to the server).
+
+    The page's ``session_workspace_busy`` refusal, in process: a session workspace
+    nobody has used for longer than the TTL is the sweep's to remove, the sweep
+    takes the session and starts the removal, and a ``set_source_zip_chunk`` for
+    that session sent while the removal runs is refused with that ``error_type``
+    (``sessions.writing_session_state``, the hold ``set_source_zip_chunk`` and
+    ``select_profile`` take). The remover is held open on an event, so the window
+    the server tests above cannot time is open when the write comes. The control
+    is the same chunk once the sweep has returned: accepted, the upload starting
+    again from chunk 0 in a new workspace, as the page says.
+    """
+    assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
+    from automated_security_helper.cli.mcp import sessions, source_delivery
+    from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
+
+    root = tmp_path / "workspaces"
+    root.mkdir()
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+    monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
+    sessions.reset_default_registry_for_tests()
+    sessions._ended_while_scanning.clear()
+    try:
+        sandbox = mark_session_workspace(root / _STALE_SESSION)
+        (sandbox / "source").mkdir()
+        (sandbox / "source" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        then = time.time() - 3600
+        for path in (sandbox, *sandbox.iterdir()):
+            os.utime(path, (then, then))
+
+        removing = threading.Event()
+        release = threading.Event()
+        real_remove = sessions._remove_session_state
+
+        def held_remove(session_id: str) -> None:
+            removing.set()
+            assert release.wait(timeout=30), "the test never released the remover"
+            real_remove(session_id)
+
+        monkeypatch.setattr(sessions, "_remove_session_state", held_remove)
+        removed: List[str] = []
+        sweep = threading.Thread(
+            target=lambda: removed.extend(
+                sessions.sweep_stale_workspaces(_SWEEP_TTL_SECONDS)
+            ),
+            daemon=True,
+        )
+        sweep.start()
+        assert removing.wait(timeout=30), "the sweep never reached the removal"
+        chunk = base64.b64encode(b"more").decode("ascii")
+        try:
+            with pytest.raises(sessions.SessionWorkspaceBusyError) as refused:
+                source_delivery.set_source_zip_chunk(
+                    "page-claims-upload",
+                    0,
+                    chunk,
+                    True,
+                    workspace_root=root,
+                    session_id=_STALE_SESSION,
+                )
+        finally:
+            release.set()
+            sweep.join(timeout=30)
+        assert not sweep.is_alive(), "the sweep did not return once released"
+        assert refused.value.error_type == "session_workspace_busy"
+        assert removed == [_STALE_SESSION], removed
+        assert not sandbox.exists(), f"the sweep left {sandbox}"
+
+        accepted = source_delivery.set_source_zip_chunk(
+            "page-claims-upload",
+            0,
+            chunk,
+            True,
+            workspace_root=root,
+            session_id=_STALE_SESSION,
+        )
+        assert accepted["received"] == len(b"more"), accepted
+    finally:
+        sessions.reset_default_registry_for_tests()
+        sessions._ended_while_scanning.clear()
 
 
 @pytest.mark.e2e

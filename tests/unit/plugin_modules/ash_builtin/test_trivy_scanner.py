@@ -548,6 +548,35 @@ def test_a_configured_trivy_file_that_does_not_exist_fails_the_scan(
         _argv(scanner, scanner.context.source_dir)
 
 
+def test_a_vulnerability_only_scan_warns_about_a_missing_secret_config_and_runs(
+    tmp_path, caplog, monkeypatch
+):
+    """The other half of the ``secret_config_file`` case above: a scan without the
+    ``secret`` scanner never opens the secret config, so a configured file that does
+    not exist does not fail it. trivy gets ASH's own empty file and the key is named
+    in a warning (``TrivyScannerBase._secret_config_file``, ``required`` false)."""
+    monkeypatch.delenv("TRIVY_SECRET_CONFIG", raising=False)
+    scanner = _scanner(
+        tmp_path,
+        operator=True,
+        scanners=["vuln"],
+        secret_config_file=str(tmp_path / "operator" / "nope.yaml"),
+    )
+
+    with caplog.at_level("WARNING"):
+        argv = _argv(scanner, scanner.context.source_dir)
+
+    (value,) = [
+        a[len("--secret-config=") :] for a in argv if a.startswith("--secret-config=")
+    ]
+    assert _ashs_own(scanner, value)
+    assert Path(value).name == "trivy-secret-empty.yaml"
+    assert (
+        "scanners.trivy.options.secret_config_file does not name a file" in caplog.text
+    )
+    assert "do not include secret" in caplog.text
+
+
 @pytest.mark.parametrize("cls", [TrivyScanner, TrivyRepoScanner])
 def test_both_scanners_install_the_pinned_trivy(tmp_path, cls):
     from automated_security_helper.utils.download_utils import (
@@ -1645,7 +1674,7 @@ def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
     # The command built here carries no mode flag, so the scan-time reconciliation
     # adds the online one before the skip flags; a scanner's own command already
     # carries it from construction.
-    assert final[:7] == [
+    assert final[: 6 + len(trivy_base.ONLINE_FLAGS)] == [
         "trivy",
         "fs",
         *trivy_base.ONLINE_FLAGS,
@@ -1720,7 +1749,7 @@ def test_misconfig_also_fetches_the_checks_bundle_and_skips_it(tmp_path, monkeyp
 
     assert [c[1] for c in fake.calls] == ["image", "config"]
     assert Path(fake.calls[1][-1]).name == "empty-target"
-    assert ran[0][2:7] == [
+    assert ran[0][2 : 6 + len(trivy_base.ONLINE_FLAGS)] == [
         *trivy_base.ONLINE_FLAGS,
         "--skip-db-update",
         "--skip-java-db-update",
