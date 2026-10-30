@@ -3488,9 +3488,13 @@ def test_the_resolve_hands_the_chain_walk_the_environment_chosen_paths(
     handed: list = []
     real = module._with_operator_chain_reporters
 
-    def spying(trusted, chain, repository_files, reads, environment_paths):
+    # The walk takes the count of scanned roots as well (``roots``); the spy
+    # accepts what the resolve passes and hands it on unchanged.
+    def spying(trusted, chain, repository_files, reads, environment_paths, roots=1):
         handed.append(set(environment_paths))
-        return real(trusted, chain, repository_files, reads, environment_paths)
+        return real(
+            trusted, chain, repository_files, reads, environment_paths, roots=roots
+        )
 
     monkeypatch.setattr(module, "_with_operator_chain_reporters", spying)
     with caplog.at_level(logging.WARNING):
