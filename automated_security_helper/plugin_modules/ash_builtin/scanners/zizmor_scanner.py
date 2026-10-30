@@ -138,7 +138,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.base.plugin_base import worse_exit_code
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -163,6 +162,7 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.path_probe import probe_path
+from automated_security_helper.utils.sandbox.fs_guard import read_bytes_at_most
 from automated_security_helper.utils.pre_installed_tool import (
     validate_version_constraint,
 )
@@ -237,11 +237,16 @@ _ACTION_PROBE_LIMIT = 1 << 20
 #: stop being counted, which is the behavior of a scanner that does not track
 #: targets -- never a false ERROR.
 _REJECTED_INPUT_PATTERN = re.compile(r"collect_inputs:[^\n]*?(failed to [^\n]*)")
-#: The path is whatever zizmor quotes, spaces included, up to the words that
-#: follow it; ``\S+`` cut a path with a space and let the line count as failed.
-_NOT_AN_ACTION_PATTERN = re.compile(
-    r"failed to validate (.+?) as action\b", re.IGNORECASE
-)
+#: The words around the input in zizmor's "failed to validate <file> as action"
+#: line. The file is never read out of the line: ``_rejected_input_named``
+#: matches the line against the inputs the run was given, each spelled as it
+#: was given, so what the probe opens is always a path ``_collect_inputs``
+#: already admitted (a regular file inside the real root), never a path cut
+#: short by the words that follow it (a directory named ``x as action y``
+#: made a lazy match end at ``x``, and a link there could point at a FIFO or a
+#: device the probe would block on).
+_NOT_AN_ACTION_LEAD = "failed to validate "
+_NOT_AN_ACTION_TAIL = " as action"
 
 
 def _names_a_workflow(path_text: str, cwd: Optional[Path] = None) -> bool:
@@ -261,14 +266,6 @@ def _names_a_workflow(path_text: str, cwd: Optional[Path] = None) -> bool:
         text = os.path.normpath(os.path.join(Path(cwd).absolute().as_posix(), text))
     parts = PurePath(text).parts
     return len(parts) >= 3 and parts[-3] == ".github" and parts[-2] == "workflows"
-
-
-def _quoted_input_path(path_text: str, cwd: Path) -> Path:
-    """The file zizmor's warning quotes, as a path: relative to ``cwd`` (the
-    subprocess working directory) unless absolute."""
-    text = path_text.removeprefix("file://")
-    path = Path(text)
-    return path if path.is_absolute() else Path(cwd) / path
 
 
 #: A ``runs`` key at column zero of the raw text: what tells an action's
@@ -295,11 +292,17 @@ def _declares_a_github_action(path: Path) -> Optional[bool]:
     undecided file as "not an action" dropped real actions from the attempted
     count instead of counting them failed, against the fail-closed rule the
     result-file reader follows; the caller counts None as failed.
+
+    Read through ``read_bytes_at_most``, which refuses anything but a regular
+    file and opens without blocking, so a FIFO or a device at the name never
+    holds the scan; the one link followed is the input's own, resolved first as
+    ``_collect_inputs`` resolved it when it admitted the input, which keeps a
+    symlinked action.yml inside the tree readable as before. A plain
+    ``open("rb")`` here followed any link and blocked on a FIFO.
     """
     try:
-        with path.open("rb") as handle:
-            data = handle.read(_ACTION_PROBE_LIMIT + 1)
-    except OSError:
+        data = read_bytes_at_most(Path(os.path.realpath(path)), _ACTION_PROBE_LIMIT + 1)
+    except (OSError, ValueError):
         return None
     cut_off = len(data) > _ACTION_PROBE_LIMIT
     text = data[:_ACTION_PROBE_LIMIT].decode("utf-8", errors="replace")
@@ -629,7 +632,8 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "unchanged, and zizmor may "
                 "call the GitHub API with the token. ASH never reads or logs the "
                 f"token. {SET_BY_THE_OPERATOR} It is ignored, with a warning, when "
-                "ASH runs in offline mode."
+                "ASH runs in offline mode or this scanner's own `offline` option "
+                "is true."
             ),
         ),
     ] = False
@@ -867,7 +871,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             f"zizmor is not available: "
             f"{rejected_detail or 'no zizmor executable was found'}, and uv "
             f"could not provide {requirement!r}"
-            + (" while offline" if self._is_offline_mode() else "")
+            + (" while offline" if self._scanner_offline() else "")
             + f". Install it with `uv tool install '{requirement}'` or "
             "`ash dependencies install --tool zizmor` (before going offline, "
             "if ASH_OFFLINE is set)."
@@ -929,7 +933,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 "rejected; it is not used through uv either.",
                 level=logging.DEBUG,
             )
-        if self._is_offline_mode():
+        # One offline reading for the whole class, the scanner's own
+        # (_scanner_offline: ASH's mode, then options.offline). The uv mixin's
+        # _is_offline_mode resolves to the same answer for a scanner, since it
+        # reads _scanner_offline itself; the one name here keeps that from
+        # being something a reader has to check.
+        if self._scanner_offline():
             return False
         self._plugin_log(
             "zizmor not found via UV tool, attempting explicit installation..."
@@ -976,7 +985,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 )
             return False
         # ASH's own offline mode, or this scanner's options.offline (read by the
-        # base class as every scanner's is): either keeps zizmor offline.
+        # base class as every scanner's is): either keeps zizmor offline. The
+        # same reading decides the uv route and the MISSING reason above.
         if self._scanner_offline():
             self._plugin_log(
                 "scanners.zizmor.options.online_audits is true but ASH, or this "
@@ -1254,9 +1264,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
 
         The inputs go on zizmor's command line in batches that fit the platform's
         limit (``_input_batches``). A target with more than one batch is one
-        template run per batch: the counters are summed and the results joined
-        into the first run's report, so the scan reads as one; the stdout and
-        stderr logs in the results directory are the last batch's.
+        template run per batch: the counters are summed, the exit codes folded
+        by this scanner's ranking, the results joined into the first run's
+        report, and the record (start time, stdout and stderr lines) spans every
+        batch, so the scan reads as one; the stdout and stderr log files in the
+        results directory are the last batch's.
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
@@ -1268,8 +1280,14 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # Each target is one invocation. The base class keeps the worst exit code
         # across runs, and a target with nothing to audit never reaches
         # _execute_scan's own reset, so without this the converted target read
-        # the source target's exit code as its own.
-        self.exit_code = 0
+        # the source target's exit code as its own. None, "the tool did not
+        # run", until a run returns one: a template that declines this target
+        # (its dependency check, its pre-scan) then leaves None, as the
+        # multi-batch decline below does, where a 0 set here read as a clean
+        # run for a single-batch target and None for the same target in two.
+        # The "nothing to audit" return sets 0 itself: zizmor was skipped
+        # there by design, and the invocation record reads 0 as accepted.
+        self.exit_code = None
         # The same for the rest of the per-target state the template resets at
         # the top of its own scan(): the "nothing to audit" return below never
         # reaches it, so the previous target's start would pair with this
@@ -1293,6 +1311,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 level=logging.INFO,
                 append_to_stream="stderr",
             )
+            self.exit_code = 0
             self._post_scan(target=target, target_type=target_type)
             return self._empty_report()
         batches = self._input_batches(inputs)
@@ -1303,16 +1322,35 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             )
         reports: List[SarifReport] = []
         attempted = failed = 0
-        # Folded as the base class folds its own runs (worse_exit_code): a
-        # signal death outranks every code, and a batch that recorded no code
-        # (None, "the tool did not run") leaves the fold alone; max() with
-        # "or 0" read a signal death as 0 and None as a clean run.
+        # Folded as the base class folds its own runs, through this scanner's
+        # _worse_exit_code, which ranks by the accepted set {0, 3}: a code
+        # outside it outranks an accepted one, where the module-level
+        # worse_exit_code (a plain max) would read 3 above 1. Today only
+        # accepted codes reach this fold (the template refuses a batch outside
+        # the set before its report is read, so such a batch raises out of the
+        # loop), and the two rankings agree on those; the scanner's own hook is
+        # the one the base class folds with, whatever a later template admits.
+        # A signal death still outranks every code, and a batch that recorded
+        # no code (None, "the tool did not run") leaves the fold alone.
         worst_exit_code: Optional[int] = None
+        # The template resets the run record (start_time, end_time, output,
+        # errors) at the top of each of its scan() calls, so after the loop only
+        # the last batch's would be left: the duration would cover one batch
+        # and the earlier batches' stderr lines, which feed the reports, would
+        # be gone. Kept across the loop and restored before every return.
+        first_start = None
+        last_end = None
+        output_lines: List[Any] = []
+        error_lines: List[Any] = []
         for index, batch in enumerate(batches):
             self._inputs = batch
             result = super().scan(
                 target, target_type, global_ignore_paths, config, *args, **kwargs
             )
+            if index == 0:
+                first_start = self.start_time
+            output_lines.extend(self.output)
+            error_lines.extend(self.errors)
             if not isinstance(result, SarifReport):
                 # The template declined to run (dependencies, pre-scan); its
                 # answer is the scan's. The batches that did run are still
@@ -1327,17 +1365,37 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 self.targets_attempted = attempted + never_ran
                 self.targets_failed = failed + never_ran
                 self.exit_code = worst_exit_code
+                self._restore_batches_record(
+                    first_start, last_end, output_lines, error_lines
+                )
                 return result
+            last_end = self.end_time
             attempted += self.targets_attempted
             failed += self.targets_failed
             if self.exit_code is not None:
-                worst_exit_code = worse_exit_code(worst_exit_code, self.exit_code)
+                worst_exit_code = self._worse_exit_code(worst_exit_code, self.exit_code)
             reports.append(result)
         self.targets_attempted = attempted
         self.targets_failed = failed
         self.exit_code = worst_exit_code
         self._last_inputs = list(inputs)
+        self._restore_batches_record(first_start, last_end, output_lines, error_lines)
         return _joined_report(reports)
+
+    def _restore_batches_record(
+        self,
+        first_start: Any,
+        last_end: Any,
+        output_lines: List[Any],
+        error_lines: List[Any],
+    ) -> None:
+        """The run record of a multi-batch target as one run: the first batch's
+        start, the last completed batch's end, and every batch's stdout and
+        stderr lines in run order (see ``scan``)."""
+        self.start_time = first_start
+        self.end_time = last_end
+        self.output = output_lines
+        self.errors = error_lines
 
     def _input_batches(self, inputs: List[Path]) -> List[List[Path]]:
         """*inputs* in order, split so that each batch's arguments (with a
@@ -1457,27 +1515,56 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         Returns the warning lines, for the log.
         """
         rejected = _REJECTED_INPUT_PATTERN.findall(stderr)
-        # zizmor quotes each input as it was given: relative to source_dir, the
-        # subprocess cwd (_input_argument), so a bare name is read against it.
-        cwd = Path(self._plugin_context.source_dir)
         for line in rejected:
-            not_an_action = _NOT_AN_ACTION_PATTERN.search(line)
-            # Only a file read whole as not an action is inapplicable; one the
-            # probe could not decide (unreadable, cut off, refused by the
-            # parser) is a target that failed, as the else branch counts.
+            named = self._rejected_input_named(line)
+            # Only an input read whole as not an action is inapplicable; a line
+            # that names no input of this run, or one the probe could not decide
+            # (unreadable, cut off, refused by the parser), is a target that
+            # failed, as the else branch counts.
             if (
-                not_an_action
-                and not _names_a_workflow(not_an_action.group(1), cwd)
-                and _declares_a_github_action(
-                    _quoted_input_path(not_an_action.group(1), cwd)
-                )
-                is False
+                named is not None
+                and not _names_a_workflow(named.as_posix())
+                and _declares_a_github_action(named) is False
             ):
                 self.targets_attempted = max(0, self.targets_attempted - 1)
             else:
                 self.targets_failed += 1
         self.targets_failed = min(self.targets_failed, self.targets_attempted)
         return rejected
+
+    def _rejected_input_named(self, line: str) -> Optional[Path]:
+        """The input of this run that zizmor's "failed to validate <file> as
+        action" *line* names, or None.
+
+        zizmor quotes the input as it was given on the command line
+        (``_input_argument``: relative to ``source_dir``, the subprocess cwd), at
+        times behind a ``file://`` prefix, so the line is matched against each
+        input of the run spelled both ways, the longest argument first (a
+        directory named ``x as action y`` holds an input whose argument ends in
+        ``... as action y/action.yml``, and the shorter ``x`` is not an input).
+        Backslashes read as slashes, as ``_names_a_workflow`` reads them. A line
+        that names no input, whatever it quotes, is None: the caller counts it
+        as a failed target, and nothing is opened on its account.
+        """
+        text = line.replace("\\", "/")
+        inputs = sorted(
+            self._last_inputs, key=lambda item: len(str(item)), reverse=True
+        )
+        for path in inputs:
+            argument = self._input_argument(path)
+            for spelled in (f"file://{argument}", argument):
+                needle = f"{_NOT_AN_ACTION_LEAD}{spelled}{_NOT_AN_ACTION_TAIL}"
+                at = text.find(needle)
+                if at < 0:
+                    continue
+                after = at + len(needle)
+                # "as action" the word, not "as actions": the line ends there or
+                # a non-word character follows.
+                if after == len(text) or not (
+                    text[after].isalnum() or text[after] == "_"
+                ):
+                    return path
+        return None
 
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
         """Account for rejected inputs, then read zizmor's SARIF.

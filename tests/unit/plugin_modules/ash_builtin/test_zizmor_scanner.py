@@ -1011,6 +1011,9 @@ def test_no_workflows_or_actions_completes_with_zero_findings_without_zizmor(tmp
     assert report.runs[0].tool.driver.name == "zizmor"
     # 0 attempted is how ASH says "nothing to evaluate": SKIPPED, not PASSED.
     assert scanner.targets_attempted == 0
+    # zizmor was skipped by design, which the invocation record reads as a 0;
+    # a declined run, where the tool did not run, leaves None instead.
+    assert scanner.exit_code == 0
 
 
 NOT_AN_ACTION = (
@@ -1475,6 +1478,27 @@ def test_offline_without_any_zizmor_does_not_try_to_install(repo, monkeypatch):
     assert "no zizmor executable was found" in scanner.dependency_unavailable_reason
 
 
+def test_the_scanners_own_offline_option_does_not_install_either(repo, monkeypatch):
+    """One offline reading for the class, the scanner's own (_scanner_offline):
+    ASH online, this scanner's options.offline true. The uv route installs
+    nothing and the MISSING reason says "while offline", as under ASH_OFFLINE."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
+    scanner = _scanner(repo, operator=True, offline=True)
+    _constrained_probe_answers(scanner, None)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner, "_get_tool_installation_info", lambda: {"available": False}
+    )
+
+    def refuse(**_):
+        raise AssertionError("must not install when the scanner is offline")
+
+    object.__setattr__(scanner, "_install_uv_tool", refuse)
+    assert scanner.validate_plugin_dependencies() is False
+    assert "while offline" in scanner.dependency_unavailable_reason
+
+
 def test_post_process_leaves_the_input_report_intact_for_other_runs(repo):
     """Guards _summarize against reading a shared object: two scans, two results."""
     _, first = _scan_with_output(repo, CAPTURED_SARIF.read_text())
@@ -1882,16 +1906,68 @@ def test_an_action_the_safe_loader_refuses_is_a_failed_target(repo, monkeypatch)
 
 
 def test_a_rejected_file_that_cannot_be_read_is_a_failed_target(repo, monkeypatch):
-    """A rejected input the probe cannot read at all (here, the quoted path
-    names no file) is not known to be another tool's file: fail closed, one
-    failed target. The attempted count stays the inputs zizmor was given; a
-    quoted path that was never an input adds nothing to it."""
+    """A rejection line that names no input of the run (here, the quoted path
+    names no file zizmor was given) is not known to be another tool's file: fail
+    closed, one failed target, and nothing is opened on its account. The
+    attempted count stays the inputs zizmor was given; a quoted path that was
+    never an input adds nothing to it."""
     scanner, _ = _scan_with_output(
         repo, CAPTURED_SARIF.read_text(), stderr=_REJECTED_BROKEN_ACTION
     )
 
     assert scanner.targets_attempted == len(EXPECTED_INPUTS)
     assert scanner.targets_failed == 1
+
+
+def test_a_rejection_line_is_matched_to_an_input_never_read_as_a_path(
+    repo, monkeypatch
+):
+    """zizmor rejected an action under a directory whose name holds the words
+    " as action ", so a lazy read of the path out of the line ended at `x` and
+    opened <source>/x, whatever that was (a committed link to a FIFO blocked the
+    scan). The line is matched against the run's inputs instead: the action
+    under that directory is the input it names, read whole as another tool's
+    file and dropped from the attempted count, and <source>/x is never opened."""
+    other = repo / "x as action y" / "action.yml"
+    other.parent.mkdir()
+    other.write_text("tool: other\n")
+    decoy = repo / "x"
+    decoy.write_text("never read\n")
+    opened: list = []
+    real_read = zizmor_module.read_bytes_at_most
+
+    def recording_read(path, limit):
+        opened.append(Path(path))
+        return real_read(path, limit)
+
+    monkeypatch.setattr(zizmor_module, "read_bytes_at_most", recording_read)
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        "file://x as action y/action.yml as action: input does not match "
+        "expected validation schema\n"
+    )
+
+    scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
+
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == 0
+    assert decoy.resolve() not in {path.resolve() for path in opened}
+    assert other.resolve() in {path.resolve() for path in opened}
+
+
+def test_the_rejected_input_is_the_longest_argument_the_line_names(repo):
+    """Matched against the run's arguments spelled with and without the file://
+    prefix, the longest first; a line that names none is None."""
+    scanner = _scanner(repo)
+    short = repo / "x"
+    long = repo / "x as action y" / "action.yml"
+    scanner._last_inputs = [short, long]
+    line = "failed to validate file://x as action y/action.yml as action: schema"
+
+    assert scanner._rejected_input_named(line) == long
+    assert scanner._rejected_input_named("failed to validate x as action: s") == short
+    assert scanner._rejected_input_named("failed to validate x as actions") is None
+    assert scanner._rejected_input_named("failed to validate other as action") is None
 
 
 def test_another_tools_file_read_whole_is_still_inapplicable(repo, monkeypatch):
@@ -2163,14 +2239,104 @@ def test_batches_that_all_declined_leave_no_exit_code(repo, monkeypatch):
     assert scanner.exit_code is None
 
 
-def test_batch_exit_codes_are_folded_by_the_base_classs_ranking():
-    """The fold is the base class's: a signal death (negative) outranks every
-    code and is recorded as the shell reports it, and None leaves the fold
-    where it was."""
-    from automated_security_helper.base.plugin_base import worse_exit_code
+def _fake_runs_with_codes(scanner, stdout: str, returncodes: list, stderrs=None):
+    """Like ``_fake_runs``, one return code (and stderr text) per run in order,
+    the last repeating, every run answered with *stdout*; the response carries
+    the stderr text too, so it reaches the scanner's own record as the real
+    runner's does. Returns the recorded calls and the start_time the template
+    had set when each run began."""
+    calls: list = []
+    starts: list = []
+    codes = list(returncodes)
+    texts = list(stderrs or [""])
 
-    assert worse_exit_code(None, 0) == 0
-    assert worse_exit_code(0, 1) == 1
-    assert worse_exit_code(1, -11) == 139
-    assert worse_exit_code(139, 0) == 139
-    assert zizmor_module.worse_exit_code is worse_exit_code
+    def run(command, results_dir=None, env=None, timeout=None, **_):
+        calls.append({"command": list(command), "env": env, "timeout": timeout})
+        starts.append(scanner.start_time)
+        code = codes.pop(0) if len(codes) > 1 else codes[0]
+        text = texts.pop(0) if len(texts) > 1 else texts[0]
+        name = scanner.__class__.__name__
+        Path(results_dir, f"{name}.stdout.log").write_text(stdout)
+        if text:
+            Path(results_dir, f"{name}.stderr.log").write_text(text)
+        response = {"returncode": code, "stderr": text}
+        scanner._process_command_response(response)
+        return response
+
+    object.__setattr__(scanner, "_run_subprocess", run)
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: True)
+    return calls, starts
+
+
+def test_batch_exit_codes_are_folded_by_the_scanners_own_ranking(repo, monkeypatch):
+    """The fold is the scanner's _worse_exit_code, which ranks by its accepted
+    codes {0, 3}: a code outside the set outranks an accepted one in either
+    order, a signal death outranks every code and is recorded as the shell
+    reports it, and None leaves the fold alone. The module-level fold, a plain
+    max, read 3 above 1. Only accepted codes reach the fold today (the template
+    refuses a batch outside the set before its report is read), so the scan
+    below proves the mechanism: every batch's code is folded through the
+    scanner's own hook, with the codes the batches returned."""
+    scanner = _scanner(repo)
+    assert scanner._worse_exit_code(None, 3) == 3
+    assert scanner._worse_exit_code(0, 3) == 3
+    assert scanner._worse_exit_code(3, 1) == 1
+    assert scanner._worse_exit_code(1, 3) == 1
+    assert scanner._worse_exit_code(1, -11) == 139
+    assert scanner._worse_exit_code(139, 3) == 139
+
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
+    calls, _ = _fake_runs_with_codes(scanner, CAPTURED_SARIF.read_text(), [3, 0, 3])
+    folded: list = []
+
+    def recording_fold(current, new):
+        folded.append((current, new))
+        return ZizmorScanner._worse_exit_code(scanner, current, new)
+
+    object.__setattr__(scanner, "_worse_exit_code", recording_fold)
+
+    report = scanner.scan(repo, "source", [])
+
+    assert isinstance(report, SarifReport)
+    assert len(calls) == len(EXPECTED_INPUTS) >= 3
+    assert [new for _, new in folded] == [3, 0] + [3] * (len(calls) - 2)
+    assert folded[0][0] is None
+    assert scanner.exit_code == 3
+
+
+def test_a_multi_batch_scan_keeps_every_batchs_record(repo, monkeypatch):
+    """The template resets start_time, output and errors at the top of each of
+    its runs, so a target audited in several batches kept only the last batch's:
+    a duration covering one batch and the earlier batches' stderr lines, which
+    feed the reports, gone. The record now spans the batches: the first batch's
+    start, and every batch's stderr lines in run order."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
+    scanner = _scanner(repo)
+    markers = [f"batch-{index}-marker" for index in range(len(EXPECTED_INPUTS))]
+    calls, starts = _fake_runs_with_codes(
+        scanner, CAPTURED_SARIF.read_text(), [0], stderrs=markers
+    )
+
+    report = scanner.scan(repo, "source", [])
+
+    assert isinstance(report, SarifReport)
+    assert len(calls) == len(markers)
+    assert scanner.start_time == starts[0]
+    assert scanner.end_time is not None and scanner.end_time >= starts[-1]
+    recorded = "\n".join(str(line) for line in scanner.errors)
+    assert [marker for marker in markers if marker in recorded] == markers
+
+
+def test_a_declined_single_batch_target_leaves_no_exit_code(repo):
+    """The template declined the one batch (its dependency check said no), so
+    zizmor never ran: the exit code is None, as it is when a multi-batch target
+    is declined, not the 0 a per-target reset left for a single batch, which
+    read as a clean run."""
+    scanner = _scanner(repo)
+    _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: False)
+
+    result = scanner.scan(repo, "source", [])
+
+    assert result is False
+    assert scanner.exit_code is None
