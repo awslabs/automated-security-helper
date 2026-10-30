@@ -141,6 +141,42 @@ def test_an_accepted_input_is_recorded_when_its_written_reason_cannot_be_read(
     assert not any("ENVCANARY" in message for message in shown), shown
 
 
+def test_an_input_is_recorded_not_accepted_when_the_suppressions_cannot_be_read(
+    test_plugin_context, monkeypatch, ash_records
+):
+    """The acceptance check reads the configured suppressions before the record is
+    appended. An error raised there used to escape record_failed_input, so the
+    input's record was lost; the jupyter loop then re-recorded the input as a
+    gating tool failure. The record lands, not accepted (the side that keeps the
+    completeness gate strict), and the error is named by its type only."""
+    test_plugin_context.config.global_settings.suppressions = [
+        AshSuppression(
+            rule_id="ash-unconverted-input", path="a.zip", reason=EXPANDED_REASON
+        )
+    ]
+
+    def _fails(display, suppressions):
+        raise RuntimeError("ENVCANARY suppressions unreadable")
+
+    monkeypatch.setattr(suppression_matcher, "accepting_unconverted_input", _fails)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+
+    converter.record_failed_input(
+        Path(test_plugin_context.source_dir) / "a.zip", "it is damaged", kind="input"
+    )
+
+    (failed,) = converter.failed_inputs
+    assert failed.path == "a.zip"
+    assert failed.kind == "input"
+    assert failed.accepted is False
+    assert failed.accepted_reason is None
+    shown = [record.getMessage() for record in ash_records]
+    assert any("Could not convert 'a.zip'" in message for message in shown), shown
+    assert not any("ENVCANARY" in message for message in shown), shown
+
+
 def test_an_accepted_inputs_written_reason_is_recorded_when_it_can_be_read(
     test_plugin_context,
 ):

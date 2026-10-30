@@ -335,15 +335,24 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         global_settings = getattr(config, "global_settings", None)
         # --ignore-suppressions runs the scan as if no suppression existed, and
         # this acceptance is a suppression (scan_result_processor reads the same
-        # flag for finding suppressions).
-        accepting = (
-            accepting_unconverted_input(
-                display, getattr(global_settings, "suppressions", None)
-            )
-            if kind == "input"
-            and not getattr(self.context, "ignore_suppressions", False)
-            else None
-        )
+        # flag for finding suppressions). Guarded as the bookkeeping below is:
+        # the match reads the configured suppressions (their paths, expirations
+        # and client_supplied flags), and an error there lost the input's record
+        # before it was appended, the loss this method exists to prevent. On an
+        # error the input is not accepted, the side that keeps the gate strict,
+        # and the error's type is logged.
+        accepting = None
+        if kind == "input" and not getattr(self.context, "ignore_suppressions", False):
+            try:
+                accepting = accepting_unconverted_input(
+                    display, getattr(global_settings, "suppressions", None)
+                )
+            except Exception as error:
+                accepting = None
+                ASH_LOGGER.debug(
+                    "could not read the suppressions for an unconverted input, so "
+                    f"it is recorded as not accepted: {type(error).__name__}"
+                )
         # A reason read from the environment is quoted by its reference, as
         # every quote of a suppression's reason is (written_suppression_reasons):
         # the log line and the record both reach the results and the reports.
