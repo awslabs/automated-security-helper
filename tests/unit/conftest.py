@@ -459,7 +459,11 @@ def no_tool_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     from automated_security_helper.utils import uv_tool_runner
     from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
+    # Both forms of the availability read: the two-valued one the mixin's gates
+    # read, and the one-valued one the Jupyter converter and the dependencies
+    # command still read directly, so neither form starts a probe.
     monkeypatch.setattr(UVToolRunner, "uv_availability", lambda self: (True, None))
+    monkeypatch.setattr(UVToolRunner, "is_uv_available", lambda self: True)
     monkeypatch.setattr(
         UVToolRunner,
         "get_tool_version",
