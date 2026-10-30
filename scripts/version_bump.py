@@ -128,8 +128,19 @@ class VersionBumper:
         if not validate_version(new_version):
             print(
                 f"Error: Invalid version format: {new_version} (expected PEP 440 "
-                "with three release numbers, spelled as pip prints it: 3.1.0, "
-                "3.1.0rc1, 3.1.0.post1 or 3.1.0.dev1)"
+                "with three release numbers, spelled as pip prints it, such as 3.1.0)"
+            )
+            return False
+
+        parsed = Version(new_version)
+        if parsed.is_prerelease or parsed.is_postrelease or parsed.is_devrelease:
+            # The install-command pins in the generated pages, and the checks that
+            # read them, know a release as X.Y.Z alone; a suffix written into a
+            # page would read as a malformed pin and be split off by `convert`.
+            print(
+                f"Error: {new_version} is not a final release. set writes final "
+                "X.Y.Z versions only, because the pins in the pages and the "
+                "checks that read them match X.Y.Z alone"
             )
             return False
 
@@ -292,9 +303,7 @@ def main():
 
     # Set version command
     set_parser = subparsers.add_parser("set", help="Set specific version")
-    set_parser.add_argument(
-        "version", help="Version to set, PEP 440 (e.g., 3.1.0 or 3.1.0rc1)"
-    )
+    set_parser.add_argument("version", help="Final version to set, X.Y.Z (e.g., 3.1.0)")
 
     # Bump version commands
     bump_parser = subparsers.add_parser("bump", help="Bump version")

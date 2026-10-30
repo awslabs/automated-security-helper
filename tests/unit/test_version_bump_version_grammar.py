@@ -17,15 +17,19 @@ Two things followed from that grammar:
 
 The grammar is now PEP 440's with three release numbers. ``validate_version`` also
 requires the spelling pip prints, so what ``set`` writes is what importlib.metadata
-will report for the built distribution.
+will report for the built distribution. ``set`` goes further and writes final
+X.Y.Z versions only: the install-command pins in the generated pages, and every
+check that reads them, know a release as X.Y.Z alone, so a pre-release, post-release
+or development version written into a page would read as a malformed pin.
 
 What is asserted
 ----------------
 The release numbers of every PEP 440 pre-release, post-release and development form
 parse; text that is not PEP 440 is refused by ``validate_version`` and, through
-``set``, leaves pyproject.toml and the generated pages as they were; a pre-release
-version round-trips through ``set`` and ``bump``; and a ``bump`` from a version that
-is not a final release says that its pre-release part is dropped.
+``set``, leaves pyproject.toml and the generated pages as they were; ``set`` refuses
+a version that is not final and changes nothing; and a ``bump`` from a version that
+is not final (one a pyproject.toml can still carry) counts from its release numbers
+and says that the pre-release part is dropped.
 
 Each test builds its trees under ``tmp_path`` and points the script's own-checkout
 lookup elsewhere, so no run touches this repository's pyproject.toml.
@@ -196,36 +200,59 @@ class TestSetWritesOnlyAVersion:
         assert "PEP 440" in out
         assert "Successfully updated" not in out
 
-    def test_a_pre_release_is_written_to_both_tables_and_the_pages(
+    @pytest.mark.parametrize("version", ["2.0.0rc1", "2.0.0.post1", "2.0.0.dev1"])
+    def test_a_version_that_is_not_final_is_refused_and_changes_nothing(
+        self, project, monkeypatch, capsys, version
+    ):
+        # Red at the previous commit: validate_version accepted these, so set wrote
+        # "@v2.0.0rc1" into the page, a pin the readers of the pages (X.Y.Z only)
+        # take as malformed, and returned True.
+        module = _load_version_bump(monkeypatch)
+        before = {
+            name: project.joinpath(name).read_text(encoding="utf-8")
+            for name in ("pyproject.toml", "README.md")
+        }
+        assert _bumper(module, project).set_version(version) is False
+        for name, text in before.items():
+            assert project.joinpath(name).read_text(encoding="utf-8") == text
+        out = capsys.readouterr().out
+        assert f"{version} is not a final release" in out
+        assert "X.Y.Z" in out
+        assert "Successfully updated" not in out
+
+    def test_a_final_version_is_written_to_both_tables_and_the_pages(
         self, project, monkeypatch
     ):
-        # Red at the base: validate_version refused 2.0.0rc1, so set returned False.
         module = _load_version_bump(monkeypatch)
-        assert _bumper(module, project).set_version("2.0.0rc1") is True
+        assert _bumper(module, project).set_version("2.0.0") is True
         pyproject = project.joinpath("pyproject.toml").read_text(encoding="utf-8")
-        assert pyproject.count('version = "2.0.0rc1"') == 2, pyproject
+        assert pyproject.count('version = "2.0.0"') == 2, pyproject
         assert (
             project.joinpath("README.md").read_text(encoding="utf-8")
-            == "pip install git+https://example.invalid/ash.git@v2.0.0rc1\n"
+            == "pip install git+https://example.invalid/ash.git@v2.0.0\n"
         )
 
-    def test_a_bump_after_setting_a_pre_release_counts_from_its_release_numbers(
+    def test_a_bump_from_a_pre_release_counts_from_its_release_numbers(
         self, project, monkeypatch
     ):
+        project.joinpath("pyproject.toml").write_text(
+            _pyproject("2.0.0rc1"), encoding="utf-8"
+        )
         module = _load_version_bump(monkeypatch)
-        bumper = _bumper(module, project)
-        assert bumper.set_version("2.0.0rc1") is True
-        assert bumper.bump_version("patch") is True
+        assert _bumper(module, project).bump_version("patch") is True
         pyproject = project.joinpath("pyproject.toml").read_text(encoding="utf-8")
         assert pyproject.count('version = "2.0.1"') == 2, pyproject
 
 
 class TestBumpFromANonFinalVersionSaysSo:
     def test_the_dropped_part_is_reported(self, project, monkeypatch, capsys):
+        # A pre-release version a pyproject.toml can still carry (hand-edited,
+        # or written by an earlier set); set itself no longer writes one.
+        project.joinpath("pyproject.toml").write_text(
+            _pyproject("2.0.0rc1"), encoding="utf-8"
+        )
         module = _load_version_bump(monkeypatch)
         bumper = _bumper(module, project)
-        assert bumper.set_version("2.0.0rc1") is True
-        capsys.readouterr()
         assert bumper.bump_version("minor") is True
         out = capsys.readouterr().out
         assert "2.0.0rc1 is not a final release" in out
