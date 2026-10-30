@@ -2294,8 +2294,10 @@ def _has_exited(process: subprocess.Popen) -> bool:
     if it finished; the kernel is never asked to decide for a pid that is not
     ours. Without ``waitid`` the poll is the answer.
     """
-    if process.returncode is not None:
-        return True
+    # No ``returncode`` shortcut ahead of the poll: ``Popen.poll`` answers a
+    # set ``returncode`` from memory, so the shortcut saves nothing for a real
+    # child, and it would hide the raise of a poll whose child already carries
+    # a code, which the handlers below read as their own failure.
     if process.poll() is not None:
         return True
     if os.name != "nt" and hasattr(os, "waitid"):
