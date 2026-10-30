@@ -443,6 +443,16 @@ def resolves_inside(path: PathLike, root: PathLike) -> bool:
     dangling link is judged by where it points. The scan set uses this to leave out
     file links that leave the tree (``get_scan_set``); it says nothing about whether
     the path is a regular file.
+
+    A target whose spelling is not below the root can still count as inside, by
+    identity: when the root is the target's directory or one of its parents, compared
+    by device and inode (:func:`_has_ancestor_file`). That admits what the spelling
+    misses and nothing else: a target spelled in another case on a case-insensitive
+    volume, and a target reached through a second path to the same directory, such as
+    a bind mount of the root. Those are the root's own files, so a link to one is
+    kept in the scan set; the check is a leak boundary, and these are the cases it
+    lets in beyond the plain spelling test. A target that is the root itself is not
+    inside, by either test.
     """
     real_root = Path(os.path.realpath(root))
     resolved = Path(os.path.realpath(_absolute(path)))
