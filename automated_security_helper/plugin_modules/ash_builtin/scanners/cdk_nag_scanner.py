@@ -798,9 +798,14 @@ def _unsatisfied_cdk_requirements(
             # (``python_version < "3.11"``). A marker that reads false names a
             # requirement this environment is not held to, so its installed version
             # is not compared; one that cannot be evaluated here is left out like a
-            # requirement string that cannot be parsed.
+            # requirement string that cannot be parsed. The marker is evaluated with
+            # the extra named: ``packaging`` evaluates ``extra`` as the empty string
+            # by default, under which a requirement that still carries ``extra ==
+            # "cdk"`` (a requirement list from another reader, or a stripping that
+            # missed a spelling) reads false and is skipped, which made this check
+            # a no-op for it and read an out-of-bounds install as satisfied.
             try:
-                applies = requirement.marker.evaluate()
+                applies = requirement.marker.evaluate({"extra": "cdk"})
             except (UndefinedComparison, UndefinedEnvironmentName):
                 continue
             if not applies:

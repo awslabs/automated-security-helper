@@ -342,6 +342,31 @@ def test_a_requirement_whose_marker_reads_true_is_compared():
     assert unsatisfied[0].startswith("cdk-nag 2.9.0 (the cdk extra needs ")
 
 
+def test_a_requirement_still_carrying_the_extras_own_clause_is_compared():
+    """``packaging`` evaluates ``extra`` as the empty string unless told otherwise, so a
+    requirement that still carries ``extra == "cdk"`` read false and was skipped: the
+    bound check was a no-op for it, and an out-of-bounds install read as satisfied.
+    The marker is evaluated with the extra named."""
+    unsatisfied = _unsatisfied_cdk_requirements(
+        ['cdk-nag>=3.0,<4.0.0; extra == "cdk"'],
+        installed_version=lambda name: "2.9.0",
+    )
+
+    assert len(unsatisfied) == 1
+    assert unsatisfied[0].startswith("cdk-nag 2.9.0 (the cdk extra needs ")
+
+
+def test_the_extras_clause_does_not_admit_a_requirement_of_another_extra():
+    """The control: a clause naming another extra still reads false."""
+    assert (
+        _unsatisfied_cdk_requirements(
+            ['cdk-nag>=3.0; extra == "symbols"'],
+            installed_version=lambda name: "2.9.0",
+        )
+        == []
+    )
+
+
 def test_an_installed_version_packaging_cannot_read_is_unsatisfied():
     """Fail closed, as the docstring now says: a version that cannot be compared cannot
     be shown inside the bound, and the install this check gates replaces it."""
