@@ -95,8 +95,49 @@ class TestFileUriForms:
 
         assert _lines(report) == []
 
+    def test_a_remote_host_is_kept_as_the_unc_root_the_source_dir_names(self):
+        """``file://host/share/...`` names a share: it matches a UNC source_dir
+        and never a local directory of the same path."""
+        report = _report("file://fileserver/share/proj/src/a.py")
+
+        report.filter_results_by_files({"src/a.py"}, "//fileserver/share/proj")
+
+        assert _lines(report) == [1]
+
+    def test_a_remote_host_does_not_match_the_local_path_of_the_same_name(self):
+        report = _report("file://fileserver/share/proj/src/a.py")
+
+        report.filter_results_by_files({"src/a.py"}, "/share/proj")
+
+        assert _lines(report) == []
+
+    @pytest.mark.parametrize(
+        ("uri", "listed"),
+        [
+            ("file:///work/src/src/C#/a.py", "src/C#/a.py"),
+            ("file:///work/src/src/a;b.py", "src/a;b.py"),
+            ("file:///work/src/src/q?.py", "src/q?.py"),
+        ],
+    )
+    def test_a_name_holding_a_url_delimiter_is_read_whole(self, uri, listed):
+        report = _report(uri, "/work/src/src/other.py")
+
+        report.filter_results_by_files({listed}, "/work/src")
+
+        assert _lines(report) == [1]
+
 
 class TestWindowsForms:
+    @pytest.mark.parametrize(
+        "uri", ["file://C:/proj/src/app.py", "file://c:\\proj\\src\\app.py"]
+    )
+    def test_a_drive_in_the_authority_slot_keeps_its_drive(self, uri):
+        report = _report(uri, "file://C:/proj/src/other.py")
+
+        report.filter_results_by_files({"src/app.py"}, "C:/proj")
+
+        assert _lines(report) == [1]
+
     def test_a_drive_path_matches_without_regard_to_case(self):
         report = _report("file:///c:/proj/Src/App.py", "C:/Proj/src/other.py")
 

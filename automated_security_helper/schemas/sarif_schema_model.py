@@ -74,7 +74,7 @@ from enum import Enum
 import json
 from pathlib import Path, PurePath, PurePosixPath
 from typing import Dict, List, Literal, Optional, Union
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 
 from pydantic import AnyUrl, ConfigDict, Field, RootModel
 
@@ -2412,23 +2412,42 @@ _DRIVE_PREFIXED_ROOT = re.compile(r"^/[A-Za-z]:")
 _DRIVE_ROOT = re.compile(r"^[A-Za-z]:/")
 
 
+# A ``file:`` URI whose authority slot holds a drive letter: ``file://C:/x``
+# and ``file://c:\x`` (a Windows tool that puts the drive where a host goes).
+_DRIVE_IN_AUTHORITY = re.compile(r"^[A-Za-z]:(?:[\\/]|$)")
+
+
 def _file_uri_path_text(uri: str) -> str:
     """The path a ``file:`` URI names, as text; any other URI unchanged.
 
-    Parsed rather than sliced, as ``utils/sarif_utils._file_uri_to_path_text``
-    parses the sanitize path's URIs: the scheme is matched without regard to
-    case, the single-slash form ``file:/abs`` and the authority forms
-    ``file://localhost/abs`` and ``file://host/abs`` all name ``/abs`` (a host
-    segment never survives as a path segment), and the path is percent-decoded
-    the way the file system decodes a name (surrogateescape), so a name holding
-    a space, a non-ASCII character or a byte that is not UTF-8 reads back as the
-    file's own. Slicing ``file://`` off kept ``localhost/abs`` as a relative
-    path, left ``file:/abs`` untouched and kept ``my%20file`` encoded, so every
-    one of those results was dropped.
+    Split by hand rather than with ``urllib.parse``: the scheme is matched
+    without regard to case; ``file:/abs``, ``file:///abs`` and
+    ``file://localhost/abs`` all name ``/abs``; a drive in the authority slot
+    (``file://C:/proj/x``) is the start of the path, where a URL parser read
+    ``C:`` as a host and lost the drive; any other host names a share, kept as
+    the UNC root ``//host/abs`` so a remote file never matches a local file of
+    the same path and a UNC ``source_dir`` still matches it. A ``;``, ``?`` or
+    ``#`` is a character of the file name, as a scanner wrote it (Java's
+    ``File.toURI`` writes ``a;b.py``; a ``C#`` directory is common), where a URL
+    parser cut the path there. The path is percent-decoded the way the file
+    system decodes a name (surrogateescape), so a name holding a space, a
+    non-ASCII character or a byte that is not UTF-8 reads back as the file's own.
     """
     if uri[:5].lower() != "file:":
         return uri
-    path = unquote(urlparse(uri).path, errors="surrogateescape")
+    rest = uri[5:]
+    if rest.startswith("//"):
+        remainder = rest[2:]
+        if _DRIVE_IN_AUTHORITY.match(remainder):
+            authority, path = "", remainder
+        else:
+            authority, separator, tail = remainder.partition("/")
+            path = separator + tail
+        if authority and authority.lower() != "localhost":
+            path = "//" + authority + path
+    else:
+        path = rest
+    path = unquote(path, errors="surrogateescape")
     # file:///C:/x -> /C:/x ; drop the slash that precedes a drive.
     if _DRIVE_PREFIXED_ROOT.match(path):
         path = path[1:]
