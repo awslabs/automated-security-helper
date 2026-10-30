@@ -342,11 +342,14 @@ def escape_markup(value: object, *, one_line: bool = False) -> str:
     value is split across two segments by an empty ``[none][/none]`` after its
     first colon (:func:`_emoji_codes_split`): it shows as written, and an emoji
     code in the message's own markup renders. The tag follows a colon, so no
-    backslash of the escape stands before it. No split lands inside an escaped
-    tag (``\\[a:b:]``): the escape's backslash counts only before a whole tag, so a
-    break there showed the backslash. A value holding a colon is also closed off
-    at both ends by an empty style, so a code it forms with the message's text
-    beside it (``:lock`` against ``: done``) does not render as an emoji.
+    backslash of the escape stands before it. A tag-shaped value holding a colon
+    (``[a:b:]``) is opened rather than escaped, its ``[`` followed by an empty
+    style, so Rich reads no tag there and a code in it is split like any other: a
+    break inside an escaped tag would have ended the tag and shown the escape's
+    backslash, and leaving the code whole rendered it as an emoji. A value
+    holding a colon is also closed off at both ends by an empty style, so a code
+    it forms with the message's text beside it (``:lock`` against ``: done``)
+    does not render as an emoji.
     """
     # Shown, not obeyed, first: every markup sink (rich.print, a progress
     # description, a MARKUP log record) prints the value to a terminal or a CI log,
@@ -370,9 +373,27 @@ _EMOJI_CODE = re.compile(r"(:(\S*?)(?:(?:\-)(emoji|text))?:)")
 _SEGMENT_BREAK = "[none][/none]"
 
 
-#: A tag Rich's escape wrote a backslash before, in escaped text: the backslash
-#: counts only while the tag behind it is whole.
-_ESCAPED_TAG = re.compile(r"\\\[[a-z#/@][^[]*?\]")
+#: A tag Rich's escape wrote a backslash before, in escaped text, with the run
+#: of backslashes the escape doubled in front of it: the added backslash counts
+#: only while the tag behind it is whole.
+_ESCAPED_TAG = re.compile(r"(\\*)\\(\[[a-z#/@][^[]*?\])")
+
+
+def _opened_if_it_holds_a_colon(match: "re.Match[str]") -> str:
+    """The escaped tag *match* opened when a colon sits inside it.
+
+    A colon inside the tag can start an emoji code, whole inside the tag
+    (``[a:b:]``) or ending after it (``[a:b]:c``), and the split after that colon
+    would end the tag. So the tag's ``[`` is followed by an empty style instead:
+    Rich reads no tag there (a ``[`` right before another ``[`` starts none), the
+    escape's backslash is not needed, and the backslashes the escape doubled in
+    front of the tag are halved back, since with no tag behind them Rich prints
+    them as written. A tag holding no colon is returned as it was.
+    """
+    doubled, tag = match.group(1), match.group(2)
+    if ":" not in tag:
+        return match.group(0)
+    return "\\" * (len(doubled) // 2) + "[" + _SEGMENT_BREAK + tag[1:]
 
 
 def _emoji_codes_split(text: str) -> str:
@@ -380,11 +401,13 @@ def _emoji_codes_split(text: str) -> str:
 
     Each search starts just after the colon the last break followed, so a code
     that overlaps the one before it (the ``:lock:`` of ``:x:lock:``) is split too:
-    no segment of the result holds two colons with a code between them. A code
-    whose first colon sits inside an escaped tag is not split there: the break
-    would end the tag, and the escape's backslash would then show as text.
+    no segment of the result holds two colons with a code between them. An
+    escaped tag holding a colon is opened first (:func:`_opened_if_it_holds_a_colon`),
+    so a break after that colon ends no tag and no code is left whole: a code
+    left whole in one segment rendered as its emoji, and a break inside an
+    escaped tag showed the escape's backslash.
     """
-    escaped_tags = [(m.start(), m.end()) for m in _ESCAPED_TAG.finditer(text)]
+    text = _ESCAPED_TAG.sub(_opened_if_it_holds_a_colon, text)
     pieces = []
     start = 0
     search_from = 0
@@ -393,9 +416,6 @@ def _emoji_codes_split(text: str) -> str:
         if code is None:
             break
         cut = code.start() + 1
-        if any(first <= code.start() < last for first, last in escaped_tags):
-            search_from = cut
-            continue
         pieces.append(text[start:cut])
         pieces.append(_SEGMENT_BREAK)
         start = cut
