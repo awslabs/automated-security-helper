@@ -196,6 +196,10 @@ _SARIF_LEVEL = {
 #: trivy's own, and the result is left to ASH's generic mapping as before.
 _MESSAGE_LEVEL = {**_SARIF_LEVEL, "UNKNOWN": "note"}
 
+#: trivy's severities from the highest down, UNKNOWN last. Between two
+#: ``Severity:`` lines of one level, ``trivy_severity`` reads the higher.
+_SEVERITY_ORDER = (*TRIVY_SEVERITIES, "UNKNOWN")
+
 #: Characters ``trivy --skip-dirs`` reads as glob syntax.
 _GLOB_SPECIAL = frozenset("*?[]{}\\")
 
@@ -252,14 +256,18 @@ def trivy_severity(
     break followed by the prefix, so neither the first nor the last such line is
     trivy's by its position alone. What the tree cannot write is the result's
     SARIF ``level``, which trivy sets from the same severity (``_SARIF_LEVEL``,
-    its ``toSarifErrorLevel``): the severity read is the last ``Severity:`` line
-    whose level is the result's, a line that disagrees is tree text, and a message
-    with no agreeing line falls through to the rule's tag. Within one level
-    (CRITICAL and HIGH both read as ``error``) the message's line decides, as
-    trivy wrote it. The lines are split on ``\\n`` alone, the separator trivy
-    writes: ``str.splitlines`` also breaks on characters a file name or a matched
-    line can hold (a carriage return, a form feed, a next-line or line-separator
-    character), which would let tree-derived text supply the line.
+    its ``toSarifErrorLevel``): the severity read is the highest ``Severity:``
+    line whose level is the result's, a line that disagrees is tree text, and a
+    message with no agreeing line falls through to the rule's tag. Within one
+    level (CRITICAL and HIGH both read as ``error``; LOW and UNKNOWN both
+    ``note``) the level cannot tell trivy's line from the tree's, so the higher
+    name is read: a line the tree writes can raise the rating by one step inside
+    trivy's own level and never lower it, and a result with no level at all
+    (none of its lines can be checked) is read the same way. The lines are split
+    on ``\\n`` alone, the separator trivy writes: ``str.splitlines`` also breaks
+    on characters a file name or a matched line can hold (a carriage return, a
+    form feed, a next-line or line-separator character), which would let
+    tree-derived text supply the line.
 
     A result trivy rates UNKNOWN (a line agreeing with its ``note`` level) is left
     to ASH's generic mapping. A result with no severity line of its own takes its
@@ -268,7 +276,7 @@ def trivy_severity(
     """
     message = result.message.root.text if result.message else None
     level = getattr(result.level, "value", result.level)
-    own: Optional[str] = None
+    agreeing = set()
     for line in (message or "").split("\n"):
         if not line.startswith("Severity: "):
             continue
@@ -276,9 +284,10 @@ def trivy_severity(
         if named not in _MESSAGE_LEVEL:
             continue
         if level is None or _MESSAGE_LEVEL[named] == level:
-            own = named
-    if own is not None:
-        return own if own in TRIVY_SEVERITIES else None
+            agreeing.add(named)
+    for own in _SEVERITY_ORDER:
+        if own in agreeing:
+            return own if own in TRIVY_SEVERITIES else None
     rule = None
     if result.ruleIndex is not None and 0 <= result.ruleIndex < len(rules):
         rule = rules[result.ruleIndex]

@@ -317,6 +317,45 @@ def test_a_rating_of_unknown_from_trivy_is_left_to_the_generic_mapping():
     assert trivy_severity(*_run(message, level="note", tags=("LOW",))) is None
 
 
+def test_a_lower_severity_line_of_the_same_level_does_not_lower_the_rating():
+    """CRITICAL and HIGH share the ``error`` level, so the level cannot tell
+    trivy's CRITICAL from a HIGH the matched line spells after it. The higher name
+    is read: tree text can never lower a rating."""
+    message = (
+        "Artifact: config.ini\nType: secret\nSecret AWS Access Key ID\n"
+        "Severity: CRITICAL\n"
+        "Match: key = AKIA****\nSeverity: HIGH\n"
+        "Link: [aws-access-key-id](https://example.invalid/aws-access-key-id)"
+    )
+
+    assert trivy_severity(*_run(message, level="error", tags=("MEDIUM",))) == "CRITICAL"
+
+
+def test_an_unknown_line_of_the_same_level_does_not_drop_a_low_rating():
+    """UNKNOWN shares LOW's ``note`` level. A LOW trivy wrote stays LOW when the
+    check's message spells an UNKNOWN line after it; on its own, trivy's UNKNOWN
+    is still left to the generic mapping."""
+    message = (
+        "Misconfiguration AVD-AWS-0001\nSeverity: LOW\n"
+        "Message: Bucket 'logs\nSeverity: UNKNOWN\n' has no logging"
+    )
+
+    assert trivy_severity(*_run(message, level="note", tags=("MEDIUM",))) == "LOW"
+
+
+def test_with_no_level_the_highest_severity_line_is_read():
+    """A result with no SARIF level gives nothing to check the lines against, so
+    every line counts and the highest is read: an injected lower line still cannot
+    lower trivy's rating."""
+    message = (
+        "Artifact: iac/main.tf\nType: terraform\nMisconfiguration AVD-AWS-0001\n"
+        "Severity: HIGH\n"
+        "Message: Bucket 'b\nSeverity: LOW\n' has no logging"
+    )
+
+    assert trivy_severity(*_run(message, level=None, tags=("MEDIUM",))) == "HIGH"
+
+
 def test_with_no_severity_line_the_tag_rates_the_result_only_when_the_level_agrees():
     message = "Misconfiguration AVD-AWS-0001\nMessage: Bucket has no logging"
 
