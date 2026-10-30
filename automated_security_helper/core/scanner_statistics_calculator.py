@@ -472,10 +472,11 @@ class ScannerStatisticsCalculator:
         specified scanner, categorizing them by severity level. It handles suppressed findings
         separately, ensuring they don't contribute to the severity counts.
 
-        If no findings are found in the SARIF data for the specified scanner, the method falls
-        back to the severity counts recorded on the scanner's non-SARIF per-target reports
-        (``_dict_result_counts``): a scanner that returned a dict instead of SARIF has
-        findings the merged SARIF never holds. A scanner with neither answers all zeros.
+        The severity counts recorded on the scanner's non-SARIF per-target reports
+        (``_dict_result_counts``) are added to the SARIF counts whatever the SARIF holds:
+        a scanner that returned a dict instead of SARIF has findings the merged SARIF
+        never holds, and it can return SARIF for one target and a dict for another. A
+        scanner with neither answers all zeros.
 
         Args:
             asharp_model: The AshAggregatedResults model containing the final SARIF data

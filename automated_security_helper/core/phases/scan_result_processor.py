@@ -304,10 +304,11 @@ class ScanResultProcessor:
             # The counts stay on the report, beside the dict they were read from.
             # A dict result (``severity_counts`` or a ``findings`` list) has no
             # result in the merged SARIF, so these counts are the only record of
-            # what the executor graded; the statistics calculator reads them
-            # when the SARIF holds nothing for the scanner
-            # (``extract_sarif_counts_for_scanner``). Dropped, the row the
-            # executor graded FAILED rolled up PASSED with 0 actionable.
+            # what the executor graded; the statistics calculator adds them to
+            # the scanner's SARIF counts whatever the SARIF holds
+            # (``extract_sarif_counts_for_scanner``), reading only reports that
+            # still carry a dict ``raw_results``. Dropped, the row the executor
+            # graded FAILED rolled up PASSED with 0 actionable.
             aggregated_results.additional_reports[scanner_name][target_key][
                 "raw_results"
             ] = results.raw_results
