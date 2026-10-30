@@ -12,11 +12,11 @@ scanner_details: {'tool_name': 'bandit', 'tool_version': '1.8.6', 'tool_invocati
 issue_severity: HIGH
 scanner_name: checkov
 scanner_version: 3.2.469
-scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 7.5, 'start_time': '2026-01-15T12:00:01.250000+00:00', 'end_time': '2026-01-15T12:00:08.750000+00:00'}}</system-out></testcase><testcase name="Ensure the S3 bucket has access logging enabled [CKV_AWS_18]" classname="CKV_AWS_18"><error message="Ensure the S3 bucket has access logging enabled" type="error" /><system-out>tags: ['checkov']
+scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 7.5, 'start_time': '2026-01-15T12:00:01.250000+00:00', 'end_time': '2026-01-15T12:00:08.750000+00:00'}}</system-out></testcase><testcase name="Ensure the S3 bucket has access logging enabled [CKV_AWS_18]" classname="CKV_AWS_18"><error message="Ensure the S3 bucket has access logging enabled" type="warning" /><system-out>tags: ['checkov']
 issue_severity: MEDIUM
 scanner_name: checkov
 scanner_version: 3.2.469
-scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 7.5, 'start_time': '2026-01-15T12:00:01.250000+00:00', 'end_time': '2026-01-15T12:00:08.750000+00:00'}}</system-out></testcase><testcase name="Ensure the last USER is not root [CKV_DOCKER_8]" classname="CKV_DOCKER_8"><error message="Ensure the last USER is not root" type="error" /><system-out>tags: ['checkov']
+scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 7.5, 'start_time': '2026-01-15T12:00:01.250000+00:00', 'end_time': '2026-01-15T12:00:08.750000+00:00'}}</system-out></testcase><testcase name="Ensure the last USER is not root [CKV_DOCKER_8]" classname="CKV_DOCKER_8"><error message="Ensure the last USER is not root" type="warning" /><system-out>tags: ['checkov']
 issue_severity: MEDIUM
 scanner_name: checkov
 scanner_version: 3.2.469
@@ -40,7 +40,7 @@ scanner_details: {'tool_name': 'detect-secrets', 'tool_version': '1.5.0', 'tool_
 issue_severity: CRITICAL
 scanner_name: grype
 scanner_version: 0.100.0
-scanner_details: {'tool_name': 'grype', 'tool_version': '0.100.0', 'tool_invocation': {'exit_code': 0, 'duration': 3.0, 'start_time': '2026-01-15T12:00:13.250000+00:00', 'end_time': '2026-01-15T12:00:16.250000+00:00'}}</system-out></testcase><testcase name="A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt [CVE-2023-32681-requests]" classname="CVE-2023-32681-requests"><error message="A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt" type="error" /><system-out>tags: ['grype']
+scanner_details: {'tool_name': 'grype', 'tool_version': '0.100.0', 'tool_invocation': {'exit_code': 0, 'duration': 3.0, 'start_time': '2026-01-15T12:00:13.250000+00:00', 'end_time': '2026-01-15T12:00:16.250000+00:00'}}</system-out></testcase><testcase name="A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt [CVE-2023-32681-requests]" classname="CVE-2023-32681-requests"><error message="A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt" type="warning" /><system-out>tags: ['grype']
 issue_severity: MEDIUM
 scanner_name: grype
 scanner_version: 0.100.0

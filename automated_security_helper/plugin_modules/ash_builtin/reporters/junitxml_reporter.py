@@ -232,6 +232,64 @@ def _xml_text(value: object) -> str:
     return _XML_FORBIDDEN.sub(shown, text)
 
 
+def _message_text(result) -> str:
+    """The text a result's message carries, or ``""``.
+
+    The plain text, else the Markdown, else the id of the message string the
+    result references: SARIF lets a message hold only that id, and its text is
+    then absent. Reading the text alone named such a case after nothing.
+    """
+    root = getattr(getattr(result, "message", None), "root", None)
+    for field in ("text", "markdown", "id"):
+        value = getattr(root, field, None)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
+def _rule_id(result) -> str | None:
+    """The rule a result names: its ``ruleId``, else the ``id`` of the rule
+    descriptor it references.
+
+    SARIF gives a result either; reading ``ruleId`` alone lost the rule of one
+    that names it through ``rule``.
+    """
+    if result.ruleId:
+        return result.ruleId
+    reference = getattr(result, "rule", None)
+    reference = getattr(reference, "root", reference)
+    identifier = getattr(reference, "id", None)
+    return identifier if isinstance(identifier, str) and identifier else None
+
+
+def _as_flag(value: object) -> bool | None:
+    """*value* as a true or false flag, or None when it states neither.
+
+    A boolean is itself; the strings ``true`` and ``false`` (any case) and the
+    integers 1 and 0 are read as those. Anything else is no flag: a string such
+    as ``"false"`` is truthy to Python, so negating it hid an actionable finding.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "false"):
+            return lowered == "true"
+    return None
+
+
+#: The ``type`` of the ``<error>`` element for each SARIF level; ``none`` is the
+#: level of a finding that carries no severity, so it takes the lowest label.
+_ERROR_TYPE_BY_LEVEL = {
+    "error": "error",
+    "warning": "warning",
+    "note": "note",
+    "none": "note",
+}
+
+
 class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
     # Consider findings as failures only if they're at or above the scanner's severity threshold
     respect_severity_threshold: bool = True
@@ -327,9 +385,14 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 # _xml_text, because XML 1.0 forbids a control character in
                 # text and attributes and one makes the whole document
                 # unreadable to every JUnit consumer.
-                message_text = _xml_text(result.message.root.text)
-                rule_id = _xml_text(result.ruleId) if result.ruleId else None
-                test_name = f"{message_text} [{rule_id}]" if rule_id else message_text
+                message_text = _xml_text(_message_text(result))
+                named_rule = _rule_id(result)
+                rule_id = _xml_text(named_rule) if named_rule else None
+                test_name = (
+                    f"{message_text} [{rule_id}]"
+                    if rule_id and message_text
+                    else message_text or rule_id or ""
+                )
                 test_case = TestCase(
                     name=test_name,
                     classname=rule_id,
@@ -379,12 +442,20 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 # it. Only the suppressions in effect are rendered as the skip.
                 in_effect = suppressions_in_effect(result.suppressions)
                 if in_effect:
+                    # One <skipped> for the case, however many suppressions
+                    # accepted it: JUnit counts each child as a skip, so one
+                    # test was counted as two. The justifications are joined.
                     test_case.result = [
                         Skipped(
-                            message=_xml_text(suppression.justification),
+                            message=_xml_text(
+                                "; ".join(
+                                    suppression.justification
+                                    for suppression in in_effect
+                                    if suppression.justification
+                                )
+                            ),
                             type_="suppression",
                         )
-                        for suppression in in_effect
                     ]
                 elif result.kind == "notApplicable":
                     # SARIF 2.1.0 3.27.9: "the rule specified by ruleId was not
@@ -463,7 +534,13 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # writer -- so in a real scan this leaves is_actionable alone
                     # and the gate below decides.
                     if self.config.options.respect_severity_threshold and props:
-                        below_threshold = getattr(props, "below_threshold", None)
+                        # Read as a flag: the string "false" is truthy to Python,
+                        # and negating it marked an actionable finding as
+                        # below threshold. A value that states neither true nor
+                        # false decides nothing, and the gate runs.
+                        below_threshold = _as_flag(
+                            getattr(props, "below_threshold", None)
+                        )
                         if below_threshold is not None:
                             is_actionable = not below_threshold
 
@@ -547,9 +624,11 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         # would not recognise, including the empty string, and
                         # _configured_severity_threshold substitutes ALL. Keeping
                         # a second guard here would mean neither was exercised.
-                        issue_severity = str(
-                            getattr(props, "issue_severity", "") or ""
-                        ).upper()
+                        issue_severity = (
+                            str(getattr(props, "issue_severity", "") or "")
+                            .strip()
+                            .upper()
+                        )
                         if issue_severity in SEVERITIES:
                             is_actionable = severity_fails_threshold(
                                 issue_severity, threshold
@@ -561,43 +640,51 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
                     # Only mark as error if it's actionable
                     if is_actionable:
-                        if result.level == "error" or result.kind == "fail":
+                        # The `type` follows the level, so a LOW (`note`)
+                        # finding is not ranked above a MEDIUM (`warning`) one.
+                        # It used to follow the kind first: the default kind
+                        # `fail` typed every finding "error".
+                        #
+                        # A kind that asserts a finding (`fail`, `open`,
+                        # `review`) always yields an <error>: the level's own
+                        # type when it names one, else `error` for `fail` and
+                        # `note` for the others. Before the `note` type existed
+                        # an actionable `open` or `review` finding at `note` or
+                        # `none` fell out with no result element, which renders
+                        # as a PASSING test case: the one direction a security
+                        # report must not fail in.
+                        #
+                        # `pass` and `informational` assert the opposite -- the
+                        # rule ran and found nothing; cdk-nag uses
+                        # `informational` with level `none` for a COMPLIANT
+                        # check (cdk_nag_wrapper._level_and_kind). They keep a
+                        # bare, passing test case unless the producer also
+                        # graded them `error` or `warning`. `notApplicable` (the
+                        # rule was not evaluated) never reaches this cascade:
+                        # it is decided ahead of the gate, above.
+                        #
+                        # `Error` rather than `Failure` because the module
+                        # imports only Error and Skipped; type_ carries the
+                        # distinction.
+                        level_type = _ERROR_TYPE_BY_LEVEL.get(str(result.level))
+                        if result.kind in _FINDING_KINDS:
+                            error_type = level_type or (
+                                "error" if result.kind == "fail" else "note"
+                            )
+                        elif result.level in ("error", "warning"):
+                            error_type = level_type
+                        else:
+                            error_type = None
+                        if error_type is not None:
                             test_case.result = [
-                                Error(message=message_text, type_="error")
+                                Error(message=message_text, type_=error_type)
                             ]
-                        elif result.level == "warning":
-                            test_case.result = [
-                                Error(message=message_text, type_="warning")
-                            ]
-                        elif result.kind in _FINDING_KINDS:
-                            # An actionable finding at `note` or `none` whose kind
-                            # still asserts a finding -- `open` or `review`. Before
-                            # this arm existed it fell out of the cascade with no
-                            # result element at all, which renders as a PASSING
-                            # test case: the reporter would decide a finding was
-                            # actionable and then publish it as a pass. That is the
-                            # one direction a security report must not fail in.
-                            #
-                            # Deliberately not extended to every kind. `pass` and
-                            # `informational` assert the opposite -- the rule ran
-                            # and found nothing -- and cdk-nag uses
-                            # `informational` with level `none` for a COMPLIANT
-                            # check (cdk_nag_wrapper._level_and_kind). Erroring on
-                            # those would report passed controls as problems,
-                            # which is how a threshold of ALL would turn a clean
-                            # compliance scan red. `notApplicable` (the rule was
-                            # not evaluated) never reaches this cascade: it is
-                            # decided ahead of the gate, above.
-                            #
-                            # `Error` rather than `Failure` because the module
-                            # imports only Error and Skipped; type_ carries the
-                            # distinction, as it already does for `warning`.
-                            test_case.result = [
-                                Error(message=message_text, type_="note")
-                            ]
-                        # Any remaining kind (`pass`, `informational`) says the
-                        # rule ran and found nothing, and keeps its bare, passing
-                        # test case.
+                    elif result.kind in _NON_FINDING_KINDS:
+                        # A check that passed (`pass`, or cdk-nag's `informational`
+                        # for a COMPLIANT rule) has no finding to be below any
+                        # threshold: it keeps its bare, passing test case rather
+                        # than a skip saying a finding was set aside.
+                        pass
                     else:
                         # Mark as skipped if below threshold
                         test_case.result = [
