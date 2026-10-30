@@ -113,10 +113,11 @@ class TestSharedArgBuilding:
         )
         scanner = SemgrepScanner(context=test_plugin_context, config=config)
 
+        # The operator's patterns travel joined, so a pattern starting with "-"
+        # is the value and not an option the tool reads.
         pairs = _extra_arg_pairs(scanner)
-        excludes = [v for k, v in pairs if k == "--exclude"]
-        assert "foo.py" in excludes
-        assert "bar/*" in excludes
+        assert ("--exclude=foo.py", None) in pairs, pairs
+        assert ("--exclude=bar/*", None) in pairs, pairs
 
     def test_severity_filter_emitted(self, test_plugin_context, monkeypatch):
         monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)

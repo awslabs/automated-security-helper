@@ -298,12 +298,19 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         self._note_unhonored_semgrepignore()
 
         # Exclude patterns / rules / severity filters — verbatim across both
-        # scanners.
-        for pattern in getattr(opts, "exclude", []) or []:
-            self.args.extra_args.append(ToolExtraArg(key="--exclude", value=pattern))
-        for rule_id in getattr(opts, "exclude_rule", []) or []:
+        # scanners. The patterns and rule ids travel in the joined form
+        # (``--exclude=<pattern>``), as the ignore names do (_execute_scan): in
+        # the split form a value starting with "-" is read by the tools as an
+        # option, and a blank value is dropped by _resolve_arguments after its
+        # flag was appended, so the flag took the next argument as its value.
+        # A blank value is left out here instead (_configured_values).
+        for pattern in self._configured_values(opts, "exclude"):
             self.args.extra_args.append(
-                ToolExtraArg(key="--exclude-rule", value=rule_id)
+                ToolExtraArg(key=f"--exclude={pattern}", value=None)
+            )
+        for rule_id in self._configured_values(opts, "exclude_rule"):
+            self.args.extra_args.append(
+                ToolExtraArg(key=f"--exclude-rule={rule_id}", value=None)
             )
         for severity in getattr(opts, "severity", []) or []:
             self.args.extra_args.append(ToolExtraArg(key="--severity", value=severity))
@@ -313,33 +320,52 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
 
         return super()._process_config_options()
 
+    def _configured_values(self, opts: Any, name: str) -> List[str]:
+        """The entries of the list option ``name`` that name something, in order.
+
+        A blank entry (empty, or whitespace only) is left out with a warning
+        naming the option: ``_resolve_arguments`` drops a blank value only after
+        the flag before it was appended, so the flag would take the next argument
+        of the command as its value.
+        """
+        values: List[str] = []
+        for value in getattr(opts, name, []) or []:
+            text = str(value)
+            if not text.strip():
+                self._plugin_log(
+                    f"Ignoring a blank entry of {self._option_key(name)}: it names "
+                    "nothing, and its flag would take the next argument as its value.",
+                    level=logging.WARNING,
+                )
+                continue
+            values.append(text)
+        return values
+
     def _note_unhonored_semgrepignore(self) -> None:
         """Say in the results that a ``.semgrepignore`` the tool would have read was not.
 
-        Looked for where either tool would read one: the source directory and
-        each directory above it up to the repository root (the first one holding
-        ``.git``). Only its presence is checked; the file is not read. The note
-        is a config warning, which the orchestrator records in the results as a
-        ``config_warning`` validation checkpoint, once per file. A file an MCP
-        client delivered (``cli/mcp/sandbox.config_is_client_supplied``, judged by
-        its path, each symlink on the way and the file it resolves to) is named
-        as client-supplied.
+        Looked for where either tool would read one (``_semgrepignore_files``):
+        the source directory and each directory above it up to the repository
+        root (the first one holding ``.git``), or the source directory alone when
+        no repository holds it. Only its presence is checked; the file is not
+        read. The note is a config warning, which the orchestrator records in the
+        results as a ``config_warning`` validation checkpoint, once per file, and
+        it is logged whether or not the context's config keeps such a list. A
+        file an MCP client delivered (``cli/mcp/sandbox.config_is_client_supplied``,
+        judged by its path, each symlink on the way and the file it resolves to)
+        is named as client-supplied. A disabled scanner runs neither tool, so
+        there is nothing it leaves unhonored and it records no note.
         """
         # Imported here, as config/path_trust.py does: importing cli.mcp runs its
         # __init__, which imports the config modules.
         from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
+        if not getattr(self.config, "enabled", True):
+            return
         source = getattr(self.context, "source_dir", None)
         if source is None:
             return
-        found = []
-        directory = Path(os.path.abspath(source))
-        for candidate in (directory, *directory.parents):
-            ignore_file = candidate / ".semgrepignore"
-            if os.path.lexists(ignore_file):
-                found.append(ignore_file)
-            if os.path.lexists(candidate / ".git"):
-                break
+        found = _semgrepignore_files(Path(os.path.abspath(source)))
         config = getattr(self.context, "config", None)
         warnings = getattr(config, "_resolution_warnings", None)
         for ignore_file in found:
@@ -368,9 +394,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                     "leave files out. List them in global_settings.ignore_paths "
                     "instead."
                 )
-            if isinstance(warnings, list) and message not in warnings:
+            if isinstance(warnings, list):
+                if message in warnings:
+                    continue
                 warnings.append(message)
-                self._plugin_log(message, level=logging.WARNING)
+            self._plugin_log(message, level=logging.WARNING)
 
     def _local_rules_configured(self) -> Optional[str]:
         """The ``options.config`` rule file or directory ASH may hand the tool, as
@@ -405,11 +433,16 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             return candidate.as_posix()
         return None
 
+    def _option_key(self, option: str) -> str:
+        """The dotted key of ``options.<option>`` in the ASH config, as a warning
+        names it (``scanners.semgrep.options.exclude``)."""
+        name = getattr(self.config, "name", None) or "grep"
+        return f"scanners.{name}.options.{option}"
+
     def _config_option_key(self) -> str:
         """The dotted key of ``options.config`` in the ASH config, as the path-trust
         warning names it (``scanners.semgrep.options.config``)."""
-        name = getattr(self.config, "name", None) or "grep"
-        return f"scanners.{name}.options.config"
+        return self._option_key("config")
 
     def _configured_registry_entry(self) -> Optional[str]:
         """``options.config`` when it names a registry entry or a URL, else None."""
@@ -506,14 +539,28 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             # the one that was asked for, reported as the one that was asked for.
             return
 
-        ASH_LOGGER.info(
-            f"{scanner_label} offline mode: using cached rules from {cache_dir}"
-        )
         # Absolute: the directory was validated against ASH's working directory,
         # and the tool runs in the source directory, so a relative value would
         # name a different directory there (one inside the scanned tree, when
         # the name exists in both).
-        self._cache_dir_in_use = os.path.abspath(cache_dir)
+        cache_abs = os.path.abspath(cache_dir)
+        if not self._cache_dir_is_passable(cache_abs, cache_env):
+            # Recorded, not raised, as the missing-cache reason above is: the
+            # scanner exists and declines, and the MISSING row says why.
+            self.dependency_unavailable_reason = (
+                f"{scanner_label} is running in offline mode, but ${cache_env} names "
+                "a rule cache inside the scanned tree, or one an MCP client "
+                "delivered, which ASH does not hand to the tool: the scanned "
+                "repository must not choose the rules it is scanned with. Point "
+                f"${cache_env} at a directory outside the scanned tree."
+            )
+            ASH_LOGGER.warning(self.dependency_unavailable_reason)
+            return
+
+        ASH_LOGGER.info(
+            f"{scanner_label} offline mode: using cached rules from {cache_dir}"
+        )
+        self._cache_dir_in_use = cache_abs
         self.args.extra_args.append(
             ToolExtraArg(key="--config", value=self._cache_dir_in_use)
         )
@@ -550,6 +597,32 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         )
         ASH_LOGGER.warning(self.dependency_unavailable_reason)
         return True
+
+    def _cache_dir_is_passable(self, cache_abs: str, cache_env: str) -> bool:
+        """Whether the validated rule cache may be handed to the tool.
+
+        The one rule every tool path follows (``config/path_trust.honored_path``):
+        a directory inside the scanned tree, or one an MCP client delivered, is
+        refused with a warning, so the scanned repository cannot choose the rules
+        it is scanned with by being the place ``$<cache env>`` points at. Judged on
+        the absolute path the validator accepted, which is the directory the tool
+        reads; the environment named it, so it is the operator's own. With no
+        source directory to judge against, the directory is passed as before.
+        """
+        source_dir = getattr(self.context, "source_dir", None)
+        if source_dir is None:
+            return True
+        return (
+            honored_path(
+                cache_abs,
+                source_dir=source_dir,
+                key=cache_env,
+                config=getattr(self.context, "config", None),
+                operator_written=True,
+                env_named=True,
+            )
+            is not None
+        )
 
     def _configure_online_mode(self) -> None:
         opts = self.config.options  # type: ignore[union-attr]
@@ -723,11 +796,9 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         if self._scan_target_type != "converted":
             return list(self.args.extra_args)
-        return [
-            arg
-            for arg in self.args.extra_args
-            if not (arg.key == "--exclude" and arg.value == CONVERTED_FILE_EXCLUDE)
-        ]
+        # The operator's patterns travel in the joined form (_process_config_options).
+        dropped = f"--exclude={CONVERTED_FILE_EXCLUDE}"
+        return [arg for arg in self.args.extra_args if arg.key != dropped]
 
     def _resolve_scan_arguments(self, target: Path, results_file: Path) -> List[str]:
         """``_resolve_arguments`` plus an ``--exclude`` per ASH output directory,
@@ -812,13 +883,19 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         (``_output_dir_excluded``), and the tools' own default ignore list, which
         ASH re-passes as ``--exclude`` because ``--x-ignore-semgrepignore-files``
         drops it (``SEMGREP_DEFAULT_IGNORES``). Matched on the path's components
-        below the target (or below the project root the tools anchor their patterns
-        at), as the tools match a directory pattern, and on the file name for a
-        file glob. The directories above the target never count: a checkout under
-        ``/opt/atlassian/pipelines/agent/build`` or ``/home/travis/build`` would
-        otherwise read every excluded file as one the tools' defaults left out.
+        below the project root the tools anchor their patterns at
+        (``_pattern_anchor``: the nearest ``.git`` at or above the target, else the
+        target itself), as the tools match a directory pattern, and on the file
+        name for a file glob. That is the target's own components below the root
+        plus the reported path's below the target: a target that is itself the
+        repository's ``tests/`` or ``vendor/`` directory is excluded whole by the
+        tools' defaults, whether the tool reports its files relative to the target
+        or to the root. The directories above the root never count: a checkout
+        under ``/opt/atlassian/pipelines/agent/build`` or ``/home/travis/build``
+        would otherwise read every excluded file as one the tools' defaults left
+        out.
         """
-        parts = _parts_below(path, target)
+        parts = (*_parts_of_target_below_root(target), *_parts_below(path, target))
         if set(self._ignore_exclude_names).intersection(parts):
             return True
         for relative in self._output_dir_excluded:
@@ -963,6 +1040,38 @@ def _pattern_anchor(target_abs: Path) -> Path:
         ),
         target_abs,
     )
+
+
+def _parts_of_target_below_root(target: Path) -> tuple[str, ...]:
+    """The target's own path components below the project root the tools anchor
+    their patterns at (``_pattern_anchor``); none when the target is that root."""
+    target_abs = Path(os.path.abspath(target))
+    try:
+        return target_abs.relative_to(_pattern_anchor(target_abs)).parts
+    except ValueError:
+        return ()
+
+
+def _semgrepignore_files(directory: Path, exists=os.path.lexists) -> List[Path]:
+    """The ``.semgrepignore`` files either tool would read for a scan of ``directory``.
+
+    semgrep reads one in its project root, the git work tree holding the scan
+    root, and ASH runs opengrep in the source directory; so the walk goes from
+    ``directory`` up to the first directory holding ``.git`` and names each file
+    on the way. Outside a repository there is no root to walk to and the tools
+    read the one in the scanned directory alone, so only that one is named: the
+    walk used to continue to the filesystem root and name a ``.semgrepignore`` in
+    the home directory, say, as one in the scanned tree that was not honored.
+    ``exists`` is the presence test, ``os.path.lexists`` (the file is not read).
+    """
+    found: List[Path] = []
+    for candidate in (directory, *directory.parents):
+        ignore_file = candidate / ".semgrepignore"
+        if exists(ignore_file):
+            found.append(ignore_file)
+        if exists(candidate / ".git"):
+            return found
+    return [ignore_file for ignore_file in found if ignore_file.parent == directory]
 
 
 def _parts_below(path: str, target: Path) -> tuple[str, ...]:

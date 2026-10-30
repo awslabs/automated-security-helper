@@ -295,3 +295,36 @@ def test_rule_ids_are_not_rewritten_offline(
 
     keys = [key for key, _ in _pairs(scanner)]
     assert keys.count("--no-rewrite-rule-ids") == 1, keys
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_a_cache_directory_inside_the_scanned_tree_is_refused(
+    scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
+):
+    """A rule cache the environment names inside the scanned tree is not handed to
+    the tool: the one rule every tool path follows (``config/path_trust``), so the
+    scanned repository cannot choose the rules it is scanned with. The scanner
+    records the reason and declines, as it does for a missing cache.
+
+    Fails at the base: the directory passed the validator and was appended as
+    ``--config`` with no judgment of where it sits.
+    """
+    source = Path(test_plugin_context.source_dir)
+    cache = source / "rules"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "ci.yaml").write_text(RULE, encoding="utf-8")
+    monkeypatch.setenv(cache_env, str(cache))
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(options=options_cls(offline=True)),
+    )
+
+    reason = scanner.dependency_unavailable_reason or ""
+    assert cache_env in reason and "scanned tree" in reason, reason
+    assert cache.as_posix() not in _configs(scanner), _pairs(scanner)
+    assert scanner._cache_dir_in_use is None
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.content_databases_in_use() == []

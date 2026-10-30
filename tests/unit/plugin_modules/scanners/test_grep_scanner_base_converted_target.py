@@ -101,11 +101,17 @@ def _command(scanner, target: Path, target_type: str) -> list[str]:
 
 
 def _exclude_values(command: list[str]) -> list[str]:
-    return [
+    """Every ``--exclude`` value in the command: the split form ASH's own constants
+    take, and the joined form (``--exclude=<pattern>``) the operator's patterns
+    take."""
+    values = [
         command[index + 1]
         for index, word in enumerate(command[:-1])
         if word == "--exclude"
     ]
+    prefix = "--exclude="
+    values.extend(word[len(prefix) :] for word in command if word.startswith(prefix))
+    return values
 
 
 @pytest.mark.parametrize(
@@ -245,7 +251,7 @@ def test_the_configured_arguments_are_left_as_they_were(
     _command(scanner, context.work_dir, "converted")
 
     pairs = [(arg.key, arg.value) for arg in scanner.args.extra_args]
-    assert ("--exclude", CONVERTED_FILE_EXCLUDE) in pairs, pairs
+    assert (f"--exclude={CONVERTED_FILE_EXCLUDE}", None) in pairs, pairs
     assert NO_GIT_IGNORE_FLAG not in [key for key, _ in pairs], pairs
     # And the source target, resolved after, is a source command.
     source = _command(scanner, context.source_dir, "source")

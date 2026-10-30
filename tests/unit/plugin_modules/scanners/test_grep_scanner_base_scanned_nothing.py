@@ -331,3 +331,77 @@ def test_the_output_directories_the_command_excluded_are_recorded(
 
     assert patterns, "premise: the output directory inside the target is excluded"
     assert Path(".ash/ash_output") in scanner._output_dir_excluded
+
+
+@pytest.mark.parametrize(
+    "reported",
+    [
+        pytest.param("test_app.py", id="relative-to-the-target"),
+        pytest.param("tests/test_app.py", id="relative-to-the-root"),
+        pytest.param("{target}/test_app.py", id="absolute"),
+    ],
+)
+def test_a_target_that_is_a_default_ignored_directory_of_its_repository_grades_skipped(
+    test_plugin_context, monkeypatch, tmp_path, reported
+):
+    """A target that is itself the repository's ``tests/`` directory is excluded
+    whole by the tools' own default list, which they anchor at the repository
+    root, so its files are ASH's exclusions however the tool reports them:
+    relative to the target, relative to the root, or absolute.
+
+    Fails at the base on the relative-to-the-target and absolute rows: only the
+    components below the target were read, which hold no ``tests``, so the files
+    counted as the operator's and the scan was refused.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    target = repo / "tests"
+    target.mkdir()
+    paths_file_dir = tmp_path / "grading"
+    paths_file_dir.mkdir()
+    paths_file = paths_file_dir / "paths.json"
+    paths_file.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "scanned": [],
+                    "skipped": _excluded(reported.format(target=target.as_posix())),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    scanner.targets_attempted = None
+
+    scanner._post_process_sarif(
+        _SARIF, [f"--json-output={paths_file.as_posix()}"], target
+    )
+
+    assert scanner.targets_attempted == 0
+
+
+def test_a_target_under_an_ordinary_directory_of_its_repository_is_still_refused(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The control: the target's own components below the root count only when
+    they are on the default list; ``src`` is not, so an operator pattern that left
+    out every file is refused as before."""
+    scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    target = repo / "src"
+    target.mkdir()
+    paths_file_dir = tmp_path / "grading"
+    paths_file_dir.mkdir()
+    paths_file = paths_file_dir / "paths.json"
+    paths_file.write_text(
+        json.dumps({"paths": {"scanned": [], "skipped": _excluded("app.py")}}),
+        encoding="utf-8",
+    )
+    scanner.targets_attempted = None
+
+    with pytest.raises(ScannerError, match="--exclude patterns left out all 1 files"):
+        scanner._post_process_sarif(
+            _SARIF, [f"--json-output={paths_file.as_posix()}"], target
+        )
