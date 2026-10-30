@@ -160,8 +160,10 @@ class TestRuleDescriptorNamesItsPack:
     def test_a_cdk_nag_rule_still_points_at_cdk_nags_rule_documentation(self):
         """The behaviour that was already right, pinned so the fix cannot break it.
 
-        The anchor is derived from the rule level, which is the pre-existing convention. Naming
-        the whole URL means a change to either half fails here.
+        The link is the document, with no fragment. It used to end in ``#errors`` or
+        ``#warnings`` from the rule's level alone; RULES.md has one error table and one
+        warning table per pack, so that anchor named one pack's table for every pack's
+        rules. Naming the whole URL means a change to either half fails here.
         """
         from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
             _reporting_descriptor_for,
@@ -177,8 +179,31 @@ class TestRuleDescriptorNamesItsPack:
         # comparing the model object with a string is always False.
         assert (
             str(descriptor.helpUri)
-            == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#errors"
+            == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
         )
+
+    def test_a_rule_of_another_pack_is_not_sent_to_the_first_packs_table(self):
+        """An HIPAA rule's link used to carry ``#errors``, the anchor of whichever
+        pack's error table comes first in RULES.md, which is not HIPAA's."""
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            _reporting_descriptor_for,
+        )
+
+        descriptor = _reporting_descriptor_for(
+            _result(
+                "HIPAA.Security-S3BucketLoggingEnabled",
+                "HIPAA.Security",
+                rule_level="Error",
+            ),
+            tool_name="cdk-nag",
+            tool_type="IAC",
+        )
+
+        assert (
+            str(descriptor.helpUri)
+            == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
+        )
+        assert "#" not in str(descriptor.helpUri)
 
     def test_a_cloudformation_validate_rule_points_at_the_cdk_validation_guide(self):
         """The destination that documents the plugin AND how to acknowledge its findings.
@@ -209,8 +234,8 @@ class TestRuleDescriptorNamesItsPack:
         send genuine cdk-nag rules away from their own documentation -- the same misattribution
         in the opposite direction, introduced by the fix for it.
 
-        The generic ``#rules`` anchor is what a missing ``rule_level`` degrades to, and it
-        claims nothing about a specific rule.
+        The link is the document itself, which claims nothing about a specific rule or a
+        specific pack's table.
         """
         from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
             _reporting_descriptor_for,
@@ -225,7 +250,7 @@ class TestRuleDescriptorNamesItsPack:
 
         assert (
             str(descriptor.helpUri)
-            == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#rules"
+            == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
         )
         # The pack is reported as unknown rather than invented, so a reader can tell the
         # difference between "cdk-nag" and "we do not know".

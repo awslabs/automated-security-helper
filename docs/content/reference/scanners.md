@@ -126,7 +126,7 @@ Options, under `scanners.cdk-nag.options`. An option not listed here refuses the
 | <a id="scanners.cdk-nag.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
 | <a id="scanners.cdk-nag.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.cdk-nag.options.nag_packs"></a>`nag_packs` | mapping | see the section | CDK Nag packs to enable |
-| <a id="scanners.cdk-nag.options.include_compliant_checks"></a>`include_compliant_checks` | boolean | `false` | Include INFO-level findings for compliant resources in the report. |
+| <a id="scanners.cdk-nag.options.include_compliant_checks"></a>`include_compliant_checks` | boolean | `false` | Kept for configuration compatibility; it changes nothing. cdk-nag 3 reports violations only, so there is no compliant-resource finding for this option to include, and a scan with it set says so. |
 
 ## `cfn-guard`
 

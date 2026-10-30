@@ -3073,7 +3073,7 @@
             "scan_timeout": 1800,
             "severity_threshold": null
           },
-          "description": "Configure Bandit scanner"
+          "description": "Configure CDK Nag scanner"
         }
       },
       "title": "CdkNagScannerConfig",
@@ -3085,7 +3085,7 @@
       "properties": {
         "include_compliant_checks": {
           "default": false,
-          "description": "Include INFO-level findings for compliant resources in the report.",
+          "description": "Kept for configuration compatibility; it changes nothing. cdk-nag 3 reports violations only, so there is no compliant-resource finding for this option to include, and a scan with it set says so.",
           "title": "Include Compliant Checks",
           "type": "boolean"
         },

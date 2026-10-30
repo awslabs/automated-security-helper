@@ -235,20 +235,21 @@ def test_empty_target_returns_the_placeholder_report(
     assert any("empty or doesn't exist" in err for err in scanner.errors)
 
 
-def test_placeholder_report_command_line_is_a_copy_paste_artifact(
+def test_placeholder_report_records_this_scanners_own_invocation(
     scanner, cdk_available, wrapper_double
 ):
-    """The skeleton invocation claims 'npm audit --json'.
+    """The skeleton invocation names ``ash --scanner cdk-nag``, as the final report does.
 
-    That string is wrong for this scanner -- it was copied from
-    npm_audit_scanner -- and it is what callers see on the empty-target and
-    no-templates paths, because those return the skeleton rather than the
-    rebuilt report. Pinned so that correcting it is a deliberate change with a
-    test to update, not a silent shift in emitted reports.
+    It used to claim ``npm audit --json``, a line copied from npm_audit_scanner, and
+    that is what callers saw on the empty-target and no-templates paths, because those
+    return the skeleton rather than the rebuilt report.
     """
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    assert report.runs[0].invocations[0].commandLine == "npm audit --json"
+    invocation = report.runs[0].invocations[0]
+    assert invocation.commandLine == "ash"
+    assert "npm" not in invocation.commandLine
+    assert list(invocation.arguments)[:3] == ["--scanner", "cdk-nag", "--source-dir"]
 
 
 def test_unsatisfied_dependencies_return_false(
