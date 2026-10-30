@@ -168,11 +168,12 @@ class TestTheSummaryLineIsOneLine:
         document = _report(test_plugin_context, model)
 
         # The report holds other collapsible sections; this finding's summary is
-        # the one that names it.
+        # the one that names its location (the line holds the severity, the rule
+        # ID and the location, not the title).
         summary = [
             line
             for line in document.split("\n")
-            if "<summary>" in line and "Odd severity" in line
+            if "<summary>" in line and "app.py:3" in line
         ]
         # The control: the finding is in the report, with its summary line.
         assert len(summary) == 1, summary
