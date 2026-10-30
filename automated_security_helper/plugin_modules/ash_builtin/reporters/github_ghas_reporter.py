@@ -491,8 +491,9 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # identical in tool identity and carried none, so uploading them
             # for one repository made each replace the previous project's
             # analysis. The project's key, when the scan has one, keeps them
-            # apart; a single-directory scan is unchanged.
-            category = self._workspace_project(model, runs)
+            # apart; a single-directory scan and a unified workspace document
+            # are unchanged.
+            category = self._workspace_project(model)
             if category:
                 out_run["automationDetails"] = {"id": f"ash/{category}/"}
 
@@ -617,27 +618,21 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         return out
 
     @staticmethod
-    def _workspace_project(model: "AshAggregatedResults", runs: list) -> Optional[str]:
+    def _workspace_project(model: "AshAggregatedResults") -> Optional[str]:
         """The workspace project this document describes, or None.
 
-        A per-project scan records it on the model's metadata; a project's own
-        run in a unified model carries it on the run's properties. A document
-        over several projects is one analysis of the workspace and names none.
+        Read from the model's metadata alone, which a per-project scan stamps
+        (``workspace/execution.py``). A unified model is one analysis of the
+        workspace whatever its run count: one run is left when every other
+        project was skipped, so a category read from that run's stamp came and
+        went between two scans of one workspace, and it was the category of the
+        project's own per-project document, whose URIs are project-relative
+        where the unified document's are workspace-relative. GitHub then held
+        two analyses of one project, each upload replacing the other's alerts.
         """
         project = getattr(getattr(model, "metadata", None), "workspace_project", None)
         if isinstance(project, str) and project.strip():
             return project.strip()
-        if len(runs) != 1:
-            return None
-        props = getattr(runs[0], "properties", None)
-        if props is None:
-            return None
-        value = getattr(props, "workspace_project", None)
-        if value is None:
-            extra = getattr(props, "model_extra", None)
-            value = extra.get("workspace_project") if isinstance(extra, dict) else None
-        if isinstance(value, str) and value.strip():
-            return value.strip()
         return None
 
     @staticmethod

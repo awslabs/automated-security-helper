@@ -209,15 +209,27 @@ class TestAutomationDetails:
 
         assert out["automationDetails"] == {"id": "ash/api/"}
 
-    def test_a_single_project_run_names_its_project(self, reporter):
-        run = _run(
-            Result(ruleId="R", level=Level.error, message=Message(text="m")),
-            properties=PropertyBag.model_validate({"workspace_project": "web"}),
-        )
+    @pytest.mark.parametrize("run_count", [1, 2], ids=["one-run", "two-runs"])
+    def test_a_unified_model_names_no_project_whatever_its_run_count(
+        self, reporter, run_count
+    ):
+        """One run is left in a unified model when every other project was
+        skipped. Its stamp used to become the category, so the category came
+        and went between two scans of one workspace, and it was the per-project
+        document's category with the other document's URI base."""
+        runs = [
+            _run(
+                Result(ruleId="R", level=Level.error, message=Message(text="m")),
+                properties=PropertyBag.model_validate(
+                    {"workspace_project": key, "workspace_project_path": key}
+                ),
+            )
+            for key in ("web", "api")[:run_count]
+        ]
 
-        out = json.loads(reporter.report(_model(run)))["runs"][0]
+        out = json.loads(reporter.report(_model(*runs)))["runs"][0]
 
-        assert out["automationDetails"] == {"id": "ash/web/"}
+        assert "automationDetails" not in out
 
     def test_a_single_directory_scan_carries_no_automation_details(self, reporter):
         model = _model(
