@@ -624,8 +624,12 @@ def _install_harness(runner, outcome_for_attempt):
             "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=_run,
         ),
+        # The wait between attempts is the module's own seam, not time.sleep: it
+        # polls the scan's cancel in short slices of time.sleep, so recording
+        # time.sleep would list the slices (hundreds of thousands of 0.2s)
+        # instead of the backoff the install asked for.
         patch(
-            "automated_security_helper.utils.uv_tool_runner.time.sleep",
+            "automated_security_helper.utils.uv_tool_runner._sleep_between_attempts",
             side_effect=sleeps.append,
         ),
     ):
@@ -2300,7 +2304,7 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
         """Two attempts that occupy real time: the first fails, the second succeeds.
 
         ``threading.Event().wait`` rather than ``time.sleep`` deliberately -- the
-        install harness patches the module's ``time.sleep`` to record intervals,
+        install harness patches the module's wait between attempts to record intervals,
         so a sleep here would return instantly and occupy no time at all.
         """
 
@@ -2516,8 +2520,9 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
             attempt, and no grace period is needed to say so.
 
             The 0.4s backoff and the 0.02s monitor cadence are far enough apart to
-            tell apart by size, which matters because the pre-fix monitor polls
-            with this same ``time.sleep``.
+            tell apart by size, which matters because the pre-fix monitor polled
+            with the module's ``time.sleep``; the backoff itself arrives whole
+            through ``_sleep_between_attempts``, the seam patched below.
             """
             if seconds > 0.1:
                 with lock:
@@ -2535,7 +2540,7 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
             # interval instead of taking it, and this test needs a real gap
             # between the two attempts to look for callbacks inside.
             patch(
-                "automated_security_helper.utils.uv_tool_runner.time.sleep",
+                "automated_security_helper.utils.uv_tool_runner._sleep_between_attempts",
                 side_effect=_sleep_really,
             ),
         ):
@@ -3381,7 +3386,10 @@ class TestProbeLocksAreNamespaced:
             ):
                 get_uv_tool_command("bandit")
 
-        assert "version::bandit::bandit" in seen
+        # The version probe's lock is keyed by the TOOL alone: two spec keys of
+        # one tool resolve to one installed environment, and locking them apart
+        # reopened the first-import race the lock exists to close.
+        assert "version::bandit" in seen
         # The command probe's key goes on to name the environment it was made in.
         assert any(key.startswith("command::bandit::bandit::") for key in seen), seen
         # The collision the namespacing exists to prevent.

@@ -799,6 +799,22 @@ def _canonical(name: str) -> str:
     return canonicalize_name(name)
 
 
+def _requirement_name(spec: str) -> Optional[str]:
+    """The package ``spec`` names, read off the requirement; None when it is not one.
+
+    A caller's ``package_name`` may be a bare name or carry its constraint and
+    extras ("nbconvert>=7.16.0,<8.0.0"): the package the spec is held to is the
+    name inside it, never the string whole. None leaves ``checked_requirement``
+    to refuse the spec in its own words.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    try:
+        return Requirement(spec).name
+    except InvalidRequirement:
+        return None
+
+
 def checked_requirement(
     spec: str, naming: str = "a tool requirement", *, package: Optional[str] = None
 ) -> str:
@@ -1886,7 +1902,10 @@ class UVToolRunner:
         # never the assembled argv. Each fact is read from the input that set
         # it, not back out of the argument list.
         described = [f"uv tool install {tool_name}"]
-        if offline:
+        # The flag the argv carries (env_offline above), not the parameter: the
+        # parameter was consumed by the offline return, and a UV_OFFLINE=1 run
+        # that failed used to describe itself without the --offline it passed.
+        if env_offline:
             described.append("--offline")
         if with_dependencies:
             count = len(with_dependencies)
@@ -2310,6 +2329,13 @@ class UVToolRunner:
 
         # Build command with --from parameter if extras or version constraint specified
         base_name = package_name or tool_name
+        # The package the --from spec is held to is the NAME inside
+        # ``package_name``, not the string whole: a caller passes the package
+        # with its constraint glued on ("nbconvert>=7.16.0,<8.0.0", the jupyter
+        # converter's), and the whole string compared against the parsed name
+        # never matched, so every such run was refused as a requirement for
+        # another package.
+        package = _requirement_name(base_name)
         if package_extras or version_constraint:
             # Build the --from specification
             if package_extras:
@@ -2321,7 +2347,7 @@ class UVToolRunner:
             from_spec = checked_requirement(
                 f"{base_spec}{version_constraint}" if version_constraint else base_spec,
                 f"the --from spec for {tool_name}",
-                package=base_name,
+                package=package,
             )
 
             command.extend(
@@ -2335,14 +2361,16 @@ class UVToolRunner:
             # A package named apart from its command is always a --from (the
             # bare run would resolve a package named after the executable); one
             # named like the command passes none, exactly as the probes'
-            # UVToolMixin._uv_from_spec reads it, so the two argvs match.
+            # UVToolMixin._uv_from_spec reads it, so the two argvs match. A
+            # package named like the command WITH a constraint is a --from too:
+            # the constraint is what the caller asked for.
             command.extend(
                 [
                     "--from",
                     checked_requirement(
                         package_name,
                         f"the --from spec for {tool_name}",
-                        package=package_name,
+                        package=package,
                     ),
                 ]
             )
