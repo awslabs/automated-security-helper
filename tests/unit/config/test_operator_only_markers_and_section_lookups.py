@@ -162,3 +162,45 @@ def test_a_date_a_yaml_file_wrote_is_shown_as_text():
     marker = shown["reporters"][SH]["options"]["findings_scope"]
     assert marker.startswith("<operator only; ignored from this file: ")
     assert "2099-01-31" in marker, marker
+
+
+def test_a_date_keyed_mapping_a_yaml_file_wrote_is_shown_as_text():
+    """``json.dumps`` applies ``default=`` to values, not to mapping keys, so
+    a date key (an unquoted ``2099-01-31:`` in YAML) raised out of the marking
+    where a date value was shown as text; the key is shown as text too."""
+    shown = mark_operator_only_options(
+        {
+            "reporters": {
+                SH: {"options": {"findings_scope": {datetime.date(2099, 1, 31): "all"}}}
+            }
+        }
+    )
+
+    marker = shown["reporters"][SH]["options"]["findings_scope"]
+    assert marker.startswith("<operator only; ignored from this file: ")
+    assert "2099-01-31" in marker and '"all"' in marker, marker
+
+
+def test_a_mapping_key_read_from_the_environment_shows_the_reference():
+    """A key reference is recorded at its mapping's place; a key the file read
+    from the environment is shown as the reference, as a read value is, never
+    as the key's text."""
+    reference = EnvironmentReference(
+        path=("reporters", SH, "options", "findings_scope"),
+        written="${ASH_PLANTED_KEY}",
+        resolved="planted-key-text",
+        value="planted-key-text",
+        key=True,
+    )
+    shown = mark_operator_only_options(
+        {
+            "reporters": {
+                SH: {"options": {"findings_scope": {"planted-key-text": "all"}}}
+            }
+        },
+        references=[reference],
+    )
+
+    marker = shown["reporters"][SH]["options"]["findings_scope"]
+    assert "planted-key-text" not in marker, marker
+    assert "${ASH_PLANTED_KEY}" in marker and '"all"' in marker, marker

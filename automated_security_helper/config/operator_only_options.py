@@ -1175,7 +1175,9 @@ def _marker_value(
     place a read value lands: a YAML alias's place included, and a ``patch``
     value at the place the operation puts it (``copy`` and ``move`` are not
     allowed ops), so no read value reaches one of these places without one.
-    A literal a later file wrote over a read value is shown as the literal.
+    A literal a later file wrote over a read value is shown as the literal. A
+    mapping key the file read from the environment (a key reference, recorded
+    at the mapping's place) is shown as its reference too.
     """
     from automated_security_helper.config.environment_record import (
         environment_marker,
@@ -1196,12 +1198,15 @@ def _marker_value(
             and path[2:4] == ("options", option)
         )
 
-    def read_as(text: Any, *, within: bool) -> Optional[str]:
+    def read_as(text: Any, *, within: bool, key: bool = False) -> Optional[str]:
+        # ``key``: the text is a mapping key, matched against the references
+        # the file read keys from (their path is the mapping's), never against
+        # the ones it read values from, and the other way round.
         if not isinstance(text, str):
             return None
         for reference in references:
             if (
-                not reference.key
+                bool(reference.key) == key
                 and reference.resolved == text
                 and at_place(reference, within=within)
             ):
@@ -1216,10 +1221,17 @@ def _marker_value(
 
     # A list or mapping the file wrote holds its read values as leaves: each
     # leaf a reference at or under this place resolved to is shown as the
-    # reference, never the value.
+    # reference, never the value. A mapping key is shown the same way, and as
+    # text: ``json.dumps`` applies ``default=`` to values only, so a date or
+    # other non-JSON key a YAML file writes would raise out of the marking.
+    def shown_key(name: Any) -> str:
+        text = name if isinstance(name, str) else str(name)
+        marker = read_as(text, within=True, key=True)
+        return text if marker is None else marker
+
     def shown_leaves(node: Any) -> Any:
         if isinstance(node, dict):
-            return {name: shown_leaves(item) for name, item in node.items()}
+            return {shown_key(name): shown_leaves(item) for name, item in node.items()}
         if isinstance(node, (list, tuple)):
             return [shown_leaves(item) for item in node]
         if isinstance(node, str):
