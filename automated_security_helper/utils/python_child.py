@@ -54,6 +54,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterator, List, Mapping, Optional, Sequence
 
+from automated_security_helper.utils.process_env import snapshot_environ
+
 #: What makes the interpreter skip the working directory, where it can.
 _SAFE_PATH_FLAGS: List[str] = ["-P"] if sys.version_info >= (3, 11) else []
 
@@ -347,7 +349,9 @@ def uv_child_overrides(
     rest = _uv_arguments(argv)
     if rest is None:
         return {}
-    environment: Mapping[str, str] = os.environ if env is None else env
+    # A locked copy, never the live mapping: another thread may be changing
+    # it while this reads (utils/process_env.py).
+    environment: Mapping[str, str] = snapshot_environ() if env is None else env
     subcommand = None
     index = 0
     while index < len(rest):
