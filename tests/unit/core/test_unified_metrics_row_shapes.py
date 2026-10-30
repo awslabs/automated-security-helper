@@ -108,6 +108,41 @@ class TestARecordedFailedWithNothingActionableReadsPassed:
         assert metrics.status == "SKIPPED"
 
 
+class TestAnErrorFiledUnderAnotherTargetIsTheScannersError:
+    """A results-processing failure is filed on the failed target's own row with
+    status ERROR, whatever target that is. The per-target walk reads every key,
+    so an ERROR under "converted" beside a PASSED source report and a PASSED
+    recorded row grades the scanner ERROR; before the refiled row was graded,
+    the failure record kept the row's FAILED-or-PASSED status and only the
+    "None" and "source" reports were read for it, so the source's PASSED won."""
+
+    def test_the_row_is_error(self):
+        model = _model(
+            {
+                "source": _report("source"),
+                "converted": _report("converted", status="ERROR"),
+            }
+        )
+        model.scanner_results[SCANNER] = ScannerTargetStatusInfo(
+            status=ScannerStatus.PASSED
+        )
+
+        (metrics,) = get_unified_scanner_metrics(model)
+
+        assert metrics.status == "ERROR"
+
+    def test_two_passed_targets_read_passed(self):
+        """Control."""
+        model = _model({"source": _report("source"), "converted": _report("converted")})
+        model.scanner_results[SCANNER] = ScannerTargetStatusInfo(
+            status=ScannerStatus.PASSED
+        )
+
+        (metrics,) = get_unified_scanner_metrics(model)
+
+        assert metrics.status == "PASSED"
+
+
 class TestAFailedRowKeepsTheMissingTreesReason:
     def test_the_rebuilt_row_says_which_tree(self):
         model = _model(
