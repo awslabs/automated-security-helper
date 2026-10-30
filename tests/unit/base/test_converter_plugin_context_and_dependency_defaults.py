@@ -184,8 +184,32 @@ def test_the_default_dependency_check_is_true_where_nothing_is_declared(
 def _default_config_records(converter_type, context):
     with _ash_records() as records:
         converter = converter_type(context=context)
+    # The fallback is a deliberate choice, asserted whole: a disabled generic
+    # config, and the converter recorded as unavailable with the model named, so
+    # ConvertPhase does not run it. A converter declared disabled by default with
+    # a required field used to run on the generic config's enabled default.
     assert type(converter.config) is ConverterPluginConfigBase
+    assert converter.config.enabled is False
+    assert converter.dependencies_satisfied is False
+    assert converter.validate_plugin_dependencies() is False
+    reason = converter.dependency_unavailable_reason
+    assert reason is not None and converter_type.__name__ not in reason
+    assert "cannot be built without a section" in reason
     return [r for r in records if "cannot be built without a section" in r.getMessage()]
+
+
+def test_a_converter_whose_model_builds_is_ready_and_configured_by_it(
+    test_plugin_context,
+):
+    """The control: a declared model that builds is the config, the converter is
+    ready, and nothing is recorded against it."""
+    converter = PlainConverter(context=test_plugin_context)
+
+    assert type(converter.config) is PlainConfig
+    assert converter.config.name == "plain"
+    assert converter.config.enabled is True
+    assert converter.dependencies_satisfied is True
+    assert converter.dependency_unavailable_reason is None
 
 
 def test_a_default_that_raises_something_other_than_validation_is_a_warning(
@@ -197,6 +221,7 @@ def test_a_default_that_raises_something_other_than_validation_is_a_warning(
     assert "BrokenDefaultConverter" in record.getMessage()
     assert "BrokenDefaultConfig" in record.getMessage()
     assert "(TypeError)" in record.getMessage()
+    assert "unavailable" in record.getMessage()
 
 
 def test_a_model_that_needs_a_section_is_still_told_at_debug(test_plugin_context):

@@ -158,9 +158,18 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         (``ConverterPluginBase[XConfig]``), so its name, its declared ``enabled``
         default and its options' defaults apply, as they do for a configured
         run: a converter declared disabled by default stays disabled, and its
-        work directory is named for the converter. The generic base only for a
-        converter that declares no model, or one whose model needs a section to
-        be built.
+        work directory is named for the converter. The generic base for a
+        converter that declares no model.
+
+        A converter whose declared model cannot be built without a section is
+        UNAVAILABLE: it gets a disabled generic config, its dependencies are
+        recorded as not satisfied, and the reason names the model, so
+        ``ConvertPhase`` records it as it records a missing tool and does not run
+        it. Before, such a converter ran on the generic config, whose ``enabled``
+        default is True and whose name is not the converter's: a model declared
+        ``enabled = False`` with a required field ran anyway, under a name its
+        own model never gave it, and a defect in a computed default (anything but
+        a ValidationError) was logged and then run past.
         """
         declared = self._declared_config_model()
         if declared is None:
@@ -171,20 +180,24 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             # A model that needs a section raises ValidationError, the expected
             # shape, told at DEBUG; one whose defaults are computed can raise
             # anything, which is a defect in that default and is told at
-            # WARNING so it is seen. A converter given no config must still run
-            # with the generic one either way.
+            # WARNING so it is seen.
             if isinstance(error, ValidationError):
                 detail = f"{error.error_count()} error(s)"
                 log = ASH_LOGGER.debug
             else:
                 detail = type(error).__name__
                 log = ASH_LOGGER.warning
-            log(
-                f"{self.__class__.__name__}: its config model "
-                f"{declared.__name__} cannot be built without a section "
-                f"({detail}); using the generic one"
+            reason = (
+                f"its config model {declared.__name__} cannot be built without a "
+                f"section ({detail})"
             )
-            return ConverterPluginConfigBase()
+            log(
+                f"{self.__class__.__name__}: {reason}; the converter is "
+                "unavailable until it is configured"
+            )
+            self.dependencies_satisfied = False
+            self.dependency_unavailable_reason = reason
+            return ConverterPluginConfigBase(enabled=False)
 
     def configure(
         self,
