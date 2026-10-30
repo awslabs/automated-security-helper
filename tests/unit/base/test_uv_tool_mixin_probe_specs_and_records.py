@@ -518,3 +518,60 @@ class TestThePluginsOwnOfflineMode:
         assert UVToolMixin()._is_offline_mode() is False
         monkeypatch.setenv("ASH_OFFLINE", "1")
         assert UVToolMixin()._is_offline_mode() is True
+
+    def test_a_scanners_own_offline_mode_reaches_the_run(self, monkeypatch):
+        """The whole way through: a plugin offline by its options, with the
+        mixin's own reading of that mode (not the stand-in's override), runs
+        its tool with the runner told so. The tests above only read the mode;
+        the install test's ``offline is False`` can never read otherwise, since
+        the install returns early when offline."""
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+
+        class Scanner(FakePlugin):
+            _is_offline_mode = UVToolMixin._is_offline_mode
+
+            def _scanner_offline(self):
+                return True
+
+        plugin = Scanner(command="bandit")
+        runner = MagicMock()
+        runner.uv_availability.return_value = (True, None)
+        runner.run_tool.return_value = SimpleNamespace(
+            stdout="", stderr="", returncode=0
+        )
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=runner,
+        ):
+            plugin._try_uv_tool_execution(
+                command=["bandit", "-r", "."],
+                working_dir=Path("/tmp"),  # nosec B108
+            )
+        assert runner.run_tool.call_count == 1
+        assert runner.run_tool.call_args.kwargs["offline"] is True
+
+    def test_a_scanner_online_by_its_options_runs_online(self, monkeypatch):
+        """The control, through the same route."""
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+
+        class Scanner(FakePlugin):
+            _is_offline_mode = UVToolMixin._is_offline_mode
+
+            def _scanner_offline(self):
+                return False
+
+        plugin = Scanner(command="bandit")
+        runner = MagicMock()
+        runner.uv_availability.return_value = (True, None)
+        runner.run_tool.return_value = SimpleNamespace(
+            stdout="", stderr="", returncode=0
+        )
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=runner,
+        ):
+            plugin._try_uv_tool_execution(
+                command=["bandit", "-r", "."],
+                working_dir=Path("/tmp"),  # nosec B108
+            )
+        assert runner.run_tool.call_args.kwargs["offline"] is False
