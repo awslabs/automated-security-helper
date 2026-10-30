@@ -450,8 +450,11 @@ def test_unsandboxed_yarn_copy_uses_the_operator_s_cache_when_the_output_is_insi
     assert audit["command"] == ["yarn", "audit", "--json"]
     assert "YARN_RC_FILENAME" not in audit["env"]
     assert sorted(audit["files"]) == ["package.json", "yarn.lock"]
-    # The copy is removed when the child's block ends.
-    assert not any(p.is_dir() for p in (cache_home / "ash").glob("ash-yarn-*"))
+    # The copy is removed when the child's block ends: the directories the
+    # tool ran in no longer exist. A glob on the copy's name prefix passed
+    # with nothing matched when the prefix differed, and said nothing.
+    for spawn in _probes(spawns) + _audits(spawns):
+        assert not spawn["cwd"].exists(), spawn["cwd"]
 
 
 def test_the_settings_file_yarn_is_told_to_read_is_never_one_the_package_holds(
