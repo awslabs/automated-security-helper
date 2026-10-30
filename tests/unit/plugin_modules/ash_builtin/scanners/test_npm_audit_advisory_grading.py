@@ -35,7 +35,12 @@ from automated_security_helper.utils.severity_ladder import result_severity
 pytestmark = pytest.mark.unit
 
 
-def _via(name, severity, *, cvss=None, score=None, vector=None, rng="<1.0.0"):
+#: No ``cvss`` key at all on a via entry (the default), as against ``None``,
+#: which writes a null object: the two are different inputs to the reader.
+_ABSENT = object()
+
+
+def _via(name, severity, *, cvss=_ABSENT, score=None, vector=None, rng="<1.0.0"):
     entry = {
         "source": 1,
         "name": name,
@@ -45,7 +50,7 @@ def _via(name, severity, *, cvss=None, score=None, vector=None, rng="<1.0.0"):
         "cwe": [],
         "range": rng,
     }
-    if cvss is not None:
+    if cvss is not _ABSENT:
         entry["cvss"] = cvss
     elif score is not None or vector is not None:
         entry["cvss"] = {"score": score, "vectorString": vector}
@@ -181,11 +186,63 @@ def test_npm_s_zero_score_without_a_vector_is_no_score(scanner):
     assert list(grades.values()) == ["HIGH"], grades
 
 
+def test_a_zero_score_with_a_vector_is_still_no_score(scanner):
+    """The boundary from the other side: any 0 reads as "no score", a vector
+    beside it or not. npm's 0 means the registry gave no CVSS, 0.0 is below
+    every bucket GHAS has, and the normalizer skips it as no score too; so the
+    rule carries no security-severity and the word grades the result."""
+    document = _report(
+        pkg=(
+            "high",
+            [_via("pkg", "high", score=0, vector="CVSS:3.1/AV:N")],
+            ["node_modules/pkg"],
+        )
+    )
+
+    report, grades = _graded(scanner, document)
+
+    rule = report.runs[0].tool.driver.rules[0]
+    assert "security_severity" not in (rule.properties.model_extra or {})
+    assert list(grades.values()) == ["HIGH"], grades
+
+
+def test_a_score_with_a_null_vector_is_a_score(scanner):
+    """The vector is not consulted: a positive score grades the result."""
+    document = _report(
+        pkg=(
+            "high",
+            [_via("pkg", "high", score=7.5, vector=None)],
+            ["node_modules/pkg"],
+        )
+    )
+
+    report, grades = _graded(scanner, document)
+
+    rule = report.runs[0].tool.driver.rules[0]
+    assert rule.properties.model_extra["security_severity"] == 7.5
+    assert list(grades.values()) == ["HIGH"], grades
+
+
+def test_a_via_entry_without_a_cvss_key_is_graded_by_its_word(scanner):
+    """Most advisories from a registry without CVSS carry no cvss key at all:
+    no failure, no score, the word grades the result."""
+    document = _report(
+        pkg=("moderate", [_via("pkg", "moderate")], ["node_modules/pkg"])
+    )
+
+    report, grades = _graded(scanner, document)
+
+    rule = report.runs[0].tool.driver.rules[0]
+    assert "security_severity" not in (rule.properties.model_extra or {})
+    assert list(grades.values()) == ["MEDIUM"], grades
+    assert report.runs[0].results[0].properties.model_extra["cvss"] == {}
+
+
 def test_a_null_cvss_object_does_not_fail_the_conversion(scanner):
     document = _report(
         pkg=("moderate", [_via("pkg", "moderate", cvss=None)], ["node_modules/pkg"])
     )
-    document["vulnerabilities"]["pkg"]["via"][0]["cvss"] = None
+    assert document["vulnerabilities"]["pkg"]["via"][0]["cvss"] is None
 
     report, grades = _graded(scanner, document)
 
