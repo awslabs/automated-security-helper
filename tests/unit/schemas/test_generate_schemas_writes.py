@@ -14,6 +14,7 @@ temporary file beside its path and renamed over it.
 
 from __future__ import annotations
 
+import os
 import stat
 import sys
 
@@ -53,21 +54,30 @@ def test_a_changed_schema_is_written_whole_and_an_unchanged_one_left_alone(tmp_p
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
-def test_a_rewritten_schema_keeps_the_mode_of_the_file_it_replaces(tmp_path):
-    """``mkstemp`` makes its file readable by its owner alone, so a rename of the
-    bare temporary file would leave the committed schema unreadable to others."""
+@pytest.mark.parametrize("mode", [0o644, 0o600, 0o664])
+def test_a_rewritten_schema_keeps_the_mode_of_the_file_it_replaces(tmp_path, mode):
+    """A temporary file made readable by its owner alone would carry that mode
+    over the committed schema when renamed."""
     target = tmp_path / "Model.json"
     target.write_text("committed\n", encoding="utf-8")
-    target.chmod(0o644)
+    target.chmod(mode)
     assert _write_if_changed(target, "changed\n") is True
-    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+    assert stat.S_IMODE(target.stat().st_mode) == mode
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
-def test_a_new_schema_is_readable_by_others(tmp_path):
+@pytest.mark.parametrize(
+    "umask, expected", [(0o022, 0o644), (0o002, 0o664), (0o077, 0o600)]
+)
+def test_a_new_schema_takes_the_mode_the_umask_allows(tmp_path, umask, expected):
+    """As ``write_text`` did: ``0o666`` less the umask, not a fixed mode."""
     target = tmp_path / "Model.json"
-    assert _write_if_changed(target, "new\n") is True
-    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+    previous = os.umask(umask)
+    try:
+        assert _write_if_changed(target, "new\n") is True
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(target.stat().st_mode) == expected
 
 
 def test_an_interrupted_write_leaves_the_existing_schema_intact(tmp_path, monkeypatch):

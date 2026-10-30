@@ -4,7 +4,7 @@
 import contextlib
 import os
 import stat
-import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, List, Literal
 
@@ -67,7 +67,8 @@ class ConfigFileJsonSchema(GenerateJsonSchema):
     schema. A free string field admits it already; a string field with a
     constraint (a pattern, a length) does not, because the reference is not the
     value the constraint describes, so it admits the reference beside the
-    constrained string.
+    constrained string. A ``Decimal`` field is described as a number or a numeric
+    string, so it takes the reference beside that.
 
     The workspace policy file resolves no reference (``ash_workspace_config``),
     so its schema is pydantic's own.
@@ -93,6 +94,9 @@ class ConfigFileJsonSchema(GenerateJsonSchema):
 
     def float_schema(self, schema: Any) -> Any:
         return _with_env_reference(super().float_schema(schema))
+
+    def decimal_schema(self, schema: Any) -> Any:
+        return _with_env_reference(super().decimal_schema(schema))
 
 
 #: The package whose models are the stored configuration, with its subpackages.
@@ -197,7 +201,41 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
     field's own schema (``ser_schema``); every other serializer is described as
     pydantic describes it, so a reshaping serializer added later is never
     described by a schema its output does not match.
+
+    Serialization mode also marks every computed field ``required`` and leaves
+    out every field a dump excludes (``Field(exclude=True)``). A results file
+    from a version that did not compute the field yet (a workspace block without
+    ``skipped_projects``) is still a file this version loads, and one from a
+    version that wrote an excluded field still carries it, under models that
+    refuse unknown keys. So a computed field is described and never required
+    (``model_fields_schema``), and an excluded field is described and never
+    required (``field_is_present``, ``field_is_required``).
     """
+
+    def field_is_present(self, field: Any) -> bool:
+        return True
+
+    def field_is_required(self, field: Any, total: bool) -> bool:
+        if field.get("serialization_exclude"):
+            return False
+        return super().field_is_required(field, total)
+
+    def model_fields_schema(self, schema: Any) -> Any:
+        json_schema = super().model_fields_schema(schema)
+        computed = {
+            field.get("alias", field["property_name"])
+            if self.by_alias
+            else field["property_name"]
+            for field in schema.get("computed_fields", [])
+        }
+        required = [
+            name for name in json_schema.get("required", []) if name not in computed
+        ]
+        if required:
+            json_schema["required"] = required
+        else:
+            json_schema.pop("required", None)
+        return json_schema
 
     def ser_schema(self, schema: Any) -> Any:
         if (
@@ -279,21 +317,23 @@ def _write_if_changed(path: Path, content: str) -> bool:
     content is left alone, so pre-commit does not report an unchanged schema as
     modified.
 
-    ``mkstemp`` creates its file readable by its owner alone, so the temporary
-    file takes the mode of the schema it replaces (``0o644`` for a new one);
-    without that, the rename would leave the schema unreadable to other users of
-    an installed package.
+    The mode of the written file is what ``write_text`` gave it. A schema that
+    exists keeps its own mode: the temporary file takes it before the rename.
+    A new schema gets ``0o666`` less the process's umask, because the temporary
+    file is created with ``os.open`` and that mode. (``tempfile.mkstemp`` would
+    make it readable by its owner alone, and the rename would carry that over a
+    schema other users of an installed package read.)
     """
     if path.exists() and path.read_text(encoding="utf-8") == content:
         return False
-    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
-    handle, temporary = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
+    existing_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(content)
-        os.chmod(temporary, mode)
+        if existing_mode is not None:
+            os.chmod(temporary, existing_mode)
         os.replace(temporary, path)
     except BaseException:
         with contextlib.suppress(OSError):

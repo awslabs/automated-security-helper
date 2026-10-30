@@ -16,10 +16,16 @@ the workspace policy file, which resolves no reference, keeps pydantic's schema.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import jsonschema
 import pytest
+from pydantic import BaseModel, Field
 
-from automated_security_helper.schemas.generate_schemas import generate_schemas
+from automated_security_helper.schemas.generate_schemas import (
+    ConfigFileJsonSchema,
+    generate_schemas,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -78,6 +84,47 @@ def test_control_the_workspace_policy_schema_keeps_its_choices_alone(schemas):
     assert validator.is_valid({"workspace": {"max_severity_threshold": "HIGH"}})
     assert not validator.is_valid(
         {"workspace": {"max_severity_threshold": "${ASH_MAX_SEVERITY}"}}
+    )
+
+
+class _Constrained(BaseModel):
+    """One field of each string-like kind the config schema has to treat."""
+
+    free: str = "x"
+    patterned: str = Field("abc", pattern=r"^[a-z]+$")
+    sized: str = Field("abc", min_length=2)
+    amount: Decimal = Decimal("1.5")
+
+
+@pytest.fixture(scope="module")
+def constrained_validator() -> jsonschema.Validator:
+    schema = _Constrained.model_json_schema(schema_generator=ConfigFileJsonSchema)
+    return jsonschema.Draft202012Validator(schema)
+
+
+@pytest.mark.parametrize("field", ["free", "patterned", "sized", "amount"])
+def test_a_reference_in_a_constrained_or_decimal_field_is_valid(
+    constrained_validator, field
+):
+    """The reference is not the value a pattern, a length or a number describes,
+    but the loader resolves it before the field is validated."""
+    assert constrained_validator.is_valid({field: "${ASH_VALUE:fallback}"})
+
+
+@pytest.mark.parametrize(
+    "document",
+    [{"patterned": "ABC1"}, {"sized": "x"}, {"amount": "not a number"}],
+    ids=["patterned", "sized", "amount"],
+)
+def test_control_a_constrained_value_that_is_not_a_reference_stays_invalid(
+    constrained_validator, document
+):
+    assert not constrained_validator.is_valid(document)
+
+
+def test_control_a_constrained_value_that_fits_stays_valid(constrained_validator):
+    assert constrained_validator.is_valid(
+        {"patterned": "abc", "sized": "ab", "amount": "2.5"}
     )
 
 
