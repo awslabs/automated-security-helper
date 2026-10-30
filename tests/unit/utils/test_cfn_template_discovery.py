@@ -74,6 +74,38 @@ def test_discovery_classifies_the_tree(context):
     assert [display_path(p, source) for p, _ in found.unmodelable] == ["custom.yaml"]
 
 
+@pytest.mark.unit
+def test_a_candidate_that_is_not_utf8_is_judged_from_its_text(context):
+    """At the previous tip every candidate whose UTF-8 read failed was returned in
+    ``unreadable`` and counted as a failed target by cfn-lint and cfn-guard, so one
+    UTF-16 appsettings.json or Latin-1 locale file in a repository failed every
+    CloudFormation scanner with no structure read at all. Now the text, decoded as
+    well as it can be, decides: a template ASH could not decode stays a failed
+    target, a file that is not CloudFormation is skipped and named."""
+    source = Path(context.source_dir)
+    (source / "latin-notes.yaml").write_bytes(b"greeting: caf\xe9\n")
+    (source / "latin-stack.yaml").write_bytes(b"Resources:\n  caf\xe9: {}\n")
+    (source / "utf16.json").write_bytes(
+        '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16")
+    )
+
+    found = discover_templates(context, "source")
+
+    assert [shown for shown, _ in found.skipped] == ["latin-notes.yaml"]
+    assert "not UTF-8" in found.skipped[0][1], found.skipped
+    assert [shown for shown, _ in found.unreadable] == [
+        "latin-stack.yaml",
+        "utf16.json",
+    ]
+    assert all("UnicodeDecodeError" in reason for _, reason in found.unreadable)
+    assert [display_path(p, source) for p in found.templates] == [
+        "intrinsics.yaml",
+        "nested/stack.json",
+        "short.yml",
+        "stack.yaml",
+    ]
+
+
 @pytest.mark.integration
 def test_cfn_nag_selects_the_same_templates(context):
     """The agreement test the discovery module's docstring promises."""

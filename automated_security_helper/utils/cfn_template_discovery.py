@@ -30,10 +30,17 @@ The outcomes per file
   nested deeper than ASH reads: returned in ``unmodelable`` with the reason, so the
   caller counts a failed target rather than letting the file vanish. That is the
   distinction ``cfn_template_model`` documents;
-* a candidate ASH could not open or decode (``OSError``, ``UnicodeDecodeError``):
-  returned in ``unreadable`` with the reason. Not known to be CloudFormation and not
-  known not to be, so the callers count it as a target that was not evaluated, the
-  same answer the tool-absent check gives (only MISSING cannot hide a template);
+* a candidate ASH could not open (``OSError``): returned in ``unreadable`` with the
+  reason. Not known to be CloudFormation and not known not to be, so the callers
+  count it as a target that was not evaluated, the same answer the tool-absent check
+  gives (only MISSING cannot hide a template);
+* a candidate that is not UTF-8 (``UnicodeDecodeError``): decoded as well as it can
+  be and judged from its text (``cfn_template_model.undecodable_candidate_is_a_template``).
+  A template ASH could not decode is returned in ``unreadable``; a file that is not
+  CloudFormation (a UTF-16 ``appsettings.json``, a Latin-1 locale file) is returned
+  in ``skipped`` with the reason, so the callers name it at WARNING and count
+  nothing, as cfn-nag skips it. Before this split one such file failed all three
+  CloudFormation scanners with no structure read at all;
 * a candidate neither parser reads that could still be a damaged template (a lenient
   read finds a Resources mapping, or the text carries a CloudFormation marker):
   returned in ``unparseable`` with the parse error, so the callers name it and count
@@ -62,6 +69,7 @@ from automated_security_helper.utils.cfn_template_model import (
     holds_cloudformation_template,
     is_template_candidate,
     read_template_text,
+    undecodable_candidate_is_a_template,
     unevaluable_template_reason,
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
@@ -85,12 +93,17 @@ class TemplateDiscovery:
     templates: List[Path] = field(default_factory=list)
     unmodelable: List[Tuple[Path, str]] = field(default_factory=list)
     refused: List[Tuple[str, str]] = field(default_factory=list)
-    #: Candidates ASH could not open or decode (an OSError, bytes that are not
-    #: UTF-8), with the reason. Not known to be CloudFormation, so not a target;
-    #: named by the callers, and counted as something to scan by
+    #: Candidates ASH could not open (an OSError), and candidates that are not
+    #: UTF-8 whose text reads as a template, with the reason. Not known not to be
+    #: CloudFormation, so a target that was not evaluated; named by the callers,
+    #: and counted as something to scan by
     #: :func:`cloudformation_templates_nothing_to_scan_reason`, since only MISSING
     #: cannot hide a template.
     unreadable: List[Tuple[str, str]] = field(default_factory=list)
+    #: Candidates that are not UTF-8 and whose text, decoded as well as it can be,
+    #: is not CloudFormation, with the reason: skipped and named at WARNING by the
+    #: callers, counted as nothing.
+    skipped: List[Tuple[str, str]] = field(default_factory=list)
     #: Candidates neither parser could read that could be a damaged template
     #: (``cfn_template_model.holds_cloudformation_template``: a lenient read
     #: finds a Resources mapping, or the text carries a CloudFormation marker),
@@ -180,10 +193,33 @@ def discover_templates(
                 )
             )
             continue
-        except (OSError, UnicodeDecodeError) as exc:
+        except UnicodeDecodeError as exc:
+            # Not UTF-8. Judged from its text, decoded as well as it can be: a
+            # template ASH cannot decode is a target that was not evaluated (named
+            # rather than dropped at TRACE, or it would vanish from cfn-lint's and
+            # cfn-guard's coverage silently); a file that is not CloudFormation is
+            # skipped and named, as cfn-nag skips it, not failed with no structure
+            # read at all.
+            shown = display_path(path, context.source_dir)
+            try:
+                is_template = undecodable_candidate_is_a_template(path, scan_root)
+            except OSError:
+                is_template = True
+            if is_template:
+                result.unreadable.append(
+                    (shown, f"the file could not be read: {type(exc).__name__}")
+                )
+            else:
+                reason = (
+                    "not UTF-8, and its text is not a CloudFormation template: "
+                    f"{type(exc).__name__}"
+                )
+                result.skipped.append((shown, reason))
+            continue
+        except OSError as exc:
             # Not read, so not known to be CloudFormation. Named rather than
-            # dropped at TRACE: a template ASH cannot open or decode would
-            # otherwise vanish from cfn-lint's and cfn-guard's coverage silently.
+            # dropped at TRACE: a template ASH cannot open would otherwise vanish
+            # from cfn-lint's and cfn-guard's coverage silently.
             result.unreadable.append(
                 (
                     display_path(path, context.source_dir),

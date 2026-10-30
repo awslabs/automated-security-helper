@@ -1397,12 +1397,21 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
+            for shown, reason in discovery.skipped:
+                # Not UTF-8 and not CloudFormation by its text: skipped and named,
+                # as cfn-nag skips it, counted as nothing.
+                self._plugin_log(
+                    f"Skipped {shown}: {reason}",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
             for shown, reason in discovery.unreadable:
-                # A candidate ASH could not open or decode: not known to be
-                # CloudFormation, and not known not to be. The tool-absent check
-                # counts it as a template (only MISSING cannot hide one), so with
-                # the tool present it is a target that was not evaluated, not a
-                # skip: the two runs give the same answer for the same file.
+                # A candidate ASH could not open, or a template it could not decode:
+                # not known not to be CloudFormation. The tool-absent check counts
+                # it as a template (only MISSING cannot hide one), so with the tool
+                # present it is a target that was not evaluated, not a skip: the
+                # two runs give the same answer for the same file.
                 self.targets_attempted += 1
                 self.targets_failed += 1
                 self.record_unevaluated_target(shown)

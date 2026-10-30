@@ -288,6 +288,27 @@ def test_a_template_that_cannot_be_decoded_is_a_failed_unevaluated_target(
     assert "UnicodeDecodeError" in named[0]
 
 
+def test_a_non_utf8_file_with_no_template_in_it_is_skipped_and_named(
+    scanner, deps_available, subprocess_double
+):
+    """At the previous tip every file whose UTF-8 read failed was a failed target
+    with no structure read, so one Latin-1 locale file in a repository reported
+    ERROR from every CloudFormation scanner. Its text, decoded as well as it can
+    be, is not a template, so it is skipped and named, counted as nothing."""
+    (scanner.context.work_dir / "latin.yaml").write_bytes(b"greeting: caf\xe9\n")
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 0
+    skipped = [e for e in scanner.errors if "Skipped" in e and "latin.yaml" in e]
+    assert len(skipped) == 1 and "not UTF-8" in skipped[0], scanner.errors
+    assert not any("latin.yaml" in t for t in scanner.unevaluated_targets)
+
+
 def test_errors_are_reset_for_each_scan_call(scanner, deps_available):
     """A line recorded by an earlier scan() call is not carried into the next.
 

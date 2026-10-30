@@ -1124,6 +1124,30 @@ class TestScan:
         assert scanner.targets_failed == 1
         assert any("could not be read" in e for e in scanner.errors), scanner.errors
 
+    def test_a_non_utf8_candidate_with_no_template_in_it_is_skipped(
+        self, repo, rules_root
+    ):
+        """At the previous tip this file was a failed target with no structure read,
+        so one Latin-1 locale file in a repository reported ERROR from every
+        CloudFormation scanner. Its text, decoded as well as it can be, is not a
+        template, so it is skipped and named, as cfn-nag skips it."""
+        _fake_bundle(rules_root)
+        (repo / "templates" / "latin.yaml").write_bytes(b"greeting: caf\xe9\n")
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 19,
+                "stdout": CAPTURED_INSECURE.read_text(),
+                "stderr": "",
+            }
+
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert scanner.targets_attempted == 2
+        assert scanner.targets_failed == 0
+        skipped = [e for e in scanner.errors if "Skipped" in e and "latin.yaml" in e]
+        assert len(skipped) == 1 and "not UTF-8" in skipped[0], scanner.errors
+
     def test_rules_removed_between_validation_and_scan_raise(self, repo, rules_root):
         scanner = _scanner(repo)
         with (

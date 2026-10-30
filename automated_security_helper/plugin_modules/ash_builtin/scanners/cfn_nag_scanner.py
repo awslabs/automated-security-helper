@@ -44,6 +44,7 @@ from automated_security_helper.utils.cfn_template_model import (
     get_model_from_template_text,
     holds_cloudformation_template,
     read_template_text,
+    undecodable_candidate_is_a_template,
     unevaluable_template_reason,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -889,6 +890,30 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     # beside good ones graded the cfn_nag scan PASSED while the
                     # other two scanners reported ERROR. ERROR puts the line in
                     # self.errors too, so it is not appended.
+                    #
+                    # A file that is not UTF-8 is judged from its text first,
+                    # decoded as well as it can be, as discover_templates and the
+                    # tool-absent check judge it: one that is not CloudFormation
+                    # (a UTF-16 appsettings.json, a Latin-1 locale file) is
+                    # skipped and named, not failed with no structure read, so
+                    # one such file no longer fails every CloudFormation scanner.
+                    if isinstance(e, UnicodeDecodeError):
+                        try:
+                            is_template = undecodable_candidate_is_a_template(
+                                cfn_file, scan_root
+                            )
+                        except OSError:
+                            is_template = True
+                        if not is_template:
+                            self._plugin_log(
+                                f"Skipped {cfn_file}: not UTF-8, and its text is "
+                                "not a CloudFormation template: "
+                                f"{type(e).__name__}",
+                                target_type=target_type,
+                                level=logging.WARNING,
+                                append_to_stream="stderr",
+                            )
+                            continue
                     self.targets_attempted += 1
                     self.targets_failed += 1
                     self.record_unevaluated_target(cfn_file)

@@ -508,3 +508,23 @@ def test_an_unreadable_candidate_is_a_target_that_was_not_evaluated(ash_temp_pat
     assert scanner.targets_attempted == 1
     assert scanner.targets_failed == 1
     assert any("could not be read" in e for e in scanner.errors), scanner.errors
+
+
+def test_a_non_utf8_candidate_with_no_template_in_it_is_skipped(ash_temp_path):
+    """At the previous tip this file was a failed target with no structure read, so
+    one Latin-1 locale file in a repository reported ERROR from every CloudFormation
+    scanner. Its text, decoded as well as it can be, is not a template, so it is
+    skipped and named, as cfn-nag skips it, and the run has nothing to scan."""
+    repo = ash_temp_path / "repo"
+    repo.mkdir()
+    (repo / "latin.yaml").write_bytes(b"greeting: caf\xe9\n")
+    fake = RegionFaultCfnLint("no-such-template")
+    scanner = _scanner(repo)
+
+    _run(scanner, fake, repo)
+
+    assert fake.calls == []
+    assert scanner.targets_attempted == 0
+    assert scanner.targets_failed == 0
+    skipped = [e for e in scanner.errors if "Skipped" in e and "latin.yaml" in e]
+    assert len(skipped) == 1 and "not UTF-8" in skipped[0], scanner.errors

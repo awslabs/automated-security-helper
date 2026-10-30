@@ -1,4 +1,5 @@
 from collections.abc import Iterable, Mapping
+import codecs
 import io
 import json
 import os
@@ -525,6 +526,55 @@ def read_template_text(template_path: Path | str, scan_root: Path | str) -> str:
         return f.read()
 
 
+#: Byte-order marks, longest first (UTF-32 LE's begins with UTF-16 LE's), with the
+#: encoding each announces.
+_BYTE_ORDER_MARKS = (
+    (codecs.BOM_UTF32_LE, "utf-32-le"),
+    (codecs.BOM_UTF32_BE, "utf-32-be"),
+    (codecs.BOM_UTF8, "utf-8"),
+    (codecs.BOM_UTF16_LE, "utf-16-le"),
+    (codecs.BOM_UTF16_BE, "utf-16-be"),
+)
+
+
+def _decode_leniently(data: bytes) -> str:
+    """``data`` as text: by its byte-order mark when it has one, else as UTF-8 with
+    every undecodable byte replaced."""
+    for mark, encoding in _BYTE_ORDER_MARKS:
+        if data.startswith(mark):
+            return data[len(mark) :].decode(encoding, errors="replace")
+    return data.decode("utf-8", errors="replace")
+
+
+def undecodable_candidate_is_a_template(
+    template_path: Path | str, scan_root: Path | str
+) -> bool:
+    """For a candidate whose UTF-8 read raised ``UnicodeDecodeError``: is it a template?
+
+    The scanners read a candidate as UTF-8 (:func:`read_template_text`). A ``.json``
+    or ``.yaml`` file that is not (a UTF-16 ``appsettings.json`` from Windows
+    PowerShell's ``Out-File``, a Latin-1 locale file) raised at the read, and the
+    three CloudFormation scanners counted it as a failed, unevaluated target with no
+    structure read at all, so one such file in a repository failed every one of
+    them. That broke the module's own rule (:func:`_could_be_a_template`): a marker
+    never makes a file a failed target; that takes a structure read.
+
+    The file is read again, under the scanned-tree rule, and decoded as well as it
+    can be (:func:`_decode_leniently`); :func:`_could_be_a_template` then answers
+    from the text. True is a template ASH could not decode, which the scanners count
+    as a failed target and the tool-absent check as a template. False is a file that
+    is not CloudFormation, skipped and named at WARNING, as a Helm chart or a
+    tsconfig.json is. The scanners and the tool-absent check all ask here, so the
+    tool-present and tool-absent answers agree.
+
+    Raises:
+        OSError: the second read failed; the caller counts the file as unreadable.
+    """
+    with open_in_scanned_tree(template_path, scan_root) as f:
+        data = f.read()
+    return _could_be_a_template(_decode_leniently(data))
+
+
 def get_model_from_template_text(
     text: str, template_path: Path | str
 ) -> CloudFormationTemplateModel | None:
@@ -869,9 +919,12 @@ def holds_cloudformation_template(
     mkdocs.yml, Helm templates and tsconfig.json are such files.
 
     A template: a document the model cannot represent (the scanners count it as a
-    failed target), a candidate that could not be read, and a rejected file that
-    parses leniently to a mapping with ``Resources`` or whose text carries a
-    CloudFormation marker, which is what a damaged template looks like.
+    failed target), a candidate that could not be opened, a candidate that is not
+    UTF-8 and whose text, decoded as well as it can be, is a template by
+    :func:`undecodable_candidate_is_a_template` (one that is not is skipped by the
+    scanners too), and a rejected file that parses leniently to a mapping with
+    ``Resources`` or whose text carries a CloudFormation marker, which is what a
+    damaged template looks like.
     """
     from automated_security_helper.utils.scanned_tree import TreeInputRefused
 
@@ -879,6 +932,16 @@ def holds_cloudformation_template(
         try:
             text = read_template_text(candidate, scan_root)
         except TreeInputRefused:
+            continue
+        except UnicodeDecodeError:
+            # Not UTF-8: judged from its text, decoded as well as it can be, as
+            # the scanners judge it, so the two answers agree. A second read that
+            # fails keeps the doubt, and the doubt counts as a template.
+            try:
+                if undecodable_candidate_is_a_template(candidate, scan_root):
+                    return True
+            except Exception:
+                return True
             continue
         except Exception:
             return True

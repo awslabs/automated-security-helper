@@ -237,6 +237,29 @@ def test_a_bom_json_file_with_tabs_counts_in_the_lenient_read():
     assert _could_be_a_template(text) is True
 
 
+def test_a_candidate_that_is_not_utf8_counts_only_when_its_text_is_a_template(
+    tmp_path,
+):
+    """At the previous tip any candidate whose UTF-8 read failed counted as a
+    template (MISSING with the tool absent), matching the scanners, which failed it
+    with the tool present. Both now judge the text, decoded as well as it can be:
+    a Latin-1 file with no CloudFormation in it is not a template, a Latin-1 file
+    with a Resources mapping is, and a UTF-16 template (decoded by its byte-order
+    mark) is."""
+    notes = tmp_path / "latin-notes.yaml"
+    notes.write_bytes(b"greeting: caf\xe9\n")
+    stack = tmp_path / "latin-stack.yaml"
+    stack.write_bytes(b"Resources:\n  caf\xe9: {}\n")
+    utf16 = tmp_path / "utf16.json"
+    utf16.write_bytes(
+        '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16")
+    )
+    assert holds_cloudformation_template([notes], tmp_path) is False
+    assert holds_cloudformation_template([stack], tmp_path) is True
+    assert holds_cloudformation_template([utf16], tmp_path) is True
+    assert holds_cloudformation_template([notes, utf16], tmp_path) is True
+
+
 def test_a_failed_target_counts_as_a_template_for_the_tool_absent_check(tmp_path):
     """The scanners count this file as failed; the MISSING/SKIPPED check must too.
 
