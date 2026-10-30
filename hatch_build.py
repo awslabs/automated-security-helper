@@ -255,6 +255,44 @@ def _commit_from_git(git_path: str) -> str | None:
     return None
 
 
+def _earlier_commit_record() -> str | None:
+    """The commit id an earlier build recorded, when this tree is an unpacked sdist.
+
+    A wheel built from an sdist has no git metadata, and the record the sdist
+    build left in assets/ is the commit the sdist was built from. Two things must
+    hold for that record to be this tree's. There is no .git, since in a checkout
+    git failing (a repository-ownership refusal, say) says nothing about which
+    commit the tree is, and the record there is whatever an earlier build, at some
+    other commit, left behind. And there is a PKG-INFO at the top, which hatchling
+    writes at the root of every sdist: a missing .git alone also describes a source
+    tree vendored inside another repository, a copy made with `rsync --exclude
+    .git` and the image build context (.dockerignore drops .git and does not name
+    the record), and each of those can hold the gitignored record of an earlier
+    build at another commit.
+
+    None when the record is not usable: absent, not from an unpacked sdist, or not
+    a commit id. A commit id only: the three placeholders, "HEAD" and a branch name
+    from an older build, and the "ERROR: ..." text a failed staging script wrote
+    all name no commit, and would be installed as a ref.
+    """
+    if os.path.lexists(ASH_REPO_ROOT.joinpath(".git")):
+        _say("This tree is a git checkout, so an earlier commit record is not used")
+        return None
+    if not ASH_INSTALLED_REVISION_PATH.exists():
+        return None
+    if not ASH_REPO_ROOT.joinpath("PKG-INFO").is_file():
+        _say(
+            "This tree is not an unpacked sdist (no PKG-INFO), so its commit record "
+            "is not used"
+        )
+        return None
+    existing_sha = ASH_INSTALLED_REVISION_PATH.read_text().strip()
+    if not _COMMIT_ID.fullmatch(existing_sha):
+        return None
+    _say(f"Using existing commit SHA from previous build: {existing_sha}")
+    return existing_sha
+
+
 class CustomBuildHook(BuildHookInterface):
     """Build hook to stage build assets before packaging."""
 
@@ -414,16 +452,18 @@ class CustomBuildHook(BuildHookInterface):
         can move the worktree or run a program, so it is dropped). So a tree that
         has no .git of its own, built with GIT_DIR (and GIT_WORK_TREE) naming its
         repository from outside, is treated as a tree with no git metadata: it keeps
-        an earlier record or records "unknown-commit". That is accepted: the
+        an earlier record (an unpacked sdist only) or records "unknown-commit".
+        That is accepted: the
         alternative would read whichever repository the caller's environment named,
         which inside a `git commit` hook is the one being committed to, not this
         tree's.
 
-        When git cannot name the commit, or is not installed, a tree with no .git
-        of its own (an unpacked sdist) keeps the commit id an earlier build
-        recorded; a checkout does not, since its earlier record may be of another
-        commit. With no usable record the result is "no-git-available" where git is
-        missing and "unknown-commit" where it is not.
+        When git cannot name the commit, or is not installed, an unpacked sdist (a
+        tree with a PKG-INFO and no .git of its own) keeps the commit id the sdist
+        build recorded; any other tree does not, since its earlier record may be of
+        another commit (see _earlier_commit_record). With no usable record the
+        result is "no-git-available" where git is missing and "unknown-commit"
+        where it is not.
         """
         git_path = shutil.which("git")
         if not git_path:
@@ -436,21 +476,11 @@ class CustomBuildHook(BuildHookInterface):
             if commit:
                 return commit
 
-        # Fallback: the record an sdist build left, for a wheel built from that sdist.
-        # Only a tree with no .git of its own can be that wheel's source: in a
-        # checkout git failing (a repository-ownership refusal, say) says nothing
-        # about which commit the tree is, and the record there is whatever an
-        # earlier build of the checkout, at some other commit, left behind.
-        if os.path.lexists(ASH_REPO_ROOT.joinpath(".git")):
-            _say("This tree is a git checkout, so an earlier commit record is not used")
-        elif ASH_INSTALLED_REVISION_PATH.exists():
-            existing_sha = ASH_INSTALLED_REVISION_PATH.read_text().strip()
-            # A commit id only. The three placeholders, "HEAD" and a branch name
-            # from an older build, and the "ERROR: ..." text a failed staging
-            # script wrote all name no commit, and would be installed as a ref.
-            if _COMMIT_ID.fullmatch(existing_sha):
-                _say(f"Using existing commit SHA from previous build: {existing_sha}")
-                return existing_sha
+        # Fallback: the record an sdist build left, for a wheel built from that
+        # sdist. Reached with git missing as well as with git failing.
+        recorded = _earlier_commit_record()
+        if recorded:
+            return recorded
 
         # Final fallback
         if not git_path:

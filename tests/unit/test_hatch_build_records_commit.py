@@ -222,9 +222,17 @@ def test_a_tree_inside_another_repository_is_not_a_commit_of_it(hatch_build, tmp
 
 @pytest.mark.integration
 def test_without_git_metadata_an_earlier_record_is_kept(hatch_build):
-    """A wheel built from an sdist keeps the commit the sdist recorded."""
+    """A wheel built from an sdist keeps the commit the sdist recorded.
+
+    The tree is an unpacked sdist: no .git, and the PKG-INFO hatchling writes at the
+    root of every sdist (test_hatch_build_revision_fallback.py pins that a record in
+    a tree without it is not reused).
+    """
     sha = "0123456789abcdef0123456789abcdef01234567"
     hatch_build.ASH_INSTALLED_REVISION_PATH.write_text(sha, encoding="utf-8")
+    (hatch_build.ASH_REPO_ROOT / "PKG-INFO").write_text(
+        "Metadata-Version: 2.4\n", encoding="utf-8"
+    )
 
     assert _sha(hatch_build) == sha
 
@@ -369,6 +377,10 @@ def test_a_git_message_the_console_cannot_encode_is_still_printed(
     without trying the earlier record."""
     sha = "0123456789abcdef0123456789abcdef01234567"
     hatch_build.ASH_INSTALLED_REVISION_PATH.write_text(sha, encoding="utf-8")
+    # An unpacked sdist, the only tree whose earlier record is reused.
+    (hatch_build.ASH_REPO_ROOT / "PKG-INFO").write_text(
+        "Metadata-Version: 2.4\n", encoding="utf-8"
+    )
 
     def run(*args, **kwargs):
         raise subprocess.CalledProcessError(
