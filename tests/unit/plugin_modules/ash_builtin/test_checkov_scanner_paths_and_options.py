@@ -31,8 +31,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess  # nosec B404
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -53,13 +54,20 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     _under_a_known_ignore_path,
     rewrite_checkov_paths,
 )
-from automated_security_helper.utils import pre_installed_tool
+from automated_security_helper.utils import pre_installed_tool, uv_tool_runner
 from automated_security_helper.utils.pre_installed_tool import PreInstalledToolVerdict
+from automated_security_helper.utils.uv_tool_runner import (
+    _reset_uv_tool_runner_caches,
+)
 
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.skipif(os.name == "nt", reason="POSIX paths"),
 ]
+
+#: The uv the real-resolver tests find. The probe spawns it with the process
+#: boundary replaced, so nothing is created at this path.
+UV_PATH = os.path.abspath("/opt/uv/bin/uv")
 
 PluginContext.model_rebuild()
 
@@ -515,3 +523,47 @@ class TestResolverOfflineMode:
         ):
             ((_, kwargs),) = calls
             assert kwargs.get("offline") is False
+
+    def _real_resolver_probe(self, tmp_path, **opts):
+        """Through the real resolver with only the process boundary replaced:
+        the probe it spawns, as argv and environment."""
+        scanner = _scanner(tmp_path / "src", tmp_path / "out", **opts)
+        spawn = MagicMock(
+            return_value=subprocess.CompletedProcess([], 0, "checkov 3.2.0\n", "")
+        )
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch.object(uv_tool_runner, "spawn_run", spawn),
+            patch.object(uv_tool_runner, "find_uv_or_none", lambda: UV_PATH),
+            patch.object(uv_tool_runner, "find_executable", lambda name: None),
+            patch.object(
+                CheckovScanner, "resolve_deferred_tool_version", return_value=None
+            ),
+            patch.object(
+                CheckovScanner, "_validate_uv_tool_availability", return_value=False
+            ),
+        ):
+            os.environ.pop("ASH_OFFLINE", None)
+            os.environ.pop("UV_OFFLINE", None)
+            _reset_uv_tool_runner_caches()
+            try:
+                assert scanner.validate_plugin_dependencies() is True
+            finally:
+                _reset_uv_tool_runner_caches()
+        return spawn.call_args.args[0], spawn.call_args.kwargs["env"]
+
+    def test_the_probe_runs_offline_for_a_scanner_offline_by_its_options(
+        self, tmp_path
+    ):
+        """The resolver's own probe carries the mode: ``uv tool run --offline``
+        with ``UV_OFFLINE`` set, while ASH itself is online."""
+        argv, env = self._real_resolver_probe(tmp_path, offline=True)
+        assert argv[:4] == [UV_PATH, "tool", "run", "--offline"]
+        assert argv[-2:] == ["checkov", "--version"]
+        assert env.get("UV_OFFLINE") == "1"
+
+    def test_the_probe_runs_online_for_a_scanner_that_follows_ash(self, tmp_path):
+        argv, env = self._real_resolver_probe(tmp_path, offline=False)
+        assert "--offline" not in argv
+        assert argv[:3] == [UV_PATH, "tool", "run"]
+        assert "UV_OFFLINE" not in env
