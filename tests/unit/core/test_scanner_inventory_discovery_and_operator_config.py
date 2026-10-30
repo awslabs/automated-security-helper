@@ -26,8 +26,11 @@ pytestmark = pytest.mark.unit
 
 
 def test_a_distribution_with_no_readable_name_does_not_fail_discovery(monkeypatch):
-    """Red before the fix: AttributeError on None.startswith."""
-    import importlib.metadata
+    """Red before the fix: AttributeError on None.startswith.
+
+    Patched on the backport, which the discovery reads (the standard library's
+    reader is its fallback only; see the test below)."""
+    import importlib_metadata
 
     def packages_distributions():
         return {
@@ -36,12 +39,32 @@ def test_a_distribution_with_no_readable_name_does_not_fail_discovery(monkeypatc
         }
 
     monkeypatch.setattr(
-        importlib.metadata, "packages_distributions", packages_distributions
+        importlib_metadata, "packages_distributions", packages_distributions
     )
 
     found = _discover_external_scanner_plugin_packages()
 
     assert found == ["automated_security_helper.plugin_modules.ash_demo_plugins"]
+
+
+def test_discovery_reads_the_metadata_backport_not_the_standard_library(monkeypatch):
+    """Red before the fix: the standard library's packages_distributions was
+    read, which on Python 3.10 reads only top_level.txt and so sees no
+    hatchling-built plugin distribution; the backport reads RECORD everywhere."""
+    import importlib.metadata
+
+    import importlib_metadata
+
+    monkeypatch.setattr(
+        importlib_metadata,
+        "packages_distributions",
+        lambda: {"hatched_ash_plugins": ["hatched-ash-plugins"]},
+    )
+    monkeypatch.setattr(importlib.metadata, "packages_distributions", dict)
+
+    found = _discover_external_scanner_plugin_packages()
+
+    assert found == ["automated_security_helper.plugin_modules.hatched_ash_plugins"]
 
 
 class _SwitchedOffConfig:
