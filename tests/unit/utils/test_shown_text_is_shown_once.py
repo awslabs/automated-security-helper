@@ -741,6 +741,23 @@ _CLASS_ARGUMENT_SITES = {
     ): "records each registered scanner's class",
 }
 
+#: Assignments to ``__class__`` in the package other than the maker's, by module,
+#: target and the Name assigned: each adopts an object into a class that cannot
+#: be text, in a function (so not the top-level shape
+#: :func:`_gives_a_class_that_cannot_be_text` admits) of a module whose own
+#: ``setattr`` calls on log records keep that proof from being read. The key holds
+#: the Name's text, so a value that is no longer that Name is refused again.
+_CLASS_ASSIGNMENT_SITES = {
+    (
+        "automated_security_helper/utils/log.py",
+        "logger.__class__",
+        "ASHLogger",
+    ): (
+        'adopts an "ash" logger made before utils/log.py set the logger class; '
+        "ASHLogger subclasses logging.Logger, not str"
+    ),
+}
+
 #: The calls in the package given an exception's info, ``(type(e), e, ...)``, by
 #: module, callee and argument: the one form of a taken class with its own value
 #: allowed, and only here, since a function of the module's own given both could
@@ -777,6 +794,28 @@ def _listed_site_problems(
     call pass under the first one's reason."""
     counts = Counter(hits)
     return [f"{row}: {counts[row]} hits" for row in sorted(rows) if counts[row] != 1]
+
+
+def _class_assignment_site(node: ast.AST, path: str) -> tuple[str, str, str] | None:
+    """The :data:`_CLASS_ASSIGNMENT_SITES` key of *node*: ``<target>.__class__ =
+    <Name>``, one target, the ``__class__`` its only one; None for any other
+    shape, which the listing never admits."""
+    if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+        return None
+    (target,) = node.targets
+    if not (isinstance(target, ast.Attribute) and target.attr == "__class__"):
+        return None
+    if not isinstance(node.value, ast.Name):
+        return None
+    if (
+        sum(
+            isinstance(inner, ast.Attribute) and inner.attr == "__class__"
+            for inner in ast.walk(target)
+        )
+        != 1
+    ):
+        return None
+    return (path, ast.unparse(target), node.value.id)
 
 
 def _is_pickler(module: str) -> bool:
@@ -823,7 +862,8 @@ def _forged(
     ShownText in an isinstance or issubclass check, in an annotation and in
     ``__all__``; the maker's definition, and a call of it from the escapers in
     utils/terminal_text.py; a top-level assignment to __class__ of a class that
-    cannot be text (:func:`_gives_a_class_that_cannot_be_text`). Refused: calling
+    cannot be text (:func:`_gives_a_class_that_cannot_be_text`), or one listed in
+    :data:`_CLASS_ASSIGNMENT_SITES` by module, target and Name. Refused: calling
     the class, naming it anywhere else (an alias can be called, or handed to a
     __new__), importing it under another name, looking it up by its name as a
     string, a cast to it, any __new__ but the maker's (called, handed on uncalled,
@@ -1291,6 +1331,11 @@ def _forged(
             and _gives_a_class_that_cannot_be_text(node, tree, bound)
         ):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            site = _class_assignment_site(node, path)
+            if site in _CLASS_ASSIGNMENT_SITES:
+                if sites is not None:
+                    sites.append(site)
+                targets = []
             for target in targets:
                 for inner in ast.walk(target):
                     if isinstance(inner, ast.Attribute) and inner.attr == "__class__":
@@ -1611,6 +1656,28 @@ def test_a_listed_site_is_allowed_once():
     assert _listed_site_problems(hits[:1], {(path, callee, argument)}) == []
 
 
+def test_a_listed_class_assignment_is_allowed_once_and_only_as_listed():
+    """A __class__ assignment in a function body is refused unless its module,
+    target and Name are listed; the listed one is found exactly once, and the
+    same text in another module, or with another value, is refused."""
+    path, target, name = next(iter(_CLASS_ASSIGNMENT_SITES))
+    body = f"def adopt(logger):\n    {target} = {name}\n"
+    hits: list = []
+
+    assert _forged(body, path, hits) == []
+    assert _listed_site_problems(hits, {(path, target, name)}) == []
+    assert _forged(body + body, path, hits := []) == []
+    assert _listed_site_problems(hits, {(path, target, name)}) == [
+        f"{(path, target, name)}: 2 hits"
+    ]
+    assert "automated_security_helper/x.py:2: __class__ assigned" in _forged(
+        body, "automated_security_helper/x.py"
+    )
+    assert f"{path}:2: __class__ assigned" in _forged(
+        f"def adopt(logger):\n    {target} = type(logger)\n", path
+    )
+
+
 def test_the_guard_allows_a_check_an_annotation_and_the_escapers():
     source = (
         "from x import ShownText, shown_not_obeyed\n"
@@ -1639,7 +1706,11 @@ def test_only_the_escapers_make_shown_text_in_the_package():
 
     assert found == []
     # Each listed site is there, once.
-    listed = set(_CLASS_ARGUMENT_SITES) | set(_EXCEPTION_INFO_SITES)
+    listed = (
+        set(_CLASS_ARGUMENT_SITES)
+        | set(_EXCEPTION_INFO_SITES)
+        | set(_CLASS_ASSIGNMENT_SITES)
+    )
     assert _listed_site_problems(sites, listed) == []
     # And the escapers do make it: the maker is there, called from both.
     source = (root / "utils" / "terminal_text.py").read_text(encoding="utf-8")
