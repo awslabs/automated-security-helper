@@ -248,6 +248,39 @@ def test_a_host_without_nix_keeps_the_previous_runs_output(tmp_path, monkeypatch
     assert (out / "ash_aggregated_results.json").exists()
 
 
+@pytest.mark.parametrize(
+    "given, present, absent",
+    [
+        pytest.param(
+            {"shard_index": 1}, "--shard-index", "--shard-count", id="index-alone"
+        ),
+        pytest.param(
+            {"shard_count": 4}, "--shard-count", "--shard-index", id="count-alone"
+        ),
+    ],
+)
+def test_half_a_shard_pair_reaches_the_inner_scan_to_be_refused_there(
+    launched, tmp_path, given, present, absent
+):
+    """ScanPhase is the one place that refuses an unusable pair, and it can
+    refuse only what reaches it. Forwarding the pair only when both were set
+    turned a caller's half pair into an unsharded whole scan."""
+    _run(tmp_path, **given)
+
+    argv = launched["argv"]
+    assert present in argv
+    assert absent not in argv
+
+
+def test_a_whole_shard_pair_is_forwarded_as_before(launched, tmp_path):
+    """Control."""
+    _run(tmp_path, shard_index=1, shard_count=4)
+
+    argv = launched["argv"]
+    assert _after_flag(argv, "--shard-index") == ["1"]
+    assert _after_flag(argv, "--shard-count") == ["4"]
+
+
 def test_a_stand_in_runner_is_asked_nothing_about_nix(launched, tmp_path, monkeypatch):
     """The refusals travel with the runner: a recorder in run_ash_nix's place
     starts no shell, so a host without `nix` is no reason to refuse before it.

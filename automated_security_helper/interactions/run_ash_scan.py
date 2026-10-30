@@ -5529,15 +5529,15 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
         # file, which is the file this process's option names: the shell shares
         # this filesystem, so the inner scan resolves the same file.
         argv.append("--use-existing")
-    if opts.shard_index is not None and opts.shard_count is not None:
-        argv.extend(
-            [
-                "--shard-index",
-                str(opts.shard_index),
-                "--shard-count",
-                str(opts.shard_count),
-            ]
-        )
+    # Each value on its own: ScanPhase is the one place that refuses an unusable
+    # pair (see the ScanOptions comment on shard_index), and it can refuse only
+    # what reaches it. Forwarding the pair only when both were set turned a
+    # caller's half pair into an unsharded whole scan that came back as a
+    # normal result.
+    if opts.shard_index is not None:
+        argv.extend(["--shard-index", str(opts.shard_index)])
+    if opts.shard_count is not None:
+        argv.extend(["--shard-count", str(opts.shard_count)])
     return argv
 
 
