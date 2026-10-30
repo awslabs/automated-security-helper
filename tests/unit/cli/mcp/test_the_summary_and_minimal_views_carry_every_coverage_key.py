@@ -192,3 +192,8 @@ def test_the_coverage_keys_are_defined_once_in_the_filters() -> None:
     )
     assert not hasattr(mcp_server, "_with_coverage")
     assert "could_not_stop" in result_filters._COVERAGE_KEYS
+    # This module's own fixture is a second list of the keys, which is the shape
+    # the docstring blames for drift: an eighth key added to the filters would
+    # leave the view tests above passing without checking it. Pinned equal, so
+    # the fixture is corrected the day the filters grow.
+    assert set(_COVERAGE_OF_AN_INCOMPLETE_SCAN) == set(result_filters._COVERAGE_KEYS)

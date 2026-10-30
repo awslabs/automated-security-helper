@@ -99,6 +99,7 @@ def test_a_finding_with_both_lines_keeps_them(tmp_path) -> None:
 
     result = mcp_suggest_suppression(finding.id, results_path=str(results))
 
+    assert result["success"] is True, result
     assert result["json"]["line_start"] == 10
     assert result["json"]["line_end"] == 15
 

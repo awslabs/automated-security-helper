@@ -140,8 +140,10 @@ def test_the_producers_counts_and_scanners_are_kept(tmp_path, monkeypatch) -> No
 def test_a_scanner_directory_linked_elsewhere_is_not_read(tmp_path, monkeypatch):
     result = _call(tmp_path, monkeypatch)
 
+    # The counts are the producer's here, so a ``critical`` of 0 could not fail
+    # on a walk that read the link; the test below, with no producer counts,
+    # owns that check.
     assert "linked" not in result["scanners"], "a linked directory was read"
-    assert result["severity_counts"]["critical"] == 0
 
 
 @pytest.mark.skipif(
@@ -154,8 +156,8 @@ def test_the_files_counts_are_summed_only_when_the_producer_gives_none(
     walks: bandit's ``high`` lands on its own bucket, its ``off-ladder`` key goes
     to the catch-all bucket (a finding under another key is a finding too, never
     nowhere), and the linked directory's ``critical`` is never read. The two
-    tests above run with a producer that gives counts, so their ``critical ==
-    0`` could not fail on a walk that read the link; this one can."""
+    tests above run with a producer that gives counts, so a ``critical == 0``
+    there could not fail on a walk that read the link; this one can."""
     result = _call(tmp_path, monkeypatch, producer=_producer_without_counts)
 
     counts = result["severity_counts"]

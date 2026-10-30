@@ -140,18 +140,29 @@ def test_registering_a_scan_still_waits_for_the_lock(
     sibling held the lock for a second. Measured as the blocking guard still
     waiting past the sweep's bound, then returning once the holder releases it."""
     done = threading.Event()
+    outcome: Dict[str, Any] = {}
 
     def take_the_guard_the_way_a_scan_does() -> None:
-        with sessions._scan_presence_guard(root):
-            pass
+        # Recorded, as _sweep_in_the_background records: a guard that raised
+        # (a timeout, a signature change) would otherwise pass the first wait
+        # below and read as "did not take the lock once it was free".
+        try:
+            with sessions._scan_presence_guard(root):
+                pass
+        except BaseException as error:  # reported by the test
+            outcome["error"] = error
         done.set()
 
     waiter = threading.Thread(target=take_the_guard_the_way_a_scan_does, daemon=True)
     waiter.start()
     assert not done.wait(sessions._SWEEP_LOCK_WAIT_SECONDS + 0.5), (
-        "a scan's registration gave the lock up instead of waiting for it"
+        "a scan's registration gave the lock up instead of waiting for it; "
+        f"the guard raised {outcome.get('error')!r}"
+        if "error" in outcome
+        else "a scan's registration gave the lock up instead of waiting for it"
     )
     another_servers_lock.close()
     assert done.wait(_SLACK_SECONDS * 2), (
         "a scan's registration did not take the lock once it was free"
     )
+    assert "error" not in outcome, outcome
