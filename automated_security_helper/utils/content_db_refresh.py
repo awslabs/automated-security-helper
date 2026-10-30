@@ -453,7 +453,14 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     while not probe.exists() and probe.parent != probe:
         probe = probe.parent
     lock = cache / f".ash-{tool}-update.lock"
-    if os.access(probe, os.W_OK) and (not lock.exists() or os.access(lock, os.W_OK)):
+    # The ancestor has to be a directory the cache can be created under:
+    # ``exclusive_lock`` creates the lock's missing parents, which fails under a
+    # regular file at the cache's path, so that case takes the temporary lock.
+    if (
+        probe.is_dir()
+        and os.access(probe, os.W_OK)
+        and (not lock.exists() or os.access(lock, os.W_OK))
+    ):
         return lock
     digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
     account = str(os.getuid()) if hasattr(os, "getuid") else getpass.getuser()

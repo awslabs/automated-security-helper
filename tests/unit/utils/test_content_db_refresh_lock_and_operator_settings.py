@@ -105,6 +105,27 @@ def test_a_config_file_outside_the_scanned_tree_reaches_the_update(
     assert argv[argv.index(flag) + 1] == operator.as_posix()
 
 
+def test_the_real_lock_is_taken_under_a_cache_whose_parents_do_not_exist(
+    tmp_path, captured
+):
+    """``exclusive_lock`` creates the lock's missing parents, so a first refresh of a
+    cache three levels deep runs with the lock inside the cache it created."""
+    cache = tmp_path / "a" / "b" / "c"
+    _prepare("grype", cache, tmp_path)
+    assert [what for _argv, _env, what in captured] == ["database"]
+    assert (cache / ".ash-grype-update.lock").is_file()
+
+
+def test_a_regular_file_at_the_caches_path_sends_the_lock_to_the_temp_dir(tmp_path):
+    """The nearest existing ancestor has to be a directory: a file there passed the
+    writability check and the lock's parent could not be created under it."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+    lock = refresh.update_lock_path("grype", blocker / "db")
+    assert lock.parent == Path(tempfile.gettempdir())
+    assert "ash-grype-update-" in lock.name
+
+
 def test_the_lock_file_is_the_same_before_and_after_the_cache_exists(tmp_path):
     cache = tmp_path / "cache-home" / "grype" / "db"
     before = refresh.update_lock_path("grype", cache)
