@@ -7,8 +7,11 @@ Properties of ``utils/content_db_refresh.py`` that nothing else pins:
 
 - ``default_cache_dir`` expands a leading ``~`` in ``XDG_CACHE_HOME`` for grype
   as adrg/xdg does, reads trivy's home from the environment's ``HOME`` as Go's
-  os.UserCacheDir does (falling to the temporary directory when it is unset),
-  and names that temporary directory as Go's os.TempDir does on each platform;
+  os.UserCacheDir does, takes this process's home when the scan's environment
+  names none (every sandbox backend hands the scanner the operator's home, so a
+  mapping built from only the variables a scan changes still means that home),
+  and names Go's temporary-directory fallback as Go's os.TempDir does on each
+  platform;
 - a dotted ``db.skip-update`` key beats the nested spelling, as viper reads it;
 - the refresh lock moves to a per-account temporary file when the cache's lock
   file is not this account's to open, or the cache is not writable;
@@ -47,10 +50,14 @@ def test_trivy_reads_its_home_from_the_environment_it_runs_with():
     assert cache == Path("/h") / "Library" / "Caches" / "trivy"
 
 
-def test_trivy_with_no_home_falls_to_the_temporary_directory():
-    # Go's os.UserHomeDir errors on an unset HOME; trivy then uses os.TempDir.
+def test_trivy_with_no_home_in_the_scans_environment_uses_this_processs_home():
+    # Go's os.UserHomeDir errors on an unset HOME and trivy then uses os.TempDir,
+    # but the scanner never runs without one: every sandbox backend hands it the
+    # operator's home, so a mapping that names no HOME means this process's home,
+    # not the temporary directory (the TMPDIR here must not be where it lands).
     cache = refresh.default_cache_dir("trivy", {"TMPDIR": "/t"}, platform="linux")
-    assert cache == Path("/t") / "trivy"
+    assert cache == Path.home() / ".cache" / "trivy"
+    assert cache != Path("/t") / "trivy"
 
 
 def test_trivy_temporary_directory_follows_go_not_python(monkeypatch):
