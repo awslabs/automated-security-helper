@@ -206,7 +206,6 @@ def test_a_refused_stop_reaps_an_ended_leader_before_reading_its_group(monkeypat
 
 
 @POSIX_ONLY
-@POSIX_ONLY
 def test_the_childs_own_path_is_searched_before_ashs(monkeypatch, tmp_path):
     """A tool's bin directory put first on the child's PATH names the copy the
     child runs; ASH's own PATH may hold another copy, which must not shadow it."""
@@ -246,6 +245,7 @@ def test_an_in_tree_copy_on_the_childs_path_is_a_refusal_not_a_miss(
     assert args[0] == "ash-u26-in-tree-tool"
 
 
+@POSIX_ONLY
 def test_the_childs_own_path_is_searched_when_the_caller_gave_one(
     monkeypatch, tmp_path
 ):
@@ -835,6 +835,139 @@ def test_a_line_printed_after_the_watchers_sigterm_does_not_cut_its_grace(
     assert "terminate" in child.calls and "kill" in child.calls
     waited = child.times["kill"] - child.times["terminate"]
     assert waited >= grace * 0.8, f"the kill came {waited:.2f}s after the SIGTERM"
+
+
+class _ReadFailsPopen(_FakeChild):
+    """A child that ignores SIGTERM and whose output pipe then fails to read:
+    the runner reaches its finally while the watcher still waits out the grace."""
+
+    instances: List["_ReadFailsPopen"] = []
+    event: Any = None
+
+    def __init__(self, args, **kwargs):
+        super().__init__()
+        self.args = list(args)
+        self.event = _ReadFailsPopen.event
+        self.terminated = threading.Event()
+        self.ended = threading.Event()
+        self.closed = False
+        _ReadFailsPopen.instances.append(self)
+        self.stdout = self
+
+    def __iter__(self):
+        yield "line one\n"
+        self.event.set()
+        # The read blocks until the SIGTERM, then the pipe read fails.
+        self.terminated.wait(_SILENT_BOUND)
+        raise OSError(5, "read failed")
+
+    def close(self):
+        self.closed = True
+
+    def terminate(self):
+        super().terminate()
+        self.terminated.set()  # the signal is ignored: no exit
+
+    def kill(self):
+        super().kill()
+        self.ended.set()
+
+    def wait(self, timeout=None):
+        self.calls.append(("wait", timeout))
+        if not self.ended.wait(_SILENT_BOUND):
+            raise subprocess.TimeoutExpired(self.args, _SILENT_BOUND)
+        return self.returncode if self.returncode is not None else 0
+
+
+class _InterruptedEvent(CancelEvent):
+    """A scan's cancel event that models a second Ctrl-C landing on the main
+    thread while the finally waits out the grace the watcher's stop began: the
+    grace read that the wait makes there raises, as an interrupt delivered at
+    that point would. The watcher's own reads, on its thread, answer as usual."""
+
+    def __init__(self):
+        super().__init__()
+        self.stop_began = threading.Event()
+
+    @property
+    def stop_promptly(self) -> bool:
+        if (
+            threading.current_thread() is threading.main_thread()
+            and self.stop_began.is_set()
+        ):
+            raise KeyboardInterrupt
+        return False
+
+
+def test_a_second_interrupt_during_the_grace_wait_still_kills_the_child(
+    monkeypatch,
+):
+    """The watcher's stop holds the grace; the runner is in its finally waiting
+    for it; a second interrupt lands there. The child is still killed, reaped
+    and its pipe closed before the interrupt leaves the runner: a wait that put
+    those behind it skipped them all on the second Ctrl-C."""
+    event = _InterruptedEvent()
+    _ReadFailsPopen.event = event
+    _ReadFailsPopen.instances.clear()
+    monkeypatch.setattr(spu.subprocess, "Popen", _ReadFailsPopen)
+    monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
+    monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda process: False)
+    stop_child = spu._stop_child
+
+    def stop_child_noting_the_start(*args, **kwargs):
+        event.stop_began.set()
+        return stop_child(*args, **kwargs)
+
+    monkeypatch.setattr(spu, "_stop_child", stop_child_noting_the_start)
+    with cancellation.cancel_scope(event):
+        with pytest.raises(KeyboardInterrupt):
+            spu.run_command_stream_output(["ash-u26-no-such-tool"])
+    (child,) = _ReadFailsPopen.instances
+    assert "kill" in child.calls, "the second interrupt skipped the kill"
+    assert ("wait", None) in child.calls, "the killed child was not reaped"
+    assert child.closed, "the output pipe was left open"
+
+
+class _OneLinePopen(_FakeChild):
+    """A child that prints one line and exits, for runs that never cancel."""
+
+    def __init__(self, args, **kwargs):
+        super().__init__()
+        self.args = list(args)
+        self.stdout = iter(["line one\n"])
+
+    def wait(self, timeout=None):
+        self.calls.append(("wait", timeout))
+        self.returncode = 0 if self.returncode is None else self.returncode
+        return self.returncode
+
+
+def test_a_watcher_whose_start_raised_is_not_joined(monkeypatch):
+    """ash_thread built the watcher, start() raised: the run is unrecorded and
+    the child is killed and reaped, and the finally does not join a thread that
+    never started (that join raises, and would hide the code behind it)."""
+    monkeypatch.setattr(spu.subprocess, "Popen", _OneLinePopen)
+    monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
+    monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
+    made: List[threading.Thread] = []
+
+    def thread_that_cannot_start(target, *args, **kwargs):
+        thread = threading.Thread(target=target, daemon=True)
+
+        def start():
+            raise RuntimeError("can't start new thread")
+
+        thread.start = start  # type: ignore[method-assign]
+        made.append(thread)
+        return thread
+
+    monkeypatch.setattr(spu, "ash_thread", thread_that_cannot_start)
+    with cancellation.cancel_scope(CancelEvent()):
+        code = spu.run_command_stream_output(["ash-u26-no-such-tool"])
+    assert code == spu.UNRECORDED_RUN_RETURNCODE
+    (thread,) = made
+    assert not thread.is_alive()
 
 
 def test_a_streamed_run_starts_nothing_in_a_cancelled_scan(monkeypatch):

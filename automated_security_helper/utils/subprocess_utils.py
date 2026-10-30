@@ -5614,51 +5614,62 @@ def run_command_stream_output(
             _log_unrecorded_run(cmd_str, e)
         finally:
             watcher_done.set()
-            # A stop the watcher is still waiting out keeps its grace: the kill
-            # below comes after it, not in front of it.
-            if stop_once.locked():
-                wait_for_the_watchers_stop()
             try:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
-            except Exception as e:
-                failed = True
-                _log_unrecorded_run(cmd_str, e)
-                # The kill can be delivered and then raise, so the child may be
-                # dead but unreaped, and a run that returns without reaping it
-                # leaves a zombie no caller can act on. A bounded wait reaps a
-                # dead child; one a failed stop left running is logged, on one
-                # line, and the code stays UNRECORDED_RUN_RETURNCODE either way.
+                # A stop the watcher is still waiting out keeps its grace: the
+                # kill below comes after it, not in front of it. The wait sits
+                # in a try of its own so that a second interrupt landing during
+                # it (a Ctrl-C while the first stop's grace runs) still reaches
+                # the kill, the reap and the close below; the first interrupt
+                # alone leaves the grace whole.
+                if stop_once.locked():
+                    wait_for_the_watchers_stop()
+            finally:
                 try:
-                    process.wait(timeout=0.5)
-                except Exception as reap_error:
-                    ASH_LOGGER.error(
-                        shown_on_one_line(
-                            f"Ran {cmd_str}, and the tool (pid {process.pid}) "
-                            f"was not reaped after a failed stop: {reap_error}"
-                        ),
-                        extra=NO_MARKUP,
-                    )
-            # After the kill above: a watcher still inside a stop's grace returns
-            # once the child is gone. Bounded, as the reap is; a daemon thread
-            # left past the bound holds nothing of the run.
-            if watcher is not None:
-                watcher.join(timeout=_REAP_SECONDS)
-            # The read end of the child's output, which nothing else closes. A
-            # close that fails loses no output, so it does not change the code;
-            # it is logged on one line.
-            close = getattr(process.stdout, "close", None)
-            if close is not None:
-                try:
-                    close()
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
                 except Exception as e:
-                    ASH_LOGGER.error(
-                        shown_on_one_line(
-                            f"Ran {cmd_str}, and closing its output pipe failed: {e}"
-                        ),
-                        extra=NO_MARKUP,
-                    )
+                    failed = True
+                    _log_unrecorded_run(cmd_str, e)
+                    # The kill can be delivered and then raise, so the child
+                    # may be dead but unreaped, and a run that returns without
+                    # reaping it leaves a zombie no caller can act on. A
+                    # bounded wait reaps a dead child; one a failed stop left
+                    # running is logged, on one line, and the code stays
+                    # UNRECORDED_RUN_RETURNCODE either way.
+                    try:
+                        process.wait(timeout=0.5)
+                    except Exception as reap_error:
+                        ASH_LOGGER.error(
+                            shown_on_one_line(
+                                f"Ran {cmd_str}, and the tool (pid {process.pid}) "
+                                f"was not reaped after a failed stop: {reap_error}"
+                            ),
+                            extra=NO_MARKUP,
+                        )
+                # After the kill above: a watcher still inside a stop's grace
+                # returns once the child is gone. Bounded, as the reap is; a
+                # daemon thread left past the bound holds nothing of the run.
+                # Only a thread that is running is joined: one whose start()
+                # raised was built but never started, and a join on it would
+                # raise here, in front of the close and the code.
+                if watcher is not None and watcher.is_alive():
+                    watcher.join(timeout=_REAP_SECONDS)
+                # The read end of the child's output, which nothing else
+                # closes. A close that fails loses no output, so it does not
+                # change the code; it is logged on one line.
+                close = getattr(process.stdout, "close", None)
+                if close is not None:
+                    try:
+                        close()
+                    except Exception as e:
+                        ASH_LOGGER.error(
+                            shown_on_one_line(
+                                f"Ran {cmd_str}, and closing its output pipe "
+                                f"failed: {e}"
+                            ),
+                            extra=NO_MARKUP,
+                        )
         code = process.returncode
         if failed or not isinstance(code, int):
             return UNRECORDED_RUN_RETURNCODE
