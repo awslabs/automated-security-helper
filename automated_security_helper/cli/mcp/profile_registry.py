@@ -29,6 +29,7 @@ import hashlib
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
@@ -39,14 +40,15 @@ from automated_security_helper.config.config_sources import (
     describe_config_path,
     is_config_parse_error,
     original_of_scan_copy,
+    parse_config_text_literally,
     read_config_file_literally,
-    resolve_config_document,
     unparsed_config_reason,
 )
 from automated_security_helper.core.exceptions import ASHConfigUnparsedError
 from automated_security_helper.utils.error_text import error_text
 
 if TYPE_CHECKING:
+    from automated_security_helper.cli.mcp.sandbox import SessionSandbox
     from automated_security_helper.config.client_config_policy import (
         ClientConfigRules,
     )
@@ -78,6 +80,20 @@ class BoundProfileUnavailableError(ProfileRegistryError, RuntimeError):
     """
 
 
+class SessionIdentityRequiredError(RuntimeError):
+    """A session config was asked for by a caller the server could not identify.
+
+    Raised by :func:`materialize_session_config` for
+    ``session_identity.UNIDENTIFIED_SESSION_ID``: such a caller is remote and
+    owns no session workspace, so there is no directory to write the config
+    into. A ``RuntimeError``, so a caller that maps ``RuntimeError`` to its
+    config error keeps doing so; and its own type, so a tool can answer it as
+    the session-identity refusal (``session_identity.session_identity_refusal``,
+    ``error_type`` ``session_identity_required``) instead of as an invalid
+    config, which is what the caller was told nothing about.
+    """
+
+
 @dataclass(frozen=True)
 class ProfileEntry:
     """A single registered profile.
@@ -86,7 +102,9 @@ class ProfileEntry:
     caller mutating the bound :class:`AshConfig` in place. ``path_sha256``
     is computed over the absolute path string (not the file content) — the
     point is to surface "did the operator point a profile at a different
-    file" without leaking the file contents.
+    file" without leaking the file contents. It is an unsalted digest, so it
+    hides the path only from a reader who cannot guess it: one who can checks
+    a guess against the digest.
     """
 
     name: str
@@ -171,6 +189,19 @@ def _profile_kept_where_a_scan_may_rewrite_it(path: Path) -> Optional[str]:
     return None
 
 
+def _top_level_key_text(key: object) -> str:
+    """How the refusal names an unknown top-level key of a profile.
+
+    A string as it is. Any other value is one the file's format parsed from a
+    bare word (YAML reads ``on:``, ``yes:`` and ``true:`` as a boolean, ``1:``
+    as an integer), so it is shown with its type, which tells the operator the
+    key is not a field name and needs quoting or correcting.
+    """
+    if isinstance(key, str):
+        return key
+    return f"{key!r} (a {type(key).__name__} key, not a field name)"
+
+
 def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
     """Parse + load every ``--profile`` spec into a registry dict.
 
@@ -209,6 +240,12 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
                 "MCP workspace root and outside any checkout the server scans."
             )
         unparsed: Optional[str] = None
+        # Each file of the profile's chain, by resolved path, as the text the
+        # load parsed it from (resolve_config._cached_reader fills it): the
+        # top-level key check below reads these, so it judges the files the
+        # load read, not a second read of the disk that an edit in between
+        # could have changed.
+        texts: Dict[Path, str] = {}
         try:
             from automated_security_helper.config.operator_paths import (
                 not_delivered_by_a_client,
@@ -224,10 +261,13 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
             # configuration, keeping what it read from the environment, so the
             # session's copy holds each such value as the file wrote it and the
             # scan reads it from the environment itself
-            # (materialize_session_config).
-            cfg = load_config_file_for_run(
-                path, anchor_relative_paths=not_delivered_by_a_client
-            )[1]
+            # (materialize_session_config). The one exception is a relative
+            # path read from the environment: anchored here, it is written as
+            # the path it now is (AshConfig.save), since the reference would
+            # resolve against the copy's directory instead.
+            document, cfg = load_config_file_for_run(
+                path, texts=texts, anchor_relative_paths=not_delivered_by_a_client
+            )
         except Exception as exc:
             if isinstance(exc, ASHConfigUnparsedError):
                 # A TOML parse refusal arrives already formatted: its message is
@@ -258,33 +298,52 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
         # validation — once that lands. Until then, a top-level gate
         # catches the common case (typos at the AshConfig root).
         #
-        # Read by the loader's own reader, as from_file read it, so a profile that
+        # Read from the text the loader's own reader parsed, so a profile that
         # uses !ENV or is TOML is checked rather than refused by a plain parser.
         try:
+            from automated_security_helper.config.config_validator import (
+                ConfigValidator,
+            )
+
             allowed = set(AshConfig.model_fields.keys())
             for finfo in AshConfig.model_fields.values():
                 if finfo.alias:
                     allowed.add(finfo.alias)
+            # And every top-level key the config validator accepts, so the two
+            # cannot disagree about a file: "$schema", which a JSON config
+            # carries for editors and a scan ignores, is one the model does
+            # not declare.
+            allowed |= set(ConfigValidator.VALID_TOP_LEVEL_FIELDS)
             # Every file the profile is built from: from_file follows its
             # `extends` chain, so a base's typo is the same mistake as the
-            # profile's own and was ignored. The chain is resolved as from_file
-            # resolved it (bases confined to the profile's directory, an
-            # error naming no value read from the environment), and each
-            # file's own keys are read in its format (YAML, JSON, TOML, a
-            # pyproject.toml's [tool.ash] table) as the file writes them.
-            chain = resolve_config_document(path).chain
-            for source in dict.fromkeys(chain):
-                raw = read_config_file_literally(source)
-                unknown = sorted(set(raw or {}) - allowed)
+            # profile's own and was ignored. The chain is the one the load
+            # resolved (bases confined to the profile's directory, an error
+            # naming no value read from the environment), and each file's own
+            # keys are read from the text that load parsed, in its format
+            # (YAML, JSON, TOML, a pyproject.toml's [tool.ash] table) as the
+            # file writes them. A file the load's cache does not hold is read
+            # from disk, as a reader with no cache would.
+            for source in dict.fromkeys(document.chain):
+                text = texts.get(Path(source))
+                raw = (
+                    parse_config_text_literally(Path(source), text)
+                    if text is not None
+                    else read_config_file_literally(Path(source))
+                )
+                # By their text, since a YAML key such as `on:` or `yes:` parses
+                # as a boolean, and Python cannot order a boolean against a
+                # string.
+                unknown = sorted(set(raw or {}) - allowed, key=str)
                 if unknown:
                     where = (
                         ""
                         if Path(source).resolve() == path.resolve()
                         else f" in its base {describe_config_path(Path(source))}"
                     )
+                    named = ", ".join(_top_level_key_text(key) for key in unknown)
                     raise ProfileRegistryError(
                         f"--profile {name!r} has unknown top-level field(s)"
-                        f"{where}: {', '.join(unknown)}"
+                        f"{where}: {named}"
                     )
         except ProfileRegistryError:
             raise
@@ -461,8 +520,20 @@ def call_profile_filename(profile_name: str) -> str:
     operator chose and would otherwise become a path component. One file per
     profile, so two calls in one session that name different profiles do not
     replace the file the other's plan recorded and its scan reads.
+
+    The digest also covers the path the name is registered under, as the
+    operator spelled it, when the name is registered. Two stdio servers share
+    the default session's ``config/`` directory, and each may register the same
+    name for a different file; by the name alone the two would write one file
+    for two profiles, and a plan recorded by one server would be scanned under
+    the other's. Two servers that register the same name for the same file
+    write the same content, so one file serves both. An unregistered name,
+    which the workspace tools refuse before writing, is digested alone.
     """
-    digest = hashlib.sha256(profile_name.encode("utf-8")).hexdigest()
+    with _lock:
+        entry = _profile_registry.get(profile_name)
+    digested = profile_name if entry is None else f"{profile_name}\n{entry.path}"
+    digest = hashlib.sha256(digested.encode("utf-8")).hexdigest()
     return (
         f"{_CALL_PROFILE_STEM}-{digest[:_CALL_PROFILE_DIGEST_LENGTH]}"
         f"{_CALL_PROFILE_SUFFIX}"
@@ -581,11 +652,44 @@ def materialize_session_config(
     is consumed -- ``Path``, ``open`` and ``resolve_config`` all take it.
 
     Raises:
+        SessionIdentityRequiredError: if the caller is one the server could not
+            identify (``session_identity.UNIDENTIFIED_SESSION_ID``), which owns
+            no session workspace. A ``RuntimeError``, so a caller that maps that
+            to its config error still does, and its own type so a tool can
+            answer it as the session-identity refusal instead.
         RuntimeError: if the session has no resolvable sandbox -- a host with no
             home directory and no ``ASH_MCP_WORKSPACE_ROOT``. Raised rather than
             falling back to a temp file, because a temp file outside the boundary
             would be written successfully and then refused at scan time, which
             reports the failure at the wrong call.
+    """
+
+    partial, target, _sandbox = _stage_session_config(
+        session_id, config, client_patched=client_patched, filename=filename
+    )
+    _replace_staged(partial, target)
+    return target.as_posix()
+
+
+def _stage_session_config(
+    session_id: Optional[str],
+    config: AshConfig,
+    *,
+    client_patched: bool = False,
+    filename: str = SESSION_CONFIG_FILENAME,
+) -> Tuple[Path, Path, "SessionSandbox"]:
+    """Write ``config`` to a temporary file beside its place in the session's sandbox.
+
+    Returns ``(partial, target, sandbox)``: the file written, the file it is to
+    replace, and the session's sandbox. The first half of
+    :func:`materialize_session_config`, on its own so that a caller writing two
+    files (:func:`materialize_session_binding`) stages both before it replaces
+    either: a failure to resolve the sandbox, make its directory or dump the
+    config happens before any file a scan reads is touched, and leaves none of
+    the partial behind. The caller moves the partial into place with
+    :func:`_replace_staged`, which removes whatever is left of it.
+
+    Raises: as :func:`materialize_session_config`.
     """
 
     from automated_security_helper.cli.mcp.sandbox import session_sandbox
@@ -595,7 +699,7 @@ def materialize_session_config(
     )
 
     if session_id == UNIDENTIFIED_SESSION_ID:
-        raise RuntimeError(
+        raise SessionIdentityRequiredError(
             "cannot materialize a session config: this caller has no session the "
             "server issued, so it has no session workspace to hold one"
         )
@@ -619,8 +723,11 @@ def materialize_session_config(
     partial = config_dir / f".{filename}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
         # Each value the profile's files read from the environment is written as
-        # the file wrote it, never the value. The operator's copy tags it !ENV,
-        # and the scan reads it from the environment when it loads the copy. The
+        # the file wrote it, never the value, except a relative path the load
+        # anchored to the operator's file's directory, which is written as the
+        # path it now is (AshConfig.save): the reference would resolve against
+        # this copy's directory. The operator's copy tags a reference !ENV, and
+        # the scan reads it from the environment when it loads the copy. The
         # client's copy, in a directory where !ENV is not resolved
         # (config_sources), holds it as quoted text, which a scan fills from the
         # operator's copy (is_client_copy_of, resolve_config).
@@ -633,10 +740,41 @@ def materialize_session_config(
             )
         else:
             config.save(partial, exclude_unset=not client_patched)
-        os.replace(partial, target)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    return partial, target, sandbox
+
+
+#: How many times :func:`_replace_staged` tries the rename, and the pause
+#: between tries. Bounded: half a second in all, longer than one load of the
+#: file by a scan, which is the hold that makes Windows refuse the rename.
+_REPLACE_ATTEMPTS = 10
+_REPLACE_RETRY_SECONDS = 0.05
+
+
+def _replace_staged(partial: Path, target: Path) -> None:
+    """Move a staged ``partial`` over ``target``, and remove what is left of it.
+
+    One rename, so a scan reading ``target`` while it is written reads the old
+    content or the new, never part of one. On Windows the rename is refused with
+    ``PermissionError`` while a reader holds the target open (a scan loading the
+    previous copy), and such a hold lasts one load, so the rename is tried again
+    a bounded number of times before the error is raised. A POSIX rename does
+    not wait on readers; a ``PermissionError`` there is the directory's, and the
+    retries only delay it. Whatever the outcome, the partial is removed afterward.
+    """
+    try:
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(partial, target)
+                return
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(_REPLACE_RETRY_SECONDS)
     finally:
         partial.unlink(missing_ok=True)
-    return target.as_posix()
 
 
 def materialize_session_binding(
@@ -652,19 +790,24 @@ def materialize_session_binding(
     a patch, whose config is ``registered`` and whose previous patched copy, if
     any, is removed, so the session holds no client copy it is not bound to.
 
-    The client's side changes first: the patched copy is written, or the old one
-    removed, before the operator copy is replaced, so the operator copy is never
-    replaced under an older client copy. The binding is recorded by the caller
-    only after both, so a failure in between leaves the previous binding with a
-    different client copy, still resolved as the client's against the previous
-    profile, or with none, which leaves it unbound.
+    Every copy is staged before any file is replaced (``_stage_session_config``):
+    a sandbox that cannot be resolved, a directory that cannot be made or a
+    config that cannot be dumped fails here with the previous binding's files as
+    they were, so the session's next scan runs under the binding it holds, never
+    under one profile's client copy against another profile's operator copy. Then
+    the client's side moves first: the patched copy is moved into place, or the
+    old one removed, before the operator copy is replaced, so the operator copy is
+    never replaced under an older client copy. The binding is recorded by the
+    caller only after both. A failure between the moves (a rename refused) leaves
+    the previous binding recorded: its files are written again from it on the
+    next read when one is missing (``_bound_config_paths``), and a client copy
+    that was already replaced is the new profile's until the session binds again.
 
     Raises:
-        RuntimeError: as ``materialize_session_config`` does.
+        RuntimeError: as ``materialize_session_config`` does,
+            ``SessionIdentityRequiredError`` included.
         OSError: when a file cannot be written or removed.
     """
-    from automated_security_helper.cli.mcp.sandbox import session_sandbox
-
     if patched is not None:
         # The client's copy is built from the registered profile, so it holds the
         # values that profile read from the environment where the client did not
@@ -673,14 +816,31 @@ def materialize_session_binding(
         # one an op moved is at its new entry.
         if not patched._references_followed:
             patched._environment_references = registered._environment_references
-        config_path = materialize_session_config(
+        client_partial, client_target, _sandbox = _stage_session_config(
             session_id, patched, client_patched=True
         )
-        return config_path, materialize_session_config(session_id, registered)
-    sandbox = session_sandbox(DEFAULT_SESSION_ID if session_id is None else session_id)
-    if sandbox.root is not None:
+        try:
+            trusted_partial, trusted_target, _sandbox = _stage_session_config(
+                session_id, registered
+            )
+        except BaseException:
+            client_partial.unlink(missing_ok=True)
+            raise
+        try:
+            _replace_staged(client_partial, client_target)
+            _replace_staged(trusted_partial, trusted_target)
+        finally:
+            # A rename that failed leaves the other staged file behind.
+            trusted_partial.unlink(missing_ok=True)
+        return client_target.as_posix(), trusted_target.as_posix()
+    partial, target, sandbox = _stage_session_config(session_id, registered)
+    try:
         (sandbox.client_config_dir / SESSION_CONFIG_FILENAME).unlink(missing_ok=True)
-    trusted = materialize_session_config(session_id, registered)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    _replace_staged(partial, target)
+    trusted = target.as_posix()
     return trusted, trusted
 
 
