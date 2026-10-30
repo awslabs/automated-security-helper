@@ -1299,6 +1299,30 @@ def test_many_workflows_are_linted_in_several_runs_and_one_report(
 
 
 @pytest.mark.unit
+def test_an_earlier_batchs_raw_output_is_not_kept_when_a_later_batch_fails(
+    repo, monkeypatch, on_path
+):
+    """The first run's stdout, password snippet included, became record lines;
+    the second run fails before the redacted payload would replace them. The
+    failed scan's records must hold a note, not the raw stdout."""
+    monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30, raising=False)
+    stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
+    assert "hunter2" in stdout
+    scanner = _scanner(repo)
+    _through_the_base_class(
+        monkeypatch,
+        [{"returncode": 1, "stdout": stdout}, {"returncode": 2, "stdout": ""}],
+    )
+
+    with pytest.raises(ScannerError):
+        scanner.scan(target=repo, target_type="source")
+
+    record = "\n".join(scanner.output)
+    assert "hunter2" not in record
+    assert "not kept" in record
+
+
+@pytest.mark.unit
 def test_the_raw_output_and_sarif_are_kept_in_the_results_dir(
     repo, monkeypatch, on_path
 ):

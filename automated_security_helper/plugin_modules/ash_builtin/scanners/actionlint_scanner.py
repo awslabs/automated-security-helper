@@ -1500,6 +1500,14 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         # No exit code until a run returns one: the 0 set above is for the clean
         # skips, which the invocation record reads as accepted.
         self.exit_code = None
+        # Every run's stdout is appended to self.output as record lines, and
+        # those are persisted with the results when a scan fails. Remembered
+        # here, outside the try, so the handler below can replace them whatever
+        # ends the scan: a later batch's timeout or bad exit code would
+        # otherwise leave an earlier batch's raw stdout, a credentials finding's
+        # password included, in the records.
+        output_before = len(self.output)
+        raw_output_note: Optional[str] = None
 
         try:
             config_file = self._resolve_config_file(target)
@@ -1537,10 +1545,6 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 "--",
             ]
             effective_timeout = self._effective_scan_timeout()
-            # The run's stdout is appended to self.output as record lines, and
-            # those are persisted with the results when a scan fails. Remembered
-            # so the lines can be replaced with the redacted payload below.
-            output_before = len(self.output)
             uri_base = Path(target).absolute() if target_type == "converted" else None
             # The workflows go on the command line in batches that fit the
             # platform's limit (workflow_batches); each run is judged by its own
@@ -1593,14 +1597,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 except json.JSONDecodeError as exc:
                     # Not kept: output that does not parse cannot be redacted,
                     # and a credentials finding's snippet, the password, may be
-                    # in it. The record lines hold the same text, so they are
-                    # replaced with a note of what was dropped.
-                    self.output[output_before:] = [
-                        (
-                            f"actionlint wrote {len(stdout)} characters that are not "
-                            "JSON; not kept, since they could not be redacted"
-                        )
-                    ]
+                    # in it. The record lines hold the same text; the handler
+                    # below replaces them with this note of what was dropped.
+                    raw_output_note = (
+                        f"actionlint wrote {len(stdout)} characters that are not "
+                        "JSON; not kept, since they could not be redacted"
+                    )
                     raise ScannerError(
                         f"actionlint output is not JSON ({exc}); the output is not "
                         "kept, since it could not be redacted"
@@ -1662,6 +1664,16 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             self.targets_failed = self.targets_attempted
             if not post_scanned:
                 self._post_scan(target=target, target_type=target_type)
+            # Whatever ended the scan, no run's raw stdout stays in the record
+            # lines: the redacted payload never replaced them, so a note does.
+            if len(self.output) > output_before:
+                self.output[output_before:] = [
+                    raw_output_note
+                    or (
+                        "actionlint's output is not kept: the scan failed before "
+                        "the output could be redacted"
+                    )
+                ]
             raise ScannerError(
                 self._describe_scan_failure(
                     exc, results_dir / "actionlint.json", tool_started=tool_started
