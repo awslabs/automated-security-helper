@@ -503,6 +503,34 @@ def _windows_process_is_running(pid: int) -> bool:
         return False
 
 
+def _shown_tool_name(tool: Any) -> str:
+    """The name a client is shown for a recorded tool: its basename, or the
+    recorded name when it has none.
+
+    A tool is recorded as argv0 as spawned (utils/subprocess_utils
+    ``_shown_tool``), which can be a full path on the server
+    (``/opt/.../venv/bin/semgrep``). The registry does not know the transport,
+    and a remote client has no use for a server path, so every text the
+    registry builds from the record uses this form."""
+    return os.path.basename(str(tool)) or str(tool)
+
+
+def _without_environment_values(
+    text: Optional[str], environment_values: Any
+) -> Optional[str]:
+    """``text`` with the entry's environment values redacted, when there are
+    any; ``text`` as it is otherwise. The one redaction every message the
+    registry applies or reports goes through, idempotent over text already
+    redacted (a needle that was replaced is not there to match again)."""
+    if not text or not environment_values:
+        return text
+    # Imported here: utils.error_text defers its config imports, and the
+    # registry is imported while the config package loads.
+    from automated_security_helper.utils.error_text import text_without_values
+
+    return text_without_values(text, environment_values)
+
+
 def _shares_an_output_tree(one: Path, other: Path) -> bool:
     """Whether two canonical output directories are one tree: the same
     directory, or one inside the other. By path component, never by string
@@ -843,11 +871,18 @@ class ScanRegistry:
                     if entry.has_runner and entry.runner_done.is_set():
                         # The runner is done; what holds the directory is a
                         # scanner tool the stop could not end, still running
-                        # (occupies_its_directory). Named by tool, as the
-                        # entry's own warning is; the pid is there when the
-                        # transport admits it.
+                        # (occupies_its_directory). Named by tool basename, as
+                        # the entry's own warning names it for a remote client:
+                        # this refusal reaches the owning session, which on a
+                        # network transport is remote, and the registry does
+                        # not know the transport, so it never shows the
+                        # server path a tool was spawned as, and never a pid
+                        # (the server's log has both).
                         tools = ", ".join(
-                            dict.fromkeys(tool for tool, _pid in entry.could_not_stop)
+                            dict.fromkeys(
+                                _shown_tool_name(tool)
+                                for tool, _pid in entry.could_not_stop
+                            )
                         )
                         raise MCPResourceError(
                             f"Directory {directory_path} has a stopped scan "
@@ -1247,14 +1282,9 @@ class ScanRegistry:
         over already-redacted text: a needle that was replaced is not there to
         match again.
         """
-        if error_message and entry.environment_values:
-            # Imported here: utils.error_text defers its config imports, and
-            # the registry is imported while the config package loads.
-            from automated_security_helper.utils.error_text import (
-                text_without_values,
-            )
-
-            error_message = text_without_values(error_message, entry.environment_values)
+        error_message = _without_environment_values(
+            error_message, entry.environment_values
+        )
         was_pending = entry.status == MCScanStatus.PENDING
         had_runner = entry.has_runner
         if status == MCScanStatus.RUNNING:
@@ -1408,10 +1438,7 @@ class ScanRegistry:
                 named = ", ".join(f"{tool} (pid {pid})" for tool, pid in new)
                 how = "end the listed process(es) before reading or reusing it."
             else:
-                # The basename, or the recorded name when it has none.
-                named = ", ".join(
-                    os.path.basename(str(tool)) or str(tool) for tool, _pid in new
-                )
+                named = ", ".join(_shown_tool_name(tool) for tool, _pid in new)
                 how = (
                     "the server's log names the process(es); end them before "
                     "reading or reusing it."
@@ -2011,6 +2038,38 @@ class ScanRegistry:
                     else summarize_scanner_statuses(output_dir)
                 )
 
+                # The gap lists: the runner's coverage when it recorded one,
+                # else the empty payload. When neither names a tool the stop
+                # could not end, the entry's own record (record_cancel_outcome)
+                # fills could_not_stop, in the payload's row shape and by tool
+                # basename, never pid: a CANCELLED scan whose tool survived
+                # read could_not_stop [] here while register_scan refused its
+                # directory for that same tool, and only the free-text warning
+                # said why.
+                coverage_payload = (
+                    coverage if coverage is not None else _empty_coverage()
+                )
+                if entry.could_not_stop and not coverage_payload.get("could_not_stop"):
+                    # Imported here as the other utils imports of this module
+                    # are; the wording has one home (subprocess_utils).
+                    from automated_security_helper.utils.subprocess_utils import (
+                        could_not_stop_sentence,
+                    )
+
+                    coverage_payload = {
+                        **coverage_payload,
+                        "could_not_stop": [
+                            {
+                                "scanner": name,
+                                "reason": could_not_stop_sentence(name),
+                            }
+                            for name in dict.fromkeys(
+                                _shown_tool_name(tool)
+                                for tool, _pid in entry.could_not_stop
+                            )
+                        ],
+                    }
+
                 # Combine registry entry information with progress info
                 result = {
                     # Set explicitly on the path where the call worked. Only
@@ -2036,9 +2095,19 @@ class ScanRegistry:
                     # results file is now unreadable says so without the entry
                     # being re-closed; else, for an ended scan whose output
                     # directory is gone, that it is. A running scan's file is
-                    # partial by nature and carries no such message.
+                    # partial by nature and carries no such message. The file's
+                    # text is redacted with the entry's environment values as
+                    # every message the registry applies is (_apply_status):
+                    # it names the results path and what the parse met, and
+                    # this arm used to be the one path that skipped that.
                     "error_message": entry.error_message
-                    or (scan_progress.error_message if entry.status in ENDED else None)
+                    or (
+                        _without_environment_values(
+                            scan_progress.error_message, entry.environment_values
+                        )
+                        if entry.status in ENDED
+                        else None
+                    )
                     or output_missing_message,
                     # The CLI's code for a scan ASH ended with an exit, so a client
                     # can branch on why it failed as a script branches on the
@@ -2076,7 +2145,7 @@ class ScanRegistry:
                     # the scan whose results it would be reading instead.
                     "superseded_by": superseded_by if superseded else [],
                     "coverage_complete": coverage_complete,
-                    **(coverage if coverage is not None else _empty_coverage()),
+                    **coverage_payload,
                     "completed_scanners": scan_progress.completed_scanners,
                     "finished_scanners": scan_progress.finished_scanners,
                     "total_scanners": scan_progress.total_scanners,

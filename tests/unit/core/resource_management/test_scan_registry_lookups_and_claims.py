@@ -268,6 +268,29 @@ class TestCheckScanProgressWithoutAnOutputDirectory:
         assert SECRET not in entry.error_message
         assert progress["status"] == "failed"
 
+    def test_a_file_derived_message_on_an_ended_scan_is_redacted_too(self, tmp_path):
+        """Red at the base: an entry a runner closed COMPLETED is not re-closed
+        when its results file later reads as unusable; the response carried the
+        file's own message instead, unredacted, the one path that skipped the
+        redaction every applied message gets. The file's text names the results
+        path, which here carries the value."""
+        registry = ScanRegistry()
+        project = _project(tmp_path, SECRET)
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        (output / "ash_aggregated_results.json").write_text("{ not json", "utf-8")
+        scan_id = _register(registry, project, environment_values=(SECRET,))
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+        registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert registry.get_scan(scan_id).status is MCScanStatus.COMPLETED
+        assert progress["results_available"] is False
+        assert progress["error_message"], "the unusable file is reported"
+        assert "ash_aggregated_results.json" in progress["error_message"]
+        assert SECRET not in progress["error_message"]
+
 
 class TestScanStatisticsAreOneRead:
     def test_the_counts_agree_and_follow_the_session(self, tmp_path):

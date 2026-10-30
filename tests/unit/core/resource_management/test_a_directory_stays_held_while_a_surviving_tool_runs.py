@@ -36,10 +36,12 @@ from automated_security_helper.core.resource_management.scan_registry import (
     MCScanStatus,
     ScanRegistry,
 )
+from automated_security_helper.utils.subprocess_utils import could_not_stop_sentence
 
 pytestmark = pytest.mark.unit
 
 BANDIT_PID = 4242
+SPAWNED_AS = "/opt/scanners/venv/bin/bandit"
 
 
 @pytest.fixture()
@@ -99,6 +101,73 @@ def test_the_directory_stays_held_while_the_tool_runs(tmp_path, alive):
     assert registry.get_scan(scan_id) is not None
     assert registry.cleanup_completed_scans(max_age_hours=0) == 0
     assert registry.get_scan(scan_id) is not None
+
+
+def _a_stopped_scan_whose_tool_was_spawned_by_path(
+    tmp_path: Path,
+) -> tuple[ScanRegistry, str, Path, Path]:
+    """As above, with the tool recorded as the server path it was spawned as."""
+    project = tmp_path / "project"
+    project.mkdir()
+    output = project / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    registry = ScanRegistry()
+    scan_id = registry.register_scan(
+        directory_path=str(project), output_directory=str(output), session_id="owner"
+    )
+    entry = registry.get_scan(scan_id)
+    entry.has_runner = True
+    entry.mark_running()
+    assert registry.cancel_scan(scan_id) is True
+    assert registry.record_cancel_outcome(
+        scan_id, ((SPAWNED_AS, BANDIT_PID),), name_process_ids=False
+    )
+    entry.runner_done.set()
+    return registry, scan_id, project, output
+
+
+def test_the_refusal_names_the_tool_by_basename_never_by_server_path(tmp_path, alive):
+    """Red at the base: the refusal joined the recorded names as spawned, so the
+    owning session, remote on a network transport, read a server path the
+    entry's own warning already withholds from it."""
+    alive[BANDIT_PID] = True
+    registry, _scan_id, project, output = (
+        _a_stopped_scan_whose_tool_was_spawned_by_path(tmp_path)
+    )
+
+    with pytest.raises(MCPResourceError) as refused:
+        registry.register_scan(
+            directory_path=str(project),
+            output_directory=str(output),
+            session_id="owner",
+        )
+    message = str(refused.value)
+    assert "may still be running" in message, message
+    assert "bandit" in message, message
+    assert SPAWNED_AS not in message, message
+    assert "/opt/scanners" not in message, message
+    assert str(BANDIT_PID) not in message, message
+
+
+def test_progress_reports_the_surviving_tool_under_could_not_stop(tmp_path, alive):
+    """Red at the base: the progress response's could_not_stop came from the
+    runner's coverage alone, so a CANCELLED scan whose tool survived read
+    could_not_stop [] while register_scan refused its directory for that same
+    tool; only the free-text warning said why. The entry's own record fills the
+    key, in the payload's row shape, by basename and never by pid."""
+    alive[BANDIT_PID] = True
+    registry, scan_id, _project, _output = (
+        _a_stopped_scan_whose_tool_was_spawned_by_path(tmp_path)
+    )
+
+    progress = registry.check_scan_progress(scan_id)
+
+    assert progress["status"] == "cancelled"
+    assert progress["could_not_stop"] == [
+        {"scanner": "bandit", "reason": could_not_stop_sentence("bandit")}
+    ]
+    assert str(BANDIT_PID) not in repr(progress["could_not_stop"])
+    assert SPAWNED_AS not in repr(progress["could_not_stop"])
 
 
 def test_another_session_is_told_the_directory_is_busy_and_nothing_more(
