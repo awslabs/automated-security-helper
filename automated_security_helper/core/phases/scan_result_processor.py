@@ -55,13 +55,29 @@ def _declared_tool_version(sarif_report: Any) -> str | None:
     return None
 
 
+#: The recorded statuses that say a scanner ran to completion: it evaluated its
+#: targets and reached a grade. ERROR did not complete; SKIPPED (excluded, or
+#: nothing to evaluate) and MISSING (its dependencies were not there) never ran.
+_COMPLETED_STATUSES = frozenset(
+    {ScannerStatus.PASSED.value, ScannerStatus.FAILED.value}
+)
+
+
 def _completed_scanner_names(aggregated_results: AshAggregatedResults) -> list[str]:
-    """The scanners whose results row says they completed: every row not ERROR."""
+    """The scanners whose results row says they ran to completion: PASSED or FAILED.
+
+    Read off a model that carries rows, a results file read back. Counting every
+    row that was not ERROR took SKIPPED and MISSING rows as completed, and MISSING
+    means "selected and did not run"; the completion check then missed exactly the
+    scanners it exists to catch. During a live scan a scanner that ran has no row
+    until the rebuild (``ScanPhase`` reads its own ``_completed_scanners`` for the
+    same check), so a caller with the executor's completed set passes it.
+    """
     rows = getattr(aggregated_results, "scanner_results", None) or {}
     names = []
     for name, row in rows.items():
         status = getattr(row, "status", None)
-        if getattr(status, "value", status) != ScannerStatus.ERROR.value:
+        if getattr(status, "value", status) in _COMPLETED_STATUSES:
             names.append(name)
     return names
 
@@ -333,8 +349,11 @@ class ScanResultProcessor:
         """Run the validate_execution_completion check, logging warnings on discrepancy.
 
         With no ``completed_scanner_names``, the completed scanners are read off
-        ``aggregated_results``: every scanner with a row whose status is not ERROR.
-        Defaulting to none marked every queued scanner as failed to complete.
+        ``aggregated_results``: every scanner with a row recorded PASSED or FAILED
+        (``_completed_scanner_names``). Defaulting to none marked every queued
+        scanner as failed to complete; counting every non-ERROR row marked the
+        SKIPPED and MISSING ones as completed. A caller that holds the executor's
+        completed set (a live scan, whose scanners have no rows yet) passes it.
         """
         try:
             names = (
