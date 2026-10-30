@@ -118,7 +118,7 @@ def test_a_hash_later_in_a_plain_ignore_line_is_text_not_a_comment():
 
 
 @pytest.mark.parametrize(
-    ("exclusion", "relative", "rule_id"),
+    ("exclusion", "inside", "rule_id"),
     [
         (
             ClientScannerExclusion(
@@ -128,7 +128,7 @@ def test_a_hash_later_in_a_plain_ignore_line_is_text_not_a_comment():
                 pattern="vendor",
                 reason="r",
             ),
-            "/elsewhere/vendor/a.py",
+            "elsewhere/vendor/a.py",
             None,
         ),
         (
@@ -139,7 +139,7 @@ def test_a_hash_later_in_a_plain_ignore_line_is_text_not_a_comment():
                 pattern="vendor",
                 reason="r",
             ),
-            "/elsewhere/vendor/a.tf",
+            "elsewhere/vendor/a.tf",
             None,
         ),
         (
@@ -151,17 +151,23 @@ def test_a_hash_later_in_a_plain_ignore_line_is_text_not_a_comment():
                 reason="r",
                 paths=("vendor/**",),
             ),
-            "/vendor/a.py",
+            "vendor/a.py",
             "CVE-1",
         ),
     ],
 )
 def test_a_finding_outside_the_scan_root_is_not_hidden_by_a_path_pattern(
-    exclusion, relative, rule_id
+    exclusion, inside, rule_id
 ):
-    assert not exclusion.hides(relative=relative, absolute=relative, rule_id=rule_id)
-    inside = relative.lstrip("/").removeprefix("elsewhere/")
-    assert exclusion.hides(relative=inside, absolute=f"/s/{inside}", rule_id=rule_id)
+    """A finding the SARIF step could not make relative keeps an absolute path,
+    spelled from the platform's own anchor (``/`` on POSIX, a drive on
+    Windows); a POSIX-rooted literal is not absolute on Windows and read as a
+    path inside the tree there."""
+    outside = str(Path(Path.cwd().anchor, inside))
+    assert Path(outside).is_absolute()
+    assert not exclusion.hides(relative=outside, absolute=outside, rule_id=rule_id)
+    kept = inside.removeprefix("elsewhere/")
+    assert exclusion.hides(relative=kept, absolute=f"/s/{kept}", rule_id=rule_id)
 
 
 def test_an_id_only_trivy_entry_still_hides_a_finding_outside_the_scan_root():
