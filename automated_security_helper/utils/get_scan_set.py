@@ -14,7 +14,9 @@ import sys
 import threading
 import uuid
 from typing import (
+    AbstractSet,
     Any,
+    Collection,
     Dict,
     Iterable,
     List,
@@ -79,6 +81,8 @@ BUNDLED_CDK_MARKER = "node_modules/aws-cdk (ASH built-in exclusion)"
 MARKER_SUFFIX = " #########"
 START_MARKER_PREFIX = "######### START CONTENTS: "
 END_MARKER_PREFIX = "######### END CONTENTS: "
+#: The line that stands in the report for an ignore file that was found and not read.
+SKIPPED_MARKER_PREFIX = "######### SKIPPED: "
 SOURCE_DIR_TOKEN = "${SOURCE_DIR}/"
 
 # The file names ASH reads as ignore files when it walks the scanned tree.
@@ -253,16 +257,65 @@ def _is_bundled_cdk_path(
     return "/node_modules/aws-cdk" in _with_posix_separators(file_path, separators)
 
 
+def _is_bundled_cdk_below(walked: str | Path, root_absolute: str) -> bool:
+    """:func:`_is_bundled_cdk_path` for *walked*, judged by its path below the scan root.
+
+    The carve-out is for the aws-cdk tree that sits inside the code being scanned.
+    Tested on the whole path, a scan root that itself lies below a
+    ``node_modules/aws-cdk*`` directory left every file out of the scan set, and
+    the answer changed with how the source was spelled: ``.`` inside that
+    directory read as outside it, the absolute path of the same directory as inside.
+    *root_absolute* is the scan root, made absolute.
+    """
+    relative = os.path.relpath(os.path.abspath(walked), root_absolute)
+    return _is_bundled_cdk_path("/" + relative)
+
+
+def _bundled_cdk_in(parts: Sequence[str]) -> bool:
+    """:func:`_is_bundled_cdk_path` for a path given as its components below the root."""
+    return _is_bundled_cdk_path("/" + "/".join(parts), separators="/")
+
+
+#: Whether this is Windows. Read where an answer is given for Windows alone, so a
+#: test can stand it in.
+_WINDOWS = sys.platform == "win32"
+
+
+def _is_junction_status(status: "os.stat_result") -> bool:
+    """Whether *status*, an ``lstat``, is a Windows junction: a mount-point reparse point."""
+    attributes = getattr(status, "st_file_attributes", 0)
+    if not attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        return False
+    return getattr(status, "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+
+
+def _is_junction(path: str | Path) -> bool:
+    """Whether *path* is a Windows junction.
+
+    ``os.path.isjunction`` where Python has it (3.12 and later). Before that it is
+    read from the reparse tag of an ``lstat``, on Windows alone: the function is
+    absent on 3.10 and 3.11, which the package supports, and it answered False for
+    every junction there, so the walks documented as never following a link followed
+    junctions.
+    """
+    isjunction = getattr(os.path, "isjunction", None)
+    if isjunction is not None:
+        return bool(isjunction(path))
+    if not _WINDOWS:
+        return False
+    try:
+        return _is_junction_status(os.lstat(path))
+    except (OSError, ValueError):
+        return False
+
+
 def _is_link_to_directory(path: str | Path) -> bool:
     """Whether *path* is a symlink, or a Windows junction, rather than a real directory.
 
     ``os.walk`` lists such an entry among the directories and does not descend it,
     so nothing behind it is ever in the scan set.
     """
-    if os.path.islink(path):
-        return True
-    isjunction = getattr(os.path, "isjunction", None)
-    return bool(isjunction is not None and isjunction(path))
+    return bool(os.path.islink(path) or _is_junction(path))
 
 
 def _entry_is_link_to_directory(entry: "os.DirEntry[str]") -> bool:
@@ -274,15 +327,38 @@ def _entry_is_link_to_directory(entry: "os.DirEntry[str]") -> bool:
     tree through :func:`file_links_leaving_tree`. The junction test is
     ``os.path.isjunction``, read off ``os.path`` when called as
     :func:`_is_link_to_directory` reads it (a test stands one in); on POSIX it
-    answers without a system call.
+    answers without a system call. Where Python has none (3.10 and 3.11) the
+    entry's own status gives the answer, on Windows only, where a listing holds it.
     """
     if entry.is_symlink():
         return True
     isjunction = getattr(os.path, "isjunction", None)
-    return bool(isjunction is not None and isjunction(entry.path))
+    if isjunction is not None:
+        return bool(isjunction(entry.path))
+    if not _WINDOWS:
+        return False
+    try:
+        return _is_junction_status(entry.stat(follow_symlinks=False))
+    except OSError:
+        return False
 
 
-def _walk_without_link_directories(top: str | Path):
+def _warn_directory_not_listed(error: OSError) -> None:
+    """``os.walk``'s *onerror*: say that a directory could not be listed.
+
+    Without one ``os.walk`` goes on without a word, so a directory the scanning
+    user cannot list was left out of the scan set with nothing logged.
+    """
+    ASH_LOGGER.warning(
+        "Not scanning the contents of %r: it could not be listed (%s), so none of "
+        "its files are in the scan set.",
+        str(error.filename),
+        error.strerror or type(error).__name__,
+        extra=NO_MARKUP,
+    )
+
+
+def _walk_without_link_directories(top: str | Path, onerror=None):
     """``os.walk(top)`` that never descends a link or junction to a directory.
 
     ``os.walk`` lists a symlink to a directory among the directories without
@@ -293,8 +369,13 @@ def _walk_without_link_directories(top: str | Path):
     taken out of the directory list before ``os.walk`` reaches it. The lists are
     the ones ``os.walk`` yields, so a caller that prunes ``dirs`` in place still
     prunes the walk.
+
+    *onerror* is passed to ``os.walk``: called with the ``OSError`` for a directory
+    that could not be listed. The walks that build the scan set pass
+    :func:`_warn_directory_not_listed`; the ones that only count files do not, since
+    the walk that builds the set has said so already.
     """
-    for root, dirs, files in os.walk(top):
+    for root, dirs, files in os.walk(top, onerror=onerror):
         dirs[:] = [d for d in dirs if not _is_link_to_directory(os.path.join(root, d))]
         yield root, dirs, files
 
@@ -314,6 +395,11 @@ def _walk_unless_link(top: str | Path):
     return _walk_without_link_directories(top)
 
 
+def _is_file_link_leaving_the_tree(full_path: str, root: str) -> bool:
+    """Whether *full_path* is a link whose target, every link resolved, is outside *root*."""
+    return os.path.islink(full_path) and not resolves_inside(full_path, root)
+
+
 def _left_out_as_a_link_leaving_the_tree(
     full_path: str, root: str, links_not_scanned: Optional[List[str]]
 ) -> bool:
@@ -330,7 +416,7 @@ def _left_out_as_a_link_leaving_the_tree(
     escaped with ``repr``, and not its target, which is outside the tree; and
     *full_path* is appended to *links_not_scanned* when one is given.
     """
-    if not os.path.islink(full_path) or resolves_inside(full_path, root):
+    if not _is_file_link_leaving_the_tree(full_path, root):
         return False
     ASH_LOGGER.warning(
         f"Not scanning {relative_display(full_path, root)!r}: {REASON_LINK_LEAVES_TREE}"
@@ -411,7 +497,18 @@ def file_links_leaving_tree(
 #: when the scan set is built: its logs, and the .gitignore it writes there when the
 #: directory is inside the tree (output_dir_links.ignore_output_dir_in_git). Not
 #: counted among the files found there.
-_THIS_RUNS_FILES = frozenset({"ash.log", "ash.log.jsonl", OUTPUT_GITIGNORE})
+_THIS_RUNS_FILES = frozenset(
+    {
+        "ash.log",
+        "ash.log.jsonl",
+        OUTPUT_GITIGNORE,
+        # The scan set and ignore report a scan writes there as it starts, and the
+        # record of the run that wrote them (:func:`_write_lists`). A walk made
+        # while the scan runs finds them, and they are ASH's, not the repository's.
+        *SCAN_START_FILE_NAMES,
+        SCAN_SET_RUN_FILE_NAME,
+    }
+)
 
 
 def _directory_identity(
@@ -484,12 +581,19 @@ def _is_own_output(candidate: str, own: Optional[_OwnOutput]) -> bool:
     return os.path.normcase(os.path.abspath(candidate)) == own.path
 
 
-def _count_files_in_own_output(directory: str) -> int:
-    """How many files were already in ASH's output directory, this run's own aside."""
+def _count_files_in_own_output(directory: str, committed: Collection[str] = ()) -> int:
+    """How many files were already in ASH's output directory, this run's own aside.
+
+    *committed* holds the paths (as the walk spells them) of the files git tracks
+    there. They are put into the scan set, so they are not among the files left out.
+    """
     count = 0
     for root, _dirs, files in _walk_unless_link(directory):
         count += sum(
-            1 for name in files if not (root == directory and name in _THIS_RUNS_FILES)
+            1
+            for name in files
+            if not (root == directory and name in _THIS_RUNS_FILES)
+            and os.path.join(root, name) not in committed
         )
     return count
 
@@ -508,16 +612,16 @@ def _excluded_by_ash_itself(walked: str, parts: Sequence[str]) -> bool:
     matching each file against the parser: a pruned ``node_modules`` holds hundreds
     of thousands of files, and a parser match per file stats each of them.
 
-    - The bundled aws-cdk tree: :func:`_is_bundled_cdk_path` on *walked*, the path
-      the scan set tests, so a scan root that is itself inside that tree counts as
-      inside it here too.
+    - The bundled aws-cdk tree: a ``node_modules/aws-cdk*`` component in *parts*,
+      the path below the scan root (:func:`_is_bundled_cdk_below`), as the scan set
+      tests it. *walked* is not read.
     - Any ``*.template.json`` is kept otherwise, which is what the forced-inclusion
       pass does whatever else matched.
     - A ``.git`` component, file or directory, is left out (rule ``.git``).
     - An ``asset.*`` component directly under a ``cdk.out`` component is left out
       (rule ``**/cdk.out/asset.*``).
     """
-    if _is_bundled_cdk_path(walked):
+    if _bundled_cdk_in(parts):
         return True
     if parts and parts[-1].endswith(".template.json"):
         return False
@@ -554,14 +658,24 @@ def _files_removed_by_ignore_files(
     )
 
 
-def _count_templates(directory: str) -> int:
-    """``*.template.json`` files under *directory*: the forced inclusion keeps them."""
+def _count_templates(directory: str, source: Optional[str] = None) -> int:
+    """``*.template.json`` files under *directory*: the forced inclusion keeps them.
+
+    With *source*, the scan root, the bundled aws-cdk tree is judged by the path
+    below it (:func:`_is_bundled_cdk_below`); without, by the whole path.
+    """
+    root_absolute = None if source is None else os.path.abspath(source)
+
+    def bundled(full: str) -> bool:
+        if root_absolute is None:
+            return _is_bundled_cdk_path(full)
+        return _is_bundled_cdk_below(full, root_absolute)
+
     return sum(
         1
         for root, _dirs, files in _walk_unless_link(directory)
         for name in files
-        if name.endswith(".template.json")
-        and not _is_bundled_cdk_path(os.path.join(root, name))
+        if name.endswith(".template.json") and not bundled(os.path.join(root, name))
     )
 
 
@@ -570,6 +684,7 @@ def _count_files_ash_would_scan(
     source: str,
     own_output: Optional[_OwnOutput] = None,
     own_output_counts: Optional[Dict[str, int]] = None,
+    named_output_dirs: Optional[AbstractSet[Path]] = None,
 ) -> int:
     """How many files under *directory* stay in the scan set when no ignore file applies.
 
@@ -580,7 +695,10 @@ def _count_files_ash_would_scan(
     was not removed by the ignore file that pruned *directory*, so it is not
     counted. The output directory's files go into *own_output_counts* instead, as
     they do when the scan-set walk reaches it directly: a pruned parent does not
-    change what they are.
+    change what they are. So do the other output directories the walk names
+    (*named_output_dirs*, as absolute paths: an earlier run's ``.ash/ash_output``,
+    the workspace's output directory), which it leaves out whatever the ignore files
+    say.
 
     ASH's own exclusions are applied a directory at a time, so a pruned
     ``node_modules`` costs a walk and a string test per file: a directory on the
@@ -589,23 +707,30 @@ def _count_files_ash_would_scan(
     inclusion keeps. Links to directories are not followed, as in the walk that
     pruned *directory*: neither *directory* itself nor one below it, including a
     ``.git`` or asset directory searched for templates (:func:`_walk_unless_link`).
+    A link to a file whose target leaves *source* is not counted either: the scan-set
+    walk never keeps one (:func:`_left_out_as_a_link_leaving_the_tree`), so the
+    ignore file did not remove it.
     """
     count = 0
+    root_absolute = os.path.abspath(source)
     for root, dirs, files in _walk_unless_link(directory):
         parts = _relative_parts(root, source)
         kept_dirs = []
         for d in dirs:
             candidate = os.path.join(root, d)
-            if _is_own_output(candidate, own_output):
+            if _is_own_output(candidate, own_output) or (
+                named_output_dirs is not None
+                and Path(os.path.abspath(candidate)) in named_output_dirs
+            ):
                 if own_output_counts is not None:
                     own_output_counts[candidate] = _count_files_in_own_output(candidate)
                 continue
-            if _is_bundled_cdk_path(candidate):
+            if _is_bundled_cdk_below(candidate, root_absolute):
                 continue
             if d == ".git" or (
                 d.startswith("asset.") and parts and parts[-1] == "cdk.out"
             ):
-                count += _count_templates(candidate)
+                count += _count_templates(candidate, source)
                 continue
             kept_dirs.append(d)
         dirs[:] = kept_dirs
@@ -613,6 +738,7 @@ def _count_files_ash_would_scan(
             1
             for name in files
             if not _excluded_by_ash_itself(os.path.join(root, name), parts + (name,))
+            and not _is_file_link_leaving_the_tree(os.path.join(root, name), source)
         )
     return count
 
@@ -884,7 +1010,9 @@ def _collect_ignorefiles_and_all_files(
     # A link or junction to a directory below the root is not descended, on any
     # interpreter (_walk_without_link_directories); the root itself is walked as
     # given, as before.
-    for root, dirs, files in _walk_without_link_directories(path):
+    for root, dirs, files in _walk_without_link_directories(
+        path, onerror=_warn_directory_not_listed
+    ):
         root_path = Path(os.path.abspath(root))
         kept_dirs = []
         for d in dirs:
@@ -894,14 +1022,19 @@ def _collect_ignorefiles_and_all_files(
                 kept_dirs.append(d)
                 continue
             skipped_output_dirs.append(walked)
-            if own_output_counts is not None:
-                own_output_counts[walked] = _count_files_in_own_output(walked)
             # tracked_files_in returns regular files reached without a link only,
             # so no link, leaving the tree or not, is among them.
             committed = [
                 os.path.join(walked, *tracked.relative_to(candidate).parts)
                 for tracked in tracked_files_in(candidate) or []
             ]
+            # The committed files are listed below, so they are not among the files
+            # left out: counted as both they were warned about as left out and
+            # reported in output_dir_file_count while sitting in the scan set.
+            if own_output_counts is not None:
+                own_output_counts[walked] = _count_files_in_own_output(
+                    walked, frozenset(committed)
+                )
             if committed:
                 all_files.extend(committed)
                 warn_about_committed_files(
@@ -933,7 +1066,22 @@ def _collect_ignorefiles_and_all_files(
             for kept in kept_assemblies
         )
         if inside_kept_assembly:
+            asset_dirs = [d for d in dirs if d.startswith(_CDK_ASSET_DIR_PREFIX)]
             dirs[:] = [d for d in dirs if not d.startswith(_CDK_ASSET_DIR_PREFIX)]
+            # Not walked, so their files are in neither list: they are missing from
+            # the scan set because the root .gitignore excludes the assembly, and
+            # counted to it like the files of a pruned directory. An assembly not
+            # named cdk.out has no rule of ASH's own for its assets, so uncounted
+            # they were missing from the exclusion count; the count leaves out
+            # what ASH excludes on its own.
+            if pruned_counts is not None:
+                for d in asset_dirs:
+                    removed = _count_files_ash_would_scan(
+                        Path(root) / d, path, own, own_output_counts, own_output_dirs
+                    )
+                    pruned_counts[pruned_key] = (
+                        pruned_counts.get(pruned_key, 0) + removed
+                    )
         else:
             # Prune directories that are ignored by the root .gitignore.
             # This prevents descending into .venv/, node_modules/, etc.
@@ -979,7 +1127,7 @@ def _collect_ignorefiles_and_all_files(
                 if pruned_counts is None:
                     continue
                 removed = _count_files_ash_would_scan(
-                    Path(root) / d, path, own, own_output_counts
+                    Path(root) / d, path, own, own_output_counts, own_output_dirs
                 )
                 pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed
 
@@ -1017,6 +1165,25 @@ def _collect_ignorefiles_and_all_files(
     return ignore_files, all_files
 
 
+def _skip_ignore_file(
+    lines: List[str], clean: str, reason: str, shown: Optional[str] = None
+) -> None:
+    """Say that an ignore file was found and not applied: a warning and a report line.
+
+    The line is a comment, which every reader of the report already skips, so the
+    skip is visible next to the rules that were applied. *clean* is the report's
+    spelling of the file (:func:`_source_dir_marker`); *shown* is how the warning
+    names it, *clean* when not given.
+    """
+    ASH_LOGGER.warning(
+        f"Skipped ignore file '{clean if shown is None else shown}': {reason}, so its "
+        "rules were not applied",
+        extra=NO_MARKUP,
+    )
+    lines.append(f"{SKIPPED_MARKER_PREFIX}{clean}: {reason} #########")
+    lines.append("")
+
+
 def get_ash_ignorespec_lines(
     path,
     ignorefiles: List[str] | None = None,
@@ -1032,15 +1199,6 @@ def get_ash_ignorespec_lines(
         # Fallback: collect ignore files via a walk (used when called standalone)
         all_ignores, _ = _collect_ignorefiles_and_all_files(path, ignorefiles, debug)
 
-    # Shallowest ignore file first, so that a deeper one's rules are added to the
-    # spec last and therefore win: igittigitt lets the last matching rule decide,
-    # and git gives precedence to the ignore file closest to the file being
-    # tested. The order has to be stated rather than taken from a set, because a
-    # set of strings iterates in hash order, which is randomized per process --
-    # a "!keep.tmp" in sub/deep/.gitignore would override "*.tmp" from
-    # sub/.gitignore on some runs of the same scan and lose on others.
-    all_ignores = sorted(set(all_ignores), key=lambda p: (len(Path(p).parts), p))
-
     # Ignore files named by the caller are the operator's choice and are read as
     # named. Every other one was found in the tree, and its text is copied into
     # ash-ignore-report.txt, so it is read under the scanned-tree rule: a link would
@@ -1048,11 +1206,53 @@ def get_ash_ignorespec_lines(
     # following a symlinked .gitignore in 2.32.
     named_by_caller = {os.path.join(path, extra) for extra in ignorefiles}
 
+    # Shallowest ignore file first, so that a deeper one's rules are added to the
+    # spec last and therefore win: igittigitt lets the last matching rule decide,
+    # and git gives precedence to the ignore file closest to the file being
+    # tested. The order has to be stated rather than taken from a set, because a
+    # set of strings iterates in hash order, which is randomized per process --
+    # a "!keep.tmp" in sub/deep/.gitignore would override "*.tmp" from
+    # sub/.gitignore on some runs of the same scan and lose on others.
+    #
+    # Depth is counted below the scan root, not from the filesystem root: counted
+    # by the path as spelled, an ignore file outside the tree sorted by its own
+    # absolute depth against tree files whose depth followed how --source was
+    # written, so whether its rules overrode a nested file's negation depended on
+    # a relative or an absolute source. A file outside the tree has its rules
+    # applied from the scan root (_confine_base_path), so it counts as a file at the
+    # root, after the tree's own files of that depth; a file the caller names in the
+    # tree sorts by its depth there, likewise after the tree's own files of that depth.
+    root_absolute = os.path.abspath(path)
+
+    def precedence(ignorefile: str) -> Tuple[int, bool, str]:
+        absolute = os.path.abspath(ignorefile)
+        try:
+            inside = os.path.commonpath([absolute, root_absolute]) == root_absolute
+        except ValueError:  # another drive
+            inside = False
+        depth = (
+            len(Path(os.path.relpath(absolute, root_absolute)).parts) if inside else 1
+        )
+        return depth, ignorefile in named_by_caller, ignorefile
+
+    all_ignores = sorted(set(all_ignores), key=precedence)
+
     lines = []
     for ignorefile in all_ignores:
         clean = _source_dir_marker(path, ignorefile)
         if ignorefile in named_by_caller:
             if not os.path.isfile(ignorefile):
+                # Named by the operator and not there (or not a file): said, like the
+                # tree-found file that is refused, with a line in the report. It was
+                # skipped with neither, so a mistyped --ignorefile excluded nothing
+                # and nothing said why.
+                _skip_ignore_file(
+                    lines,
+                    clean,
+                    "it is not a regular file"
+                    if os.path.exists(ignorefile)
+                    else "it does not exist",
+                )
                 continue
             with open(
                 ignorefile, errors=IGNORE_FILE_ERRORS, newline=IGNORE_FILE_NEWLINE
@@ -1062,16 +1262,7 @@ def get_ash_ignorespec_lines(
             try:
                 handle = open_in_scanned_tree(ignorefile, path)
             except TreeInputRefused as refused:
-                ASH_LOGGER.warning(
-                    f"Skipped ignore file '{refused.path}': {refused.reason}, so its "
-                    "rules were not applied",
-                    extra=NO_MARKUP,
-                )
-                # Recorded in the report as a comment, which every reader of the
-                # report already skips, so the skip is visible next to the rules
-                # that were applied.
-                lines.append(f"######### SKIPPED: {clean}: {refused.reason} #########")
-                lines.append("")
+                _skip_ignore_file(lines, clean, refused.reason, shown=refused.path)
                 continue
             except FileNotFoundError:
                 # Gone since the walk: what the isfile() check here used to skip. Any
@@ -1214,6 +1405,52 @@ def _git_trim_trailing_spaces(text: str) -> str:
     return text if last_space is None else text[:last_space]
 
 
+def _bracket_expression_end(tokens: Sequence[str], start: int) -> Optional[int]:
+    """The index of the token that closes the bracket expression opened at *start*.
+
+    ``[``, an optional ``!`` or ``^``, an optional first ``]`` that is a member, then
+    everything up to the next ``]``: how a glob reads a class. None when there is no
+    closing ``]``, which makes the ``[`` an ordinary character.
+    """
+    index = start + 1
+    if index < len(tokens) and tokens[index] in ("!", "^"):
+        index += 1
+    if index < len(tokens) and tokens[index] == "]":
+        index += 1
+    while index < len(tokens):
+        if tokens[index] == "]":
+            return index
+        index += 1
+    return None
+
+
+def _escaped_spaces_made_literal(tokens: Sequence[str]) -> List[str]:
+    """*tokens* with each escaped space (``\\ ``) written so igittigitt keeps it.
+
+    Outside a bracket expression an escaped space becomes the one-character class
+    ``[ ]``. Inside one it becomes a plain space, a member of that class:
+    ``[a\\ b]`` was rewritten to ``[a[ ]b]``, whose first ``]`` closes the class
+    early, so the rule named something else. igittigitt splits a pattern on an escaped
+    space and strips the parts; a plain space in a class is left alone.
+    """
+    result: List[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "[":
+            end = _bracket_expression_end(tokens, index)
+            if end is not None:
+                result.extend(
+                    " " if member == "\\ " else member
+                    for member in tokens[index : end + 1]
+                )
+                index = end + 1
+                continue
+        result.append("[ ]" if token == "\\ " else token)
+        index += 1
+    return result
+
+
 def gitignore_rule_for_igittigitt(line: str) -> str:
     """One ignore-file line, newline removed, as igittigitt must get it to read it as git does.
 
@@ -1245,7 +1482,7 @@ def gitignore_rule_for_igittigitt(line: str) -> str:
         else:
             tokens.append(text[index])
             index += 1
-    tokens = ["[ ]" if token == "\\ " else token for token in tokens]
+    tokens = _escaped_spaces_made_literal(tokens)
     start = 0
     while start < len(tokens) and tokens[start].isspace():
         tokens[start] = f"[{tokens[start]}]"
@@ -1360,6 +1597,22 @@ def _start_marker_path(stripped: str) -> Optional[str]:
     if len(stripped) < len(START_MARKER_PREFIX) + len(MARKER_SUFFIX):
         return None
     return stripped[len(START_MARKER_PREFIX) : len(stripped) - len(MARKER_SUFFIX)]
+
+
+def _check_rule_compiles(rule: str, base_path: str | Path) -> None:
+    """Raise what igittigitt raises when it cannot compile *rule*, as it would at match.
+
+    ``add_rule`` only builds the rule. igittigitt compiles the rule's glob the first
+    time a path is matched against it, so a pattern wcmatch refuses passed
+    ``add_rule`` and then raised out of the first match that reached it, out of the
+    scan set, though the pruning pass tolerates the same pattern. A parser holding
+    only this rule is asked about a path that is not a file, which makes it compile
+    every rule it holds, directory-only rules included, so the real parser never
+    holds a rule it cannot match.
+    """
+    probe = IgnoreParser()
+    probe.add_rule(rule, base_path=base_path)
+    probe.match(Path(os.path.abspath(base_path)) / "probe")
 
 
 def get_ash_ignorespec_with_attribution(
@@ -1494,6 +1747,7 @@ def get_ash_ignorespec_with_attribution(
 
         added_from = len(parser.rules)
         try:
+            _check_rule_compiles(rule, current_base_path)
             parser.add_rule(rule, base_path=current_base_path)
         except _IGNORE_RULE_ERRORS as error:
             # One pattern the parser refuses used to raise out of here and abort
@@ -1522,6 +1776,7 @@ def report_ignore_file_exclusions(
     debug: bool = False,
     pruned_counts: Optional[Dict[str, int]] = None,
     honored: bool = True,
+    skipped_ignore_files: int = 0,
 ) -> dict[str, int]:
     """Log how many files each ignore file removed from the scan set.
 
@@ -1555,6 +1810,9 @@ def report_ignore_file_exclusions(
 
     *honored* is False when the operator turned the repository's ignore files off,
     so none were read; the "no ignore files were found" line is then not logged.
+    *skipped_ignore_files* is how many ignore files were found and not read (refused,
+    or named by the caller and not there): when every one found was skipped, the
+    line says none could be applied, not that none were found.
 
     Returns:
         Marker to number of files removed, for every marker seen -- including
@@ -1571,12 +1829,13 @@ def report_ignore_file_exclusions(
     counts[BUNDLED_CDK_MARKER] = 0
     paths_by_marker: dict[str, list[str]] = {}
     unattributed: list[str] = []
+    root_absolute = os.path.abspath(path)
 
     for excluded_file in sorted(excluded):
         # The bundled aws-cdk tree first, because get_files_not_matching_spec drops it
         # before it consults the spec: an ignore rule that also matches one of its
         # files did not remove it.
-        if _is_bundled_cdk_path(excluded_file):
+        if _is_bundled_cdk_below(excluded_file, root_absolute):
             marker = BUNDLED_CDK_MARKER
             counts[marker] = counts.get(marker, 0) + 1
             paths_by_marker.setdefault(marker, []).append(excluded_file)
@@ -1604,7 +1863,15 @@ def report_ignore_file_exclusions(
     ]
     # With the repository's ignore files not honored, none were read, so "none were
     # found" would be untrue; scan_set says why they were not read instead.
-    if not ignore_file_markers and honored:
+    if not ignore_file_markers and honored and skipped_ignore_files:
+        ASH_LOGGER.info(
+            "None of the %d ignore file(s) found for %s could be applied (see the "
+            "warnings above), so no ignore rules removed anything from the scan set.",
+            skipped_ignore_files,
+            path,
+            extra=NO_MARKUP,
+        )
+    elif not ignore_file_markers and honored:
         ASH_LOGGER.info(
             "No ignore files were found under %s, so no ignore rules removed "
             "anything from the scan set.",
@@ -1711,12 +1978,35 @@ def get_files_not_matching_spec(
     # cfn_nag_scanner read, so CloudFormation analysis of that template stopped
     # with nothing logged to say so.
     forced_inclusions = _forced_inclusion_spec(path)
+    root_absolute = os.path.abspath(path)
+    forced_directories: Dict[Path, bool] = {}
+
+    def forced_in(file_path: Path) -> bool:
+        """Whether a forced inclusion names *file_path* itself.
+
+        A rule that names a file also names a directory of that name, and the
+        parser then reports everything below the directory as matched. A directory
+        called ``x.template.json`` made every file in it, ``.git`` internals and
+        user-ignored files among them, forced into the scan set. A file counts when
+        no directory above it, below the scan root, is matched by a forced rule.
+        """
+        if not forced_inclusions.match(file_path):
+            return False
+        for parent in file_path.parents:
+            if str(parent) == root_absolute or not parent.is_relative_to(root_absolute):
+                break
+            matched = forced_directories.get(parent)
+            if matched is None:
+                matched = forced_directories[parent] = forced_inclusions.match(parent)
+            if matched:
+                return False
+        return True
 
     included = []
     for inc_full in _all_files:
         # inc_full stays native throughout, because callers use it to open files.
         # Both helpers below normalize internally and only for their own comparison.
-        if _is_bundled_cdk_path(inc_full):
+        if _is_bundled_cdk_below(inc_full, root_absolute):
             continue
         if _left_out_as_a_link_leaving_the_tree(inc_full, path, links_not_scanned):
             continue
@@ -1726,7 +2016,7 @@ def get_files_not_matching_spec(
         # no rule of that directory's ignore file matched it and it stayed in the
         # scan set. abspath, not resolve: the rules are anchored on abspath bases.
         file_path = Path(os.path.abspath(inc_full))
-        if spec.match(file_path) and not forced_inclusions.match(file_path):
+        if spec.match(file_path) and not forced_in(file_path):
             continue
         clean = _source_dir_marker(path, inc_full)
         debug_echo(f"Matched file for scan set: {clean}", debug=debug)
@@ -2480,6 +2770,16 @@ def get_changed_files(
             extra=NO_MARKUP,
         )
         return None
+    except OSError as error:
+        # NotADirectoryError (a working directory that is a file), PermissionError and
+        # the rest of what starting git can raise: the same answer as a git that is not
+        # there, as the repository-root lookup gives for the same errors.
+        shown = Path(cwd).as_posix() if cwd is not None else "the working directory"
+        ASH_LOGGER.warning(
+            f"git could not be started in {shown}: {error}; reporting every finding",
+            extra=NO_MARKUP,
+        )
+        return None
 
     if result.returncode != 0:
         ASH_LOGGER.warning(
@@ -2784,19 +3084,34 @@ def scan_set_this_run_wrote(output: str | Path, run_id: object) -> Optional[List
 _PAIR_WRITE_LOCK = threading.Lock()
 
 
+def _run_settings(output_path: Path, run_id: str) -> Dict[str, Any]:
+    """The settings the run recorded beside its scan set, or ``{}``.
+
+    ``honor_ignore_files`` and ``workspace_output_dir``, as the call that wrote the
+    pair had them (:func:`_write_lists`). A later call of the run that does not state
+    its own takes these (:func:`scan_set`), so a scan set built again because the
+    first could not be read back is the one the run asked for.
+    """
+    record = _record_this_run_wrote(output_path, run_id)
+    settings = record.get("settings") if record is not None else None
+    return dict(settings) if isinstance(settings, dict) else {}
+
+
 def _write_lists(
     output_path: Path,
     ignore_lines: list[str],
     scan_set_lines: list[str],
     run_id: Optional[str],
     inputs: Optional[Mapping[str, Any]] = None,
+    settings: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Write the ignore report and the scan-set list, and, for a run, its record.
 
     Each file is replaced atomically, the record last, so no reader trusts a pair
     that is half written. Without *run_id* no record is written, and no caller
     reads the pair back. The record holds *inputs* (:func:`_scan_set_inputs`),
-    which a later call of the run must match to reuse the pair.
+    which a later call of the run must match to reuse the pair, and *settings*
+    (:func:`_run_settings`), which a later call that states none takes as its own.
 
     Each list is encoded once, and the record holds the digest of those bytes, not
     of the file as it is after the replace: another run writing to the same output
@@ -2831,6 +3146,7 @@ def _write_lists(
                 {
                     "run_id": run_id,
                     "inputs": None if inputs is None else dict(inputs),
+                    "settings": None if settings is None else dict(settings),
                     "sha256": digests if reusable else None,
                 },
                 indent=2,
@@ -2846,7 +3162,7 @@ def scan_set(
     debug: bool = False,
     print_results: bool = False,
     filter_pattern: Optional[re.Pattern] = None,
-    honor_ignore_files: bool = True,
+    honor_ignore_files: Optional[bool] = None,
     exclusions: Optional[Dict[str, Any]] = None,
     run_id: Optional[str] = None,
     write_lists: bool = False,
@@ -2887,6 +3203,10 @@ def scan_set(
             aws-cdk tree, and *output* when it is inside *source*). The
             ``honor_ignore_files`` config key and
             ``--no-honor-ignore-files`` set it; see :func:`honors_ignore_files`.
+            Left unstated (None), a call of a run that has a record in *output*
+            takes the run's setting, True when it has none: a scanner that builds
+            the scan set again, because the run's could not be read back, builds the
+            run's, not one that honors ignore files the run turned off.
         exclusions: When given, filled with the record of what the ignore files
             removed (:func:`ignore_file_exclusion_record`), which the orchestrator
             stores as ``metadata.ignore_file_exclusions``. Left empty when the
@@ -2898,7 +3218,9 @@ def scan_set(
         workspace_output_dir: In a workspace scan, the workspace's output
             directory, which holds every project's output and is left out of the
             walk like *output*: a project at the workspace root holds it
-            (``PluginContext.workspace_output_dir``).
+            (``PluginContext.workspace_output_dir``). Left unstated (None), a call
+            of a run that has a record in *output* takes the run's, as for
+            *honor_ignore_files*.
         links_not_scanned: When given, extended with ``{"path", "reason"}`` for
             each file link left out of the scan set because its target leaves
             *source* (:func:`_left_out_as_a_link_leaving_the_tree`): the path below
@@ -2924,6 +3246,23 @@ def scan_set(
         # only a string is a run's ID, and anything else reads nothing back.
         run_id = None
     inputs = _scan_set_inputs(source, ignorefile)
+
+    # What this call leaves unstated is the run's, when the run recorded it: the
+    # orchestrator states them, and the scanners that read the scan set do not.
+    recorded = _run_settings(Path(output), run_id) if output and run_id else {}
+    if honor_ignore_files is None:
+        was = recorded.get("honor_ignore_files")
+        honor_ignore_files = was if isinstance(was, bool) else True
+    if workspace_output_dir is None and isinstance(
+        recorded.get("workspace_output_dir"), str
+    ):
+        workspace_output_dir = recorded["workspace_output_dir"]
+    settings = {
+        "honor_ignore_files": honor_ignore_files,
+        "workspace_output_dir": None
+        if workspace_output_dir is None
+        else os.fspath(workspace_output_dir),
+    }
 
     if output and run_id is not None:
         reread = _lists_this_run_wrote(Path(output), run_id, inputs)
@@ -3010,6 +3349,11 @@ def scan_set(
             debug=debug,
             pruned_counts=pruned_counts,
             honored=honor_ignore_files,
+            skipped_ignore_files=sum(
+                1
+                for line in ashignore_content
+                if line.startswith(SKIPPED_MARKER_PREFIX)
+            ),
         )
         if exclusions is not None:
             removed = _files_removed_by_ignore_files(
@@ -3062,7 +3406,12 @@ def scan_set(
                     debug=debug,
                 )
                 _write_lists(
-                    Path(output), ashignore_content, ashscanset_list, run_id, inputs
+                    Path(output),
+                    ashignore_content,
+                    ashscanset_list,
+                    run_id,
+                    inputs,
+                    settings,
                 )
         if owned_by_another_call:
             # The run's first call wrote this pair for its own tree. This call
@@ -3075,18 +3424,20 @@ def scan_set(
                 debug=debug,
             )
 
-    if print_results:
-        # The names are the repository's: a control or a CI command form in one
-        # is shown, not obeyed.
-        for file in ashscanset_list:
-            print(shown_not_obeyed(file), file=sys.stdout)
-
+    # Filtered before it is printed, so what is shown is what is returned. The pair
+    # written above is the whole scan set, as before.
     if filter_pattern:
         ashscanset_list = [
             file
             for file in ashscanset_list
             if re.match(pattern=filter_pattern, string=file)
         ]
+
+    if print_results:
+        # The names are the repository's: a control or a CI command form in one
+        # is shown, not obeyed.
+        for file in ashscanset_list:
+            print(shown_not_obeyed(file), file=sys.stdout)
 
     # Each name exactly as the walk found it, or as _list_lines read it back. A
     # strip took the whitespace off a name that ends in a space, a tab or a
@@ -3103,12 +3454,25 @@ def main() -> int:
     """
     args = parse_args()
 
+    # --filter-pattern was parsed and never passed on, so it filtered nothing.
+    filter_pattern = None
+    if args.filter_pattern:
+        try:
+            filter_pattern = re.compile(args.filter_pattern)
+        except re.error as error:
+            print(
+                f"--filter-pattern is not a regular expression: {error}",
+                file=sys.stderr,
+            )
+            return 2
+
     file_list = scan_set(
         source=args.source,
         output=args.output,
         ignorefile=args.ignorefile,
         debug=args.debug,
         print_results=True,
+        filter_pattern=filter_pattern,
         honor_ignore_files=args.honor_ignore_files,
         write_lists=True,
     )

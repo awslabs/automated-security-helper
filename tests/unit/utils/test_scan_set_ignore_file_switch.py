@@ -593,14 +593,16 @@ class TestTheBundledCdkTreeIsAshsOwnExclusion:
         record = _record(root)
         assert record["by_ignore_file"] == {"pkg/.gitignore": 1}, record
 
-    def test_a_source_dir_inside_the_bundled_tree_counts_nothing_as_ignored(
+    def test_a_source_dir_inside_the_bundled_tree_is_scanned_like_any_other(
         self, tmp_path
     ):
-        """The bundled-tree test reads the walked path, so the record has to as well.
+        """The carve-out is for the aws-cdk tree inside the scanned code, judged by
+        the path below the scan root.
 
-        A source directory below ``node_modules/aws-cdk*`` leaves every file out of
-        the scan set, with the ignore files or without them. None of that is an
-        ignore file's doing, so the total is what turning them off adds back: 0.
+        A source directory that itself lies below ``node_modules/aws-cdk*`` was left
+        out of the scan set whole, with the ignore files or without them, and only
+        when the source was spelled as an absolute path. Scanned like any other, the
+        ignore files remove what they name, and the record counts it.
         """
         root = _build(
             tmp_path / "node_modules" / "aws-cdk-lib" / "proj",
@@ -614,12 +616,26 @@ class TestTheBundledCdkTreeIsAshsOwnExclusion:
         honored = _names(root, scan_set(source=str(root)))
         unhonored = _names(root, scan_set(source=str(root), honor_ignore_files=False))
         record = _record(root)
-        assert record["excluded_file_count"] == len(unhonored - honored) == 0, (
-            record,
+        assert "app.py" in honored, sorted(honored)
+        assert unhonored - honored == {"a.log", "build/x.txt"}, (
             sorted(honored),
             sorted(unhonored),
         )
-        assert record["by_ignore_file"] == {".gitignore": 0}, record
+        assert record["excluded_file_count"] == 2, record
+        assert record["by_ignore_file"] == {".gitignore": 2}, record
+
+    def test_a_relative_and_an_absolute_source_inside_it_agree(
+        self, tmp_path, monkeypatch
+    ):
+        root = _build(
+            tmp_path / "node_modules" / "aws-cdk-lib" / "proj",
+            {"app.py": "x = 1\n", "other.py": "y = 2\n"},
+        )
+        absolute = _names(root, scan_set(source=str(root)))
+        monkeypatch.chdir(root)
+        relative = {os.path.relpath(name, root) for name in scan_set(source=".")}
+
+        assert absolute == relative == {"app.py", "other.py"}
 
 
 class TestNotHonored:
