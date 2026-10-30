@@ -1107,10 +1107,18 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         f"{', ...' if len(not_ignored) > 3 else ''}), so its result "
                         "says nothing about them."
                     )
+                # Grouped by the LOWERCASED reason, once, so every test below
+                # reads the same spelling: three of the tool's own spellings are
+                # capitalized, and a capitalized unread spelling compared as
+                # written would miss the unread test and then lowercase into the
+                # known list, the one route by which an unknown spelling could
+                # grade SKIPPED.
                 by_reason: dict = {}
                 for entry in skipped:
                     if isinstance(entry, dict):
-                        by_reason.setdefault(str(entry.get("reason")), []).append(entry)
+                        by_reason.setdefault(
+                            str(entry.get("reason")).lower(), []
+                        ).append(entry)
                 where = (
                     f"{self.command} scanned no file below {Path(target).as_posix()}"
                 )
@@ -1136,9 +1144,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         "files on purpose."
                     )
                 unknown = sorted(
-                    r
-                    for r in by_reason
-                    if r.lower() not in KNOWN_SKIP_REASONS and r != "None"
+                    r for r in by_reason if r not in KNOWN_SKIP_REASONS and r != "none"
                 )
                 if unknown:
                     count = sum(len(by_reason[r]) for r in unknown)

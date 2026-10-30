@@ -439,6 +439,23 @@ def test_a_parse_failure_is_refused_as_a_covered_file(
         )
 
 
+def test_a_capitalized_unread_spelling_is_refused_as_unread(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The tool's enum capitalizes three spellings, and opengrep's own spellings
+    beyond the three it wrote are unmeasured, so a reason is compared lowercased
+    in every test: ``Too_big`` is the size refusal, not a reason that lowercases
+    into the known list and grades SKIPPED.
+
+    Fails at the tip that compared the unread and unparsed sets as written and
+    only the known set lowercased: ``Too_big`` graded SKIPPED.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+
+    with pytest.raises(ScannerError, match="did not read 1 file"):
+        _grade(scanner, tmp_path, [{"path": "src/big.py", "reason": "Too_big"}])
+
+
 def test_an_unknown_skip_reason_is_refused_not_graded_skipped(
     test_plugin_context, monkeypatch, tmp_path
 ):
