@@ -115,8 +115,9 @@ def _children_file(pid: Union[int, str], tid: Union[int, str]) -> str:
     return f"{_task(pid)}/{tid}/children"
 
 
-def test_a_thread_whose_children_file_cannot_be_read_gives_what_was_read(procfs):
-    """A permission error on one thread's file is not a reason to list /proc."""
+def test_a_thread_whose_children_file_cannot_be_read_is_skipped(procfs):
+    """A permission error on one thread's file is not a reason to list /proc, and
+    the threads after it still have their children read."""
     proc = procfs(
         {
             _task("self"): ["1", "2", "3"],
@@ -126,7 +127,22 @@ def test_a_thread_whose_children_file_cannot_be_read_gives_what_was_read(procfs)
         }
     )
 
-    assert landlock_exec._children() == [11, 12]
+    assert landlock_exec._children() == [11, 12, 13]
+    assert "/proc" not in proc.listed
+
+
+def test_a_thread_that_exited_between_the_listing_and_the_read_is_skipped(procfs):
+    """The first thread's files are gone (no thread dir left) while a later
+    thread has children: those are read, and the kernel is not taken to lack
+    children files."""
+    proc = procfs(
+        {
+            _task("self"): ["1", "2"],
+            _children_file("self", 2): b"12",
+        }
+    )
+
+    assert landlock_exec._children() == [12]
     assert "/proc" not in proc.listed
 
 

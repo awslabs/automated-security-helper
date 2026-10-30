@@ -491,12 +491,14 @@ def _children_files(pid: int = 0) -> Optional[List[int]]:
     """Children of ``pid`` (this process when 0) from /proc/<pid>/task/*/children.
 
     One read per thread. None when the kernel provides no children file
-    (CONFIG_PROC_CHILDREN off), so the caller lists /proc instead. Any other
-    failure gives the children read so far: a process that is gone has nothing
-    left to reap, and a file this process may not read is one a listing of /proc
-    could not read either, so neither is a reason to scan every entry of /proc.
-    Read as bytes: a text open may need to import a codec, and after Landlock the
-    interpreter's own library is not necessarily readable.
+    (CONFIG_PROC_CHILDREN off), so the caller lists /proc instead. A process that
+    is gone has nothing left to reap, so its children are the empty list. A
+    thread whose file cannot be read (it exited between the listing and the read,
+    or the file is not readable) is skipped and the other threads' children are
+    still read: a listing of /proc could not read that file either, so neither
+    failure is a reason to scan every entry of /proc. Read as bytes: a text open
+    may need to import a codec, and after Landlock the interpreter's own library
+    is not necessarily readable.
     """
     base = f"/proc/{pid}" if pid else "/proc/self"
     found: List[int] = []
@@ -511,13 +513,13 @@ def _children_files(pid: int = 0) -> Optional[List[int]]:
                 found += [int(child) for child in f.read().split()]
             read_one = True
         except FileNotFoundError:
-            # A thread that exited has no files left; a thread still there with
-            # no children file is a kernel that provides none.
+            # A thread still there with no children file is a kernel that
+            # provides none; a thread that exited has no files left, and the
+            # threads after it still have children to read.
             if not read_one and os.path.isdir(f"{base}/task/{tid}"):
                 return None
-            return found
         except OSError:
-            return found
+            pass
     return found
 
 
