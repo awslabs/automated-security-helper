@@ -103,6 +103,25 @@ def test_the_operators_pin_is_restored_when_the_section_is_absent(tmp_path):
     assert _pin_of(config) == "==1.2.3"
 
 
+@pytest.mark.parametrize("spelling", ["MyPluginScanner", "my_plugin_scanner"])
+def test_a_respelled_section_takes_the_pin_and_no_second_section_is_made(
+    tmp_path, spelling
+):
+    """The repository spells the plugin's section another way than the
+    operator's file. The section is the plugin's under either spelling (the
+    lookup folds case and separators), so the pin lands in the section the
+    plugin reads; a second section spelled the operator's way, holding only
+    the pin, was made beside it and is not."""
+    config = AshConfig.model_validate({"scanners": {spelling: {"options": {}}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    extra = config.scanners.model_extra or {}
+    assert list(extra) == [spelling], extra
+    assert extra[spelling]["options"]["tool_version"] == "==1.2.3"
+    assert _pin_of(config) == "==1.2.3"
+
+
 @pytest.fixture(autouse=True)
 def _no_operator_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ASH_CONFIG", raising=False)
