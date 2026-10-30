@@ -212,6 +212,49 @@ def _safe_directory_config(environ) -> dict:
     return kept
 
 
+def _commit_from_git(git_path: str) -> str | None:
+    """The commit id git names for this tree, or None when it names none.
+
+    None covers git failing (a repository it will not read, no repository at all)
+    and git answering with something that is not this tree's own top-level commit.
+    """
+    # Try to get commit details from current directory (source repo build).
+    # With no GIT_* variable from the caller: git exports GIT_DIR (and others) to
+    # its hooks, and pre-commit builds hook environments inside `git commit`, so
+    # git would read the repository being committed to instead of this tree.
+    # GIT_WORK_TREE alone moved the top level, and GIT_COMMON_DIR alone hid the
+    # repository. GIT_CEILING_DIRECTORIES is kept: it only stops git looking
+    # for a repository above the directories it names, so it can turn a tree
+    # unpacked inside another repository into no repository at all, never into
+    # a commit of the wrong one.
+    git_env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("GIT_") or k == "GIT_CEILING_DIRECTORIES"
+    }
+    # The one GIT_CONFIG_* setting that is kept: safe.directory, the caller's
+    # own statement that git may read this tree despite its owner.
+    git_env.update(_safe_directory_config(os.environ))
+    try:
+        git_result_full = subprocess.run(  # nosec B603 - This code is run during package build
+            [git_path, "rev-parse", "--show-prefix", "HEAD"],
+            capture_output=True,
+            cwd=ASH_REPO_ROOT.as_posix(),
+            env=git_env,
+            check=True,
+        )
+        # An empty prefix line, then the commit id: nothing else is the top level.
+        at_top_level = re.fullmatch(rb"\n([0-9a-f]{40})\n", git_result_full.stdout)
+        if at_top_level:
+            return at_top_level.group(1).decode("ascii")
+        _say(f"Not a commit of this source tree: {git_result_full.stdout!r}")
+    except subprocess.CalledProcessError as e:
+        _say(f"Git command failed in current directory: {e}")
+        if hasattr(e, "stderr") and e.stderr:
+            _say(f"stderr: {e.stderr.decode('utf-8', 'replace').strip()}")
+    return None
+
+
 class CustomBuildHook(BuildHookInterface):
     """Build hook to stage build assets before packaging."""
 
@@ -370,57 +413,30 @@ class CustomBuildHook(BuildHookInterface):
         git sees none of the caller's GIT_* variables except
         GIT_CEILING_DIRECTORIES and the safe.directory entries of GIT_CONFIG_COUNT,
         GIT_CONFIG_KEY_<n> and GIT_CONFIG_VALUE_<n> (every other config entry there
-        can move the worktree or run a program, so it is dropped). So a tree that has no .git of its own, built with
-        GIT_DIR (and GIT_WORK_TREE) naming its repository from outside, is
-        treated as a tree with no git metadata: it keeps an earlier record or
-        records "unknown-commit". That is accepted: the alternative would read whichever repository the caller's
-        environment named, which inside a `git commit` hook is the one being
-        committed to, not this tree's.
+        can move the worktree or run a program, so it is dropped). So a tree that
+        has no .git of its own, built with GIT_DIR (and GIT_WORK_TREE) naming its
+        repository from outside, is treated as a tree with no git metadata: it keeps
+        an earlier record or records "unknown-commit". That is accepted: the
+        alternative would read whichever repository the caller's environment named,
+        which inside a `git commit` hook is the one being committed to, not this
+        tree's.
 
-        When git cannot name the commit, a tree with no .git of its own (an
-        unpacked sdist) keeps the commit id an earlier build recorded; a checkout
-        records "unknown-commit" instead, since its earlier record may be of
-        another commit.
+        When git cannot name the commit, or is not installed, a tree with no .git
+        of its own (an unpacked sdist) keeps the commit id an earlier build
+        recorded; a checkout does not, since its earlier record may be of another
+        commit. With no usable record the result is "no-git-available" where git is
+        missing and "unknown-commit" where it is not.
         """
         git_path = shutil.which("git")
         if not git_path:
+            # Not an early return: a wheel built from an sdist on a host without
+            # git still has the commit the sdist recorded, which the fallback
+            # below reads.
             _say("Warning: git command not found")
-            return "no-git-available"
-
-        # Try to get commit details from current directory (source repo build).
-        # With no GIT_* variable from the caller: git exports GIT_DIR (and others) to
-        # its hooks, and pre-commit builds hook environments inside `git commit`, so
-        # git would read the repository being committed to instead of this tree.
-        # GIT_WORK_TREE alone moved the top level, and GIT_COMMON_DIR alone hid the
-        # repository. GIT_CEILING_DIRECTORIES is kept: it only stops git looking
-        # for a repository above the directories it names, so it can turn a tree
-        # unpacked inside another repository into no repository at all, never into
-        # a commit of the wrong one.
-        git_env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith("GIT_") or k == "GIT_CEILING_DIRECTORIES"
-        }
-        # The one GIT_CONFIG_* setting that is kept: safe.directory, the caller's
-        # own statement that git may read this tree despite its owner.
-        git_env.update(_safe_directory_config(os.environ))
-        try:
-            git_result_full = subprocess.run(  # nosec B603 - This code is run during package build
-                [git_path, "rev-parse", "--show-prefix", "HEAD"],
-                capture_output=True,
-                cwd=ASH_REPO_ROOT.as_posix(),
-                env=git_env,
-                check=True,
-            )
-            # An empty prefix line, then the commit id: nothing else is the top level.
-            at_top_level = re.fullmatch(rb"\n([0-9a-f]{40})\n", git_result_full.stdout)
-            if at_top_level:
-                return at_top_level.group(1).decode("ascii")
-            _say(f"Not a commit of this source tree: {git_result_full.stdout!r}")
-        except subprocess.CalledProcessError as e:
-            _say(f"Git command failed in current directory: {e}")
-            if hasattr(e, "stderr") and e.stderr:
-                _say(f"stderr: {e.stderr.decode('utf-8', 'replace').strip()}")
+        else:
+            commit = _commit_from_git(git_path)
+            if commit:
+                return commit
 
         # Fallback: the record an sdist build left, for a wheel built from that sdist.
         # Only a tree with no .git of its own can be that wheel's source: in a
@@ -439,5 +455,7 @@ class CustomBuildHook(BuildHookInterface):
                 return existing_sha
 
         # Final fallback
+        if not git_path:
+            return "no-git-available"
         _say("Unable to determine commit SHA, using fallback")
         return "unknown-commit"

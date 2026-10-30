@@ -25,6 +25,9 @@ and a record of a commit id records "unknown-commit"; the same record in a tree 
 no .git is kept, which is the sdist case. Only a 40-digit lowercase commit id is
 reused; the placeholders, a branch name, "HEAD", and ids of any other length or case
 read as no record.
+
+A host with no git on PATH takes the same fallback: it keeps an sdist's record, and
+records "no-git-available" only when there is none to keep.
 """
 
 from __future__ import annotations
@@ -140,6 +143,46 @@ def test_only_a_commit_id_is_reused(monkeypatch, tmp_path, recorded):
     _record(hook, recorded)
 
     assert _get(hook) == "unknown-commit"
+
+
+def _git_is_not_installed(monkeypatch, hook) -> None:
+    """No git on PATH; running anything would be a bug, so it fails the test."""
+    monkeypatch.setattr(hook.shutil, "which", lambda name: None)
+
+    def run(*args, **kwargs):
+        raise AssertionError(f"nothing is run without git: {args!r}")
+
+    monkeypatch.setattr(hook.subprocess, "run", run)
+
+
+def test_a_host_without_git_keeps_the_record_an_sdist_left(monkeypatch, tmp_path):
+    """Red at the base: the missing-git arm returned "no-git-available" before the
+    record fallback was read, so a wheel built from an sdist on a host without git
+    lost the commit the sdist recorded."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _git_is_not_installed(monkeypatch, hook)
+    sha = _commit_id()
+    _record(hook, sha)
+
+    assert _get(hook) == sha
+
+
+def test_a_host_without_git_and_without_a_record_says_so(monkeypatch, tmp_path):
+    """The control: green at the base and the fix."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _git_is_not_installed(monkeypatch, hook)
+
+    assert _get(hook) == "no-git-available"
+
+
+def test_a_checkout_without_git_does_not_reuse_an_earlier_record(monkeypatch, tmp_path):
+    """A tree with a .git entry never takes the record, git installed or not."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _git_is_not_installed(monkeypatch, hook)
+    _record(hook, _commit_id())
+    (hook.ASH_REPO_ROOT / ".git").mkdir()
+
+    assert _get(hook) == "no-git-available"
 
 
 def test_a_lowercase_commit_id_is_reused(monkeypatch, tmp_path):
