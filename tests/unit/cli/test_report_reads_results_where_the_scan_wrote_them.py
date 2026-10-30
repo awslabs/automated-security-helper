@@ -155,6 +155,27 @@ def test_a_path_the_user_cannot_search_reads_as_present(tmp_path):
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0, reason="root searches any directory"
 )
+def test_a_locked_path_is_present_whatever_path_exists_answers(tmp_path, monkeypatch):
+    """From Python 3.14 on, ``Path.exists`` answers False for a path the user
+    cannot reach instead of raising, so a check built on it read the path as
+    absent there and kept the two wrong answers; the check reads the path with
+    ``os.stat``. ``Path.exists`` is pinned to the 3.14 answer so the test holds on
+    every version."""
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    probe = locked / "ash.yaml"
+    monkeypatch.setattr(Path, "exists", lambda self, **kwargs: False)
+    locked.chmod(0o000)
+    try:
+        assert _exists(probe) is True
+    finally:
+        locked.chmod(0o700)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory modes are POSIX")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root searches any directory"
+)
 def test_a_config_the_user_cannot_reach_is_refused_with_the_real_cause(tmp_path):
     """It was refused as "Configuration file not found"; the file is there."""
     results = _write_results(tmp_path / "out")
