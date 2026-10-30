@@ -227,6 +227,41 @@ def test_a_threshold_read_from_the_environment_grades_and_is_not_published(
     # Not published: no entry for bandit, so a reader grades it by the project's.
     assert entry.scanner_thresholds == {}
     assert "CRITICAL" not in outcome.results_path.read_text("utf-8")
+    # Red at the base: nothing said the fallback was not the verdict's gate, so
+    # the merged reporters and the result filters regraded bandit's HIGH at
+    # MEDIUM (actionable) while the verdict had not counted it. The name is
+    # published, the value still is not.
+    assert entry.withheld_scanner_thresholds == ["bandit"]
+    assert entry.scanner_threshold_is_withheld("bandit") is True
+    assert entry.scanner_threshold_is_withheld("semgrep") is False
+    assert entry.threshold_for_scanner("bandit") == entry.severity_threshold
+
+
+def test_no_withheld_threshold_is_recorded_when_none_came_from_the_environment(
+    tmp_path, monkeypatch
+):
+    """Control: a scanner whose own threshold is in the config is published, not
+    withheld, and the withheld list is empty."""
+    monkeypatch.setattr(
+        ScannerStatisticsCalculator,
+        "get_scanner_threshold_details",
+        _threshold_details({"bandit": "CRITICAL"}),
+    )
+    _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+    FakeOrchestrator.behaviour["api"] = {
+        "sarif": _sarif_of(_finding("bandit"), _finding("semgrep")),
+        "scanner_results": {
+            "bandit": _scanner("PASSED"),
+            "semgrep": _scanner("PASSED"),
+        },
+    }
+
+    outcome = _run(tmp_path, plan)
+    entry = outcome.payload.projects[0]
+
+    assert entry.scanner_thresholds == {"bandit": "CRITICAL"}
+    assert entry.withheld_scanner_thresholds == []
+    assert entry.scanner_threshold_is_withheld("bandit") is False
 
 
 def _config_with_bandit_at(threshold: str):

@@ -466,8 +466,29 @@ class WorkspaceProjectResult(RecordModel):
                 "threshold the scan read from an environment variable is not "
                 "listed either: the environment's value is not published here, "
                 "as no report surface prints it, so a reader grades that scanner "
-                "by severity_threshold. Empty in a workspace file written before "
+                "by severity_threshold; its name is in "
+                "withheld_scanner_thresholds, so the reader can tell that grade "
+                "from the verdict's. Empty in a workspace file written before "
                 "the field existed."
+            ),
+        ),
+    ]
+    withheld_scanner_thresholds: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "The scanners (as properties.scanner_name records them) whose own "
+                "threshold the verdict graded by but whose value is withheld from "
+                "scanner_thresholds because the scan read it from an environment "
+                "variable. The names only, never the values. A reader that "
+                "regrades a finding of such a scanner (threshold_for_scanner "
+                "answers severity_threshold for it) is told here that the "
+                "verdict's gate was another, undisclosed one, so it can defer to "
+                "the carried actionable counts or flag the finding instead of "
+                "silently grading it by the project gate. Empty when no threshold "
+                "was withheld, and in a workspace file written before the field "
+                "existed."
             ),
         ),
     ]
@@ -819,10 +840,27 @@ class WorkspaceProjectResult(RecordModel):
         finding attributed to this project call this instead of reading one of
         the two fields, so they cannot pick the project gate for a scanner the
         verdict judged by its own.
+
+        One answer is knowingly not the verdict's: a scanner whose own threshold
+        the scan read from an environment variable has no entry (the value is
+        withheld) and answers ``severity_threshold`` here, as it always did.
+        :meth:`scanner_threshold_is_withheld` says when that is so, and a reader
+        that would otherwise grade such a finding by the project gate can defer
+        to the carried actionable counts or flag it instead.
         """
         if scanner and scanner in self.scanner_thresholds:
             return self.scanner_thresholds[scanner]
         return self.severity_threshold
+
+    def scanner_threshold_is_withheld(self, scanner: Optional[str]) -> bool:
+        """Whether *scanner*'s own threshold graded the verdict but is withheld.
+
+        True for a scanner named in ``withheld_scanner_thresholds``: the scan
+        read its threshold from an environment variable, the value is not
+        published, and :meth:`threshold_for_scanner` answers the project gate for
+        it, which is not the gate the verdict used.
+        """
+        return bool(scanner) and scanner in self.withheld_scanner_thresholds
 
     def as_skipped_project(self) -> Optional[SkippedProject]:
         """This project as a ``skipped_projects`` payload entry, or None."""

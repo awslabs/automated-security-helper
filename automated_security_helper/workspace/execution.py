@@ -1639,6 +1639,11 @@ def _scan_one_project(
         scanner_thresholds=_recorded_scanner_thresholds(
             scanner_threshold, statuses, results_list, environment_read
         ),
+        # The names of the scanners left out of that map because their value
+        # came from the environment: a reader then knows the project gate it
+        # falls back to for them is not the gate the verdict used. Names only;
+        # the values stay unpublished.
+        withheld_scanner_thresholds=sorted(environment_read),
         finding_count=len(unsuppressed),
         actionable_finding_count=actionable,
         policy_origin_finding_count=len(policy_origin),
