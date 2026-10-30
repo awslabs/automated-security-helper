@@ -138,6 +138,15 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         )
         return super().model_post_init(context)
 
+    @classmethod
+    def _declared_config_model(cls) -> type[ConverterPluginConfigBase] | None:
+        """The config model this converter class declares, or None.
+
+        Read from the class itself: a class taken from a value (``type(self)``)
+        handed to a call is what the shown-text guard refuses in the package.
+        """
+        return declared_config_model(cls, ConverterPluginConfigBase)
+
     def _default_config(self) -> ConverterPluginConfigBase:
         """The config a converter runs with when it is given none.
 
@@ -149,7 +158,7 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         converter that declares no model, or one whose model needs a section to
         be built.
         """
-        declared = declared_config_model(type(self), ConverterPluginConfigBase)
+        declared = self._declared_config_model()
         if declared is None:
             return ConverterPluginConfigBase()
         try:
