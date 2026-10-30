@@ -316,7 +316,8 @@ def _invocation_failure(response: Dict[str, Any]) -> Optional[str]:
     key alone does not. Before this every response with an error key read as
     "could not be started", a tool that ran and died on a signal, or whose output
     ASH failed to record, included; and every timeout read as "was killed", one
-    ASH could not end, which may still be running, included.
+    ASH could not end (the tool possibly left alive), included. The endings
+    themselves are spelled once, in ``subprocess_utils``.
     """
     if response.get("timed_out"):
         ending = (
