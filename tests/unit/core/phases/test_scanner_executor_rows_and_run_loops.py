@@ -13,8 +13,8 @@ Per target:
 - the TRACE record of the raw result is formatted only at TRACE;
 - False alone is MISSING; an empty dict or list is refused as ungradable;
 - a target scan() never ran on records no times, counters or unscanned inputs;
-- a "FAILED" dict is read like "failed", a failed dict with no errors gets a
-  reason, and the refusal names the plugin's status redacted;
+- a failed dict with no errors gets a reason, and the refusal of any other
+  status names the plugin's status redacted;
 - a negative counter is warned about once; unevaluated targets and a recorded
   timeout reach a row that is already ERROR; a skipped reason writes the home
   directory as a tilde; the row is named as the task is.
@@ -22,11 +22,13 @@ Per target:
 The run loops:
 
 - a scanner with no row is not recorded as completed;
-- a failed scanner is not shown "Completed scan" in green;
+- a failed scanner is not shown "Completed scan" in green; a run that did not
+  succeed is shown "Scan failed" in red;
 - SCAN_COMPLETE subscribers get a copy of the remaining list, in both modes;
 - the parallel loop emits SCAN_START, keys tasks by position, records the future's
-  own plugin, sets the scan's cancel event on a cancel, and announces a scanner
-  whose bookkeeping raised as complete, with the processor error redacted.
+  own plugin and sets the scan's cancel event on a cancel; a scanner whose
+  bookkeeping raised leaves the remaining list without a SCAN_COMPLETE of its
+  own (a failure is not a completion), with the processor error redacted.
 """
 
 from __future__ import annotations
@@ -353,18 +355,6 @@ class TestOneTargetsRow:
         assert row.targets_failed == 0
         assert row.inputs_not_scanned == []
 
-    def test_a_failed_status_is_read_whatever_its_case(self, tmp_path):
-        context = _context(tmp_path)
-
-        row = _one_row(
-            context, _scanner(context, {"status": "FAILED", "errors": ["tool said no"]})
-        )
-
-        assert row.status == ScannerStatus.ERROR
-        assert not any("does not say its tool completed" in e for e in row.errors), (
-            row.errors
-        )
-
     def test_a_failed_dict_with_no_errors_gets_a_reason(self, tmp_path):
         context = _context(tmp_path)
 
@@ -463,6 +453,9 @@ class TestTheRunLoops:
         assert executor.completed_scanners == []
 
     def test_a_failed_scanner_is_not_shown_completed_in_green(self, tmp_path):
+        """A scan() that raised and a dict that said "failed" each grade their
+        target ERROR inside the per-target handler, so the scanner's turn is a
+        recorded one with an ERROR row: shown with errors, never green."""
         context = _context(tmp_path)
         raising = _scanner(context, RuntimeError("the tool exploded"))
         errored = _scanner(context, {"status": "failed", "errors": ["tool said no"]})
@@ -486,8 +479,29 @@ class TestTheRunLoops:
         assert not any(
             d.startswith(("[green](raising)", "[green](errored)")) for d in descriptions
         ), descriptions
-        assert any("(raising)" in d and d.startswith("[red]") for d in descriptions)
+        assert any("(raising)" in d and "with errors" in d for d in descriptions)
         assert any("(errored)" in d and "with errors" in d for d in descriptions)
+
+    def test_a_run_that_did_not_succeed_is_shown_failed_in_red(
+        self, tmp_path, monkeypatch
+    ):
+        """The run itself failed (the executor's own wrapper says so): red."""
+        context = _context(tmp_path)
+        executor = _executor(
+            context, [("broken", _scanner(context, _sarif()), _targets(context))]
+        )
+        monkeypatch.setattr(
+            executor, "_safe_execute_scanner", lambda name, plugin, targets: ([], False)
+        )
+
+        executor.run_sequential(AshAggregatedResults())
+
+        descriptions = [
+            call.kwargs.get("description", "")
+            for call in executor.progress_display.update_task.call_args_list
+        ]
+        assert "[red](broken) Scan failed" in descriptions, descriptions
+        assert executor.completed_scanners == []
 
     def test_sequential_scan_complete_passes_a_copy_of_the_remaining_list(
         self, tmp_path
@@ -592,11 +606,13 @@ class TestTheRunLoops:
         assert waited.get("set") is True, waited
         assert waited["seconds"] < 4, waited
 
-    def test_a_scanner_whose_bookkeeping_raised_is_announced_complete(
+    def test_a_scanner_whose_bookkeeping_raised_leaves_the_remaining_list_unannounced(
         self, tmp_path, monkeypatch
     ):
-        """The progress update raising sends the scanner down the except path:
-        it is still taken off the remaining list, SCAN_COMPLETE names it, and the
+        """The progress update raising sends the first scanner down the except
+        path: it is taken off the remaining list, so the next scanner's
+        SCAN_COMPLETE no longer names it as running, but no SCAN_COMPLETE names
+        the failed scanner itself (a failure is not a completion), and the
         processor error of its failure container is logged redacted."""
         from automated_security_helper.plugins.events import AshEventType
 
@@ -616,15 +632,19 @@ class TestTheRunLoops:
         context = _context(tmp_path)
         executor = _executor(
             context,
-            [("only", _scanner(context, _sarif()), _targets(context))],
+            [
+                ("first", _scanner(context, _sarif()), _targets(context)),
+                ("second", _scanner(context, _sarif()), _targets(context)),
+            ],
             notify_fn=_notify,
             process_results_fn=_process,
         )
         raised = []
 
         def _update_task(**kwargs):
-            # Once: the first completion update, inside the try. The except
-            # path's own update must go through, or the raise would escape it.
+            # Once: the first scanner's completion update, inside the try. The
+            # except path's own update must go through, or the raise would
+            # escape it.
             if kwargs.get("completed") == 100 and not raised:
                 raised.append(True)
                 raise RuntimeError("the display is gone")
@@ -633,6 +653,6 @@ class TestTheRunLoops:
 
         executor.run_sequential(AshAggregatedResults())
 
-        assert completions == [("only", [])], completions
+        assert completions == [("second", [])], completions
         assert any("Failed to process error results" in line for line in errors), errors
         assert not any(CANARY in line for line in errors), errors

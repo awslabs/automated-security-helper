@@ -770,16 +770,18 @@ class ScannerExecutor:
     ) -> None:
         """Take *scanner_name* off *remaining_scanners* and announce SCAN_COMPLETE.
 
-        One path for every way a scanner's turn ends: results recorded, or a
-        failure container filed for it. Left to the recorded path alone, a scanner
-        whose bookkeeping raised stayed in the remaining list, so every later
-        SCAN_COMPLETE named it as still running and the completion logger never
-        said the scan was complete. The subscriber gets a copy of the list: the
-        executor keeps changing its own, and a subscriber that kept the live list
-        (as the sequential loop passed it) saw it change under it.
+        The path for a scanner whose results were recorded. A scanner whose turn
+        ended in a failure container is taken off the list too
+        (``_drop_from_remaining``) but not announced: SCAN_COMPLETE is the
+        completion event, and a subscriber reading it as "this scanner
+        completed" would read a failure as a completion. Left in the list, the
+        failed scanner was named as still running by every later SCAN_COMPLETE
+        and the completion logger never said the scan was complete. The
+        subscriber gets a copy of the list: the executor keeps changing its own,
+        and a subscriber that kept the live list (as the sequential loop passed
+        it) saw it change under it.
         """
-        if scanner_name in remaining_scanners:
-            remaining_scanners.remove(scanner_name)
+        self._drop_from_remaining(scanner_name, remaining_scanners)
         try:
             from automated_security_helper.plugins.events import AshEventType
 
@@ -807,27 +809,35 @@ class ScannerExecutor:
             )
 
     @staticmethod
-    def _completion_description(
-        scanner_name: str,
-        scanner_succeeded: bool,
-        results_list: List[ScanResultsContainer],
-    ) -> str:
-        """The progress line for a scanner whose turn ended with results recorded.
+    def _drop_from_remaining(scanner_name: str, remaining_scanners: List[str]) -> None:
+        """Take *scanner_name* off *remaining_scanners*; its turn is over.
 
-        Green only for a run that returned with no ERROR row. A run that raised
-        (its results are a failure container) or graded a target ERROR was shown
-        "[green] Completed scan" like a clean one, so the progress display said
-        the opposite of the row.
+        Called for a recorded turn before SCAN_COMPLETE is announced, and for a
+        failed turn alone: the failure is in its container, not an event.
         """
-        shown = escape_markup(scanner_name)
+        if scanner_name in remaining_scanners:
+            remaining_scanners.remove(scanner_name)
+
+    @staticmethod
+    def _completion_outcome(
+        scanner_succeeded: bool, results_list: List[ScanResultsContainer]
+    ) -> str:
+        """How a scanner's recorded turn ended: "failed", "errors" or "clean".
+
+        The run loops print one description per outcome, written inline where
+        they call the progress display (the markup check reads each one there).
+        Green is for "clean" only: a run that raised (its results are a failure
+        container) or graded a target ERROR was shown "[green] Completed scan"
+        like a clean one, so the progress display said the opposite of the row.
+        """
         if not scanner_succeeded:
-            return f"[red]({shown}) Scan failed"
+            return "failed"
         if any(
             getattr(container, "status", None) == ScannerStatus.ERROR
             for container in results_list
         ):
-            return f"[yellow]({shown}) Completed scan with errors"
-        return f"[green]({shown}) Completed scan"
+            return "errors"
+        return "clean"
 
     def _process_each(
         self,
@@ -1688,15 +1698,12 @@ class ScannerExecutor:
                             ):
                                 container.status = ScannerStatus.ERROR
                                 # "failed" dicts carry their own errors: the template's
-                                # and the scan phase's failure responses. Read case-
-                                # insensitively, as the completed set above is: a
-                                # "FAILED" that carried its tool's errors got the
-                                # refusal below as its first reason instead.
+                                # and the scan phase's failure responses. Any other
+                                # status, "FAILED" and "Failed" among them, is refused
+                                # by name below: only the one spelling the templates
+                                # write says the tool reported its own failure.
                                 status = raw_results["status"]
-                                failed_status = (
-                                    isinstance(status, str)
-                                    and status.strip().lower() == "failed"
-                                )
+                                failed_status = status == "failed"
                                 if not failed_status:
                                     # The status is the plugin's own text, redacted
                                     # as every other plugin-sourced text here is.
@@ -2334,14 +2341,28 @@ class ScannerExecutor:
                         )
                         self.completed_scanners.append(scanner_plugin)
 
-                    self.progress_display.update_task(
-                        phase=ExecutionPhase.SCAN,
-                        task_id=scanner_task,
-                        completed=100,
-                        description=self._completion_description(
-                            scanner_name, scanner_succeeded, results_list
-                        ),
-                    )
+                    outcome = self._completion_outcome(scanner_succeeded, results_list)
+                    if outcome == "failed":
+                        self.progress_display.update_task(
+                            phase=ExecutionPhase.SCAN,
+                            task_id=scanner_task,
+                            completed=100,
+                            description=f"[red]({escape_markup(scanner_name)}) Scan failed",
+                        )
+                    elif outcome == "errors":
+                        self.progress_display.update_task(
+                            phase=ExecutionPhase.SCAN,
+                            task_id=scanner_task,
+                            completed=100,
+                            description=f"[yellow]({escape_markup(scanner_name)}) Completed scan with errors",
+                        )
+                    else:
+                        self.progress_display.update_task(
+                            phase=ExecutionPhase.SCAN,
+                            task_id=scanner_task,
+                            completed=100,
+                            description=f"[green]({escape_markup(scanner_name)}) Completed scan",
+                        )
                     self._announce_scan_complete(
                         scanner_name, remaining_scanners, completed + 1, total
                     )
@@ -2422,10 +2443,9 @@ class ScannerExecutor:
                         aggregated_results,
                     )
                 # The scanner's turn is over, its failure recorded: it is not
-                # still running, and the subscribers are told so.
-                self._announce_scan_complete(
-                    scanner_name, remaining_scanners, completed + 1, total
-                )
+                # still running, so it leaves the remaining list, but a failure
+                # is not a completion and SCAN_COMPLETE does not name it.
+                self._drop_from_remaining(scanner_name, remaining_scanners)
             finally:
                 completed += 1
 
@@ -2640,14 +2660,30 @@ class ScannerExecutor:
                                 self.completed_scanners.append(plugin_inst)
 
                         if task_id is not None:
-                            self.progress_display.update_task(
-                                phase=ExecutionPhase.SCAN,
-                                task_id=task_id,
-                                completed=100,
-                                description=self._completion_description(
-                                    scanner_name, scanner_succeeded, results_list
-                                ),
+                            outcome = self._completion_outcome(
+                                scanner_succeeded, results_list
                             )
+                            if outcome == "failed":
+                                self.progress_display.update_task(
+                                    phase=ExecutionPhase.SCAN,
+                                    task_id=task_id,
+                                    completed=100,
+                                    description=f"[red]({escape_markup(scanner_name)}) Scan failed",
+                                )
+                            elif outcome == "errors":
+                                self.progress_display.update_task(
+                                    phase=ExecutionPhase.SCAN,
+                                    task_id=task_id,
+                                    completed=100,
+                                    description=f"[yellow]({escape_markup(scanner_name)}) Completed scan with errors",
+                                )
+                            else:
+                                self.progress_display.update_task(
+                                    phase=ExecutionPhase.SCAN,
+                                    task_id=task_id,
+                                    completed=100,
+                                    description=f"[green]({escape_markup(scanner_name)}) Completed scan",
+                                )
 
                         with remaining_scanners_lock:
                             self._announce_scan_complete(
@@ -2747,15 +2783,12 @@ class ScannerExecutor:
                             aggregated_results,
                         )
                     # The scanner's turn is over, its failure recorded: it is
-                    # not still running, and the subscribers are told so.
+                    # not still running, so it leaves the remaining list, but a
+                    # failure is not a completion and SCAN_COMPLETE does not
+                    # name it.
                     with remaining_scanners_lock:
-                        self._announce_scan_complete(
-                            scanner_name,
-                            remaining_scanners,
-                            completed_count + 1,
-                            total,
-                        )
-                    # A recorded failure is a completion too.
+                        self._drop_from_remaining(scanner_name, remaining_scanners)
+                    # A recorded failure counts toward the run's progress.
                     completed_count += 1
 
             if cancelled:
