@@ -214,6 +214,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Sized,
     Tuple,
     Type,
@@ -2151,6 +2152,52 @@ def _record_merge_provenance(
     )
 
 
+def _converter_acceptance_ids(merged: AshAggregatedResults, config: Any) -> Set[str]:
+    """The suppression ids the shards' convert phases registered as used.
+
+    The convert phase puts two kinds of id in ``used_suppressions``: the
+    ``accepted_by`` a converter wrote on a failed-input record when a suppression
+    accepted it, and, for an accepted record carrying no id (a write that failed,
+    a third-party converter's record, a results file written before the field
+    existed), the written id of the entry its path matches now. Both are read
+    back here the way the phase derived them, from the merged converter rows,
+    so the ``--ignore-suppressions`` clear keeps exactly what the phase recorded.
+    A record whose path matches no entry any more names nothing, as it would
+    there.
+    """
+    from automated_security_helper.utils.suppression_matcher import (
+        accepting_unconverted_input,
+        recorded_suppressions,
+        written_suppression_id,
+    )
+
+    ids: Set[str] = set()
+    uncovered: List[FailedInputInfo] = []
+    for row in merged.converter_results.values():
+        for record in getattr(row, "failed_inputs", None) or []:
+            if not getattr(record, "accepted", False):
+                continue
+            if getattr(record, "kind", None) != "input":
+                continue
+            carried = getattr(record, "accepted_by", None)
+            if isinstance(carried, str) and carried:
+                ids.add(carried)
+            else:
+                uncovered.append(record)
+    if not uncovered:
+        return ids
+    settings = getattr(config, "global_settings", None)
+    suppressions = getattr(settings, "suppressions", None)
+    recorded = recorded_suppressions(config)
+    for record in uncovered:
+        accepting = accepting_unconverted_input(
+            str(getattr(record, "path", "")), suppressions
+        )
+        if accepting is not None:
+            ids.add(written_suppression_id(accepting, recorded))
+    return ids
+
+
 def apply_aggregated_suppressions(
     merged: AshAggregatedResults, plugin_context: PluginContext
 ) -> AshAggregatedResults:
@@ -2254,7 +2301,20 @@ def apply_aggregated_suppressions(
             # never calls apply_suppressions_to_sarif, which is what fills it, so
             # its results record none, and a merged results file whose SARIF now
             # carries none of the shards' suppressions must not say they matched.
-            merged.used_suppressions.clear()
+            # The convert phase registers another kind of use in the same set:
+            # the id of the ``ash-unconverted-input`` suppression that accepted
+            # a failed input on a shard. The lift undoes nothing of that (the
+            # input was never converted, flag or no flag), so those ids stay.
+            merged.used_suppressions.intersection_update(
+                _converter_acceptance_ids(merged, plugin_context.config)
+            )
+            # Written into the results for a later ``ash report`` over the file,
+            # whose context carries no flag: the unused-suppressions reporter
+            # reads this field and says the suppressions were not evaluated,
+            # instead of subtracting the emptied record from the configured list
+            # and offering every entry as unused. ReportMetadata admits the
+            # field (extra="allow") ahead of its declaration.
+            merged.metadata.suppressions_ignored = True
             _warn_ignore_paths_the_flag_cannot_lift(plugin_context.config)
 
     # Recomputed unconditionally, not only when suppressions ran. Under

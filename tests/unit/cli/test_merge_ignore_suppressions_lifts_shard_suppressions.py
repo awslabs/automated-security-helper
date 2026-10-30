@@ -21,6 +21,8 @@ it does on a scan run with the flag.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -28,7 +30,14 @@ from automated_security_helper.cli.merge import (
     apply_aggregated_suppressions,
     lift_ash_suppressions,
 )
+from automated_security_helper.models.asharp_model import (
+    ConverterStatusInfo,
+    FailedInputInfo,
+)
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
+from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+    UnusedSuppressionsReporter,
+)
 from automated_security_helper.schemas.sarif_schema_model import (
     Kind1,
     PropertyBag,
@@ -289,3 +298,128 @@ def test_a_marked_suppression_is_lifted_whatever_its_wording(tmp_path):
     )
 
     assert _result(lifted, NATIVELY_SUPPRESSED).suppressions is None
+
+
+ACCEPTED_INPUT = "notebooks/a.ipynb"
+ACCEPTANCE_ID = "ash-unconverted-input:notebooks/a.ipynb"
+SHARD_MATCHED = "bandit:B101:src/bandit_0.py"
+
+
+def _accepted(path: str, accepted_by: str | None) -> FailedInputInfo:
+    return FailedInputInfo(
+        path=path,
+        reason="nbconvert could not read it",
+        kind="input",
+        accepted=True,
+        accepted_reason="fixture",
+        accepted_by=accepted_by,
+    )
+
+
+def test_the_flag_records_the_lift_on_the_merged_metadata(tmp_path):
+    """A later ``ash report`` over the merged results file runs under a context
+    carrying no flag; the unused-suppressions reporter reads this field to say
+    the suppressions were not evaluated. Red at the base: no such attribute."""
+    merged = _merged(tmp_path, ignore_suppressions=True)
+
+    assert merged.metadata.suppressions_ignored is True
+
+
+def test_without_the_flag_the_metadata_records_no_lift(tmp_path):
+    """The control for the field."""
+    merged = _merged(tmp_path, ignore_suppressions=False)
+
+    assert getattr(merged.metadata, "suppressions_ignored", False) is False
+
+
+def test_the_unused_reporter_reads_the_merged_file_as_not_evaluated(tmp_path):
+    """The reporter driven over the merged model under a context with no flag,
+    the shape ``ash report`` takes over the written file. Red at the base: with
+    the record emptied and nothing else said, every configured entry read as
+    unused, and ``ash config lint --fix-unused`` would comment them all out."""
+    model = _results_as_the_shards_left_them()
+    model.ash_config.global_settings.suppressions = [
+        AshSuppression(path="src/bandit_0.py", rule_id="RULE-0", reason="one"),
+        AshSuppression(path="src/other.py", rule_id="RULE-9", reason="two"),
+    ]
+    merged = apply_aggregated_suppressions(
+        model, _context(tmp_path, model.ash_config, ignore_suppressions=True)
+    )
+    reporting = PluginContext(
+        source_dir=tmp_path,
+        output_dir=tmp_path / "report",
+        work_dir=tmp_path / "work",
+        config=model.ash_config,
+        ignore_suppressions=False,
+    )
+
+    report = json.loads(UnusedSuppressionsReporter(context=reporting).report(merged))
+
+    assert report["unused_suppressions"] == []
+    assert report["summary"]["evaluated"] is False
+
+
+def test_a_converter_acceptance_survives_the_clear(tmp_path):
+    """The convert phase registers, in the same set, the id of the suppression
+    that accepted a failed input on a shard (``accepted_by`` on the record); the
+    lift undoes nothing of that acceptance. Red at the base: the clear emptied
+    the set whole."""
+    model = _results_as_the_shards_left_them()
+    model.converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[_accepted(ACCEPTED_INPUT, ACCEPTANCE_ID)]
+    )
+    model.used_suppressions = {ACCEPTANCE_ID, SHARD_MATCHED}
+
+    merged = apply_aggregated_suppressions(
+        model, _context(tmp_path, model.ash_config, ignore_suppressions=True)
+    )
+
+    assert merged.used_suppressions == {ACCEPTANCE_ID}
+
+
+def test_an_acceptance_with_no_recorded_id_is_rederived_from_its_path(tmp_path):
+    """A record carrying no ``accepted_by`` (a third-party converter's, or one
+    written before the field existed) names the entry its path matches now, the
+    way the convert phase derives it."""
+    from automated_security_helper.utils.suppression_matcher import (
+        recorded_suppressions,
+        written_suppression_id,
+    )
+
+    model = _results_as_the_shards_left_them()
+    accepting = AshSuppression(
+        path="notebooks/*.ipynb", rule_id="ash-unconverted-input", reason="fixture"
+    )
+    model.ash_config.global_settings.suppressions = [accepting]
+    expected = written_suppression_id(
+        accepting, recorded_suppressions(model.ash_config)
+    )
+    model.converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[_accepted(ACCEPTED_INPUT, None)]
+    )
+    model.used_suppressions = {expected, SHARD_MATCHED}
+
+    merged = apply_aggregated_suppressions(
+        model, _context(tmp_path, model.ash_config, ignore_suppressions=True)
+    )
+
+    assert merged.used_suppressions == {expected}
+
+
+def test_a_record_a_suppression_did_not_accept_keeps_nothing(tmp_path):
+    """The control: an unaccepted failed input, and an accepted one whose path
+    matches no entry any more, name nothing, so the clear stays whole."""
+    model = _results_as_the_shards_left_them()
+    unaccepted = FailedInputInfo(
+        path="notebooks/b.ipynb", reason="nbconvert could not read it", kind="input"
+    )
+    model.converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[unaccepted, _accepted("notebooks/gone.ipynb", None)]
+    )
+    model.used_suppressions = {SHARD_MATCHED}
+
+    merged = apply_aggregated_suppressions(
+        model, _context(tmp_path, model.ash_config, ignore_suppressions=True)
+    )
+
+    assert merged.used_suppressions == set()
