@@ -3051,6 +3051,25 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
             "steps: [{uses: ./../outside dir/action}]\nbad: [\n",
             {"./../outside", "./../outside dir/action"},
         ),
+        # A flow collection opened on an EARLIER line cannot be seen from the
+        # key's line, so the block reading applies and runs past the value's real
+        # end; the flow reading is a candidate as well, so the real value, where
+        # actionlint resolves it, is read too.
+        (
+            (
+                "steps: [\n  {name: s,\n   uses: ./../outside dir/action, with: {}}\n]\n"
+                "bad: [\n"
+            ),
+            {
+                "./../outside",
+                "./../outside dir/action",
+                "./../outside dir/action, with: {}}",
+            },
+        ),
+        # A key at column 0 is read against its own line, not the line above:
+        # the opener on the line above does not put this value in flow context,
+        # so the block reading (to the end of the line) is kept.
+        ("x: [1]\nuses: ./a, b\nbad: [\n", {"./a", "./a, b"}),
         # A quoted value runs across lines, so a stray `uses: "` in a comment (or
         # a name: string, a run: script) opens one that reaches the next quote.
         # The keys inside it are still read, each on its own with its value at
@@ -3103,6 +3122,8 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "next-line-value-under-a-flow-key",
         "flow-plain-with-space",
         "flow-plain-with-space-out-of-the-tree",
+        "flow-opened-on-an-earlier-line",
+        "column-zero-key-after-a-flow-line",
         "double-quote-decoy-before-the-reference",
         "single-quote-decoy-before-the-reference",
     ],

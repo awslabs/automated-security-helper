@@ -478,14 +478,19 @@ def _uses_values_of(match: "re.Match[str]", text: str, key_start: int) -> Set[st
     comma, a closing bracket or brace, or a comment, with spaces kept (``{uses:
     ./my dir/act}`` names the same directory, where the cut at the space alone
     named ``./my``, and a reference out of the tree spelled that way was read
-    as naming nothing and the workflow linted). The context is read from the
-    text between the start of the KEY's line and the value (*key_start* is the
-    key match's start): an opener there, on the key's line or, for a value on
-    the next line, on the line the key shares with it, is flow; an opener on an
-    earlier line is not read. Both readings are candidates: this is a superset
-    of what actionlint resolves, and a candidate that names nothing is judged
-    to be inside the tree. A quoted value whose escape no YAML parser accepts
-    yields nothing (``_decoded_scalar``).
+    as naming nothing and the workflow linted). The flow reading is always a
+    candidate. The block reading is added unless the text between the start of
+    the KEY's line and the value (*key_start* is the key match's start) holds a
+    flow opener, on the key's line or, for a value on the next line, on the line
+    the key shares with it: there the value is in flow context for certain. A
+    flow collection opened on an EARLIER line cannot be seen from the key's
+    line, which is why the flow reading is kept in block context too: without
+    it ``uses: ./../outside dir/action, with: {}}`` inside such a collection
+    read as the whole rest of the line and as the first word, never as the real
+    value, where actionlint would resolve it. Every reading is a candidate:
+    this is a superset of what actionlint resolves, and a candidate that names
+    nothing is judged to be inside the tree. A quoted value whose escape no
+    YAML parser accepts yields nothing (``_decoded_scalar``).
     """
     double_quoted, single_quoted, plain = match.groups()
     if double_quoted is not None:
@@ -498,10 +503,13 @@ def _uses_values_of(match: "re.Match[str]", text: str, key_start: int) -> Set[st
     start = match.start(3)
     line_end = text.find("\n", start)
     rest = text[start : len(text) if line_end == -1 else line_end]
-    key_line_start = text.rfind("\n", 0, key_start) + 1
-    if _FLOW_OPENERS.intersection(text[key_line_start:start]):
-        candidates.add(_FLOW_VALUE_END.split(rest, 1)[0].rstrip())
-    else:
+    # The key's line starts after the newline before the key match. When the key
+    # opens a line, that newline is the match's own first character (the
+    # separator the key pattern takes), so the search includes it; without this
+    # a key at column 0 was read against the line above it.
+    key_line_start = text.rfind("\n", 0, key_start + 1) + 1
+    candidates.add(_FLOW_VALUE_END.split(rest, 1)[0].rstrip())
+    if not _FLOW_OPENERS.intersection(text[key_line_start:start]):
         candidates.add(_PLAIN_VALUE_COMMENT.split(rest, 1)[0].rstrip())
     return candidates
 
