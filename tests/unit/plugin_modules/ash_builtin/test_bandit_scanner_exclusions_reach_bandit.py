@@ -126,12 +126,16 @@ def test_an_anchor_with_a_line_break_gets_no_entries():
 
 def test_a_line_break_entry_leaves_the_other_exclusions_in_place(tmp_path, caplog):
     """The argument keeps every other entry; the base class never sees a key it
-    would drop, and the operator is told the entry excludes nothing."""
+    would drop, and the operator is told, once per input, that the entry
+    excludes nothing: the excluded_paths entry is reported when the scanner is
+    built, the global ignore path when the scan's arguments are assembled."""
     source = _tree(tmp_path, ["app.py"])
-    scanner = _scanner(
-        source, tmp_path, BanditScannerConfigOptions(excluded_paths=_ignore("ven\ndor"))
-    )
     with caplog.at_level(logging.WARNING):
+        scanner = _scanner(
+            source,
+            tmp_path,
+            BanditScannerConfigOptions(excluded_paths=_ignore("ven\ndor")),
+        )
         argv, _, _ = scanner._execute_scan(source, "source", _ignore("gen\nerated/**"))
 
     entries = _entries(argv)
@@ -139,9 +143,11 @@ def test_a_line_break_entry_leaves_the_other_exclusions_in_place(tmp_path, caplo
     assert not any("\n" in entry or "\r" in entry for entry in entries), entries
     for entry in bandit_excluded_path_globs(source.as_posix(), ".venv/"):
         assert entry in entries
-    assert any("line break" in record.message for record in caplog.records), [
-        record.message for record in caplog.records
+    told = [
+        record.message for record in caplog.records if "line break" in record.message
     ]
+    assert any(repr("ven\ndor") in message for message in told), told
+    assert any(repr("gen\nerated/**") in message for message in told), told
 
 
 def test_a_target_whose_path_holds_a_line_break_refuses_the_scan(tmp_path):
