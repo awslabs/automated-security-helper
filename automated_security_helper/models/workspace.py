@@ -147,20 +147,28 @@ fails during *execution* is ``FAILED``, not skipped, and does affect the status.
 So when no project completed or failed, the ERROR skips are set aside and what
 is left decides:
 
-* Something is left, and it can only be ``NO_CHANGES`` skips -- ASH asked git
-  what changed in each of those projects and git said nothing. Exit 0. This is
-  the ordinary outcome of a precommit hook in a monorepo when the edit landed
-  outside every project directory, and single-project mode exits 0 for exactly
-  that case. It stays 0 when an optional project is also absent: a hook that
-  exits 4 on every commit touching no project, and 0 on commits that do, would
-  be worse than not having the optimisation.
-* Nothing is left -- the definition named no project, or every project it named
-  was missing. Exit 4, because exiting 0 would report a clean result for code
-  nothing examined.
+* A ``NO_CHANGES`` skip is left -- ASH asked git what changed in that project
+  and git said nothing. Exit 0. This is the ordinary outcome of a precommit
+  hook in a monorepo when the edit landed outside every project directory, and
+  single-project mode exits 0 for exactly that case. It stays 0 when an
+  optional project is also absent: a hook that exits 4 on every commit touching
+  no project, and 0 on commits that do, would be worse than not having the
+  optimisation.
+* No ``NO_CHANGES`` skip is left -- the definition named no project, or every
+  project it named was missing. Exit 4, because exiting 0 would report a clean
+  result for code nothing examined.
 
-The alternative rule, "nothing was scanned at all exits 4" (an unchanged
-project beside a missing one does not count as examined), was in force between
-2026-10-29 22:51Z and this change and is recorded for review.
+Only a ``NO_CHANGES`` skip counts as examined, by identity. The model admits a
+``SKIPPED`` entry with no ``skip_reason`` (``as_skipped_project`` leaves it out
+of the payload), and a gate must not read an unexpected state as a pass: such an
+entry neither counts as examined nor is set aside, so a run of only such entries
+exits 4. A test written as "any entry whose reason is not ERROR" read that entry
+as examined and exited 0.
+
+History: before 2026-10-29 22:51Z the branch read ``entries and all(skip_reason is
+NO_CHANGES)``, so one unchanged project beside a tolerated missing one exited 4
+("nothing was scanned at all"); that rule was in force until the change that
+introduced the set-aside, and is recorded for review.
 """
 
 from __future__ import annotations
@@ -1046,21 +1054,28 @@ def workspace_exit_code(
         # in the payload, not in the exit code. See "A tolerated skip never
         # colours the status" in the module docstring.
         #
-        # What is left can only be NO_CHANGES skips: ASH asked git what changed
-        # in each of those projects and git said nothing. That is a successful
-        # no-op, the ordinary outcome of a precommit hook in a monorepo where the
-        # edit landed outside every project directory, and single-project mode
-        # exits 0 for exactly this case. It stays 0 beside an absent optional
-        # project: a hook that exits 4 on every commit touching no project and 0
-        # on commits that do would be worse than not having the optimisation.
+        # What counts as examined is a NO_CHANGES skip, and only that: ASH asked
+        # git what changed in that project and git said nothing. That is a
+        # successful no-op, the ordinary outcome of a precommit hook in a
+        # monorepo where the edit landed outside every project directory, and
+        # single-project mode exits 0 for exactly this case. It stays 0 beside
+        # an absent optional project: a hook that exits 4 on every commit
+        # touching no project and 0 on commits that do would be worse than not
+        # having the optimisation.
         #
-        # Nothing left means no project was named, or every project named was
-        # missing: exiting 0 would report a clean result for code nothing
-        # examined.
+        # The test is for NO_CHANGES by identity, not for "not ERROR": the
+        # model admits a SKIPPED entry with no skip_reason at all, and a gate
+        # must not turn an unexpected state into a pass. Such an entry is
+        # neither examined nor set aside, so it decides nothing on its own and
+        # a run of only such entries exits 4.
+        #
+        # Nothing examined means no project was named, every project named was
+        # missing, or no entry says a project was looked at: exiting 0 would
+        # report a clean result for code nothing examined.
         examined = [
             entry
             for entry in entries
-            if entry.skip_reason is not SkippedProjectReason.ERROR
+            if entry.skip_reason is SkippedProjectReason.NO_CHANGES
         ]
         if examined:
             return WorkspaceExitCode.SUCCESS

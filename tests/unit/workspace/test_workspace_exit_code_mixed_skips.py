@@ -27,6 +27,12 @@ The middle case read WORKSPACE_ERROR between 2026-10-29 22:51Z and this change
 ("nothing was scanned at all"); that alternative is recorded for review, not
 kept, because it made the same hook exit 4 on a commit touching no project and
 0 on a commit touching a present one.
+
+Examined means a ``NO_CHANGES`` skip, by identity. The model admits a SKIPPED
+entry with no ``skip_reason`` at all; written as "any entry whose reason is not
+ERROR", the branch read such an entry as examined and a run of only such entries
+exited 0, a gate passing an unexpected state. It is neither examined nor set
+aside: alone it exits 4, and beside an unchanged skip it changes nothing.
 """
 
 from __future__ import annotations
@@ -44,7 +50,7 @@ from automated_security_helper.models.workspace import (
 pytestmark = pytest.mark.unit
 
 
-def _skipped(key: str, reason: SkippedProjectReason) -> WorkspaceProjectResult:
+def _skipped(key: str, reason: SkippedProjectReason | None) -> WorkspaceProjectResult:
     return WorkspaceProjectResult(
         project=key,
         relative_path=key,
@@ -78,3 +84,34 @@ def test_every_project_an_error_skip_is_a_workspace_error():
         _skipped("web", SkippedProjectReason.ERROR),
     ]
     assert workspace_exit_code(entries) is WorkspaceExitCode.WORKSPACE_ERROR
+
+
+def test_a_skipped_project_with_no_reason_is_not_examined():
+    """A SKIPPED entry with skip_reason None is a state the model admits and
+    nothing produces on purpose. It used to read as examined ("not ERROR"), so
+    a run of only such entries exited 0."""
+    assert (
+        workspace_exit_code([_skipped("api", None)])
+        is WorkspaceExitCode.WORKSPACE_ERROR
+    )
+    assert (
+        workspace_exit_code([_skipped("api", None), _skipped("web", None)])
+        is WorkspaceExitCode.WORKSPACE_ERROR
+    )
+
+
+def test_a_skipped_project_with_no_reason_changes_nothing_beside_others():
+    """Neither examined nor set aside: an unchanged sibling still exits 0, and
+    a tolerated ERROR sibling alone beside it still exits 4."""
+    assert (
+        workspace_exit_code(
+            [_skipped("api", SkippedProjectReason.NO_CHANGES), _skipped("web", None)]
+        )
+        is WorkspaceExitCode.SUCCESS
+    )
+    assert (
+        workspace_exit_code(
+            [_skipped("api", SkippedProjectReason.ERROR), _skipped("web", None)]
+        )
+        is WorkspaceExitCode.WORKSPACE_ERROR
+    )
