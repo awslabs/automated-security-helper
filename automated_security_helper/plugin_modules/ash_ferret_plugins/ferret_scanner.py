@@ -12,7 +12,17 @@ import re
 import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set, Tuple
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+)
 from urllib.parse import quote, urljoin
 
 import yaml
@@ -237,17 +247,25 @@ def _ignored_relatives(
     entries = ignored_entries(target, source_dir, ignore_paths, files)
     if not entries:
         return [], set()
-    whole_dirs = {entry for entry in entries if entry.endswith("/")}
-    ignored_files = set(entries) - whole_dirs
+    return entries, _under_entries(files, entries)
 
-    def _ignored(relative: str) -> bool:
+
+def _under_entries(files: Iterable[str], entries: Iterable[str]) -> Set[str]:
+    """The paths among ``files`` that ``entries`` (``ignored_entries``'s shape: a
+    file itself, or a directory with a trailing ``/``) cover: the file itself, or
+    any file below one of the directories."""
+    entries = set(entries)
+    whole_dirs = {entry for entry in entries if entry.endswith("/")}
+    ignored_files = entries - whole_dirs
+
+    def _covered(relative: str) -> bool:
         parts = relative.split("/")
         return relative in ignored_files or any(
             "/".join(parts[:depth]) + "/" in whole_dirs
             for depth in range(1, len(parts))
         )
 
-    return entries, {relative for relative in files if _ignored(relative)}
+    return {relative for relative in files if _covered(relative)}
 
 
 def _ignore_exclude_patterns(
@@ -352,7 +370,10 @@ def _link_exclude_patterns(
     pattern for its directory, or for the link itself, leaves it out, so it is
     neither given a pattern nor a reason to refuse the target. And such a path
     does not count as another walked file in the substring test, since
-    ferret-scan does not read it either.
+    ferret-scan does not read it either. That holds only for a pattern that is
+    written: ``scan`` calls this again for the links whose ignore pattern
+    ``_ignore_exclude_patterns`` left out, with ``ignored`` narrowed to the
+    paths still under a written pattern.
 
     ferret-scan walks the directory it is given. How it treats a link was not
     measured, so every link to a file whose target, every link resolved, leaves
@@ -1688,7 +1709,9 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # the tree from inside an ignored directory is left out by that
             # directory's pattern, so it is neither written nor a reason to
             # refuse the target, and an ignored file is not "another walked
-            # file" in the 2.4.x substring test.
+            # file" in the 2.4.x substring test. Whether that pattern is in fact
+            # written is known only after _ignore_exclude_patterns below, which
+            # is why the links it leaves uncovered are given their own then.
             ignored = _ignored_relatives(
                 target,
                 getattr(self.context, "source_dir", None),
@@ -1739,6 +1762,45 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     target_type=target_type,
                     level=logging.DEBUG,
                 )
+                # A link leaving the tree was given no pattern of its own because
+                # its ignored directory's pattern (or its own ignore entry) would
+                # leave it out. That pattern is now known not to be written, so
+                # ferret-scan would read the file the link points at: such a link
+                # gets its own pattern after all, or refuses the target as a link
+                # nothing ignores does. The ignored files still under a written
+                # pattern are the ones ferret-scan does not read, so only they
+                # stay out of the 2.4.x substring test.
+                still_covered = _under_entries(
+                    ignored[1], [entry for entry in ignored[0] if entry not in left_out]
+                )
+                uncovered = ignored[1] - still_covered
+                uncovered_links = [link for link in walk[1] if link in uncovered]
+                uncovered_directory_links = sorted(
+                    link for link in directory_links if link in uncovered
+                )
+                if uncovered_links or uncovered_directory_links:
+                    exclude_patterns.extend(
+                        _link_exclude_patterns(
+                            target,
+                            (walk[0], uncovered_links),
+                            directory_links=uncovered_directory_links,
+                            substring_match=self._exclude_matches_substrings(),
+                            ignored=still_covered,
+                        )
+                    )
+                    value_size = len(os.fsencode(",".join(exclude_patterns)))
+                    if value_size > _EXCLUDE_VALUE_BUDGET:
+                        raise ScannerError(
+                            f"Not running ferret-scan on {target.as_posix()}: its "
+                            f"--exclude value would be {value_size} bytes over "
+                            f"{len(exclude_patterns)} patterns once the "
+                            f"{len(uncovered_links) + len(uncovered_directory_links)} "
+                            "link(s) leaving the tree under ignored paths that got no "
+                            f"pattern are excluded themselves, past the "
+                            f"{_EXCLUDE_VALUE_BUDGET} bytes one argument may take, so "
+                            "ferret-scan could not be started with them all. Narrow "
+                            "exclude_patterns, or remove the links."
+                        )
 
             # Temporarily swap in the extended list for argument resolution, and
             # put the configured list back whether or not resolving raises: the

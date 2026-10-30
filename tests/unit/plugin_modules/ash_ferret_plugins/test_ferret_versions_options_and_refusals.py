@@ -16,6 +16,9 @@
 - A link leaving the tree from inside an ignored directory was given a pattern,
   or refused the target, although the directory's own pattern leaves it out; and
   an ignored file counted as "another walked file" in the substring test.
+- The reverse: a link under an ignored path was given no pattern of its own on the
+  strength of that path's ignore pattern, which the ignore step then left out (a
+  comma, no room, a kept path holding it), so nothing excluded the link.
 - The mandatory ``--exclude`` value (the operator's patterns, ASH's output
   directories, the links leaving the tree) had no bound, past which ferret-scan
   cannot be started at all.
@@ -275,6 +278,82 @@ def test_a_scan_with_a_link_leaving_the_tree_under_an_ignored_directory_runs(
     patterns = argv[argv.index("--exclude") + 1].split(",")
     assert os.fspath(root / "vendor") + os.sep + "*" in patterns
     assert os.fspath(root / "vendor" / "leaving.js") not in patterns
+
+
+@POSIX_ONLY
+def test_a_link_whose_ignored_directory_got_no_pattern_is_refused_like_any_other(
+    mock_plugin_context, tmp_path
+):
+    """The directory's path holds a comma, so its ignore pattern cannot be written;
+    the link under it then leaves the tree with nothing excluding it, and its own
+    path holds the comma too, so the target is refused rather than run."""
+    root = _tree(mock_plugin_context.source_dir, ["src/a.js", "ven,dor/x.js"])
+    outside = tmp_path / "outside.js"
+    outside.write_text("x\n", encoding="utf-8")
+    (root / "ven,dor" / "leaving.js").symlink_to(outside)
+    started: list[list[str]] = []
+
+    with pytest.raises(ScannerError, match="cannot carry its path"):
+        _scan(
+            _scanner(mock_plugin_context),
+            _run_double({"returncode": 0}, EMPTY_SARIF, started),
+            root,
+            [IgnorePathWithReason(path="ven,dor/", reason="third party")],
+        )
+
+    assert started == []
+
+
+@POSIX_ONLY
+def test_an_ignored_link_whose_own_pattern_was_left_out_gets_one_as_a_link(
+    mock_plugin_context, tmp_path
+):
+    """The ignored link's pattern is held by a kept file's path (``conf.js.bak``
+    starts with it), so the ignore step leaves it out; on the 2.5.x line a pattern
+    names one path only, so the link is excluded as a link leaving the tree."""
+    root = _tree(mock_plugin_context.source_dir, ["conf.js.bak"])
+    outside = tmp_path / "outside.js"
+    outside.write_text("x\n", encoding="utf-8")
+    (root / "conf.js").symlink_to(outside)
+    scanner = _scanner(mock_plugin_context)
+    scanner.tool_version = "2.5.3"
+    started: list[list[str]] = []
+
+    _scan(
+        scanner,
+        _run_double({"returncode": 0}, EMPTY_SARIF, started),
+        root,
+        [IgnorePathWithReason(path="conf.js", reason="generated")],
+    )
+
+    (argv,) = started
+    patterns = argv[argv.index("--exclude") + 1].split(",")
+    assert os.fspath(root / "conf.js") in patterns
+
+
+@POSIX_ONLY
+def test_control_the_same_link_on_the_substring_line_refuses_the_target(
+    mock_plugin_context, tmp_path
+):
+    """2.4.x would leave ``conf.js.bak`` out with the link's pattern, and nothing
+    else excludes the link, so the target is refused as for a link nothing ignores."""
+    root = _tree(mock_plugin_context.source_dir, ["conf.js.bak"])
+    outside = tmp_path / "outside.js"
+    outside.write_text("x\n", encoding="utf-8")
+    (root / "conf.js").symlink_to(outside)
+    scanner = _scanner(mock_plugin_context)
+    scanner.tool_version = "2.4.5"
+    started: list[list[str]] = []
+
+    with pytest.raises(ScannerError, match="another file's path holds its path"):
+        _scan(
+            scanner,
+            _run_double({"returncode": 0}, EMPTY_SARIF, started),
+            root,
+            [IgnorePathWithReason(path="conf.js", reason="generated")],
+        )
+
+    assert started == []
 
 
 # --- the mandatory exclude budget -----------------------------------------------------
