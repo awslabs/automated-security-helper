@@ -29,7 +29,12 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sarif_utils import suppressions_in_effect
+from automated_security_helper.utils.sarif_utils import (
+    FINDING_KINDS,
+    result_message_text,
+    result_rule_id,
+    suppressions_in_effect,
+)
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     SEVERITY_THRESHOLDS,
@@ -42,10 +47,10 @@ import defusedxml
 import warnings
 
 
-# SARIF `kind` values that assert a finding exists. `fail` is handled earlier by
-# the level cascade; `open` and `review` reach the arm below.
-_FINDING_KINDS = frozenset({"fail", "open", "review"})
-
+# The SARIF `kind` values that assert a finding exists are `sarif_utils.FINDING_KINDS`,
+# shared with the other reporters. `fail` is handled earlier by the level
+# cascade; `open` and `review` reach the arm below.
+#
 # The other kinds (`pass`, `informational`) do not assert a finding. cdk-nag uses
 # `informational` for a COMPLIANT check (cdk_nag_wrapper._level_and_kind). They
 # are graded by level like any result, so that the report agrees with the exit
@@ -232,36 +237,6 @@ def _xml_text(value: object) -> str:
     return _XML_FORBIDDEN.sub(shown, text)
 
 
-def _message_text(result) -> str:
-    """The text a result's message carries, or ``""``.
-
-    The plain text, else the Markdown, else the id of the message string the
-    result references: SARIF lets a message hold only that id, and its text is
-    then absent. Reading the text alone named such a case after nothing.
-    """
-    root = getattr(getattr(result, "message", None), "root", None)
-    for field in ("text", "markdown", "id"):
-        value = getattr(root, field, None)
-        if isinstance(value, str) and value.strip():
-            return value
-    return ""
-
-
-def _rule_id(result) -> str | None:
-    """The rule a result names: its ``ruleId``, else the ``id`` of the rule
-    descriptor it references.
-
-    SARIF gives a result either; reading ``ruleId`` alone lost the rule of one
-    that names it through ``rule``.
-    """
-    if result.ruleId:
-        return result.ruleId
-    reference = getattr(result, "rule", None)
-    reference = getattr(reference, "root", reference)
-    identifier = getattr(reference, "id", None)
-    return identifier if isinstance(identifier, str) and identifier else None
-
-
 def _as_flag(value: object) -> bool | None:
     """*value* as a true or false flag, or None when it states neither.
 
@@ -385,8 +360,8 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 # _xml_text, because XML 1.0 forbids a control character in
                 # text and attributes and one makes the whole document
                 # unreadable to every JUnit consumer.
-                message_text = _xml_text(_message_text(result))
-                named_rule = _rule_id(result)
+                message_text = _xml_text(result_message_text(result, default=""))
+                named_rule = result_rule_id(result)
                 rule_id = _xml_text(named_rule) if named_rule else None
                 test_name = (
                     f"{message_text} [{rule_id}]"
@@ -667,7 +642,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         # imports only Error and Skipped; type_ carries the
                         # distinction.
                         level_type = _ERROR_TYPE_BY_LEVEL.get(str(result.level))
-                        if result.kind in _FINDING_KINDS:
+                        if result.kind in FINDING_KINDS:
                             error_type = level_type or (
                                 "error" if result.kind == "fail" else "note"
                             )
