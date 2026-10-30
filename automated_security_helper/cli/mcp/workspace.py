@@ -156,6 +156,7 @@ from automated_security_helper.cli.mcp.progress_monitor import (
 from automated_security_helper.cli.mcp.sandbox import (
     caller_is_remote,
     config_base_gate,
+    transport_is_networked,
 )
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
@@ -2375,6 +2376,49 @@ async def _scan_workspace(
         for event in cancel_events.values():
             event.set()
 
+    def _record_the_tools_the_stop_could_not_end() -> None:
+        """Put the tools the stop could not end on every project entry the server stopped.
+
+        Each project's worker runs under its entry's cancel event, chained to
+        `stop`, and the subprocess layer records a tool it could not end on the
+        chain's root (CancelEvent.note_could_not_stop), which is `stop`: the
+        records are the workspace's, not one project's. They are attached,
+        through record_cancel_outcome, to each registered entry the server
+        stopped (the timeout and a cancelled task close them FAILED and set
+        their events), so a client polling any project is told its output
+        directory may still be written to. Called on the thread before the
+        projects' directories are let go (_settle), and on the task once the
+        entries are closed, because either may run first; a pair already
+        recorded is not recorded twice. On a network transport the warning
+        names the tools only, and the process ids go to this log. Never raises:
+        it runs inside the settle, which must finish.
+        """
+        try:
+            records = stop.could_not_stop_records()
+            if not records:
+                return
+            registry = get_scan_registry()
+            name_pids = not transport_is_networked()
+            attached = [
+                scan_id
+                for scan_id in registered.values()
+                if registry.record_cancel_outcome(
+                    scan_id, records, name_process_ids=name_pids
+                )
+            ]
+            if attached:
+                named = ", ".join(f"{tool} (pid {pid})" for tool, pid in records)
+                _logger.warning(
+                    f"Workspace scan of {plan.workspace_file} was stopped, but "
+                    f"{len(records)} scanner tool(s) could not be stopped and may "
+                    f"still be running: {named}"
+                )
+        except Exception as recording_error:  # noqa: BLE001 -- the settle must go on
+            _logger.warning(
+                "Workspace scan: the tools the stop could not end were not "
+                f"recorded: {type(recording_error).__name__}"
+            )
+
     def _stop_at_timeout() -> None:
         # The entries are closed as failed first, so their status says why, and
         # then the run is stopped; _close_registrations leaves a closed entry
@@ -2448,6 +2492,9 @@ async def _scan_workspace(
             try:
                 _restore_unfinished_projects(project_outputs, registered)
             finally:
+                # Before the projects' directories are let go: a tool still
+                # running would write into one of them.
+                _record_the_tools_the_stop_could_not_end()
                 _release_projects(registered)
                 # Called on the thread or on the loop; the future is the loop's.
                 with suppress(RuntimeError):  # the loop is closed: nobody awaits it
@@ -2552,9 +2599,13 @@ async def _scan_workspace(
             # The run stopped at one of execute_workspace's checks, which only
             # `stop` makes it reach: the timeout, here. A project's own cancel is
             # that project's outcome and never arrives here. The thread has
-            # settled the output directories itself.
+            # settled the output directories itself. The tools the stop could
+            # not end are on `stop` (the exception carries the same records):
+            # attached once the entries are closed, in case the thread's own
+            # record found them still open.
             reason = timed_out[0] if timed_out else "Workspace scan was cancelled"
             _close_registrations(registered, None, error=reason)
+            _record_the_tools_the_stop_could_not_end()
             return _stopped_response(
                 reason,
                 registered,
@@ -2632,6 +2683,10 @@ async def _scan_workspace(
                     None,
                     error=f"Workspace scan ended without a result: {type(exc).__name__}",
                 )
+                # The entries are closed and their events set: a tool the stop
+                # could not end, recorded on `stop` by then, is attached here;
+                # the thread attaches what it finds later, once.
+                _record_the_tools_the_stop_could_not_end()
             except Exception as close_error:  # noqa: BLE001 -- the cancellation wins
                 # Logged and swallowed: the raise below must re-raise the
                 # cancellation, not a close failure that would swallow it.
