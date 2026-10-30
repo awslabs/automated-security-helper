@@ -90,7 +90,10 @@ BANDIT_DEFAULT_EXCLUDES = (
 #: so 120 KiB leaves room for the rest of the command line.
 _EXCLUDE_ARGUMENT_LIMIT = 120 * 1024
 
-#: Windows bounds the WHOLE command line CreateProcess is given, not one argument.
+#: Windows bounds the WHOLE command line CreateProcess is given, not one argument:
+#: "The maximum length of this string is 32,767 characters, including the Unicode
+#: terminating null character" (CreateProcessW, lpCommandLine), so the text itself
+#: has to stay one character shorter.
 _WINDOWS_COMMAND_LINE_LIMIT = 32767
 
 
@@ -98,15 +101,16 @@ def _exclude_fits(token: str, rest: Sequence[str], platform: str = os.name) -> b
     """Whether the ``--exclude=...`` ``token`` fits the command line beside ``rest``.
 
     ``rest`` is every other argument of the command. On Windows the whole line,
-    as ``subprocess`` builds it (``list2cmdline``), has to stay within 32,767
-    characters, so the budget for the token is what the other arguments leave;
+    as ``subprocess`` builds it (``list2cmdline``), has to stay under 32,767
+    characters (that figure counts the terminating NUL), so the budget for the
+    token is what the other arguments leave;
     elsewhere one argument is bounded on its own (``_EXCLUDE_ARGUMENT_LIMIT``,
     in UTF-8 bytes as exec passes them, ``_argument_length``). A fixed 24 KiB
     bound on Windows refused scans whose required entries fit the real line.
     """
     if platform == "nt":
         line = subprocess.list2cmdline([*rest, token])
-        return len(line) <= _WINDOWS_COMMAND_LINE_LIMIT
+        return len(line) < _WINDOWS_COMMAND_LINE_LIMIT
     return _argument_length(token) <= _EXCLUDE_ARGUMENT_LIMIT
 
 

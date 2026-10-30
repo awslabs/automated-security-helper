@@ -208,6 +208,10 @@ def test_the_windows_bound_is_the_whole_command_line():
     assert not _exclude_fits("--exclude=" + "x" * 32760, rest, "nt")
     long_rest = ["x" * 2000]
     assert not _exclude_fits("--exclude=" + "x" * 31000, long_rest, "nt")
+    # The 32,767 of CreateProcess counts the terminating NUL, so a line of
+    # 32,766 characters is the longest that fits and one of 32,767 is not.
+    assert _exclude_fits("x" * 32766, [], "nt")
+    assert not _exclude_fits("x" * 32767, [], "nt")
 
 
 def test_elsewhere_one_argument_is_bounded_on_its_own():
