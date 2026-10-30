@@ -224,6 +224,32 @@ def test_the_defaults_forward_only_the_two_directories(tmp_path):
     assert set(flags) == {"--phases", "--strategy"}, rest
 
 
+def test_a_config_the_cli_read_from_ash_config_is_not_forwarded_as_named(
+    tmp_path, monkeypatch
+):
+    """The scan CLI fills ``--config`` from ``ASH_CONFIG`` when none is typed, and
+    the shell keeps that variable, so the inner CLI reads it the same way. Forwarded
+    as well, the command named a config the caller never named (install.md: with no
+    ``--config``, the file ``ASH_CONFIG`` names is the config too). A config the
+    caller did name is forwarded whatever the variable holds."""
+    env_config = tmp_path / "env" / "ash.yaml"
+    named_config = tmp_path / "cfg" / "ash.yaml"
+    monkeypatch.setenv("ASH_CONFIG", str(env_config))
+
+    def options(config):
+        return ras.ScanOptions(
+            source_dir=tmp_path / "src",
+            output_dir=tmp_path / "out",
+            mode=RunMode.nix,
+            config=config,
+        )
+
+    assert "--config" not in ras._nix_inner_argv(options(str(env_config)))
+    assert _after_flag(ras._nix_inner_argv(options(str(named_config))), "--config") == [
+        str(named_config)
+    ]
+
+
 def test_a_host_without_nix_keeps_the_previous_runs_output(tmp_path, monkeypatch):
     """The refusal is asked before the previous run's output is cleared: a
     refused run starts no shell, so it must not delete the reports of one that

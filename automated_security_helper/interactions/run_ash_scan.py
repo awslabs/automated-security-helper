@@ -5589,6 +5589,9 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
       ``--mode`` is left to ``rewrite_mode_args``, which appends ``--mode local``.
       ``--cli-json-input`` never reaches the inner scan: its document was read
       into these options already, and the shell's standard input is empty.
+      ``--config`` is forwarded unless it is the file ``ASH_CONFIG`` names: the
+      scan CLI reads the option from that variable when none is typed, and the
+      shell keeps the variable, so the inner CLI reads it the same way.
     * REFUSED before this point, in ``run_ash_scan``, because the scan CLI has
       no flag for them and the scan inside the shell cannot be given them:
       ``config_base_gate``, ``untrusted_config``, ``client_config_policy``,
@@ -5628,7 +5631,13 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
     else:
         argv.extend(["--source-dir", str(opts.source_dir)])
     argv.extend(["--output-dir", str(opts.output_dir)])
-    if opts.config:
+    # The scan CLI fills --config from ASH_CONFIG when none is typed (the
+    # option's envvar), and run_ash_nix keeps that variable for the shell, so
+    # the inner CLI reads it the same way. The command names a config only when
+    # the caller named one: forwarded, the file ASH_CONFIG names reached the
+    # inner scan as if the operator had typed it, against what install.md says
+    # of a scan with no --config.
+    if opts.config and str(opts.config) != os.environ.get("ASH_CONFIG"):
         argv.extend(["--config", str(opts.config)])
     for override in opts.config_overrides or []:
         argv.extend(["--config-overrides", override])
