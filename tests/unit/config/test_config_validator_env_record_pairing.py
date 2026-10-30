@@ -207,11 +207,17 @@ class TestQuietKeyResolution:
             "${ASH_PAIRING_KEY}",
             "${HOME}",
             "${ASH_PAIRING_NAME}x}",
+            "${ASH_PAIRING_BLANK}",
+            "${ASH_PAIRING_BLANK} tail",
+            "${ASH_PAIRING_UNSET:}",
+            "${ASH_PAIRING_UNSET:dflt} tail",
+            "${ASH_PAIRING_UNSET:None} tail",
         ],
     )
     def test_the_quiet_resolution_agrees_with_the_loader(self, monkeypatch, text):
         monkeypatch.setenv("ASH_PAIRING_NAME", "a")
         monkeypatch.setenv("ASH_PAIRING_KEY", "a")
+        monkeypatch.setenv("ASH_PAIRING_BLANK", "")
         monkeypatch.delenv("ASH_PAIRING_UNSET", raising=False)
 
         assert _quietly_resolved(text) == resolve_env_references(text)
