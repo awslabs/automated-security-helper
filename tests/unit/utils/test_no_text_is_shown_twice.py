@@ -62,9 +62,7 @@ shown_not_obeyed(v)`` in one method, logged in another), a container, another
 function's argument or a return value of a function outside the package; an
 exception of a builtin or library kind that reaches its handler through a call the
 check cannot resolve (a method of an object) or through more than _REACH_DEPTH
-calls of the package; a local assigned, inside the handler, from the handler's
-variable (the assignments are read before the handlers, so the local is not shown
-text and is logged unflagged); a logger or a log method handed in as an argument,
+calls of the package; a logger or a log method handed in as an argument,
 kept in an attribute or a container, or returned by a function that is no maker; a
 log method wrapped (functools.partial) or looked up by getattr; repr() and ascii()
 of a value; and the TUI's widgets (cli/inspect), which have their own guard.
@@ -77,6 +75,7 @@ a new escaper there is counted.
 from __future__ import annotations
 
 import ast
+import bisect
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
@@ -713,26 +712,10 @@ class _Bindings:
 
     def __init__(self, function: ast.AST, module: _Module, analysis: "_Analysis"):
         self._events: List[Tuple[int, str, bool]] = []
-        assignments = sorted(
-            (
-                node
-                for node in ast.walk(function)
-                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
-                and node.value is not None
-            ),
-            key=lambda node: node.lineno,
-        )
-        for node in assignments:
-            shown_before = self.at(node.lineno)
-            is_shown = analysis.shown_in(node.value, module, shown_before)
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    if isinstance(node, ast.AugAssign) and target.id in shown_before:
-                        is_shown = True
-                    self._events.append(
-                        (node.end_lineno or node.lineno, target.id, is_shown)
-                    )
+        # The handlers' variables first, in line order: whether a handler's
+        # variable holds shown text reads the analysis' exceptions, never this
+        # function's locals, and a local assigned from it inside the handler
+        # (``msg = str(exc)``) is looked at against these events below.
         key = (module.path, function.name)
         for statement in ast.walk(function):
             if not isinstance(statement, _TRY):
@@ -752,6 +735,28 @@ class _Bindings:
                         )
                     )
         self._events.sort()
+        assignments = sorted(
+            (
+                node
+                for node in ast.walk(function)
+                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+                and node.value is not None
+            ),
+            key=lambda node: node.lineno,
+        )
+        for node in assignments:
+            shown_before = self.at(node.lineno)
+            is_shown = analysis.shown_in(node.value, module, shown_before)
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    if isinstance(node, ast.AugAssign) and target.id in shown_before:
+                        is_shown = True
+                    # In line order: ``at`` stops at the first later line.
+                    bisect.insort(
+                        self._events,
+                        (node.end_lineno or node.lineno, target.id, is_shown),
+                    )
 
     def at(self, lineno: int) -> Set[str]:
         """The names whose latest binding before *lineno* holds shown text."""
@@ -1180,6 +1185,43 @@ def test_the_class_of_a_value_is_not_the_value(logged, offends):
         "    try:\n        raise ValueError(f'no: {_shown(name)}')\n"
         "    except ValueError as exc:\n"
         f"        ASH_LOGGER.debug(f'cannot read ({logged})')\n"
+    )
+
+    sites = _sites({"automated_security_helper/x.py": source})
+
+    assert sites == ([("automated_security_helper/x.py", "site")] if offends else []), (
+        sites
+    )
+
+
+#: A local assigned inside a handler from the handler's variable, then logged.
+_HANDLER_LOCAL_CASES = {
+    "str-of-the-variable": ("msg = str(exc)", True),
+    "the-variable-itself": ("msg = exc", True),
+    "an-fstring-of-it": ("msg = f'cannot read ({exc})'", True),
+    "the-class-name-only": ("msg = type(exc).__name__", False),
+    "a-raw-constant": ("msg = 'cannot read'", False),
+}
+
+
+@pytest.mark.parametrize(
+    "assignment, offends",
+    _HANDLER_LOCAL_CASES.values(),
+    ids=list(_HANDLER_LOCAL_CASES),
+)
+def test_a_local_assigned_in_a_handler_from_its_variable_holds_its_text(
+    assignment, offends
+):
+    """The handler's variable holds shown text when its try body raises the kind
+    with shown text; a local bound from it inside the handler does too, and logging
+    that local shows the text twice. The handler's binding is placed in line order
+    before the assignments are read, so the local is seen."""
+    source = _HELPERS + (
+        "def site(name):\n"
+        "    try:\n        raise ValueError(f'no: {_shown(name)}')\n"
+        "    except ValueError as exc:\n"
+        f"        {assignment}\n"
+        "        ASH_LOGGER.debug(msg)\n"
     )
 
     sites = _sites({"automated_security_helper/x.py": source})
