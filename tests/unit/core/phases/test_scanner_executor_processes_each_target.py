@@ -211,7 +211,9 @@ def test_a_failure_on_an_item_that_is_no_row_is_filed_as_a_fresh_failure_row(
     assert seen[0] == "not-a-results-row"
     assert isinstance(seen[-1], ScanResultsContainer), seen
     assert seen[-1].scanner_name == "shape-tool"
-    assert seen[-1].status == ScannerStatus.ERROR
+    # ScanResultsContainer.for_failure files the row as FAILED (the scanner did not
+    # finish); ERROR is the status a processor failure writes onto an existing row.
+    assert seen[-1].status == ScannerStatus.FAILED
     assert executor.completed_scanners == []
 
 
