@@ -473,7 +473,11 @@ ASH checks every MCP-client file in a config chain against the server's policy, 
 `runtime_overrides.enabled` is set. Only what the file writes counts: a value equal to the
 server's at the same key is accepted. Every operation in the file's `patch` is checked as
 written, and one that targets a denied field is
-refused even when it writes the server's value. The policy's `denied_value_patterns` apply to
+refused even when it writes the server's value. A `test` operation in an MCP-client file is
+refused outright, before any operation applies and whatever the configuration holds at its
+path: a `test` against a base the operator owns would reveal, through whether the file loads,
+a value the client may not read, so the message names the file and says the op is one a
+config file chosen by this caller may not use. The policy's `denied_value_patterns` apply to
 delivered files too.
 
 With the default policy, a delivered config is refused as a whole, with `error_type`
