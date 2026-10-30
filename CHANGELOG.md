@@ -5463,6 +5463,49 @@
   shard 1 ran. Both are usage errors now (exit 5) that name the key; `true`,
   `false`, whole numbers and the text forms click already read are unchanged.
 
+- **`--cli-json-input` reads a document as tools write it.** A UTF-8 byte order
+  mark on a file or on stdin is accepted; stdin is read as UTF-8 whatever the
+  process locale, and a read that fails is the usage refusal a file gets, not a
+  traceback. The text after `file://` is a path, relative or absolute,
+  percent-decoded, as the AWS CLI reads the prefix: it used to be parsed as a URI,
+  so `file://params.json` was refused as a remote host and a `#` in a file's name
+  cut the name. A document nested too deeply to parse and a number too large for a
+  whole-number parameter are usage refusals, not tracebacks. `--help` and
+  `--generate-cli-skeleton` run before the document is read, so a bad document
+  blocks neither. The document's values rank above environment variables, as
+  documented: an environment value the parameter's type refused used to fail the
+  run even when the document set that parameter. The skeleton writes `null` for a
+  parameter that is required or that an environment variable backs, so an
+  unedited skeleton no longer overrides the variable with the default; its
+  `--generate-cli-skeleton` help says so.
+
+- **`ash plugin list` lists the plugins a scan with the configuration runs, built
+  as the scan builds them.** It listed every class registered in the process, so
+  plugins no scan of the configuration would run (a module the configuration does
+  not name, an off-host reporter a trusted module does not load) were listed and
+  had their options checked; the listing now follows the scan's selection. Each
+  plugin is built from its own section, so the Enabled column follows the
+  plugin's model default where the section leaves the key out (an opt-in plugin
+  whose section sets options only is listed off, as a scan runs it), a section
+  without `name` shows the plugin's declared name, and an off-host reporter's row
+  shows the section the report phase reads, with Enabled true only for an
+  `enabled: true` there. `--show-versions` matches each scanner to its inventory
+  entry by position, so a scanner whose config name differs from its class name
+  no longer reads Unknown; its help no longer calls the default listing fast, since
+  the default listing builds every plugin too.
+
+- **`ash build-image` stops its container scan on SIGTERM and exits as terminated.**
+  The scan that follows the build ran outside the SIGTERM shutdown scope `ash scan`
+  uses, so a SIGTERM killed the process at once with no word; the scan now runs
+  inside that scope, the runner is stopped through the launcher's interrupt path,
+  and the command exits with the terminated code and one line saying so. Ctrl-C
+  cancels the scope before the command exits, and a SIGTERM that lands where
+  nothing in the run polls the event still ends the command as terminated. The
+  command also applies `--quiet`, `--verbose` and `--debug` to records logged
+  before the scan attaches its handlers, and shows the scan's summary and
+  exit-code legend when a scan runs, which the host used to suppress along with
+  the container's copy.
+
 - **What an archive does to itself is an input error; what the run does is a tool
   error, and only the first can be accepted.** The archive converter graded every
   failure as a tool error, so no `ash-unconverted-input` suppression on an archive's

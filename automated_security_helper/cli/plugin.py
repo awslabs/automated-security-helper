@@ -115,9 +115,9 @@ def list_plugins(
             help=(
                 "For scanners, add Version and Reachable columns reporting each "
                 "scanner's detected tool version and whether its dependencies are "
-                "satisfied (Yes/No/Unknown). Off by default, so the fast listing is "
-                "unchanged; enabling it checks each scanner's dependencies and "
-                "probes its version, which takes longer."
+                "satisfied (Yes/No/Unknown). Off by default; enabling it checks "
+                "each scanner's dependencies and probes its version, which takes "
+                "longer."
             ),
         ),
     ] = False,
@@ -307,7 +307,8 @@ def list_plugins(
                 return "Unknown"
             return entry.get("version") or "Unknown"
 
-        # A plugin whose section is not a dict is built below to read its config.
+        # Every listed plugin is built below from its section, as a scan builds
+        # it, so the row shows the config the plugin's own model reads.
         # Built inside checking_only() and deferred_tool_version_probes(), as the
         # scan phase and the inventory build them: outside them a uv-based
         # scanner's construction-time version probe resolves, and can download,

@@ -531,7 +531,8 @@ def _meta_options() -> list[Parameter]:
             rich_help_panel=_HELP_PANEL,
             help=(
                 f"Print a JSON template for {CLI_JSON_INPUT_FLAG}, listing every "
-                "parameter of this command with its default, and exit."
+                "parameter of this command with its default, or null where it is "
+                "required or an environment variable backs it, and exit."
             ),
         ),
     ]

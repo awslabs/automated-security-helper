@@ -48,11 +48,10 @@
 │                                                                   version and whether its        │
 │                                                                   dependencies are satisfied     │
 │                                                                   (Yes/No/Unknown). Off by       │
-│                                                                   default, so the fast listing   │
-│                                                                   is unchanged; enabling it      │
-│                                                                   checks each scanner's          │
-│                                                                   dependencies and probes its    │
-│                                                                   version, which takes longer.   │
+│                                                                   default; enabling it checks    │
+│                                                                   each scanner's dependencies    │
+│                                                                   and probes its version, which  │
+│                                                                   takes longer.                  │
 │ --color                      --no-color                           Enable/disable colorized       │
 │                                                                   output                         │
 │                                                                   [default: color]               │
