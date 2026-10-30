@@ -216,7 +216,10 @@ _MCP_SESSION_WORKSPACE = (
 #: (module, function, kind) -> (number of such calls, where they write). Each writes
 #: outside every output directory, or is the guarded implementation itself.
 WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
-    (_INSTALLER, "download", "Path.open"): (1, _INSTALLS),
+    # Two, and only one writes: the file `target.open("wb")` creates, and the
+    # urllib opener's `opener.open(url, ...)`, a network call that this detector
+    # cannot tell from a `Path.open` with a mode it cannot read.
+    (_INSTALLER, "download", "Path.open"): (2, _INSTALLS),
     (_INSTALLER, "extract_member", "Path.open"): (4, _INSTALLS),
     (_INSTALLER, "_place_executable", "os.replace"): (1, _INSTALLS),
     (_INSTALLER, "_place_executable", "shutil.copyfile"): (1, _INSTALLS),
