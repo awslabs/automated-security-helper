@@ -1038,6 +1038,26 @@ def test_a_relative_git_work_tree_is_read_against_the_scanned_directory(
 
 
 @pytest.mark.integration
+def test_the_diff_with_no_directory_reads_a_work_tree_from_this_process_directory(
+    isolated_tmp, monkeypatch
+):
+    """``get_changed_files`` takes no directory by default and git then starts in
+    this process's own directory, so a GIT_WORK_TREE named there is read against
+    it. Joining the value onto a missing directory raised TypeError instead, out
+    of a ``try`` that catches only a missing git and a timeout, so a hook that
+    exported GIT_DIR and GIT_WORK_TREE and called the default crashed the scan."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    monkeypatch.chdir(tree / "src")
+    monkeypatch.setenv("GIT_DIR", bare.as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", "../deployed")
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    changed = get_changed_files("HEAD~1")
+
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
 def test_the_list_check_holds_against_a_git_that_cannot_list_worktrees(
     isolated_tmp, monkeypatch
 ):

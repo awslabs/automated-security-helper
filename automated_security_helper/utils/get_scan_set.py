@@ -2179,7 +2179,7 @@ def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
     return {key: value for key, value in child_environ().items() if key not in dropped}
 
 
-def _layout_environ(cwd: "str | os.PathLike[str]") -> Dict[str, str]:
+def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     """The environment of the repository-root lookup and the diff started in *cwd*.
 
     :func:`_git_environ`, unless the caller names the work tree: with GIT_WORK_TREE
@@ -2187,7 +2187,9 @@ def _layout_environ(cwd: "str | os.PathLike[str]") -> Dict[str, str]:
     they are. A relative GIT_WORK_TREE is read against *cwd*, the directory git is
     started in, since that is where git resolves it; read against this process's
     own directory it could name a directory that git would not find, or the other
-    way round. A bare repository driven as ``GIT_DIR=<bare> GIT_WORK_TREE=<tree>``
+    way round. A *cwd* of None is this process's own directory, which is where
+    :func:`subprocess.run` starts git when it is given no directory.
+    A bare repository driven as ``GIT_DIR=<bare> GIT_WORK_TREE=<tree>``
     (a post-receive hook deploying a checkout, a ``core.worktree`` layout) has no
     ``.git`` entry in the tree for git to discover, so dropping the pair there
     turned the scan's root lookup into "not a repository", and dropping GIT_DIR
@@ -2202,8 +2204,10 @@ def _layout_environ(cwd: "str | os.PathLike[str]") -> Dict[str, str]:
     environ = child_environ()
     work_tree = environ.get("GIT_WORK_TREE")
     # os.path.join keeps an absolute work tree as it is and places a relative one
-    # under cwd, which is how git reads the variable from that directory.
-    if work_tree and os.path.isdir(os.path.join(cwd, work_tree)):
+    # under the directory git starts in, which is how git reads the variable from
+    # that directory. With no cwd, git starts in this process's directory.
+    started_in = os.getcwd() if cwd is None else cwd
+    if work_tree and os.path.isdir(os.path.join(started_in, work_tree)):
         return environ
     return _git_environ()
 
