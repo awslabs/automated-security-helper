@@ -323,13 +323,7 @@ def test_class_name_and_empty_keys_are_excluded_from_executed_scanners(
     ]
 
 
-def test_a_completed_tracker_state_without_a_row_is_not_present(
-    checkpointer, tracker, quiet
-):
-    """A scanner whose state says it completed but that left no row is NOT read
-    as present: that reading is what kept ensure_complete_results from ever
-    backfilling such a scanner or recording the missing row. The results keys
-    alone say what is present."""
+def test_a_completed_tracker_state_counts_as_executed(checkpointer, tracker, quiet):
     tracker.update_scanner_state("semgrep", registration_status="registered")
     results = AshAggregatedResults()
     results.scanner_results = {}
@@ -341,7 +335,7 @@ def test_a_completed_tracker_state_without_a_row_is_not_present(
     ):
         executed = checkpointer._get_executed_scanners_from_validation_state(results)
 
-    assert executed == []
+    assert executed == ["semgrep"]
 
 
 def test_a_non_completed_tracker_state_does_not_count_as_executed(
@@ -390,9 +384,7 @@ def test_a_scanner_in_both_results_and_tracker_state_is_not_double_counted(
 
 
 def test_a_class_named_tracker_state_is_skipped(checkpointer, tracker, quiet):
-    """update_scanner_state rejects class names, so this state is injected
-    directly. Tracker states are no longer read as rows at all, so neither the
-    legacy entry nor the real one counts without a results row."""
+    """update_scanner_state rejects class names, so this state is injected directly."""
     tracker.update_scanner_state("bandit", registration_status="registered")
     legacy = tracker.scanner_states["bandit"]
     tracker.scanner_states["LegacyScanner"] = legacy
@@ -406,7 +398,7 @@ def test_a_class_named_tracker_state_is_skipped(checkpointer, tracker, quiet):
     ):
         executed = checkpointer._get_executed_scanners_from_validation_state(results)
 
-    assert executed == []
+    assert executed == ["bandit"]
 
 
 # ---------------------------------------------------------------------------

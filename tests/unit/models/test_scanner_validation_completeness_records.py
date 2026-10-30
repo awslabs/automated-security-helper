@@ -35,7 +35,6 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scanner_validation import (
     ScannerStateTracker,
@@ -143,26 +142,6 @@ def test_the_completeness_rate_counts_registered_scanners_with_a_row(
     )
     assert "Scanners present in results" in verbose
     assert "executed successfully" not in verbose
-
-
-def test_a_completed_scanner_with_no_row_is_backfilled(checkpointer, tracker):
-    """Red before the fix: the completed state counted as a row, so nothing was
-    added and no discrepancy was recorded."""
-    tracker.update_scanner_state(
-        "bandit",
-        registration_status="registered",
-        enablement_status="enabled",
-        queued_for_execution=True,
-        execution_completed=True,
-    )
-    results = AshAggregatedResults()
-    results.scanner_results = {}
-
-    checkpoint = checkpointer.ensure_complete_results(results)
-
-    assert results.scanner_results["bandit"].status is ScannerStatus.PASSED
-    assert checkpoint.metadata["added_scanners"] == ["bandit"]
-    assert checkpoint.metadata["final_count"] == 1
 
 
 def test_a_missing_scanners_discrepancy_names_the_reason_its_state_holds(

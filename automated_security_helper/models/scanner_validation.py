@@ -1133,14 +1133,16 @@ class ValidationCheckpointer:
     def _get_executed_scanners_from_validation_state(
         self, aggregated_results: "AshAggregatedResults"
     ) -> List[str]:
-        """The scanners present in the results: the keys of ``scanner_results``.
+        """The scanners read as present: the ``scanner_results`` keys, plus every
+        tracked scanner whose execution state reads completed.
 
-        The results alone. A scanner whose tracked state says it completed but
-        that has no row used to count as present too, so
-        :meth:`ensure_complete_results` never backfilled it and recorded no
-        discrepancy: the completeness pass exists to add the row such a scanner
-        is missing (as PASSED with no findings, from its completed state), and
-        reading the state as the row hid exactly that case.
+        The completed-state arm is deliberate: the scan phase leaves a row only
+        for a scanner that produced a report or an error tree, so a scanner
+        that completed over clean trees alone has no row yet, and
+        :meth:`ensure_complete_results` must not backfill it as PASSED behind
+        the phase's back (tests/unit/core/test_partial_loss_status_through_scan_phase.py
+        pins that shape). Whether such a scanner should get a row at all is the
+        phase's design question, not this pass's.
         """
         executed_scanners: List[str] = []
 
@@ -1154,6 +1156,20 @@ class ValidationCheckpointer:
             self.logger.debug(
                 f"Found {len(existing_scanners)} scanners already in results: {sorted(existing_scanners)}"
             )
+
+        for scanner_name, scanner_state in self._tracker.scanner_states.items():
+            if self._tracker.is_class_name_entry(scanner_name):
+                continue
+            if scanner_name in executed_scanners:
+                continue
+            status_info = self._tracker.determine_scanner_status_from_execution_data(
+                scanner_name
+            )
+            if status_info["status"] == "completed":
+                executed_scanners.append(scanner_name)
+                self.logger.debug(
+                    f"Scanner '{scanner_name}' marked as executed in validation state"
+                )
 
         executed_scanners = sorted(set(executed_scanners))
         self.logger.debug(
