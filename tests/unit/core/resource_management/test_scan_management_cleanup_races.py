@@ -24,6 +24,7 @@ instance attributes.
 
 import asyncio
 import os
+import shutil
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -341,8 +342,77 @@ class TestALinkOnTheOutputPathIsNotFollowed:
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
         assert result["removed_output"] is False
-        assert "outside the scanned directory" in result["output_dir_error"]
+        assert "outside the output directory" in result["output_dir_error"]
         assert (elsewhere / ".ash" / "ash_output" / "keep.txt").exists()
+
+    def test_a_workspace_projects_output_outside_its_directory_is_removed(
+        self, registry, tmp_path
+    ):
+        """A workspace scan registers each project with an output directory
+        under the workspace's output_dir (``<output_dir>/projects/<key>``,
+        cli/mcp/workspace.py), not under the project's own directory. Compared
+        against the scanned directory, that output never resolved "inside" and
+        every workspace entry's cleanup refused the removal, blaming a symbolic
+        link that was not there; compared against the registered output
+        directory, it is removed."""
+        project = tmp_path / "ws" / "proj"
+        project.mkdir(parents=True)
+        output = tmp_path / "ws" / ".ash" / "ash_output" / "projects" / "proj-key"
+        output.mkdir(parents=True)
+        (output / "ash_aggregated_results.json").write_text("{}", encoding="utf-8")
+        entry = ScanRegistryEntry(
+            scan_id="scan-1",
+            directory_path=str(project),
+            output_directory=str(output),
+        )
+        entry.status = MCScanStatus.COMPLETED
+        entry.has_runner = False
+        registry.get_scan.return_value = entry
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["removed_output"] is True
+        assert result.get("output_dir_error") is None
+        assert not output.exists()
+        assert project.exists()
+
+    def test_a_workspace_projects_directory_that_became_a_link_is_not_removed_through(
+        self, registry, tmp_path
+    ):
+        """The same fail-closed shape for the workspace layout: a ``projects``
+        component that became a link after registration redirects the stored
+        path outside the registered output tree, and nothing is removed."""
+        if not hasattr(os, "symlink"):
+            pytest.skip("symlinks are not available on this platform")
+        project = tmp_path / "ws" / "proj"
+        project.mkdir(parents=True)
+        ash_output = tmp_path / "ws" / ".ash" / "ash_output"
+        (ash_output / "projects" / "proj-key").mkdir(parents=True)
+        entry = ScanRegistryEntry(
+            scan_id="scan-1",
+            directory_path=str(project),
+            output_directory=str(ash_output / "projects" / "proj-key"),
+        )
+        entry.status = MCScanStatus.COMPLETED
+        entry.has_runner = False
+        # After registration, `projects` is replaced by a link to another tree.
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "proj-key").mkdir(parents=True)
+        (elsewhere / "proj-key" / "keep.txt").write_text("keep", encoding="utf-8")
+        shutil.rmtree(ash_output / "projects")
+        try:
+            (ash_output / "projects").symlink_to(elsewhere)
+        except OSError:
+            pytest.skip("this platform refuses to create a symlink here")
+        registry.get_scan.return_value = entry
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["removed_output"] is False
+        assert "outside the output directory" in result["output_dir_error"]
+        assert (elsewhere / "proj-key" / "keep.txt").exists()
 
     def test_a_real_output_tree_is_still_removed(self, registry, tmp_path):
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)

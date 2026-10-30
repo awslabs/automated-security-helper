@@ -41,22 +41,30 @@ class _OutputDirectoryInUse(Exception):
     """The output directory must not be removed now; the message says why."""
 
 
-def _output_dir_within(output_dir: Path, canonical_directory: Path) -> bool:
-    """Whether ``output_dir`` still resolves to a path inside the scanned tree.
+def _output_dir_within(output_dir: Path, canonical_output_directory: Path) -> bool:
+    """Whether ``output_dir`` still resolves to the output tree the scan registered.
 
     The output directory is stored as a string at registration and removed by
-    that path later; MCP scans place it under the scanned directory
-    (``<source>/.ash/ash_output``), whose resolved form the registry fixed at
-    registration as ``canonical_directory``. The recursive delete must land
-    inside that tree. Resolving the stored path at cleanup time and requiring
-    the result to be under the canonical directory refuses every way a link
-    can redirect it: a ``.ash`` or ``ash_output`` that became a link after the
-    scan, a source directory that is itself a link retargeted since, and a
-    link anywhere above them. (A per-component lstat walk from the source
-    directory down checked none of the source's own ancestors, and checked
-    only the last component when the stored spelling did not sit under the
-    stored source.) A link that stays inside the tree is admitted: the delete
-    then removes a directory the scan owned.
+    that path later; the registry fixed its resolved form at registration as
+    ``canonical_output_directory``. The recursive delete must land in that
+    tree. Resolving the stored path at cleanup time and requiring the result
+    to be at or under the registered output directory refuses every way a
+    link can redirect it: a ``.ash`` or ``ash_output`` that became a link
+    after the scan, a source directory that is itself a link retargeted since,
+    a ``projects`` directory of a workspace that became a link, and a link
+    anywhere above them. (A per-component lstat walk from the source directory
+    down checked none of the source's own ancestors, and checked only the last
+    component when the stored spelling did not sit under the stored source.)
+    A link that stays inside the tree is admitted: the delete then removes a
+    directory the scan owned.
+
+    The comparison is against the OUTPUT tree, not the scanned directory. A
+    single MCP scan writes under its source (``<source>/.ash/ash_output``), but
+    a workspace scan registers each project with
+    ``<settings.output_dir>/projects/<key>`` (cli/mcp/workspace.py), which is
+    not under the project's own directory; compared against the scanned
+    directory, every workspace entry's cleanup refused the removal and blamed
+    a symbolic link that was not there.
 
     False when the path cannot be resolved at all (a link loop, a NUL byte):
     nothing is removed through a path that cannot be read.
@@ -66,7 +74,7 @@ def _output_dir_within(output_dir: Path, canonical_directory: Path) -> bool:
     except (OSError, RuntimeError, ValueError):
         return False
     try:
-        resolved.relative_to(canonical_directory)
+        resolved.relative_to(canonical_output_directory)
     except ValueError:
         return False
     return True
@@ -417,12 +425,18 @@ async def cleanup_scan_resources(
                 def remove() -> bool:
                     # The path was recorded at registration; a link placed on
                     # or above it since would redirect the delete outside the
-                    # scanned tree. Checked here, inside the registry's lock
-                    # and right before the delete.
-                    if not _output_dir_within(output_dir, entry.canonical_directory):
+                    # output tree the scan registered. Checked here, inside
+                    # the registry's lock and right before the delete, against
+                    # the registered OUTPUT directory: a workspace project's
+                    # output sits under the workspace's output_dir, not under
+                    # the project's own directory.
+                    if not _output_dir_within(
+                        output_dir, entry.canonical_output_directory
+                    ):
                         raise _OutputDirectoryInUse(
-                            "the output path now resolves outside the scanned "
-                            "directory (a component of it became a symbolic link)"
+                            "the output path now resolves outside the output "
+                            "directory the scan registered (a component of it "
+                            "became a symbolic link)"
                         )
                     # The stats and the recursive delete, on the worker thread
                     # this remover runs on; True when the tree is absent
