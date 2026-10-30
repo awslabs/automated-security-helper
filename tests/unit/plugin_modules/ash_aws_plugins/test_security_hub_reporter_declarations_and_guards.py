@@ -3,8 +3,7 @@
 
 """What the Security Hub reporter declares, reads, retries, logs and refuses.
 
-Each test failed at the base: an empty AWS_REGION hid AWS_DEFAULT_REGION; an
-all-digit findings_scope or aws_profile was refused as not a string; the
+Each test failed at the base: an empty AWS_REGION hid AWS_DEFAULT_REGION; the
 reporter declared three destination options while the trust table lists five;
 a ClientError without an Error record left the dependency check as a KeyError
 and a throttled DescribeHub dropped the reporter with no retry; results with no
@@ -90,15 +89,26 @@ def test_an_empty_aws_region_does_not_hide_aws_default_region(monkeypatch):
     assert options.aws_profile is None
 
 
-def test_an_all_digit_scope_or_profile_is_read_as_the_text_written():
-    """YAML and --config-overrides hand an all-digit value over as an int."""
-    options = SecurityHubReporterConfigOptions(findings_scope=12345, aws_profile=42)
+def test_an_all_digit_scope_or_profile_written_as_text_is_kept_as_written():
+    options = SecurityHubReporterConfigOptions(
+        findings_scope="0755", aws_profile="0123"
+    )
 
-    assert options.findings_scope == "12345"
-    assert options.aws_profile == "42"
+    assert options.findings_scope == "0755"
+    assert options.aws_profile == "0123"
 
 
-def test_a_scope_that_is_not_text_or_digits_is_still_refused():
+@pytest.mark.parametrize("field", ["findings_scope", "aws_profile"])
+@pytest.mark.parametrize("value", [493, 12345])
+def test_an_int_scope_or_profile_is_refused_not_converted(field, value):
+    """YAML reads an unquoted 0755 as octal 493: the text the operator wrote is
+    not recoverable from the int, so an int is refused (as a configuration
+    error) rather than converted into a name they never wrote."""
+    with pytest.raises(ValidationError):
+        SecurityHubReporterConfigOptions(**{field: value})
+
+
+def test_a_scope_that_is_not_text_is_still_refused():
     with pytest.raises(ValidationError):
         SecurityHubReporterConfigOptions(findings_scope=["a", "list"])
 

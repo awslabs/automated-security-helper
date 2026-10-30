@@ -293,15 +293,11 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
             return f"{value:012d}"
         return value
 
-    @field_validator("findings_scope", "aws_profile", mode="before")
-    @classmethod
-    def _digits_as_text(cls, value: Any) -> Any:
-        """An all-digit scope or profile name is read as an int by YAML and by
-        --config-overrides; it names the text the operator wrote, so it is taken
-        as that text rather than refused for not being a string."""
-        if isinstance(value, int) and not isinstance(value, bool):
-            return str(value)
-        return value
+    # findings_scope and aws_profile take text only. An all-digit value YAML or
+    # --config-overrides hands over as an int is refused rather than converted:
+    # the text the operator wrote is not recoverable from the int (YAML reads
+    # `0755` as octal 493), so a converted value could name a scope or profile
+    # they never wrote. Quote it in the config to keep it text.
 
     @model_validator(mode="after")
     def _retry_delays_are_bounded(self):
