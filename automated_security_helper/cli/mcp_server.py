@@ -2128,9 +2128,9 @@ async def cancel_scan(ctx: Context, scan_id: str) -> Dict[str, Any]:
     The previous scan's results are then put back in place of every result the
     cancelled scan wrote; its logs, ash.log and ash.log.jsonl, stay. Without
     previous results, what it wrote before it stopped stays, except that its
-    reports are removed when it stops during the report phase; the
-    unused-suppressions reporter's markdown file, which that reporter writes
-    itself, stays even then.
+    reports are removed when it stops during the report phase, with every other
+    file a reporter wrote beside them; the unused-suppressions reporter's
+    markdown file goes with them.
 
     The scan's status becomes `cancelled` at once; until the scan has stopped, a
     new scan of the same directory is refused as still stopping. A scan that has

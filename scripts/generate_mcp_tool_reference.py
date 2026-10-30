@@ -503,8 +503,8 @@ TOOL_NOTES: dict[str, dict] = {
             "log, `ash.log`, stays, and an `ash.log.jsonl` already there is left as it "
             "was. With no previous results, what the scan wrote before it stopped "
             "stays, except that a cancel during the report phase removes the reports "
-            "that phase wrote. `reports/ash.unused-suppressions.md`, which its "
-            "reporter writes on its own, stays even then."
+            "that phase wrote and every other file a reporter wrote beside them, "
+            "`reports/ash.unused-suppressions.md` included."
         ),
         "params": {"scan_id": {"notes": "The scan to cancel"}},
         "caveats": [

@@ -9042,9 +9042,9 @@ _CANCEL_PUTS_BACK = (
 )
 _CANCEL_LEAVES = (
     "With no previous results, what the scan wrote before it stopped stays, except "
-    "that a cancel during the report phase removes the reports that phase wrote. "
-    "`reports/ash.unused-suppressions.md`, which its reporter writes on its own, stays "
-    "even then."
+    "that a cancel during the report phase removes the reports that phase wrote and "
+    "every other file a reporter wrote beside them, `reports/ash.unused-suppressions.md` "
+    "included."
 )
 MCP_TOOLS = "reference/mcp-tools.md"
 
@@ -9620,8 +9620,8 @@ def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
     every result the scan wrote, and the scan's own ``ash.log`` must stay, not the
     previous scan's; with none, ``partial.txt`` must stay. In the report phase
     the cancel lands while the plugin reporter, which runs after ASH's own, waits: the
-    reports that phase wrote must be gone, except ``reports/ash.unused-suppressions.md``,
-    which must stay. In every case the scan's ``ash.log`` must stay, and an
+    reports that phase wrote must be gone, ``reports/ash.unused-suppressions.md``, which
+    its reporter writes beside them, with them. In every case the scan's ``ash.log`` must stay, and an
     ``ash.log.jsonl`` that was there before the scan must be left as it was. The
     control in each case is the scan under way when the cancel is sent, and for the
     report phase that ASH's reports were written by then.
@@ -9672,9 +9672,7 @@ def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
         assert partial, "what the scan wrote before it stopped did not stay"
     else:
         left = sorted(p.name for p in reports.iterdir()) if reports.is_dir() else []
-        assert left == ["ash.unused-suppressions.md"], (
-            f"after a report-phase cancel, reports/ holds {left}"
-        )
+        assert left == [], f"after a report-phase cancel, reports/ holds {left}"
 
 
 #: mcp-server.md's paragraph on how an HTTP server stops (Run over streamable HTTP).
