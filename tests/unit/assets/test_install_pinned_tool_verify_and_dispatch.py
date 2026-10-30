@@ -248,6 +248,28 @@ class TestVerifyThirdParty:
 
         assert installer._uv_tool_dir() is None
 
+    def test_uv_tool_dir_starts_uv_without_the_scripts_own_stdin(
+        self, monkeypatch, tmp_path
+    ):
+        # Red before: the spawn had no stdin=, so uv inherited the installer's own
+        # standard input (the image build's, or an operator's terminal).
+        uv = tmp_path / "bin" / "uv"
+        uv.parent.mkdir()
+        uv.write_text("#!/bin/sh\n", encoding="utf-8")
+        uv.chmod(0o755)
+        monkeypatch.setenv("PATH", str(uv.parent))
+        seen = {}
+
+        def record(argv, **kwargs):
+            seen["argv"], seen["kwargs"] = argv, kwargs
+            return types.SimpleNamespace(returncode=0, stdout="/somewhere\n")
+
+        monkeypatch.setattr(installer.subprocess, "run", record)
+
+        assert installer._uv_tool_dir() == "/somewhere"
+        assert seen["argv"] == [str(uv), "tool", "dir"]
+        assert seen["kwargs"]["stdin"] == installer.subprocess.DEVNULL
+
 
 @pytest.mark.unit
 class TestTheModeFlagNeedNotComeFirst:

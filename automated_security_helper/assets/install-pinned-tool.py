@@ -1453,6 +1453,7 @@ def _uv_tool_dir() -> "str | None":
     try:
         result = subprocess.run(  # nosec B603 - fixed argv, uv resolved on PATH
             [uv, "tool", "dir"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=_VERSION_TIMEOUT_SECONDS,
