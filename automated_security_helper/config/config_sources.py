@@ -1529,12 +1529,72 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
         yield search_dir / ASH_PYPROJECT_FILE_NAME
 
 
+#: Links followed before a chain is given up on as unjudgeable: the bound
+#: ``os.path.realpath`` applies to a chain of links before it stops following.
+_LINK_HOPS = 40
+
+
+def _names_a_windows_share(target: str) -> bool:
+    """Whether `target` is a UNC path, ``\\\\server\\share`` or ``//server/share``.
+
+    A path in the extended form, ``\\\\?\\...`` or ``\\\\.\\...``, names a share
+    only through its ``UNC`` device: ``\\\\?\\UNC\\server\\share`` does,
+    ``\\\\?\\C:\\repo`` is a local volume. ``os.readlink`` returns a junction's
+    target in that form, so the form is read here rather than taken for a
+    share by its two leading separators.
+    """
+    if target[:4] in ("\\\\?\\", "\\\\.\\", "//?/", "//./"):
+        return target[4:8].upper() in ("UNC\\", "UNC/")
+    return target.startswith(("\\\\", "//"))
+
+
+def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
+    """Whether the link at `path`, or a link it leads to, names a network share.
+
+    Read with ``os.readlink`` one hop at a time: reading a link's target opens
+    the link's own entry, never what it names, so a chain is judged without a
+    connection to anything it leads to. A relative target is taken from the
+    link's directory, as resolving would take it. The walk ends at the first
+    name that is not a link, or that is not there: a local name is then all
+    that resolving would open, and the answer is False.
+
+    None when the chain cannot be judged: a link whose target cannot be read, or
+    a chain longer than ``_LINK_HOPS``. The caller refuses then, as it refused
+    every link before, since what resolving would open cannot be told. A link
+    in a parent directory of `path` is not read, as it was not before.
+    """
+    current = os.fspath(path)
+    for _ in range(_LINK_HOPS):
+        try:
+            target = os.readlink(current)
+        except OSError:
+            return None
+        if _names_a_windows_share(target):
+            return True
+        if not os.path.isabs(target):
+            target = os.path.join(os.path.dirname(current), target)
+        target = os.path.normpath(target)
+        try:
+            is_link = _is_a_symlink_or_reparse_point(os.lstat(target))
+        except OSError:
+            # Absent, or under a directory that cannot be searched: a local name
+            # either way, which is all that resolving would open.
+            return False
+        if not is_link:
+            return False
+        current = target
+    return None
+
+
 def _permitted(path: Path, permit: PermitBase) -> bool:
     if _on_windows() and _is_a_link(path):
         # Resolving a link on Windows can open a connection to the host a UNC
-        # target names, so a linked source is refused unresolved, as an extends
-        # base whose spelling leaves the root is (_resolve_base_path).
-        return False
+        # target names, so a link that leads to a share, or whose target cannot
+        # be read, is refused unresolved, as an extends base whose spelling
+        # leaves the root is (_resolve_base_path). A link that leads to a local
+        # name is resolved below and judged as the file it names.
+        if _link_chain_names_a_windows_share(path) is not False:
+            return False
     # realpath reads links and opens nothing, and does not raise on a loop.
     return permit(Path(os.path.realpath(path)))
 
