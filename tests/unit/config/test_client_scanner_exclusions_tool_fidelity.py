@@ -424,6 +424,10 @@ def test_an_operator_chain_files_ignore_file_survives_a_delivered_override(tmp_p
 def test_an_entry_an_operator_file_adds_by_a_patch_operation_is_the_operators(
     tmp_path,
 ):
+    """The option keeps the operator's own entry (its reason and expiration),
+    not the client's copy. The operator's entry is unexpired here: an expired
+    operator entry now drops the client's copy altogether, which
+    ``test_a_client_copy_of_an_expired_operator_entry_is_dropped`` pins."""
     config = AshConfig()
     config.scanners.bandit.options.excluded_paths = [
         IgnorePathWithReason(path="shared", reason="client says"),
@@ -433,7 +437,7 @@ def test_an_entry_an_operator_file_adds_by_a_patch_operation_is_the_operators(
             {
                 "op": "add",
                 "path": "/scanners/bandit/options/excluded_paths/-",
-                "value": {"path": "shared", "reason": "op", "expiration": "2000-01-01"},
+                "value": {"path": "shared", "reason": "op", "expiration": "2099-01-01"},
             }
         ]
     }
@@ -442,6 +446,6 @@ def test_an_entry_an_operator_file_adds_by_a_patch_operation_is_the_operators(
 
     kept = config.scanners.bandit.options.excluded_paths
     assert [entry.path for entry in kept] == ["shared"]
-    assert kept[0].expiration == "2000-01-01"
+    assert kept[0].expiration == "2099-01-01"
     assert kept[0].reason == "op"
     assert config._client_scanner_exclusions == []
