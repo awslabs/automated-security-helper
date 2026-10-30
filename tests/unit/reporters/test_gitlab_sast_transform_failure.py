@@ -402,12 +402,19 @@ class TestRuleIdBindingIsTransparent:
             locations=[_located()],
         )
 
-        (vuln,) = json.loads(reporter.report(_model(result)))["vulnerabilities"]
+        model = _model(result)
+
+        (vuln,) = json.loads(reporter.report(model))["vulnerabilities"]
 
         assert vuln["name"] == "B105"
         assert vuln["details"]["rule_id"]["value"] == "B105"
+        # The id and the ASH finding-id identifier are the flattened finding's
+        # id, the one every other ASH report gives this finding; the test that
+        # pinned the older rule-file-line hash was replaced by this derivation.
+        (flat,) = model.to_flat_vulnerabilities()
+        assert vuln["id"] == flat.id
         assert [
             identifier["value"]
             for identifier in vuln["identifiers"]
             if identifier["type"] == "ash-finding-id"
-        ]
+        ] == [flat.id]

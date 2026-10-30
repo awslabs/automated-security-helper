@@ -35,6 +35,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
+    Kind,
     Location,
     Message,
     PhysicalLocation,
@@ -53,7 +54,21 @@ def reporter(test_plugin_context):
     return GitLabSASTReporter(context=test_plugin_context)
 
 
-def _result(rule_id: str, text: str) -> Result:
+def _scanner_message(name: str, status: ScannerStatus) -> str:
+    """The exact text the report gives a scanner that did not complete. An enum
+    repr (``ScannerStatus.MISSING``) in the message would fail this, where a
+    substring check on the status value passed it."""
+    return (
+        f"Scanner {name} did not complete ({status.value}); its findings are "
+        "absent from this report."
+    )
+
+
+def _result(rule_id: str, text: str, kind: Kind | None = None) -> Result:
+    # ``kind`` is passed only when given: the model's default is ``fail``, and
+    # an explicit None would be a different result from the one every other
+    # test here builds.
+    extra = {"kind": kind} if kind is not None else {}
     return Result(
         ruleId=rule_id,
         message=Message(text=text),
@@ -66,6 +81,7 @@ def _result(rule_id: str, text: str) -> Result:
                 )
             )
         ],
+        **extra,
     )
 
 
@@ -99,7 +115,7 @@ class TestScanStatusReportsScannersThatDidNotComplete:
 
         assert report["scan"]["status"] == "failure"
         values = [m["value"] for m in report["scan"]["messages"]]
-        assert any("bandit" in v and status.value in v for v in values), values
+        assert _scanner_message("bandit", status) in values, values
         assert all(m["level"] == "warn" for m in report["scan"]["messages"])
 
     def test_a_completed_scanner_keeps_a_clean_success(self, reporter):
@@ -147,10 +163,8 @@ class TestScanStatusReportsScannersThatDidNotComplete:
 
         assert len(report["vulnerabilities"]) == 1
         assert report["scan"]["status"] == "failure"
-        assert any(
-            "bandit" in m["value"] and "ERROR" in m["value"]
-            for m in report["scan"]["messages"]
-        )
+        values = [m["value"] for m in report["scan"]["messages"]]
+        assert _scanner_message("bandit", ScannerStatus.ERROR) in values, values
 
     @pytest.mark.parametrize("status", [ScannerStatus.MISSING, ScannerStatus.ERROR])
     def test_the_operators_gate_off_keeps_success_and_still_warns(
@@ -169,7 +183,7 @@ class TestScanStatusReportsScannersThatDidNotComplete:
 
         assert report["scan"]["status"] == "success"
         values = [m["value"] for m in report["scan"]["messages"]]
-        assert any("bandit" in v and status.value in v for v in values), values
+        assert _scanner_message("bandit", status) in values, values
         assert all(m["level"] == "warn" for m in report["scan"]["messages"])
 
     def test_the_gate_defaults_on_when_the_model_carries_no_config(self, reporter):
@@ -524,6 +538,27 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         assert {
             i["value"] for i in vuln["identifiers"] if i["type"] == "ash-finding-id"
         } == {flat.id}
+
+    def test_a_no_problem_result_between_two_findings_keeps_their_shared_ids(
+        self, reporter
+    ):
+        """The shared ids are read by position over every result, the ``pass``,
+        ``notApplicable`` and ``informational`` ones the report leaves out
+        included, so the flattening has to keep a row for those too or every
+        finding after one would fall back to its legacy id. cdk-nag emits them
+        in ordinary scans."""
+        model = _model(
+            _result("B105", "first"),
+            _result("AwsSolutions-S1", "not evaluated", kind=Kind.notApplicable),
+            _result("B106", "second"),
+        )
+
+        vulns = json.loads(reporter.report(model))["vulnerabilities"]
+
+        flat = model.to_flat_vulnerabilities()
+        assert [row.rule_id for row in flat] == ["B105", "AwsSolutions-S1", "B106"]
+        assert [v["name"] for v in vulns] == ["B105", "B106"]
+        assert [v["id"] for v in vulns] == [flat[0].id, flat[2].id]
 
     def test_an_extra_flattened_row_takes_no_other_findings_id(
         self, reporter, monkeypatch
