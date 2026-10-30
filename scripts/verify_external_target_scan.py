@@ -1349,14 +1349,19 @@ def _stop_process_group(
     ``subprocess.run(timeout=...)`` kills the child with SIGKILL, which skips ASH's
     own SIGTERM shutdown, so the scanner tools ASH had started kept running after
     the gate exited and kept writing into the kept evidence directory. The child
-    is started as the leader of its own process group (``start_new_session``), so
-    the signal reaches ASH and everything it spawned: SIGTERM to the group, a
-    grace period for ASH to stop its tools, then SIGKILL to whatever is left.
-    Where process groups are not available the child alone is terminated, then
-    killed, which is what ``subprocess.run`` did minus the grace period.
+    is started as the leader of its own process group (``start_new_session``):
+    SIGTERM goes to the group so ASH runs its own shutdown, which is what stops
+    the tools ASH starts in sessions of their own (its spawn plan decides that
+    per tool; the group signals never reach those), then a grace period, then
+    SIGKILL to the group. Where process groups are not available the child alone
+    is terminated, then killed, which is what ``subprocess.run`` did minus the
+    grace period.
 
-    The group is signaled even when the child has already exited: a process it
-    started can outlive it in the group and keep the output pipes open.
+    The group gets the SIGKILL sweep even when the child exited in time: a tool
+    that traps SIGTERM, or one ASH did not wait for, can outlive the child in
+    the group, keep the output pipes open and keep writing into the evidence
+    directory. ``ProcessLookupError`` from an empty group is expected and
+    suppressed, so the sweep costs nothing when there is nothing left.
     """
     group_signals = hasattr(os, "killpg") and hasattr(signal, "SIGKILL")
     if group_signals:
@@ -1366,12 +1371,12 @@ def _stop_process_group(
         process.terminate()
     try:
         process.wait(timeout=grace_seconds)
-        return
     except subprocess.TimeoutExpired:
-        pass
+        _kill_process_group(process)
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=grace_seconds)
+        return
     _kill_process_group(process)
-    with suppress(subprocess.TimeoutExpired):
-        process.wait(timeout=grace_seconds)
 
 
 def _drain_output(
@@ -1438,6 +1443,14 @@ def run_scan(
             raise subprocess.TimeoutExpired(
                 command, timeout, output=stdout, stderr=stderr
             ) from expired
+        except BaseException:
+            # Ctrl-C, a CI cancel or a SIGTERM to the gate turned into
+            # SystemExit. The child leads its own session, so the terminal's
+            # SIGINT never reached it, and Popen.__exit__ assumes it did: it
+            # waits a moment and returns with the child still running. Stop the
+            # group before the exception unwinds.
+            _stop_process_group(process)
+            raise
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 

@@ -146,13 +146,17 @@ class TestChildEnvironment:
 
 
 class _FakeProcess:
-    """A child that ignores SIGTERM and dies on SIGKILL, with the calls recorded."""
+    """A child that dies on SIGTERM, or ignores it and dies on SIGKILL only.
+
+    The fake records every ``wait`` deadline and every direct ``terminate`` or
+    ``kill`` call; the group signals are recorded by the ``killpg`` fixture.
+    """
 
     def __init__(self, dies_on_term: bool):
         self.pid = 4242
         self.dies_on_term = dies_on_term
         self.alive = True
-        self.signals: list = []
+        self.waits: list = []
         self.terminated = False
         self.killed = False
 
@@ -160,6 +164,7 @@ class _FakeProcess:
         return None if self.alive else 0
 
     def wait(self, timeout=None):
+        self.waits.append(timeout)
         if self.alive:
             raise subprocess.TimeoutExpired(cmd="ash", timeout=timeout)
         return 0
@@ -193,16 +198,21 @@ class TestStopProcessGroup:
         monkeypatch.setattr(gate.os, "killpg", fake_killpg)
         return calls, calls_process
 
-    def test_sigterm_reaches_the_group_and_a_cooperative_child_is_not_killed(
-        self, gate, killpg
-    ):
+    def test_a_cooperative_child_gets_sigterm_then_the_group_sweep(self, gate, killpg):
+        """The child exits on SIGTERM; the group is still swept with SIGKILL.
+
+        A tool that trapped SIGTERM, or one the child did not wait for, can
+        outlive it in the group. Before the sweep nothing ever killed it and it
+        kept writing into the evidence directory the gate had just reported.
+        """
         calls, calls_process = killpg
         process = _FakeProcess(dies_on_term=True)
         calls_process.append(process)
         gate._stop_process_group(process, grace_seconds=0.01)
-        assert [signum for _, signum in calls] == [signal.SIGTERM]
+        assert [signum for _, signum in calls] == [signal.SIGTERM, signal.SIGKILL]
         assert all(pgid == process.pid for pgid, _ in calls)
-        assert not process.killed
+        assert process.waits == [0.01], "one wait, for the grace period"
+        assert not process.killed, "the group kill, never a bare process.kill"
 
     def test_a_child_that_ignores_sigterm_is_killed_after_the_grace_period(
         self, gate, killpg
@@ -212,16 +222,45 @@ class TestStopProcessGroup:
         calls_process.append(process)
         gate._stop_process_group(process, grace_seconds=0.01)
         assert [signum for _, signum in calls] == [signal.SIGTERM, signal.SIGKILL]
+        # The grace period is waited before the kill and again after it; a
+        # wait(timeout=0) would make the grace period a fiction.
+        assert process.waits == [0.01, 0.01]
 
-    def test_an_exited_child_still_gets_the_group_signal(self, gate, killpg):
+    def test_an_exited_child_still_gets_the_group_signals(self, gate, killpg):
         """A tool the child started can outlive it in the group and hold the pipes."""
         calls, calls_process = killpg
         process = _FakeProcess(dies_on_term=True)
         process.alive = False
         calls_process.append(process)
         gate._stop_process_group(process, grace_seconds=0.01)
-        assert calls == [(process.pid, signal.SIGTERM)]
+        assert calls == [
+            (process.pid, signal.SIGTERM),
+            (process.pid, signal.SIGKILL),
+        ]
         assert not process.killed
+
+    def test_an_empty_group_is_not_an_error(self, gate, monkeypatch):
+        """The real killpg raises ProcessLookupError once nothing is left."""
+
+        def no_such_group(pgid, signum):
+            raise ProcessLookupError(pgid)
+
+        monkeypatch.setattr(gate.os, "killpg", no_such_group)
+        process = _FakeProcess(dies_on_term=True)
+        process.alive = False
+        gate._stop_process_group(process, grace_seconds=0.01)
+        assert process.waits == [0.01]
+
+    def test_a_group_of_zombies_is_not_an_error(self, gate, monkeypatch):
+        """macOS answers EPERM for a group that holds only zombies."""
+
+        def permission_denied(pgid, signum):
+            raise PermissionError(pgid)
+
+        monkeypatch.setattr(gate.os, "killpg", permission_denied)
+        process = _FakeProcess(dies_on_term=True)
+        process.alive = False
+        gate._stop_process_group(process, grace_seconds=0.01)
 
 
 class _FakePipes:
@@ -249,8 +288,9 @@ def _timeout(output=None, stderr=None):
 class _FakeScanChild:
     """A scan child that exited while a tool it started still holds the pipes."""
 
+    pid = 4242
+
     def __init__(self, *args, **kwargs):
-        self.pid = 4242
         self.returncode = 0
 
     def __enter__(self):
@@ -314,6 +354,38 @@ class TestDrainOutput:
         with pytest.raises(subprocess.TimeoutExpired) as raised:
             gate.run_scan(tmp_path, tmp_path / "src", tmp_path / "out", timeout=0.01)
         assert raised.value.output == "tail"
+        # The stop (SIGTERM, then the sweep) and the drain's own kill all reach
+        # the group; a run_scan that skipped the stop would still raise.
+        assert killed == [
+            (_FakeScanChild.pid, signal.SIGTERM),
+            (_FakeScanChild.pid, signal.SIGKILL),
+            (_FakeScanChild.pid, signal.SIGKILL),
+        ]
+
+    def test_an_interrupt_during_the_scan_stops_the_group(
+        self, gate, killed, monkeypatch, tmp_path
+    ):
+        """Ctrl-C reaches only the gate: the child leads its own session.
+
+        Only ``TimeoutExpired`` was caught, and ``Popen.__exit__`` treats a
+        ``KeyboardInterrupt`` as one the child also received: it waits a moment
+        and returns, so the scan and its tools kept running detached.
+        """
+
+        class _Interrupted(_FakeScanChild):
+            def communicate(self, timeout=None):
+                raise KeyboardInterrupt
+
+        stopped: list = []
+        monkeypatch.setattr(gate.subprocess, "Popen", _Interrupted)
+        monkeypatch.setattr(
+            gate, "_stop_process_group", lambda process, **_: stopped.append(process)
+        )
+        with pytest.raises(KeyboardInterrupt):
+            gate.run_scan(tmp_path, tmp_path / "src", tmp_path / "out", timeout=0.01)
+        assert len(stopped) == 1
+        assert isinstance(stopped[0], _Interrupted)
+        assert killed == [], "the stop was routed through _stop_process_group"
 
 
 class TestExitCodeRecords:
