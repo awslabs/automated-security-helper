@@ -1640,11 +1640,13 @@ class UVToolMixin:
             )
             self.use_uv_tool = False
             self.dependencies_satisfied = True
-            if verdict.version:
-                # The copy that runs is this one, so the version the reports
-                # name (SARIF scanner_version) is its own, not the one the uv
-                # probe read from uv's environment.
-                self.tool_version = verdict.version
+            # The copy that runs is this one, so the version the reports name
+            # (SARIF scanner_version) is its own, not the one the uv probe read
+            # from uv's environment. Read with a default: a verifier stand-in
+            # that carries only status and detail is a verdict without one.
+            verified_version = getattr(verdict, "version", None)
+            if verified_version:
+                self.tool_version = verified_version
             return True
 
         # A tool from the Nix store is the pinned one `--mode nix` exists to run.
