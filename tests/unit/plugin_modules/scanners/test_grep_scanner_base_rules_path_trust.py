@@ -270,6 +270,135 @@ def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_offlin
 @pytest.mark.parametrize(
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )
+def test_the_decline_reason_names_the_resolved_path_of_a_missing_rules_file(
+    scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
+):
+    """A typo's reason shows the absolute path ASH looked for and says it does not
+    exist, and names the operator sources that admit a rules file; a reader can
+    tell it from a path-trust refusal.
+
+    Fails at the tip whose reason was one sentence listing every possible cause.
+    """
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(options=options_cls(offline=False, config="my-rulez.yaml")),
+    )
+
+    reason = scanner.dependency_unavailable_reason or ""
+    expected = os.path.realpath(Path(test_plugin_context.source_dir) / "my-rulez.yaml")
+    assert expected in reason, reason
+    assert "does not exist" in reason, reason
+    assert "path trust refused" not in reason, reason
+    assert "--config-overrides" in reason, reason
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_the_decline_reason_names_a_path_trust_refusal_as_such(
+    scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
+):
+    """An in-tree rules file's reason says path trust refused it, with the resolved
+    path, and does not claim the file is missing."""
+    source_dir = Path(test_plugin_context.source_dir)
+    source_dir.mkdir(parents=True, exist_ok=True)
+    (source_dir / "shipped-rules.yaml").write_text(RULE, encoding="utf-8")
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(
+            options=options_cls(offline=False, config="shipped-rules.yaml")
+        ),
+    )
+
+    reason = scanner.dependency_unavailable_reason or ""
+    assert "path trust refused" in reason, reason
+    assert os.path.realpath(source_dir / "shipped-rules.yaml") in reason, reason
+    assert "does not exist" not in reason, reason
+
+
+def _separate_checkout_with_rules(tmp_path: Path) -> Path:
+    other = tmp_path / "other-checkout"
+    (other / ".git").mkdir(parents=True)
+    rules = other / "rules"
+    rules.mkdir()
+    (rules / "a.yaml").write_text(RULE, encoding="utf-8")
+    return rules
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_a_rules_directory_in_another_checkout_is_refused_from_a_repository_config(
+    scanner_cls,
+    config_cls,
+    options_cls,
+    cache_env,
+    context_outside_checkouts,
+    tmp_path,
+    monkeypatch,
+):
+    """A rules directory inside ANY git checkout is refused when the value is not
+    the operator's own (the config that names it is read as the scanned
+    repository's): ``config/path_trust.honored_path`` judges such a value with
+    ``scanned_tree_reason`` (``sandbox_grants.untrusted_reason``: inside any git
+    checkout). The scanner declines and the reason names the operator sources."""
+    rules = _separate_checkout_with_rules(tmp_path)
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=context_outside_checkouts,
+        config=config_cls(options=options_cls(offline=False, config=str(rules))),
+    )
+
+    _declined_for_its_config(scanner, scanner.config.name)
+    assert rules.as_posix() not in _configs(scanner)
+    assert "--config-overrides" in (scanner.dependency_unavailable_reason or "")
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_a_rules_directory_in_another_checkout_is_admitted_from_an_operator_source(
+    scanner_cls,
+    config_cls,
+    options_cls,
+    cache_env,
+    context_outside_checkouts,
+    tmp_path,
+    monkeypatch,
+):
+    """The same directory named by the operator (here through a
+    ``--config-overrides`` entry recorded in ``AshConfig._operator_paths``) is
+    admitted: an operator's value is judged by ``operator_reason``
+    (``sandbox_grants.in_tree_reason``: the scanned tree itself, never another
+    checkout), so a rules repository checked out elsewhere is the operator's to
+    name. Only the scanned tree stays refused for the operator too."""
+    from automated_security_helper.config.path_trust import OperatorPaths
+
+    rules = _separate_checkout_with_rules(tmp_path)
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+    config = config_cls(options=options_cls(offline=False, config=str(rules)))
+    context_outside_checkouts.config._operator_paths = OperatorPaths(
+        overrides=[(f"scanners.{config.name}.options.config", str(rules))]
+    )
+
+    scanner = scanner_cls(context=context_outside_checkouts, config=config)
+
+    assert scanner.dependency_unavailable_reason is None
+    assert _configs(scanner) == [Path(os.path.realpath(rules)).as_posix()]
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
 def test_online_passes_a_registry_name_as_written(
     scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
 ):

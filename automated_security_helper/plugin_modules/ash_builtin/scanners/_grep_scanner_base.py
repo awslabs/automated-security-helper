@@ -20,6 +20,7 @@ import fnmatch
 import logging
 import os
 from pathlib import Path
+from dataclasses import dataclass
 from typing import (
     Any,
     ClassVar,
@@ -38,7 +39,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.config.path_trust import honored_path
+from automated_security_helper.config.path_trust import honored_path, resolved_path
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
@@ -109,6 +110,21 @@ SEMGREP_DEFAULT_IGNORES: tuple[str, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class _ConfiguredRules:
+    """What ``options.config`` resolved to (``GrepScannerBase._resolve_configured_rules``).
+
+    ``kind`` is one of ``unset``, ``as_written``, ``local``, ``refused``, ``missing``;
+    ``value`` is the string handed to the tool for ``as_written`` and ``local`` (the
+    resolved absolute path for ``local``) and the configured text otherwise;
+    ``detail`` says why for ``refused`` and ``missing`` and is None otherwise.
+    """
+
+    kind: str
+    value: Optional[str]
+    detail: Optional[str]
+
+
 class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     """Shared scaffolding for semgrep and opengrep scanners."""
 
@@ -129,6 +145,10 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # staleness probe read it, so a scan that read other rules is not graded on
     # the cache's age.
     _cache_dir_in_use: Optional[str] = PrivateAttr(default=None)
+    # What options.config resolved to, judged ONCE per _process_config_options
+    # (_resolve_configured_rules); the offline and online branches and the refusal
+    # read this instead of resolving again, so path trust runs and warns once.
+    _configured_rules: Optional[_ConfiguredRules] = PrivateAttr(default=None)
 
     # ---------------------------------------------------------------
     # Hooks subclasses override
@@ -252,6 +272,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # re-call this and we want a clean state).
         self.args.extra_args = [a for a in self.args.extra_args if a.key != "--metrics"]
         self._cache_dir_in_use = None
+        self._configured_rules = self._resolve_configured_rules()
 
         # Bundled ASH stargrep rules — picked up by both scanners.
         ash_stargrep_rules = [
@@ -400,27 +421,35 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 warnings.append(message)
             self._plugin_log(message, level=logging.WARNING)
 
-    def _local_rules_configured(self) -> Optional[str]:
-        """The ``options.config`` rule file or directory ASH may hand the tool, as
-        the resolved absolute path, or None.
+    def _resolve_configured_rules(self) -> "_ConfiguredRules":
+        """Judge ``options.config`` once: what it is and, when ASH cannot pass it,
+        why.
 
-        None for a registry name or a URL (``_is_registry_name``), for a value that
-        names nothing on this host, and for a path ASH may not pass: the one rule
-        every tool path option follows (``config/path_trust.honored_path``), under
-        which a relative value is taken from the source directory, the tool's
-        working directory, and a file inside the scanned tree or one an MCP client
-        delivered is refused with a warning, so the scanned repository cannot choose
-        the rules it is scanned with. One resolver for both modes: online and
-        offline hand the tool the same file for the same configuration.
+        Kinds: ``unset`` (empty); ``as_written`` (a URL, a registry entry name or
+        one of the tool's own spellings, handed to the tool untouched,
+        ``_passes_through_as_written``); ``local`` (a rule file or directory ASH may
+        hand the tool, as the resolved absolute path); ``refused`` (path trust said
+        no: the one rule every tool path option follows,
+        ``config/path_trust.honored_path``, under which a relative value is taken
+        from the source directory, the tool's working directory, and a path inside
+        the scanned tree, one a repository's config names inside a git checkout, or
+        one an MCP client delivered is refused with a warning, so the scanned
+        repository cannot choose the rules it is scanned with); ``missing`` (passable,
+        but nothing is there). One resolver for both modes: online and offline hand
+        the tool the same file for the same configuration, and the refusal names the
+        same cause in both.
         """
         configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
         if not configured or not isinstance(configured, str):
-            return None
+            return _ConfiguredRules("unset", None, None)
         if self._passes_through_as_written(configured):
-            return None
+            return _ConfiguredRules("as_written", configured, None)
         source_dir = getattr(self.context, "source_dir", None)
         if source_dir is None:
-            return None
+            return _ConfiguredRules(
+                "missing", configured, "no source directory to resolve it against"
+            )
+        resolved = resolved_path(configured, source_dir)
         candidate = honored_path(
             configured,
             source_dir=source_dir,
@@ -428,10 +457,33 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             config=getattr(self.context, "config", None),
         )
         if candidate is None:
-            return None
+            return _ConfiguredRules(
+                "refused",
+                configured,
+                f"path trust refused {resolved.as_posix()}: it sits inside the "
+                "scanned tree, or a repository's config named it inside a git "
+                "checkout, or an MCP client delivered it (the warning above names "
+                "which)",
+            )
         if candidate.is_file() or candidate.is_dir():
-            return candidate.as_posix()
-        return None
+            return _ConfiguredRules("local", candidate.as_posix(), None)
+        return _ConfiguredRules(
+            "missing",
+            configured,
+            f"it resolved to {candidate.as_posix()}, which does not exist",
+        )
+
+    def _configured(self) -> "_ConfiguredRules":
+        """The resolution of ``options.config`` for this build, judged once."""
+        if self._configured_rules is None:
+            self._configured_rules = self._resolve_configured_rules()
+        return self._configured_rules
+
+    def _local_rules_configured(self) -> Optional[str]:
+        """The ``options.config`` rule file or directory ASH may hand the tool, as
+        the resolved absolute path, or None (see ``_resolve_configured_rules``)."""
+        rules = self._configured()
+        return rules.value if rules.kind == "local" else None
 
     def _option_key(self, option: str) -> str:
         """The dotted key of ``options.<option>`` in the ASH config, as a warning
@@ -447,12 +499,8 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     def _configured_registry_entry(self) -> Optional[str]:
         """``options.config`` when it is passed to the tool as written (a registry
         entry, a URL, or one of the tool's own spellings), else None."""
-        configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
-        if not configured or not isinstance(configured, str):
-            return None
-        if self._passes_through_as_written(configured):
-            return configured
-        return None
+        rules = self._configured()
+        return rules.value if rules.kind == "as_written" else None
 
     def _passes_through_as_written(self, configured: str) -> bool:
         """Whether a configured value is one the tool reads itself, not a path ASH
@@ -596,19 +644,18 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         results with nothing in its place. Both modes call this before they choose
         their rules, so a bad value fails the same way online and offline.
         """
-        configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
-        if not configured or not isinstance(configured, str):
-            return False
-        if self._configured_registry_entry() is not None:
-            return False
-        if self._local_rules_configured() is not None:
+        rules = self._configured()
+        if rules.kind not in ("refused", "missing"):
             return False
         self.dependency_unavailable_reason = (
-            f"{self._config_option_key()} names a rules file or directory that ASH "
-            "cannot pass to the tool: it does not exist, or it sits inside the scanned "
-            "tree or a git checkout. The scan does not run under other rules in its "
-            "place. Name a rules file outside the scanned tree, a registry ruleset "
-            "(auto, p/<ruleset>, r/<rule>, s/<snippet>) or a URL."
+            f"{self._config_option_key()} names rules ASH cannot pass to the tool: "
+            f"{rules.detail}. The scan does not run under other rules in its place. "
+            "Name a rules file or directory outside the scanned tree from an operator "
+            "source (--config-overrides, or a config file outside every git checkout "
+            "and the scanned directory, given with --config or ASH_CONFIG; a rules "
+            "repository checked out elsewhere is admitted from such a source), a "
+            "registry ruleset (auto, p/<ruleset>, r/<rule>, s/<snippet>), one of the "
+            "tool's own config spellings, or a URL."
         )
         ASH_LOGGER.warning(self.dependency_unavailable_reason)
         return True
