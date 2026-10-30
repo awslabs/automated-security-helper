@@ -2059,16 +2059,25 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         Two dicts merge recursively, two numbers add, two lists join, so the
         per-severity ``vulnerabilities`` counters sum across lockfiles (a
-        ``dict.update`` kept only the last lockfile's). Two values of other
-        kinds, or of different kinds, cannot be combined: the first stays and
-        the disagreement is logged once, since it is a count across tools and
-        not a finding.
+        ``dict.update`` kept only the last lockfile's). A number that meets a
+        dict is read as that dict's ``total`` (pnpm's integer is npm's map's
+        total), so the two merge and the shape is the map whichever lockfile
+        comes first; keeping the first dropped pnpm's count when npm's lockfile
+        was walked first, and left a bare integer where readers of
+        ``["dependencies"]["total"]`` expect the map when pnpm's was. Two
+        values of other kinds cannot be combined: the first stays and the
+        disagreement is logged once, since it is a count across tools and not
+        a finding.
         """
         for key, incoming in value.items():
             if key not in into:
                 into[key] = copy.deepcopy(incoming)
                 continue
             current = into[key]
+            if isinstance(current, dict) and cls._is_number(incoming):
+                incoming = {"total": incoming}
+            elif cls._is_number(current) and isinstance(incoming, dict):
+                current = into[key] = {"total": current}
             if isinstance(current, dict) and isinstance(incoming, dict):
                 cls._merge_metadata(current, incoming, lock_file)
             elif cls._is_number(current) and cls._is_number(incoming):

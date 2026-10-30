@@ -8,7 +8,11 @@ where pnpm's v1 report counts them in an integer (``"dependencies": 5``). The me
 read the incoming value's type alone: a dict was ``update``d into whatever was
 there, a number was ``+=``d onto it. With one lockfile of each kind in a scan the
 second merge raised (``dict.update`` on an integer, ``int += dict``), the raise was
-recorded as a failed audit, and two valid reports failed the whole scan.
+recorded as a failed audit, and two valid reports failed the whole scan. Keeping
+the first of the pair instead made the saved shape depend on the walk order:
+pnpm's count was dropped, or a bare integer stood where the map's readers look
+for ``["dependencies"]["total"]``. The integer is read as the map's total, so
+the two merge whichever lockfile comes first.
 
 The per-severity ``vulnerabilities`` counters are dicts on both sides, and
 ``dict.update`` kept only the last lockfile's counts, so the merged run's metrics
@@ -188,15 +192,18 @@ def test_an_npm_and_a_pnpm_lockfile_in_one_scan_both_report(plugin_context):
         r.properties.model_extra["package_name"] for r in report.runs[0].results
     }
     assert {"left-pad", "lodash", "minimist"} <= packages, packages
-    # Each side's counts are kept where they combine, and the sides that do
-    # not (an integer against a dict) keep the first without failing the scan.
+    # Each side's counts combine: pnpm's one integer is read as npm's map's
+    # total, so the saved shape is the map whichever lockfile came first.
     saved = json.loads(
         scanner.results_dir.joinpath("converted", "results.json").read_text()
     )
     metadata = saved["metadata"]
-    vulnerabilities = json.loads(pnpm["stdout"])["metadata"]["vulnerabilities"]
+    pnpm_metadata = json.loads(pnpm["stdout"])["metadata"]
+    vulnerabilities = pnpm_metadata["vulnerabilities"]
     assert metadata["vulnerabilities"]["high"] == 1 + vulnerabilities["high"]
     assert metadata["vulnerabilities"]["critical"] == vulnerabilities["critical"]
+    assert metadata["dependencies"]["prod"] == 3
+    assert metadata["dependencies"]["total"] == 3 + pnpm_metadata["dependencies"]
 
 
 @pytest.mark.parametrize("first", ["npm", "pnpm"])
@@ -275,8 +282,9 @@ def test_merged_metrics_sum_every_lockfiles_counters(plugin_context):
 
 
 def test_merge_metadata_by_type():
-    """The unit itself: dicts recurse, numbers add, lists join, the rest keeps
-    the first value, and a bool is never added as a number."""
+    """The unit itself: dicts recurse, numbers add, lists join, a number that
+    meets a dict is read as the dict's total, the rest keeps the first value,
+    and a bool is never added as a number."""
     into = {
         "vulnerabilities": {"high": 1, "total": 1},
         "dependencies": {"prod": 2},
@@ -299,7 +307,7 @@ def test_merge_metadata_by_type():
 
     assert into == {
         "vulnerabilities": {"high": 3, "moderate": 1, "total": 4},
-        "dependencies": {"prod": 2},
+        "dependencies": {"prod": 2, "total": 5},
         "flags": ["a", "b"],
         "ok": True,
         "note": "first",
@@ -307,9 +315,11 @@ def test_merge_metadata_by_type():
     }, into
 
 
-def test_merge_metadata_keeps_an_integer_when_a_dict_arrives():
+def test_merge_metadata_reads_an_integer_as_the_map_s_total_when_a_dict_arrives():
     """The other direction of the npm/pnpm pair: pnpm's integer was merged
-    first, and npm's dict arrives second. ``int.update`` raised here."""
+    first, and npm's dict arrives second. ``int.update`` raised here, and
+    keeping the integer left a reader of ``["dependencies"]["total"]`` with a
+    TypeError whenever pnpm's lockfile was walked first."""
     into = {"dependencies": 5, "vulnerabilities": {"high": 3}}
 
     NpmAuditScanner._merge_metadata(
@@ -318,4 +328,7 @@ def test_merge_metadata_keeps_an_integer_when_a_dict_arrives():
         "package-lock.json",
     )
 
-    assert into == {"dependencies": 5, "vulnerabilities": {"high": 4}}, into
+    assert into == {
+        "dependencies": {"total": 7, "prod": 2},
+        "vulnerabilities": {"high": 4},
+    }, into
