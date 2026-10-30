@@ -25,7 +25,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -290,26 +289,16 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValidationError,
-    reason=(
-        "get_shortest_name() returns its input unchanged when the path does not "
-        "exist, so a Path argument comes back as a Path rather than the str the "
-        "final 'return Path(input).as_posix()' would produce. ArtifactLocation.uri "
-        "requires a str, so scan() raises ValidationError at the report-skeleton "
-        "step and never reaches its own 'target is empty or doesn't exist' branch. "
-        "Remove this xfail once get_shortest_name normalizes its early return."
-    ),
-)
 def test_missing_target_directory_returns_an_empty_report(
     scanner, deps_available, subprocess_double, tmp_path
 ):
-    """A target that does not exist should yield a report, not an exception.
+    """A target that does not exist yields an empty report, not an exception.
 
-    The scan body has an explicit branch for a missing target, but it is
-    unreachable today: the report skeleton is built first and passes the target
-    through get_shortest_name, which returns a Path for a non-existent input.
+    The report skeleton is built first and passes the target through
+    get_shortest_name; a missing path now comes back as text, so
+    ArtifactLocation.uri validates and scan() reaches its own "target is empty
+    or doesn't exist" branch. This was an expected failure while
+    get_shortest_name handed a missing Path back unchanged.
     """
     report = scanner.scan(target=tmp_path / "does-not-exist", target_type="converted")
 
@@ -317,13 +306,12 @@ def test_missing_target_directory_returns_an_empty_report(
     subprocess_double.assert_not_called()
 
 
-def test_get_shortest_name_early_return_does_not_normalize_to_str():
-    """Pin the root cause of the xfail above at its own source.
+def test_get_shortest_name_answers_in_text_for_a_missing_path():
+    """The early return for a missing path is text, like the resolved return.
 
-    The final ``return Path(input).as_posix()`` yields a str, but the
-    not-exists early return hands back whatever it was given. Callers that feed
-    the result into a pydantic str field therefore work for existing paths and
-    fail for missing ones.
+    Callers feed the result into pydantic str fields (ArtifactLocation.uri), so
+    a missing path that came back as a Path failed validation where an existing
+    one passed; both are str now.
     """
     from automated_security_helper.utils.get_shortest_name import get_shortest_name
 
@@ -331,10 +319,7 @@ def test_get_shortest_name_early_return_does_not_normalize_to_str():
     assert isinstance(existing, str)
 
     missing = get_shortest_name(input=Path.cwd() / "no-such-file-exists-here")
-    assert isinstance(missing, Path), (
-        "if this now returns str, get_shortest_name was fixed -- drop the "
-        "xfail on test_missing_target_directory_returns_an_empty_report"
-    )
+    assert isinstance(missing, str)
 
 
 def test_empty_target_directory_returns_an_empty_report(
