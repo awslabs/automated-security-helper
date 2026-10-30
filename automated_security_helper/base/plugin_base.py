@@ -840,10 +840,21 @@ class CustomCommand(BaseModel):
     slices, iterates or searches the entry reads its ``args``, as it read the
     bare argv list the method used to return in its place; the flag rides
     beside and is read by name.
+
+    ``shell=False`` (the default): ``args`` is the argv handed to the program
+    unchanged, no shell in between. ``shell=True``: the installer joins the
+    words with single spaces into ONE command line and hands that line to the
+    shell as written, so each word carries its own quoting, and shell syntax in
+    it (a ``$VARIABLE``, a redirection, a pipe) is expanded and interpreted by
+    the shell. Declare ``shell=True`` only when that expansion is the point; a
+    command that already names its program and arguments is an argv and stays
+    ``shell=False``.
     """
 
     args: List[str]
-    shell: bool = False  # Set to True only when shell expansion is absolutely necessary
+    # True only when shell expansion is the point; see the class docstring for
+    # how the words are joined and handed to the shell.
+    shell: bool = False
 
     def __getitem__(self, index):
         return self.args[index]
