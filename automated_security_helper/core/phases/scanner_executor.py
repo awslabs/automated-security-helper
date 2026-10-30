@@ -1043,6 +1043,12 @@ class ScannerExecutor:
                 # (a timeout) and the unevaluated targets on the row, so the blocks
                 # after grading do not name them twice.
                 cause_recorded = False
+                # The timeout flag a per-target scanner kept while recording the
+                # timed-out target itself (_recorded_the_timed_out_target): the
+                # raise is skipped for it, and the grading below makes the row
+                # ERROR from this, not from scan_timed_out_after, which the run
+                # recorder can fail to set while the flag is kept.
+                kept_timeout: Optional[Tuple[str, str]] = None
                 heartbeat = _ScannerHeartbeat(
                     scanner_config_name,
                     target_type,
@@ -1253,6 +1259,7 @@ class ScannerExecutor:
                                             "accounting; keeping its report",
                                             extra=NO_MARKUP,
                                         )
+                                        kept_timeout = kept
                                     elif kept is not None:
                                         raise ScannerError(
                                             _unfinished_run_reason(
@@ -2123,6 +2130,32 @@ class ScannerExecutor:
                                 f"{scanner_config_name} timed out after "
                                 f"{timeout_limit_token(timed_out_after, environment_values)} "
                                 f"on {target_type}{ending}",
+                                environment_values,
+                            )
+                        )
+                        if container.status != ScannerStatus.MISSING:
+                            container.status = ScannerStatus.ERROR
+                    elif kept_timeout is not None and not cause_recorded:
+                        # The run kept its timeout flag and recorded no limit:
+                        # the recorder sets the flag before the limit and can
+                        # raise between the two (its record step is the plugin's
+                        # own code), so a scanner that recorded the timed-out
+                        # target itself graded PASSED or FAILED over a run that
+                        # did not finish, with the kept reason on no row. The
+                        # flag alone says the run did not finish; the row is
+                        # ERROR with the reason, as the skip promised.
+                        environment_values = self._plugin_environment_values(
+                            scanner_plugin
+                        )
+                        container.add_error(
+                            text_without_values(
+                                _unfinished_run_reason(
+                                    scanner_config_name,
+                                    target_type,
+                                    kept_timeout,
+                                    None,
+                                    environment_values,
+                                ),
                                 environment_values,
                             )
                         )
