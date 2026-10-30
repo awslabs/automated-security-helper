@@ -297,6 +297,12 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the MCP upload workspace, where a client's source is assembled",
     ),
+    # Not a write: `zf.open(info)` opens a zip member for reading, but the detector
+    # cannot read the mode of an open() whose first argument is not a literal.
+    (f"{_ASH}/cli/mcp/source_delivery.py", "_finalize_zip_upload", "Path.open"): (
+        1,
+        "nothing: it reads a member of the uploaded zip",
+    ),
     (f"{_ASH}/cli/mcp/session_paths.py", "mark_session_workspace", "touch"): (
         1,
         _MCP_SESSIONS,
@@ -326,7 +332,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (f"{_ASH}/cli/mcp/sessions.py", "_a_scan_holds", "open"): (1, _MCP_SESSIONS),
     (
         f"{_ASH}/cli/mcp/profile_registry.py",
-        "materialize_session_config",
+        "_replace_staged",
         "os.replace",
     ): (1, _MCP_PROFILE_COPY),
     (f"{_ASH}/cli/mcp/sessions.py", "_scan_presence_guard", "open"): (
