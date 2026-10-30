@@ -12,11 +12,17 @@
   with the same relative paths;
 * a ``file://`` root is percent-decoded before it is resolved;
 * the path-loss accounting counts every result, properties or not;
-* the scan child's environment carries no ASH_* variable.
+* the scan child's environment carries no ASH_* variable;
+* a timed-out scan gets SIGTERM to its process group even when the child has
+  already exited, and its output is read with a deadline and a final kill, so a
+  tool that outlives the child cannot hang the gate.
 """
 
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -219,3 +225,135 @@ class TestChildEnvironment:
         assert "ASH_SCANNERS" not in env
         assert env["PATH"] == "/usr/bin"
         assert env["PYTHONIOENCODING"] == "utf-8"
+
+
+class _FakeProcess:
+    """A child that has exited, or one that ignores SIGTERM and never exits."""
+
+    def __init__(self, alive: bool):
+        self.pid = 4242
+        self.alive = alive
+        self.killed = False
+
+    def poll(self):
+        return None if self.alive else 0
+
+    def wait(self, timeout=None):
+        if self.alive:
+            raise subprocess.TimeoutExpired(cmd="ash", timeout=timeout)
+        return 0
+
+    def kill(self):
+        self.killed = True
+        self.alive = False
+
+
+class _FakePipes:
+    """A stopped child whose output pipes follow a script of results or timeouts."""
+
+    def __init__(self, *outcomes):
+        self.pid = 4242
+        self.outcomes = list(outcomes)
+        self.timeouts: list = []
+
+    def communicate(self, timeout=None):
+        self.timeouts.append(timeout)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, subprocess.TimeoutExpired):
+            raise outcome
+        return outcome
+
+
+def _timeout(output=None, stderr=None):
+    return subprocess.TimeoutExpired(
+        cmd="ash", timeout=0.01, output=output, stderr=stderr
+    )
+
+
+class _FakeScanChild:
+    """A scan child that exited while a tool it started still holds the pipes."""
+
+    def __init__(self, *args, **kwargs):
+        self.pid = 4242
+        self.returncode = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def communicate(self, timeout=None):
+        assert timeout is not None, "the output must be read with a deadline"
+        raise _timeout(output=b"tail")
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "killpg") or not hasattr(signal, "SIGKILL"),
+    reason="process groups are a POSIX feature",
+)
+class TestStopProcessGroup:
+    @pytest.fixture
+    def killed(self, monkeypatch):
+        calls: list = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, signum: calls.append((pgid, signum))
+        )
+        return calls
+
+    def test_an_exited_child_still_gets_the_group_signal(self, gate, killed):
+        """A tool the child started can outlive it in the group and hold the pipes."""
+        process = _FakeProcess(alive=False)
+        gate._stop_process_group(process, grace_seconds=0.01)
+        assert killed == [(process.pid, signal.SIGTERM)]
+        assert not process.killed
+
+    def test_a_child_that_ignores_sigterm_gets_a_group_kill_after_the_grace_period(
+        self, gate, killed
+    ):
+        process = _FakeProcess(alive=True)
+        gate._stop_process_group(process, grace_seconds=0.01)
+        assert killed == [
+            (process.pid, signal.SIGTERM),
+            (process.pid, signal.SIGKILL),
+        ]
+
+    def test_pipes_that_close_are_read_without_a_kill(self, gate, killed):
+        process = _FakePipes(("out", "err"))
+        assert gate._drain_output(process, drain_seconds=0.01) == ("out", "err")
+        assert process.timeouts == [0.01]
+        assert killed == []
+
+    def test_pipes_still_open_after_the_deadline_get_a_final_kill(self, gate, killed):
+        process = _FakePipes(_timeout(), ("late out", "late err"))
+        assert gate._drain_output(process, drain_seconds=0.01) == (
+            "late out",
+            "late err",
+        )
+        assert process.timeouts == [0.01, 0.01]
+        assert killed == [(process.pid, signal.SIGKILL)]
+
+    def test_pipes_held_past_the_final_kill_return_the_partial_output(
+        self, gate, killed
+    ):
+        process = _FakePipes(_timeout(), _timeout(output=b"half"))
+        assert gate._drain_output(process, drain_seconds=0.01) == ("half", "")
+        assert None not in process.timeouts
+        assert killed == [(process.pid, signal.SIGKILL)]
+
+    def test_run_scan_gives_up_on_pipes_a_leftover_tool_holds_open(
+        self, gate, killed, monkeypatch, tmp_path
+    ):
+        """At the base the drain after a timeout had no deadline and hung here."""
+        monkeypatch.setattr(gate.subprocess, "Popen", _FakeScanChild)
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            gate.run_scan(
+                tmp_path, tmp_path / "ws.yaml", tmp_path / "out", timeout=0.01
+            )
+        assert raised.value.output == "tail"
