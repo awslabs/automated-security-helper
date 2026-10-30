@@ -592,12 +592,25 @@ def test_a_session_profile_a_client_patched_is_not_the_operators(tmp_path, patch
     assert (honored is None) is patched
 
 
-def test_a_key_spelled_in_another_case_is_another_key(tmp_path):
+def test_a_section_spelled_in_another_case_is_the_same_scanners_section(tmp_path):
+    """A plugin section the operator spells ``Checkov`` is read by the
+    configuration as the checkov scanner's (``folded_section_name``: ASCII case
+    and the ``-`` / ``_`` separators dropped), so the path it names is the
+    operator's under the key the scanner asks about. The fold applies to the
+    section name under a plugin segment only: a top-level key in another case
+    (``Scanners``) is another key, and an option spelled with a hyphen is the
+    same option as before."""
     from automated_security_helper.config.path_trust import OperatorPaths
 
     record = OperatorPaths(
         documents=[
             {"scanners": {"Checkov": {"options": {"config_file": "/ops/c.yaml"}}}}
+        ]
+    )
+    assert record.named(CHECKOV_KEY, "/ops/c.yaml")
+    record = OperatorPaths(
+        documents=[
+            {"Scanners": {"checkov": {"options": {"config_file": "/ops/c.yaml"}}}}
         ]
     )
     assert not record.named(CHECKOV_KEY, "/ops/c.yaml")
