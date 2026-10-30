@@ -1086,7 +1086,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         own verdict: cfn_nag accepts any non-negative violation count, which
         admits every judged code. The flag is the judgment, so no band is
         consulted for it. A never-started run (``spawn_failed``) is covered
-        by its code instead: 127 is refused by the base and every override.
+        by its code where the band refuses 127 (the base's accepted set,
+        npm_audit's 0-31), and by the recorded spawn failure
+        (``scan_spawn_failure``) where the band admits it: cfn_nag's count
+        can be 127, so its override reads that marker before the code.
         """
         failed = getattr(self, "targets_failed", 0) or 0
         if failed:
