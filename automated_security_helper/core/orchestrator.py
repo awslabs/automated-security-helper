@@ -1555,6 +1555,11 @@ class ASHScanOrchestrator(BaseModel):
         cancel propagates from here, outside execute_scan's arm that puts the
         previous results back, so they stay set aside for the caller to settle,
         as the CLI's single write (after its own check) left them.
+
+        A write that FAILS is a failed scan, as it was when the write sat inside
+        _execute_scan: the previous results are put back here, and the failure
+        is raised as ASHValidationError with the run's environment values
+        redacted and carried, the shape _execute_scan's own arm gives a failure.
         """
         if not self._writes_results_file(phases or []):
             return
@@ -1567,7 +1572,19 @@ class ASHScanOrchestrator(BaseModel):
             )
             return
         ASH_LOGGER.debug(f"Saving AshAggregatedResults to {self.output_dir}")
-        results.save_model(self.output_dir)
+        try:
+            results.save_model(self.output_dir)
+        except Exception as e:
+            values = config_environment_values(self.config)
+            ASH_LOGGER.error(
+                f"Could not write the results file: {error_text(e, values)}"
+            )
+            self.settle_previous_results(restore=True)
+            wrapper = ASHValidationError(
+                f"Scan execution failed: {error_text(e, values)}"
+            )
+            carry_environment_values(wrapper, values)
+            raise wrapper
         try:
             raise_if_cancelled()
         except ScanCancelled:
