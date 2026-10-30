@@ -48,10 +48,14 @@ def test_register_scan_accepts_a_project_configured_by_pyproject(tmp_path):
     config = project / "pyproject.toml"
     config.write_text('[tool.ash]\nproject_name = "proj"\n', encoding="utf-8")
 
-    scan_id = ScanRegistry().register_scan(
+    registry = ScanRegistry()
+    scan_id = registry.register_scan(
         directory_path=str(project),
         output_directory=str(project / ".ash" / "ash_output"),
         config_path=str(config),
     )
 
     assert scan_id
+    # The path is kept, not admitted by dropping it: a registration that
+    # cleared config_path would silently ignore the project's [tool.ash] table.
+    assert registry.get_scan(scan_id).config_path == str(config)
