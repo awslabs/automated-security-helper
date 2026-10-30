@@ -513,11 +513,11 @@ class TestAnUnavailableConverterWithNothingToConvert:
     def test_a_row_that_converted_paths_is_not_exempted_by_a_zero_count(self):
         """ "Never ran" is the gate's inference, not the writer's promise.
 
-        The phase asks a converter's dependency check more than once, so a converter
-        whose first answer was False can still run, and ``ash merge`` reads rows from
-        any producer. A row with converted paths describes a converter that ran; a
-        count of 0 beside it answers a question that was not asked, so the row keeps
-        the strict answer it had before the count existed.
+        ``ash merge`` reads rows from any producer, and a row's fields are what it
+        says about its own run, not what this phase's dependency check would have
+        said. A row with converted paths describes a converter that ran; a count of
+        0 beside it answers a question that was not asked, so the row keeps the
+        strict answer it had before the count existed.
         """
         results = _results(
             jupyter=ConverterStatusInfo(
@@ -545,16 +545,19 @@ class TestAnUnavailableConverterWithNothingToConvert:
     def test_a_row_with_another_sign_of_a_run_is_not_exempted_either(self, sign):
         """The two records that do not list a row by themselves (an accepted input
         loss, a refusal that names no limit) still show the converter ran."""
-        row = SimpleNamespace(
-            excluded=False,
-            failure=None,
-            dependencies_satisfied=False,
-            candidate_inputs=0,
-            converted_paths=[],
-            failed_inputs=[],
-            refused_inputs=[],
-            **sign,
-        )
+        # The sign replaces the empty default of its own field: passing both to
+        # SimpleNamespace named the keyword twice and raised before the gate ran.
+        fields = {
+            "excluded": False,
+            "failure": None,
+            "dependencies_satisfied": False,
+            "candidate_inputs": 0,
+            "converted_paths": [],
+            "failed_inputs": [],
+            "refused_inputs": [],
+        }
+        fields.update(sign)
+        row = SimpleNamespace(**fields)
 
         assert [row[0] for row in incomplete_converters(_results(jupyter=row))] == [
             "jupyter"
