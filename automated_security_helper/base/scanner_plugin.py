@@ -838,13 +838,20 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     "Keys must match pattern: -<letter> or --<letter>[alphanumeric_-]*"
                 )
                 continue
-            args.append(tool_extra_arg.key)
             # An extra arg's value may be a number or a bool (ToolExtraArg),
             # and a spawn takes text only: handed over as it was, the tool
-            # "could not start". A bool is spelled as a config file spells it.
+            # "could not start". A number is spelled as text. A bool is the
+            # switch's own state, not a word: True is the flag alone and False
+            # leaves it out. Spelled as a word after the key, a store_true flag
+            # would run ON for "false" and leave the word behind as a stray
+            # positional, which bandit reads as a target. A tool whose flag
+            # takes the word "true" or "false" is given that word as text.
             value = tool_extra_arg.value
-            if isinstance(value, bool):
-                value = "true" if value else "false"
+            if value is False:
+                continue
+            args.append(tool_extra_arg.key)
+            if value is True:
+                value = None
             elif value is not None and not isinstance(value, str):
                 value = str(value)
             args.append(value)

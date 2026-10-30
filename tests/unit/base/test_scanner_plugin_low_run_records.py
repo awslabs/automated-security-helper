@@ -5,7 +5,7 @@
 
 One small behavior per test, each about ``ScannerPluginBase`` in
 ``base/scanner_plugin.py``: an extra-arg key that ends in a newline is refused,
-a number or bool extra-arg value reaches the command line as text, a SARIF
+a number extra-arg value reaches the command line as text, a SARIF
 notification reader neither hangs on a FIFO nor fails on deeply nested JSON,
 the per-target start and end times are not the previous target's, a values hook
 that raises cannot replace the error being reported, and so on.
@@ -70,18 +70,16 @@ def test_an_extra_arg_key_ending_in_a_newline_is_skipped(tmp_path):
     assert "after" not in args
 
 
-def test_number_and_bool_extra_arg_values_reach_the_command_as_text(tmp_path):
+def test_number_extra_arg_values_reach_the_command_as_text(tmp_path):
     args = _resolved(
         tmp_path,
         ToolExtraArg(key="--depth", value=5),
         ToolExtraArg(key="--ratio", value=1.5),
-        ToolExtraArg(key="--strict", value=True),
     )
 
     assert all(isinstance(argument, str) for argument in args), args
     assert args[args.index("--depth") + 1] == "5"
     assert args[args.index("--ratio") + 1] == "1.5"
-    assert args[args.index("--strict") + 1] == "true"
 
 
 # -- the notification reader ----------------------------------------------------
