@@ -1519,7 +1519,9 @@ class AshAggregatedResults(RecordModel):
         """Convert the AshAggregatedResults to a list of flattened vulnerability objects.
 
         The first call materializes the list and applies legacy side effects
-        (bumping summary_stats.suppressed, updating scanner_results). Subsequent
+        (setting summary_stats.suppressed and the scanner rows' suppressed
+        counts from the flattened findings, so a second pass sets the same
+        counts again). Subsequent
         calls return the memoized list so the method is safe to call from
         reporters multiple times per run, for as long as the sarif and the
         additional_reports it was made from stand: not replaced, and not
@@ -1845,8 +1847,15 @@ class AshAggregatedResults(RecordModel):
                 ASH_LOGGER.error(
                     f"Stack trace: {traceback_text(e, values)}", extra=NO_MARKUP
                 )
-            except Exception:
-                # The type alone: it names no input and no value.
+            except Exception as describing:
+                # The type alone: it names no input and no value. The error that
+                # stopped the description is named the same way, one line before,
+                # so a broken formatter is not lost behind the first failure.
+                ASH_LOGGER.debug(
+                    "Describing the final-metrics error raised "
+                    f"{type(describing).__name__}",
+                    extra=NO_MARKUP,
+                )
                 ASH_LOGGER.error(
                     f"Error populating final metrics: {type(e).__name__}",
                     extra=NO_MARKUP,
