@@ -1640,7 +1640,13 @@ def _close_registrations(
             # project's own verdict, computed with the gate and the
             # policy-scanner exclusion already applied; re-deriving it from
             # incomplete_scanners here would ignore both.
-            coverage = _project_coverage(outcome)
+            # The coverage is kept on the entry and read by any later progress
+            # call, whoever makes it, so the process-wide transport decides
+            # whether its could_not_stop reasons name pids, as the cancel
+            # warning's rule does (_stop_at_timeout).
+            coverage = _project_coverage(
+                outcome, name_process_ids=not transport_is_networked()
+            )
             if outcome.scan_incomplete and coverage_has_gap(coverage):
                 registry.finish_scan(
                     scan_id, MCScanStatus.INCOMPLETE, coverage=coverage
@@ -1651,7 +1657,9 @@ def _close_registrations(
             registry.finish_scan(scan_id, status)
 
 
-def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
+def _project_coverage(
+    outcome: WorkspaceProjectResult, *, name_process_ids: bool = True
+) -> Dict[str, Any]:
     """One project's coverage, in the shape a single scan's progress reports it.
 
     Built from the facts the project's outcome already carries, so a client
@@ -1663,7 +1671,19 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
     content database is in ``stale_content_databases`` and only there, as in a
     single scan's payload: the outcome leaves a scanner listed only for it out of
     ``incomplete_scanners``.
+
+    ``name_process_ids`` False drops the process ids from the ``could_not_stop``
+    reasons (``without_process_ids``): the executor records each reason naming
+    the pid of the tool the stop could not end, and this coverage is stored on
+    the registry entry and read back by any later progress call, so on a network
+    transport a remote client was handed server-side pids here while the cancel
+    warning (``record_cancel_outcome``) deliberately withheld them.
     """
+    from automated_security_helper.utils.subprocess_utils import without_process_ids
+
+    def shown(reason: str) -> str:
+        return reason if name_process_ids else without_process_ids(reason)
+
     statuses = outcome.scanners or {}
     # Both fields default empty on an outcome a pre-field ASH wrote; the rows
     # then fall back to the bare status, which is all that outcome recorded.
@@ -1691,7 +1711,7 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
         "unevaluated_rules": list(getattr(outcome, "unevaluated_rules", None) or []),
         "stale_content_databases": list(outcome.stale_content_databases or []),
         "could_not_stop": [
-            {"scanner": name, "reason": reason}
+            {"scanner": name, "reason": shown(str(reason))}
             for name, reason in (
                 getattr(outcome, "unstoppable_tools", None) or {}
             ).items()
@@ -1706,9 +1726,18 @@ _WITHHELD_PROJECT_FIELDS: FrozenSet[str] = frozenset()
 
 
 def _project_verdicts(
-    payload: WorkspaceResults, scan_ids: Dict[str, str]
+    payload: WorkspaceResults,
+    scan_ids: Dict[str, str],
+    *,
+    name_process_ids: bool = True,
 ) -> List[Dict[str, Any]]:
     """The per-project outcome, joined to the scan id the client was handed.
+
+    ``name_process_ids`` False drops the process ids from the
+    ``unstoppable_tools`` reasons (``without_process_ids``) and nothing else:
+    the field is projected like every other, but its values name the pid of a
+    server-side process, which a remote client cannot act on and should not
+    learn; the cancel warning already withholds them on a network transport.
 
     Per project and not merged, because the first question about a workspace scan
     is which project failed and a merged count cannot answer it.
@@ -1734,10 +1763,17 @@ def _project_verdicts(
     replaces the per-field ``_enum_value`` calls this function used to make, and it
     covers a future enum-typed field that those calls would have missed.
     """
+    from automated_security_helper.utils.subprocess_utils import without_process_ids
+
     projected = set(WorkspaceProjectResult.model_fields) - _WITHHELD_PROJECT_FIELDS
     verdicts: List[Dict[str, Any]] = []
     for entry in payload.projects:
         verdict = entry.model_dump(mode="json", include=projected)
+        if not name_process_ids and verdict.get("unstoppable_tools"):
+            verdict["unstoppable_tools"] = {
+                name: without_process_ids(str(reason))
+                for name, reason in verdict["unstoppable_tools"].items()
+            }
         verdict["scan_id"] = scan_ids.get(entry.project)
         verdicts.append(verdict)
     return verdicts
@@ -2881,7 +2917,14 @@ async def _scan_workspace(
         "scan_ids": registered,
         "scan_incomplete": _workspace_scan_incomplete(result.payload),
         "ceiling_unreachable_findings": _workspace_ceiling_unreachable(result.payload),
-        "projects": _project_verdicts(result.payload, registered),
+        # The request-scoped signal decides whether this client is told the
+        # pids in unstoppable_tools: a remote caller cannot act on a server
+        # pid and should not learn it (the cancel warning's rule).
+        "projects": _project_verdicts(
+            result.payload,
+            registered,
+            name_process_ids=not caller_is_remote(session_id),
+        ),
         "skipped_projects": [
             entry.model_dump(mode="json") for entry in plan.skipped_projects
         ],

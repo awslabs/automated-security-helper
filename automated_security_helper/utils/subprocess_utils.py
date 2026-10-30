@@ -59,6 +59,7 @@ import logging
 import ntpath
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
@@ -324,6 +325,23 @@ def could_not_stop_default(pid: Any) -> str:
     if isinstance(pid, int) and not isinstance(pid, bool):
         return f"{COULD_NOT_STOP_MARKER} {pid}), {COULD_NOT_STOP_SUFFIX}"
     return COULD_NOT_STOP_REASON
+
+
+#: The one spelling of a process id inside a could-not-stop reason: the
+#: parenthetical :func:`could_not_stop_default` writes and a referent such as
+#: ``python3 (pid 7)`` carries into :func:`could_not_stop_sentence`.
+_PROCESS_ID_PARENTHETICAL = re.compile(r"\s*\(pid [0-9]+\)")
+
+
+def without_process_ids(text: str) -> str:
+    """``text`` with every ``(pid N)`` parenthetical dropped, and nothing else.
+
+    For the texts a remote client is shown: a reason recorded by the executor
+    names the pid of the tool the stop could not end, which a server-side
+    operator can act on and a client on a network transport cannot, and should
+    not learn. ``could_not_stop_default(4242)`` becomes
+    :data:`COULD_NOT_STOP_REASON`; a text with no pid is returned as it is."""
+    return _PROCESS_ID_PARENTHETICAL.sub("", text)
 
 
 def response_could_not_stop(response: Any) -> bool:

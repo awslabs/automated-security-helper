@@ -391,7 +391,7 @@ class TestTheExitCodeAndTheStatusShareOneVerdict:
 
 
 class TestWorkspaceProjectsFollowTheSameRule:
-    def _close(self, tmp_path, **outcome_fields):
+    def _close(self, tmp_path, networked: bool = False, **outcome_fields):
         from automated_security_helper.cli.mcp import workspace as ws
         from automated_security_helper.models.workspace import (
             ProjectRunStatus,
@@ -412,9 +412,34 @@ class TestWorkspaceProjectsFollowTheSameRule:
             **outcome_fields,
         )
         payload = WorkspaceResults.model_construct(projects=[outcome])
-        with patch.object(ws, "get_scan_registry", return_value=registry):
+        with (
+            patch.object(ws, "get_scan_registry", return_value=registry),
+            patch.object(ws, "transport_is_networked", return_value=networked),
+        ):
             ws._close_registrations({"app": scan_id}, payload)
         return registry.get_scan(scan_id)
+
+    def test_on_a_network_transport_the_stored_reason_names_no_pid(self, tmp_path):
+        """Red at the base: the coverage kept on the registry entry, read back by
+        any later progress call, carried the executor's reason with the pid in
+        it on every transport, while the cancel warning withheld the pid from a
+        network transport."""
+        reason = "bandit's tool was still running after the stop (pid 7)"
+        entry = self._close(
+            tmp_path,
+            networked=True,
+            scanners={"bandit": "PASSED"},
+            unstoppable_tools={"bandit": reason},
+            scan_incomplete=True,
+        )
+
+        assert entry.status.value == "incomplete"
+        assert entry.coverage["could_not_stop"] == [
+            {
+                "scanner": "bandit",
+                "reason": "bandit's tool was still running after the stop",
+            }
+        ]
 
     def test_a_project_whose_gate_fired_is_incomplete(self, tmp_path):
         entry = self._close(

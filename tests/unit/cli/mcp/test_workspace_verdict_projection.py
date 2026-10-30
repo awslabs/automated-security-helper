@@ -42,6 +42,12 @@ from automated_security_helper.models.workspace import (
     WorkspaceProjectResult,
     WorkspaceResults,
 )
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_REASON,
+    could_not_stop_default,
+    could_not_stop_sentence,
+    without_process_ids,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -96,6 +102,48 @@ def _payload(*outcomes: WorkspaceProjectResult) -> WorkspaceResults:
         exit_code=int(WorkspaceExitCode.INTERNAL_ERROR),
         projects=list(outcomes),
     )
+
+
+class TestUnstoppableToolReasonsNameProcessIdsOnlyToALocalCaller:
+    """The executor records each ``unstoppable_tools`` reason naming the pid of
+    the tool the stop could not end (``could_not_stop_default``). The field was
+    projected to every client as recorded, while the cancel warning withheld
+    the same pids from a network transport: a remote client learned a
+    server-side pid here that it cannot act on. ``name_process_ids`` False drops
+    them; the call site passes ``not caller_is_remote(session_id)``."""
+
+    def test_the_helper_drops_the_pid_and_nothing_else(self):
+        assert (
+            without_process_ids(could_not_stop_default(4242)) == COULD_NOT_STOP_REASON
+        )
+        assert without_process_ids(
+            could_not_stop_sentence("python3 (pid 7)")
+        ) == could_not_stop_sentence("python3")
+        assert without_process_ids("no pid here") == "no pid here"
+
+    def test_a_remote_caller_reads_the_reason_without_the_pid(self):
+        """Red at the base: the projection took no such argument and the reason
+        reached the client with the pid in it."""
+        payload = _payload(
+            _outcome("api", unstoppable_tools={"bandit": could_not_stop_default(4242)})
+        )
+
+        verdicts = _module()._project_verdicts(
+            payload, {"api": "scan-1"}, name_process_ids=False
+        )
+
+        assert verdicts[0]["unstoppable_tools"] == {"bandit": COULD_NOT_STOP_REASON}
+        assert "4242" not in json.dumps(verdicts[0]["unstoppable_tools"])
+
+    def test_a_local_caller_reads_the_reason_as_recorded(self):
+        reason = could_not_stop_default(4242)
+        payload = _payload(_outcome("api", unstoppable_tools={"bandit": reason}))
+
+        verdicts = _module()._project_verdicts(
+            payload, {"api": "scan-1"}, name_process_ids=True
+        )
+
+        assert verdicts[0]["unstoppable_tools"] == {"bandit": reason}
 
 
 class TestTheProjectionCarriesEveryDeclaredField:
