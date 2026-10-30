@@ -1894,6 +1894,10 @@ def test_a_failure_after_the_redaction_keeps_the_redacted_output(
     assert "hunter2" not in record
     assert "before the output could be redacted" not in record
     assert any('"errors"' in line for line in scanner.output)
+
+
+@pytest.mark.unit
+def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
     sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
     credentials = sarif["runs"][0]["results"][0]
     assert credentials["ruleId"] == "credentials"
