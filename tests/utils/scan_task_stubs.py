@@ -52,9 +52,15 @@ def completed_task_create() -> Callable[[Any], MagicMock]:
 def closing_scan_task_start(
     started: Optional[List[str]] = None,
 ) -> Callable[[str, Any], None]:
-    """A ``_start_scan_task`` stand-in: records, closes the runner, ends the scope."""
+    """A ``_start_scan_task`` stand-in: records, closes the runner, ends the scope.
 
-    def start(scan_id: str, runner: Any) -> None:
+    The real start also takes ``ran`` and ``if_never_run`` as keywords, the
+    marker and the release for a task cancelled before its runner ran; a
+    stand-in that never runs the scan has nothing to release through them, so
+    they are accepted and left alone.
+    """
+
+    def start(scan_id: str, runner: Any, **_start_options: Any) -> None:
         if started is not None:
             started.append(scan_id)
         runner.close()
