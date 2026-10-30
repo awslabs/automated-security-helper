@@ -23,7 +23,7 @@ import os
 import signal
 import sys
 import types
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import pytest
 
@@ -395,6 +395,49 @@ def child_calls(monkeypatch):
         return calls
 
     return run
+
+
+@pytest.fixture
+def child_run(monkeypatch):
+    """Run ``_run_child`` with the setup, the exec and the exit stood in for.
+
+    Returns the recorded calls: the setup's restrict, ``os.execve`` and
+    ``os._exit`` in the order the child made them. ``parent`` is the wrapper's pid
+    as the child would have read it before the fork.
+    """
+
+    def run(parent: Optional[int]) -> List[Tuple[str, tuple]]:
+        calls: List[Tuple[str, tuple]] = []
+        monkeypatch.setattr(
+            landlock_exec, "_child_setup", lambda restrict: calls.append(("setup", ()))
+        )
+        monkeypatch.setattr(
+            landlock_exec, "os", _Recording(os, {"execve", "_exit"}, calls)
+        )
+        landlock_exec._run_child(["/bin/true"], lambda: None, parent)
+        return calls
+
+    return run
+
+
+def test_a_child_whose_wrapper_died_before_the_prctl_exits(child_run, capsys):
+    """The kernel sends the parent-death signal only for a parent that exits after
+    the call, so a child reparented already runs nothing: it exits 126 as a
+    failed setup does, instead of going on to exec, and says why."""
+    # No process has a negative pid, so this never equals the real parent.
+    calls = child_run(parent=-1)
+    names = [name for name, _ in calls]
+
+    assert names == ["setup", "_exit"]
+    assert ("_exit", (126,)) in calls
+    assert "the wrapper exited before the scanner started" in capsys.readouterr().err
+
+
+def test_a_child_whose_wrapper_is_alive_execs_the_scanner(child_run):
+    calls = child_run(parent=os.getppid())
+    names = [name for name, _ in calls]
+
+    assert names[:2] == ["setup", "execve"]
 
 
 def test_the_child_asks_for_sigterm_on_its_parents_exit_between_setsid_and_restrict(

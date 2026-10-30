@@ -677,9 +677,10 @@ def _child_setup(restrict: Callable[[], None]) -> None:
     # Landlock does not end a process's descendants with it, so a wrapper that
     # dies before it reaps (ASH SIGKILLs one that outlives its grace) would leave
     # the scanner running with nothing to end it. SIGTERM on the wrapper's exit
-    # is what an unwrapped scanner gets from ASH's own stop; the scanner may
-    # still be told to stop before this call lands if the wrapper dies in the
-    # few instructions between the fork and here.
+    # is what an unwrapped scanner gets from ASH's own stop. The kernel sends it
+    # only for a parent that exits after this call; a wrapper that died in the
+    # instructions between the fork and here is caught by _run_child, which
+    # compares the parent to the pid the wrapper read before the fork.
     if libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0) != 0:
         sys.stderr.write(
             _shown(
@@ -693,14 +694,22 @@ def _child_setup(restrict: Callable[[], None]) -> None:
     restrict()
 
 
-def _run_child(command: List[str], restrict: Callable[[], None]) -> NoReturn:
+def _run_child(
+    command: List[str], restrict: Callable[[], None], parent: Optional[int] = None
+) -> NoReturn:
     """The forked child: set up, restrict, become the scanner; never return.
 
     A failure is reported for what it is: a restriction step that raised an
     OSError says so (it used to be written as a failed exec of the scanner, which
     had not been attempted), ``fail()``'s SystemExit has written its own line, and
     any other exception is written with its type and text rather than exiting in
-    silence. Whatever happened, the child never returns into the wrapper's code; a
+    silence. ``parent`` is the wrapper's pid as it read it before the fork: the
+    kernel sends the parent-death signal ``_child_setup`` asks for only for a
+    parent that exits after that call, so a child whose parent is no longer
+    ``parent`` once the setup is done was orphaned in the window before it, and
+    would run the scanner with no one to reap what it leaves; it exits instead.
+    (None, for a caller that drives the child's reporting alone, skips the check.)
+    Whatever happened, the child never returns into the wrapper's code; a
     restriction that failed leaves it here, unrestricted, so it exits 126.
     """
     try:
@@ -713,11 +722,17 @@ def _run_child(command: List[str], restrict: Callable[[], None]) -> NoReturn:
             + "\n"
         )
     else:
-        try:
-            os.execve(command[0], command, os.environ)
-        except OSError as e:
-            # The scanner's path, and the error that quotes it.
-            sys.stderr.write(_shown(f"ash-landlock: exec {command[0]}: {e}") + "\n")
+        if parent is not None and os.getppid() != parent:
+            sys.stderr.write(
+                _shown("ash-landlock: the wrapper exited before the scanner started")
+                + "\n"
+            )
+        else:
+            try:
+                os.execve(command[0], command, os.environ)
+            except OSError as e:
+                # The scanner's path, and the error that quotes it.
+                sys.stderr.write(_shown(f"ash-landlock: exec {command[0]}: {e}") + "\n")
     os._exit(126)
 
 
@@ -830,12 +845,13 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     # Blocked across the fork, so a signal that arrives before the handler is in
     # place is held rather than killing the wrapper and orphaning the scanner.
     signal.pthread_sigmask(signal.SIG_BLOCK, stop_signals)
+    parent = os.getpid()
     try:
         pid = os.fork()
     except OSError as e:
         fail(f"fork: {e}")
     if pid == 0:
-        _run_child(command, restrict)
+        _run_child(command, restrict, parent)
 
     stopped_at: List[float] = []
     scanner_exited = False
