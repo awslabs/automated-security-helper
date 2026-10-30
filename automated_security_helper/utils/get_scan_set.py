@@ -281,12 +281,21 @@ def _bundled_cdk_in(parts: Sequence[str]) -> bool:
 _WINDOWS = sys.platform == "win32"
 
 
+#: The reparse tag of a mount point, which is what a junction is. ``stat`` defines
+#: the name on Windows builds only, so the value is spelled here (the Windows
+#: header's mount-point tag, 0xA in the top four bits and 3 in the low bits) for the
+#: platforms where a test hands the check a status of its own.
+_IO_REPARSE_TAG_MOUNT_POINT = getattr(
+    stat, "IO_REPARSE_TAG_MOUNT_POINT", (0xA << 28) | 3
+)
+
+
 def _is_junction_status(status: "os.stat_result") -> bool:
     """Whether *status*, an ``lstat``, is a Windows junction: a mount-point reparse point."""
     attributes = getattr(status, "st_file_attributes", 0)
     if not attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
         return False
-    return getattr(status, "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+    return getattr(status, "st_reparse_tag", 0) == _IO_REPARSE_TAG_MOUNT_POINT
 
 
 def _is_junction(path: str | Path) -> bool:
