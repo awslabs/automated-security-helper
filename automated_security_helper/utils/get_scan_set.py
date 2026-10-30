@@ -2179,12 +2179,15 @@ def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
     return {key: value for key, value in child_environ().items() if key not in dropped}
 
 
-def _layout_environ() -> Dict[str, str]:
-    """The environment of the repository-root lookup and the diff.
+def _layout_environ(cwd: "str | os.PathLike[str]") -> Dict[str, str]:
+    """The environment of the repository-root lookup and the diff started in *cwd*.
 
     :func:`_git_environ`, unless the caller names the work tree: with GIT_WORK_TREE
     set to an existing directory, the location variables are passed through as
-    they are. A bare repository driven as ``GIT_DIR=<bare> GIT_WORK_TREE=<tree>``
+    they are. A relative GIT_WORK_TREE is read against *cwd*, the directory git is
+    started in, since that is where git resolves it; read against this process's
+    own directory it could name a directory that git would not find, or the other
+    way round. A bare repository driven as ``GIT_DIR=<bare> GIT_WORK_TREE=<tree>``
     (a post-receive hook deploying a checkout, a ``core.worktree`` layout) has no
     ``.git`` entry in the tree for git to discover, so dropping the pair there
     turned the scan's root lookup into "not a repository", and dropping GIT_DIR
@@ -2198,7 +2201,9 @@ def _layout_environ() -> Dict[str, str]:
     """
     environ = child_environ()
     work_tree = environ.get("GIT_WORK_TREE")
-    if work_tree and os.path.isdir(work_tree):
+    # os.path.join keeps an absolute work tree as it is and places a relative one
+    # under cwd, which is how git reads the variable from that directory.
+    if work_tree and os.path.isdir(os.path.join(cwd, work_tree)):
         return environ
     return _git_environ()
 
@@ -2382,7 +2387,7 @@ def _rev_parse_toplevel(
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=path,
-            env=_layout_environ(),
+            env=_layout_environ(path),
         )
     except FileNotFoundError as error:
         return None, _why_git_did_not_start(error, path)
@@ -2885,7 +2890,7 @@ def get_changed_files(
             # diff and the root its names are joined onto describe one repository:
             # the one git discovers from cwd, or the one GIT_DIR and GIT_WORK_TREE
             # name together.
-            env=_layout_environ(),
+            env=_layout_environ(cwd),
         )
     except FileNotFoundError as error:
         ASH_LOGGER.warning(

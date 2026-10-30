@@ -1013,6 +1013,31 @@ def test_a_git_work_tree_naming_no_directory_is_not_honored(isolated_tmp, monkey
 
 
 @pytest.mark.integration
+def test_a_relative_git_work_tree_is_read_against_the_scanned_directory(
+    isolated_tmp, monkeypatch
+):
+    """git reads a relative GIT_WORK_TREE against the directory it is started in,
+    which for the root lookup and the diff is the scanned directory. The check
+    that the named tree exists read the value against this process's own
+    working directory instead, so ``../deployed`` named from ``<tree>/src`` was
+    not honored, the variables were dropped, and the tree, which has no ``.git``
+    entry, read as no repository. The value is now joined onto the scanned
+    directory, and the root and the diff describe the named tree."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    monkeypatch.setenv("GIT_DIR", bare.as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", "../deployed")
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+    assert not Path("../deployed").is_dir()
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+    assert all((found_root / p).is_file() for p in changed), changed
+
+
+@pytest.mark.integration
 def test_the_list_check_holds_against_a_git_that_cannot_list_worktrees(
     isolated_tmp, monkeypatch
 ):
