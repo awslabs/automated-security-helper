@@ -5778,8 +5778,19 @@ def run_command_stream_output(
             finally:
                 try:
                     if process.poll() is None:
-                        process.kill()
-                        process.wait()
+                        # The whole group when the child leads one (the plan's
+                        # start_new_session, or a tool that called setsid): a
+                        # kill of the pid alone left the members the tool
+                        # started running, and holding the output directory
+                        # the cleanup below sweeps. SIGKILL at once, as before,
+                        # with the reap bounded as the tree stop bounds it; a
+                        # child in ASH's own group is killed alone and waited
+                        # for, as before.
+                        if _leads_its_own_group(process):
+                            _stop_tree(process, 0.0, None)
+                        else:
+                            process.kill()
+                            process.wait()
                 except Exception as e:
                     failed = True
                     _log_unrecorded_run(cmd_str, e)
