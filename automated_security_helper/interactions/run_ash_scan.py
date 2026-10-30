@@ -181,11 +181,7 @@ from automated_security_helper.utils.sarif_utils import (
     is_result_suppressed,
 )
 from automated_security_helper.utils.scan_output_dirs import WORKING_DIR_NAMES
-from automated_security_helper.utils.severity_ladder import (
-    SEVERITIES,
-    sarif_level_fails_threshold,
-    severity_fails_threshold,
-)
+from automated_security_helper.utils.severity_ladder import severity_fails_threshold
 from automated_security_helper.workspace.plan import WorkspacePlan
 
 if TYPE_CHECKING:
@@ -2342,29 +2338,81 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
     return _SEVERITY_RANK.get(_resolve_result_severity(result), 1) >= min_sev_rank
 
 
-def _actionable_under_its_scanner_threshold(result, results) -> bool:
+def _scanner_threshold_lookup(results) -> Callable[[object], str]:
+    """The threshold governing a scanner, by name, memoised for one exit-code read.
+
+    The scanner's own ``options.severity_threshold`` when it has one, else
+    ``global_settings.severity_threshold``
+    (``ScannerStatisticsCalculator.get_scanner_threshold_info``, which dumps the
+    whole scanners config on every call, so one read of a large report asks it
+    once per scanner, not once per result). An empty or missing name is passed
+    through to the same resolver rather than short-circuited: it matches no
+    scanner config key, so the resolver answers with the global threshold, and a
+    result whose scanner cannot be identified is judged as every result was
+    judged before per-scanner thresholds reached this gate instead of being
+    skipped, which would remove a finding from the exit code.
+    """
+    cache: Dict[str, str] = {}
+
+    def threshold_for(scanner_name: object) -> str:
+        key = scanner_name if isinstance(scanner_name, str) else ""
+        if key not in cache:
+            cache[key] = ScannerStatisticsCalculator.get_scanner_threshold_info(
+                results, key
+            )[0]
+        return cache[key]
+
+    return threshold_for
+
+
+def _result_scanner_name(result) -> Optional[str]:
+    """``properties.scanner_name`` of a SARIF result, model or JSON form."""
+    props = (
+        result.get("properties")
+        if isinstance(result, dict)
+        else getattr(result, "properties", None)
+    )
+    if props is None:
+        return None
+    name = (
+        props.get("scanner_name")
+        if isinstance(props, dict)
+        else getattr(props, "scanner_name", None)
+    )
+    return name if isinstance(name, str) else None
+
+
+def _result_fails_its_scanner_threshold(result, threshold_for) -> bool:
+    """Whether *result* (a SARIF ``Result`` or its JSON form) fails the gate of
+    the scanner that reported it: the ONE actionability rule of the exit code.
+
+    The count over the written report and the ``--min-severity`` filter over the
+    model's results both read it, with the same *threshold_for* (from
+    ``_scanner_threshold_lookup``) and the same severity reading, the ladder's
+    ``result_severity`` through ``_resolve_result_severity``:
+    ``properties.issue_severity`` when it names a severity, else the SARIF level.
+    Two readings (one upper-casing ``issue_severity`` against ``SEVERITIES`` and
+    falling back to the level, one resolving the result) could disagree on a
+    result with only a level or a non-standard ``issue_severity``.
+    """
+    return severity_fails_threshold(
+        _resolve_result_severity(result), threshold_for(_result_scanner_name(result))
+    )
+
+
+def _actionable_under_its_scanner_threshold(
+    result, results, threshold_for: Optional[Callable[[object], str]] = None
+) -> bool:
     """Whether *result* fails the gate of the scanner that reported it.
 
-    The threshold is the one ``_compute_exit_code`` counts actionable findings
-    by: the scanner's own ``options.severity_threshold`` when it has one, else
-    ``global_settings.severity_threshold``
-    (``ScannerStatisticsCalculator.get_scanner_threshold_info``). A result the
-    scanner's threshold made non-actionable was not counted, so the
-    ``--min-severity`` filter must not read it as the finding that keeps the
-    count standing. A result with no scanner name is judged by the global
-    threshold, as the count judges it.
+    A result the scanner's threshold made non-actionable was not counted, so
+    the ``--min-severity`` filter must not read it as the finding that keeps the
+    count standing. *threshold_for* is the exit-code read's shared lookup; a
+    caller without one gets a fresh lookup over *results*.
     """
-    props = getattr(result, "properties", None)
-    scanner_name = None
-    if props is not None:
-        scanner_name = (
-            props.get("scanner_name")
-            if isinstance(props, dict)
-            else getattr(props, "scanner_name", None)
-        )
-    key = scanner_name if isinstance(scanner_name, str) else ""
-    threshold = ScannerStatisticsCalculator.get_scanner_threshold_info(results, key)[0]
-    return severity_fails_threshold(_resolve_result_severity(result), threshold)
+    if threshold_for is None:
+        threshold_for = _scanner_threshold_lookup(results)
+    return _result_fails_its_scanner_threshold(result, threshold_for)
 
 
 # ---------------------------------------------------------------------------
@@ -7020,6 +7068,10 @@ def _gating_actionable_count(
 
     # Indexed, not .get() with a default: ScanOptions only holds a ranked value.
     min_sev_rank = _SEVERITY_RANK[opts.min_severity.lower()]
+    # One threshold lookup for this read, shared by the count over the written
+    # report and the --min-severity filter over the model: one resolver call per
+    # scanner, and one actionability rule (_result_fails_its_scanner_threshold).
+    threshold_for = _scanner_threshold_lookup(results)
     # Set when the count below is taken from the written report: whether that
     # report holds a counted result at or above --min-severity. None when the
     # count comes from the model's own results, which are then judged instead.
@@ -7034,31 +7086,6 @@ def _gating_actionable_count(
         try:
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec
-
-            # Memoised because get_scanner_threshold_info dumps the whole scanners
-            # config on every call, and a large ash.sarif carries one result per
-            # finding.
-            _threshold_cache: Dict[str, str] = {}
-
-            def _threshold_for(scanner_name: object) -> str:
-                """The threshold governing *scanner_name*, global when it has none.
-
-                An empty name is passed through to the same resolver rather than
-                short-circuited: it matches no scanner config key, so the resolver
-                answers with the global threshold. That keeps one threshold
-                resolution site for both cases, and it means a result whose scanner
-                cannot be identified is judged exactly as every result was judged
-                before this change instead of being skipped -- dropping it would
-                remove a finding from the verdict.
-                """
-                key = scanner_name if isinstance(scanner_name, str) else ""
-                if key not in _threshold_cache:
-                    _threshold_cache[key] = (
-                        ScannerStatisticsCalculator.get_scanner_threshold_info(
-                            results, key
-                        )[0]
-                    )
-                return _threshold_cache[key]
 
             sarif_active = 0
             # The --min-severity question is answered on the file the count is
@@ -7077,20 +7104,10 @@ def _gating_actionable_count(
                     # and the workspace verdict already read it.
                     if is_result_suppressed(r):
                         continue
-                    props = r.get("properties", {}) or {}
-                    threshold = _threshold_for(
-                        props.get("scanner_name") if isinstance(props, dict) else None
-                    )
-                    issue_severity = (
-                        (props.get("issue_severity") or "").upper()
-                        if isinstance(props, dict)
-                        else ""
-                    )
-                    if issue_severity in SEVERITIES:
-                        counted = severity_fails_threshold(issue_severity, threshold)
-                    else:
-                        counted = sarif_level_fails_threshold(r.get("level"), threshold)
-                    if not counted:
+                    # The one actionability rule, with the shared lookup: the
+                    # same threshold and the same severity reading the
+                    # --min-severity filter below applies to the model's results.
+                    if not _result_fails_its_scanner_threshold(r, threshold_for):
                         continue
                     sarif_active += 1
                     # Rank as _severity_filters_finding ranks a model result:
@@ -7128,7 +7145,9 @@ def _gating_actionable_count(
                         # --min-severity.
                         if _severity_filters_finding(
                             result, min_sev_rank
-                        ) and _actionable_under_its_scanner_threshold(result, results):
+                        ) and _actionable_under_its_scanner_threshold(
+                            result, results, threshold_for
+                        ):
                             has_qualifying = True
                             break
                     if has_qualifying:

@@ -381,6 +381,82 @@ def test_the_minimum_is_read_on_the_written_report_too(tmp_path):
     )
 
 
+def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypatch):
+    """One lookup is shared by the count over the written report and the
+    --min-severity filter over the model: get_scanner_threshold_info dumps the
+    whole scanners config on every call, and a filter that asked it once per
+    result ran that dump over every result at or above the minimum."""
+    from automated_security_helper.core.scanner_statistics_calculator import (
+        ScannerStatisticsCalculator,
+    )
+
+    findings = [
+        _finding("bandit", "warning", "MEDIUM"),
+        _finding("bandit", "warning", "MEDIUM"),
+        _finding("bandit", "warning", "MEDIUM"),
+        _finding("semgrep", "note", "LOW"),
+        _finding("semgrep", "note", "LOW"),
+    ]
+    results = _results_with_the_file_apart_from_the_model(
+        tmp_path, in_model=findings, in_file=findings
+    )
+    asked = []
+    real = ScannerStatisticsCalculator.get_scanner_threshold_info
+
+    def counting(model, scanner_name):
+        asked.append(scanner_name)
+        return real(model, scanner_name)
+
+    monkeypatch.setattr(
+        ScannerStatisticsCalculator, "get_scanner_threshold_info", counting
+    )
+    # The count comes from the model (the written report is not this run's), so
+    # the filter judges the model's results: three bandit MEDIUMs at the minimum,
+    # each asking bandit's threshold; the two semgrep LOWs are below the minimum
+    # and never asked. One scanner, so one resolver call.
+    metric = MagicMock()
+    metric.scanner_name = "semgrep"
+    metric.status = "PASSED"
+    metric.actionable = 2
+    metric.targets_attempted = 1
+    metric.targets_failed = 0
+    monkeypatch.setattr(ras, "get_unified_scanner_metrics", lambda _results: [metric])
+
+    exit_code = ras._compute_exit_code(
+        results, _opts(tmp_path, "medium"), report_sarif_written_this_run=False
+    )
+
+    assert exit_code == 0
+    assert asked == ["bandit"], asked
+
+
+def test_the_count_and_the_filter_read_a_level_only_result_alike(tmp_path):
+    """A result with no issue_severity is graded by its SARIF level by both: the
+    one rule is utils.severity_ladder.result_severity, so a level-only `error`
+    (CRITICAL) fails a HIGH threshold on the written report and in the model."""
+    from automated_security_helper.schemas.sarif_schema_model import Result
+
+    level_only = _finding("semgrep", "error", "")
+    del level_only["properties"]["issue_severity"]
+    results = _results_with_the_file_apart_from_the_model(
+        tmp_path, in_model=[level_only], in_file=[level_only]
+    )
+    threshold_for = ras._scanner_threshold_lookup(results)
+
+    as_json = ras._result_fails_its_scanner_threshold(level_only, threshold_for)
+    as_model = ras._result_fails_its_scanner_threshold(
+        Result.model_validate(level_only), threshold_for
+    )
+
+    assert as_json is as_model is True
+    assert (
+        ras._compute_exit_code(
+            results, _opts(tmp_path, "low"), report_sarif_written_this_run=True
+        )
+        == 2
+    )
+
+
 def test_a_workspace_plan_in_nix_mode_runs_inside_the_shell(tmp_path, monkeypatch):
     plan = _workspace_plan(tmp_path)
     entered = {}
