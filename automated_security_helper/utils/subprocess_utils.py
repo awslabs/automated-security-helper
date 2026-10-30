@@ -2934,7 +2934,11 @@ def _note_stop_refused(process: subprocess.Popen) -> None:
     if started is None or started.process is not process:
         return
     try:
-        if _has_exited(process) and (os.name == "nt" or not _group_exists(process.pid)):
+        # Through _group_survives: as PID 1 a group left with nothing but the
+        # tool's unreaped children is a tool that is gone, not a survivor.
+        if _has_exited(process) and (
+            os.name == "nt" or not _group_survives(process.pid)
+        ):
             return
     except OSError:
         return
@@ -3544,7 +3548,9 @@ def _kill_group(process: subprocess.Popen) -> bool:
     if process.returncode is not None:
         if _pid_names_a_live_process(process.pid):
             return False
-        if not _group_exists(process.pid):
+        # A reaped leader's group of nothing but zombies (this process as PID 1)
+        # is gone, not a group to signal: _group_survives reaps them first.
+        if not _group_survives(process.pid):
             return False
     if _leads_its_own_group(process) or process.returncode is not None:
         if _signal_group(process.pid, signal.SIGKILL):
@@ -3621,7 +3627,9 @@ def kill_running_groups() -> int:
                 extra=NO_MARKUP,
             )
     settled = time.monotonic() + _KILLED_GROUP_SETTLE_SECONDS
-    while time.monotonic() < settled and any(_group_exists(pgid) for pgid in signalled):
+    while time.monotonic() < settled and any(
+        _group_survives(pgid) for pgid in signalled
+    ):
         time.sleep(0.02)
     return len(signalled)
 

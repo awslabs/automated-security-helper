@@ -90,6 +90,54 @@ def test_the_grace_wait_ends_once_the_group_holds_zombies_only():
     assert took < _GRACE / 2, f"the wait ran {took:.2f}s on a group of zombies"
 
 
+def test_a_refused_stop_on_a_group_of_zombies_marks_nothing():
+    """The mark after a refused stop is skipped when the child has exited and
+    its group is gone; as PID 1 a group of zombies is gone too."""
+    group = _GroupOfZombies(777)
+    process = _reaped_child(_NO_SUCH_PGID)
+    started = subprocess_utils._StartedChild()
+    with contextlib.ExitStack() as stack:
+        group.installed(stack)
+        stack.enter_context(
+            patch.object(subprocess_utils, "_has_exited", return_value=True)
+        )
+        with started.recording():
+            started.process = process
+            subprocess_utils._note_stop_refused(process)
+    assert group.zombies == set()
+    assert started.stop_refused is False
+
+
+def test_the_servers_last_stop_settles_at_once_on_groups_of_zombies():
+    """kill_running_groups waits for the groups it signalled to be gone; as PID 1
+    a group left with nothing but zombies is gone once they are reaped."""
+    group = _GroupOfZombies(777)
+    process = MagicMock(spec=subprocess.Popen)
+    process.pid = _NO_SUCH_PGID
+    process.returncode = None
+    process.poll.return_value = None
+    began = time.monotonic()
+    with contextlib.ExitStack() as stack:
+        group.installed(stack)
+        stack.enter_context(
+            patch.object(subprocess_utils, "_RUNNING_GROUPS", {process.pid: process})
+        )
+        # The server's stop flag is set by the call; put back on the way out so
+        # no later spawn reads the server as stopping.
+        stack.enter_context(patch.object(subprocess_utils, "_STOPPING", False))
+        stack.enter_context(
+            patch.object(subprocess_utils, "_leads_its_own_group", return_value=True)
+        )
+        stack.enter_context(
+            patch.object(subprocess_utils, "_KILLED_GROUP_SETTLE_SECONDS", _GRACE)
+        )
+        signalled = subprocess_utils.kill_running_groups()
+    took = time.monotonic() - began
+    assert signalled == 1
+    assert group.zombies == set()
+    assert took < _GRACE / 2, f"the settle ran {took:.2f}s on a group of zombies"
+
+
 def test_a_group_of_zombies_is_not_signalled_or_waited_out_before_the_kill():
     """The read before the SIGTERM already sees the group gone: nothing of ours is
     running, so no signal is sent and no grace is waited out."""
