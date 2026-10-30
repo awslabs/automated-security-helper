@@ -30,6 +30,7 @@ or the move out of the options read more or less than the scanner did:
 from __future__ import annotations
 
 import os
+import time
 from datetime import date
 from pathlib import Path
 
@@ -45,6 +46,7 @@ from automated_security_helper.config.client_scanner_exclusions import (
     glob_excludes,
     parse_trivy_ignore_file,
     strip_client_scanner_exclusions,
+    trivy_path_matches,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
 
@@ -203,6 +205,41 @@ def test_a_posix_backslash_is_a_character_of_the_name():
     assert not glob_excludes("b.py", "a\\b.py")
     assert glob_excludes("a\\b.py", "a\\b.py")
     assert glob_excludes("b.py", "a/b.py")
+
+
+def test_a_pattern_of_repeated_doublestars_answers_at_once():
+    """A delivered ``*/**/**/.../zz`` against a deep path. Matched by trying
+    every split at every ``**``, it took billions of calls (about C(35, 16) for
+    sixteen of them against twenty components) for each finding and entry; the
+    position-set match answers in linear time. Five seconds is a loose bound on
+    a linear match and far below what the recursive one needed."""
+    pattern = "*/" + "**/" * 16 + "zz"
+    path = "/".join(f"d{depth}" for depth in range(20))
+    started = time.monotonic()
+    assert not glob_excludes(pattern, path)
+    assert glob_excludes(pattern, path + "/zz")
+    assert trivy_path_matches(pattern, path + "/zz")
+    assert time.monotonic() - started < 5.0
+
+
+@pytest.mark.parametrize(
+    ("pattern", "relative", "excluded"),
+    [
+        ("**/**/a.py", "x/y/a.py", True),
+        ("**/**/a.py", "a.py", True),
+        ("src/**", "src", False),
+        ("src/**", "src/a.py", True),
+        ("src/**/*.py", "src/a.py", True),
+        ("src/**/*.py", "src/x/y/a.py", True),
+        ("src/**/*.py", "src/x/y/a.js", False),
+        ("a/**/b/**/c", "a/b/c", True),
+        ("a/**/b/**/c", "a/x/b/y/z/c", True),
+        ("a/**/b/**/c", "a/x/c", False),
+    ],
+)
+def test_doublestar_runs_match_as_before(pattern, relative, excluded):
+    """The position-set match agrees with the recursive one on every ``**`` shape."""
+    assert glob_excludes(pattern, relative) is excluded
 
 
 # ---------------------------------------------------------------------------

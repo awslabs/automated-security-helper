@@ -479,18 +479,35 @@ def _components_match(pattern_parts: Sequence[str], path_parts: Sequence[str]) -
     ``**`` takes any run of components, none included; every other component
     matches exactly one path component with ``fnmatchcase``, so ``*`` and ``?``
     never cross a ``/``.
+
+    Evaluated as the set of path positions each pattern component can reach,
+    left to right: a ``**`` reaches every position from the earliest one
+    reached so far to the end, and any other component advances each reached
+    position by one when it matches the component there. That is linear in the
+    pattern and the path. A recursive match tried every split at every ``**``,
+    which a delivered pattern of repeated ``**`` turned into billions of calls
+    against a deep path, for every finding and every entry; consecutive ``**``
+    are also one ``**`` here, since a run of them takes the same runs.
     """
-    if not pattern_parts:
-        return not path_parts
-    head, rest = pattern_parts[0], pattern_parts[1:]
-    if head == "**":
-        return any(
-            _components_match(rest, path_parts[skip:])
-            for skip in range(len(path_parts) + 1)
-        )
-    if not path_parts or not fnmatch.fnmatchcase(path_parts[0], head):
-        return False
-    return _components_match(rest, path_parts[1:])
+    pattern: List[str] = []
+    for part in pattern_parts:
+        if part == "**" and pattern and pattern[-1] == "**":
+            continue
+        pattern.append(part)
+    reached = {0}
+    for part in pattern:
+        if part == "**":
+            reached = set(range(min(reached), len(path_parts) + 1))
+        else:
+            reached = {
+                position + 1
+                for position in reached
+                if position < len(path_parts)
+                and fnmatch.fnmatchcase(path_parts[position], part)
+            }
+        if not reached:
+            return False
+    return len(path_parts) in reached
 
 
 def trivy_path_matches(pattern: str, relative: str) -> bool:
