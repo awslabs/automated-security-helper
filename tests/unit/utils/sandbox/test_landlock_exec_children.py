@@ -78,7 +78,10 @@ class _Os:
 
     def __init__(self, proc: _Procfs):
         self.listdir = proc.listdir
-        self.path = types.SimpleNamespace(isdir=proc.isdir)
+        # A path with an entry exists, whatever reading it does.
+        self.path = types.SimpleNamespace(
+            isdir=proc.isdir, exists=lambda path: path in proc.files
+        )
 
     @staticmethod
     def getpid() -> int:
@@ -234,6 +237,34 @@ def test_a_scan_with_a_deadline_is_bounded_by_the_deadline_not_the_cap(
     procfs(files)
 
     assert landlock_exec._parent_map(until=lambda: 20.0) == {ME: [1, 2, 3, 4]}
+
+
+def test_a_live_descendant_whose_stat_cannot_be_read_is_left_alone_and_named(
+    procfs, capsys
+):
+    """The kill first reads the pid's parent to be sure it is still the scanner's;
+    a process that is there but whose stat cannot be read is not killed (the
+    reused-pid guard) and one stderr line names it."""
+    procfs(
+        {
+            "/proc/4242": [],
+            "/proc/4242/stat": PermissionError(errno.EACCES, "denied"),
+        }
+    )
+
+    assert landlock_exec._kill_descendant(4242, {ME}) is False
+    noted = capsys.readouterr().err
+    assert "4242" in noted
+    assert noted.startswith("ash-landlock: could not read the parent of process")
+
+
+def test_a_descendant_that_is_gone_is_skipped_in_silence(procfs, capsys):
+    """The common case, a pid that exited between the listing and the kill, says
+    nothing."""
+    procfs({})
+
+    assert landlock_exec._kill_descendant(4242, {ME}) is False
+    assert capsys.readouterr().err == ""
 
 
 def _three_levels() -> Dict[str, Entry]:

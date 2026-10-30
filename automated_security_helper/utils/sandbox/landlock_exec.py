@@ -602,7 +602,20 @@ def _kill_descendant(pid: int, tree: Set[int]) -> bool:
     signal was sent.
     """
     parent = _parent_pid(pid)
-    if parent is None or parent not in tree:
+    if parent is None:
+        # Gone between the listing and here, usually. A process still there
+        # whose stat cannot be read is left alone too (the guard against a
+        # reused pid stays), but not in silence.
+        if os.path.exists(f"/proc/{pid}"):
+            sys.stderr.write(
+                _shown(
+                    f"ash-landlock: could not read the parent of process {pid}; "
+                    "it is left alone"
+                )
+                + "\n"
+            )
+        return False
+    if parent not in tree:
         return False
     pidfd_open = getattr(os, "pidfd_open", None)
     pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
