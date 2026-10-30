@@ -49,7 +49,6 @@ from automated_security_helper.utils.package_identity import (
     identity_properties,
     install_path,
 )
-from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.content_db_refresh import (
     GRYPE_PREPARED_ENV,
@@ -324,20 +323,24 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         return self
 
     def validate_plugin_dependencies(self) -> bool:
-        """Validate the scanner configuration and requirements.
+        """The base check, then grype's own warning when the binary is simply absent.
 
-        Returns:
-            True if validation passes, False otherwise
-
-        Raises:
-            ScannerError: If validation fails
+        ``ScannerPluginBase.validate_plugin_dependencies`` reads a recorded
+        ``dependency_unavailable_reason`` first (a construction-time refusal is not
+        outvoted by a PATH probe), then probes PATH, and records the in-tree
+        refusal when the only copy found sits inside the scanned tree, so the
+        MISSING row says so rather than "not installed". This override used to
+        probe PATH itself and skip both, so a recorded reason was ignored. The
+        warning is kept for the case the base leaves unworded: no binary, no
+        reason.
         """
-        found = find_executable(self.command)
-        if not found:
+        if super().validate_plugin_dependencies():
+            return True
+        if not self.dependency_unavailable_reason:
             ASH_LOGGER.warning(
                 "Grype executable not found in PATH. Please ensure grype is installed."
             )
-        return found is not None
+        return False
 
     @staticmethod
     def _strip_leading_slash_from_uri(location, root: Path) -> None:

@@ -22,6 +22,9 @@
   ``--exclude`` values for the next target.
 - ``_name_grype_garbled`` split on ``/`` alone, so on Windows a garbled component
   behind a backslash was never matched.
+- ``validate_plugin_dependencies`` probed PATH itself instead of chaining to the
+  base check, so a recorded ``dependency_unavailable_reason`` was ignored and a
+  refused in-tree copy read as "not installed".
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from unittest.mock import patch
 
 import pytest
 
+from automated_security_helper.base import scanner_plugin
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.config.path_trust import reset_path_refusal_warnings
@@ -257,3 +261,71 @@ def test_a_backslash_separator_is_kept_in_place_when_asked_for(root):
 
     assert _name_grype_garbled(root, "a\\b�", separators="/\\") == f"a\\{garbled}"
     assert _name_grype_garbled(root, "a/b�", separators="/\\") == f"a/{garbled}"
+
+
+# --- the dependency check -----------------------------------------------------------
+
+
+def _probe_answers(monkeypatch, found):
+    """Make every PATH probe the check can reach answer ``found``: the base
+    module's, and the scanner module's own import (gone once the override chains,
+    kept so the test runs against the pre-fix shape too)."""
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda command: found)
+    monkeypatch.setattr(
+        grype_scanner, "find_executable", lambda command: found, raising=False
+    )
+
+
+def test_a_recorded_reason_makes_the_check_answer_false_without_a_path_probe(
+    root, monkeypatch
+):
+    """A construction-time reason is not outvoted by the binary being on PATH."""
+    scanner = _grype(_context(root))
+    scanner.dependency_unavailable_reason = "grype is in offline mode with no database"
+    _probe_answers(monkeypatch, "/usr/bin/grype")
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert (
+        scanner.dependency_unavailable_reason
+        == "grype is in offline mode with no database"
+    )
+
+
+def test_a_refused_in_tree_copy_is_recorded_as_the_reason(root, monkeypatch, caplog):
+    """No binary on PATH and a refused copy inside the tree: the refusal is the
+    MISSING row's reason, and the "not installed" warning is not given."""
+    scanner = _grype(_context(root))
+    _probe_answers(monkeypatch, None)
+    monkeypatch.setattr(
+        scanner_plugin,
+        "in_tree_refusal",
+        lambda command: f"{command} inside the scanned tree was refused",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner.validate_plugin_dependencies() is False
+
+    assert scanner.dependency_unavailable_reason == (
+        "grype inside the scanned tree was refused"
+    )
+    assert "not found in PATH" not in caplog.text
+
+
+def test_control_a_binary_on_path_and_no_reason_passes_the_check(root, monkeypatch):
+    scanner = _grype(_context(root))
+    _probe_answers(monkeypatch, "/usr/bin/grype")
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert not scanner.dependency_unavailable_reason
+
+
+def test_control_no_binary_and_no_refusal_still_warns(root, monkeypatch, caplog):
+    scanner = _grype(_context(root))
+    _probe_answers(monkeypatch, None)
+    monkeypatch.setattr(scanner_plugin, "in_tree_refusal", lambda command: None)
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner.validate_plugin_dependencies() is False
+
+    assert "Grype executable not found in PATH" in caplog.text
+    assert not scanner.dependency_unavailable_reason
