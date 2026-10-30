@@ -215,6 +215,84 @@ def test_another_sections_overrides_still_apply_when_one_section_fails():
     assert cloudwatch is not None and cloudwatch["enabled"] is True, reporters
 
 
+def test_two_spellings_of_one_section_fall_together():
+    """The apply reads ``aws_security_hub`` and ``aws-security-hub`` as one
+    section, so the per-section fallback groups them as one: an enable under
+    one spelling never lands while the destination override under the other
+    fails."""
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
+
+    trusted = AshConfig.model_validate(
+        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": False}}}
+    )
+
+    view = _with_reporter_overrides(
+        trusted,
+        [
+            "reporters.aws_security_hub.enabled=true",
+            "reporters.aws-security-hub.options=notamapping",
+        ],
+        trusted,
+    )
+
+    assert _security_hub_enabled(view) is False, view.reporters
+
+
+def test_an_override_of_the_reporters_mapping_falls_with_the_whole_set():
+    """``reporters={...}`` writes every section, so with it present the set is
+    one group: it is not applied while another override of the set fails."""
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
+
+    trusted = AshConfig.model_validate(
+        {
+            "project_name": "op",
+            "reporters": {
+                "aws-security-hub": {"enabled": False},
+                "cloudwatch-logs": {"enabled": True},
+            },
+        }
+    )
+
+    view = _with_reporter_overrides(
+        trusted,
+        [
+            'reporters={"aws-security-hub": {"enabled": true}}',
+            "reporters.cloudwatch-logs.options=notamapping",
+        ],
+        trusted,
+    )
+
+    assert _security_hub_enabled(view) is False, view.reporters
+
+
+def test_the_warning_names_the_disable_it_still_applies(caplog):
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
+
+    trusted = AshConfig.model_validate(
+        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": True}}}
+    )
+
+    with caplog.at_level("WARNING", logger="ash"):
+        view = _with_reporter_overrides(
+            trusted,
+            [
+                "reporters.aws-security-hub.options=notamapping",
+                "reporters.aws-security-hub.enabled=false",
+            ],
+            trusted,
+        )
+
+    assert _security_hub_enabled(view) is False, view.reporters
+    warnings = [
+        r.getMessage() for r in caplog.records if "do not apply" in r.getMessage()
+    ]
+    assert warnings, [r.getMessage() for r in caplog.records]
+    assert "except the disable 'reporters.aws-security-hub.enabled'" in warnings[0], (
+        warnings
+    )
+    assert "which is applied on its own" in warnings[0], warnings
+
+
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="the working directory cannot be removed while a process holds it",

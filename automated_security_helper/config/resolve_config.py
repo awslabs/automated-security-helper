@@ -3928,7 +3928,9 @@ def _with_reporter_overrides(
             # stays whole.
             pass
         view = trusted.model_copy(deep=True)
-        for section_overrides in _reporter_overrides_by_section(reporter_overrides):
+        for section_overrides in _reporter_overrides_by_section(
+            reporter_overrides, trusted
+        ):
             try:
                 view = apply_config_overrides(view, section_overrides)
                 continue
@@ -3939,27 +3941,11 @@ def _with_reporter_overrides(
                 # while the destination override beside it failed would send
                 # findings to the base's or the default destination, so every
                 # override of the section is dropped with the failing one.
-                # The error can quote a section key the trusted file read from
-                # the environment, so the warning is redacted with that file's
-                # values; the overrides are named by key only (never a value,
-                # which can be a credential), redacted the same way.
-                values = config_environment_values(trusted)
-                described = redact_values(str(error), values)
-                keys = ", ".join(
-                    redact_values(override.partition("=")[0], values)
-                    for override in section_overrides
-                )
-                ASH_LOGGER.warning(
-                    "The --config-overrides under reporters do not apply to the "
-                    f"operator's own configuration for '{keys}' ({described}), so "
-                    "none of that section's overrides is applied and a reporter "
-                    "that sends findings off the host keeps that configuration's "
-                    "settings for it; the other reporters sections' overrides "
-                    "still apply.",
-                    extra=NO_MARKUP,
-                )
+                failure = error
             # A disable is applied whatever else the section asked for: it
-            # fails closed, and it can never send a finding anywhere.
+            # fails closed, and it can never send a finding anywhere. Applied
+            # before the warning, so the warning says what happened.
+            applied_disables: List[str] = []
             for override in section_overrides:
                 if not _disables_a_reporter(override):
                     continue
@@ -3969,21 +3955,72 @@ def _with_reporter_overrides(
                     raise
                 except ASHConfigValidationError:
                     # The disable itself does not apply (its section is not a
-                    # mapping the trusted base knows); the warning above named
+                    # mapping the trusted base knows); the warning below names
                     # it among the section's keys.
-                    pass
+                    continue
+                applied_disables.append(override)
+            # The error can quote a section key the trusted file read from
+            # the environment, so the warning is redacted with that file's
+            # values; the overrides are named by key only (never a value,
+            # which can be a credential), redacted the same way.
+            values = config_environment_values(trusted)
+            described = redact_values(str(failure), values)
+            keys = ", ".join(
+                redact_values(override.partition("=")[0], values)
+                for override in section_overrides
+            )
+            kept = ""
+            if applied_disables:
+                disable_keys = ", ".join(
+                    redact_values(override.partition("=")[0], values)
+                    for override in applied_disables
+                )
+                kept = (
+                    f" except the disable '{disable_keys}', which is applied on "
+                    "its own,"
+                )
+            ASH_LOGGER.warning(
+                "The --config-overrides under reporters do not apply to the "
+                f"operator's own configuration for '{keys}' ({described}), so "
+                f"none of that section's overrides is applied{kept} and a "
+                "reporter that sends findings off the host keeps that "
+                "configuration's settings for it; the other reporters sections' "
+                "overrides still apply.",
+                extra=NO_MARKUP,
+            )
         return view
     return trusted.model_copy(deep=True)
 
 
-def _reporter_overrides_by_section(overrides: List[str]) -> List[List[str]]:
+def _reporter_overrides_by_section(
+    overrides: List[str], trusted: AshConfig
+) -> List[List[str]]:
     """``overrides``, every one under ``reporters``, grouped by the reporter
-    section each names (the second segment of its key), in first-seen order;
-    an override of ``reporters`` itself is its own group."""
+    section each lands on, in first-seen order.
+
+    The section is the key the apply resolves the override's second segment
+    to against the trusted base's own dump (``resolve_override_segment``, the
+    one resolver every override walker reads keys with), not the segment's
+    text: ``aws_security_hub`` and ``aws-security-hub`` land on one section,
+    so an enable under one spelling and a failing destination override under
+    the other are one group and fall together, as the all-or-nothing rule
+    promises. A segment that resolves to no existing key is grouped as
+    written, which is where the apply would create it. An override of
+    ``reporters`` itself (``reporters={...}``) writes every section, so when
+    one is present every override is one group and the set applies or falls
+    as a whole.
+    """
+    sections = trusted.model_dump().get("reporters")
+    current: Dict[str, Any] = sections if isinstance(sections, dict) else {}
+    values = config_environment_values(trusted)
     groups: Dict[str, List[str]] = {}
     for override in overrides:
         segments = override.partition("=")[0].removesuffix("+").strip().split(".")
-        section = segments[1].strip() if len(segments) > 1 else ""
+        if len(segments) < 2:
+            return [list(overrides)]
+        section = resolve_override_segment(
+            current, "reporters", segments[1].strip(), values
+        )
         groups.setdefault(section, []).append(override)
     return list(groups.values())
 
