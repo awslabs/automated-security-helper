@@ -249,19 +249,35 @@ class CommandSafeStream:
                 # written, not after this text.
                 self._checked_buffer._emit_held()
             self._mid_write = True
+            # A write deferred after the last drain's final empty check,
+            # before _mid_write was cleared, is still in _pending with no
+            # write under way to drain it. It lands first: it was made
+            # before this text, and left to the drain below it would have
+            # landed after it. Its error is held, not raised here: raised
+            # from the same try as this text's write, a stranded item's
+            # error lost the caller's own text on a wrap whose drain had
+            # nothing to do with it. The text lands, then the held error.
+            stranded = self._land_stranded()
             try:
-                # A write deferred after the last drain's final empty check,
-                # before _mid_write was cleared, is still in _pending with no
-                # write under way to drain it. It lands first: it was made
-                # before this text, and left to the drain below it would have
-                # landed after it.
-                self._drain_pending()
                 written = self._write_text(text)
             except BaseException:
                 self._end_write(failed=True)
                 raise
             self._end_write(failed=False)
+            if stranded is not None:
+                raise stranded
             return written
+
+    def _land_stranded(self) -> BaseException | None:
+        """Drain the writes stranded in _pending ahead of a new write, returning
+        the first error one of them raised instead of raising it, so the write
+        that found them can still land its own text. Run with _mid_write set,
+        under the lock."""
+        try:
+            self._drain_pending()
+        except BaseException as exc:
+            return exc
+        return None
 
     def writelines(self, lines: Any) -> None:
         """Each line through ``write``, under one hold of the lock.
@@ -305,14 +321,25 @@ class CommandSafeStream:
         while an item lands is held the same way: the items after it still
         land, and it is raised once the list is empty."""
         error: BaseException | None = None
+        if self._checked_buffer is not None and any(
+            isinstance(item, str) for item in self._pending
+        ):
+            # Bytes a buffer write left held land first, where they were
+            # written, as write() has them land before its own text: once, at
+            # the start, ahead of every deferred item. Emitted only right
+            # before the first deferred TEXT item, the tail landed after the
+            # deferred BYTE items before it (b"caf\xc3" then [b"B2", "T"] wrote
+            # caf, B2, \xc3, T), neither where it was written nor joined to the
+            # rest of its character.
+            self._checked_buffer._emit_tail()
         while self._pending:
             item = self._pending.pop(0)
             try:
                 if isinstance(item, str):
                     if self._checked_buffer is not None:
-                        # Bytes a buffer write left held land first, where
-                        # they were written, as write() has them land before
-                        # its own text.
+                        # A text item deferred while this drain ran, after a
+                        # byte item landed: the tail is already out (above), so
+                        # this is a no-op unless a write since then held one.
                         self._checked_buffer._emit_tail()
                     self._write_text(item)
                 elif self._checked_buffer is not None:
@@ -392,14 +419,21 @@ class CommandSafeStream:
         this wrap's target (utils/log.py's Windows UTF-8 fallback, whose
         replacement detaches the stream it is given).
 
-        Under this wrap's lock: bytes a buffer write left held are written to
-        the old target first, so they are not dropped with it, and no write of
-        this wrap can land between that and the replacement. This wrap is not
-        usable after a *replace* that detached its target.
+        Under this wrap's lock: bytes a buffer write left held, and a write
+        stranded in _pending after the last drain (see ``write``), are written
+        to the old target first, so they are not dropped with it, and no write
+        of this wrap can land between that and the replacement. This wrap is
+        not usable after a *replace* that detached its target.
         """
         with self._lock:
             if self._checked_buffer is not None:
+                # _emit_held drains the stranded writes too.
                 self._checked_buffer._emit_held()
+            elif self._pending and not self._mid_write:
+                # As flush() lands a stranded write: left in the old wrap, it
+                # went with it.
+                self._mid_write = True
+                self._end_write(failed=False)
             new_target = replace(self.target)
         return CommandSafeStream(
             lambda: new_target, check_buffer=self._checked_buffer is not None
@@ -492,15 +526,17 @@ class CommandSafeBuffer(io.BufferedIOBase):
                 owner._pending.append(given)
                 return len(given)
             owner._mid_write = True
+            # As in CommandSafeStream.write: a write stranded in _pending after
+            # the last drain lands first, and its error waits for these bytes.
+            stranded = owner._land_stranded()
             try:
-                # As in CommandSafeStream.write: a write stranded in _pending
-                # after the last drain lands first.
-                owner._drain_pending()
                 written = self._write_bytes(given)
             except BaseException:
                 owner._end_write(failed=True)
                 raise
             owner._end_write(failed=False)
+            if stranded is not None:
+                raise stranded
             return written
 
     def _write_bytes(self, given: bytes, deferred: bool = False) -> int:

@@ -11,7 +11,10 @@ Properties of ``utils/command_safe_stream.py`` that nothing else pins:
   after the tail an earlier checked byte write left held;
 - a text write deferred during a byte write lands after that write's held tail;
 - a write deferred after a drain's last empty check lands before the next
-  write's text, not after it;
+  write's text, not after it, on a flush, and on the old target when the wrap is
+  retargeted; its error, when it raises, follows the next write's text instead
+  of replacing it;
+- the held tail lands once, ahead of every deferred item, byte items included;
 - a KeyboardInterrupt while a deferred item lands strands nothing after it;
 - ``copy.copy`` of a wrap or of its checked view does not recurse;
 - the checked byte view hands out no ``raw`` writer.
@@ -114,6 +117,56 @@ def test_a_flush_lands_a_stranded_write():
     wrap._mid_write = False
     wrap.flush()
     assert target.getvalue() == "late\n", target.getvalue()
+
+
+def test_retargeting_lands_a_stranded_write_on_the_old_target():
+    """A write stranded in _pending goes to the target it was written to before
+    the replacement, as a flush lands it; left in the old wrap, it went with it."""
+    old = io.StringIO()
+    wrap = css.CommandSafeStream(lambda: old)
+    wrap._mid_write = True
+    wrap.write("late\n")
+    wrap._mid_write = False
+    new = io.StringIO()
+    wrap.retargeted(lambda _target: new)
+    assert old.getvalue() == "late\n", old.getvalue()
+    assert new.getvalue() == ""
+
+
+def test_a_stranded_writes_error_does_not_lose_the_callers_text():
+    """A stranded item whose write raises is drained ahead of a new write; its
+    error is raised after the new write's own text has landed, not instead of it."""
+
+    class Refusing(io.StringIO):
+        def write(self, text: str) -> int:
+            if text == "bad\n":
+                raise OSError("refused")
+            return super().write(text)
+
+    target = Refusing()
+    wrap = css.CommandSafeStream(lambda: target)
+    wrap._pending = ["bad\n"]
+    with pytest.raises(OSError, match="refused"):
+        wrap.write("mine\n")
+    assert target.getvalue() == "mine\n", target.getvalue()
+    assert wrap._pending == []
+    assert wrap._mid_write is False
+
+
+def test_the_held_tail_lands_ahead_of_every_deferred_item():
+    """Bytes a byte write left held (an incomplete character's start) land once,
+    before the deferred items, byte items included: emitted only before the first
+    deferred text item, the tail landed after the deferred bytes before it."""
+    raw = io.BytesIO()
+    target = io.TextIOWrapper(raw, encoding="utf-8", write_through=True)
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    wrap.buffer.write(b"caf\xc3")
+    # A signal handler's byte write and text write inside that byte write.
+    wrap._mid_write = True
+    wrap.buffer.write(b"B2")
+    wrap.write("T\n")
+    wrap._end_write(failed=False)
+    assert raw.getvalue() == b"caf\xc3B2T\n", raw.getvalue()
 
 
 def test_a_keyboard_interrupt_in_a_deferred_write_strands_nothing_after_it():
