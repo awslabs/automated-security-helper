@@ -158,6 +158,10 @@ def test_members_scanners_read_by_name_or_an_unlisted_extension_are_extracted(
         "go.mod",
         "a.lock",
         "x.mjs",
+        "identity",
+        ".ssh/identity",
+        "README",
+        "docs/readme",
     ],
 )
 def test_the_admission_test_names_what_scanners_read(name):
@@ -169,10 +173,10 @@ def test_the_admission_test_names_what_scanners_read(name):
     [
         "logo.png",
         "a.woff",
-        "README",
         "Dockerfiles",
-        "identity",
         "id_card",
+        "identities",
+        "README-logo.png",
         ".environment",
         ".enviro.local",
         ".gitkeep",
@@ -180,6 +184,29 @@ def test_the_admission_test_names_what_scanners_read(name):
 )
 def test_the_admission_test_leaves_out_what_no_scanner_reads(name):
     assert archive_converter._member_is_scannable(name) is False
+
+
+def test_a_legacy_private_key_and_a_readme_are_extracted(
+    test_plugin_context, monkeypatch
+):
+    """``identity`` is OpenSSH's legacy default private-key name, and a README is a
+    text file the secret scanners read like any other. Both were left out of an
+    archive as members no scanner reads, so a key kept under either name reached
+    neither gitleaks nor detect-secrets."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [
+            (".ssh/identity", b"-----BEGIN OPENSSH PRIVATE KEY-----\nnot a key\n"),
+            ("README", b"token: not a token\n"),
+            ("ok.js", b"ok = 1\n"),
+        ],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert sorted(files) == [".ssh/identity", "README", "ok.js"]
+    assert converter.refused_inputs == []
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == {"a.zip"}
 
 
 def test_a_notebook_member_is_extracted_but_its_archive_is_not_recorded_whole(

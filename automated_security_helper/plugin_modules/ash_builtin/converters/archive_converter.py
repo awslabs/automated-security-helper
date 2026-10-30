@@ -109,9 +109,11 @@ NESTED_ARCHIVE_SUFFIXES = (
 
 #: Member names with no extension that scanners read, so KNOWN_SCANNABLE_EXTENSIONS,
 #: which admits members by their extension, cannot name them: container and build
-#: files (checkov, semgrep, opengrep), dependency manifests (grype, syft) and
-#: private keys (detect-secrets). Compared against the member's base name as read
-#: through ``_base_name``, case-folded; a name with a variant suffix
+#: files (checkov, semgrep, opengrep), dependency manifests (grype, syft),
+#: private keys (detect-secrets, gitleaks: the ``id_*`` names and ``identity``,
+#: OpenSSH's legacy default name for a private key) and a README, a text file the
+#: secret scanners read like any other. Compared against the member's base name
+#: as read through ``_base_name``, case-folded; a name with a variant suffix
 #: (``Dockerfile.prod``, ``Makefile_linux``, ``id_rsa.old``, ``.env.local``) is
 #: admitted by its stem (_SCANNABLE_MEMBER_STEMS, _SCANNABLE_DOTFILE_STEMS).
 SCANNABLE_MEMBER_NAMES = frozenset(
@@ -127,10 +129,12 @@ SCANNABLE_MEMBER_NAMES = frozenset(
         "Procfile",
         "Brewfile",
         "Podfile",
+        "README",
         "id_rsa",
         "id_dsa",
         "id_ecdsa",
         "id_ed25519",
+        "identity",
         "credentials",
         ".git-credentials",
         ".pgpass",
