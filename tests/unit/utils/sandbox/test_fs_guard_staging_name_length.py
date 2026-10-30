@@ -139,3 +139,39 @@ def test_the_writers_ask_the_targets_directory_for_its_limit(tmp_path, monkeypat
 
     assert asked == [os.fspath(tmp_path), os.fspath(tmp_path)], asked
     assert target.read_text() == "replaced\n"
+
+
+@pytest.mark.skipif(not hasattr(os, "fpathconf"), reason="asks through a descriptor")
+def test_a_guarded_atomic_write_asks_the_open_directory_for_its_limit(
+    tmp_path, monkeypatch
+):
+    """Below a root the atomic writer holds the target's directory open, created
+    a moment ago when it was missing; the limit is asked through that descriptor.
+    Asked by the spelled name before the directory existed, pathconf failed and
+    the limit fell back to the ceiling, which is the case the limit is for."""
+    root = fs_guard.register_writable_root(tmp_path / "out")
+    asked_by_fd = []
+    asked_by_name = []
+    real_fpathconf = os.fpathconf
+
+    def fpathconf(fd, name):
+        asked_by_fd.append(name)
+        return 143 if name == "PC_NAME_MAX" else real_fpathconf(fd, name)
+
+    def pathconf(path, name):
+        asked_by_name.append(os.fspath(path))
+        return 255
+
+    monkeypatch.setattr(os, "fpathconf", fpathconf)
+    monkeypatch.setattr(os, "pathconf", pathconf, raising=False)
+    target = root / "new" / _long_name(140)
+    try:
+        with fs_guard.open_for_atomic_write(target) as handle:
+            handle.write("atomic\n")
+    finally:
+        fs_guard.release_writable_root(root)
+
+    assert asked_by_fd == ["PC_NAME_MAX"], asked_by_fd
+    assert asked_by_name == [], asked_by_name
+    assert target.read_text() == "atomic\n"
+    assert sorted(p.name for p in target.parent.iterdir()) == [target.name]

@@ -44,6 +44,18 @@ def test_a_missing_root_among_others_does_not_stop_the_sweep(tmp_path):
     assert not os.path.lexists(written / "escape")
 
 
+def test_a_root_that_is_a_regular_file_sweeps_as_empty(tmp_path):
+    """The policy's writable roots are directories; a caller that passes a file
+    has nothing below it to sweep, and the file is neither opened as a directory
+    (a refusal) nor touched."""
+    file_root = tmp_path / "root.txt"
+    file_root.write_text("kept\n")
+
+    assert fs_guard.sweep_writable([file_root]) == 0
+
+    assert file_root.read_text() == "kept\n"
+
+
 def test_the_tree_sweep_itself_reads_a_missing_root_as_empty(tmp_path):
     """sweep_writable passes a missing root over before the tree sweep runs;
     the tree sweep, called on its own, reads one as empty too."""

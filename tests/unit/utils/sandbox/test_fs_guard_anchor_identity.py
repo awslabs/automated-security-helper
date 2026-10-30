@@ -154,3 +154,34 @@ def test_a_guarded_read_refuses_an_anchor_that_leads_elsewhere(tmp_path):
             fs_guard.read_bytes_at_most(out / "x", 64)
     finally:
         release_writable_root(root)
+
+
+def test_the_by_name_check_examines_a_directory_another_writer_made_first(
+    tmp_path, monkeypatch
+):
+    """The by-name check (the platform without directory descriptors) lstats a
+    component, finds nothing, and creates it. When the mkdir then fails because
+    something appeared in between, that something used to be taken as the
+    directory just made and passed without a look; a link put there by the
+    other writer was followed by every step below. It is examined like any
+    component."""
+    root = tmp_path / "out"
+    root.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    made = root / "made"
+    real_mkdir = os.mkdir
+
+    def racing_mkdir(path, *args, **kwargs):
+        if os.fspath(path) == os.fspath(made):
+            made.symlink_to(elsewhere)
+            raise FileExistsError(17, "File exists", os.fspath(path))
+        return real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "mkdir", racing_mkdir)
+
+    with pytest.raises(OutputLinkRefused):
+        fs_guard._check_beneath_by_name(root, ("made", "f"), made / "f")
+
+    assert os.path.islink(made), "the link the other writer put there is left"
+    assert sorted(p.name for p in elsewhere.iterdir()) == []

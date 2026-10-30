@@ -835,9 +835,15 @@ def sweep_writable(
             # os.lstat, not Path.is_symlink: since Python 3.14 is_symlink is
             # os.path.islink, which reads every OSError as "not a link", so a
             # root that cannot be checked would pass through here in silence.
-            if stat.S_ISLNK(os.lstat(root).st_mode):
+            mode = os.lstat(root).st_mode
+            if stat.S_ISLNK(mode):
                 root.unlink()
                 removed += 1
+                continue
+            if not stat.S_ISDIR(mode):
+                # A regular or special file given as a root (the policy builds
+                # only directories; a caller may not) has nothing below it, and
+                # opening it as a directory would read as a refusal.
                 continue
         except FileNotFoundError:
             # A sandboxed scanner that wrote nothing created no results
@@ -925,9 +931,11 @@ def _check_beneath_by_name(
             try:
                 os.mkdir(current)
             except FileExistsError:
-                # Another writer made it between the lstat and the mkdir.
+                # Another writer put something there between the lstat and the
+                # mkdir: examined as any component is, a link there included.
+                status = _lstat(current)
+            else:
                 continue
-            continue
         if _is_link_status(status):
             raise OutputLinkRefused(target, current)
         if not stat.S_ISDIR(status.st_mode):
@@ -1226,20 +1234,28 @@ _STAGING_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY
 _NAME_MAX = 255
 
 
-def _name_max(directory: Optional[Union[str, Path]]) -> int:
-    """The longest entry name ``directory``'s filesystem accepts, in bytes.
+def _name_max(
+    directory: Optional[Union[str, Path]], dir_fd: Optional[int] = None
+) -> int:
+    """The longest entry name the directory's filesystem accepts, in bytes.
 
-    ``os.pathconf(directory, "PC_NAME_MAX")`` where the platform has it, because a
-    filesystem can accept fewer than NAME_MAX bytes (eCryptfs accepts 143), and
-    a target whose name a plain open there accepts would otherwise fail with
-    ENAMETOOLONG at the staging open. _NAME_MAX when there is no directory to
-    ask, no pathconf (Windows), the call fails (the directory is not there yet)
-    or the answer is not a positive number; never more than _NAME_MAX.
+    ``os.fpathconf(dir_fd, "PC_NAME_MAX")`` when the caller holds the directory
+    open (the guarded atomic writer, whose descriptor is the directory the
+    staging file goes into, created a moment ago if it was missing), else
+    ``os.pathconf(directory, ...)`` by name; either because a filesystem can
+    accept fewer than NAME_MAX bytes (eCryptfs accepts 143), and a target whose
+    name a plain open there accepts would otherwise fail with ENAMETOOLONG at the
+    staging open. _NAME_MAX when there is nothing to ask, no pathconf (Windows),
+    the call fails (a directory not there yet, asked by name) or the answer is
+    not a positive number; never more than _NAME_MAX.
     """
-    if directory is None or not hasattr(os, "pathconf"):
-        return _NAME_MAX
     try:
-        limit = os.pathconf(directory, "PC_NAME_MAX")
+        if dir_fd is not None and hasattr(os, "fpathconf"):
+            limit = os.fpathconf(dir_fd, "PC_NAME_MAX")
+        elif directory is not None and hasattr(os, "pathconf"):
+            limit = os.pathconf(directory, "PC_NAME_MAX")
+        else:
+            return _NAME_MAX
     except (OSError, ValueError):
         return _NAME_MAX
     if not isinstance(limit, int) or limit <= 0:
@@ -1247,19 +1263,24 @@ def _name_max(directory: Optional[Union[str, Path]]) -> int:
     return min(limit, _NAME_MAX)
 
 
-def _staging_name(name: str, directory: Optional[Union[str, Path]] = None) -> str:
+def _staging_name(
+    name: str,
+    directory: Optional[Union[str, Path]] = None,
+    dir_fd: Optional[int] = None,
+) -> str:
     """The name of the staging file open_for_atomic_write writes ``name`` through.
 
     A dot, the target's name, the pid and 32 hex digits of randomness, then
     ``.tmp``. The target's name is shortened, from its end, until the whole fits
-    in the name limit of ``directory``'s filesystem (``_name_max``; _NAME_MAX
-    bytes without one): the suffix alone is about 46 bytes, so a target whose
-    name a plain open accepts could otherwise fail with ENAMETOOLONG at the
-    staging open. Uniqueness is the pid and the random digits, which are always
-    kept. secrets, not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter
-    that report ids are built from, and a staging name only has to be unique.
+    in the name limit of the directory's filesystem (``_name_max``, asked through
+    ``dir_fd`` when given, else by ``directory``'s name; _NAME_MAX bytes without
+    either): the suffix alone is about 46 bytes, so a target whose name a plain
+    open accepts could otherwise fail with ENAMETOOLONG at the staging open.
+    Uniqueness is the pid and the random digits, which are always kept. secrets,
+    not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter that report
+    ids are built from, and a staging name only has to be unique.
     """
-    limit = _name_max(directory)
+    limit = _name_max(directory, dir_fd)
     suffix = f".{os.getpid()}.{secrets.token_hex(16)}.tmp"
     stem = name
     while stem and len(os.fsencode(f".{stem}{suffix}")) > limit:
@@ -1324,10 +1345,18 @@ def open_for_atomic_write(
     guard = _guard_root(path, root)
     anchor = guard[1] if guard is not None else None
     relative = path.relative_to(anchor).parts if anchor is not None else ()
-    staging = _staging_name(path.name, path.parent)
     dir_fd: Optional[int] = None
     if anchor is not None and _HAS_DIR_FD:
         dir_fd = _open_dir_beneath(anchor, relative[:-1], path, identity_of=guard[0])
+    # After the directory is open (and created, when it was missing): its own
+    # filesystem's name limit is asked through the descriptor, where asking the
+    # spelled path before it existed fell back to the ceiling.
+    try:
+        staging = _staging_name(path.name, path.parent, dir_fd=dir_fd)
+    except BaseException:
+        if dir_fd is not None:
+            os.close(dir_fd)
+        raise
 
     def refuse_a_link_at_the_name() -> Optional[os.stat_result]:
         if dir_fd is not None:
