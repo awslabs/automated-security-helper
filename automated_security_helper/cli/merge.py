@@ -1521,6 +1521,8 @@ def _merge_timing(
     # datetime whose microsecond is zero is written without the fraction, and
     # "10:00:00Z" sorts after "10:00:00.5Z" as text while it is the earlier
     # instant. Mixed types would not compare, so each list is filtered to one kind.
+    # The parse (_parse_instant) accepts those two spellings on Python 3.10 too,
+    # whose fromisoformat refuses them, so the fallback is not the rule there.
     if starts and all(isinstance(value, str) for value in starts):
         base.metadata.summary_stats.start = min(starts, key=_instant_key(starts))
     if ends and all(isinstance(value, str) for value in ends):
@@ -1539,13 +1541,38 @@ def _instant_key(values: Sequence[str]) -> Any:
     parsed = []
     for value in values:
         try:
-            parsed.append(datetime.fromisoformat(value))
+            parsed.append(_parse_instant(value))
         except ValueError:
             return lambda text: text
     aware = {instant.tzinfo is not None for instant in parsed}
     if len(aware) != 1:
         return lambda text: text
-    return lambda text: datetime.fromisoformat(text)
+    return _parse_instant
+
+
+def _parse_instant(value: str) -> datetime:
+    """``datetime.fromisoformat`` over every spelling the writers emit, on 3.10 too.
+
+    Python 3.10's parser rejects a ``Z`` suffix and a fraction that is not three
+    or six digits; 3.11 accepts both. Every value this module compares comes from
+    a shard's ``summary_stats``, written by whatever ASH produced it, so the two
+    shapes are normalized before parsing (``Z`` to ``+00:00``, the fraction
+    padded to six digits) and the recorded text is never changed. A value that
+    still does not parse raises ``ValueError``, as before, and the caller falls
+    back to text order.
+    """
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    dot = text.rfind(".")
+    if dot != -1:
+        end = dot + 1
+        while end < len(text) and text[end].isdigit():
+            end += 1
+        digits = text[dot + 1 : end]
+        if digits:
+            text = f"{text[:dot]}.{(digits + '000000')[:6]}{text[end:]}"
+    return datetime.fromisoformat(text)
 
 
 def _refuse_shards_without_a_config(

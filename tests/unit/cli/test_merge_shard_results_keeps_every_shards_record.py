@@ -34,6 +34,7 @@ from automated_security_helper.cli.merge import (
     ShardSettingsDisagreeError,
     _adopt_owning_shard_results,
     _merge_converter_rows,
+    _parse_instant,
     merge_shard_results,
     read_shard_assignment,
     stamp_shard_assignment,
@@ -206,6 +207,33 @@ class TestTimingIsOrderedByInstant:
         assert merged.metadata.summary_stats.start == "2026-08-28T10:00:00+02:00"
         # 09:30Z is the later instant; as text 10:30+02:00 (08:30Z) sorts after it.
         assert merged.metadata.summary_stats.end == "2026-08-28T09:30:00+00:00"
+
+    def test_a_z_suffix_and_a_short_fraction_are_parsed_as_instants(self):
+        """The two spellings the comment names: ``10:00:00Z`` sorts after
+        ``10:00:00.5Z`` as text while it is the earlier instant. Python 3.10's
+        ``fromisoformat`` rejects both (the ``Z``, a one-digit fraction), which
+        put every merge on that interpreter on the text order; the parse now
+        normalizes them first. On 3.11 and later the parser accepts them itself,
+        so this test is green there on either side; the 3.10 leg is the red."""
+        shards = build_shards(2)
+        shards[0].metadata.summary_stats.start = "2026-08-28T10:00:00Z"
+        shards[1].metadata.summary_stats.start = "2026-08-28T10:00:00.5Z"
+        shards[0].metadata.summary_stats.end = "2026-08-28T10:30:00.25Z"
+        shards[1].metadata.summary_stats.end = "2026-08-28T10:30:00Z"
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.metadata.summary_stats.start == "2026-08-28T10:00:00Z"
+        assert merged.metadata.summary_stats.end == "2026-08-28T10:30:00.25Z"
+
+    def test_the_parse_reads_the_three_spellings_as_one_instant(self):
+        zulu = _parse_instant("2026-08-28T08:00:00Z")
+        assert _parse_instant("2026-08-28T08:00:00.000Z") == zulu
+        assert _parse_instant("2026-08-28T08:00:00.0Z") == zulu
+        assert _parse_instant("2026-08-28T10:00:00+02:00") == zulu
+        assert _parse_instant("2026-08-28T08:00:00.5Z") > zulu
+        with pytest.raises(ValueError):
+            _parse_instant("not a time")
 
     def test_text_that_does_not_parse_is_ordered_as_text(self):
         """The fallback, so a hand-written stamp cannot crash the merge."""
