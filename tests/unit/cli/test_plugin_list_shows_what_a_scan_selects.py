@@ -160,8 +160,9 @@ def test_a_section_without_a_name_shows_the_plugins_declared_name():
     assert result.exit_code == 0, result.output
     plain = ANSI.sub("", result.output)
     assert "unnamed" in plain, plain
-    assert "UnnamedScanner" in plain, plain  # the Class column still names the class
-    assert plain.count("UnnamedScanner") == 1, plain
+    # The Class column still names the class, which _stub spells "unnamedScanner".
+    assert "unnamedScanner" in plain, plain
+    assert plain.count("unnamedScanner") == 1, plain
 
 
 def test_a_plugins_own_redaction_values_mask_its_config_column():
