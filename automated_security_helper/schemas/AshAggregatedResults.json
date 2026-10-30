@@ -1565,6 +1565,25 @@
           },
           "description": "Converter configurations by name."
         },
+        "extends": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Base config file(s) this config extends: a path, or a list of paths applied in order, relative to this file. Mappings merge key by key; lists and scalars from this file replace the base's. Paths must stay inside the repository being scanned; URLs are refused.",
+          "title": "Extends"
+        },
         "external_reports_to_include": {
           "default": [],
           "description": "List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools.",
@@ -1753,6 +1772,23 @@
           ],
           "description": "Reports to write, by reporter name (for example sarif, markdown, github-ghas): a list, one name, or names separated by commas. Narrows the enabled reporters; it does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats list on the command line replaces this list.",
           "title": "Output Formats"
+        },
+        "patch": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list.",
+          "title": "Patch"
         },
         "project_name": {
           "default": "ash-scan",
@@ -11645,6 +11681,10 @@
           },
           {
             "$ref": "#/$defs/LicenseExpression"
+          },
+          {
+            "additionalProperties": true,
+            "type": "object"
           }
         ]
       },
@@ -26184,6 +26224,14 @@
           "title": "Scan Incomplete",
           "type": "boolean"
         },
+        "scanner_reasons": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Why each SKIPPED, MISSING or ERROR scanner gave no result, for this project alone: a SKIPPED or MISSING row's skipped_reason or missing_reason, and the first error an ERROR scanner's reports recorded, such as a constructor that raised. A scanner that ran, or that recorded no reason, is not listed. Empty in a workspace file written before the field existed.",
+          "title": "Scanner Reasons",
+          "type": "object"
+        },
         "scanner_thresholds": {
           "additionalProperties": {
             "type": "string"
@@ -26385,8 +26433,7 @@
       "required": [
         "workspace_file",
         "workspace_root",
-        "exit_code",
-        "skipped_projects"
+        "exit_code"
       ],
       "title": "WorkspaceResults",
       "type": "object"
