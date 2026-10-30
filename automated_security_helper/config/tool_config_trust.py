@@ -97,6 +97,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Literal,
@@ -216,6 +217,9 @@ class DroppedOverride(NamedTuple):
     key: str
     #: The refusal's text, which names keys and never values.
     reason: str
+    #: Its position in the list ``replay_overrides_onto`` was given, so the
+    #: caller can read the override as the operator typed it (``landings_of``).
+    index: int
 
 
 class Replay(NamedTuple):
@@ -225,8 +229,8 @@ class Replay(NamedTuple):
     dropped: List[DroppedOverride]
 
 
-def _dropped(override: str, error: Exception) -> DroppedOverride:
-    return DroppedOverride(override.partition("=")[0], str(error))
+def _dropped(override: str, error: Exception, index: int) -> DroppedOverride:
+    return DroppedOverride(override.partition("=")[0], str(error), index)
 
 
 def replay_overrides_onto(
@@ -251,8 +255,8 @@ def replay_overrides_onto(
 
     The result lists the dropped overrides. The value such an override set is
     the operator's own on the resolved config, and the confinement leaves it
-    alone (``_covered``), so a dropped override never turns into a replaced
-    value. ``warn_dropped`` says which ones were dropped. A respelled section
+    alone (``_covered``, by where ``landings_of`` says the override landed), so
+    a dropped override never turns into a replaced value. ``warn_dropped`` says which ones were dropped. A respelled section
     (``ASHRespelledOverrideError``) is still refused, as the reporters replay
     refuses it: the scan does not resolve under a spelling the operator did
     not type
@@ -296,17 +300,18 @@ def replay_overrides_onto(
             pass
         else:
             return Replay(
-                replayed, [_dropped(overrides[index], failure) for index in culprits]
+                replayed,
+                [_dropped(overrides[index], failure, index) for index in culprits],
             )
     replayed = trusted_config
     dropped: List[DroppedOverride] = []
-    for override in overrides:
+    for index, override in enumerate(overrides):
         try:
             replayed = apply_config_overrides(replayed, [override])
         except ASHRespelledOverrideError:
             raise
         except ASHConfigValidationError as error:
-            dropped.append(_dropped(override, error))
+            dropped.append(_dropped(override, error, index))
     return Replay(replayed, dropped)
 
 
@@ -337,31 +342,165 @@ def warn_dropped(
         )
 
 
-def _covered(dropped: Sequence[DroppedOverride], segments: Sequence[str]) -> bool:
+class Landing(NamedTuple):
+    """Where an override the trusted base could not take landed on the resolved config."""
+
+    #: The override's first key: ``scanners`` or ``converters``.
+    segment: str
+    #: The section key the override landed on, as the resolved configuration
+    #: holds it; None when the override sets the whole segment. Not the
+    #: spelling the trusted base uses (the fold respells the override onto
+    #: that), and not every section that folds with it: a file can hold
+    #: ``ferret_scan`` and ``ferret-scan`` both, and the scan's own apply
+    #: puts the override on the one it resolves the typed spelling to. More
+    #: than one key only when no typed spelling can tell them apart.
+    sections: Optional[FrozenSet[str]]
+    #: The key path below the section, as the override wrote it.
+    below: Tuple[str, ...]
+    #: Whether it appended to a list (``key+=item``) rather than set.
+    append: bool
+    #: The value it set or appended, parsed. The operator's own, so it is never
+    #: printed or logged.
+    value: Any
+
+
+def _landed_key(held: Sequence[str], typed: str) -> Optional[str]:
+    """The key among ``held`` that the scan's own apply puts a section typed ``typed`` on.
+
+    That is ``config_sources._resolve_dict_key``'s rule, the exact key first and
+    then its ``-``/``_`` twin; a spelling that matches neither is refused by
+    the apply, so none of ``held`` is the answer then.
+    """
+    from automated_security_helper.config.config_sources import _resolve_dict_key
+
+    landed = _resolve_dict_key(dict.fromkeys(held), typed)
+    return landed if landed in held else None
+
+
+def landings_of(
+    config: "AshConfig", typed: Sequence[str], dropped: Sequence[DroppedOverride]
+) -> List[Landing]:
+    """Where each of the ``dropped`` overrides landed on the resolved ``config``.
+
+    ``typed`` is the list the replay was given before the fold respelled it
+    onto the trusted base's section keys, as the operator wrote it: the scan's
+    own apply resolved those texts against ``config``, whose section keys the
+    repository's file chose, so the section an override changed is the one its
+    typed spelling resolves to there. The replayed key (``DroppedOverride.key``)
+    may name the trusted base's spelling of a section instead, which is not
+    necessarily a key ``config`` holds, and a file that holds a section under
+    two spellings has only one of them changed by the override.
+    """
+    from automated_security_helper.config.ash_config import section_fold_key
+    from automated_security_helper.config.resolve_config import _parse_config_value
+
+    known = {segment for segment, _kind in _PLUGIN_SEGMENTS}
+    found: List[Landing] = []
+    for item in dropped:
+        if not 0 <= item.index < len(typed):
+            continue
+        written, _separator, raw = typed[item.index].partition("=")
+        written_parts = written.removesuffix("+").strip().split(".")
+        replayed_parts = item.key.removesuffix("+").strip().split(".")
+        segment = replayed_parts[0]
+        sections: Optional[FrozenSet[str]] = None
+        if len(replayed_parts) > 1:
+            held = (
+                [key for key, _section in _plugin_sections(getattr(config, segment))]
+                if segment in known
+                else []
+            )
+            fold = section_fold_key(replayed_parts[1])
+            same = [key for key in held if section_fold_key(key) == fold]
+            if len(same) > 1 and len(written_parts) > 1:
+                landed = _landed_key(same, written_parts[1])
+                same = [landed] if landed else same
+            sections = frozenset(same or [replayed_parts[1]])
+        found.append(
+            Landing(
+                segment,
+                sections,
+                tuple(replayed_parts[2:]),
+                item.key.rstrip().endswith("+"),
+                _parse_config_value(raw),
+            )
+        )
+    return found
+
+
+def _relation(landing: Landing, segments: Sequence[str]) -> Optional[bool]:
+    """How a landing relates to the path ``segments``: None when it is not on it.
+
+    True when the landing is exactly that path, False when it is the path or a
+    mapping above it (the value at ``segments`` is the one it set, or part of
+    the one it set). A section key matches by the key the override landed on;
+    an option name under either of ``-`` and ``_``.
+    """
+    if not segments or landing.segment != segments[0]:
+        return None
+    if landing.sections is None:
+        return False
+    if len(segments) < 2 or segments[1] not in landing.sections:
+        return None
+    below = segments[2:]
+    if len(landing.below) > len(below):
+        return None
+    for part, segment in zip(landing.below, below):
+        if part.replace("-", "_") != segment.replace("-", "_"):
+            return None
+    return len(landing.below) == len(below)
+
+
+def _covered(
+    landings: Sequence[Landing],
+    segments: Sequence[str],
+    *,
+    except_appends: bool = False,
+) -> bool:
     """Whether a dropped override set the value at ``segments``, or a mapping above it.
 
     The value such an override set is the operator's own, and the trusted base
-    holds nothing to put in its place, so the confinement leaves it. A section
-    key matches under any spelling that folds with it; an option name under
-    either of ``-`` and ``_``.
+    holds nothing to put in its place, so the confinement leaves it. With
+    ``except_appends``, an override that appended to a list at exactly
+    ``segments`` does not count: the list holds the repository's items too,
+    which ``_appended`` and ``_with_appended`` confine.
     """
-    from automated_security_helper.config.ash_config import section_fold_key
-
-    for item in dropped:
-        parts = item.key.removesuffix("+").strip().split(".")
-        if len(parts) > len(segments):
+    for landing in landings:
+        relation = _relation(landing, segments)
+        if relation is None:
             continue
-        for index, (part, segment) in enumerate(zip(parts, segments)):
-            if part == segment:
-                continue
-            if index == 1 and section_fold_key(part) == section_fold_key(segment):
-                continue
-            if index > 1 and part.replace("-", "_") == segment.replace("-", "_"):
-                continue
-            break
-        else:
-            return True
+        if except_appends and relation and landing.append:
+            continue
+        return True
     return False
+
+
+def _appended(landings: Sequence[Landing], segments: Sequence[str]) -> List[Landing]:
+    """The dropped overrides that appended to the list at exactly ``segments``."""
+    return [
+        landing
+        for landing in landings
+        if landing.append and _relation(landing, segments)
+    ]
+
+
+def _with_appended(base: Any, appended: Sequence[Landing]) -> Any:
+    """``base`` with what each of ``appended`` added, as the apply adds it.
+
+    An append extends a list, starts one where the document holds none, and
+    sets the value where the document holds anything else
+    (``resolve_config._apply_config_override``).
+    """
+    value = base
+    for landing in appended:
+        items = landing.value if isinstance(landing.value, list) else [landing.value]
+        if isinstance(value, list):
+            value = [*value, *items]
+        elif value is _MISSING or value is None:
+            value = list(items)
+        else:
+            value = landing.value
+    return value
 
 
 def _options_mapping(section: Any) -> Dict[str, Any]:
@@ -483,6 +622,13 @@ def confine_scanner_config_files(
     file replaces the operator's config rather than adding to it. The warning
     names only an option the file wrote.
 
+    An override the trusted base cannot take (``replay_overrides_onto``) leaves
+    the value it set on the resolved config alone, at the one section it
+    landed on (``landings_of``). An override that only appended to a list
+    (``key+=item``) leaves the repository's own items in that list too, so the
+    list is confined as for any other override, with the operator's appended
+    items put back after the trusted base's.
+
     Args:
         config: The resolved AshConfig, changed in place.
         trusted_config: The trusted base ``resolve_config`` built for the sandbox
@@ -505,7 +651,7 @@ def confine_scanner_config_files(
         if override.partition("=")[0].removesuffix("+").strip().split(".")[0]
         == "scanners"
     ]
-    dropped: List[DroppedOverride] = []
+    landings: List[Landing] = []
     if scanner_overrides:
         # An override the scan's own apply resolved under the repository's
         # spelling of a section the trusted base spells another way is folded
@@ -516,15 +662,17 @@ def confine_scanner_config_files(
             _folded_onto_trusted,
         )
 
+        typed = scanner_overrides
         scanner_overrides = _folded_onto_trusted(
             trusted_config, scanner_overrides, config, section="scanners"
         )
         replay = replay_overrides_onto(trusted_config, scanner_overrides)
-        trusted_config, dropped = replay.config, replay.dropped
+        trusted_config = replay.config
+        landings = landings_of(config, typed, replay.dropped)
         # This step reports every scanners override the base could not take;
         # confine_tool_versions replays the same list and reports only the
         # others, so one dropped override is one warning.
-        warn_dropped(trusted_config, dropped)
+        warn_dropped(trusted_config, replay.dropped)
 
     ignored: List[str] = []
     extra = getattr(config.scanners, "__pydantic_extra__", None)
@@ -546,7 +694,7 @@ def confine_scanner_config_files(
         for key, section in sections:
             # A value an override the trusted base could not take set is the
             # operator's own; there is nothing of the base's to put in its place.
-            if _covered(dropped, ("scanners", key)):
+            if _covered(landings, ("scanners", key)):
                 continue
             options = _options_of(section)
             if options is None:
@@ -558,12 +706,20 @@ def confine_scanner_config_files(
                     section["options"] = dict(trusted_values)
                 continue
             for name, default in option_defaults.items():
-                if _covered(dropped, ("scanners", key, "options", name)):
+                path = ("scanners", key, "options", name)
+                # An override that set the option (or the mapping it is in)
+                # leaves the operator's value; one that only appended to a
+                # list leaves the repository's items beside the operator's,
+                # which are confined below with the operator's re-admitted.
+                if _covered(landings, path, except_appends=True):
                     continue
-                wanted = _trusted_option(trusted_options, name)
+                appended = _appended(landings, path)
+                wanted = _with_appended(
+                    _trusted_option(trusted_options, name), appended
+                )
                 written = _get(options, name)
                 current = _or_default(written, default)
-                wrote = _file_wrote(config, ("scanners", key, "options", name), written)
+                wrote = _file_wrote(config, path, written)
                 if wrote and is_tightening_value(scanner, name, current):
                     continue
                 if current == _or_default(wanted, default):
@@ -576,11 +732,13 @@ def confine_scanner_config_files(
                 # built-in scanner's options model reads an unwritten option as
                 # the model's own default (opengrep's config as ``p/ci``), which
                 # is not the file's choice, though it still gives way to the
-                # operator's value.
-                if current != default and wrote:
+                # operator's value. A list that holds only what the operator's
+                # own appended override added is no choice of the file's.
+                own_items = _with_appended(_MISSING, appended) if appended else None
+                if current != default and wrote and current != own_items:
                     ignored.append(f"scanners.{key}.options.{name}")
                 _set(options, name, wanted, default)
-    ignored.extend(_confine_settings_files(config, trusted_config, dropped))
+    ignored.extend(_confine_settings_files(config, trusted_config, landings))
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         tail = (
@@ -688,7 +846,7 @@ def confine_tool_versions(
         if override.partition("=")[0].removesuffix("+").strip().split(".")[0]
         in sections
     ]
-    dropped: List[DroppedOverride] = []
+    landings: List[Landing] = []
     if replayed:
         # The scanners entries are folded onto the trusted base's own section
         # spellings as confine_scanner_config_files folds them; the converters
@@ -698,11 +856,13 @@ def confine_tool_versions(
             _folded_onto_trusted,
         )
 
+        typed = replayed
         replayed = _folded_onto_trusted(
             trusted_config, replayed, config, section="scanners"
         )
         replay = replay_overrides_onto(trusted_config, replayed)
-        trusted_config, dropped = replay.config, replay.dropped
+        trusted_config = replay.config
+        landings = landings_of(config, typed, replay.dropped)
         # confine_scanner_config_files replays the scanners entries of this
         # same list and reports the ones the base could not take (both steps
         # run on every route), so only the others are reported here.
@@ -710,7 +870,7 @@ def confine_tool_versions(
             trusted_config,
             [
                 item
-                for item in dropped
+                for item in replay.dropped
                 if item.key.removesuffix("+").strip().split(".")[0] != "scanners"
             ],
         )
@@ -725,7 +885,7 @@ def confine_tool_versions(
         seen: set[Tuple[str, str]] = set()
         for key, section in _plugin_sections(config_segment):
             seen.add(section_fold_key(key))
-            if _covered(dropped, (segment, key)):
+            if _covered(landings, (segment, key)):
                 continue
             options = _options_of(section)
             trusted_section = trusted_config.get_plugin_config(kind, key)
@@ -739,7 +899,7 @@ def confine_tool_versions(
                         wanted = _trusted_option(trusted_options, name)
                         if wanted is _MISSING or wanted is None:
                             continue
-                        if _covered(dropped, (segment, key, "options", name)):
+                        if _covered(landings, (segment, key, "options", name)):
                             continue
                         section.setdefault("options", {})
                         if isinstance(section["options"], dict):
@@ -758,7 +918,7 @@ def confine_tool_versions(
                             )
                 continue
             for name in OPERATOR_ONLY_PLUGIN_OPTIONS:
-                if _covered(dropped, (segment, key, "options", name)):
+                if _covered(landings, (segment, key, "options", name)):
                     continue
                 default = _field_default(options, name)
                 wanted = _trusted_option(trusted_options, name)
@@ -828,7 +988,7 @@ def _entry_dump(entry: Any) -> Any:
 def _confine_settings_files(
     config: "AshConfig",
     trusted_config: "AshConfig",
-    dropped: Sequence[DroppedOverride] = (),
+    landings: Sequence[Landing] = (),
 ) -> List[str]:
     """Drop the detect-secrets ``file://`` plugins and filters the trusted base lacks.
 
@@ -846,7 +1006,7 @@ def _confine_settings_files(
     trusted_settings = _options_mapping(trusted_section).get("scan_settings") or {}
     ignored: List[str] = []
     for key, section in _scanner_sections(config, "detect-secrets"):
-        if _covered(dropped, ("scanners", key, "options", "scan_settings")):
+        if _covered(landings, ("scanners", key, "options", "scan_settings")):
             continue
         options = _options_of(section)
         if options is None:

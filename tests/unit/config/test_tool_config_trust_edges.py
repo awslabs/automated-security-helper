@@ -564,3 +564,148 @@ def test_a_respelled_section_is_still_refused(
 
     with pytest.raises(ASHRespelledOverrideError):
         confine(config, trusted, OVERRIDES, [Path(tmp_path) / ".ash.yaml"])
+
+
+APPEND = "scanners.opengrep.options.patterns+=operator-rule"
+
+
+def _opengrep_patterns(config: AshConfig) -> List[str]:
+    return list(config.scanners.opengrep.options.patterns)
+
+
+def test_a_repository_item_in_a_confined_list_is_confined_under_a_refused_append(
+    tmp_path, ash_log, monkeypatch
+):
+    """The operator appended an item and the trusted base could not take the
+    append, so the resolved list holds the repository's items beside it.
+    Leaving the path alone kept them, and opengrep's ``patterns`` replaces
+    every rule config. What is left is the trusted base's list and the
+    operator's item."""
+    config = apply_config_overrides(
+        AshConfig.model_validate(
+            {
+                "project_name": "repo",
+                "scanners": {"opengrep": {"options": {"patterns": ["repo-rule"]}}},
+            }
+        ),
+        [APPEND],
+    )
+    assert _opengrep_patterns(config) == ["repo-rule", "operator-rule"]
+    trusted = AshConfig.model_validate({"project_name": "op"})
+    _refuse_on_the_trusted_base(monkeypatch, "opengrep")
+
+    confine_scanner_config_files(config, trusted, [APPEND], [tmp_path / ".ash.yaml"])
+
+    assert _opengrep_patterns(config) == ["operator-rule"]
+    named = _warnings_naming(ash_log, "Ignoring")
+    assert len(named) == 1, named
+    assert "scanners.opengrep.options.patterns" in named[0]
+    assert not _warnings_naming(ash_log, "operator-rule")
+
+
+def test_an_appended_item_follows_the_trusted_bases_list_and_is_not_blamed_on_the_file(
+    tmp_path, ash_log, monkeypatch
+):
+    """The file wrote no ``patterns``: the list is the operator's item alone,
+    and the confined list is the trusted base's with that item after it."""
+    config = apply_config_overrides(
+        AshConfig.model_validate({"project_name": "repo"}), [APPEND]
+    )
+    trusted = AshConfig.model_validate(
+        {
+            "project_name": "op",
+            "scanners": {"opengrep": {"options": {"patterns": ["base-rule"]}}},
+        }
+    )
+    _refuse_on_the_trusted_base(monkeypatch, "opengrep")
+
+    confine_scanner_config_files(config, trusted, [APPEND], [tmp_path / ".ash.yaml"])
+
+    assert _opengrep_patterns(config) == ["base-rule", "operator-rule"]
+    assert not _warnings_naming(ash_log, "Ignoring")
+
+
+def test_a_refused_append_onto_a_scalar_option_keeps_the_operators_value(
+    tmp_path, ash_log, monkeypatch
+):
+    """An append onto a value that is not a list sets it (``config`` is a
+    string); the operator's value is what the apply set and stays."""
+    override = "scanners.opengrep.options.config+=p/custom"
+    config = apply_config_overrides(
+        AshConfig.model_validate({"project_name": "repo"}), [override]
+    )
+    trusted = AshConfig.model_validate({"project_name": "op"})
+    _refuse_on_the_trusted_base(monkeypatch, "opengrep")
+
+    confine_scanner_config_files(config, trusted, [override], [tmp_path / ".ash.yaml"])
+
+    assert config.scanners.opengrep.options.config == "p/custom"
+    assert not _warnings_naming(ash_log, "Ignoring")
+
+
+#: The spelling an override is typed in and the other spelling of the same
+#: plugin's section; a file can hold both (``ferret-scan`` is not a declared
+#: field of the scanners segment, so neither is folded onto the other).
+SPELLINGS = [
+    pytest.param("ferret-scan", "ferret_scan", id="kebab"),
+    pytest.param("ferret_scan", "ferret-scan", id="snake"),
+]
+
+
+def _operator_base(options: dict) -> AshConfig:
+    """The trusted base the refusing stub treats as the operator's (``op``)."""
+    return AshConfig.model_validate(
+        {"project_name": "op", "scanners": {FERRET: {"options": options}}}
+    )
+
+
+def _repository_with_both_spellings(option: str) -> AshConfig:
+    return AshConfig.model_validate(
+        {
+            "project_name": "repo",
+            "scanners": {
+                "ferret-scan": {"options": {option: "repository"}},
+                "ferret_scan": {"options": {option: "repository"}},
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize(("landed", "other"), SPELLINGS)
+def test_only_the_section_a_refused_override_landed_on_keeps_its_value(
+    tmp_path, monkeypatch, landed, other
+):
+    """The file holds the plugin's section under both spellings and the
+    override changed one of them. The other is the repository's, so it is
+    confined; matching every spelling that folds together left it alone."""
+    override = f"scanners.{landed}.options.profile=quick"
+    config = apply_config_overrides(
+        _repository_with_both_spellings("profile"), [override]
+    )
+    assert _extra(config, landed)["options"]["profile"] == "quick"
+    assert _extra(config, other)["options"]["profile"] == "repository"
+    trusted = _operator_base({"profile": "standard"})
+    _refuse_on_the_trusted_base(monkeypatch, "ferret")
+
+    confine_scanner_config_files(config, trusted, [override], [tmp_path / ".ash.yaml"])
+
+    assert _extra(config, landed)["options"]["profile"] == "quick"
+    assert _extra(config, other)["options"]["profile"] == "standard"
+
+
+@pytest.mark.parametrize(("landed", "other"), SPELLINGS)
+def test_only_the_section_a_refused_tool_version_landed_on_keeps_its_pin(
+    tmp_path, monkeypatch, landed, other
+):
+    override = f"scanners.{landed}.options.tool_version===2.0.0"
+    config = apply_config_overrides(
+        _repository_with_both_spellings("tool_version"), [override]
+    )
+    assert _extra(config, landed)["options"]["tool_version"] == "==2.0.0"
+    trusted = _operator_base({"tool_version": "==1.0.1"})
+    _refuse_on_the_trusted_base(monkeypatch, "ferret")
+
+    confine_tool_versions(config, trusted, [override], [tmp_path / ".ash.yaml"])
+
+    assert _extra(config, landed)["options"]["tool_version"] == "==2.0.0"
+    assert _extra(config, other)["options"]["tool_version"] == "==1.0.1"
