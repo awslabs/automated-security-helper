@@ -208,7 +208,14 @@ class TestWindowsRefusesBeforeResolving:
         "spelling", ["//server/share/tree", "\\\\server\\share\\tree"]
     )
     def test_a_network_share_is_refused_without_resolving(self, monkeypatch, spelling):
-        """Red at the base: the path was resolved (the share opened) before any refusal."""
+        """Red at the base: the path was resolved (the share opened) before any refusal.
+
+        On Windows every filesystem call on a UNC name opens the share, not only
+        ``Path.resolve``: ``os.lstat`` (the link check the gate runs on a name
+        that is not a share spelling), ``os.stat`` and ``os.path.realpath``. So
+        those are recorded too, and the refusal has to come before any of them
+        sees the server's name.
+        """
         resolved = []
         real_resolve = Path.resolve
 
@@ -217,12 +224,21 @@ class TestWindowsRefusesBeforeResolving:
             return real_resolve(self, strict=strict)
 
         monkeypatch.setattr(Path, "resolve", recording_resolve)
+        touched = []
+        for module, name in ((os, "lstat"), (os, "stat"), (os.path, "realpath")):
+            real = getattr(module, name)
+
+            def recording(path, *args, _real=real, **kwargs):
+                touched.append(os.fspath(path))
+                return _real(path, *args, **kwargs)
+
+            monkeypatch.setattr(module, name, recording)
 
         refusal = validate_scan_target_in_sandbox(spelling, session_id=OWN)
 
         assert refusal is not None
         assert "network share" in str(refusal)
-        assert all("server" not in p for p in resolved), resolved
+        assert all("server" not in p for p in resolved + touched), (resolved, touched)
 
     @pytest.mark.parametrize(
         "spelling", ["\\\\server\\share\\tree", "//server/share/tree"]
