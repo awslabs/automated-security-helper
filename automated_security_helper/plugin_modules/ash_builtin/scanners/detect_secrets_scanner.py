@@ -304,7 +304,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
     # Whether the chosen baseline came from the baseline_file option rather than
     # from the tree's own ``.secrets.baseline`` locations. One of the two facts
-    # that decide whose record of known candidates the baseline is
+    # that decide whether the baseline's entries may leave the report
     # (_baseline_entries_trusted).
     _baseline_from_option: bool = PrivateAttr(default=False)
 
@@ -1082,23 +1082,24 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         )
 
     def _baseline_entries_trusted(self) -> bool:
-        """Whether the baseline in use is the operator's as a record of known candidates.
+        """Whether the baseline in use may take the candidates it lists out of the report.
 
         A baseline's ``results`` are a suppression surface: every candidate it
-        lists by file, hash and type is one the report marks suppressed. The
-        suppression names whose file made the call: the operator's when the
-        operator named the file (``baseline_file`` written by the operator's own
-        settings, ``--config-overrides`` included) or when the file lies outside
-        the scanned tree and the settings-trust rule
-        (``_untrusted_baseline_reason``) finds it the operator's; otherwise a
-        file the scanned repository controls, its own in-tree
-        ``.secrets.baseline`` or a ``baseline_file`` that a config the operator
-        did not write names. Either way the known candidates stay in the report
-        as suppressed findings, so the count is visible and each can be
-        audited, and an entry the baseline audits as a real secret is reported
-        as an ordinary finding (see ``scan``): a repository cannot hide a secret
-        still in its files by listing the hash in a file it commits, and a
-        confirmed secret is not cleared by the record of it.
+        lists by file, hash and type is one the report will not show as an
+        ordinary finding. Removing a candidate is the operator's call to make,
+        so the entries are honored as removals only when the operator named the
+        file (``baseline_file`` written by the operator's own settings,
+        ``--config-overrides`` included) or when the file lies outside the
+        scanned tree and the settings-trust rule (``_untrusted_baseline_reason``)
+        finds it the operator's. A baseline the scanned repository controls, its
+        own in-tree ``.secrets.baseline`` or a ``baseline_file`` that a config
+        the operator did not write names, may only mark: its known candidates
+        stay in the report as suppressed findings, so the count is visible and
+        each can be audited, and a repository cannot hide a secret still in its
+        files by listing the hash in a file it commits. Under either baseline an
+        entry audited as a real secret is reported as an ordinary finding (see
+        ``scan``): a confirmed secret is not cleared by the record of it. The
+        worker is told the answer as ``baseline_trusted`` (``_scan_in_worker``).
         """
         if not self._baseline_in_use():
             return False
@@ -1403,6 +1404,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         work_dir: Path,
         scan_timeout: float | None,
         verify: bool = False,
+        baseline_trusted: bool = False,
     ) -> Any:
         """Scan ``scan_paths`` in a subprocess; return the resulting collection.
 
@@ -1418,6 +1420,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         When it is False the worker refuses every HTTP request detect-secrets
         tries, so a filter or plugin that verifies under another name cannot
         either (see ``utils/detect_secrets_worker.py``).
+
+        ``baseline_trusted`` is whether the baseline handed over, if any, is the
+        operator's (``_baseline_entries_trusted``). The worker drops an entry the
+        baseline's audit accepted as not a secret only when the request says
+        ``"baseline_trusted": true``; absent or false means no drop, so a
+        repository-written baseline can only mark, never remove. The scanner
+        hands over no baseline today (``scan`` applies it to the scan's own
+        findings itself), so the flag records whose baseline the scan runs under
+        and keeps the two halves composed for a request that does carry one.
 
         A worker killed at ``scan_timeout`` fails the scan: the timeout is recorded
         on the scanner (``scan_timed_out_after``) and ScannerError is raised, as the
@@ -1530,6 +1541,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 {
                     "root": str(root),
                     "baseline": baseline,
+                    "baseline_trusted": bool(baseline_trusted),
                     "settings": scan_settings_dict,
                     "paths": scan_paths,
                     "verify": verify,
@@ -1910,8 +1922,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # line (at line 0 for a --slim baseline's entry, which the SARIF
             # model refuses). The scan's own findings are the one copy; what the
             # baseline knows about each is applied to it below (_baseline_known).
-            # Whose baseline it is (_baseline_entries_trusted) decides the
-            # wording of the suppression a known candidate carries.
+            # Whose baseline it is (_baseline_entries_trusted) decides whether a
+            # known candidate leaves the report or stays marked, and is told to
+            # the worker as ``baseline_trusted`` so its own drop of accepted
+            # entries, for a request that does carry a baseline, follows the
+            # same rule.
             known_entries_trusted = self._baseline_entries_trusted()
             worker_baseline = None
 
@@ -2197,6 +2212,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 work_dir=target_results_dir,
                 scan_timeout=scan_timeout,
                 verify=verify,
+                baseline_trusted=known_entries_trusted,
             )
             if scanned is not None:
                 self._secrets_collection = scanned
@@ -2216,46 +2232,42 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             #   confirmed secret still in the file, so it is reported as an
             #   ordinary finding, whoever's baseline lists it: a baseline
             #   records such a finding, it does not clear it;
-            # * any other known candidate stays in the report marked
-            #   suppressed, with the baseline as the reason, so it is counted
-            #   and can be audited rather than removed from the report. The
-            #   wording says whose baseline it is: the operator's
-            #   (_baseline_entries_trusted), or a file the scanned repository
-            #   controls, which cannot hide a secret still in its files by
-            #   listing the hash. Tune findings with ASH suppressions, which are
-            #   reported and counted, as the gitleaks scanner says of the
-            #   tree's own ignore file.
+            # * any other known candidate is the baseline's call, and whose
+            #   baseline it is decides what the call may be
+            #   (_baseline_entries_trusted): a baseline the operator names may
+            #   DROP it from the report, as `detect-secrets scan --baseline`
+            #   would; a file the scanned repository controls may only MARK it,
+            #   kept in the report as suppressed with the baseline as the
+            #   reason, so it is counted and can be audited, and a repository
+            #   cannot hide a secret still in its files by listing the hash.
+            #   Tune findings with ASH suppressions, which are reported and
+            #   counted, as the gitleaks scanner says of the tree's own ignore
+            #   file. The worker applies the same rule to a baseline it is
+            #   handed (``baseline_trusted``).
             known = self._baseline_known(baseline_document, scan_root)
             baseline_suppression: Optional[Suppression] = None
-            if known:
+            if known and not known_entries_trusted:
                 listed_in = (
                     self._baseline_named
                     if self._baseline_named is not None
                     else self._baseline_file_path()
                 )
-                if known_entries_trusted:
-                    justification = (
-                        "(ASH) Listed in the detect-secrets baseline "
-                        f"{Path(listed_in).as_posix()}, which the operator's "
-                        "configuration names; kept in the report as suppressed "
-                        "rather than removed, so it is counted. An entry the "
-                        "baseline audits as a real secret is reported as a "
-                        "finding."
-                    )
-                else:
-                    justification = (
+                baseline_suppression = Suppression(
+                    kind=Kind1.external,
+                    justification=text_without_values(
                         "(ASH) Listed in the detect-secrets baseline "
                         f"{Path(listed_in).as_posix()}, a file the scanned "
                         "repository controls; kept in the report as suppressed "
-                        "rather than removed, so it is counted. An entry the "
-                        "baseline audits as a real secret is reported as a "
-                        "finding."
-                    )
-                baseline_suppression = Suppression(
-                    kind=Kind1.external,
-                    justification=text_without_values(justification, values),
+                        "rather than removed, so it is counted. Name the baseline "
+                        "with scanners.detect-secrets.options.baseline_file in "
+                        "the operator's own config to have its entries removed; "
+                        "an entry the baseline audits as a real secret is "
+                        "reported as a finding either way.",
+                        values,
+                    ),
                 )
             kept_known = 0
+            dropped_known = 0
             audited_real = 0
             results: List[Result] = []
             for filename, detections in self._secrets_collection.data.items():
@@ -2264,11 +2276,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     key = (uri, finding.secret_hash, finding.type)
                     is_known = key in known
                     is_real = bool(known.get(key))
+                    if is_known and is_real:
+                        audited_real += 1
+                    elif is_known and known_entries_trusted:
+                        dropped_known += 1
+                        continue
                     suppressed = is_known and not is_real
                     if suppressed:
                         kept_known += 1
-                    elif is_known:
-                        audited_real += 1
                     rule_id = re.sub(
                         pattern=r"\W+", repl="-", string=finding.type
                     ).upper()
@@ -2327,14 +2342,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         )
                     )
             if kept_known:
-                whose = (
-                    "the operator's detect-secrets baseline"
-                    if known_entries_trusted
-                    else "the scanned repository's own detect-secrets baseline"
-                )
                 self._plugin_log(
-                    f"{kept_known} candidate(s) listed in {whose} are reported as "
-                    "suppressed, not removed, so they are counted.",
+                    f"{kept_known} candidate(s) listed in the scanned repository's "
+                    "own detect-secrets baseline are reported as suppressed, not "
+                    "removed, so they are counted: only a baseline the operator "
+                    "names may remove them.",
+                    level=logging.INFO,
+                    target_type=target_type,
+                )
+            if dropped_known:
+                self._plugin_log(
+                    f"{dropped_known} candidate(s) listed in the operator's "
+                    "detect-secrets baseline left the report.",
                     level=logging.INFO,
                     target_type=target_type,
                 )
