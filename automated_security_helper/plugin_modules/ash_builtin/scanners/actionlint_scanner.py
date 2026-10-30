@@ -319,15 +319,25 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
     )
 
 
-#: A ``uses:`` value on one line, in block or flow style: double-quoted (group 1,
-#: with its escapes still encoded), single-quoted (group 2, with ``''`` for a
-#: quote) or plain (group 3). The key is matched whatever its case, as actionlint
-#: reads workflow keys. Backs up the YAML walk in ``local_uses_references``.
+#: A ``uses:`` value, in block or flow style: double-quoted (group 1, with its
+#: escapes still encoded; an escaped line break is part of it), single-quoted
+#: (group 2, with ``''`` for a quote; it may span lines) or plain (group 3, the
+#: rest of the line, cut down in ``_uses_values_of``). The key is matched
+#: whatever its case, as actionlint reads workflow keys. Backs up the YAML walk
+#: in ``local_uses_references``.
 _LOCAL_USES_LINE = re.compile(
     r"""(?:^|[\s{,])["']?uses["']?[ \t]*:[ \t]*"""
-    r"""(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|(\./[^\s"',}\]#]*))""",
+    r"""(?:"((?:[^"\\]|\\[\s\S])*)"|'((?:[^']|'')*)'|(\./[^\n]*))""",
     re.MULTILINE | re.IGNORECASE,
 )
+#: Where a plain value ends in flow context (a space, a quote, a comma, a closing
+#: bracket or a comment), the one reading that is right inside ``{...}``/``[...]``.
+_PLAIN_VALUE_FLOW_END = re.compile(r"""[\s"',}\]#]""")
+#: Where a plain value ends in block context: a comment, which needs a blank in
+#: front of its ``#``, or the end of the line. Spaces, commas and brackets are
+#: part of the value there (``uses: ./my dir/act`` is ``./my dir/act``).
+_PLAIN_VALUE_COMMENT = re.compile(r"[ \t]#")
+_FLOW_OPENERS = frozenset("{[")
 
 
 #: Byte-order marks go-yaml, actionlint's parser, decodes a workflow by. UTF-8
@@ -353,20 +363,41 @@ def decode_workflow(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _uses_value_of(match: "re.Match[str]") -> str:
-    """The value a ``_LOCAL_USES_LINE`` match names, with YAML quoting decoded."""
+def _decoded_scalar(quoted: str, fallback: str) -> str:
+    """*quoted*, a YAML flow scalar with its quotes, as the text it denotes.
+
+    Escapes are decoded and line breaks folded as YAML does. The *fallback* is
+    returned when PyYAML cannot read it: a YAMLError, or a ValueError, which
+    PyYAML's scanner raises as is on an escape outside Unicode (``\\UFFFFFFFF``).
+    """
+    try:
+        decoded = yaml.safe_load(quoted)
+    except (yaml.YAMLError, ValueError):
+        return fallback
+    return decoded if isinstance(decoded, str) else fallback
+
+
+def _uses_values_of(match: "re.Match[str]", text: str) -> Set[str]:
+    """The values a ``_LOCAL_USES_LINE`` match could name, YAML quoting decoded.
+
+    A plain value is read two ways, because the line scan does not know whether
+    it sits in a flow collection: cut at the first space, quote, comma, closing
+    bracket or ``#`` (right inside ``{...}``), and, when nothing before the key on
+    its line opens a flow collection, run to a comment or the end of the line
+    (right in block style, where ``uses: ./my dir/act`` names a directory with
+    a space in it). Both are candidates: this is a superset of what actionlint
+    resolves, and a candidate that names nothing is judged to be inside the tree.
+    """
     double_quoted, single_quoted, plain = match.groups()
     if double_quoted is not None:
-        try:
-            decoded = yaml.safe_load(f'"{double_quoted}"')
-        except (yaml.YAMLError, ValueError):
-            # ValueError: an escape outside Unicode (``\UFFFFFFFF``), which
-            # PyYAML's scanner raises as is, not as a YAMLError.
-            return double_quoted
-        return decoded if isinstance(decoded, str) else double_quoted
+        return {_decoded_scalar(f'"{double_quoted}"', double_quoted)}
     if single_quoted is not None:
-        return single_quoted.replace("''", "'")
-    return plain
+        return {_decoded_scalar(f"'{single_quoted}'", single_quoted.replace("''", "'"))}
+    candidates = {_PLAIN_VALUE_FLOW_END.split(plain, 1)[0]}
+    line_start = text.rfind("\n", 0, match.start()) + 1
+    if not _FLOW_OPENERS.intersection(text[line_start : match.start(3)]):
+        candidates.add(_PLAIN_VALUE_COMMENT.split(plain, 1)[0].rstrip())
+    return candidates
 
 
 def local_uses_references(text: str) -> Set[str]:
@@ -382,9 +413,9 @@ def local_uses_references(text: str) -> Set[str]:
     read, is still covered. A value holding an expression is left out: actionlint
     does not resolve it.
     """
-    found: Set[str] = {
-        _uses_value_of(match) for match in _LOCAL_USES_LINE.finditer(text)
-    }
+    found: Set[str] = set()
+    for match in _LOCAL_USES_LINE.finditer(text):
+        found.update(_uses_values_of(match, text))
     stack: List[Any] = []
     try:
         # compose_all is a generator: the documents it composed before failing

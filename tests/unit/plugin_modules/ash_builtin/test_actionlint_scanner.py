@@ -2283,6 +2283,15 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         # rejects the escape too, so actionlint reads nothing through it.
         ('steps:\n  - uses: "./\\UFFFFFFFF"\n', set()),
         ('steps:\n  - uses: "./\\UFFFFFFFF"\n  bad: [\n', set()),
+        # Three more shapes actionlint's parser reads that the line scan has to
+        # read too when PyYAML cannot compose the file: an escaped line break in
+        # a double-quoted value joins the lines; a plain value in block style
+        # runs to the comment or the end of the line, spaces included (the cut
+        # at the space is kept as a second candidate, since the scan cannot tell
+        # block from flow); a single-quoted value may span lines, folded.
+        ('steps:\n  - uses: "./a\\\n      b"\n  bad: [\n', {"./ab"}),
+        ("steps:\n  - uses: ./my dir/act\n  bad: [\n", {"./my", "./my dir/act"}),
+        ("steps:\n  - uses: './a\n      b'\n  bad: [\n", {"./a b"}),
     ],
     ids=[
         "block",
@@ -2305,6 +2314,9 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "later-document-fails",
         "escape-outside-unicode",
         "escape-outside-unicode-line-scan",
+        "double-quoted-escaped-break",
+        "plain-with-space",
+        "single-quoted-multi-line",
     ],
 )
 @pytest.mark.unit
