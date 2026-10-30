@@ -587,8 +587,7 @@ def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
                 rules_by_id.setdefault(rule.id, rule)
 
         for result in run.results or []:
-            kind = getattr(result, "kind", None)
-            if str(getattr(kind, "value", kind) or "fail") != "fail":
+            if result_kind(result) != DEFAULT_RESULT_KIND:
                 continue
             if result.properties:
                 current = getattr(result.properties, "issue_severity", None)
@@ -638,6 +637,175 @@ def _resolve_result_severity(result) -> str:
     can call the same function.
     """
     return result_severity(result).lower()
+
+
+# ---------------------------------------------------------------------------
+# One reading of a result for every reporter.
+#
+# The OCSF, GitLab SAST, JUnit and GitHub reporters each carried a copy of what
+# is not a finding, of a result's message text, of its rule id and of its
+# scanner, and the copies drifted apart: one left ``notApplicable`` out of the
+# kinds that state no finding, one read ``ruleId`` alone, one read the scanner
+# name without the ``scanner_details.tool_name`` fallback the flattening uses,
+# and an id-only message was the bare id in one report and "No description" in
+# another. The definitions below are the one each reporter imports.
+# ---------------------------------------------------------------------------
+
+#: The SARIF 2.1.0 result kinds (3.27.9) that state NO finding: the rule was
+#: evaluated and passed, did not apply to the target, or produced information
+#: only. ``notApplicable`` belongs here: the rule was not evaluated, so there is
+#: nothing to grade; a copy without it graded a cdk-nag rule that was skipped,
+#: and a report that emitted such a result as a finding put a New vulnerability
+#: in a SIEM. The complement is :data:`FINDING_KINDS`.
+NON_FINDING_KINDS = frozenset({"pass", "notApplicable", "informational"})
+
+#: The kinds that assert a finding: ``fail``, and ``open`` and ``review``,
+#: whose results a reader still has to judge. The two sets together are the
+#: schema's ``Kind`` enum, which the tests check, so a kind the schema adds is
+#: caught there and not in a reporter at run time.
+FINDING_KINDS = frozenset({"fail", "open", "review"})
+
+#: SARIF 3.27.9: a result that states no ``kind`` is a failing one.
+DEFAULT_RESULT_KIND = "fail"
+
+
+def result_kind(result: Any) -> str:
+    """*result*'s SARIF ``kind`` as text; an absent or empty kind is ``fail``.
+
+    Reads the ``Kind`` enum's value, a plain string, or the ``kind`` key of a
+    mapping, so the same function serves a model, a stand-in and raw SARIF.
+    """
+    if isinstance(result, dict):
+        kind = result.get("kind")
+    else:
+        kind = getattr(result, "kind", None)
+    value = getattr(kind, "value", kind)
+    return str(value) if value else DEFAULT_RESULT_KIND
+
+
+def is_not_a_finding(
+    result: Any, non_finding_kinds: Iterable[str] = NON_FINDING_KINDS
+) -> bool:
+    """Whether *result*'s kind says no problem was found.
+
+    *non_finding_kinds* is the caller's set; the default is
+    :data:`NON_FINDING_KINDS`. A report whose consumer reads no ``kind`` (GitHub
+    code scanning documents none) keeps only failing results and passes the
+    kinds it leaves out; whether ``open`` and ``review`` belong among them is
+    that reporter's decision, not this function's.
+    """
+    return result_kind(result) in non_finding_kinds
+
+
+def result_message_text(
+    result: Any, rule: Any = None, default: str | None = None
+) -> str | None:
+    """*result*'s message as text, or *default* when it has none.
+
+    The message's ``text``, else its ``markdown``, else the ``id`` of the message
+    string it names, resolved against *rule* when one is given: the rule's
+    ``messageStrings`` entry of that id (text, then markdown), else the rule's
+    ``shortDescription``, else the id itself, written as the rule names it so a
+    reader can find the string. A value of whitespace alone counts as absent:
+    one copy tested the value and another its stripped form, and a message of
+    spaces described a finding as spaces. SARIF lets a message be given by id
+    alone (``Message2``); read as ``text`` alone, such a result was described as
+    "No description" in one report and left blank in another.
+    """
+    message = getattr(result, "message", None)
+    body = getattr(message, "root", message)
+    for field in ("text", "markdown"):
+        value = getattr(body, field, None)
+        if isinstance(value, str) and value.strip():
+            return value
+    message_id = getattr(body, "id", None)
+    if not (isinstance(message_id, str) and message_id.strip()):
+        return default
+    rule_body = getattr(rule, "root", rule)
+    strings = getattr(rule_body, "messageStrings", None)
+    named = strings.get(message_id) if isinstance(strings, dict) else None
+    for source in (named, getattr(rule_body, "shortDescription", None)):
+        for field in ("text", "markdown"):
+            value = getattr(source, field, None)
+            if isinstance(value, str) and value.strip():
+                return value
+    return message_id
+
+
+def result_rule_id(result: Any) -> str | None:
+    """The id of the rule *result* names: its ``ruleId``, else its ``rule.id``.
+
+    SARIF 2.1.0 lets a result name its rule either way (3.27.5, 3.27.7). Read
+    as ``ruleId`` alone, a result naming it through ``rule`` was emitted as
+    "Unknown Rule" by one reporter and with no rule entry by another; an empty
+    ``ruleId`` falls through to the reference the same way. None when neither
+    names a rule.
+    """
+    rule_id = getattr(result, "ruleId", None)
+    if isinstance(rule_id, str) and rule_id:
+        return rule_id
+    reference = getattr(result, "rule", None)
+    body = getattr(reference, "root", reference)
+    identifier = getattr(body, "id", None)
+    return identifier if isinstance(identifier, str) and identifier else None
+
+
+def result_scanner_name(result: Any) -> str | None:
+    """The scanner that produced *result*, as the flattening reads it, or None.
+
+    ``properties.scanner_name`` (an attribute, else a ``model_extra`` key: a
+    ``PropertyBag`` allows extras, and a key the schema does not declare lands
+    there), else ``properties.scanner_details.tool_name`` (a mapping or an
+    object), stripped. None when nothing names one, or when a read raises: this
+    is called on the error paths too, where a stand-in's field can raise.
+    """
+    try:
+        props = getattr(result, "properties", None)
+        if props is None:
+            return None
+        extra = getattr(props, "model_extra", None)
+        extra = extra if isinstance(extra, dict) else {}
+        name = getattr(props, "scanner_name", None) or extra.get("scanner_name")
+        if not name:
+            details = getattr(props, "scanner_details", None)
+            if details is None:
+                details = extra.get("scanner_details")
+            if isinstance(details, dict):
+                name = details.get("tool_name")
+            elif details is not None:
+                name = getattr(details, "tool_name", None)
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        return None
+    except Exception:  # noqa: BLE001 -- see the docstring
+        return None
+
+
+def shared_finding_ids(model: Any, all_results: List[Any]) -> List[str | None]:
+    """The id every other ASH report gives each result, by position, else None.
+
+    ``to_flat_vulnerabilities`` builds one flattened finding per SARIF result in
+    ``get_all_results`` order (``utils/finding_identity``: scanner, rule, file,
+    line, column, fingerprints, message, an occurrence counter for findings that
+    still collide), so a uid or identifier derived from it is the same string
+    the GitLab SAST, OCSF and flat JSON reports carry, and distinct for two
+    identical results in one run. None at every position when the flattening
+    fails or has another length, and at a position whose row does not describe
+    its result (another rule or another file), so that result's id comes from
+    the reporter's own fallback instead of another finding's id
+    (``shared_ids_by_position``).
+    """
+    # Imported here: the reporters package imports this module at load time.
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.shared_finding_ids import (  # noqa: E501
+        shared_ids_by_position,
+    )
+
+    try:
+        flat = list(model.to_flat_vulnerabilities())
+    except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
+        ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
+        return [None] * len(all_results)
+    return shared_ids_by_position(flat, all_results)
 
 
 def _result_message_text(result: Any) -> str | None:
