@@ -5,6 +5,7 @@ import errno
 import json
 import logging
 import os
+import stat
 from pathlib import Path
 from typing import (
     Annotated,
@@ -97,10 +98,6 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.workspace import WorkspaceExitCode
-from automated_security_helper.utils.atomic_write import (
-    write_bytes_atomically,
-    write_text_atomically,
-)
 from automated_security_helper.utils.directory_refusals import source_dir_refusal
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import (
@@ -306,20 +303,80 @@ def _write_target(config_path: Path) -> Path:
     return Path(os.path.realpath(config_path))
 
 
+def _mode_to_keep(target: Path) -> int | None:
+    """The permission bits of the file at ``target``, or None when there is none.
+
+    A staged write makes a new inode, whose mode is 0o666 less the umask
+    (fs_guard.open_for_atomic_write); the mode the user set on the file is put
+    back on the staging file before it is renamed into place, so a 0600 config
+    does not come back 0644. The owner cannot be carried without privilege.
+    """
+    try:
+        return stat.S_IMODE(os.stat(target).st_mode)
+    except (OSError, ValueError):
+        return None
+
+
+def _staged_write_falls_back(error: OSError) -> bool:
+    """Whether a staged write that failed with ``error`` is made in place instead.
+
+    Staging beside the file and renaming over it needs a writable directory and
+    a name that can be replaced. A file the user may write in a directory they
+    may not (EACCES at the staging file), a single file bind-mounted into the
+    container (EBUSY from the rename onto a mount point), a rename across file
+    systems (EXDEV) and a file another process holds open on Windows
+    (PermissionError from the rename) are all places the plain in-place write
+    these commands made used to succeed, so it is made then. Any other error
+    (a full disk among them) is the write's own and is raised.
+    """
+    return isinstance(error, PermissionError) or error.errno in (
+        errno.EBUSY,
+        errno.EXDEV,
+    )
+
+
 def _write_config_text(config_path: Path, text: str) -> None:
-    """Replace the config file's text in one step.
+    """Replace the config file's text so a failed write leaves it as it was.
 
     ``Path.write_text`` truncates the file before it writes, so a write that
     failed partway (a full disk, a signal) left the user's config empty or
-    partial. The text is staged beside the file and renamed over it
-    (utils/atomic_write.py), so a failed write leaves the file as it was.
+    partial. The text is staged beside the file with the file's own permission
+    bits and renamed over it (fs_guard.open_for_atomic_write, as
+    utils/atomic_write.py writes); where staging or the rename is refused for
+    the file's place (``_staged_write_falls_back``) the in-place write is made.
     """
-    write_text_atomically(_write_target(config_path), text)
+    # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
+
+    target = _write_target(config_path)
+    mode = _mode_to_keep(target)
+    try:
+        with open_for_atomic_write(target, encoding="utf-8") as handle:
+            handle.write(text)
+            if mode is not None and hasattr(os, "fchmod"):
+                os.fchmod(handle.fileno(), mode)
+    except OSError as error:
+        if not _staged_write_falls_back(error):
+            raise
+        target.write_text(text, encoding="utf-8")
 
 
 def _write_config_bytes(config_path: Path, data: bytes) -> None:
     """``_write_config_text`` for bytes the caller has already encoded."""
-    write_bytes_atomically(_write_target(config_path), data)
+    # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
+
+    target = _write_target(config_path)
+    mode = _mode_to_keep(target)
+    try:
+        with open_for_atomic_write(target, binary=True) as handle:
+            handle.write(data)
+            if mode is not None and hasattr(os, "fchmod"):
+                os.fchmod(handle.fileno(), mode)
+    except OSError as error:
+        if not _staged_write_falls_back(error):
+            raise
+        target.write_bytes(data)
 
 
 def _print_unchecked_plugin_options_note(check: ConfigCheck) -> None:
@@ -1520,7 +1577,7 @@ def lint(
         typer.Option(
             "--output-dir",
             "-o",
-            help="Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output",
+            help="Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output under --source-dir when that is given, else to the one beside the config file (its project's .ash/ash_output, then ash_output)",
         ),
     ] = None,
     fix: Annotated[
@@ -1626,11 +1683,14 @@ def lint(
     scan_root = _source_dir(source_dir)
     config_path = _config_path_or_discovered(config, scan_root)
     output_dir_path = Path(output_dir) if output_dir else None
-    if output_dir_path is None:
-        # Where a scan of scan_root writes the report: its output directory is
-        # under --source-dir, not beside the config file, which --config can
-        # name anywhere. The linter's own search beside the file stays for a
-        # report an older layout wrote there.
+    if output_dir_path is None and source_dir is not None:
+        # Where a scan of --source-dir writes the report: its output directory is
+        # under the scanned tree, not beside the config file, which --config can
+        # name anywhere. Only when the caller named the scanned tree: without
+        # --source-dir the working directory is not known to be the tree the
+        # config describes (a lint run from one project against another's file),
+        # so the linter's own search beside the file stays the default there,
+        # as it does when the scanned tree holds no report.
         scan_output_dir = scan_root / ConfigLinter.DEFAULT_OUTPUT_DIR
         if is_regular_file(scan_output_dir / ConfigLinter.UNUSED_SUPPRESSIONS_REPORT):
             output_dir_path = scan_output_dir
@@ -1748,6 +1808,9 @@ def lint(
     # read, or is not a regular file) has nothing to fix: --fix finds no fixable
     # issue in it, and --fix-unused would read it again and end in the parser's
     # or the reader's traceback where the refusal below exits 3.
+    # The category beside `scan_ignores_file`: a path that is not a regular file
+    # is refused by the reader with that category and is not marked ignored,
+    # and the fixers would open it all the same.
     loadable = not any(
         issue.category == LintCategory.SYNTAX_ERROR for issue in lint_result.issues
     )
@@ -1759,7 +1822,12 @@ def lint(
         fix_refused = True
     try:
         if lint_result.scan_ignores_file or not loadable:
-            pass
+            if fix or fix_unused:
+                secho(
+                    "\nNot applying fixes: the file could not be loaded, so there "
+                    "is nothing to fix in it.",
+                    fg=typer.colors.YELLOW,
+                )
         elif fix and not fix_refused:
             applied = _apply_fixes(
                 config_path,

@@ -54,7 +54,10 @@ class _RefusingHandle:
 
 
 @pytest.fixture
-def text_writes_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+def text_writes_fail(config_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Installed after ``config_file`` has written the starting text (it holds
+    ``PROJECT`` too, so the fake would refuse it): the dependency makes the order
+    explicit instead of relying on the test's argument order."""
     real_open = io.open
 
     def opening(file, mode="r", *args, **kwargs):
