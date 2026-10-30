@@ -37,7 +37,9 @@ operator's. A ``policy: warn`` entry of the operator's is not copied in: the
 policy the repository's config keeps is at least as strict for that database.
 ``content_db_staleness_offline_image_default``
 is kept when it is false, or when the trusted base's is true; a true where the
-operator's is false is set back to false and named in the same warning.
+operator's is false is set back to false, and named in the same warning when a
+file wrote it (the field defaults to true, so a config that never mentions it is
+set back without being named).
 
 Under the MCP server the default ``denied_paths`` already refuse a client's file
 that sets any of these keys, and an MCP runtime patch cannot change them.
@@ -60,6 +62,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
+from automated_security_helper.config.recorded_config import _sets
 from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
@@ -158,12 +161,15 @@ def confine_content_db_staleness(
         config.content_db_staleness_overrides = [*kept, *carried]
 
     # true holds trivy-db to warn in an image built with OFFLINE=YES, so it relaxes
-    # the gate as warn does; false only makes it stricter.
+    # the gate as warn does; false only makes it stricter. The field defaults to
+    # true, so a true here is the file's own only when a file wrote it: a config
+    # that never mentions the field is set back to false without being blamed.
     if (
         config.content_db_staleness_offline_image_default
         and not trusted_config.content_db_staleness_offline_image_default
     ):
-        ignored.append(STALENESS_OFFLINE_IMAGE_CONFIG_FIELD)
+        if _sets(config, [STALENESS_OFFLINE_IMAGE_CONFIG_FIELD]):
+            ignored.append(STALENESS_OFFLINE_IMAGE_CONFIG_FIELD)
         config.content_db_staleness_offline_image_default = False
 
     if ignored:
