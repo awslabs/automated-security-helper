@@ -377,6 +377,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     #: for a package whose manifest stayed in the scan set.
     _ignored_lockfiles: Set[Path] = PrivateAttr(default_factory=set)
 
+    #: The ignore list the last ``scan()`` call was handed (None when it was
+    #: handed none), so ``nothing_to_scan_reason`` answers from the selection
+    #: that scan made, not from one recomputed from the config.
+    _handed_ignore_paths: List[IgnorePathWithReason] | None = PrivateAttr(default=None)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = NpmAuditScannerConfig()
@@ -563,10 +568,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         npm-audit read an ignored package's lockfile, and its results held it. The
         list is ``global_ignore_paths`` when ``scan()`` is handed one (the
         orchestrator's, which honors ``--ignore-suppressions`` and leaves the
-        client-supplied entries to the SARIF step); otherwise it is computed from
-        the config the same way (``_scan_ignore_paths``). Recomputing it from the
-        config alone discarded the list scan() was given, so the flag and the
-        carve-out did not reach npm-audit's file selection.
+        client-supplied entries to the SARIF step), less any entry whose
+        expiration has passed, as every other reader of an ignore list filters
+        it (``active_ignore_paths``); an empty list given is an empty list.
+        Otherwise it is computed from the config the same way
+        (``_scan_ignore_paths``). Recomputing it from the config alone discarded
+        the list scan() was given, so the flag and the carve-out did not reach
+        npm-audit's file selection.
 
         In a workspace scan the workspace's output directory is left out of the
         walk like the project's own (``workspace_output_dir``), as the other
@@ -584,7 +592,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         ignore_paths = (
             self._scan_ignore_paths()
             if global_ignore_paths is None
-            else list(global_ignore_paths)
+            else active_ignore_paths(
+                list(global_ignore_paths), where="global_ignore_paths"
+            )
         )
         workspace_output = getattr(self.context, "workspace_output_dir", None)
         ignored_lockfiles: Set[Path] = set()
@@ -646,14 +656,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         """None when either tree holds a package.json with a lockfile beside it.
 
         npm, yarn and pnpm audit a lockfile, so a package.json without one is not
-        audited; that is the selection ``scan()`` makes. See the base class.
+        audited; that is the selection ``scan()`` makes, with the ignore list the
+        last ``scan()`` call was handed (``_handed_ignore_paths``): computing the
+        list from the config here while scan() used the orchestrator's answered
+        from another selection. See the base class.
         """
         trees = ["source"]
         work_dir = Path(self.context.work_dir)
         if work_dir.is_dir() and any(work_dir.rglob("*.*")):
             trees.append("converted")
         for target_type in trees:
-            for package_file in self._package_manifests(target_type):
+            for package_file in self._package_manifests(
+                target_type, self._handed_ignore_paths
+            ):
                 if self._lockfile_beside(package_file) is not None:
                     return None
         return (
@@ -2218,7 +2233,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         """
         # global_ignore_paths stays None when the caller gave none: the package
         # selection then computes the list from the config as the orchestrator
-        # does (_package_manifests); an empty list given is an empty list.
+        # does (_package_manifests); an empty list given is an empty list. The
+        # list is kept so nothing_to_scan_reason answers from the same selection.
+        self._handed_ignore_paths = global_ignore_paths
         # Per call, above every return, as in cfn_nag_scanner: each lockfile audited
         # counts as a target, so a tree with none to audit reads as SKIPPED rather
         # than as a clean audit. exit_code is None until an audit runs, so a scan that

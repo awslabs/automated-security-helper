@@ -175,6 +175,54 @@ class TestTheHandedIgnoreList:
 
         assert _names(started) == ["app", "vendor"]
 
+    def test_an_expired_entry_in_the_handed_list_keeps_nothing_out(
+        self, online, tmp_path
+    ):
+        """Every reader of an ignore list drops the entries whose expiration has
+        passed; the handed list was used as given, so an expired entry still
+        kept its package out of the audit."""
+        context = _context(tmp_path)
+        _package(context.source_dir / "app")
+        _package(context.source_dir / "vendor")
+        started = _audited(online)
+
+        _scanner(context).scan(
+            target=context.source_dir,
+            target_type="source",
+            global_ignore_paths=[
+                IgnorePathWithReason(
+                    path="vendor/", reason="vendored", expiration="2000-01-01"
+                )
+            ],
+        )
+
+        assert _names(started) == ["app", "vendor"]
+
+    def test_nothing_to_scan_reason_answers_from_the_handed_list(
+        self, online, tmp_path
+    ):
+        """The one package is under the handed ignore path, so the scan audits
+        nothing; the reason the executor then asks for has to say so, from the
+        same selection, where a list recomputed from the config found the
+        package and answered None."""
+        context = _context(tmp_path)
+        _package(context.source_dir / "vendor")
+        started = _audited(online)
+        scanner = _scanner(context)
+
+        scanner.scan(
+            target=context.source_dir,
+            target_type="source",
+            global_ignore_paths=[
+                IgnorePathWithReason(path="vendor/", reason="vendored")
+            ],
+        )
+
+        assert _names(started) == []
+        assert scanner.nothing_to_scan_reason() is not None
+        # A scanner that was never handed a list still answers from the config.
+        assert _scanner(context).nothing_to_scan_reason() is None
+
 
 class TestOfflineShrinkwrap:
     def test_a_shrinkwrap_only_package_is_recorded_as_not_audited(
