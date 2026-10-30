@@ -1893,13 +1893,34 @@ class Evaluator:
         call: ast.Call,
         family: Optional[list[ast.AST]],
     ) -> Shape:
-        """What a construction passes for ``__init__``'s ``param``."""
+        """What a construction passes for ``__init__``'s ``param``.
+
+        For a caught exception's construction that :meth:`_construction_argument`
+        does not place, a plain name is read where the construction sits: a
+        parameter of the raising function is then unread and a local assignment
+        is its value, never the module name either happens to shadow; a name
+        the function does not bind is still the module's. A name passed inside a
+        lambda's body, a comprehension or a class body is unread. Anything else
+        (a literal, an attribute, a call) is read as before, in ``scope``.
+        """
         if family is not None:
             found = self._construction_argument(
                 value, param, init, scope.module, call, family
             )
             if found is not None:
                 return found
+            if isinstance(value, ast.Name):
+                site = self._call_scope(scope.module, call)
+                if site is None:
+                    return unread(f"{scope.module.rel}:{getattr(call, 'lineno', 0)}")
+                local = site.locals
+                if (
+                    site.func is not None
+                    and local is not None
+                    and (value.id in local.params or value.id in local.assigns)
+                    and value.id not in local.caught
+                ):
+                    return self.evaluate(value, site)
         return self.evaluate(value, scope)
 
     def _construction_argument(
@@ -2111,7 +2132,10 @@ class Evaluator:
                 continue
             scope = self._call_scope(call_module, call)
             if scope is None:
-                return None
+                # A literal needs no scope; anything that names something does.
+                if any(isinstance(n, ast.Name) for n in ast.walk(passed)):
+                    return None
+                scope = _Scope(module=call_module)
             parts.append(self.evaluate(passed, scope))
         return union(*parts) if parts else None
 
