@@ -224,6 +224,45 @@ def test_a_link_whose_target_cannot_be_read_is_refused_unresolved(
     assert resolved == []
 
 
+def test_a_hop_that_cannot_be_examined_is_refused_unresolved(
+    tmp_path: Path, on_windows: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hop under a directory that cannot be searched is not absent: it may be
+    a link whose own target was never read and names a share."""
+    second = tmp_path / "second"
+    second.symlink_to(tmp_path / "anything.yaml")
+    first = tmp_path / ".ash.yaml"
+    first.symlink_to(second)
+    real_lstat = os.lstat
+
+    def lstat(path, *args, **kwargs):
+        if Path(os.fspath(path)) == second:
+            raise PermissionError(13, "Permission denied")
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    resolved = _no_resolving(monkeypatch)
+    permit, asked = _recording_permit(True)
+
+    assert config_sources._permitted(first, permit) is False
+
+    assert asked == []
+    assert resolved == []
+
+
+def test_a_hop_that_is_not_there_is_a_local_name(
+    tmp_path: Path, on_windows: None
+) -> None:
+    """The control for the test above: an absent hop ends the walk as local."""
+    first = tmp_path / ".ash.yaml"
+    first.symlink_to(tmp_path / "gone" / "anything.yaml")
+    permit, asked = _recording_permit(True)
+
+    assert config_sources._permitted(first, permit) is True
+
+    assert len(asked) == 1
+
+
 def _chain(tmp_path: Path, links: int) -> Path:
     """``links`` symbolic links in a row, the last leading to a real file."""
     target = tmp_path / "target.yaml"

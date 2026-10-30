@@ -1558,8 +1558,8 @@ def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
     name that is not a link, or that is not there: a local name is then all
     that resolving would open, and the answer is False.
 
-    None when the chain cannot be judged: a link whose target cannot be read, or
-    a chain longer than ``_LINK_HOPS``. The caller refuses then, as it refused
+    None when the chain cannot be judged: a link whose target cannot be read, a
+    hop that cannot be examined, or a chain longer than ``_LINK_HOPS``. The caller refuses then, as it refused
     every link before, since what resolving would open cannot be told. A link
     in a parent directory of `path` is not read, as it was not before.
     """
@@ -1576,10 +1576,14 @@ def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
         target = os.path.normpath(target)
         try:
             is_link = _is_a_symlink_or_reparse_point(os.lstat(target))
-        except OSError:
-            # Absent, or under a directory that cannot be searched: a local name
-            # either way, which is all that resolving would open.
+        except (FileNotFoundError, NotADirectoryError):
+            # Not there: a local name, which is all that resolving would open.
             return False
+        except OSError:
+            # Cannot be examined (a directory above it cannot be searched): it
+            # may be a link whose own target was never read and names a share, so
+            # the chain is unjudged and the caller refuses.
+            return None
         if not is_link:
             return False
         current = target
