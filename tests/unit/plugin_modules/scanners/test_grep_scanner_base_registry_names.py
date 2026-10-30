@@ -19,6 +19,7 @@ the probes as a host without the tools would, so nothing starts here.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -48,7 +49,15 @@ def _offline_scanner(test_plugin_context, config: str) -> SemgrepScanner:
 
 
 @pytest.mark.parametrize(
-    "name", ["p/ci", "r/python.lang.security.audit", "s/some-snippet", "auto"]
+    "name",
+    [
+        "p/ci",
+        "r/python.lang.security.audit",
+        "s/some-snippet",
+        "auto",
+        "policy",
+        "secrets",
+    ],
 )
 def test_a_registry_name_is_not_local_rules_even_when_a_path_of_that_name_exists(
     test_plugin_context, tmp_path, monkeypatch, name
@@ -58,7 +67,8 @@ def test_a_registry_name_is_not_local_rules_even_when_a_path_of_that_name_exists
 
     The directory exists both in ASH's working directory and in the source
     directory, the two places a relative path has been taken from, and neither
-    copy is read: the name is the registry's.
+    copy is read: the name is the registry's, or one of the product names semgrep
+    reserves (``policy``, ``secrets``), which the tool resolves before any path.
     """
     source_dir = Path(test_plugin_context.source_dir)
     for root in (tmp_path, source_dir):
@@ -70,9 +80,13 @@ def test_a_registry_name_is_not_local_rules_even_when_a_path_of_that_name_exists
     scanner = _offline_scanner(test_plugin_context, name)
 
     assert "SEMGREP_RULES_CACHE_DIR" in (scanner.dependency_unavailable_reason or "")
-    # The two directories by path: a bare substring test would read "auto" inside
-    # the bundled rules' own path (automated_security_helper/...).
-    planted = {(root / name).as_posix() for root in (tmp_path, source_dir)}
+    # The two directories by resolved path, as the scanner emits them: a bare
+    # substring test would read "auto" inside the bundled rules' own path
+    # (automated_security_helper/...).
+    planted = {
+        Path(os.path.realpath(root / name)).as_posix()
+        for root in (tmp_path, source_dir)
+    }
     assert not planted.intersection(_configs(scanner)), _configs(scanner)
 
 
@@ -117,7 +131,10 @@ def test_a_local_path_inside_the_scanned_tree_is_refused(
     assert not any(value.endswith("/p/ci") for value in _configs(scanner)), _configs(
         scanner
     )
-    assert any(
-        "scanners.semgrep.options.config" in record.getMessage()
-        for record in caplog.records
+    assert (
+        sum(
+            "scanners.semgrep.options.config" in record.getMessage()
+            for record in caplog.records
+        )
+        == 1
     ), [record.getMessage() for record in caplog.records]

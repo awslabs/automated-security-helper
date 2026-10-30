@@ -450,6 +450,9 @@ def test_opengrep_asks_its_version_when_the_arguments_are_resolved(
 
     assert asked == [True]
     assert [argv.count("--metrics") for argv in runs] == [expected, expected], runs
+    # Resolving the same target twice on one instance gives one command, not a
+    # command plus the per-target excludes appended a second time.
+    assert runs[0] == runs[1], runs
 
 
 @pytest.mark.unit

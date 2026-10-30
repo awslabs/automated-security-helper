@@ -164,12 +164,19 @@ def test_both_modes_hand_the_tool_the_same_rule_file(
 ):
     """One resolver: the same configuration names one file online and offline.
 
+    The working directory is moved two levels down, where the same relative value
+    names a DECOY file, so a resolution from the working directory is a different
+    path from one from the source directory and cannot pass by coincidence.
+
     Fails at the base: offline resolved the value against ASH's working directory
     and online passed it as written, two different answers for one value.
     """
     rules = _rules_beside_the_tree(context_outside_checkouts)
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
+    elsewhere = tmp_path / "deep" / "elsewhere"
+    elsewhere.mkdir(parents=True)
+    decoy = tmp_path / "deep" / "rules-beside-the-tree" / "my-rules.yaml"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text(RULE, encoding="utf-8")
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv(cache_env, raising=False)
     relative = "../rules-beside-the-tree/my-rules.yaml"
@@ -186,6 +193,7 @@ def test_both_modes_hand_the_tool_the_same_rule_file(
 
     assert _configs(offline) == _configs(online)
     assert _configs(online) == [Path(os.path.realpath(rules)).as_posix()]
+    assert Path(os.path.realpath(decoy)).as_posix() not in _configs(online)
 
 
 @pytest.mark.parametrize(

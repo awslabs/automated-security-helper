@@ -99,7 +99,9 @@ def test_offline_runs_the_configured_local_rule_file(
 
     assert scanner.dependency_unavailable_reason is None
     assert rules.as_posix() in _configs(scanner), _pairs(scanner)
-    assert "p/ci" not in _configs(scanner)
+    assert not any(
+        value in _configs(scanner) for value in scanner.default_rulesets()
+    ), _pairs(scanner)
 
 
 @pytest.mark.parametrize(
@@ -133,8 +135,9 @@ def test_offline_runs_the_configured_local_rule_directory_over_the_cache(
     )
 
     configs = _configs(scanner)
+    assert scanner.dependency_unavailable_reason is None
     assert own.as_posix() in configs, configs
-    assert cache.as_posix() not in configs, configs
+    assert Path(os.path.realpath(cache)).as_posix() not in configs, configs
 
 
 @pytest.mark.parametrize(
@@ -152,14 +155,19 @@ def test_a_relative_local_config_reaches_the_tool_as_an_absolute_path(
     """A relative path is taken from the source directory, as every tool path
     option is (``path_trust.resolved_path``), and reaches the tool absolute. A
     directory beside the scanned one, outside every checkout, is a path the
-    scanner may pass. ASH's working directory plays no part: it is moved to a
-    directory holding no such file."""
+    scanner may pass. ASH's working directory plays no part: it is moved two
+    levels down, where the same relative value names a DECOY file, so a
+    resolution from the working directory produces a different path than one from
+    the source directory, and the test tells them apart."""
     source_dir = Path(context_outside_checkouts.source_dir)
     rules_dir = source_dir.parent / "rules-beside-the-tree"
     rules_dir.mkdir(parents=True, exist_ok=True)
     (rules_dir / "my-rules.yaml").write_text(RULE, encoding="utf-8")
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
+    elsewhere = tmp_path / "deep" / "elsewhere"
+    elsewhere.mkdir(parents=True)
+    decoy = tmp_path / "deep" / "rules-beside-the-tree" / "my-rules.yaml"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text(RULE, encoding="utf-8")
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv(cache_env, raising=False)
 
@@ -174,8 +182,8 @@ def test_a_relative_local_config_reaches_the_tool_as_an_absolute_path(
 
     configs = [Path(value) for value in _configs(scanner)]
     assert Path(os.path.realpath(rules_dir / "my-rules.yaml")) in configs, configs
+    assert Path(os.path.realpath(decoy)) not in configs, configs
     assert all(path.is_absolute() for path in configs), configs
-    assert not any(str(elsewhere) in str(path) for path in configs), configs
 
 
 @pytest.mark.parametrize(
@@ -324,7 +332,9 @@ def test_a_cache_directory_inside_the_scanned_tree_is_refused(
 
     reason = scanner.dependency_unavailable_reason or ""
     assert cache_env in reason and "scanned tree" in reason, reason
-    assert cache.as_posix() not in _configs(scanner), _pairs(scanner)
+    assert Path(os.path.realpath(cache)).as_posix() not in _configs(scanner), _pairs(
+        scanner
+    )
     assert scanner._cache_dir_in_use is None
     assert scanner.validate_plugin_dependencies() is False
     assert scanner.content_databases_in_use() == []

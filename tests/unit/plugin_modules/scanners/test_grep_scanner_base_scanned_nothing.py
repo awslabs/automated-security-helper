@@ -78,6 +78,15 @@ def _excluded(*paths: str) -> list:
     return [{"path": path, "reason": "cli_exclude_flags_match"} for path in paths]
 
 
+def _outside_every_repository(tmp_path: Path) -> None:
+    """Skip a case whose target must be its own project root: with a ``.git``
+    above the temporary directory (``--basetemp`` inside a checkout, say) the
+    outer repository is the root, the target's components below it are read
+    against the default list, and the case measures the wrong thing."""
+    if any((parent / ".git").exists() for parent in (tmp_path, *tmp_path.parents)):
+        pytest.skip("a repository holds the temporary directory; it would be the root")
+
+
 @pytest.mark.parametrize(
     "paths",
     [
@@ -114,8 +123,8 @@ def test_files_the_tools_default_ignore_list_left_out_grade_skipped(
     "checkout",
     [
         pytest.param(("opt", "atlassian", "pipelines", "agent", "build"), id="build"),
-        pytest.param(("home", "ci", "tests", "repo"), id="tests"),
-        pytest.param(("srv", "vendor", "repo"), id="vendor"),
+        pytest.param(("home", "ci", "tests"), id="tests"),
+        pytest.param(("srv", "vendor"), id="vendor"),
     ],
 )
 def test_directories_above_the_target_never_count_as_default_ignores(
@@ -127,10 +136,12 @@ def test_directories_above_the_target_never_count_as_default_ignores(
     are read against the list, so an operator pattern that left out every file is
     still refused.
 
-    Fails at the base: every component of the absolute path was matched, so
+    Fails at the tip that matched every component of the absolute path: there
     ``/opt/atlassian/pipelines/agent/build/repo/app.py`` read as a default ignore
-    and the scan was graded SKIPPED.
+    and the scan was graded SKIPPED. (At the base every excluded file was the
+    operator's, so the base refuses this case too.)
     """
+    _outside_every_repository(tmp_path)
     scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
     target = tmp_path.joinpath(*checkout, "repo")
     target.mkdir(parents=True)
@@ -150,9 +161,22 @@ def test_directories_above_the_target_never_count_as_default_ignores(
         )
 
 
+def _git_marker(repo: Path, marker: str) -> None:
+    """Mark ``repo`` as a git work tree: ``.git`` as a directory (a main checkout)
+    or as the one-line file a linked worktree or a submodule carries."""
+    repo.mkdir(parents=True, exist_ok=True)
+    if marker == "directory":
+        (repo / ".git").mkdir()
+    else:
+        (repo / ".git").write_text(
+            "gitdir: ../repo.git/worktrees/x\n", encoding="utf-8"
+        )
+
+
+@pytest.mark.parametrize("marker", ["directory", "file"])
 @pytest.mark.parametrize("under", ["tests", "build", "vendor"])
 def test_a_target_nested_under_a_default_ignore_inside_a_git_work_tree_grades_skipped(
-    test_plugin_context, monkeypatch, tmp_path, under
+    test_plugin_context, monkeypatch, tmp_path, under, marker
 ):
     """A target such as ``<repo>/tests/e2e-app`` inside a git work tree: the tools
     anchor their patterns at the repository root, so ``--exclude tests/`` (ASH's
@@ -161,7 +185,10 @@ def test_a_target_nested_under_a_default_ignore_inside_a_git_work_tree_grades_sk
     the target; ``_left_out_by_ash`` prefixes the target's own components below the
     project root (``_parts_of_target_below_root``) to the reported path's
     components below the target, so it is read once and the target grades SKIPPED,
-    as the tools graded it; nothing here was the operator's exclude.
+    as the tools graded it; nothing here was the operator's exclude. The root is
+    found by a ``.git`` entry of either shape: a linked worktree or a submodule
+    carries a ``.git`` FILE, and a root finder that asked for a directory would
+    make such a target its own root and refuse it.
 
     A membership pin on that grading, green since the prefix was added, not a red
     at the base: it holds whichever side supplies the component, and it fails if
@@ -169,7 +196,7 @@ def test_a_target_nested_under_a_default_ignore_inside_a_git_work_tree_grades_sk
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    _git_marker(repo, marker)
     target = repo / under / "e2e-app"
     target.mkdir(parents=True)
     paths_file = tmp_path / "paths.json"
@@ -199,6 +226,7 @@ def test_the_same_nested_target_outside_any_git_work_tree_is_the_operators_exclu
     """The control: with no ``.git`` above it the target is its own project root,
     the tools match patterns below it, and a path under it carries no ``tests``
     component, so an exclude that left out every file is the operator's."""
+    _outside_every_repository(tmp_path)
     scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
     target = tmp_path / "checkout" / "tests" / "e2e-app"
     target.mkdir(parents=True)
@@ -226,6 +254,7 @@ def test_an_ignore_name_above_the_target_does_not_count(
 ):
     """The global ignore names are matched below the target too: a target under a
     directory that carries one of those names is not thereby all ASH's exclusion."""
+    _outside_every_repository(tmp_path)
     scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
     scanner._ignore_exclude_names = ["generated"]
     target = tmp_path / "generated" / "repo"
@@ -247,6 +276,23 @@ def test_an_ignore_name_above_the_target_does_not_count(
         scanner._post_process_sarif(
             _SARIF, [f"--json-output={paths_file.as_posix()}"], target
         )
+
+
+def test_an_ignore_name_below_the_target_is_ashs_own_exclusion(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The positive twin of the test above: the same name below the target is one
+    of ASH's exclusions, so a target whose files all sit under it grades SKIPPED;
+    without the name recorded the same paths are refused, which shows the recorded
+    names are what the grading reads."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    scanner._ignore_exclude_names = ["generated"]
+
+    assert _grade(scanner, tmp_path, _excluded("generated/app.py")) == 0
+
+    scanner._ignore_exclude_names = []
+    with pytest.raises(ScannerError, match="--exclude patterns left out"):
+        _grade(scanner, tmp_path, _excluded("generated/app.py"))
 
 
 def test_an_absolute_path_outside_the_target_keeps_only_its_file_name(
@@ -279,6 +325,12 @@ def test_files_in_an_ash_output_directory_grade_skipped(
         f"{target}/.ash/ash_output/scanners/semgrep/x.py",
     )
     assert _grade(scanner, tmp_path, skipped) == 0
+
+    # The control: with no output directory recorded the same paths are nobody's
+    # exclusion but the operator's, so the recorded list is what admits them.
+    scanner._output_dir_excluded = []
+    with pytest.raises(ScannerError, match="--exclude patterns left out"):
+        _grade(scanner, tmp_path, skipped)
 
 
 def test_files_the_operators_patterns_left_out_are_a_scanner_error(
@@ -361,6 +413,21 @@ def test_only_uncovered_files_grade_skipped(test_plugin_context, monkeypatch, tm
     assert _grade(scanner, tmp_path, skipped) == 0
 
 
+def test_default_ignored_files_beside_uncovered_ones_grade_skipped(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """A repository holding only ``tests/`` and documents: the tests are the tools'
+    own default exclusion and the documents are in no covered language, so nothing
+    here is the operator's and nothing was left unread; the target is SKIPPED."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    skipped = [
+        *_excluded("tests/test_app.py"),
+        {"path": "README.md", "reason": "wrong_language"},
+    ]
+
+    assert _grade(scanner, tmp_path, skipped) == 0
+
+
 def test_a_scanned_file_counts_whatever_was_skipped(
     test_plugin_context, monkeypatch, tmp_path
 ):
@@ -401,7 +468,16 @@ def test_the_output_directories_the_command_excluded_are_recorded(
     patterns = scanner._output_dir_exclude_patterns(source)
 
     assert patterns, "premise: the output directory inside the target is excluded"
-    assert Path(".ash/ash_output") in scanner._output_dir_excluded
+    assert scanner._output_dir_excluded == [Path(".ash/ash_output")]
+
+    # A second target on the same instance replaces the record: ASH resolves the
+    # source and the converted target on one scanner, and the grading of the
+    # second must not read the first's directories.
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "lib.py").write_text("y = 2\n", encoding="utf-8")
+    assert scanner._output_dir_exclude_patterns(other) == []
+    assert scanner._output_dir_excluded == []
 
 
 @pytest.mark.parametrize(
@@ -420,9 +496,10 @@ def test_a_target_that_is_a_default_ignored_directory_of_its_repository_grades_s
     root, so its files are ASH's exclusions however the tool reports them:
     relative to the target, relative to the root, or absolute.
 
-    Fails at the base on the relative-to-the-target and absolute rows: only the
-    components below the target were read, which hold no ``tests``, so the files
-    counted as the operator's and the scan was refused.
+    Fails at the tip that read only the components below the target, on the
+    relative-to-the-target and absolute rows: those hold no ``tests``, so the files
+    counted as the operator's and the scan was refused. (The base refused every
+    excluded file as the operator's, so it is red on every row.)
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     repo = tmp_path / "repo"

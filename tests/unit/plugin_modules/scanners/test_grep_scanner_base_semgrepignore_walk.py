@@ -99,7 +99,8 @@ def test_a_file_above_a_scanned_directory_outside_any_repository_is_not_noted(
     tmp_path, monkeypatch
 ):
     """Driven through the scanner: a ``.semgrepignore`` in the parent of a scanned
-    directory that no repository holds is not noted as unhonored.
+    directory that no repository holds is not noted as unhonored, while the one in
+    the scanned directory itself is, which proves the note is live in this setup.
 
     Fails at the base: the parent's file was noted.
     """
@@ -108,6 +109,7 @@ def test_a_file_above_a_scanned_directory_outside_any_repository_is_not_noted(
     source = tmp_path / "outer" / "source"
     source.mkdir(parents=True)
     (source / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (source / ".semgrepignore").write_text("docs/\n", encoding="utf-8")
     (tmp_path / "outer" / ".semgrepignore").write_text("tests/\n", encoding="utf-8")
     config = get_default_config()
     context = PluginContext(
@@ -123,9 +125,10 @@ def test_a_file_above_a_scanned_directory_outside_any_repository_is_not_noted(
         ),
     )
 
-    assert not [w for w in config._resolution_warnings if ".semgrepignore" in w], (
-        config._resolution_warnings
-    )
+    noted = [w for w in config._resolution_warnings if ".semgrepignore" in w]
+    assert len(noted) == 1, config._resolution_warnings
+    assert (source / ".semgrepignore").as_posix() in noted[0], noted
+    assert (tmp_path / "outer" / ".semgrepignore").as_posix() not in noted[0], noted
 
 
 def test_the_note_is_logged_when_the_config_keeps_no_warnings_list(

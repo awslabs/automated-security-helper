@@ -87,26 +87,34 @@ def test_an_unresolvable_semgrepignore_leaves_the_scanner_constructed(
     monkeypatch.delenv(cache_env, raising=False)
     monkeypatch.setattr(scanner_cls, "_scanner_offline", lambda self: False)
 
+    asked = []
+
     def refuse_to_resolve(config_path):
+        asked.append(config_path)
         raise error
 
     monkeypatch.setattr(sandbox, "config_is_client_supplied", refuse_to_resolve)
 
+    # Enabled on every platform: the default turns semgrep off on Windows, and a
+    # disabled scanner never asks about the file, so the stub would go unreached.
     scanner = scanner_cls(
         context=test_plugin_context,
-        config=config_cls(options=options_cls(offline=False)),
+        config=config_cls(enabled=True, options=options_cls(offline=False)),
     )
 
+    assert asked, "the stub was never reached, so nothing here measures the fix"
     assert scanner.command in ("semgrep", "opengrep")
     assert any(
         arg.key == "--x-ignore-semgrepignore-files" for arg in scanner.args.extra_args
     )
 
 
+@pytest.mark.parametrize("error", LOOP_ERRORS)
 def test_the_unresolvable_file_is_named_as_the_repositorys(
-    test_plugin_context, monkeypatch
+    test_plugin_context, monkeypatch, error
 ):
-    """The warning still names the file, as one the repository holds."""
+    """The warning still names the file, as one the repository holds, whichever
+    exception the resolution raised."""
     from automated_security_helper.cli.mcp import sandbox
 
     source = test_plugin_context.source_dir
@@ -115,11 +123,13 @@ def test_the_unresolvable_file_is_named_as_the_repositorys(
     ignore_file.write_text("tests/\n", encoding="utf-8")
     monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
     monkeypatch.setattr(SemgrepScanner, "_scanner_offline", lambda self: False)
-    monkeypatch.setattr(
-        sandbox,
-        "config_is_client_supplied",
-        lambda config_path: (_ for _ in ()).throw(RuntimeError("Symlink loop")),
-    )
+    asked = []
+
+    def refuse_to_resolve(config_path):
+        asked.append(config_path)
+        raise error
+
+    monkeypatch.setattr(sandbox, "config_is_client_supplied", refuse_to_resolve)
     # The config's own list of resolution warnings, which the note is appended to.
     warnings = test_plugin_context.config._resolution_warnings
 
@@ -132,7 +142,8 @@ def test_the_unresolvable_file_is_named_as_the_repositorys(
         ),
     )
 
-    assert any(
-        ignore_file.as_posix() in message and "client-supplied" not in message
-        for message in warnings
-    ), warnings
+    assert asked, "the stub was never reached, so nothing here measures the fix"
+    named = [message for message in warnings if ignore_file.as_posix() in message]
+    assert len(named) == 1, warnings
+    assert "client-supplied" not in named[0], named
+    assert "in the scanned tree" in named[0], named
