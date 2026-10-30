@@ -12,12 +12,26 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.converter_refusals import refusal_invocations
+from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.severity_ladder import effective_sarif_level
 from automated_security_helper.schemas.sarif_schema_model import (
     ReportingDescriptorReference,
     ReportingDescriptorReference1,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
     ToolComponentReference,
 )
+
+#: The log written for a results model whose ``sarif`` is None: a valid SARIF
+#: 2.1.0 document with no runs. Every field is set explicitly because the
+#: reporter dumps with ``exclude_unset``, which would leave a bare ``{}``.
+_EMPTY_LOG = {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "version": "2.1.0",
+    "runs": [],
+}
 
 
 class SARIFReporterConfigOptions(ReporterOptionsBase):
@@ -64,22 +78,47 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
         reader learns which parts of the tree were not scanned
         (``utils/converter_refusals.py``). Added to a copy: the scan's own SARIF,
         which the exit-code gates read, is left as it is.
+
+        A model whose ``sarif`` is None (the field allows it, and a results file
+        read back can hold it) is written as a log with no runs, the way the
+        other reporters treat a missing SARIF, where this raised AttributeError
+        and ``ash.sarif`` was not written at all. A log with no runs that has
+        refusals to report gets one run of ASH's own to carry them: dropped, as
+        they were, the document said nothing about the inputs that were not
+        scanned, and nothing said it was silent.
         """
         sarif = model.sarif
+        if sarif is None:
+            sarif = SarifReport.model_validate(_EMPTY_LOG)
         invocations = refusal_invocations(model)
         per_project = workspace_converter_invocations(model)
-        if (invocations or per_project) and sarif is not None and sarif.runs:
+        if invocations or per_project:
             sarif = sarif.model_copy(deep=True)
-            if invocations:
-                # A single-directory scan's results carry one run; the unified
-                # workspace model keeps its top-level converter rows empty, so
-                # this is never the arm that reports a project's converters.
-                run = sarif.runs[0]
-                run.invocations = list(run.invocations or []) + invocations
-            for run_index, project_invocations in per_project:
-                if 0 <= run_index < len(sarif.runs):
-                    run = sarif.runs[run_index]
-                    run.invocations = list(run.invocations or []) + project_invocations
+            if not sarif.runs:
+                sarif.runs = [
+                    _run_carrying(
+                        invocations
+                        + [
+                            invocation
+                            for _, project_invocations in per_project
+                            for invocation in project_invocations
+                        ]
+                    )
+                ]
+            else:
+                if invocations:
+                    # A single-directory scan's results carry one run; the
+                    # unified workspace model keeps its top-level converter rows
+                    # empty, so this is never the arm that reports a project's
+                    # converters.
+                    run = sarif.runs[0]
+                    run.invocations = list(run.invocations or []) + invocations
+                for run_index, project_invocations in per_project:
+                    if 0 <= run_index < len(sarif.runs):
+                        run = sarif.runs[run_index]
+                        run.invocations = (
+                            list(run.invocations or []) + project_invocations
+                        )
         restore = complete_results_for_the_dump(sarif)
         try:
             return sarif.model_dump_json(
@@ -87,6 +126,26 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
             )
         finally:
             restore()
+
+
+def _run_carrying(invocations: List[Any]) -> Run:
+    """A run of ASH's own, with no results, carrying *invocations*.
+
+    For a log that has no run to attach a converter's refusals to. The driver is
+    ASH, which is what ran the converters; a reader sees which inputs were not
+    scanned without a scanner's run to find them on.
+    """
+    return Run(
+        tool=Tool(
+            driver=ToolComponent(
+                name="AWS Labs - Automated Security Helper",
+                version=get_ash_version(),
+                organization="Amazon Web Services",
+            )
+        ),
+        results=[],
+        invocations=list(invocations),
+    )
 
 
 def workspace_converter_invocations(
