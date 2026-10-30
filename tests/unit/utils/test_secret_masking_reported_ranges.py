@@ -113,12 +113,17 @@ class TestAKeyBlocksRangeOnLaterMaskings:
             _neighbor("keys.py", 40, 40, [FAR_LINE]),
         )
 
-    def test_the_end_line_found_is_kept_on_the_key_finding(self):
+    def test_the_end_line_found_is_recorded_on_the_key_finding(self):
+        """The END line is kept as a property; the scanner's own region, which is
+        the finding's identity across scans, is left as written."""
         model = self._model()
 
         mask_secrets_in_results(model)
 
-        assert _region(model, 0).endLine == 14
+        recorded = model.sarif.runs[0].results[0].properties.model_dump()
+        assert recorded["masked_block_end"] == 14
+        assert "masked_to_end_of_file" not in recorded
+        assert _region(model, 0).endLine == 11
 
     def test_a_second_masking_stops_at_the_end_line(self):
         """Every reload masks again; the END line is masked by then."""
@@ -197,11 +202,32 @@ class TestAKeyBlocksRangeOnLaterMaskings:
 
         mask_secrets_in_results(later)
 
-        assert _region(later, 0).endLine == 14
+        assert _region(later, 0).endLine == 12
         assert _context(later, 1) == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
         assert _context(later, 2) == FAR_LINE
         recorded = later.sarif.runs[0].results[0].properties.model_dump()
         assert "masked_to_end_of_file" not in recorded
+        assert recorded["masked_block_end"] == 14
+
+    def test_a_recorded_end_line_bounds_the_range_once_its_snippets_are_masked(
+        self,
+    ):
+        """After the END line is recorded, a reload masks the block's lines and
+        no snippet shows an END line any more: the record bounds the range, the
+        lines after it stay, and the region is still the scanner's."""
+        model = self._model()
+        mask_secrets_in_results(model)
+        loaded = AshAggregatedResults.model_validate_json(model.model_dump_json())
+
+        mask_secrets_in_results(loaded)
+        mask = source_snippet_masker(loaded)
+        shown = mask("keys.py", 10, "".join([BEFORE_PEM] + PEM_LINES + [AFTER_PEM]))
+
+        assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
+        assert _context(loaded, 2) == FAR_LINE
+        assert _region(loaded, 0).endLine == 11
+        recorded = loaded.sarif.runs[0].results[0].properties.model_dump()
+        assert recorded["masked_block_end"] == 14
 
     def test_a_begin_line_finding_with_no_end_in_sight_keeps_its_range_on_reload(
         self,
