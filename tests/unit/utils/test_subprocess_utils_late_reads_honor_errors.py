@@ -33,6 +33,32 @@ def test_the_partial_read_uses_the_callers_handler():
     assert subprocess_utils._late_decoded(UNDECODABLE, "utf-8") == "caf�\n"
 
 
+def test_a_strict_partial_read_falls_back_to_replacement_so_it_cannot_raise():
+    """A strict caller whose partial output ends mid-character: the timeout result
+    is reported, never a UnicodeDecodeError from inside the timeout handler."""
+    assert subprocess_utils._late_decoded(UNDECODABLE, "utf-8", "strict") == "caf�\n"
+
+
+@patch(
+    "automated_security_helper.utils.subprocess_utils.find_executable",
+    return_value=None,
+)
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
+def test_run_command_with_a_strict_handler_still_returns_the_timeout_result(
+    mock_run, _mock_find
+):
+    mock_run.side_effect = subprocess.TimeoutExpired(
+        cmd=["tool"], timeout=5, output=UNDECODABLE, stderr=UNDECODABLE
+    )
+
+    result = subprocess_utils.run_command(
+        ["tool"], timeout=5, text=True, encoding="utf-8", errors="strict"
+    )
+
+    assert isinstance(result, subprocess_utils.TimedOutProcess)
+    assert result.stdout == "caf�\n"
+
+
 def test_the_failed_wait_read_uses_the_streams_handler():
     process = SimpleNamespace(
         stdout=SimpleNamespace(encoding="utf-8", errors="backslashreplace"),

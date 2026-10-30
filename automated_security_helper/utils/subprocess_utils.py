@@ -2599,9 +2599,15 @@ def _late_decoded(
     the locale read answers utf-8, keeping the two in step), and the caller's
     error handler (every runner's default is replace). A decode pinned to
     UTF-8 disagreed with the finished run on a non-UTF-8 locale.
-    TimeoutExpired carries the partial output undecoded, text mode or not."""
+    TimeoutExpired carries the partial output undecoded, text mode or not.
+    "strict" is not kept, as _decoded does not keep it: this read runs inside
+    the timeout's handler, and a UnicodeDecodeError raised there, for a partial
+    read that ended in the middle of a character, would replace the timeout
+    the caller is owed."""
     if not isinstance(captured, bytes):
         return captured
+    if errors in (None, "strict"):
+        errors = "replace"
     return _as_text_mode_reads(
         captured, encoding or locale.getpreferredencoding(False), errors
     )
