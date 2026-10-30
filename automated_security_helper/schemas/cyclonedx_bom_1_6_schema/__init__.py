@@ -41,6 +41,12 @@ def _spdx_id_text(value: object) -> object:
 # whether or not the list has it, so an id a newer ASH wrote still loads.
 LicenseId = Annotated[Union[spdx.Schema, str], AfterValidator(_spdx_id_text)]
 
+# Not from the codegen: the two members of a 0 - 1 number field
+# (ComponentIdentityEvidence.confidence, Conformance.score), each with the
+# schema's bounds, so a BOM's integer stays an integer and its fraction a float.
+ZeroToOneInt = Annotated[int, Field(ge=0, le=1)]
+ZeroToOneFloat = Annotated[float, Field(ge=0.0, le=1.0)]
+
 # Not from the codegen: every model below that declares an aliased field
 # (`bom-ref`, `mime-type`) carries serialize_by_alias=True and
 # validate_by_name=True. pydantic resolves a dump's by_alias per model, from
@@ -1394,13 +1400,13 @@ class ComponentIdentityEvidence(BaseModel):
     )
     # Not from the codegen: a number, as the schema types it. Typed int, a
     # fractional confidence (the documented 0 - 1 range, 0.85 say) refused the
-    # whole SBOM.
-    confidence: Optional[float] = Field(
+    # whole SBOM; typed float alone, a BOM's integer 1 was re-emitted as 1.0. In
+    # the default smart union an int stays an int and a float a float, so the
+    # value is kept as written; the bounds sit on each member.
+    confidence: Optional[Union[ZeroToOneInt, ZeroToOneFloat]] = Field(
         None,
         description="The overall confidence of the evidence from 0 - 1, where 1 is 100% confidence.",
         title="Confidence",
-        ge=0.0,
-        le=1.0,
     )
     concludedValue: Optional[str] = Field(
         None,
@@ -1823,14 +1829,12 @@ class Conformance(BaseModel):
         extra="forbid",
     )
 
-    # Not from the codegen: a number, as the schema types it (see
+    # Not from the codegen: a number kept as written, as the schema types it (see
     # ComponentIdentityEvidence.confidence).
-    score: Optional[float] = Field(
+    score: Optional[Union[ZeroToOneInt, ZeroToOneFloat]] = Field(
         None,
         description="The conformance of the claim between and inclusive of 0 and 1, where 1 is 100% conformance.",
         title="Score",
-        ge=0.0,
-        le=1.0,
     )
     rationale: Optional[str] = Field(
         None, description="The rationale for the conformance score.", title="Rationale"
