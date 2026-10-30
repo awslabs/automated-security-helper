@@ -151,15 +151,18 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         try:
             return declared()
         except Exception as error:
-            # A model that needs a section raises ValidationError; one whose
-            # defaults are computed can raise anything, and a converter given no
-            # config must still run with the generic one.
-            detail = (
-                f"{error.error_count()} error(s)"
-                if isinstance(error, ValidationError)
-                else type(error).__name__
-            )
-            ASH_LOGGER.debug(
+            # A model that needs a section raises ValidationError, the expected
+            # shape, told at DEBUG; one whose defaults are computed can raise
+            # anything, which is a defect in that default and is told at
+            # WARNING so it is seen. A converter given no config must still run
+            # with the generic one either way.
+            if isinstance(error, ValidationError):
+                detail = f"{error.error_count()} error(s)"
+                log = ASH_LOGGER.debug
+            else:
+                detail = type(error).__name__
+                log = ASH_LOGGER.warning
+            log(
                 f"{self.__class__.__name__}: its config model "
                 f"{declared.__name__} cannot be built without a section "
                 f"({detail}); using the generic one"

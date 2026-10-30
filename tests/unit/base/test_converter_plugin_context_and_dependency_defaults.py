@@ -20,6 +20,8 @@ converter's own record.
 
 from __future__ import annotations
 
+import logging
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Literal
 
@@ -34,8 +36,55 @@ from automated_security_helper.core.exceptions import ScannerError
 pytestmark = pytest.mark.unit
 
 
+@contextmanager
+def _ash_records():
+    """Every record the ash logger emits inside the block, at any level."""
+    records: list[logging.LogRecord] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collector(level=1)
+    logger = logging.getLogger("ash")
+    level = logger.level
+    logger.setLevel(1)
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+
+
 class PlainConfig(ConverterPluginConfigBase):
     name: Literal["plain"] = "plain"
+
+
+class SectionNeedingConfig(ConverterPluginConfigBase):
+    """A model that cannot be built without a section: ValidationError."""
+
+    name: Literal["needy"] = "needy"
+    section: str
+
+
+class BrokenDefaultConfig(ConverterPluginConfigBase):
+    """A model whose computed default is a defect: it raises something else."""
+
+    name: Literal["broken"] = "broken"
+
+    def __init__(self, **data):
+        raise TypeError("a computed default went wrong")
+
+
+class SectionNeedingConverter(ConverterPluginBase[SectionNeedingConfig]):
+    def convert(self) -> List[Path]:
+        return []
+
+
+class BrokenDefaultConverter(ConverterPluginBase[BrokenDefaultConfig]):
+    def convert(self) -> List[Path]:
+        return []
 
 
 class PlainConverter(ConverterPluginBase[PlainConfig]):
@@ -77,3 +126,29 @@ def test_the_default_dependency_check_is_true_where_nothing_is_declared(
     converter = PlainConverter(context=test_plugin_context)
 
     assert converter.validate_plugin_dependencies() is True
+
+
+def _default_config_records(converter_type, context):
+    with _ash_records() as records:
+        converter = converter_type(context=context)
+    assert type(converter.config) is ConverterPluginConfigBase
+    return [r for r in records if "cannot be built without a section" in r.getMessage()]
+
+
+def test_a_default_that_raises_something_other_than_validation_is_a_warning(
+    test_plugin_context,
+):
+    (record,) = _default_config_records(BrokenDefaultConverter, test_plugin_context)
+
+    assert record.levelno == logging.WARNING
+    assert "BrokenDefaultConverter" in record.getMessage()
+    assert "BrokenDefaultConfig" in record.getMessage()
+    assert "(TypeError)" in record.getMessage()
+
+
+def test_a_model_that_needs_a_section_is_still_told_at_debug(test_plugin_context):
+    """The control: the expected shape keeps its level."""
+    (record,) = _default_config_records(SectionNeedingConverter, test_plugin_context)
+
+    assert record.levelno == logging.DEBUG
+    assert "1 error(s)" in record.getMessage()
