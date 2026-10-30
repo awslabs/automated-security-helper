@@ -33,7 +33,7 @@ import inspect
 import json
 import re
 from pathlib import Path, PurePath
-from typing import Any, Optional, TypeVar
+from typing import Any, List, Optional, TypeVar
 
 from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
 from pydantic_core import PydanticSerializationError
@@ -191,8 +191,22 @@ def texts_of_undecodable(value: Any) -> Any:
             return value
         if isinstance(value, list):
             return items
-        return type(value)(items)
+        return _rebuilt(value, items)
     return value
+
+
+def _rebuilt(value: Any, items: List[Any]) -> Any:
+    """A container of ``value``'s type holding ``items``.
+
+    A tuple subclass with named fields (a NamedTuple, which the result models
+    keep in a few property bags) takes its items as positional arguments, one
+    per field, where every other container takes one iterable; ``type(value)
+    (items)`` handed a NamedTuple one list where it wanted its fields and raised
+    TypeError out of a dump.
+    """
+    if isinstance(value, tuple) and hasattr(type(value), "_fields"):
+        return type(value)(*items)
+    return type(value)(items)
 
 
 def _record_fields(model: BaseModel) -> None:
