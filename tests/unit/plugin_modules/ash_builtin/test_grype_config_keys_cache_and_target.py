@@ -149,7 +149,11 @@ def test_a_blank_config_file_names_no_file(root, caplog):
 
     configured = [a.value for a in scanner.args.extra_args if a.key == "--config"]
     assert Path(ctx.source_dir).as_posix() not in configured
-    assert "does not exist" not in caplog.text
+    # The config-file message, named in full: this module runs offline (the
+    # autouse fixture), and in a HOME without a grype database the offline cache
+    # check warns that the database directory "does not exist", which is not
+    # about the config file.
+    assert "Configured grype config file does not exist" not in caplog.text
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
