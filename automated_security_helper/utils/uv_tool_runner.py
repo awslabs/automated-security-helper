@@ -297,7 +297,9 @@ def _sleep_between_attempts(seconds: float) -> None:
     poll = _UV_PROBE_CANCEL_POLL_SECONDS
     for index in range(math.ceil(total / poll)):
         raise_if_cancelled()
-        time.sleep(min(total - index * poll, poll))
+        # Clamped at zero: a count one too high (the division and the
+        # multiplication rounding apart) must not hand the sleep a negative.
+        time.sleep(max(0.0, min(total - index * poll, poll)))
     raise_if_cancelled()
 
 

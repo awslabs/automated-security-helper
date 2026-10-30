@@ -152,6 +152,26 @@ def test_a_wait_of_nothing_sleeps_nothing(monkeypatch):
     assert handed == []
 
 
+def test_a_chunk_count_one_too_high_hands_the_sleep_nothing_negative(monkeypatch):
+    """The last chunk is the delay minus the chunks before it; a count one too
+    high would make it negative, and ``time.sleep`` raises on a negative.
+
+    No pair of floats was found that rounds the division and the multiplication
+    apart for the real poll (two million delays and every schedule shape were
+    tried), so the count is forced one too high here to read the clamp.
+    """
+    real_ceil = math.ceil
+    monkeypatch.setattr(uv_tool_runner.math, "ceil", lambda value: real_ceil(value) + 1)
+    handed: list = []
+    monkeypatch.setattr(uv_tool_runner.time, "sleep", handed.append)
+    _sleep_between_attempts(1.0)
+    poll = uv_tool_runner._UV_PROBE_CANCEL_POLL_SECONDS
+    assert len(handed) == real_ceil(1.0 / poll) + 1
+    assert all(0.0 <= chunk <= poll for chunk in handed), handed
+    assert handed[-1] == 0.0
+    assert sum(handed) == pytest.approx(1.0)
+
+
 class TestTheInstallArms:
     def test_a_failure_after_the_child_started_drops_the_memos(
         self, runner, spawn, monkeypatch
