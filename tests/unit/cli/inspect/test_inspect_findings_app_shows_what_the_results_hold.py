@@ -83,6 +83,29 @@ def _findings_of(**result_fields) -> list:
     return extract_findings(SimpleNamespace(sarif=report))
 
 
+#: A file name holding one byte that is not UTF-8, as the bytes a POSIX file
+#: system stores; its record form in a results file is "caf\\udce9.py".
+_NON_UTF8_NAME = b"caf\xe9.py"
+
+
+def _write_a_non_utf8_name(root) -> None:
+    """One line of source in a file named _NON_UTF8_NAME under *root*, or a skip
+    where the file system will not hold that name as given.
+
+    Linux file systems store the bytes; APFS refuses a name that is not UTF-8
+    (the open fails), and a file system that respelled the name would make the
+    record form name no file. Either is the file system's shape, not the
+    product's, so the test is skipped there with the reason.
+    """
+    try:
+        with open(os.path.join(os.fsencode(root), _NON_UTF8_NAME), "wb") as handle:
+            handle.write(b"x = 1\n")
+    except OSError as exc:
+        pytest.skip(f"this file system refuses a file name that is not UTF-8: {exc}")
+    if _NON_UTF8_NAME not in os.listdir(os.fsencode(root)):
+        pytest.skip("this file system stores a non-UTF-8 name under another spelling")
+
+
 # --- the snippet cap -------------------------------------------------------------
 
 
@@ -145,8 +168,7 @@ def test_excerpt_line_numbers_are_right_aligned(tmp_path):
 def test_a_record_form_name_is_read_back_before_the_file_is_opened(tmp_path):
     """A name with a byte that is not UTF-8 is recorded as text in its record form
     (utils/undecodable_text.py); opened as those six characters it was not found."""
-    with open(os.path.join(os.fsencode(tmp_path), b"caf\xe9.py"), "wb") as handle:
-        handle.write(b"x = 1\n")
+    _write_a_non_utf8_name(tmp_path)
 
     excerpt = tui._source_excerpt({"file": "caf\\udce9.py", "line": 1}, tmp_path)
 
@@ -481,12 +503,6 @@ async def test_the_shown_line_width_is_measured_before_the_lines_are_masked(tmp_
     # Lines 5 to 12 are shown, so every number is two wide: "   5: " is six.
     assert finding["code_snippet"].startswith("(masked)\n")
     assert finding[SNIPPET_LINE_CHARS_KEY] == SNIPPET_LINE_CHARS + len("   5: ")
-
-
-def _write_a_non_utf8_name(root) -> None:
-    """One line of source in a file whose name holds a byte that is not UTF-8."""
-    with open(os.path.join(os.fsencode(root), b"caf\xe9.py"), "wb") as handle:
-        handle.write(b"x = 1\n")
 
 
 @pytest.mark.skipif(
