@@ -504,10 +504,25 @@ def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
     assert "symbolic link" in caplog.text
 
 
-@pytest.mark.parametrize("option", ["config_file", "ignore_file", "secret_config_file"])
-def test_a_configured_trivy_file_that_does_not_exist_fails_the_scan(tmp_path, option):
+@pytest.mark.parametrize(
+    ("option", "scanners"),
+    [
+        pytest.param("config_file", ["vuln"], id="config_file"),
+        pytest.param("ignore_file", ["vuln"], id="ignore_file"),
+        # Only a scan that runs the secret scanner reads the secret config; a
+        # vulnerability-only scan gets ASH's empty file with a warning instead
+        # (TrivyScannerBase._secret_config_file).
+        pytest.param("secret_config_file", ["vuln", "secret"], id="secret_config_file"),
+    ],
+)
+def test_a_configured_trivy_file_that_does_not_exist_fails_the_scan(
+    tmp_path, option, scanners
+):
     scanner = _scanner(
-        tmp_path, operator=True, **{option: str(tmp_path / "operator" / "nope.yaml")}
+        tmp_path,
+        operator=True,
+        scanners=scanners,
+        **{option: str(tmp_path / "operator" / "nope.yaml")},
     )
     with pytest.raises(ScannerError, match=option):
         _argv(scanner, scanner.context.source_dir)
@@ -1747,6 +1762,11 @@ def test_the_staleness_probe_reads_the_cache_the_scan_was_given(
     monkeypatch.delenv("TRIVY_CACHE_DIR")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    # The default cache reads XDG_CACHE_HOME before HOME (Go's os.UserCacheDir,
+    # github.com/adrg/xdg), and the unit fixture points that variable into the
+    # fixture's own home; left as is, the update's lock lands there and the
+    # fixture's HOME-hygiene check reports it. The whole home moves together.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "home" / ".cache"))
     monkeypatch.setattr(refresh.sys, "platform", platform)
     scanner = _scanner(tmp_path) if kind == "trivy" else _repo_scanner(tmp_path)
     command = ["trivy", "fs" if kind == "trivy" else "repository", "/t"]
