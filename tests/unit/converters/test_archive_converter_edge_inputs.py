@@ -343,7 +343,9 @@ def test_a_compressed_stream_that_holds_no_tar_falls_back_to_the_raw_bytes(
         assert stream.read(tarfile.BLOCKSIZE) == plain[: tarfile.BLOCKSIZE]
 
     probe = archive_converter._decompresses_to_a_tar_header
-    assert probe(archive_converter._GzipMembersStream, io.BytesIO(gzip_of_text)) is False
+    assert (
+        probe(archive_converter._GzipMembersStream, io.BytesIO(gzip_of_text)) is False
+    )
     assert probe(archive_converter._GzipMembersStream, io.BytesIO(gzip_of_tar)) is True
 
 
@@ -511,6 +513,30 @@ def test_a_patched_or_module_less_zip_member_is_refused_alone(
     reasons = {r.member: r.reason for r in converter.refused_inputs}
     assert "needs a module this Python does not have" in reasons["b.py"]
     assert "patched data" in reasons["c.py"]
+
+
+def test_a_strongly_encrypted_zip_member_is_refused_alone(
+    test_plugin_context, tmp_path
+):
+    """Flag bit 6 (strong encryption) with bit 0 clear: zipfile's ``open`` raises
+    NotImplementedError for it as for patched data, so one such member failed the
+    whole archive past the bit-0 check. It is refused alone, the control admitted.
+    The bit is set on a stdlib ZipInfo; no bytes are hand-assembled."""
+    converter = _converter(test_plugin_context)
+    plain = zipfile.ZipInfo("a.py")
+    strong = zipfile.ZipInfo("d.py")
+    strong.flag_bits |= 0x40
+    assert not strong.flag_bits & 0x1
+
+    kept = converter.inspect_members(
+        [plain, strong], target_path=tmp_path, archive="a.zip"
+    )
+
+    assert kept == [plain]
+    (refused,) = converter.refused_inputs
+    assert refused.member == "d.py"
+    assert "strongly encrypted" in refused.reason
+    assert "flag bit 6" in refused.reason
 
 
 def test_a_later_name_bound_for_a_taken_path_is_refused_when_members_are_names(

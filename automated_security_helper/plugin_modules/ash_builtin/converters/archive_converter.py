@@ -1768,8 +1768,15 @@ _ZIP_ENCRYPTED_FLAG = 0x1
 #: "compressed patched data"), which zipfile does not read: ``open`` raises
 #: NotImplementedError for such a member.
 _ZIP_PATCHED_DATA_FLAG = 0x20
+#: General-purpose flag bit 6 ("strong encryption", the PKWARE scheme), which
+#: zipfile does not read either: ``open`` raises NotImplementedError for such a
+#: member whether or not bit 0 is set, so the bit-0 check alone did not catch it.
+_ZIP_STRONG_ENCRYPTION_FLAG = 0x40
 
 _MEMBER_PATCHED_DATA = "it holds compressed patched data, which zipfile does not read"
+_MEMBER_STRONG_ENCRYPTION = (
+    "it is marked as strongly encrypted (flag bit 6), which zipfile does not read"
+)
 
 
 def _zip_method_available(method: int) -> bool:
@@ -1809,16 +1816,20 @@ _ZIP_METHODS_EXTRACTED = frozenset(
 
 def _zip_member_problem(member: zipfile.ZipInfo) -> Optional[str]:
     """Why zipfile could not extract this member's content, or None: it is
-    encrypted (zipfile asks for a password and the converter has none), its data
-    is patched (flag bit 5, which zipfile refuses), or its compression method is
-    one zipfile does not implement, or one whose module this Python was built
-    without (_zip_method_available). ``extractall`` raised on the first such
-    member and the converter then removed every member it had already written,
-    so one such member lost the whole archive; refused one by one here, the rest
-    of the archive is extracted and the refusal is recorded.
+    encrypted (zipfile asks for a password and the converter has none), it is
+    marked as strongly encrypted (flag bit 6, which zipfile refuses whether or
+    not bit 0 is set), its data is patched (flag bit 5, which zipfile refuses),
+    or its compression method is one zipfile does not implement, or one whose
+    module this Python was built without (_zip_method_available). ``extractall``
+    raised on the first such member and the converter then removed every member
+    it had already written, so one such member lost the whole archive; refused
+    one by one here, the rest of the archive is extracted and the refusal is
+    recorded.
     """
     if member.flag_bits & _ZIP_ENCRYPTED_FLAG:
         return _MEMBER_ENCRYPTED
+    if member.flag_bits & _ZIP_STRONG_ENCRYPTION_FLAG:
+        return _MEMBER_STRONG_ENCRYPTION
     if member.flag_bits & _ZIP_PATCHED_DATA_FLAG:
         return _MEMBER_PATCHED_DATA
     if member.compress_type not in _ZIP_METHODS_EXTRACTED:
