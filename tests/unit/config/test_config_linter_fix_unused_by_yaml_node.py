@@ -337,7 +337,9 @@ def test_a_list_with_nothing_unused_in_it_is_not_refused_for_its_shape(tmp_path)
         "  suppressions: [{path: src/a.py, rule_id: B101, reason: one}]\n",
         [],
     )
-    before = config_path.read_text(encoding="utf-8")
+    # The bytes as written: the fixer keeps the file's own line breaks, and
+    # ``read_text`` would fold a Windows CRLF to LF before the comparison.
+    before = config_path.read_bytes().decode("utf-8")
 
     fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
 
@@ -364,7 +366,10 @@ def test_a_comment_between_entries_is_kept_as_it_is(tmp_path):
     fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
 
     assert len(fixed_issues) == 1
-    assert "    # kept as written\n" in fixed_content
-    assert "# # kept" not in fixed_content
-    data = _active_yaml(fixed_content)
+    # Read with the file's line breaks folded: on Windows the file, and so the
+    # fixed text, carries CRLF.
+    fixed = fixed_content.replace("\r\n", "\n")
+    assert "    # kept as written\n" in fixed
+    assert "# # kept" not in fixed
+    data = _active_yaml(fixed)
     assert [s["path"] for s in data["global_settings"]["suppressions"]] == ["src/b.py"]
