@@ -281,7 +281,10 @@ def _repository_root_of(directory: Path) -> Optional[Path]:
     directory never belonged to.
     """
     ceilings = {
-        _absolute(entry)
+        # Resolved, as *directory* is by its caller and as git resolves a listed
+        # entry: a ceiling spelled through a link stops the walk at the directory it
+        # names, compared where the walk really is.
+        _resolved(Path(entry))
         for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep)
         if entry and os.path.isabs(entry)
     }

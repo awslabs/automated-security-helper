@@ -175,3 +175,42 @@ def test_control_a_repository_above_an_earlier_output_dir_names_it(
 
     assert named == [earlier]
     assert scanned == []
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_a_ceiling_spelled_through_a_link_still_stops_the_walk(tmp_path, monkeypatch):
+    """The walk starts from where the directory really is, so a GIT_CEILING_DIRECTORIES
+    entry is compared the same way: spelled through a link, it names the directory
+    it leads to, and the search stops below it as git's own search does."""
+    tree = Path(os.path.realpath(tmp_path))
+    (tree / ".git").mkdir()
+    (tree / "real" / "sub").mkdir(parents=True)
+    alias = tree / "alias"
+    alias.symlink_to(tree / "real")
+    git = _GitStandIn()
+    monkeypatch.setattr(subprocess_utils, "spawn_run", git)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(alias))
+
+    answer = git_index_below(alias / "sub")
+
+    assert answer.repository is None
+    assert answer.names is None
+    assert git.calls == []
+
+
+def test_control_a_ceiling_spelled_as_the_real_path_stops_the_walk(
+    tmp_path, monkeypatch
+):
+    tree = Path(os.path.realpath(tmp_path))
+    (tree / ".git").mkdir()
+    (tree / "real" / "sub").mkdir(parents=True)
+    git = _GitStandIn()
+    monkeypatch.setattr(subprocess_utils, "spawn_run", git)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tree / "real"))
+
+    answer = git_index_below(tree / "real" / "sub")
+
+    assert answer.repository is None
+    assert git.calls == []
