@@ -222,7 +222,9 @@ def test_the_recorders_see_a_process_start_by_any_route(recorders, tmp_path):
         with pytest.raises(RuntimeError, match="allows no process"):
             attempt()
     assert [event for event, _ in spawned] == list(attempts)
-    assert spawned[0][1] == ["true"]
+    # On Windows, Popen joins the argument list into one command line before it
+    # raises the audit event, so the recorded arguments are the string "true".
+    assert spawned[0][1] in (["true"], "true")
     started = threading.Timer(30, lambda: None)
     started.start()
     try:
