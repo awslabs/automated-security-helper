@@ -213,21 +213,34 @@ def test_honored_template_ignores_merge_with_the_operators_ignore_checks(
     [
         pytest.param(b"ignore_checks: [\n", "unparseable YAML", id="yaml"),
         pytest.param(b"ignore_checks: [caf\xe9]\n", "not UTF-8", id="utf8"),
-        pytest.param(None, "a directory, not a file", id="oserror"),
+        pytest.param(None, "a file ASH may not read", id="oserror"),
     ],
 )
 def test_an_operators_cfnlintrc_ash_cannot_read_stops_the_scan(
-    ash_temp_path, tmp_path, content, kind
+    ash_temp_path, tmp_path, monkeypatch, content, kind
 ):
     """Through scan(): cfn-lint is never started with a config file ASH could not
     check (a merge_configs in it would apply unseen). The three ways a read fails
     (YAMLError, UnicodeDecodeError, OSError) all end the scan; at the base the
-    UnicodeDecodeError escaped as the generic scanner failure."""
+    UnicodeDecodeError escaped as the generic scanner failure.
+
+    The OSError arm refuses the read of this one path: a directory at the path is
+    refused before any read (the next test), and a mode-000 file reads fine for
+    root, which the venue may run as.
+    """
     repo = _repo(ash_temp_path, "a.yaml")
     operator_rc = tmp_path / "operator" / ".cfnlintrc"
     operator_rc.parent.mkdir()
     if content is None:
-        operator_rc.mkdir()
+        operator_rc.write_bytes(b"ignore_checks: []\n")
+        real_read_text = Path.read_text
+
+        def refused(self, *args, **kwargs):
+            if self == operator_rc:
+                raise PermissionError(13, "Permission denied", str(self))
+            return real_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", refused)
     else:
         operator_rc.write_bytes(content)
     scanner = _scanner(repo, config_file=str(operator_rc))
@@ -235,6 +248,22 @@ def test_an_operators_cfnlintrc_ash_cannot_read_stops_the_scan(
     with pytest.raises(ScannerError, match="could not read"):
         _run(scanner, fake, repo)
     assert fake.calls == [], f"cfn-lint was started with {kind}"
+
+
+def test_an_operators_cfnlintrc_that_is_a_directory_is_refused_as_not_a_file(
+    ash_temp_path, tmp_path
+):
+    """A directory at the configured path is refused before any read, and the
+    refusal says what was found: at the base it said the path did not exist."""
+    repo = _repo(ash_temp_path, "a.yaml")
+    operator_rc = tmp_path / "operator" / ".cfnlintrc"
+    operator_rc.mkdir(parents=True)
+    scanner = _scanner(repo, config_file=str(operator_rc))
+    fake = RegionFaultCfnLint("no-such-template")
+    with pytest.raises(ScannerError, match="is not a file") as excinfo:
+        _run(scanner, fake, repo)
+    assert "does not exist" not in str(excinfo.value)
+    assert fake.calls == [], "cfn-lint was started with a directory as its config"
 
 
 def test_errors_are_reset_for_each_scan_call(ash_temp_path):

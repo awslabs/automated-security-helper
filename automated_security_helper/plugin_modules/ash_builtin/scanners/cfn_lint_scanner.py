@@ -1129,7 +1129,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         """The ``config_file`` to pass, or None when it must not be used.
 
         Raises:
-            ScannerError: the operator named a file that does not exist.
+            ScannerError: the operator named a path that is not a file: nothing
+                there, or a directory.
         """
         chosen = operator_path(
             self.context.config if self.context is not None else None,
@@ -1139,9 +1140,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         )
         if chosen.path is not None:
             if not chosen.path.is_file():
+                # Say what was found: a directory at the path is not "missing".
+                found = "is not a file" if chosen.path.exists() else "does not exist"
                 raise ScannerError(
                     f"scanners.cfn-lint.options.config_file names {chosen.path}, "
-                    "which does not exist"
+                    f"which {found}"
                 )
             return chosen.path
         reason = chosen.refusal
