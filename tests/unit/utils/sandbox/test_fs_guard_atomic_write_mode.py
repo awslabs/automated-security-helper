@@ -12,6 +12,13 @@ handed over its mode as well. Only the read, write and execute bits are copied
 now, and only from a file no other name refers to; a hard-linked entry outside
 every root leaves the new file at its umask-derived mode. Below a root a
 hard-linked entry is refused before any of this (test_link_refusal_family.py).
+
+The planted mode carries the sticky bit as well as setuid: Linux clears setuid
+(and setgid) on a write by a process without CAP_FSETID, so a setuid bit alone
+would vanish from the new file whether or not the mask ran, and the test could not
+tell the mask from its absence. The sticky bit survives a write, so it is what
+these tests measure on an unprivileged venue; the setuid assertion still holds on
+a root one.
 """
 
 import os
@@ -48,16 +55,20 @@ def _plant(path, mode: int) -> None:
         pytest.skip(f"this filesystem does not keep mode {mode:o} on a file")
 
 
-def test_a_setuid_bit_at_the_name_is_not_carried_onto_the_new_file(tmp_path):
+def test_setuid_and_sticky_bits_at_the_name_are_not_carried_onto_the_new_file(
+    tmp_path,
+):
+    """The sticky bit is the one a write cannot clear, so it is the bit that
+    tells the mask from no mask on an unprivileged venue (module docstring)."""
     target = tmp_path / "report.json"
-    _plant(target, 0o4755)
+    _plant(target, 0o5755)
 
     with fs_guard.open_for_atomic_write(target) as handle:
         handle.write("written\n")
 
     assert target.read_text() == "written\n"
     assert _mode(target) == 0o755, oct(_mode(target))
-    assert not os.lstat(target).st_mode & stat.S_ISUID
+    assert not os.lstat(target).st_mode & (stat.S_ISUID | stat.S_ISVTX)
 
 
 def test_a_hard_linked_file_at_the_name_lends_the_new_file_no_mode(tmp_path):
@@ -68,7 +79,7 @@ def test_a_hard_linked_file_at_the_name_lends_the_new_file_no_mode(tmp_path):
     is refused with OutputHardLinkRefused before the staging file is made."""
     target = tmp_path / "report.json"
     other = tmp_path / "other-name"
-    _plant(target, 0o4755)
+    _plant(target, 0o5755)
     os.link(target, other)
     assert os.lstat(target).st_nlink == 2
     expected = _default_mode(tmp_path)
@@ -78,8 +89,8 @@ def test_a_hard_linked_file_at_the_name_lends_the_new_file_no_mode(tmp_path):
 
     assert target.read_text() == "written\n"
     assert _mode(target) == expected, (oct(_mode(target)), oct(expected))
-    assert not os.lstat(target).st_mode & stat.S_ISUID
+    assert not os.lstat(target).st_mode & (stat.S_ISUID | stat.S_ISVTX)
     assert os.lstat(target).st_nlink == 1
     assert other.read_bytes() == b"planted\n"
-    assert _mode(other) == 0o4755, oct(_mode(other))
+    assert _mode(other) == 0o5755, oct(_mode(other))
     assert os.lstat(other).st_nlink == 1
