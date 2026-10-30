@@ -352,7 +352,11 @@ def environment_references(
             _resolved_key(key, resolved) if _has_reference(key) else key
             for key, _ in entries
         ]
-        # The loader keeps the last entry written under a name.
+        # The loader keeps the last entry written under a name, and the
+        # written reading's mapping order is the write order of the entries it
+        # kept (``load_yaml_config(..., env="written")`` moves a repeated key to
+        # its last writing; a dict alone would hold it at its first), so the
+        # highest index under a name is the entry the loader kept.
         last = {
             name: index for index, name in enumerate(names) if name is not _UNRESOLVED
         }

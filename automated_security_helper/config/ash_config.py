@@ -434,6 +434,24 @@ def load_yaml_config(
             node.ash_explicit_env = explicit
             return node
 
+        def construct_mapping(self, node, deep=False):
+            mapping = super().construct_mapping(node, deep=deep)
+            if env == "written":
+                # A key written more than once keeps its LAST value, at the
+                # position of its FIRST writing: that is how a dict takes a
+                # repeated key. The record of what a file read pairs the
+                # written and the resolved readings by key and keeps, for a
+                # name two entries come to (a plain key and a reference that
+                # resolves to it), the entry written last; it reads that order
+                # from this mapping. So each kept entry is moved to where its
+                # last writing was: the mapping's order is the write order of
+                # the entries the loader kept.
+                for key_node, _ in node.value:
+                    key = self.construct_object(key_node, deep=deep)
+                    if key in mapping:
+                        mapping[key] = mapping.pop(key)
+            return mapping
+
     _AshConfigLoader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
 
     def constructor_env_variables(loader, node):
