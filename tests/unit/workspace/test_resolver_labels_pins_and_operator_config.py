@@ -13,7 +13,10 @@ at the base.
 * A plugin scanner section that is a bare ``false`` read as enabled, because
   ``getattr(False, "enabled", True)`` is True.
 * A disabled scanner's pin was recorded and compared, so a tool that would not
-  run could refuse the workspace.
+  run could refuse the workspace. That rule is for the declared scanners only: an
+  extra, plugin-provided section is read by a reduced name, so its pin is
+  recorded whether or not it is on, and a pair the plan cannot resolve records a
+  pin only when every section of it, an off one included, sets the same one.
 * A remote client's containment refusal echoed the real path an entry resolved
   to.
 * A discovered project config that is the operator's own file (a link to
@@ -49,6 +52,7 @@ from automated_security_helper.workspace.resolver import (
     _refuse_missing_default_config,
     _resolve_project_config,
     _scanner_state,
+    _unresolved_pins,
     _validate_plugin_modules,
     resolve_workspace,
 )
@@ -241,6 +245,58 @@ class TestScannerSections:
         assert "bandit" not in enabled
         assert "bandit" not in pins
         assert pins.get("semgrep") == ">=1"
+
+    def test_an_extra_section_that_is_off_still_records_its_pin(self):
+        """The declared-scanner rule above does not reach an extra section.
+
+        ``snykcode`` is no scanner ASH ships, so the plan has no registered name
+        for it and the scan may read this section for the reduced name whatever
+        a plugin registers. Its pin is recorded whether or not the section is on,
+        and the section itself is not listed as enabled.
+        """
+        config = AshConfig.model_validate(
+            {
+                "scanners": {
+                    "snykcode": {"enabled": False, "options": {"tool_version": ">=2.0"}}
+                }
+            }
+        )
+
+        enabled, pins, _twins = _scanner_state(config)
+
+        assert "snykcode" not in enabled
+        assert pins.get("snykcode") == ">=2.0"
+
+    def test_a_pair_with_one_off_unpinned_section_holds_its_version(self):
+        """``Snyk_Code`` beside ``snyk-code`` is a pair the plan cannot resolve.
+
+        The off section sets no pin and the on one does, so the pair does not
+        agree: no pin is recorded for it, and the one version it has is held for
+        the comparison with the other projects' pins. Dropping the off section
+        made the pair read as agreeing and recorded a version the scan might not
+        apply.
+        """
+        config = AshConfig.model_validate(
+            {
+                "scanners": {
+                    "Snyk_Code": {"enabled": False},
+                    "snyk-code": {
+                        "enabled": True,
+                        "options": {"tool_version": ">=2.0"},
+                    },
+                }
+            }
+        )
+
+        enabled, pins, twins = _scanner_state(config)
+        held = _unresolved_pins(config)
+
+        assert twins == {"snykcode": ["Snyk_Code", "snyk-code"]}
+        assert "Snyk_Code" not in enabled
+        assert "snyk-code" not in enabled
+        assert "Snyk_Code" not in pins
+        assert "snyk-code" not in pins
+        assert [versions.pins for versions in held.values()] == [[">=2.0"]]
 
 
 class TestWhatARefusalShows:
