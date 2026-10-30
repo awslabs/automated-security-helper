@@ -436,11 +436,18 @@ class TestARuleIgittigittCannotCompile:
 
         monkeypatch.setattr(gss, "IgnoreParser", RecordingParser)
         monkeypatch.setattr(igittigitt_module, "_globmatch", lambda glob: False)
+        monkeypatch.setattr(gss, "_RULE_CHECK_DEGRADED_WARNED", False)
 
-        gss._check_rule_compiles(".git", tmp_path)
+        with patch.object(gss.ASH_LOGGER, "warning") as warning:
+            gss._check_rule_compiles(".git", tmp_path)
+            gss._check_rule_compiles("*.log", tmp_path)
 
         assert gss._igittigitt_glob_function() is None
-        assert len(asked) == 1, asked
+        assert len(asked) == 2, asked
+        # The fallback checks less than the glob compile does, so it says so, and
+        # says it once for the process, not once per rule.
+        assert len(_said(warning)) == 1, _said(warning)
+        assert "igittigitt" in _said(warning)[0], _said(warning)
 
     def test_the_installed_glob_function_is_used_without_asking_a_path(
         self, tmp_path, monkeypatch
@@ -455,11 +462,14 @@ class TestARuleIgittigittCannotCompile:
                 return False
 
         monkeypatch.setattr(gss, "IgnoreParser", RecordingParser)
+        monkeypatch.setattr(gss, "_RULE_CHECK_DEGRADED_WARNED", False)
 
-        gss._check_rule_compiles(".git", tmp_path)
+        with patch.object(gss.ASH_LOGGER, "warning") as warning:
+            gss._check_rule_compiles(".git", tmp_path)
 
         assert gss._igittigitt_glob_function() is not None
         assert asked == []
+        assert _said(warning) == [], _said(warning)
 
     def test_a_negation_it_cannot_compile_is_skipped_too(self, tmp_path, monkeypatch):
         """The check holds the rule alone, so it has to compile a negation without a

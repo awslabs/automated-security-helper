@@ -1724,10 +1724,34 @@ def _check_rule_compiles(rule: str, base_path: str | Path) -> None:
         or built_rules is None
         or not all(hasattr(built, "pattern_glob") for built in built_rules)
     ):
+        _warn_once_that_the_rule_check_is_degraded()
         probe.match(Path(os.path.abspath(base_path)) / "probe")
         return
     for built in built_rules:
         glob_match("", built.pattern_glob)
+
+
+_RULE_CHECK_DEGRADED_WARNED = False
+
+
+def _warn_once_that_the_rule_check_is_degraded() -> None:
+    """Say once per process that the installed igittigitt is not the one the rule
+    check is written for, so the check asks about a path instead.
+
+    That path-based check skips a directory-only rule when a file of the probe's
+    name exists, so a rule igittigitt cannot compile can get through. One line,
+    not one per rule: the check runs for every rule of every ignore file.
+    """
+    global _RULE_CHECK_DEGRADED_WARNED
+    if _RULE_CHECK_DEGRADED_WARNED:
+        return
+    _RULE_CHECK_DEGRADED_WARNED = True
+    ASH_LOGGER.warning(
+        "The installed igittigitt does not match what the ignore-rule check is "
+        "written for; checking rules by matching a path instead, which can miss a "
+        "directory-only rule that cannot be compiled",
+        extra=NO_MARKUP,
+    )
 
 
 def _igittigitt_glob_function():
