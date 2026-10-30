@@ -3599,6 +3599,27 @@ def run_mcp_server():
             signal.signal(signum, handler)
 
 
+def _run_as_the_mcp_command(**kwargs: Any) -> Any:
+    """``ash mcp`` with this process's arguments, for ``python -m``.
+
+    The entry point's ``run_module_app`` calls the app it is given the way click's
+    ``main`` is called, with ``standalone_mode=False``, so a usage error and a
+    command's exit code come back to it instead of ending the process there. The
+    three command modules hand it a Typer app, which takes that keyword; this
+    module runs the root app's ``mcp`` command instead, so whatever the entry
+    point passes is forwarded to the root app behind the command name and this
+    process's arguments. A callable that took no keyword failed every
+    ``python -m automated_security_helper.cli.mcp_server`` start with a TypeError
+    once the entry point began passing one. The imports are inside: cli.main
+    imports this module.
+    """
+    import sys
+
+    from automated_security_helper.cli.main import app
+
+    return app(["mcp", *sys.argv[1:]], **kwargs)
+
+
 if __name__ == "__main__":
     # `python -m automated_security_helper.cli.mcp_server` starts the way `ash mcp`
     # does, with the same arguments, so it makes the same startup checks
@@ -3606,9 +3627,6 @@ if __name__ == "__main__":
     # before it serves. Run through the entry point's failure path, as the other
     # command modules are, so an exception that escapes is shown, not obeyed
     # (tests/unit/cli/test_typer_output_is_shown_not_obeyed.py).
-    import sys
-
     from automated_security_helper.cli.entrypoint import run_module_app
-    from automated_security_helper.cli.main import app
 
-    run_module_app(lambda: app(["mcp", *sys.argv[1:]]))
+    run_module_app(_run_as_the_mcp_command)
