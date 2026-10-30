@@ -1516,8 +1516,13 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         dropped with a warning that names the variable or key and counts the
         names, never their text (the environment chose them). When trivy's list
         cannot be read, the misconfiguration scanner is not run offline at all,
-        rather than guessed at, whether or not the operator chose names. checkov
-        still checks Terraform.
+        rather than guessed at, whether or not the operator chose names: it is
+        taken out of the ``--scanners`` value, or, when the set came from
+        ``TRIVY_SCANNERS`` or the config file and the command carries no such
+        token, a ``--scanners`` of that set without it is added, since trivy
+        would otherwise read the set as before. A set of ``misconfig`` alone
+        then leaves nothing to run, and the scan is refused. checkov still
+        checks Terraform.
 
         Shared by ``trivy-repo``, which runs ``misconfig`` by default, and ``trivy``,
         which runs it when the operator adds it to ``scanners``.
@@ -1590,6 +1595,15 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     "cannot leave out the Terraform checks, which download module "
                     "sources."
                 )
+            # Turning the misconfiguration scanner off has to reach trivy. With a
+            # --scanners token in the command (the option named a set) its value
+            # loses misconfig. Without one the set is trivy's own reading of
+            # TRIVY_SCANNERS or the config file (_effective_scanners), which trivy
+            # would read as before whatever this method decided, so the command
+            # gets a --scanners of that set without misconfig: left as it was,
+            # trivy ran the Terraform checks the warning said were skipped. A set
+            # that was misconfig alone leaves nothing to run, and the scan is
+            # refused with the reason, as the token form already was.
             index = args.index("--scanners") if "--scanners" in args else -1
             if index >= 0 and index + 1 < len(args):
                 remaining = [
@@ -1598,6 +1612,17 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 if not remaining:
                     raise ScannerError(message)
                 args[index + 1] = ",".join(remaining)
+            else:
+                remaining = [
+                    name
+                    for name in self._effective_scanners(final_args)
+                    if name != "misconfig"
+                ]
+                if not remaining:
+                    raise ScannerError(message)
+                head = [command, *self.subcommands]
+                insert_at = len(head) if args[: len(head)] == head else len(args)
+                args[insert_at:insert_at] = ["--scanners", ",".join(remaining)]
         if message not in self._warned_inputs:
             self._warned_inputs.add(message)
             self._plugin_log(message, level=logging.WARNING)

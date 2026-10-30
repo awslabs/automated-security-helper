@@ -39,6 +39,10 @@ Each test here pins one reading that went wrong before:
 - the operator's list reached trivy as written: a list variable split on commas
   alone (trivy splits on whitespace too), and a name trivy does not know passed
   through, which makes trivy run every misconfiguration scanner.
+- turning the misconfiguration scanner off reached trivy only through a
+  ``--scanners`` token ASH had passed; a set from ``TRIVY_SCANNERS`` or the config
+  file was left as trivy read it, so trivy ran the checks the warning called
+  skipped.
 - the builtin trivy scanner redacted neither ``TRIVY_IGNOREFILE`` nor
   ``TRIVY_SECRET_CONFIG``, which it reads from the environment.
 - a trivy config file that is not UTF-8 raised out of the scanner-set read.
@@ -844,6 +848,13 @@ def _misconfig_flags(args) -> list[str]:
     return [a for a in args if a.startswith("--misconfig-scanners")]
 
 
+def _scanners_value(args) -> str:
+    """The value of the one ``--scanners`` token trivy is given."""
+    tokens = [i for i, a in enumerate(args) if a == "--scanners"]
+    assert len(tokens) == 1, args
+    return args[tokens[0] + 1]
+
+
 def test_offline_the_operators_misconfig_scanners_are_kept_without_terraform(
     tmp_path, monkeypatch
 ):
@@ -883,9 +894,13 @@ def test_offline_the_operators_config_file_misconfig_scanners_are_read(
 def test_offline_an_operator_list_of_terraform_alone_runs_no_misconfig_checks(
     tmp_path, monkeypatch
 ):
+    """The set came from TRIVY_SCANNERS, so the command carried no --scanners
+    token to take misconfig out of; trivy read the variable as before and ran the
+    misconfiguration scanner under a warning saying it was skipped. The command
+    now gets the set without misconfig as an explicit token."""
     scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
     scanner.extra_env = {
-        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_SCANNERS": "vuln,misconfig",
         "TRIVY_MISCONFIG_SCANNERS": "terraform",
     }
     _knows(monkeypatch)
@@ -895,7 +910,62 @@ def test_offline_an_operator_list_of_terraform_alone_runs_no_misconfig_checks(
         args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
 
     assert not _misconfig_flags(args), args
+    assert _scanners_value(args) == "vuln"
+    assert args[:3] == ["trivy", "repository", "--scanners"], args
     assert any("the operator chose" in m for m in messages), messages
+
+
+def test_offline_a_config_file_set_without_misconfig_is_passed_as_a_token(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "scan:\n  scanners: [vuln, misconfig, secret]\nmisconfiguration:\n"
+        "  scanners: [terraform]\n",
+        encoding="utf-8",
+    )
+    _knows(monkeypatch)
+    final_args = ["trivy", "repository", f"--config={operator.as_posix()}", "/src"]
+
+    with patch.object(scanner, "_plugin_log"):
+        args = scanner._offline_misconfig_args(final_args)
+
+    assert not _misconfig_flags(args), args
+    assert _scanners_value(args) == "vuln,secret"
+
+
+def test_offline_a_scanner_set_of_misconfig_alone_is_refused(tmp_path, monkeypatch):
+    """Nothing is left to run once misconfig is out, so the scan is refused with
+    the reason, as it already was when the option named the set."""
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    scanner.extra_env = {
+        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_MISCONFIG_SCANNERS": "terraform",
+    }
+    _knows(monkeypatch)
+
+    with (
+        patch.object(scanner, "_plugin_log"),
+        pytest.raises(ScannerError, match="the operator chose"),
+    ):
+        scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
+
+
+def test_control_the_option_named_set_loses_misconfig_in_its_own_token(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path, scanners=["vuln", "misconfig"], offline=True)
+    scanner.extra_env = {"TRIVY_MISCONFIG_SCANNERS": "terraform"}
+    _knows(monkeypatch)
+    final_args = ["trivy", "repository", "--scanners", "vuln,misconfig", "/src"]
+
+    with patch.object(scanner, "_plugin_log"):
+        args = scanner._offline_misconfig_args(final_args)
+
+    assert _scanners_value(args) == "vuln"
+    assert args == ["trivy", "repository", "--scanners", "vuln", "/src"]
 
 
 # --- the operator's names are read as trivy reads them, and checked -----------------
@@ -931,7 +1001,7 @@ def test_a_capitalized_terraform_is_the_terraform_scanner(tmp_path, monkeypatch)
     trivy does not know, and would have run every scanner rather than none."""
     scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
     scanner.extra_env = {
-        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_SCANNERS": "vuln,misconfig",
         "TRIVY_MISCONFIG_SCANNERS": "Terraform",
     }
     _knows(monkeypatch)
@@ -941,6 +1011,7 @@ def test_a_capitalized_terraform_is_the_terraform_scanner(tmp_path, monkeypatch)
         args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
 
     assert not _misconfig_flags(args), args
+    assert _scanners_value(args) == "vuln"
     assert any("the operator chose" in m for m in messages), messages
 
 
@@ -970,7 +1041,7 @@ def test_an_operator_list_of_unknown_names_alone_runs_no_misconfig_checks(
 ):
     scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
     scanner.extra_env = {
-        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_SCANNERS": "vuln,misconfig",
         "TRIVY_MISCONFIG_SCANNERS": "zz-typo-zz",
     }
     _knows(monkeypatch)
@@ -980,6 +1051,7 @@ def test_an_operator_list_of_unknown_names_alone_runs_no_misconfig_checks(
         args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
 
     assert not _misconfig_flags(args), args
+    assert _scanners_value(args) == "vuln"
     (skipped,) = [m for m in messages if "skipped offline" in m]
     assert "none of the 1" in skipped
     assert "zz-typo-zz" not in skipped
@@ -992,7 +1064,7 @@ def test_an_operator_list_with_trivys_list_unreadable_runs_no_misconfig_checks(
     misconfiguration scanner: fail closed, as with no list at all."""
     scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
     scanner.extra_env = {
-        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_SCANNERS": "vuln,misconfig",
         "TRIVY_MISCONFIG_SCANNERS": "dockerfile",
     }
     _knows(monkeypatch, None)
@@ -1002,6 +1074,7 @@ def test_an_operator_list_with_trivys_list_unreadable_runs_no_misconfig_checks(
         args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
 
     assert not _misconfig_flags(args), args
+    assert _scanners_value(args) == "vuln"
     (skipped,) = [m for m in messages if "skipped offline" in m]
     assert "could not read trivy's list" in skipped
     assert "TRIVY_MISCONFIG_SCANNERS" in skipped
