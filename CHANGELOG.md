@@ -7779,6 +7779,40 @@
 
 ### Reporting changes
 
+- **GitLab SAST reports a finding with several locations at its first located
+  one.** The `location` of a vulnerability used to blend the locations: the last
+  location's file with an earlier location's line and source excerpt, a position
+  that exists in neither. It is now the first location with a file, with that
+  location's own line and excerpt. GitLab's location fingerprint changes for such
+  a vulnerability, so one pipeline marks the existing one as no longer detected
+  and opens it anew at its real position; a vulnerability with one location is
+  unchanged. The `id` and the ASH finding-id identifier of every vulnerability
+  are now the finding's `id` in `ash.flat.json` (see the entry on that id below),
+  so they change once with it.
+
+- **Every OCSF `finding_info.uid` changes once, and then stays.** It was a fresh
+  random UUID on every run, so no SIEM could match a finding across two scans. It
+  is now derived (UUID version 5) from the finding's `id` in `ash.flat.json`, the
+  same id the GitLab SAST report carries, so the same finding has the same uid in
+  every scan of the same tree and the same identity across the reports. A finding
+  the flattening cannot vouch for is keyed on the result alone: scanner, workspace
+  project, rule, message, file and lines, with two identical results numbered.
+
+- **The GitHub GHAS report leaves out results that state no failing finding, and
+  names its category only when asked.** A result whose SARIF `kind` is `pass`,
+  `open`, `review`, `notApplicable` or `informational` (a cdk-nag rule that was
+  not evaluated) is left out of `ash.ghas.sarif` and out of its rules' scores;
+  GitHub reads no `kind`, so uploaded it opened an alert like a failing result.
+  Such results stay in every other report. The new reporter option
+  `emit_automation_details` (off by default) writes `runAutomationDetails.id`
+  `ash/<project key>/` into a workspace project's own report so that the
+  per-project uploads for one repository are filed under separate categories; it
+  is off by default because an id in the file takes precedence over the `category`
+  the `upload-sarif` action is given, and turning it on moves existing uploads to
+  a new category, leaving the old analysis's alerts open until they are closed by
+  hand. The report also keeps a chained `originalUriBaseIds` entry's own
+  `uriBaseId`, and writes a suppression's `kind` only when it has one.
+
 - **A converter whose dependencies were unavailable says why in the results.**
   Its `converter_results` row in `ash_aggregated_results.json` carries
   `dependency_unavailable_reason`: the reason its dependency check recorded,
