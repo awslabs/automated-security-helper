@@ -83,10 +83,52 @@ def test_a_server_that_served_returns():
     assert calls == ["kill_running_groups"]
 
 
-def test_a_server_stopped_by_a_signal_before_starting_does_not_raise(monkeypatch):
-    """Control: the signal's own exit status applies, not a startup failure."""
-    import signal
+class _ServerStoppedBySignalBeforeStarting(_ServerThatNeverStarts):
+    """A run that a signal ends before the app started: the signal noter has
+    recorded it by the time ``run()`` returns, and the server never started."""
 
-    monkeypatch.setattr(mcp_cli, "_stop_signal", signal.SIGTERM)
+    def run(self, sockets=None) -> None:
+        import signal
 
-    _run_with(_ServerThatNeverStarts)
+        mcp_cli._stop_signal = signal.SIGTERM
+
+
+@pytest.fixture(autouse=True)
+def _uvicorn_loggers_restored():
+    """``_run_uvicorn`` builds a real ``uvicorn.Config``, whose logging setup
+    reconfigures the uvicorn loggers in this process (handlers replaced,
+    propagate off) and never restores them. Snapshot and restore, so the tests
+    that follow in the same process read the loggers they started with."""
+    import logging
+
+    names = ("uvicorn", "uvicorn.error", "uvicorn.access")
+    saved = {}
+    for name in names:
+        logger = logging.getLogger(name)
+        saved[name] = (
+            list(logger.handlers),
+            logger.level,
+            logger.propagate,
+            logger.disabled,
+        )
+    yield
+    for name, (handlers, level, propagate, disabled) in saved.items():
+        logger = logging.getLogger(name)
+        logger.handlers[:] = handlers
+        logger.setLevel(level)
+        logger.propagate = propagate
+        logger.disabled = disabled
+
+
+def test_a_server_stopped_by_a_signal_before_starting_does_not_raise():
+    """Control: the signal's own exit status applies, not a startup failure.
+
+    The signal is recorded by the run itself, as the noter records it, not set
+    before the call: an earlier shape preset it with the noter mocked and
+    asserted nothing, so it passed whatever the runner did. The runner returns,
+    kills the groups, and leaves no signal recorded for the next run.
+    """
+    calls = _run_with(_ServerStoppedBySignalBeforeStarting)
+
+    assert calls == ["kill_running_groups"]
+    assert mcp_cli._stop_signal is None

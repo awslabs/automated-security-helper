@@ -112,9 +112,13 @@ def _git_that_fails_at(step: str):
             target = Path(cmd[-1])
             target.mkdir(parents=True, exist_ok=True)
             (target / "cloned.txt").write_text("from git\n")
-        if name == "rev-parse":
-            return subprocess.CompletedProcess(cmd, 0, HEAD_COMMIT + "\n", "")
         if name != step:
+            # The step the double is told to fail is read before any answer:
+            # an earlier shape answered rev-parse with a commit first, so
+            # ``_git_that_fails_at("rev-parse")`` never failed and the
+            # ref-less clone's refusal was never driven as a failed delivery.
+            if name == "rev-parse":
+                return subprocess.CompletedProcess(cmd, 0, HEAD_COMMIT + "\n", "")
             return subprocess.CompletedProcess(cmd, 0, "", "")
         if name == "fetch":
             # A fetch that git fails is tolerated; one that git cannot be started
@@ -184,6 +188,29 @@ def test_a_git_redelivery_that_fails_leaves_the_scan_on_the_previous_tree(
     second = mcp_set_source_git(url=URL, ref="release", session_id=session_id)
 
     assert second["success"] is False, second
+    resolution = _resolve_omitted_source_dir(session_id)
+    assert resolution.error is None, resolution.error
+    assert resolution.source_dir == first["source_dir"]
+    assert (Path(resolution.source_dir) / "cloned.txt").read_text() == "from git\n"
+
+
+@pytest.mark.parametrize("session_id", SESSIONS)
+def test_a_ref_less_redelivery_whose_clone_has_no_commit_keeps_the_previous_tree(
+    monkeypatch, session_id
+) -> None:
+    """A clone with no ref whose HEAD names no commit is refused, and the refusal
+    is a failed delivery like the others: the previous tree and its record stay.
+    Red before the double read ``step`` before answering rev-parse: the second
+    delivery then succeeded with an empty tree."""
+    monkeypatch.setattr(sd, "_run_git", _git_that_fails_at("none"))
+    first = mcp_set_source_git(url=URL, session_id=session_id)
+    assert first["success"] is True, first
+
+    monkeypatch.setattr(sd, "_run_git", _git_that_fails_at("rev-parse"))
+    second = mcp_set_source_git(url=URL, session_id=session_id)
+
+    assert second["success"] is False, second
+    assert "no commit" in second["error"], second
     resolution = _resolve_omitted_source_dir(session_id)
     assert resolution.error is None, resolution.error
     assert resolution.source_dir == first["source_dir"]

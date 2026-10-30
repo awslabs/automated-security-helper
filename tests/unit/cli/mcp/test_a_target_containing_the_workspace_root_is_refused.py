@@ -57,14 +57,20 @@ def _delivered(session_id: str):
 
 
 @pytest.mark.parametrize("levels_up", [1, 2])
+@pytest.mark.parametrize("caller", [None, OWN], ids=["local-no-id", "session"])
 def test_an_ancestor_of_the_workspace_root_is_refused_to_a_local_caller(
-    tmp_path, levels_up
+    tmp_path, levels_up, caller
 ):
     """The defect: the local caller with no grant could scan one directory up.
 
     At the base the gate found the parent neither inside the root nor the
     caller's, the local fallback denies only a few system directories, and the
     scan was permitted over both sessions' delivered trees.
+
+    Two callers: the local one that named no session (``None``, the sandbox
+    with the denylist fallback, which is the caller the defect was about) and a
+    session's. An earlier shape passed only the session id, so the sessionless
+    branch of the refusal was never pinned.
     """
     _delivered(OWN)
     _delivered(SIBLING)
@@ -72,7 +78,7 @@ def test_an_ancestor_of_the_workspace_root_is_refused_to_a_local_caller(
     assert shared is not None
     target = shared.parents[levels_up - 1]
 
-    refusal = validate_scan_target_in_sandbox(target, session_id=OWN)
+    refusal = validate_scan_target_in_sandbox(target, session_id=caller)
 
     assert refusal is not None, f"{target} contains every session's source"
     assert refusal.context["error_category"] == ErrorCategory.INVALID_PATH.value
