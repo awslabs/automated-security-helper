@@ -13,6 +13,7 @@ opts in with ``pytestmark = pytest.mark.usefixtures(...)``.
 from __future__ import annotations
 
 import itertools
+import logging
 import os
 import shutil
 import sys
@@ -152,6 +153,45 @@ def pytest_configure(config):
         "tests' tool guard is not installed for it; only the modules in "
         "REAL_TOOL_MODULES (tests/unit/conftest.py) may use it",
     )
+
+
+@pytest.fixture
+def capture(caplog):
+    """Route ASH's logger at WARNING into caplog.
+
+    ASH's configured handler renders to a console and leaves nothing in
+    ``caplog.records``, so its handlers are swapped for pytest's capture handlers
+    for the duration, and the logger's own level is set, since
+    ``caplog.at_level`` with no ``logger=`` lowers the root logger only and a
+    merge that ran earlier in the process may have left ``ash`` higher. A test
+    that asserts ``records == []`` through plain ``caplog`` passes with no capture
+    at all; through this fixture the absence is a measurement.
+
+    Here, at the unit tests' root conftest, so every module under tests/unit gets
+    it by name: the merge tests under tests/unit/cli, and
+    tests/unit/test_ash_output_dirs_are_not_scanned.py beside them. It used to be
+    defined in tests/unit/cli/test_merge.py, and a module that took it from there
+    had to bind it under its own name for pytest to register it.
+    """
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    saved_handlers = ASH_LOGGER.handlers
+    saved_propagate = ASH_LOGGER.propagate
+    capture_handlers = [
+        handler
+        for handler in saved_handlers
+        if isinstance(handler, type(caplog.handler))
+    ]
+    if caplog.handler not in capture_handlers:
+        capture_handlers.append(caplog.handler)
+    ASH_LOGGER.handlers = capture_handlers
+    ASH_LOGGER.propagate = False
+    caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
+    try:
+        yield caplog
+    finally:
+        ASH_LOGGER.handlers = saved_handlers
+        ASH_LOGGER.propagate = saved_propagate
 
 
 @pytest.fixture

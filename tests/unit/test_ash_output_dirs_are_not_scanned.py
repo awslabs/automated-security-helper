@@ -72,15 +72,14 @@ from automated_security_helper.utils.scan_output_dirs import (
     named_output_dirs,
     output_dir_candidates,
 )
-from tests.unit.cli import test_merge
 from tests.unit.workspace.test_execution import _git
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 PluginContext.model_rebuild()
 
-# The fixture itself, so warnings are captured the way test_merge.py captures them.
-capture = test_merge.capture
+# The ``capture`` fixture comes from tests/unit/conftest.py by name, so warnings
+# are captured the way test_merge.py captures them.
 
 #: Integration because every tree here is a real git checkout (``_git`` starts git);
 #: the scanners built here start no tool (tests/unit/conftest.py).
