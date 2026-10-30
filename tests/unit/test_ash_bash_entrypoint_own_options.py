@@ -320,18 +320,21 @@ def test_help_runs_the_wrappers_own_cli_not_a_package_in_the_working_directory(
 
 
 def test_the_scripts_directory_is_read_with_cdpath_unset(runner, tmp_path):
-    """With CDPATH exported, `cd .` goes to the CDPATH entry's "." and prints it, so the
-    root directory held that path twice on two lines at the base, and the build got
-    a Dockerfile path and a context with a newline in them. Invoked by its relative
-    name from the repository, so the script's directory is "."."""
+    """With CDPATH exported, `cd` searches its entries for a relative directory whose
+    first component is not "." or "..", and prints the directory it went to. Invoked as
+    `utils/../ash` from the repository, the script's directory is `utils/..`; with a
+    CDPATH entry that holds a `utils` of its own, the base went to that entry and the
+    root directory held its path twice on two lines, so the build got a Dockerfile
+    path and a context with a newline in them. (`./ash` and `ash` give "." and are
+    never searched, so they cannot show this.)"""
     source, out = _dirs(tmp_path)
     elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
+    (elsewhere / "utils").mkdir(parents=True)
     result, calls = _run(
         runner,
         ["--source-dir", str(source), "--output-dir", str(out)],
         cwd=REPO_ROOT,
-        script="ash",
+        script="utils/../ash",
         env={"CDPATH": str(elsewhere), "BUILD_FAILS": "1"},
     )
     shown = result.stdout + result.stderr
