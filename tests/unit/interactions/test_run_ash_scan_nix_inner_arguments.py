@@ -467,6 +467,37 @@ def test_an_option_the_shell_cannot_be_given_is_refused_for_nix_mode(tmp_path, o
     assert "nix" in str(refused.value)
 
 
+@pytest.mark.parametrize(
+    "option",
+    [
+        pytest.param({"severity_threshold_restriction": "HIGH"}, id="restriction"),
+        pytest.param({"keep_previous_results": True}, id="keep-previous-results"),
+        pytest.param({"trusted_config_path": "/elsewhere/ash.yaml"}, id="trusted"),
+    ],
+)
+def test_an_option_the_container_cannot_be_given_is_refused_for_container_mode(
+    tmp_path, option
+):
+    """Container mode is the other mode that re-executes ASH, and its runner has
+    no parameter and builds no flag for these three (``run_ash_container``'s
+    signature and the inner command line it assembles), so a container run
+    dropped them as silently as a Nix run did. The same refusal, before any
+    runtime is looked for: the container arm of the loop, pinned on its own."""
+    with pytest.raises(ValueError) as refused:
+        ras.run_ash_scan(
+            source_dir=str(tmp_path / "src"),
+            output_dir=str(tmp_path / "out"),
+            mode=RunMode.container,
+            progress=False,
+            show_summary=False,
+            **option,
+        )
+
+    (name,) = option
+    assert name in str(refused.value)
+    assert "container" in str(refused.value)
+
+
 def test_the_missing_payload_message_names_what_ran():
     assert "Nix shell" in ras._no_workspace_payload_message(RunMode.nix)
     assert "container" in ras._no_workspace_payload_message(RunMode.container)
