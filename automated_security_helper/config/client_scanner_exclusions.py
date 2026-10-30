@@ -1418,12 +1418,16 @@ def parse_trivy_ignore_file(
                     paths = []
                 if not isinstance(paths, list):
                     raise ValueError(f"an entry's paths in {section} is not a list")
-                found.append(
-                    (
-                        str(item["id"]),
-                        tuple(str(path) for path in paths if isinstance(path, str)),
+                if not all(isinstance(path, str) for path in paths):
+                    # A path that is not a string was dropped from the list, so
+                    # an entry whose every path was one (`paths: [1]`) read as an
+                    # entry with no path limit and applied to every file. trivy
+                    # refuses such a file; so does this reader.
+                    raise ValueError(
+                        f"an entry's paths in {section} holds a value that is not "
+                        "a string"
                     )
-                )
+                found.append((str(item["id"]), tuple(paths)))
         return found
     for line in text.splitlines():
         fields = line.split()

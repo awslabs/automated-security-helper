@@ -140,6 +140,17 @@ def test_a_scalar_paths_value_is_a_parse_error():
         )
 
 
+@pytest.mark.parametrize("paths", [[1], [None], ["requirements.txt", 2]])
+def test_a_path_that_is_not_a_string_is_a_parse_error(paths):
+    """A non-string path was dropped from the list, so an entry whose every
+    path was one read as an entry with no path limit and applied everywhere."""
+    with pytest.raises(ValueError, match="not a string"):
+        parse_trivy_ignore_file(
+            yaml.safe_dump({"vulnerabilities": [{"id": "CVE-1", "paths": paths}]}),
+            yaml_format=True,
+        )
+
+
 def test_an_entry_limited_by_purls_is_not_applied():
     text = yaml.safe_dump(
         {
