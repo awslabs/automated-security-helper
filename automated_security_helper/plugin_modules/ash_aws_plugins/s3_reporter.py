@@ -75,7 +75,11 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     key_prefix: Annotated[
         str,
         Field(
-            description="Prefix for S3 object keys",
+            description=(
+                "Prefix for S3 object keys, used as a directory: a prefix written "
+                "without its trailing slash gets one, so 'scans/repo' and "
+                "'scans/repo/' both place the object under scans/repo/"
+            ),
         ),
     ] = "ash-reports/"
     file_format: Annotated[
@@ -156,7 +160,10 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     The object key needs care for this ruling to hold.
 
     The key is ``f"{key_prefix}[{project}/]ash-report-{timestamp}.{ext}"``, as
-    documented in ``docs/plugins/aws/s3-reporter.md``. ``timestamp`` used to be
+    documented in ``docs/content/plugins/aws.md``, where ``key_prefix`` is the
+    option with a ``/`` appended if it did not end in one: the prefix is a
+    directory, never fused with the file name (a prefix such as ``scans/repo-``
+    therefore writes under ``scans/repo-/``). ``timestamp`` used to be
     read only from ``model.metadata.summary_stats.start``, and that field is
     **not set yet** when a reporter runs: ``ScanExecutionEngine.execute_phases``
     assigns it in a ``finally`` block that runs *after* ``ReportPhase``. So every
