@@ -1472,6 +1472,13 @@ class TestEveryReaderFiltersExpiredEntries:
             "plugin_modules/ash_builtin/scanners/syft_scanner.py",
             "exclude",
         ): "scanner-option",
+        # The list scan() was handed, kept so nothing_to_scan_reason answers from
+        # the same package selection; _package_manifests filters it through
+        # active_ignore_paths() at the read, so no entry is applied unfiltered.
+        (
+            "plugin_modules/ash_builtin/scanners/npm_audit_scanner.py",
+            "_handed_ignore_paths",
+        ): "filtered-at-read",
     }
     # Readers of a scanner option list that do not turn it into arguments.
     # None: bandit's _execute_scan does not save and restore the list.
