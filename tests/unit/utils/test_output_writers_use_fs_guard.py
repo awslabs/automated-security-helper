@@ -368,12 +368,17 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _STDOUT_DIVERSION,
     ),
+    (f"{_ASH}/cli/report.py", "report_command", "os.open"): (1, _STDOUT_DIVERSION),
     (
         f"{_ASH}/plugin_modules/ash_builtin/converters/jupyter_converter.py",
         "JupyterConverter._stage_notebook",
         "write_bytes",
     ): (1, "the converter's own TemporaryDirectory for nbconvert"),
-    (f"{_ASH}/schemas/generate_schemas.py", "generate_schemas", "write_text"): (
+    (f"{_ASH}/schemas/generate_schemas.py", "_write_if_changed", "os.fdopen"): (
+        1,
+        "the JSON schemas in the source checkout, a development step",
+    ),
+    (f"{_ASH}/schemas/generate_schemas.py", "_write_if_changed", "os.replace"): (
         1,
         "the JSON schemas in the source checkout, a development step",
     ),
@@ -412,10 +417,8 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _TOOL_CONFIG_DIR,
     ),
-    (f"{_ASH}/utils/detect_secrets_worker.py", "_write_output", "os.open"): (
-        1,
-        _DETECT_SECRETS_CHILD,
-    ),
+    # The os.open there takes its flags from a local name, which the detector does
+    # not follow, so only the os.fdopen is found.
     (f"{_ASH}/utils/detect_secrets_worker.py", "_write_output", "os.fdopen"): (
         1,
         _DETECT_SECRETS_CHILD,
@@ -456,7 +459,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the install receipts under ASH's home",
     ),
-    (f"{_ASH}/utils/file_lock.py", "exclusive_lock", "os.open"): (
+    (f"{_ASH}/utils/file_lock.py", "_open_lock_file", "os.open"): (
         1,
         "lock files in the content-database cache",
     ),
@@ -487,11 +490,11 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _RULES_INSTALLS,
     ),
-    (f"{_ASH}/utils/rules_bundles.py", "install_rules_bundle", "os.replace"): (
+    (f"{_ASH}/utils/rules_bundles.py", "_install_locked", "os.replace"): (
         2,
         _RULES_INSTALLS,
     ),
-    (f"{_ASH}/utils/rules_bundles.py", "install_rules_bundle", "write_text"): (
+    (f"{_ASH}/utils/rules_bundles.py", "_install_locked", "write_text"): (
         1,
         _RULES_INSTALLS,
     ),
