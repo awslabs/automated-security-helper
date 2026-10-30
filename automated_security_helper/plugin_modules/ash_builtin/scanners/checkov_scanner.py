@@ -573,9 +573,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # tool-version probe, which construction leaves to this point.
         self.resolve_deferred_tool_version()
         if not self._validate_uv_tool_availability():
-            # UV missing: the resolver's direct binary, verified first.
+            # UV missing: the resolver's direct binary, verified first. The
+            # resolver probes under this scanner's own offline mode, as every uv
+            # call of the mixin does: without it a scanner offline by its
+            # options probed PyPI online while its run and install were offline.
             resolved = get_uv_tool_command(
-                self.command, from_spec=self._uv_probe_from_spec()
+                self.command,
+                from_spec=self._uv_probe_from_spec(),
+                offline=self._is_offline_mode(),
             )
             if resolved is None:
                 return False
@@ -613,7 +618,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # scan went through uv, whose install had just failed. And a dependency
         # declared satisfied is recorded as such, as the branches above record it.
         resolved = get_uv_tool_command(
-            self.command, from_spec=self._uv_probe_from_spec()
+            self.command,
+            from_spec=self._uv_probe_from_spec(),
+            offline=self._is_offline_mode(),
         )
         if resolved is None:
             return False
