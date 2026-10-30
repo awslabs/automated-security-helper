@@ -503,6 +503,13 @@ def _windows_process_is_running(pid: int) -> bool:
         return False
 
 
+def _shares_an_output_tree(one: Path, other: Path) -> bool:
+    """Whether two canonical output directories are one tree: the same
+    directory, or one inside the other. By path component, never by string
+    prefix (``out`` and ``out-backup`` share nothing)."""
+    return one == other or one in other.parents or other in one.parents
+
+
 def _slot_of(entry: "ScanRegistryEntry") -> Tuple[str, str]:
     """The max_concurrent_scans slot an entry holds: its shared slot, or its own."""
     if entry.slot is not None:
@@ -1018,6 +1025,31 @@ class ScanRegistry:
                 if (
                     entry.canonical_output_directory == requested
                     and entry.occupies_its_directory()
+                ):
+                    return entry.scan_id
+            return None
+
+    def scan_writing_within(self, output_directory: str) -> Optional[str]:
+        """The id of a scan that still occupies an output tree that shares
+        ``output_directory``: the same directory, one inside it, or one that
+        contains it. None when there is none.
+
+        :meth:`scan_writing_output` answers for one directory exactly, which is
+        the question for a project's own output folder. A workspace scan also
+        writes its unified results, reports and spool into its output ROOT, and
+        two workspace scans with different projects and one root shared nothing
+        at the project level, so both were admitted and each run's cleanup
+        removed the other's; a single scan whose output tree is the root, or
+        contains it, was admitted the same way. Occupancy is the registry's own
+        (:meth:`ScanRegistryEntry.occupies_its_directory`), under the lock, in
+        canonical form; the tree relation is by path component
+        (``Path.parents``), so ``out`` and ``out-backup`` are two trees.
+        """
+        requested = _canonical_directory(output_directory)
+        with self._registry_lock:
+            for entry in self._registry.values():
+                if entry.occupies_its_directory() and _shares_an_output_tree(
+                    entry.canonical_output_directory, requested
                 ):
                     return entry.scan_id
             return None

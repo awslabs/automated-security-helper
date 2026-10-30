@@ -1374,7 +1374,10 @@ def _restore_unfinished_projects(
 
 
 def _refuse_outputs_another_scan_writes(
-    registry: Any, plan: WorkspacePlan, project_outputs: Dict[str, Path]
+    registry: Any,
+    plan: WorkspacePlan,
+    project_outputs: Dict[str, Path],
+    output_dir: Union[str, Path],
 ) -> None:
     """Refuse a workspace scan whose output directory a live scan is writing.
 
@@ -1392,6 +1395,16 @@ def _refuse_outputs_another_scan_writes(
     output was being written; and it admitted a timed-out scan whose entries
     are FAILED at once (``_stop_at_timeout``) while its thread still writes for
     seconds, so a second scan was let into exactly that window.
+
+    Then the same question is asked of the workspace's output ROOT,
+    ``output_dir`` (``ScanRegistry.scan_writing_within``): the unified results,
+    the reports and the spool go there, not into any project's folder, and no
+    registry entry names the root, so two workspace scans with different
+    projects and one root passed the per-project check and wrote beside each
+    other. A live scan whose output tree is the root, lies inside it (another
+    workspace's project folder; a single scan aimed into it) or contains it (a
+    scan whose cleanup would remove this run's tree) refuses the workspace. The
+    per-project check stays first for its message, which names the project.
     """
     for project in plan.active_projects:
         output = project_outputs[project.key]
@@ -1411,6 +1424,19 @@ def _refuse_outputs_another_scan_writes(
                 ],
             },
         )
+    if registry.scan_writing_within(str(output_dir)) is not None:
+        raise MCPResourceError(
+            f"Output directory {output_dir} is being written by another scan, "
+            "or lies inside the output directory of one",
+            context={
+                "output_directory": str(output_dir),
+                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                "suggestions": [
+                    "Wait for the other scan to complete",
+                    "Use a different output_dir for this workspace scan",
+                ],
+            },
+        )
 
 
 def _register_projects(
@@ -1418,10 +1444,16 @@ def _register_projects(
     project_outputs: Dict[str, Path],
     session_id: Optional[str] = None,
     *,
+    output_dir: Union[str, Path],
     max_active: Optional[int] = None,
     environment_values: Sequence[str] = (),
 ) -> Dict[str, str]:
     """Register one scan per active project and return ``{project key: scan id}``.
+
+    ``output_dir`` is the workspace's output root, which the run writes into
+    beside the project folders; a live scan writing it, or a tree that shares it,
+    refuses the workspace before anything is registered
+    (:func:`_refuse_outputs_another_scan_writes`).
 
     Each entry is recorded under ``session_id``, the session that asked for the
     workspace scan, so the registry tools show it to that session only.
@@ -1458,7 +1490,7 @@ def _register_projects(
     would report a scan at a threshold it is not being judged against.
     """
     registry = get_scan_registry()
-    _refuse_outputs_another_scan_writes(registry, plan, project_outputs)
+    _refuse_outputs_another_scan_writes(registry, plan, project_outputs, output_dir)
     registered: Dict[str, str] = {}
     slot = str(uuid.uuid4())
     try:
@@ -2648,6 +2680,7 @@ async def _scan_workspace(
                 plan,
                 project_outputs,
                 session_id,
+                output_dir=settings.output_dir,
                 # 0 or None is no limit.
                 max_active=limits.max_concurrent_scans or None,
                 environment_values=environment_values,

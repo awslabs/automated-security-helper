@@ -543,6 +543,56 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert refused.value.context["waited_seconds"] == 0.2
 
 
+class TestAScanWritingWithinAnOutputTree:
+    """``scan_writing_within`` answers for a TREE (the same directory, one
+    inside it, one containing it); ``scan_writing_output`` for one directory.
+    A workspace's output root is written by the run and named by no entry, so
+    the one-directory question admitted a scan sharing the root."""
+
+    @staticmethod
+    def _live(registry, tmp_path, name, output):
+        source = tmp_path / "src" / name
+        source.mkdir(parents=True)
+        return _register(registry, source, output)
+
+    def test_the_same_directory_is_found_until_the_scan_finishes(self, tmp_path):
+        registry = ScanRegistry()
+        root = tmp_path / "out"
+        same = self._live(registry, tmp_path, "same", root)
+
+        assert registry.scan_writing_within(str(root)) == same
+        registry.update_scan_status(same, MCScanStatus.COMPLETED)
+        assert registry.scan_writing_within(str(root)) is None
+
+    def test_a_tree_inside_the_root_is_found_and_the_one_directory_question_misses_it(
+        self, tmp_path
+    ):
+        registry = ScanRegistry()
+        root = tmp_path / "out"
+        inside = self._live(registry, tmp_path, "inside", root / "projects" / "web")
+
+        assert registry.scan_writing_within(str(root)) == inside
+        assert registry.scan_writing_output(str(root)) is None
+        # A sibling folder under the same root shares nothing with it.
+        assert registry.scan_writing_within(str(root / "projects" / "api")) is None
+
+    def test_a_tree_containing_the_root_is_found(self, tmp_path):
+        registry = ScanRegistry()
+        root = tmp_path / "out"
+        above = self._live(registry, tmp_path, "above", root)
+
+        assert registry.scan_writing_within(str(root / "nested")) == above
+
+    def test_a_string_prefix_sibling_is_not_found(self, tmp_path):
+        """By path component, never by prefix: out-backup is not out."""
+        registry = ScanRegistry()
+        root = tmp_path / "out"
+        self._live(registry, tmp_path, "sibling", tmp_path / "out-backup")
+
+        assert registry.scan_writing_within(str(root)) is None
+        assert registry.scan_writing_within(str(tmp_path / "out-backup")) is not None
+
+
 class TestProgressOfASupersededScanReadsNoFiles:
     def test_a_later_scans_files_are_not_reported_as_the_old_scans(self, tmp_path):
         registry = ScanRegistry()

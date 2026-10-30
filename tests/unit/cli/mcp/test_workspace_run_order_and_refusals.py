@@ -181,7 +181,7 @@ class TestAnOutputDirectoryAnotherScanWritesIsRefused:
 
         with pytest.raises(MCPResourceError, match="being written by another scan"):
             workspace_module._refuse_outputs_another_scan_writes(
-                registry, plan, outputs
+                registry, plan, outputs, tmp_path / "out"
             )
 
     def test_a_finished_scan_on_it_does_not(self, tmp_path):
@@ -193,7 +193,9 @@ class TestAnOutputDirectoryAnotherScanWritesIsRefused:
         registry.update_scan_status(completed, MCScanStatus.COMPLETED)
         _registered(registry, tmp_path, tmp_path / "elsewhere", "elsewhere")
 
-        workspace_module._refuse_outputs_another_scan_writes(registry, plan, outputs)
+        workspace_module._refuse_outputs_another_scan_writes(
+            registry, plan, outputs, tmp_path / "out"
+        )
 
     def test_a_cancelled_entry_that_never_ran_does_not_refuse(self, tmp_path):
         """Red at the base: every CANCELLED entry blocked until the registry pruned it.
@@ -210,7 +212,9 @@ class TestAnOutputDirectoryAnotherScanWritesIsRefused:
         registry.update_scan_status(rolled_back, MCScanStatus.CANCELLED)
         assert registry.get_scan(rolled_back).has_runner is False
 
-        workspace_module._refuse_outputs_another_scan_writes(registry, plan, outputs)
+        workspace_module._refuse_outputs_another_scan_writes(
+            registry, plan, outputs, tmp_path / "out"
+        )
 
     def test_a_failed_entry_whose_runner_still_writes_refuses(self, tmp_path):
         """Red at the base: a FAILED entry was skipped whatever its runner state.
@@ -229,12 +233,92 @@ class TestAnOutputDirectoryAnotherScanWritesIsRefused:
 
         with pytest.raises(MCPResourceError, match="being written by another scan"):
             workspace_module._refuse_outputs_another_scan_writes(
-                registry, plan, outputs
+                registry, plan, outputs, tmp_path / "out"
             )
 
         # Once the runner has settled the directory, the same entry occupies nothing.
         entry.runner_done.set()
-        workspace_module._refuse_outputs_another_scan_writes(registry, plan, outputs)
+        workspace_module._refuse_outputs_another_scan_writes(
+            registry, plan, outputs, tmp_path / "out"
+        )
+
+
+class TestAnOutputRootAnotherScanWritesIsRefused:
+    """The output ROOT is asked about too, not only each project's own folder.
+
+    The unified results, the reports and the spool go into ``settings.output_dir``
+    itself, which no project folder is and no registry entry named, so two
+    workspace scans with different projects and one root passed the per-project
+    check and wrote beside each other, each run's cleanup removing the other's
+    results. The question is now asked of the root through
+    ``ScanRegistry.scan_writing_within``: a live scan whose output tree is the
+    root, lies inside it, or contains it refuses the workspace.
+    """
+
+    def test_a_live_scan_on_the_output_root_refuses_the_workspace(self, tmp_path):
+        """Red at the base: a scan writing the root itself was admitted beside this one."""
+        plan = _plan(tmp_path)
+        outputs = workspace_module._project_outputs(plan, _settings(tmp_path))
+        registry = ScanRegistry()
+        _registered(registry, tmp_path, tmp_path / "out", "root-writer")
+
+        with pytest.raises(
+            MCPResourceError, match="being written by another scan"
+        ) as refused:
+            workspace_module._refuse_outputs_another_scan_writes(
+                registry, plan, outputs, tmp_path / "out"
+            )
+        assert refused.value.context["output_directory"] == str(tmp_path / "out")
+
+    def test_another_workspaces_project_under_the_same_root_refuses(self, tmp_path):
+        """Red at the base: two workspaces, different projects, one root; neither
+        project folder matched, so both were admitted."""
+        plan = _plan(tmp_path)
+        outputs = workspace_module._project_outputs(plan, _settings(tmp_path))
+        registry = ScanRegistry()
+        _registered(
+            registry, tmp_path, tmp_path / "out" / "projects" / "web", "other-ws"
+        )
+
+        with pytest.raises(MCPResourceError, match="being written by another scan"):
+            workspace_module._refuse_outputs_another_scan_writes(
+                registry, plan, outputs, tmp_path / "out"
+            )
+
+    def test_a_live_scan_whose_output_tree_contains_the_root_refuses(self, tmp_path):
+        """A scan writing a directory above the root: its cleanup removes the
+        whole tree, this run's output with it."""
+        plan = _plan(tmp_path)
+        nested = ProjectScanSettings(
+            output_dir=tmp_path / "out" / "nested",
+            phases=("scan",),
+            max_parallel_projects=1,
+        )
+        outputs = workspace_module._project_outputs(plan, nested)
+        registry = ScanRegistry()
+        _registered(registry, tmp_path, tmp_path / "out", "above")
+
+        with pytest.raises(MCPResourceError, match="being written by another scan"):
+            workspace_module._refuse_outputs_another_scan_writes(
+                registry, plan, outputs, nested.output_dir
+            )
+
+    def test_a_sibling_tree_and_a_finished_scan_on_the_root_do_not_refuse(
+        self, tmp_path
+    ):
+        """Control: the relation is by path component, never string prefix
+        (``out-backup`` shares nothing with ``out``), and a completed scan with
+        no runner holds the root no more."""
+        plan = _plan(tmp_path)
+        outputs = workspace_module._project_outputs(plan, _settings(tmp_path))
+        registry = ScanRegistry()
+        _registered(registry, tmp_path, tmp_path / "out-backup", "sibling")
+        done = _registered(registry, tmp_path, tmp_path / "out", "done")
+        registry.update_scan_status(done, MCScanStatus.COMPLETED)
+
+        workspace_module._refuse_outputs_another_scan_writes(
+            registry, plan, outputs, tmp_path / "out"
+        )
 
 
 class TestTheClockStartsOnceTheSessionLockIsHeld:
