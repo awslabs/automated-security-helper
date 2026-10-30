@@ -351,6 +351,25 @@ def test_an_output_directory_that_is_the_source_under_another_spelling_is_refuse
     assert len(resolved_paths) == 2
 
 
+def test_a_volume_without_inodes_tells_no_directory_identity(tmp_path, monkeypatch):
+    """Where every entry reports st_ino 0, two different directories compare
+    equal by samestat; the identity comparison then says nothing."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    original = os.stat
+
+    def without_inodes(path, *args, **kwargs):
+        status = original(path, *args, **kwargs)
+        return os.stat_result((status.st_mode, 0, status.st_dev, *tuple(status)[3:]))
+
+    monkeypatch.setattr(os, "stat", without_inodes)
+
+    assert rac._is_at_or_above(first, second) is False
+    assert rac._is_at_or_above(first, first) is False
+
+
 def test_an_env_file_directory_reaching_the_source_under_another_name_is_refused(
     tmp_path, monkeypatch
 ):

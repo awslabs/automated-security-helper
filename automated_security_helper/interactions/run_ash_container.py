@@ -2460,20 +2460,25 @@ def _is_at_or_above(ancestor: Path | str, path: Path | str) -> bool:
     by name: a bind mount, or another spelling of the case on a case-insensitive
     volume, names the same directory under a path the real-path comparison does
     not match. ``path`` is walked as given, then as its real path and that path's
-    parents. A path that cannot be looked at matches nothing: the real-path
-    comparison beside this one still decides what it can.
+    parents. A path that cannot be looked at matches nothing, and so does one
+    whose volume reports no inode (``st_ino`` 0: some SMB and FUSE mounts, some
+    Windows drives), where every directory on the device would otherwise compare
+    equal: the real-path comparison beside this one still decides what it can.
     """
     try:
         wanted = os.stat(ancestor)
     except OSError:
         return False
+    if wanted.st_ino == 0:
+        return False
     real = Path(os.path.realpath(path))
     for candidate in (Path(path), real, *real.parents):
         try:
-            if os.path.samestat(os.stat(candidate), wanted):
-                return True
+            status = os.stat(candidate)
         except OSError:
             continue
+        if status.st_ino != 0 and os.path.samestat(status, wanted):
+            return True
     return False
 
 
