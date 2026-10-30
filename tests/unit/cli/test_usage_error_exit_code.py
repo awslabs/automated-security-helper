@@ -477,7 +477,11 @@ def test_an_unknown_plugin_type_is_shown_with_its_controls_escaped(
     assert result.exit_code == BAD_SELECTION_EXIT, (
         f"exited {result.exit_code}: {result.output!r}"
     )
-    assert "\x1b" not in result.output, repr(result.output)
+    # The operator's control is shown as text, never written through: the raw
+    # sequence is absent and its escape is present. Not "no escape anywhere":
+    # the console's own styling carries escapes wherever the environment turns
+    # color on (the hosted Windows runners do), and that is not the operator's.
+    assert "x\x1b[31mred" not in result.output, repr(result.output)
     assert "x\\x1b[31mred" in result.output, repr(result.output)
     assert started_processes == [], "the install ran a process"
 
