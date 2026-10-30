@@ -7,28 +7,48 @@ template regeneration to ensure all version references are updated.
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
 from typing import Tuple
+
+from packaging.version import InvalidVersion, Version
 
 # Add the project root to the path so we can import our version management
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from automated_security_helper.utils.version_management import (
     get_version,
+    get_version_from_pyproject,
     update_version_in_pyproject,
 )
 from scripts.version_template_manager import VersionTemplateManager
 
 
-def parse_version(version: str) -> Tuple[int, int, int]:
-    """Parse a semantic version string into major, minor, patch components."""
-    pattern = r"^(\d+)\.(\d+)\.(\d+)(?:-.*)?$"
-    match = re.match(pattern, version)
-    if not match:
+def _read_version(version: str) -> Version:
+    """``version`` read as PEP 440, limited to the shape ASH releases use.
+
+    The release segment has exactly three numbers and there is no epoch. The
+    grammar is PEP 440's, the one pip, hatch and importlib.metadata share, so a
+    version read back from the installed distribution (3.8.0rc1, 3.8.0.dev1) parses
+    and a hyphen followed by arbitrary text does not.
+    """
+    try:
+        parsed = Version(version)
+    except InvalidVersion:
+        raise ValueError(f"Invalid version format: {version}") from None
+    if parsed.epoch or len(parsed.release) != 3:
         raise ValueError(f"Invalid version format: {version}")
-    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+    return parsed
+
+
+def parse_version(version: str) -> Tuple[int, int, int]:
+    """Parse a PEP 440 version string into major, minor, patch components.
+
+    Only the release numbers are returned; a pre-release, post-release or
+    development part is not.
+    """
+    major, minor, patch = _read_version(version).release
+    return major, minor, patch
 
 
 def format_version(major: int, minor: int, patch: int) -> str:
@@ -65,12 +85,18 @@ def bump_version(current_version: str, bump_type: str) -> str:
 
 
 def validate_version(version: str) -> bool:
-    """Validate a version string format."""
+    """Whether ``version`` is a version ``set`` may write into pyproject.toml.
+
+    It must be PEP 440 as three release numbers, spelled the way pip prints it
+    (3.8.0rc1, not 3.8.0-rc1), with no local part. What is written is then what
+    importlib.metadata reports for the built distribution, and nothing a TOML
+    string cannot hold (a quote, a newline) gets through.
+    """
     try:
-        parse_version(version)
-        return True
+        parsed = _read_version(version)
     except ValueError:
         return False
+    return parsed.local is None and str(parsed) == version
 
 
 class VersionBumper:
@@ -100,7 +126,11 @@ class VersionBumper:
             True if successful
         """
         if not validate_version(new_version):
-            print(f"Error: Invalid version format: {new_version}")
+            print(
+                f"Error: Invalid version format: {new_version} (expected PEP 440 "
+                "with three release numbers, spelled as pip prints it: 3.1.0, "
+                "3.1.0rc1, 3.1.0.post1 or 3.1.0.dev1)"
+            )
             return False
 
         current_version = self.get_current_version()
@@ -159,29 +189,85 @@ class VersionBumper:
             print(f"Error: {e}")
             return False
 
+        current = Version(current_version)
+        if current.is_prerelease or current.is_postrelease or current.is_devrelease:
+            # Only the release numbers are counted; say so instead of dropping
+            # the pre-release, post-release or development part silently.
+            print(
+                f"Note: {current_version} is not a final release. The {bump_type} "
+                "bump counts from its release numbers alone, so that part is "
+                f"dropped and {new_version} follows."
+            )
+
         return self.set_version(new_version)
 
     def validate_consistency(self) -> bool:
         """
         Validate that all version references are consistent.
 
+        Three things are compared, none of them with the installed distribution:
+        ``[project] version`` with ``[tool.commitizen] version`` in the
+        pyproject.toml at the project root, and each generated page with its
+        template rendered for that version (what ``set`` would write now).
+
         Returns:
             True if all versions are consistent
         """
         print("Validating version consistency...")
 
-        current_version = self.get_current_version()
+        # The pyproject.toml itself, not get_current_version(): that falls back to
+        # the installed metadata when the file is missing or is another project's,
+        # and the label below would then name a file nothing was read from.
+        current_version = get_version_from_pyproject(self.project_root)
+        if current_version is None:
+            print(
+                "Error: no pyproject.toml of automated-security-helper with a "
+                f"version at {self.project_root}"
+            )
+            return False
         print(f"Current version from pyproject.toml: {current_version}")
 
-        # Check if templates need regeneration
+        consistent = True
+
+        try:
+            released = self.template_manager.packaged_release()
+        except KeyError:
+            released = None  # no [tool.commitizen] version to compare
+        if released is not None and released != current_version:
+            print(
+                f"Error: [tool.commitizen] version is {released} but "
+                f"[project] version is {current_version}"
+            )
+            consistent = False
+
         templates = self.template_manager.list_templates()
         if not templates:
             print("Warning: No template files found. Run 'convert' first.")
             return False
 
-        # This is a basic check - in a more sophisticated implementation,
-        # you might actually parse all files and verify consistency
+        suffix = self.template_manager.template_suffix
+        for template in templates:
+            target = template.parent / template.name[: -len(suffix)]
+            expected = self.template_manager.render(
+                template.read_text(encoding="utf-8"), current_version
+            )
+            try:
+                actual = target.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                print(f"Error: {target} does not exist; generate it from {template}")
+                consistent = False
+                continue
+            if actual != expected:
+                print(
+                    f"Error: {target} is not its template rendered for "
+                    f"{current_version}; run 'set {current_version}' to regenerate it"
+                )
+                consistent = False
+
         print(f"Found {len(templates)} template files")
+        if not consistent:
+            print("Version consistency validation failed")
+            return False
         print("Version consistency validation passed")
 
         return True
@@ -206,7 +292,9 @@ def main():
 
     # Set version command
     set_parser = subparsers.add_parser("set", help="Set specific version")
-    set_parser.add_argument("version", help="Version to set (e.g., 3.1.0)")
+    set_parser.add_argument(
+        "version", help="Version to set, PEP 440 (e.g., 3.1.0 or 3.1.0rc1)"
+    )
 
     # Bump version commands
     bump_parser = subparsers.add_parser("bump", help="Bump version")
