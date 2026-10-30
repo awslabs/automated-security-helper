@@ -681,6 +681,9 @@ class _GzipMembersStream(io.RawIOBase):
     raises), and zlib checks each member's CRC and length as it ends. At most
     _GZIP_READ_CHUNK compressed and _COPY_CHUNK decompressed bytes are held at a
     time. Seekable as GzipFile is: forward by reading, backward by starting over.
+    The bytes that ended the stream are counted (``trailing``: None until the end
+    is reached, 0 for a clean end): nothing reads them, so the caller records
+    them and the archive is not recorded as extracted whole.
     """
 
     def __init__(self, raw: BinaryIO) -> None:
@@ -695,6 +698,7 @@ class _GzipMembersStream(io.RawIOBase):
         self._pending = b""
         self._pos = 0
         self._ended = False
+        self.trailing: Optional[int] = None
 
     def readable(self) -> bool:
         return True
@@ -745,8 +749,16 @@ class _GzipMembersStream(io.RawIOBase):
             rest += self._raw.read(_GZIP_READ_CHUNK)
         if rest[:2] != b"\x1f\x8b":
             # The gzip data ends here: nothing follows, or bytes that are not
-            # another member's, which gzip(1) ignores too.
+            # another member's, which gzip(1) ignores too. Counted, with what
+            # is still unread behind them, for the caller's record.
             self._ended = True
+            if rest:
+                here = self._raw.tell()
+                end = self._raw.seek(0, io.SEEK_END)
+                self._raw.seek(here)
+                self.trailing = len(rest) + max(end - here, 0)
+            else:
+                self.trailing = 0
             return False
         self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
         self._pending = self._decompressor.decompress(rest, _COPY_CHUNK)
@@ -998,13 +1010,16 @@ def _tarfile_sizes(info: tarfile.TarInfo) -> bool:
 def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
     """Whether a gzip file's content starts with a tar header.
 
-    Reads one block of the decompressed content. A damaged stream raises, and the
-    archive is then refused as unreadable. Content that starts with a block of
-    zeros is one file of zeros, not a tarball (``empty_is_tar=False``): the
-    decision that sends a ``.gz`` to the plain-gzip path.
+    Reads one block of the decompressed content, through the same stream the
+    extraction reads (_GzipMembersStream), so a gzip of one short file followed
+    by other bytes is read as that file here as it is there, where GzipFile
+    failed it. A damaged stream raises, and the archive is then refused as
+    unreadable. Content that starts with a block of zeros is one file of zeros,
+    not a tarball (``empty_is_tar=False``): the decision that sends a ``.gz``
+    to the plain-gzip path.
     """
     handle.seek(0)
-    with gzip.GzipFile(fileobj=handle, mode="rb") as stream:
+    with _GzipMembersStream(handle) as stream:
         block = stream.read(tarfile.BLOCKSIZE)
     handle.seek(0)
     return _is_tar_header(block, empty_is_tar=False)
@@ -1284,30 +1299,35 @@ def _copy_at_most(source: BinaryIO, out: BinaryIO, limit: int) -> None:
 
 def _decompress_plain_gzip(
     handle: BinaryIO, destination: Path, name: str, budget: "_ExtractionBudget"
-) -> None:
-    """Decompress a single-file gzip to ``destination`` within ``budget``.
+) -> int:
+    """Decompress a single-file gzip to ``destination`` within ``budget``, and
+    return how many bytes after its gzip data were not read (0 for none).
 
     Its size is known only by reading it (the size in the gzip trailer is the
     writer's claim, modulo 4 GiB), so at most ``budget.room()`` plus one byte is
     written and then admitted, which refuses it, naming the limit, when it is over.
-    The file is created with fs_guard.open_for_write, which below the output
-    directory follows no link at any component of its path, and elsewhere none at
-    its name.
+    Read through the stream the tar path reads (_GzipMembersStream), so bytes
+    after the gzip data end the file instead of failing it, as they do for a
+    .tar.gz, and are counted for the caller to record. The file is created with
+    fs_guard.open_for_write, which below the output directory follows no link at
+    any component of its path, and elsewhere none at its name.
     """
     from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
     handle.seek(0)
     room = budget.room()
     with (
-        gzip.GzipFile(fileobj=handle, mode="rb") as source,
+        _GzipMembersStream(handle) as source,
         open_for_write(destination, binary=True, mode=0o644) as out,
     ):
         # A copy that stops short of room + 1 bytes stopped because the stream
-        # ended, and GzipFile checks the CRC and length before it reports the end,
-        # so a damaged stream or a bad CRC has raised by then.
+        # ended, and zlib checks the CRC and length before the stream reports
+        # the end, so a damaged stream or a bad CRC has raised by then.
         _copy_at_most(source, out, room + 1)
         written = out.tell()
+        trailing = source.trailing or 0
     budget.admit(name, written)
+    return trailing
 
 
 def _copy_tar_members(
@@ -1912,6 +1932,24 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         else:
             self.record_refused_input(TreeInputRefused(archive, reason), member=member)
 
+    def _record_trailing_bytes(self, archive: str, trailing: int) -> None:
+        """Record the ``trailing`` bytes after ``archive``'s gzip data: not another
+        gzip member, so the stream ended there (as gzip(1) does, "trailing garbage
+        ignored") and nothing read them. Dropping them silently counted the
+        archive as extracted whole, so a consumer that copies the source whole
+        left it out, and a reader of the results saw nothing of the bytes. A
+        refusal, so the results name the count and archives_extracted_whole
+        leaves the archive out; without a limit, so the completeness gate is not
+        failed by it: every member the gzip data held was extracted.
+        """
+        self.record_refused_input(
+            TreeInputRefused(
+                archive,
+                f"{trailing} bytes after the end of its gzip data are not another "
+                "gzip member and were not read, so no scanner reads them",
+            )
+        )
+
     def _record_extracted_in_part(
         self,
         archive: str,
@@ -2385,9 +2423,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             continue
                         target_path.mkdir()
                         created_target = target_path
-                        _decompress_plain_gzip(
+                        trailing = _decompress_plain_gzip(
                             archive_handle, target_path / plain_gzip, plain_gzip, budget
                         )
+                        if trailing:
+                            self._record_trailing_bytes(archive_display, trailing)
                         results.append(target_path)
                         sources[target_path] = archive_display
                         scan_budget.commit(budget)
@@ -2492,6 +2532,12 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 )
                             else:
                                 _copy_tar_members(tar_ref, safe_members, target_path)
+                        # Bytes after a .tar.gz's gzip data ended the stream
+                        # (_GzipMembersStream.trailing); recorded, so the archive is
+                        # not read as extracted whole with bytes nothing read.
+                        trailing = getattr(tar_stream._raw, "trailing", None) or 0
+                        if trailing:
+                            self._record_trailing_bytes(archive_display, trailing)
                         if unreadable or stopped or ended:
                             # Nothing is charged after a listing stops, and a spent
                             # budget stops a listing well before its own limit, so

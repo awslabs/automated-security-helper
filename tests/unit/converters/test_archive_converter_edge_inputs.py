@@ -242,6 +242,10 @@ def test_a_tar_whose_first_member_spells_the_whole_bzip2_head_is_a_tar(
 def test_a_tar_gz_followed_by_other_bytes_is_extracted(
     test_plugin_context, monkeypatch
 ):
+    """Every member is extracted, and the bytes after the gzip data, which nothing
+    reads, are recorded by their count: a refusal without a limit, so the archive
+    is not counted as extracted whole and the gate is not failed. They used to be
+    dropped with nothing recorded, and the archive counted whole."""
     raw = tar_bytes({"a.py": "x = 1\n", "b.py": "y = 2\n"}, gz=True) + b"TRAILER\n"
 
     converter, results = _convert_one(
@@ -251,7 +255,49 @@ def test_a_tar_gz_followed_by_other_bytes_is_extracted(
     (extracted,) = results
     assert sorted(p.name for p in extracted.iterdir()) == ["a.py", "b.py"]
     assert converter.failed_inputs == []
+    (refused,) = converter.refused_inputs
+    assert (refused.path, refused.member, refused.limit) == ("src.tar.gz", None, None)
+    assert "8 bytes after the end of its gzip data" in refused.reason
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
+
+
+def test_a_tar_gz_with_nothing_after_its_data_is_extracted_whole(
+    test_plugin_context, monkeypatch
+):
+    """The control: a clean gzip ends with its last member and is recorded whole."""
+    raw = tar_bytes({"a.py": "x = 1\n", "b.py": "y = 2\n"}, gz=True)
+
+    converter, results = _convert_one(
+        test_plugin_context, monkeypatch, "src.tar.gz", raw
+    )
+
+    (extracted,) = results
+    assert sorted(p.name for p in extracted.iterdir()) == ["a.py", "b.py"]
     assert converter.refused_inputs == []
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == {
+        "src.tar.gz"
+    }
+
+
+def test_a_plain_gzip_followed_by_other_bytes_is_decompressed(
+    test_plugin_context, monkeypatch
+):
+    """A .gz of one file took the GzipFile path, which failed the whole file on the
+    bytes after its data (BadGzipFile) where the .tar.gz path read past them: the
+    one stream serves both now, and the bytes are recorded the same way."""
+    import gzip
+
+    raw = gzip.compress(b'{"x": 1}\n') + b"TRAILER\n"
+
+    converter, results = _convert_one(
+        test_plugin_context, monkeypatch, "data.json.gz", raw
+    )
+
+    (extracted,) = results
+    assert (extracted / "data.json").read_bytes() == b'{"x": 1}\n'
+    assert converter.failed_inputs == []
+    (refused,) = converter.refused_inputs
+    assert "8 bytes after the end of its gzip data" in refused.reason
 
 
 def test_a_tar_gz_cut_short_still_fails(test_plugin_context, monkeypatch):
