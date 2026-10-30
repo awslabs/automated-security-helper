@@ -11,14 +11,22 @@ not declare (a marker under it is never read) or missing a field it requires.
 pydantic refuses such an arm and its smart-mode union hands the value to a
 sibling, so the sibling converted the env-read text and printed it in clear
 while the walk had read it as kept.
+
+The arm is validated as pydantic validates it: under the config in force around
+the slot and with the load's context. Validated under the default config, a
+TypedDict arm whose keys the holder's ``alias_generator`` names was refused for a
+key it does read, an arm under the holder's ``extra="forbid"`` vouched for a
+value pydantic hands to a converting sibling, and a section arm validated
+without the ``strict_file_load`` context accepted a reference the load refuses.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import ClassVar, Dict, FrozenSet, List, Optional, Tuple, Union
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
+from typing_extensions import TypedDict
 
 from automated_security_helper.utils.redacted_model import (
     RedactedSection,
@@ -31,9 +39,9 @@ CANARY = "424242"
 VARIABLE = "ASH_ARM_CANARY"
 
 
-def _refusal_text(model_type, payload) -> str:
+def _refusal_text(model_type, payload, context=None) -> str:
     with pytest.raises(ValidationError) as refused:
-        model_type.model_validate(payload)
+        model_type.model_validate(payload, context=context)
     return " ".join(
         f"{error['loc']}: {error['msg']}" for error in refused.value.errors()
     )
@@ -160,3 +168,84 @@ def test_an_undeclared_marker_key_with_no_converting_sibling_is_downcast():
     )
     assert section.value.__pydantic_extra__ == {"other": CANARY}
     assert type(section.value.__pydantic_extra__["other"]) is str
+
+
+class _Opts(TypedDict):
+    """No config of its own: pydantic builds it under the holder's."""
+
+    max_count: int
+    label: str
+
+
+def test_a_typed_dict_arm_under_the_holders_alias_generator_still_admits():
+    """The holder's alias_generator names the TypedDict's keys, so pydantic
+    accepts the camel-cased value at the TypedDict arm, where the reference
+    sits at a str field; the arm vouches, and the Dict[str, int] sibling that
+    would type the reference is never asked. Validated under the default
+    config, the arm read its key as missing and the sibling refused a config
+    pydantic accepts."""
+
+    class Section(RedactedSection):
+        model_config = ConfigDict(alias_generator=str.upper)
+
+        value: Optional[Union[_Opts, Dict[str, int]]] = None
+
+    section = Section.model_validate(
+        {"VALUE": {"MAX_COUNT": 1, "LABEL": env_resolved_scalar(CANARY, VARIABLE)}}
+    )
+    assert section.value == {"max_count": 1, "label": CANARY}
+    assert type(section.value["label"]) is str
+
+
+def test_a_typed_dict_arm_under_the_holders_extra_forbid_does_not_vouch():
+    """The holder forbids undeclared keys, and pydantic applies that to the
+    TypedDict arm too, so the arm refuses the value for its extra key and the
+    union hands the value to Dict[str, int], which types the reference: it is
+    refused by name. Validated under the default config, the arm ignored the
+    extra key, vouched for the value, and the sibling typed the text
+    silently."""
+
+    class Section(RedactedSection):
+        model_config = ConfigDict(extra="forbid")
+
+        value: Optional[Union[_Opts, Dict[str, int]]] = None
+
+    text = _refusal_text(
+        Section,
+        {
+            "value": {
+                "max_count": 1,
+                "label": env_resolved_scalar(CANARY, VARIABLE),
+                "note": 2,
+            }
+        },
+    )
+    _assert_named_not_echoed(text, "value")
+
+
+class _Opted(RedactedSection):
+    """A section that opts a typed field into keeping a reference on the
+    plugin route; a config-file load refuses the reference there by name."""
+
+    _env_scalar_typed_fields: ClassVar[FrozenSet[str]] = frozenset({"scan_timeout"})
+
+    scan_timeout: int = 0
+
+
+def test_a_section_arm_is_validated_with_the_loads_context():
+    """Under the config-file context the section arm refuses the reference at
+    its opted field, so it cannot vouch for the value, and the Dict[str, int]
+    sibling that would type the reference refuses it by name. Validated
+    without the context, the arm accepted the reference (the plugin route
+    keeps it) and vouched, and the real load, which refuses the arm, handed
+    the text to the sibling."""
+
+    class Section(RedactedSection):
+        value: Optional[Union[_Opted, Dict[str, int]]] = None
+
+    text = _refusal_text(
+        Section,
+        {"value": {"scan_timeout": env_resolved_scalar(CANARY, VARIABLE)}},
+        context={"strict_file_load": True},
+    )
+    _assert_named_not_echoed(text, "value")

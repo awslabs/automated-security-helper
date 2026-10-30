@@ -131,6 +131,33 @@ def test_an_enum_member_text_an_earlier_converting_arm_takes_is_refused():
     assert "0080" not in text.replace("port", ""), text
 
 
+def test_an_enum_member_text_with_no_earlier_converting_arm_is_admitted():
+    """The must-not-flag control for the order rule: the Enum arm comes first,
+    so no converting arm takes the text ahead of it, and the member spells the
+    text. A check that read every sibling instead of the earlier ones would
+    refuse this."""
+
+    class Section(RedactedSection):
+        port: Optional[Union[_Port, int]] = None
+
+    section = Section.model_validate({"port": env_resolved_scalar("0080", VARIABLE)})
+    assert section.port is _Port.DEFAULT
+
+
+def test_a_constrained_str_match_wins_over_a_converting_arm_before_it():
+    """The must-not-flag control for the other half of the rule: a constrained
+    str's match is exact and wins whatever the order, so text the int arm
+    before it would also take is admitted and kept whole. The order check
+    applied to a constrained str would refuse this."""
+
+    class Section(RedactedSection):
+        port: Optional[Union[int, Annotated[str, Field(pattern=r"^\d+$")]]] = None
+
+    section = Section.model_validate({"port": env_resolved_scalar("0080", VARIABLE)})
+    assert section.port == "0080"
+    assert type(section.port) is str
+
+
 def test_an_unconstrained_annotated_str_arm_beside_a_converting_arm_admits():
     """A Field with no constraint of its own (a description) refuses no text,
     so the str arm keeps every reference, as a bare str arm does."""

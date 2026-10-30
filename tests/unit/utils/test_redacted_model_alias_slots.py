@@ -151,3 +151,61 @@ def test_a_stdlib_dataclass_field_by_its_own_name_is_still_a_typed_slot():
         Section, {"limits": {"limit": env_resolved_scalar(CANARY, VARIABLE)}}
     )
     _assert_named_not_echoed(text, "limits")
+
+
+@dataclasses.dataclass
+class _Defaulted:
+    """The alias is given as the field's default, the other spelling pydantic
+    reads (``collect_dataclass_fields`` takes a ``Field(...)`` default as the
+    field's info); the Field carries a default of its own, so the field is
+    optional."""
+
+    limit: int = Field(0, alias="max")
+
+
+def test_a_stdlib_dataclass_field_default_alias_is_a_typed_slot():
+    """Read off the Annotated metadata only, the alias was missed: the key
+    landed in the extras branch, no extras type refused it, and the reference
+    was downcast and typed to int silently."""
+
+    class Section(RedactedSection):
+        limits: Optional[_Defaulted] = None
+
+    text = _refusal_text(
+        Section, {"limits": {"max": env_resolved_scalar(CANARY, VARIABLE)}}
+    )
+    _assert_named_not_echoed(text, "limits")
+
+
+def test_pydantic_reads_the_annotated_alias_of_a_stdlib_dataclass():
+    """The positive control for the refusals above: pydantic does read the
+    keys the walk refuses, so a refused key is one a value would land under.
+    A pydantic release that stopped reading one would show here."""
+
+    class Section(RedactedSection):
+        limits: Optional[_Limits] = None
+
+    assert Section.model_validate({"limits": {"max": "5"}}).limits.limit == 5
+
+
+def test_pydantic_reads_the_holders_generated_alias_of_a_stdlib_dataclass():
+    class Section(RedactedSection):
+        model_config = ConfigDict(alias_generator=str.upper)
+
+        limits: Optional[_Plain] = None
+
+    assert Section.model_validate({"LIMITS": {"LIMIT": "5"}}).limits.limit == 5
+
+
+def test_pydantic_reads_the_own_config_generated_alias_of_a_stdlib_dataclass():
+    class Section(RedactedSection):
+        limits: Optional[_OwnConfig] = None
+
+    assert Section.model_validate({"limits": {"LIMIT": "5"}}).limits.limit == 5
+
+
+def test_pydantic_reads_the_field_default_alias_of_a_stdlib_dataclass():
+    class Section(RedactedSection):
+        limits: Optional[_Defaulted] = None
+
+    assert Section.model_validate({"limits": {"max": "5"}}).limits.limit == 5
