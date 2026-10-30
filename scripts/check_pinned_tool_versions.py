@@ -48,8 +48,8 @@ next image build then fails with ``Version '...' for '...' was not found``. This
 script reads those pins from the Dockerfile and looks each one up in the package
 indexes apt reads in the image, for amd64 and arm64: the base image's Debian suite
 with its ``-updates`` and ``-security`` suites (the codename comes from the
-``BASE_IMAGE`` tag), and the NodeSource repository for the ``NODE_MAJOR`` the
-Dockerfile configures. Each pin is reported as
+``BASE_IMAGE`` tag), and the NodeSource repository for the major the Dockerfile
+configures, in ``NODE_MAJOR`` or in the ``node_<major>.x`` URL. Each pin is reported as
 
 * ``current``: the version apt would choose today;
 * ``outdated``: still installable, but a newer version is published, typically a
@@ -64,8 +64,9 @@ form array or as a here-document, and whether spelled ``apt-get`` or ``apt``. Th
 of a here-document that a command writes to a file (``cat > setup.sh <<'EOF'``) is
 that file's content and is not read. An option that takes its value as a separate
 word (``-t suite``, ``-o Name=value``) and a redirection are not packages. A
-Dockerfile that configures NodeSource without a ``NODE_MAJOR`` this script can read is
-refused too, because the nodejs pin would be looked up in Debian's own nodejs.
+Dockerfile that configures NodeSource without a major this script can read, or with
+two different majors, is refused too, because the nodejs pin would be looked up in
+Debian's own nodejs or in the wrong NodeSource index.
 
 What was rejected
 -----------------
@@ -1293,6 +1294,10 @@ _IMAGE_VARIANTS = frozenset({"slim", "alpine"})
 # The NodeSource major the Dockerfile sets: NODE_MAJOR=22, NODE_MAJOR="22" or
 # ENV NODE_MAJOR 22.
 _NODE_MAJOR = re.compile(r"\bNODE_MAJOR(?:=|\s+)[\"']?(?P<major>\d+)\b")
+# The same major written into the repository URL apt reads, which is where apt gets it.
+_NODESOURCE_URL_MAJOR = re.compile(
+    r"deb\.nodesource\.com/node_(?P<major>\d+)\.x(?![\w.])"
+)
 # Docker reads instruction names without regard to case.
 _RUN_INSTRUCTION = re.compile(r"^RUN\s", re.IGNORECASE)
 # A here-document marker on a RUN line: <<EOF, <<-EOF, <<"EOF". Not a here-string (<<<),
@@ -1588,13 +1593,14 @@ def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
     The Debian codename is the last word among the ``-`` parts of the ``BASE_IMAGE``
     default's tag that is not an image variant (``python:3.12-slim-bookworm``,
     ``debian:bookworm-slim``, ``debian:bookworm-20241016-slim``), with any
-    ``@sha256:...`` digest left out. The NodeSource repository is the one
-    ``NODE_MAJOR`` names, so a base-image or Node bump moves the lookup with it.
+    ``@sha256:...`` digest left out. The NodeSource repository is the major that
+    ``NODE_MAJOR`` or a ``node_<major>.x`` repository URL names, so a base-image or
+    Node bump moves the lookup with it.
 
     Raises:
         PinEnumerationError: when the tag holds no codename, when the Dockerfile
-            configures NodeSource without a ``NODE_MAJOR`` this can read, or when it
-            sets ``NODE_MAJOR`` to more than one value. The nodejs pin would
+            configures NodeSource without a major this can read in either spelling, or
+            when the two name different majors. The nodejs pin would
             otherwise be looked up in Debian's own nodejs, reported unavailable, and
             the report would name an older version to pin.
     """
@@ -1620,17 +1626,24 @@ def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
     code = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
-    majors = sorted({m.group("major") for m in _NODE_MAJOR.finditer(code)})
+    # The major apt reads is the one in the repository URL, and a Dockerfile usually
+    # builds that URL from NODE_MAJOR. Either spelling names it; two values disagree.
+    majors = sorted(
+        {m.group("major") for m in _NODE_MAJOR.finditer(code)}
+        | {m.group("major") for m in _NODESOURCE_URL_MAJOR.finditer(code)}
+    )
     if len(majors) > 1:
         raise PinEnumerationError(
-            f"{dockerfile.name} sets NODE_MAJOR to {', '.join(majors)}; the NodeSource "
-            "index to look the nodejs pin up in is ambiguous."
+            f"{dockerfile.name} names NodeSource major {', '.join(majors)} (in "
+            "NODE_MAJOR or in the repository URL); the NodeSource index to look the "
+            "nodejs pin up in is ambiguous."
         )
     if not majors and "deb.nodesource.com" in code:
         raise PinEnumerationError(
-            f"{dockerfile.name} configures the NodeSource repository, but no "
-            "NODE_MAJOR=<digits> (or ENV NODE_MAJOR <digits>) names its major "
-            "version, so the nodejs pin cannot be looked up in the right index."
+            f"{dockerfile.name} configures the NodeSource repository, but neither "
+            "NODE_MAJOR=<digits> (or ENV NODE_MAJOR <digits>) nor a node_<digits>.x "
+            "URL names its major version, so the nodejs pin cannot be looked up in "
+            "the right index."
         )
     if majors:
         major = majors[0]
