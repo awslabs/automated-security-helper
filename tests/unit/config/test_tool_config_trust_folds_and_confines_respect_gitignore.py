@@ -203,7 +203,12 @@ def test_the_repositorys_spelling_of_a_plugin_section_replays_onto_the_trusted_b
     ``MyPluginScanner``, the operator's file ``my-plugin-scanner``, and the
     override is typed the way the scan's own apply demands (the repository's).
     The confinement's replay onto the trusted base folds it onto the operator's
-    key instead of refusing it, so the scan resolves and the override lands."""
+    key instead of refusing it, so the scan resolves and the override lands.
+
+    The override sets ``tool_version``, which the confinement replaces with the
+    trusted base's: the final pin is the override's only when the replay folded
+    it onto the operator's key, where a raw replay refused it or left the
+    operator's own pin to win."""
     checkout = _checkout(
         tmp_path,
         "project_name: repo\nscanners:\n  MyPluginScanner:\n    options:\n"
@@ -212,15 +217,16 @@ def test_the_repositorys_spelling_of_a_plugin_section_replays_onto_the_trusted_b
     operator = tmp_path / "operator.yaml"
     operator.write_text(
         "project_name: op\nscanners:\n  my-plugin-scanner:\n    options:\n"
-        "      timeout: 1\n",
+        '      tool_version: "==1.2.3"\n',
         encoding="utf-8",
     )
 
     config = resolve_config(
         source_dir=checkout,
         trusted_config_path=operator,
-        config_overrides=["scanners.MyPluginScanner.options.timeout=2"],
+        config_overrides=["scanners.MyPluginScanner.options.tool_version===2.0.0"],
     )
 
     extra = config.scanners.model_extra or {}
-    assert extra["MyPluginScanner"]["options"]["timeout"] == 2
+    assert extra["MyPluginScanner"]["options"]["tool_version"] == "==2.0.0"
+    assert _pin_of(config) == "==2.0.0"

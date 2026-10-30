@@ -45,6 +45,10 @@ def _resolution(tmp_path: Path, repo_text: str, operator_text: str, override: st
 
 
 def test_the_repositorys_spelling_of_a_plugin_reporter_section_replays(tmp_path):
+    """The scan's own apply lands the override on the repository's key (the
+    control); the confinement's replay folds it onto the operator's key in the
+    trusted base it records (``_trusted_reporter_base``), which is what the fold
+    changes: a raw replay refused the repository's spelling there."""
     config = _resolution(
         tmp_path,
         "project_name: repo\nreporters:\n  MyPluginReporter:\n    enabled: true\n",
@@ -54,3 +58,6 @@ def test_the_repositorys_spelling_of_a_plugin_reporter_section_replays(tmp_path)
 
     extra = config.reporters.model_extra or {}
     assert extra["MyPluginReporter"]["enabled"] is False
+    trusted = config._trusted_reporter_base.reporters.model_extra or {}
+    assert trusted["my-plugin-reporter"]["enabled"] is False, trusted
+    assert "MyPluginReporter" not in trusted, trusted
