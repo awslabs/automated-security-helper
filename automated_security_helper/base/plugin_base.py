@@ -711,6 +711,25 @@ def worse_exit_code(current: int | None, new: int) -> int:
     return max(current if current is not None else 0, new)
 
 
+def _folded_exit_code(plugin: Any, current: int | None, new: int) -> int:
+    """*current* and *new* folded by the plugin's own ranking, ``_worse_exit_code``.
+
+    The hook is read through ``getattr``, like the accumulator's other helpers:
+    a host that carries only the accumulator fields has none, and an override
+    that raises or answers something that is no exit code must not lose the
+    run's code. Both get :func:`worse_exit_code`, the default ranking.
+    """
+    rank = getattr(plugin, "_worse_exit_code", None)
+    if callable(rank):
+        try:
+            ranked = rank(current, new)
+        except Exception:  # noqa: BLE001 -- an overridable hook
+            ranked = None
+        if is_exit_code(ranked):
+            return ranked
+    return worse_exit_code(current, new)
+
+
 def _response_text(response: Dict, keys: Tuple[str, ...], default: str) -> str:
     """The first readable, non-empty value under ``keys``, as text, or ``default``.
 
@@ -1209,6 +1228,16 @@ class PluginBase(UVToolMixin, BaseModel):
             seen for seen in self._processed_responses if seen is not response
         ]
 
+    def _worse_exit_code(self, current: int | None, new: int) -> int:
+        """The worse of two runs' exit codes, for the accumulated ``exit_code``.
+
+        A hook: the accumulator folds every run's code through it. The default
+        is :func:`worse_exit_code`, the larger code. A plugin that knows which
+        codes it accepts overrides it to rank by that, since the larger code
+        is not always the worse one (``ScannerPluginBase`` does).
+        """
+        return worse_exit_code(current, new)
+
     def _process_command_response(self, response: dict) -> None:
         """Accumulate stdout, stderr, and exit code from a subprocess response.
 
@@ -1381,7 +1410,7 @@ class PluginBase(UVToolMixin, BaseModel):
             )
             if ending is not None:
                 self._scan_kept_flag = ("signaled", ending[1])
-        self.exit_code = worse_exit_code(self.exit_code, new_code)
+        self.exit_code = _folded_exit_code(self, self.exit_code, new_code)
 
     @property
     def scan_timed_out_after(self) -> float | None:
@@ -2044,8 +2073,8 @@ class PluginBase(UVToolMixin, BaseModel):
                     self._process_command_response(spawn_failure)
                 except Exception as again:  # noqa: BLE001 -- see above
                     self._forget_processed(spawn_failure)
-                    self.exit_code = worse_exit_code(
-                        self.exit_code, SPAWN_FAILURE_RETURNCODE
+                    self.exit_code = _folded_exit_code(
+                        self, self.exit_code, SPAWN_FAILURE_RETURNCODE
                     )
                     spawn_failure["error"] = (
                         f"{spawn_failure['error']}; "
@@ -2110,7 +2139,7 @@ class PluginBase(UVToolMixin, BaseModel):
                 # and False then recorded as an accepted-looking 0.
                 returncode = flagged_returncode(post_run)
             if is_exit_code(returncode):
-                self.exit_code = worse_exit_code(self.exit_code, returncode)
+                self.exit_code = _folded_exit_code(self, self.exit_code, returncode)
             # Recorded by the flag the response keeps, so the scan is graded by
             # it. Each recorder runs at most once for a response, the ones the
             # raise skipped run now, and under guard a recorder that raises again

@@ -9,6 +9,7 @@ from automated_security_helper.base.plugin_base import (
     PluginBase,
     read_log_bounded,
     shown_excerpt,
+    worse_exit_code,
 )
 from automated_security_helper.base.plugin_config import (
     PluginConfigBase,
@@ -1022,6 +1023,31 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if self.exit_code == SPAWN_FAILURE_RETURNCODE:
             return False
         return self.exit_code in success_codes
+
+    def _worse_exit_code(self, current: int | None, new: int) -> int:
+        """The worse of two runs' exit codes, by this scanner's accepted set.
+
+        The base keeps the larger code, which is right only while the accepted
+        codes are the small ones: for a set such as grype's ``{0, 2}`` an error
+        code of 1 from one run was hidden behind an accepted 2 from another,
+        and the accumulated code then read as a completed scan. A code outside
+        ``success_exit_codes`` (``SPAWN_FAILURE_RETURNCODE`` always is) ranks
+        above an accepted one. Between two codes of the same rank, and for a
+        signal death (a negative code), a missing code or a 0, the larger code
+        is kept as ``worse_exit_code`` keeps it.
+        """
+        if current is None or current <= 0 or new <= 0:
+            return worse_exit_code(current, new)
+        accepted_now = self._code_is_accepted(current)
+        accepted_new = self._code_is_accepted(new)
+        if accepted_now == accepted_new:
+            return worse_exit_code(current, new)
+        return current if accepted_new else new
+
+    def _code_is_accepted(self, code: int) -> bool:
+        """Whether *code*, as ``exit_code``, would be one this scanner accepts:
+        ``_exit_code_accepted``'s rule for a code other than the current one."""
+        return code != SPAWN_FAILURE_RETURNCODE and code in self.success_exit_codes
 
     def _sarif_execution_successful(self) -> bool:
         """SARIF ``executionSuccessful`` under the graded rule: the counter rule
