@@ -1238,15 +1238,24 @@ def test_a_timeout_whose_stop_failed_does_not_say_the_tool_was_killed(
 def test_output_that_is_not_json_is_not_kept(repo, monkeypatch, on_path):
     """Output that does not parse cannot be redacted, and a credentials
     finding's snippet (the password) may be in it, so nothing of it is written
-    to the output directory or kept in the plugin's record lines."""
+    to the output directory or kept in the plugin's record lines.
+
+    Driven through the base class, which copies the run's stdout into the
+    record lines; a stand-in for the whole subprocess step skipped that copy,
+    so the record-lines check could only have caught the scanner echoing the
+    output itself."""
     scanner = _scanner(repo)
-    _run(scanner, monkeypatch, "not json: password hunter2", 1)
+    _through_the_base_class(
+        monkeypatch, [{"returncode": 1, "stdout": "not json: password hunter2"}]
+    )
 
     with pytest.raises(ScannerError, match="not JSON"):
         scanner.scan(target=repo, target_type="source")
 
     assert not (Path(scanner.results_dir) / "source" / "actionlint.json").exists()
-    assert "hunter2" not in "\n".join(scanner.output)
+    record = "\n".join(scanner.output)
+    assert "hunter2" not in record
+    assert "not kept" in record
 
 
 @pytest.mark.unit
