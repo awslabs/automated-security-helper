@@ -192,10 +192,11 @@ def test_a_symlinked_entrypoint_builds_from_the_checkout_it_links_to(
     assert Path(build[-1]).resolve() == REPO_ROOT.resolve(), build
 
 
-@pytest.mark.parametrize("option", ["--help", "--version"])
+@pytest.mark.parametrize("option", ["--help", "--version", "-v"])
 def test_help_and_version_exit_with_the_host_clis_status(runner, tmp_path, option):
-    """`./ash --help` and `./ash --version` exited 0 whatever the host CLI did, so a
-    python that cannot run the CLI at all reported success."""
+    """`./ash --help`, `./ash --version` and `./ash -v` exited 0 whatever the host
+    CLI did, so a python that cannot run the CLI at all reported success. The short
+    form kept its `exit 0` after the long forms were fixed."""
     fake_python = _executable(
         tmp_path / "pybin" / "python",
         "#!/bin/bash\necho 'fake python: cannot run the CLI' >&2\nexit 7\n",

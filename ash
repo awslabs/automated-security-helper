@@ -1082,7 +1082,7 @@ while (("$#")); do
         ASH_ARGS="${ASH_ARGS} $1"
       else
         (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --version)
-        exit 0
+        exit "$?"
       fi
       ;;
     --no-color | -c)
