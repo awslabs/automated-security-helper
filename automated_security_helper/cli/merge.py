@@ -1827,10 +1827,12 @@ def _merge_converter_rows(
         )
         # From the rows that ran it alone: with none recorded, the merged row has
         # none, where leaving the field alone kept the base row's, an excluded
-        # row's "never checked" text included.
-        update["dependency_unavailable_reason"] = (
-            _FAILURE_JOIN.join(reasons) if reasons else None
-        )
+        # row's "never checked" text included. A field neither row set stays
+        # unset, as the docstring promises for every field.
+        if reasons:
+            update["dependency_unavailable_reason"] = _FAILURE_JOIN.join(reasons)
+        elif "dependency_unavailable_reason" in fields_set:
+            update["dependency_unavailable_reason"] = None
     elif base.dependencies_satisfied != other.dependencies_satisfied:
         # One row ran it with its dependencies and the other was excluded with
         # dependencies_satisfied False: the merged row ran it.

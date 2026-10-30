@@ -232,6 +232,17 @@ class TestConverterRowsAcrossThreeShards:
         assert row.dependencies_satisfied is False
         assert row.dependency_unavailable_reason is None
 
+    def test_a_reason_neither_row_set_stays_unset(self):
+        """The function's promise: a field neither row set is left unset, so a
+        dump of the merged row carries no key the shards did not write."""
+        first = ConverterStatusInfo(dependencies_satisfied=False)
+        second = ConverterStatusInfo(dependencies_satisfied=False)
+
+        row = _merge_converter_rows(first, second)
+
+        assert row.dependencies_satisfied is False
+        assert "dependency_unavailable_reason" not in row.model_fields_set
+
     def test_an_accepted_record_does_not_hide_another_shards_tool_failure(self):
         accepted = ConverterStatusInfo(
             failed_inputs=[
