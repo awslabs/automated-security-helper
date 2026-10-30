@@ -29,15 +29,23 @@ class _ChildWithPollAndWaitOnly:
 
     pid = _FAKE_PGID
 
-    def __init__(self) -> None:
-        self.polls = 0
-
     def poll(self):
-        self.polls += 1
         return None
 
     def wait(self, timeout=None):
         return None
+
+
+class _ChildAPollWouldReap(_ChildWithPollAndWaitOnly):
+    """A leader whose exit a poll would observe, with no exit attribute recorded.
+
+    ``poll`` answers an exit code, as it does for a child whose exit the kernel
+    holds and nothing has reaped yet. The recorded exit status is still absent,
+    so a check that reads the attribute sees no exit, while one that polls sees
+    one, and the two can be told apart by whether the pid is probed."""
+
+    def poll(self):
+        return 0
 
 
 def test_a_stand_in_without_the_exit_attribute_is_stopped_as_a_group(monkeypatch):
@@ -57,7 +65,12 @@ def test_a_stand_in_without_the_exit_attribute_is_stopped_as_a_group(monkeypatch
 
 def test_the_reused_pid_check_does_not_poll_the_child(monkeypatch):
     """The exit status is read as recorded: a poll would reap an unobserved
-    leader before the group read that depends on it."""
+    leader before the group read that depends on it.
+
+    The stand-in's poll answers an exit while its recorded status is absent, so
+    a check that went back to polling would read the exit, probe the pid for
+    reuse, and fail here; a stand-in whose poll answered None, the same value an
+    unreaped child gives, could not tell the two reads apart."""
     monkeypatch.setattr(subprocess_utils.os, "killpg", lambda pgid, signum: None)
     monkeypatch.setattr(subprocess_utils, "_KILLED_GROUP_SETTLE_SECONDS", 0.0)
     probed = []
@@ -66,7 +79,7 @@ def test_the_reused_pid_check_does_not_poll_the_child(monkeypatch):
         "_pid_names_a_live_process",
         lambda pid: probed.append(pid) or False,
     )
-    child = _ChildWithPollAndWaitOnly()
+    child = _ChildAPollWouldReap()
 
     subprocess_utils._stop_tree(child, grace=0.0)
 
