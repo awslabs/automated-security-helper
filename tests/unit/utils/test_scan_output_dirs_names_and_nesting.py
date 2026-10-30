@@ -100,18 +100,26 @@ def test_a_named_dir_nested_in_one_holding_a_committed_file_is_excluded_whole(
     (earlier / "README.md").write_text("committed\n", encoding="utf-8")
     (this_run / "reports" / "ash.sarif").write_text("{}", encoding="utf-8")
     monkeypatch.chdir(source)
-    monkeypatch.setattr(
-        scan_output_dirs,
-        "git_index_below",
-        lambda directory, **_: GitIndexAnswer(
-            Path(os.path.abspath(directory)), names=["README.md"], repository=source
-        ),
-    )
+    asked = []
+
+    # The stand-in answers for the directory it is asked about: only the earlier
+    # run's directory holds a committed file. One answer for every directory told
+    # the code run2/README.md was committed too, which the fixture does not have,
+    # so the assertion could not tell "excluded as this run's output" from
+    # "excluded as a directory holding a committed file".
+    def git_index_below(directory, **_):
+        base = Path(os.path.abspath(directory))
+        asked.append(base)
+        names = ["README.md"] if base == earlier else []
+        return GitIndexAnswer(base, names=names, repository=source)
+
+    monkeypatch.setattr(scan_output_dirs, "git_index_below", git_index_below)
 
     excluded = output_dirs_to_exclude(
         source, output_dir=this_run, scanned_files=[earlier / "README.md"]
     )
 
+    assert earlier in asked
     assert this_run in excluded
     assert earlier not in excluded
     assert earlier / "analysis" in excluded
@@ -130,11 +138,14 @@ def _located(uri: str) -> SimpleNamespace:
 
 
 def test_an_encoded_name_longer_than_the_filesystem_allows_names_no_file(tmp_path):
+    """The encoded spelling (900 characters) is what ``Path.exists`` raised on; it
+    names no file, so the decoded name is resolved and yielded as the one path, as
+    it is for any decoded name that is not on disk."""
     encoded = "%41" * 300 + ".py"
 
     paths = list(_result_paths(_located(encoded), tmp_path))
 
-    assert len(paths) <= 1
+    assert paths == [Path(os.path.realpath(tmp_path)) / ("A" * 300 + ".py")]
 
 
 def test_control_an_encoded_name_that_decodes_to_a_file_is_resolved(tmp_path):
