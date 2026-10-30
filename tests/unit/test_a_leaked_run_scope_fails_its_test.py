@@ -21,7 +21,9 @@ from tests.utils.helpers import run_a_child_pytest_under_this_suite
 # The child pytest runs under the suite's own conftest, whose collection hook
 # refuses any test without exactly one tier marker. The probes measure scope
 # leaks, not tiers, so the marker is appended here once instead of being written
-# into each probe's source; a probe that marks itself is left as written.
+# into each probe's source; a probe that marks itself is left as written, and a
+# probe whose own pytestmark names no tier (usefixtures, filterwarnings, skipif)
+# keeps those marks: the tier is added to them, never written over them.
 _A_TIER_FOR_THE_PROBE = """
 
 import pytest
@@ -29,22 +31,46 @@ import pytest
 pytestmark = pytest.mark.unit
 """
 
+_A_TIER_ADDED_TO_THE_PROBES_MARKS = """
+
+import pytest
+
+pytestmark = [
+    *(pytestmark if isinstance(pytestmark, (list, tuple)) else [pytestmark]),
+    pytest.mark.unit,
+]
+"""
+
 
 _TIERS = {"unit", "integration", "e2e"}
 
 
-def _names_a_tier(source: str) -> bool:
-    """Whether a module-level ``pytestmark`` of *source* carries a tier mark.
+def _pytestmark_assignments(source: str) -> list | None:
+    """The module-level ``pytestmark = ...`` statements of *source*, or ``None``
+    when *source* does not parse: the child's own collection then reports the
+    syntax error, which a probe may exist to measure."""
+    try:
+        module = ast.parse(source)
+    except SyntaxError:
+        return None
+    return [
+        statement
+        for statement in module.body
+        if isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "pytestmark"
+            for target in statement.targets
+        )
+    ]
+
+
+def _names_a_tier(assignments: list) -> bool:
+    """Whether one of the ``pytestmark`` *assignments* carries a tier mark.
 
     Read with ``ast``: a ``pytestmark = pytest.mark.usefixtures(...)`` line, or
     the word in a comment or docstring, is not a tier.
     """
-    for statement in ast.parse(source).body:
-        if not isinstance(statement, ast.Assign) or not any(
-            isinstance(target, ast.Name) and target.id == "pytestmark"
-            for target in statement.targets
-        ):
-            continue
+    for statement in assignments:
         for node in ast.walk(statement.value):
             if (
                 isinstance(node, ast.Attribute)
@@ -57,9 +83,18 @@ def _names_a_tier(source: str) -> bool:
 
 
 def _with_a_tier(source: str) -> str:
-    """*source* with the collection hook's one-tier requirement satisfied."""
-    if _names_a_tier(source):
+    """*source* with the collection hook's one-tier requirement satisfied.
+
+    A source with no ``pytestmark`` gets ``pytestmark = pytest.mark.unit``; one
+    whose ``pytestmark`` names no tier gets the tier added to its own marks (a
+    second plain assignment would replace them silently); one that names a tier,
+    or does not parse, is left as written.
+    """
+    assignments = _pytestmark_assignments(source)
+    if assignments is None or _names_a_tier(assignments):
         return source
+    if assignments:
+        return source + _A_TIER_ADDED_TO_THE_PROBES_MARKS
     return source + _A_TIER_FOR_THE_PROBE
 
 
@@ -105,10 +140,23 @@ def test_a_probe_without_a_tier_is_given_one():
     assert tiered.count("pytestmark = pytest.mark.unit") == 1
 
 
+def _marks_in_effect(source: str) -> list:
+    """The names of the marks the module-level ``pytestmark`` of *source* holds
+    once Python has run it, in the order pytest reads them."""
+    namespace: dict = {}
+    exec(compile(source, "<probe>", "exec"), namespace)  # noqa: S102 - the probe's own text
+    marks = namespace["pytestmark"]
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return [mark.name for mark in marks]
+
+
 @pytest.mark.unit
-def test_a_probe_whose_pytestmark_is_not_a_tier_is_still_given_one():
+def test_a_probe_whose_pytestmark_is_not_a_tier_keeps_its_marks_and_gains_one():
     """``pytestmark = pytest.mark.usefixtures(...)`` names no tier, so the child
-    would refuse to collect the probe; the word alone is not the test."""
+    would refuse to collect the probe. The tier is added to the probe's own
+    marks: a second plain ``pytestmark =`` would replace them and the
+    ``usefixtures`` would be gone without any error."""
     source = (
         "import pytest\n\n"
         'pytestmark = pytest.mark.usefixtures("tmp_path")\n\n\n'
@@ -118,13 +166,39 @@ def test_a_probe_whose_pytestmark_is_not_a_tier_is_still_given_one():
     tiered = _with_a_tier(source)
 
     assert tiered.startswith(source)
-    assert tiered.count("pytest.mark.unit") == 1
+    assert _marks_in_effect(tiered) == ["usefixtures", "unit"]
+
+
+@pytest.mark.unit
+def test_a_probe_whose_pytestmark_is_a_list_keeps_every_mark_and_gains_one():
+    source = (
+        "import pytest\n\n"
+        "pytestmark = [\n"
+        '    pytest.mark.usefixtures("tmp_path"),\n'
+        '    pytest.mark.filterwarnings("ignore"),\n'
+        "]\n\n\n"
+        "def test_zz():\n    pass\n"
+    )
+
+    tiered = _with_a_tier(source)
+
+    assert tiered.startswith(source)
+    assert _marks_in_effect(tiered) == ["usefixtures", "filterwarnings", "unit"]
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("tier", ["unit", "integration", "e2e"])
 def test_a_probe_that_marks_its_own_tier_is_left_as_written(tier):
     source = f"import pytest\n\npytestmark = pytest.mark.{tier}\n\n\ndef test_zz():\n    pass\n"
+
+    assert _with_a_tier(source) == source
+
+
+@pytest.mark.unit
+def test_a_probe_that_does_not_parse_is_left_for_the_child_to_report():
+    """A probe written to fail at collection keeps its syntax error for the
+    child; the helper neither raises nor marks it."""
+    source = "def test_zz(:\n    pass\n"
 
     assert _with_a_tier(source) == source
 
