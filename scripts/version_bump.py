@@ -379,10 +379,9 @@ class VersionBumper:
         # target whose template is missing is skipped with a warning by generate,
         # so a loop over the existing templates never reached it and validate
         # passed over a page that `set` reports as not regenerated.
-        suffix = self.template_manager.template_suffix
         for relative in self.template_manager.target_files:
             target = self.project_root / relative
-            template = self.project_root / (relative + suffix)
+            template = self.template_manager.template_path_for(relative)
             if not template.exists():
                 print(
                     f"Error: {template} does not exist, so {target} cannot be "

@@ -499,6 +499,15 @@ class VersionTemplateManager:
 
         return converted_count
 
+    def template_path_for(self, target: str) -> Path:
+        """The template that ``generate`` renders into the ``target_files`` entry.
+
+        One rule for everything that walks the list (generate, list, and the
+        version checker): the template sits beside its target with the template
+        suffix appended to the name.
+        """
+        return self.project_root / (target + self.template_suffix)
+
     def generate_all_from_templates(self) -> int:
         """
         Generate all files from their templates.
@@ -514,8 +523,7 @@ class VersionTemplateManager:
         self.failures = []
         generated_count = 0
         templates = [
-            self.project_root / (file_path_str + self.template_suffix)
-            for file_path_str in self.target_files
+            self.template_path_for(file_path_str) for file_path_str in self.target_files
         ]
 
         try:
@@ -540,7 +548,7 @@ class VersionTemplateManager:
         """List all existing template files."""
         templates = []
         for file_path_str in self.target_files:
-            template_path = self.project_root / (file_path_str + self.template_suffix)
+            template_path = self.template_path_for(file_path_str)
             if template_path.exists():
                 templates.append(template_path)
         return templates

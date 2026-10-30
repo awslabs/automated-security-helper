@@ -290,6 +290,43 @@ class TestEveryListedTargetIsChecked:
         assert "missing.md.template does not exist" in out
 
 
+class TestTheTemplatePathComesFromTheManager:
+    def test_validate_walks_the_managers_own_target_list(
+        self, project, monkeypatch, capsys
+    ):
+        # Every other test replaces target_files with ["README.md"]. This one keeps
+        # the manager's real list, so a target whose type or layout validate
+        # assumed wrongly (it builds no path of its own now) would raise here.
+        module = _load_version_bump(monkeypatch)
+        bumper = module.VersionBumper(project)
+        manager = bumper.template_manager
+        targets = list(manager.target_files)
+        assert targets
+        assert all(isinstance(target, str) for target in targets)
+
+        assert bumper.validate_consistency() is False
+
+        out = capsys.readouterr().out
+        for target in targets:
+            template = manager.template_path_for(target)
+            if template.exists():
+                assert f"{template} does not exist" not in out
+            else:
+                assert f"{template} does not exist" in out
+
+    def test_the_manager_has_one_rule_for_where_a_template_sits(
+        self, project, monkeypatch
+    ):
+        module = _load_version_bump(monkeypatch)
+        manager = module.VersionBumper(project).template_manager
+        manager.target_files = ["README.md", "docs/missing.md"]
+
+        assert manager.template_path_for("docs/missing.md") == (
+            project / "docs" / "missing.md.template"
+        )
+        assert manager.list_templates() == [manager.template_path_for("README.md")]
+
+
 class TestTheVersionItselfIsChecked:
     def test_a_spelling_set_refuses_is_reported_with_a_command_set_accepts(
         self, project, monkeypatch, capsys
