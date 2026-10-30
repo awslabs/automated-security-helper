@@ -91,14 +91,21 @@ def test_the_windows_safe_filter_puts_the_arguments_in_ascii(monkeypatch):
     )
     record.args = (arrow + "x",)
 
+    # The arguments do not fit the message (a mapping key with a tuple), so the
+    # filter cannot fold them in and puts each in ASCII where it is.
     assert safe.filter(record)
     assert record.args == ("->x",)
-    record.args = {"k": "caf" + chr(0xE9)}
+
+    # Arguments that fit are folded into the message first and the one text is
+    # put in ASCII, with the character written as its escape, not dropped: the
+    # file sinks write the record as it was logged, and the console gets every
+    # character as text or as an escape. Nothing is left for a sink to put in.
+    record = logging.LogRecord(
+        "ash", logging.INFO, "f", 1, "%(k)s", {"k": "caf" + chr(0xE9)}, None
+    )
     assert safe.filter(record)
-    # Written as its escape, not dropped: the file sinks write the record as it
-    # was logged, and the console gets every character as text or as an escape.
-    assert record.args == {"k": "caf\\xe9"}
-    record.msg = "%(k)s"
+    assert record.args == ()
+    assert record.msg == "caf\\xe9"
     record.getMessage().encode("ascii")
 
 
