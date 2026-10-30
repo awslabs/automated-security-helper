@@ -2735,17 +2735,20 @@ class SarifReport(RecordModel):
         # A run may carry no results list at all (SARIF allows omitting it, and a
         # scanner that failed leaves it so), which merges as no results.
         for res in report_run.results or []:
-            clean_result = res.model_dump(
-                # Remove `ruleIndex`, since we're reordering rules. RuleId should
-                # correctly correlate results to associated rules in our set of scanners
-                # without it.
-                exclude={"ruleIndex"},
-                # Only the fields the scanner stated. A full dump marks every field
-                # as set, so a result that stated no level came back with the
-                # default level set and resolve_missing_levels could no longer give
-                # it the level its rule's defaultConfiguration names.
-                exclude_unset=True,
-            )
+            # Remove `ruleIndex`, since we're reordering rules. RuleId should
+            # correctly correlate results to associated rules in our set of scanners
+            # without it. A full dump, not one of the set fields only: pydantic marks
+            # a field set on construction or assignment, never on an append, so a
+            # dump of the set fields drops what code appended in place to a default
+            # list (a tag on a fresh PropertyBag, a related location).
+            clean_result = res.model_dump(exclude={"ruleIndex"})
+            # A full dump marks every field as set, so a result that stated no level
+            # came back with the default level set and resolve_missing_levels could
+            # no longer give it the level its rule's defaultConfiguration names. That
+            # one field keeps its unset state; nothing else reads the set-fields
+            # record of a result.
+            if "level" not in res.model_fields_set:
+                clean_result.pop("level", None)
             _keep_the_rule_by_id(clean_result, res, report_tool)
             report_results.append(Result(**clean_result))
 
@@ -2763,8 +2766,9 @@ class SarifReport(RecordModel):
         else:
             # Adopt the incoming run's tool, properties and the rest, with its
             # results and invocations left out: the common tail below adds them
-            # once, so an adopted run is not counted twice.
-            cleaned_run = json.loads(report_run.model_dump_json(exclude_unset=True))
+            # once, so an adopted run is not counted twice. A full dump, for the
+            # reason given above for results: an appended run tag must survive.
+            cleaned_run = json.loads(report_run.model_dump_json())
             cleaned_run.pop("results", None)
             cleaned_run.pop("invocations", None)
             self_run = Run(**cleaned_run)

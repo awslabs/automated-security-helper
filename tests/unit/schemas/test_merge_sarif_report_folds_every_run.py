@@ -17,7 +17,11 @@ rules list is ``None`` raised ``AttributeError``, which cfn-lint produces for a
 clean or an all-failed target. And each result was rebuilt from a full
 ``model_dump``, which marks every field as set, so a result that stated no level
 came back with the default level set and ``resolve_missing_levels`` could no
-longer give it the level its rule's ``defaultConfiguration`` names.
+longer give it the level its rule's ``defaultConfiguration`` names. The first
+cure for that, a dump of the set fields only, dropped what code had appended in
+place to a default list (pydantic marks a field set on construction or
+assignment, never on an append), so the dump is full again and only ``level``
+keeps its unset state.
 """
 
 from __future__ import annotations
@@ -25,10 +29,13 @@ from __future__ import annotations
 import pytest
 
 from automated_security_helper.schemas.sarif_schema_model import (
+    Location,
+    PropertyBag,
     Run,
     SarifReport,
     ToolComponent,
 )
+from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.severity_ladder import resolve_missing_levels
 
 pytestmark = pytest.mark.unit
@@ -203,3 +210,53 @@ def test_a_result_that_stated_no_level_still_takes_its_rules_default_level():
     assert "level" not in merged.model_fields_set
     resolve_missing_levels(aggregated)
     assert str(getattr(merged.level, "value", merged.level)) == "error"
+
+
+def test_what_code_appended_to_a_results_default_list_survives():
+    # pydantic marks a field set on construction or assignment, never on an
+    # append, so a merge that dumped only the set fields lost these: a tag
+    # appended to a fresh PropertyBag and a location appended to the default
+    # relatedLocations list.
+    aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+    incoming = SarifReport(runs=[_run("scanner", [_finding("S-1")], [])])
+    result = incoming.runs[0].results[0]
+    result.properties = PropertyBag()
+    result.properties.tags.append("scanner")
+    result.relatedLocations.append(
+        Location.model_validate({"message": {"text": "see also"}})
+    )
+
+    aggregated.merge_sarif_report(incoming)
+
+    merged = aggregated.runs[0].results[0]
+    assert merged.properties.tags == ["scanner"]
+    assert [loc.message.root.text for loc in merged.relatedLocations] == ["see also"]
+
+
+def test_what_code_appended_to_an_adopted_runs_default_list_survives():
+    aggregated = SarifReport(runs=[])
+    incoming = SarifReport(runs=[_run("scanner", [_finding("S-1")], [])])
+    incoming.runs[0].properties = PropertyBag()
+    incoming.runs[0].properties.tags.append("adopted")
+
+    aggregated.merge_sarif_report(incoming)
+
+    assert aggregated.runs[0].properties.tags == ["adopted"]
+
+
+def test_the_scan_paths_scanner_details_survive_the_merge():
+    # The scan path runs attach_scanner_details right before merge_sarif_report.
+    # It assigns the tags list before appending to it, so the field is set and
+    # survives either dump; this pins the real pattern alongside the append case.
+    aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+    incoming = SarifReport(
+        runs=[_run("bandit", [_finding("B-1")], [{"executionSuccessful": True}])]
+    )
+    attach_scanner_details(incoming, scanner_name="bandit", scanner_version="1.0")
+
+    aggregated.merge_sarif_report(incoming)
+
+    merged = aggregated.runs[0].results[0]
+    assert merged.properties.tags == ["bandit"]
+    assert merged.properties.scanner_name == "bandit"
+    assert merged.properties.scanner_version == "1.0"
