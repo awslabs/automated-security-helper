@@ -14,14 +14,19 @@ Two readings of "extracted whole" change with it. A notebook member is extracted
 as it is, but the jupyter converter reads the scan set and not this converter's
 output, so the notebook's code reaches no scanner as code: its archive is not
 recorded whole. And two members written to one path (``vendor//m.js`` after
-``vendor/m.js``, or a tar's repeated name) no longer overwrite each other
-silently: the later one is refused, the earlier one's content is what is scanned,
-and the refusal keeps the archive out of the whole set.
+``vendor/m.js``, a tar's repeated name, or two spellings of one name on a
+case-insensitive filesystem) no longer overwrite each other silently: the later
+one is written beside the earlier under a numbered name (``vendor/m~2.js``), so
+both are scanned. Refusing the later one and scanning the first, the shape before
+this, scanned the bytes an unpacker that keeps the first member would produce and
+never the bytes one that keeps the last produces, which is what a deploy that
+unpacks the archive with ``tar`` or ``unzip`` gets.
 """
 
 from __future__ import annotations
 
 import io
+import logging
 import tarfile
 import zipfile
 from pathlib import Path
@@ -40,6 +45,23 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
 pytestmark = pytest.mark.unit
 
 ARCHIVE_MODULE = archive_converter.__name__
+
+
+@pytest.fixture
+def ash_log_records():
+    records: List[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.WARNING)
+    logger = logging.getLogger("ash")
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
 
 
 def _zip(path: Path, members: List[Tuple[str, bytes]]) -> Path:
@@ -137,16 +159,26 @@ def test_a_notebook_member_is_extracted_but_its_archive_is_not_recorded_whole(
 
 
 @pytest.mark.parametrize(
-    ("kind", "first", "second"),
+    ("kind", "first", "second", "renamed"),
     [
-        pytest.param("zip", "vendor//m.js", "vendor/m.js", id="zip-spellings"),
-        pytest.param("tar", "./vendor/m.js", "vendor/m.js", id="tar-spellings"),
-        pytest.param("tar", "vendor/m.js", "vendor/m.js", id="tar-repeated-name"),
+        pytest.param(
+            "zip", "vendor//m.js", "vendor/m.js", "vendor/m~2.js", id="zip-spellings"
+        ),
+        pytest.param(
+            "tar", "./vendor/m.js", "vendor/m.js", "vendor/m~2.js", id="tar-spellings"
+        ),
+        pytest.param(
+            "tar", "vendor/m.js", "vendor/m.js", "vendor/m~2.js", id="tar-repeated"
+        ),
+        pytest.param("zip", "Dockerfile", "Dockerfile", "Dockerfile~2", id="no-ext"),
+        pytest.param("zip", "lib/M.js", "lib/m.js", "lib/m~2.js", id="case-fold"),
     ],
 )
-def test_two_members_written_to_one_path_keep_the_first_and_refuse_the_second(
-    test_plugin_context, monkeypatch, kind, first, second
+def test_two_members_written_to_one_path_are_both_extracted(
+    test_plugin_context, monkeypatch, kind, first, second, renamed, ash_log_records
 ):
+    """The later member holds the finding here: it is the one a deploy that unpacks
+    the archive with tar or unzip gets, and it used to be refused unscanned."""
     maker = _zip if kind == "zip" else _tar
     archive = maker(
         Path(test_plugin_context.source_dir) / f"a.{kind}",
@@ -155,12 +187,30 @@ def test_two_members_written_to_one_path_keep_the_first_and_refuse_the_second(
 
     converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
 
-    assert files == {"vendor/m.js": b"m = 1\n", "ok.js": b"ok = 1\n"}
-    assert [(r.path, r.member) for r in converter.refused_inputs] == [
-        (f"a.{kind}", second)
+    expected_first = archive_converter._member_written_path(first, kind)
+    assert files == {
+        expected_first: b"m = 1\n",
+        renamed: b"m = 2\n",
+        "ok.js": b"ok = 1\n",
+    }
+    assert converter.refused_inputs == []
+    notices = [
+        r.getMessage()
+        for r in ash_log_records
+        if r.levelno >= logging.WARNING and renamed in r.getMessage()
     ]
-    assert "same path" in converter.refused_inputs[0].reason
-    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
+    assert len(notices) == 1 and f"a.{kind}" in notices[0], notices
+
+
+def test_three_members_written_to_one_path_count_up(test_plugin_context, monkeypatch):
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [("m.js", b"1\n"), ("m.js", b"2\n"), ("./m.js", b"3\n")],
+    )
+
+    _, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"m.js": b"1\n", "m~2.js": b"2\n", "m~3.js": b"3\n"}
 
 
 def test_members_written_to_distinct_paths_are_all_extracted(

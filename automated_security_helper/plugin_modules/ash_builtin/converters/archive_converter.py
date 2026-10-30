@@ -901,9 +901,13 @@ _MEMBER_SPARSE_BEYOND_SIZE = (
     "it is a sparse file whose map places data beyond the size it declares, or "
     "writes the same bytes twice"
 )
-_MEMBER_SAME_PATH = (
-    "an earlier member of the archive is extracted to the same path, so one would "
-    "overwrite the other; the earlier member's content is the one scanned"
+#: How a later member bound for the path an earlier member took is told apart: it
+#: is written beside the earlier one under a numbered name, so both are scanned.
+#: One unpacker keeps the first of two members with one name and another keeps
+#: the last, so scanning only one would leave out the bytes a consumer may get.
+_MEMBER_RENAMED = (
+    "an earlier member of the archive is extracted to the same path, so this one "
+    "is written as '{renamed}' and both are scanned"
 )
 _NOT_EXTRACTED = (
     "it is an archive or compressed file of a format that is not extracted (the "
@@ -1101,6 +1105,41 @@ def _member_written_path(
         parts = [piece for part in parts for piece in part.split(separator)]
     dropped = {"", ".", ".."} if kind == "zip" else {"", "."}
     return "/".join(part for part in parts if part not in dropped)
+
+
+def _written_key(member_name: str, kind: Optional[Literal["zip", "tar"]]) -> str:
+    """The key two members are compared by to tell whether they are written to one
+    file: the written path (_member_written_path), as the host compares names
+    (os.path.normcase) and case-folded, since the output directory may sit on a
+    case-insensitive filesystem (APFS, NTFS), where ``X.js`` and ``x.js`` are one
+    file. On a case-sensitive one the fold only renames a member that would have
+    been a second file, so nothing is lost either way.
+    """
+    return os.path.normcase(_member_written_path(member_name, kind)).casefold()
+
+
+def _renamed_member_name(
+    member_name: str, kind: Optional[Literal["zip", "tar"]], written: Dict[str, str]
+) -> str:
+    """``member_name`` with a counter before its extension (``vendor/m~2.js``,
+    ``Dockerfile~2``), the first such name no earlier member of the archive is
+    written to (``written``, keyed by _written_key). The directory part and the
+    separators the name uses are kept, so the member lands beside the one it
+    would have overwritten.
+    """
+    normalized = member_name.replace("\\", "/")
+    head, slash, base = normalized.rpartition("/")
+    stem, dot, extension = base.rpartition(".")
+    counter = 2
+    while True:
+        if stem and dot:
+            renamed_base = f"{stem}~{counter}.{extension}"
+        else:
+            renamed_base = f"{base}~{counter}"
+        renamed = f"{head}{slash}{renamed_base}"
+        if _written_key(renamed, kind) not in written:
+            return renamed
+        counter += 1
 
 
 def _member_name_problem(member_name: str) -> Optional[str]:
@@ -1392,9 +1431,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # Refusals by reason: how many were listed, and how many more were not.
         listed: Dict[str, int] = {}
         unlisted: Dict[str, int] = {}
-        # The path each admitted member is written to, as the host compares
-        # names (os.path.normcase), so a later member bound for the same file
-        # is refused rather than written over the earlier one.
+        # The path each admitted member is written to (_written_key: as the host
+        # compares names, case-folded), so a later member bound for the same
+        # file is written beside the earlier one under a numbered name, and both
+        # are scanned, rather than one written over the other.
         written: Dict[str, str] = {}
         for member in members:
             kind: Optional[Literal["zip", "tar"]] = None
@@ -1470,11 +1510,30 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             if problem is None and nested:
                 problem = _MEMBER_NESTED_ARCHIVE
             if problem is None:
-                destination = os.path.normcase(_member_written_path(member_name, kind))
-                if destination in written:
-                    problem = _MEMBER_SAME_PATH
-                else:
-                    written[destination] = member_name
+                destination = _written_key(member_name, kind)
+                if destination in written and not isinstance(member, str):
+                    # Renamed on the member object itself: zipfile and tarfile
+                    # write each member to the path its name holds, so the
+                    # renamed member lands beside the earlier one and the scan
+                    # reads both, whichever of the two a consumer's unpacker
+                    # keeps. The notice names the archive when inspect_members
+                    # knows it.
+                    renamed = _renamed_member_name(member_name, kind, written)
+                    ASH_LOGGER.warning(
+                        shown_on_one_line(
+                            f"Archive member '{member_name}'"
+                            + (f" of '{archive}'" if archive is not None else "")
+                            + ": "
+                            + _MEMBER_RENAMED.format(renamed=renamed)
+                        )
+                    )
+                    if isinstance(member, tarfile.TarInfo):
+                        member.name = renamed
+                    else:
+                        member.filename = renamed
+                    member_name = renamed
+                    destination = _written_key(renamed, kind)
+                written[destination] = member_name
             if problem is not None:
                 if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:
                     listed[problem] = listed.get(problem, 0) + 1
