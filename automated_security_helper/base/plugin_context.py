@@ -266,6 +266,12 @@ class PluginContext(BaseModel):
             value = Path(value)
         if name == "work_dir":
             current = getattr(self, name, None)
+            if current is not None and not _repoints(current, value):
+                # The same directory under another spelling is no change, so it
+                # is not stored either: a relative spelling would depend on the
+                # current directory from then on, and a link spelling would
+                # replace the plain path.
+                return
             if current is not None and _repoints(current, value):
                 message = (
                     f"Assigning to PluginContext.work_dir replaces {_shown(current)} "
