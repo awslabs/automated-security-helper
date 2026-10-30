@@ -385,15 +385,21 @@ def _opened_if_it_holds_a_colon(match: "re.Match[str]") -> str:
     A colon inside the tag can start an emoji code, whole inside the tag
     (``[a:b:]``) or ending after it (``[a:b]:c``), and the split after that colon
     would end the tag. So the tag's ``[`` is followed by an empty style instead:
-    Rich reads no tag there (a ``[`` right before another ``[`` starts none), the
-    escape's backslash is not needed, and the backslashes the escape doubled in
-    front of the tag are halved back, since with no tag behind them Rich prints
-    them as written. A tag holding no colon is returned as it was.
+    Rich reads no tag there (a ``[`` right before another ``[`` starts none) and
+    the escape's own backslash is not needed. The backslashes the escape doubled
+    in front of the tag stay, and an empty style follows them: Rich halves an
+    even run of backslashes in front of a tag and prints the other half, which
+    gives the value's own backslashes back. Left in front of the opened ``[``
+    instead, they are read as text, and Rich turns the last ``\\[`` of that text
+    into ``[``, so a value with a backslash before the tag rendered one short.
+    A tag holding no colon is returned as it was.
     """
     doubled, tag = match.group(1), match.group(2)
     if ":" not in tag:
         return match.group(0)
-    return "\\" * (len(doubled) // 2) + "[" + _SEGMENT_BREAK + tag[1:]
+    if not doubled:
+        return "[" + _SEGMENT_BREAK + tag[1:]
+    return doubled + _SEGMENT_BREAK + "[" + _SEGMENT_BREAK + tag[1:]
 
 
 def _emoji_codes_split(text: str) -> str:
