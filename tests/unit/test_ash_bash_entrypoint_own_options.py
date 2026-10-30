@@ -348,8 +348,8 @@ def test_the_long_version_option_is_still_the_wrappers_own(runner, tmp_path):
     )
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
-    # The wrapper exits 0 after the CLI whatever it printed, so the version line
-    # itself is what shows the real CLI ran.
+    # The version line itself is what shows the real CLI ran; the exit status is the
+    # CLI's own (test_a_failing_host_cli_fails_the_version_check).
     assert "awslabs/automated-security-helper v" in result.stdout, shown
     assert calls == [], "the version is printed on the host; no image is built or run"
 
@@ -372,10 +372,40 @@ def test_help_runs_the_wrappers_own_cli_not_a_package_in_the_working_directory(
     shown = result.stdout + result.stderr
     assert "PLANTED-PACKAGE-RAN" not in shown, shown
     assert result.returncode == 0, shown
-    # The wrapper exits 0 after the CLI whatever it printed, so the help text itself
-    # is what shows the real CLI ran.
+    # The help text itself is what shows the real CLI ran; the exit status is the
+    # CLI's own (test_a_failing_host_cli_fails_the_version_check).
     assert "Usage" in result.stdout, shown
     assert calls == []
+
+
+@pytest.mark.parametrize("words", [["-v"], ["--version"], ["--help"]])
+def test_a_failing_host_cli_fails_the_version_check(runner, tmp_path, words):
+    """`./ash -v`, `--version` and `--help` run the CLI on the host and exit with ITS
+    status. An `exit 0` after the subshell reported success when the host python
+    could not run the CLI at all (no python, no package), so a health check on
+    `./ash -v` could never fail. Here a planted `python` first on PATH prints a
+    marker and exits 7, and the wrapper exits 7 with it."""
+    planted_bin = tmp_path / "bin"
+    planted_bin.mkdir()
+    _executable(
+        planted_bin / "python",
+        "#!/bin/bash\necho PLANTED-PYTHON-RAN\nexit 7\n",
+    )
+    # The planted bin goes first; the fixed-id bin _run puts on PATH stays behind it,
+    # since an env PATH given here replaces the one _run built.
+    _, log_dir = runner
+    path = os.pathsep.join(
+        [
+            str(planted_bin),
+            str(log_dir.parent / "fixed-id-bin"),
+            os.environ.get("PATH", ""),
+        ]
+    )
+    result, calls = _run(runner, words, env={"PATH": path})
+    shown = result.stdout + result.stderr
+    assert "PLANTED-PYTHON-RAN" in shown, shown
+    assert result.returncode == 7, shown
+    assert calls == [], "the host CLI is run; no image is built or run"
 
 
 def test_the_scripts_directory_is_read_with_cdpath_unset(runner, tmp_path):
