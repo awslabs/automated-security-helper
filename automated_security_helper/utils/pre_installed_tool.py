@@ -516,13 +516,41 @@ def _probe(command: List[str], timeout: int, cwd: Optional[str]) -> _ProbeAnswer
 #: substring of its flowed output: "The package `bandit==1.7.0` does not have an
 #: extra named `sarif`".
 _UV_UNKNOWN_EXTRA_MARKER = "does not have an extra named"
-#: The same warning with the package it names captured: uv prints it for every
-#: package in the resolution, so the check has to tell the requested package's
-#: missing extra from a transitive dependency's.
-_UV_UNKNOWN_EXTRA_PATTERN = (
-    r"The package `([A-Za-z0-9][A-Za-z0-9._-]*)(?:==[^`]*)?` "
-    + _UV_UNKNOWN_EXTRA_MARKER
-)
+#: The same warning with the backticked package fragment captured whole: uv
+#: prints it for every package in the resolution, so the check has to tell the
+#: requested package's missing extra from a transitive dependency's. The fragment
+#: is read by ``_names_in_fragment``, not by a fixed ``name==version`` shape, so a
+#: spelling with another operator, an ``@ url`` or a ``name-version`` join still
+#: names its package.
+_UV_UNKNOWN_EXTRA_PATTERN = r"The package `([^`]+)` " + _UV_UNKNOWN_EXTRA_MARKER
+#: A distribution name, as PEP 503 spells it, at the head of a fragment.
+_NAME_HEAD = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _names_in_fragment(fragment: str) -> frozenset:
+    """The canonical package names uv's backticked fragment can be naming.
+
+    ``bandit==1.7.0``, ``bandit>=1.7``, ``bandit @ file:///x`` and ``bandit[sarif]``
+    parse as requirements and name ``bandit``. A ``name-version`` join (``bandit-1.7.0``)
+    parses too, as the name ``bandit-1.7.0``, so the head before a ``-<digit>`` is
+    offered as well; and a fragment the parser refuses falls back to its leading
+    name-shaped run. Empty when nothing in the fragment reads as a name.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    names = set()
+    try:
+        names.add(canonicalize_name(Requirement(fragment).name))
+    except (InvalidRequirement, ValueError):
+        pass
+    head = _NAME_HEAD.match(fragment)
+    if head is not None:
+        names.add(canonicalize_name(head.group(0)))
+        joined = re.match(r"(.+?)-\d", head.group(0))
+        if joined is not None:
+            names.add(canonicalize_name(joined.group(1)))
+    return frozenset(names)
 
 
 def _requested_package_lacks_an_extra(requirement: str, flowed: str) -> bool:
@@ -536,20 +564,30 @@ def _requested_package_lacks_an_extra(requirement: str, flowed: str) -> bool:
     brings. The bare marker matched any package's warning, so a satisfied copy
     read as unsatisfied and, offline, was refused in favor of ``uv tool run
     --offline``, the fallback this module exists to prevent.
+
+    Fail-closed on wording drift: when the marker is present but no backticked
+    fragment reads as a package (uv changed the line's shape), the answer is the
+    bare marker's, unsatisfied, never "satisfied" by a pattern that saw nothing.
     """
     from packaging.requirements import InvalidRequirement, Requirement
     from packaging.utils import canonicalize_name
 
+    if _UV_UNKNOWN_EXTRA_MARKER not in flowed:
+        return False
     try:
         requested = canonicalize_name(Requirement(requirement).name)
     except (InvalidRequirement, ValueError):
         # Not a requirement the parser reads (a URL, a path): the marker's own
         # reading, as before.
-        return _UV_UNKNOWN_EXTRA_MARKER in flowed
-    return any(
-        canonicalize_name(match.group(1)) == requested
+        return True
+    named = [
+        _names_in_fragment(match.group(1))
         for match in re.finditer(_UV_UNKNOWN_EXTRA_PATTERN, flowed)
-    )
+    ]
+    readable = [names for names in named if names]
+    if not readable:
+        return True
+    return any(requested in names for names in readable)
 
 
 def _dry_run(

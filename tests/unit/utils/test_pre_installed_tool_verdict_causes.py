@@ -182,6 +182,55 @@ class TestAnExtraTheInstalledVersionDoesNotDeclare:
         status, _ = _dry_run("/opt/uv", sys.executable, "Bandit[sarif]")
         assert status == "unsatisfied"
 
+    @pytest.mark.parametrize(
+        "fragment",
+        [
+            "bandit>=1.7",
+            "bandit~=1.7.0",
+            "bandit @ file:///wheels/bandit.whl",
+            "bandit-1.7.0",
+        ],
+        ids=["lower bound", "compatible", "url", "name-version join"],
+    )
+    def test_the_requested_package_is_matched_whatever_its_version_spelling(
+        self, monkeypatch, fragment
+    ):
+        """The pattern read only ``name==version``; a warning spelling the package
+        with another operator, an ``@ url`` or a ``name-version`` join left the
+        requested package's own warning unmatched, and the copy read satisfied."""
+        monkeypatch.setattr(
+            pre_installed_tool,
+            "_run",
+            lambda command, timeout: subprocess.CompletedProcess(
+                command,
+                0,
+                "",
+                f"warning: The package `{fragment}` does not have an extra "
+                "named `sarif`\nWould make no changes\n",
+            ),
+        )
+        assert _dry_run("/opt/uv", sys.executable, "bandit[sarif]")[0] == "unsatisfied"
+
+    def test_a_drifted_warning_with_no_readable_package_is_unsatisfied(
+        self, monkeypatch
+    ):
+        """Fail-closed: the marker is present but uv's wording no longer carries a
+        backticked fragment, so no package can be read; the answer is the bare
+        marker's, as before the scoping, never satisfied by a pattern that saw
+        nothing."""
+        monkeypatch.setattr(
+            pre_installed_tool,
+            "_run",
+            lambda command, timeout: subprocess.CompletedProcess(
+                command,
+                0,
+                "",
+                "warning: the package bandit 1.7.0 does not have an extra named "
+                "sarif\nWould make no changes\n",
+            ),
+        )
+        assert _dry_run("/opt/uv", sys.executable, "bandit[sarif]")[0] == "unsatisfied"
+
 
 class TestNixStaging:
     def test_a_staging_error_is_an_unverifiable_verdict(self, tmp_path, monkeypatch):
