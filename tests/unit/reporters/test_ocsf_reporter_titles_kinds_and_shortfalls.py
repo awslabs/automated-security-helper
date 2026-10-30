@@ -203,10 +203,15 @@ class TestShortfalls:
     def test_a_dropped_result_leaves_a_shortfall_record(self, reporter, monkeypatch):
         original = OcsfReporter._create_vulnerability_finding
 
-        def flaky(self, result, metadata, current_time_ms, shared_id=None):
+        # The stub forwards whatever the report passes (shared_id, identity,
+        # anything added later), so only the BROKEN result fails; a stub with a
+        # fixed parameter list failed on every result once the report passed a
+        # keyword it did not name, and the test then read the all-failed
+        # response instead of the shortfall record it is about.
+        def flaky(self, result, *args, **kwargs):
             if result.ruleId == "BROKEN":
                 raise RuntimeError("cannot build")
-            return original(self, result, metadata, current_time_ms, shared_id)
+            return original(self, result, *args, **kwargs)
 
         monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
         payload = json.loads(
