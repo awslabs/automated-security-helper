@@ -4708,7 +4708,12 @@ def mcp_get_config(
             ``sandbox`` section shown, and which chain files count as the
             scanned repository's own -- so the answer refuses exactly what
             a scan of that target refuses; without it, the session's
-            delivered source or the working directory stands in.
+            delivered source stands in, or the working directory for the
+            local client, whose own tree it is. A network session that
+            delivered nothing names no target a scan of it could take, so
+            its answer is judged for no scanned tree (the file confined by
+            its own root, no checkout's operator-only options read), which
+            leaves out more than a scan would, never less.
             A given search_dir crosses the scan tool's own root gate, so a
             directory this session may not scan is refused as a scan of it
             is (``scan_target_not_permitted``, exit 4), before anything
@@ -5170,8 +5175,10 @@ def _answer_get_config(
     # resolved for the directory searched, which is what a scan of it would find.
     # A named file is resolved for the directory the caller's scan will target
     # when search_dir names one; with none, for the target run_ash_scan() takes
-    # when none is named, this session's delivered source or else the working
-    # directory. Never for the file's own directory: no scan targets the
+    # when none is named: this session's delivered source, or the working
+    # directory for the local client, or no tree at all for a network session
+    # that delivered nothing (run_ash_scan refuses the working directory for
+    # it). Never for the file's own directory: no scan targets the
     # directory of a bound profile or a config root, so treating the file as
     # inside its own scanned tree would hide grants a scan applies. A file the
     # client delivered is restrict-only wherever it is, with the bound profile
@@ -5211,11 +5218,22 @@ def _answer_get_config(
             delivered = get_session_source_dir(
                 DEFAULT_SESSION_ID if session_id is None else session_id
             )
-            scanned_root = (
-                delivered
-                if delivered is not None and delivered.is_dir()
-                else working_directory()
-            )
+            if delivered is not None and delivered.is_dir():
+                scanned_root = delivered
+            elif caller_is_remote(session_id):
+                # A network session that delivered nothing has no tree a scan
+                # of it may target: run_ash_scan refuses to fall back to the
+                # server's working directory for it (_resolve_omitted_source_dir),
+                # so this answer is not judged for that directory either. It is
+                # judged for no scanned tree, the fail-closed path a deleted
+                # working directory already takes: the file is confined by its
+                # own root and the operator-only options of no checkout are
+                # read, which leaves out more, never less.
+                scanned_root = None
+            else:
+                # The local client's working directory is its own tree, the
+                # target run_ash_scan takes for it when none is named.
+                scanned_root = working_directory()
 
     # resolve_config starts from the ASH_CONFIG base and raises when it is
     # refused. Checked first, so the refusal is not reported as the file asked
