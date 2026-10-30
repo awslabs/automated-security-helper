@@ -887,6 +887,7 @@ class TestFileUriForms:
         assert len(filtered.sarif.runs[0].results) == 1
 
 
+@pytest.mark.unit
 class TestTheKeptConvertedCountSaid:
     def test_it_is_a_declared_private_attribute_and_not_a_field(self):
         """The count already said lives on the model so the two passes of the filter
