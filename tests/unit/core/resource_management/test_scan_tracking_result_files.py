@@ -60,6 +60,21 @@ def _write_result(output_dir, scanner, target, document):
     return path
 
 
+def _symlink_or_skip(link, target):
+    """Make ``link`` point at ``target``, or skip where links cannot be made.
+
+    ``hasattr(os, "symlink")`` is true on Windows, where creating one still
+    fails without the privilege (OSError, winerror 1314); a platform limit is
+    a skip, not a failure of the behavior under test.
+    """
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlinks are not available on this platform")
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as e:
+        pytest.skip(f"this platform refuses to create a symlink: {e}")
+
+
 class TestOnlyARegularResultFileIsRead:
     def test_a_regular_file_is_read(self, tmp_path):
         out = tmp_path / "ash_output"
@@ -75,7 +90,7 @@ class TestOnlyARegularResultFileIsRead:
         other = tmp_path / "other-tree.json"
         other.write_text(json.dumps({"status": "FAILED"}), encoding="utf-8")
         link = _target_dir(out, "bandit", "source") / _RESULTS_FILE
-        link.symlink_to(other)
+        _symlink_or_skip(link, other)
 
         assert is_regular_result_file(link) is False
         assert find_scanner_result_files(out) == {}
@@ -114,7 +129,7 @@ class TestTheAggregatedResultsFileGetsTheSameGuard:
             json.dumps({"scanner_results": {"bandit": {"status": "PASSED"}}}),
             encoding="utf-8",
         )
-        (out / "ash_aggregated_results.json").symlink_to(other)
+        _symlink_or_skip(out / "ash_aggregated_results.json", other)
 
         assert summarize_scanner_statuses(out)["scanner_statuses"] == {}
         with pytest.raises(MCPResourceError, match="not a regular file"):

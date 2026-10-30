@@ -52,6 +52,21 @@ def _register(registry, directory, output=None):
     )
 
 
+def _symlink_or_skip(link, target):
+    """Make ``link`` point at ``target``, or skip where links cannot be made.
+
+    ``hasattr(os, "symlink")`` is true on Windows, where creating one still
+    fails without the privilege (OSError, winerror 1314); a platform limit is
+    a skip, not a failure of the behavior under test.
+    """
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlinks are not available on this platform")
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as e:
+        pytest.skip(f"this platform refuses to create a symlink: {e}")
+
+
 def _results_document(scanner_name):
     return {
         "metadata": {"generated_at": "2024-01-01T00:00:00", "summary_stats": {}},
@@ -92,7 +107,7 @@ class TestCanonicalDirectorySurvivesAnUnresolvablePath:
         target = tmp_path / "target"
         target.mkdir()
         link = tmp_path / "link"
-        link.symlink_to(target)
+        _symlink_or_skip(link, target)
         first = _register(registry, link)
         registry.update_scan_status(first, MCScanStatus.COMPLETED)
 
@@ -121,12 +136,12 @@ class TestDirectoryOccupancyIsFixedAtRegistration:
         unrelated = tmp_path / "unrelated"
         unrelated.mkdir()
         link = tmp_path / "link"
-        link.symlink_to(real)
+        _symlink_or_skip(link, real)
         first = _register(registry, link)
 
         # After the scan started, the link is pointed somewhere else.
         link.unlink()
-        link.symlink_to(unrelated)
+        _symlink_or_skip(link, unrelated)
 
         # The real directory is still being scanned: a second scan is refused.
         with pytest.raises(MCPResourceError) as excinfo:
@@ -147,10 +162,10 @@ class TestDirectoryOccupancyIsFixedAtRegistration:
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
         link = tmp_path / "link"
-        link.symlink_to(real)
+        _symlink_or_skip(link, real)
         first = _register(registry, link)
         link.unlink()
-        link.symlink_to(elsewhere)
+        _symlink_or_skip(link, elsewhere)
 
         assert registry.get_scan_by_directory(str(real)).scan_id == first
         assert registry.get_scan_by_directory(str(elsewhere)) is None
