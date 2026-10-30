@@ -387,14 +387,21 @@ def test_a_link_to_a_file_the_scan_set_holds_is_tested_under_that_name(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
 def test_a_link_to_a_file_an_ignore_path_keeps_out_of_the_copy_is_unevaluated(
-    tmp_path, tested
+    tmp_path, tested, monkeypatch
 ):
     """The target is in the scan set, but the operator's ignore path keeps it out
     of the copy, so the link's content is tested under no name: recorded, as a
     link to a file outside the set is. Judged against what the copy holds, not
-    against the set."""
+    against the set.
+
+    ``scan()`` refuses a source holding an ignored file before it copies anything
+    (``_refuse_ignored_files``, pinned by its own tests); the copy's ignore skip
+    is the second guard, which this test reaches by setting the first aside."""
     from automated_security_helper.models.core import IgnorePathWithReason
 
+    monkeypatch.setattr(
+        SnykCodeScanner, "_refuse_ignored_files", lambda self, *a, **k: None
+    )
     context = _context(tmp_path)
     _write(context.source_dir, "app.js")
     _write(context.source_dir, "vendor/lib.js")
