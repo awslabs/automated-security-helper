@@ -58,7 +58,14 @@ def test_download_file(mock_urlopen, tmp_path):
     dest = tmp_path / "destination"
     result = download_file("https://example.com/file.txt", dest)
 
-    mock_urlopen.assert_called_once_with("https://example.com/file.txt")
+    # The fetch is bounded: the URL is the one positional argument and a positive
+    # socket timeout rides with it (its exact value is pinned in
+    # test_download_utils_transfer_and_receipt_edges.py). A stalled connection
+    # must end the attempt, so a call without the bound is the defect here.
+    assert mock_urlopen.call_count == 1
+    (called_url,), kwargs = mock_urlopen.call_args
+    assert called_url == "https://example.com/file.txt"
+    assert kwargs.get("timeout", 0) > 0
     assert result == dest.joinpath("file.txt")
     assert result.read_bytes() == payload
     # No staging file is left behind on the happy path.
