@@ -21,6 +21,11 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
     GHASReporter,
 )
+from automated_security_helper.workspace.aggregation import (
+    PROJECT_ROOT_URI_BASE_ID,
+    rebase_run_for_project,
+)
+from automated_security_helper.workspace.plan import ProjectPlan
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Level,
@@ -43,8 +48,22 @@ pytestmark = pytest.mark.unit
 AshAggregatedResults.model_rebuild()
 
 
-def _project_run(project_path: str, rule_id: str, uri: str) -> Run:
-    """One project's run as the workspace aggregator writes it."""
+def _project_run(
+    project_path: str,
+    rule_id: str,
+    uri: str,
+    level: Level = Level.error,
+    **run_fields,
+) -> Run:
+    """One project's run as the workspace aggregator writes it.
+
+    ``rebase_run_for_project`` (workspace/aggregation.py) stamps every run it
+    adds with ``properties.workspace_project`` and ``workspace_project_path``,
+    anchors it with ``originalUriBaseIds.PROJECTROOT`` and tags each result's
+    ``properties.workspace_project``; the reporter reads the run-level path, so
+    that is what this mirrors (and ``test_the_run_the_real_aggregator_writes_is_
+    read_as_a_project_run`` checks the mirror against the real thing).
+    """
     return Run(
         tool=Tool(
             driver=ToolComponent(
@@ -52,7 +71,7 @@ def _project_run(project_path: str, rule_id: str, uri: str) -> Run:
                 rules=[
                     ReportingDescriptor(
                         id=rule_id,
-                        defaultConfiguration=ReportingConfiguration(level=Level.error),
+                        defaultConfiguration=ReportingConfiguration(level=level),
                     )
                 ],
             )
@@ -60,7 +79,7 @@ def _project_run(project_path: str, rule_id: str, uri: str) -> Run:
         results=[
             Result(
                 ruleId=rule_id,
-                level=Level.error,
+                level=level,
                 message=Message(text=f"{rule_id} fired"),
                 locations=[
                     Location(
@@ -80,7 +99,12 @@ def _project_run(project_path: str, rule_id: str, uri: str) -> Run:
                 "workspace_project_path": project_path,
             }
         ),
+        **run_fields,
     )
+
+
+def _run_dict(run: Run) -> dict:
+    return run.model_dump(by_alias=True, exclude_none=True, mode="json")
 
 
 @pytest.fixture
@@ -116,6 +140,137 @@ def test_rules_of_every_run_are_declared(document):
 
 def test_locations_are_below_the_workspace_root(document):
     (run,) = document["runs"]
+    uris = {
+        result["ruleId"]: result["locations"][0]["physicalLocation"][
+            "artifactLocation"
+        ]["uri"]
+        for result in run["results"]
+    }
+    assert uris == {
+        "API-1": "services/api/src/handler.py",
+        "WEB-1": "apps/web/src/index.js",
+    }
+
+
+def test_a_rule_fired_in_two_projects_is_declared_once_at_its_most_severe(reporter):
+    """The same scanner fires the same rule in several projects of a monorepo.
+    The merged document declares the rule once (two descriptors with one id
+    would be invalid), carries no ``ruleIndex`` (a per-run index is stale after
+    the merge), and scores the rule by its most severe emitted result across
+    every run: an ``error`` in one project and a ``note`` in another is 9.5."""
+    api = _project_run("services/api", "B105", "src/handler.py")
+    web = _project_run("apps/web", "B105", "src/index.js", level=Level.note)
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(version="2.1.0", runs=[api, web])
+
+    (run,) = json.loads(reporter.report(model))["runs"]
+
+    rules = run["tool"]["driver"]["rules"]
+    assert [rule["id"] for rule in rules] == ["B105"]
+    assert rules[0]["properties"]["security-severity"] == "9.5"
+    assert all("ruleIndex" not in result for result in run["results"])
+    assert sorted(result["level"] for result in run["results"]) == ["error", "note"]
+
+
+def test_a_multi_run_document_carries_no_base_ids_or_related_locations(reporter):
+    """The slim result keeps ``locations`` only: ``relatedLocations`` and code
+    flows, whose URIs the rebase never visits, are left out, and a multi-run
+    document declares no ``originalUriBaseIds`` and no per-location
+    ``uriBaseId``, so a consumer cannot resolve the project prefix twice."""
+    api = _project_run(
+        "services/api",
+        "API-1",
+        "src/handler.py",
+        originalUriBaseIds={
+            "PROJECTROOT": ArtifactLocation(uri="file:///ws/services/api/")
+        },
+    )
+    api.results[0].relatedLocations = [
+        Location(
+            physicalLocation=PhysicalLocation(
+                artifactLocation=ArtifactLocation(
+                    uri="src/other.py", uriBaseId="PROJECTROOT"
+                )
+            )
+        )
+    ]
+    web = _project_run("apps/web", "WEB-1", "src/index.js")
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(version="2.1.0", runs=[api, web])
+
+    (run,) = json.loads(reporter.report(model))["runs"]
+
+    assert "originalUriBaseIds" not in run
+    for result in run["results"]:
+        assert "relatedLocations" not in result
+        assert "codeFlows" not in result
+        for location in result["locations"]:
+            assert "uriBaseId" not in location["physicalLocation"]["artifactLocation"]
+
+
+@pytest.mark.parametrize(
+    ("project_path", "expected"),
+    [
+        # a project at the workspace root: its own paths are already
+        # workspace-relative, and the helper refuses a "." prefix, so the URI
+        # is kept as written
+        (".", "src/handler.py"),
+        # a trailing separator is not a component: no doubled slash
+        ("services/api/", "services/api/src/handler.py"),
+        ("services/api", "services/api/src/handler.py"),
+    ],
+)
+def test_a_root_or_slash_terminated_project_path_places_the_uri_once(
+    reporter, project_path, expected
+):
+    run = _project_run(project_path, "R-1", "src/handler.py")
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(version="2.1.0", runs=[run])
+
+    (out,) = json.loads(reporter.report(model))["runs"]
+
+    assert (
+        out["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        == expected
+    )
+
+
+def test_the_run_the_real_aggregator_writes_is_read_as_a_project_run(
+    reporter, tmp_path
+):
+    """The fixture above mirrors the aggregator by hand. This one runs the real
+    ``rebase_run_for_project`` over a scanner's run and hands its output to the
+    reporter, so the key the reporter reads is the key the aggregator writes;
+    a rename on either side turns this red."""
+    project_dir = tmp_path / "services" / "api"
+    project_dir.mkdir(parents=True)
+    plan = ProjectPlan(
+        key="services-api",
+        relative_path="services/api",
+        path=project_dir.as_posix(),
+        label="api",
+        display_label="api",
+    )
+    scanner_run = _project_run("unused", "API-1", "src/handler.py")
+    scanner_run.properties = None
+
+    rebased, _unconvertible = rebase_run_for_project(_run_dict(scanner_run), plan)
+
+    assert rebased["properties"]["workspace_project_path"] == "services/api"
+    assert PROJECT_ROOT_URI_BASE_ID in rebased["originalUriBaseIds"]
+    model = AshAggregatedResults()
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                rebased,
+                _run_dict(_project_run("apps/web", "WEB-1", "src/index.js")),
+            ],
+        }
+    )
+
+    (run,) = json.loads(reporter.report(model))["runs"]
+
     uris = {
         result["ruleId"]: result["locations"][0]["physicalLocation"][
             "artifactLocation"

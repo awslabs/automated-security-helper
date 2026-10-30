@@ -26,6 +26,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_
     _usable_security_severity,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    Kind1,
     Level,
     Message,
     PropertyBag,
@@ -33,6 +34,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     Run,
     SarifReport,
+    Suppression,
     Tool,
     ToolComponent,
 )
@@ -47,25 +49,37 @@ def reporter(test_plugin_context):
     return GHASReporter(context=test_plugin_context)
 
 
-def _rule_score(reporter, score, level=Level.error, issue_severity=None) -> str:
+def _result(level, issue_severity=None, suppressed=False) -> Result:
+    return Result(
+        ruleId="R",
+        level=level,
+        message=Message(text="finding"),
+        properties=(
+            PropertyBag(tags=[], issue_severity=issue_severity)
+            if issue_severity
+            else None
+        ),
+        suppressions=[Suppression(kind=Kind1.external)] if suppressed else None,
+    )
+
+
+def _rule_score(
+    reporter, score, level=Level.error, issue_severity=None, results=None
+) -> str:
     """The emitted security-severity of rule R, whose scanner declared *score*
-    and whose one result is at *level*, optionally with an ``issue_severity``."""
-    rule = ReportingDescriptor(
-        id="R", properties=PropertyBag(tags=[], **{"security-severity": score})
+    (None for no score at all) and whose results are *results*, rows of
+    ``(level, issue_severity, suppressed)``, defaulting to one unsuppressed
+    result at *level*, optionally with an ``issue_severity``."""
+    rule_props = (
+        PropertyBag(tags=[])
+        if score is None
+        else PropertyBag(tags=[], **{"security-severity": score})
     )
-    result_props = (
-        PropertyBag(tags=[], issue_severity=issue_severity) if issue_severity else None
-    )
+    rule = ReportingDescriptor(id="R", properties=rule_props)
+    rows = results if results is not None else [(level, issue_severity, False)]
     run = Run(
         tool=Tool(driver=ToolComponent(name="ASH", rules=[rule])),
-        results=[
-            Result(
-                ruleId="R",
-                level=level,
-                message=Message(text="finding"),
-                properties=result_props,
-            )
-        ],
+        results=[_result(*row) for row in rows],
     )
     model = AshAggregatedResults()
     model.sarif = SarifReport(version="2.1.0", runs=[run])
@@ -93,10 +107,78 @@ class TestUnusableScoresFallToTheGate:
             ("high", None),
             ("", None),
             (None, None),
+            # float() parses these; the range test is what refuses them
+            ("nan", None),
+            ("inf", None),
+            ("-inf", None),
+            (" 5 ", "5"),
         ],
     )
     def test_usable_security_severity(self, value, expected):
         assert _usable_security_severity(value) == expected
+
+
+class TestTheBucketIsTheMostSevereEmittedResult:
+    """The docstring's rule, row by row: the gate's grade of the rule's most
+    severe result that the file emits decides the bucket a scanner score must
+    land in."""
+
+    def test_the_most_severe_of_several_results_decides(self, reporter):
+        rows = [(Level.warning, "HIGH", False), (Level.error, None, False)]
+
+        assert _rule_score(reporter, "3.1", results=rows) == "9.5"
+
+    def test_a_suppressed_result_left_out_of_the_file_does_not_score_the_rule(
+        self, reporter
+    ):
+        """One suppressed CRITICAL and one emitted LOW: the LOW decides, so a
+        scanner score in the critical bucket is replaced by the gate's LOW."""
+        rows = [(Level.error, None, True), (Level.note, "LOW", False)]
+
+        assert _rule_score(reporter, "9.8", results=rows) == "3.0"
+
+    def test_a_rule_whose_only_result_is_suppressed_keeps_the_scanners_score(
+        self, reporter
+    ):
+        """No emitted alert carries the rule, so there is no bucket to agree
+        with; the scanner's usable score stands."""
+        assert _rule_score(reporter, "3.1", results=[(Level.error, None, True)]) == (
+            "3.1"
+        )
+
+    @pytest.mark.parametrize(
+        ("score", "expected"),
+        [
+            ("9.0", "8.0"),  # 9.0 is the critical bucket's floor
+            ("8.95", "8.95"),
+            ("7.0", "7.0"),  # the high bucket's floor
+            ("6.9", "8.0"),  # medium
+        ],
+    )
+    def test_the_high_buckets_boundaries(self, reporter, score, expected):
+        assert (
+            _rule_score(reporter, score, level=Level.warning, issue_severity="HIGH")
+            == expected
+        )
+
+    def test_nine_point_zero_is_in_the_critical_bucket(self, reporter):
+        assert _rule_score(reporter, "9.0") == "9.0"
+
+    @pytest.mark.parametrize(
+        ("score", "level", "issue_severity", "expected"),
+        [
+            ("3.9", Level.note, None, "3.9"),  # LOW, low bucket
+            ("4.0", Level.note, None, "3.0"),  # medium bucket against a LOW
+            ("0.5", Level.note, "INFO", "0.5"),  # INFO shares the low bucket
+            ("0.0", Level.note, "INFO", "1.0"),  # 0.0 is no severity: the gate's
+        ],
+    )
+    def test_low_and_info_share_githubs_low_bucket(
+        self, reporter, score, level, issue_severity, expected
+    ):
+        assert _rule_score(
+            reporter, score, level=level, issue_severity=issue_severity
+        ) == (expected)
 
 
 class TestTheScannerScoreMustAgreeWithTheGatesBucket:
