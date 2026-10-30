@@ -3168,9 +3168,13 @@ def _plan_popen_kwargs(plan: "Optional[SpawnPlan]") -> Dict[str, Any]:
     itself, so the stop paths' group signals reach what the tool starts. Empty for
     every other plan and for no plan, so such a spawn is passed exactly what it
     was. Where the runner sets the flag itself (_start_in_own_group), the plan's
-    True is the same value.
+    True is the same value. Read with a default, as the other reads of a plan
+    here go: a plan that does not carry the field (one built before it existed,
+    or a stand-in that only runs a cleanup) asks for nothing, instead of the
+    spawn failing before the child exists and the run being reported as a tool
+    that never started.
     """
-    if plan is not None and plan.start_new_session:
+    if plan is not None and getattr(plan, "start_new_session", False):
         return {"start_new_session": True}
     return {}
 
