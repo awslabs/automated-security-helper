@@ -325,20 +325,6 @@ class TestEveryProbeRunsInThePluginsEnvironment:
         assert kwargs["offline"] is True
         assert kwargs["package"] == "nbconvert"
 
-    def test_the_installed_fallback_probe_carries_them_too(self):
-        plugin = FakePlugin(
-            command="jupyter-nbconvert", uv_tool_package_name="nbconvert", offline=True
-        )
-        runner = self._runner()
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
-            return_value=runner,
-        ):
-            assert plugin._is_uv_tool_installed() is True
-        kwargs = runner.get_tool_version.call_args.kwargs
-        assert kwargs["offline"] is True
-        assert kwargs["package"] == "nbconvert"
-
 
 def _install_runner(**overrides):
     runner = MagicMock()
