@@ -58,6 +58,9 @@ def source_dir_refusal(source_dir: PathLike) -> Optional[str]:
         mode = os.stat(path).st_mode
     except (FileNotFoundError, NotADirectoryError):
         return f"Source directory does not exist: {path}"
+    except ValueError:
+        # A path the OS cannot take at all (an embedded NUL) names nothing.
+        return f"Source directory does not exist: {path}"
     except OSError as error:
         # A link that leads back to itself names nothing, as a link to nothing does.
         if error.errno == errno.ELOOP:
@@ -82,12 +85,20 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
     way that cannot be searched (``Permission denied``). One that is simply not
     there is not checked further: whether it can be made is known only by making
     it, so the caller that makes it refuses it with :func:`output_dir_unmakeable`.
+    An empty path is refused as mkdir refuses it (``No such file or directory``):
+    stat answers the same, and nothing was about to make it, while the run that
+    took it would have written into the current directory. A path the OS cannot
+    take (an embedded NUL) is refused with the reason Python gives.
     """
     path = os.fspath(output_dir)
     try:
         mode = os.stat(path).st_mode
-    except FileNotFoundError:
+    except FileNotFoundError as error:
+        if not path:
+            return output_dir_unmakeable(path, error.strerror or "No such file")
         return _link_to_nothing_on_the_way(path)
+    except ValueError as error:
+        return output_dir_unmakeable(path, str(error) or type(error).__name__)
     except OSError as error:
         return output_dir_unmakeable(path, error.strerror or type(error).__name__)
     if not stat.S_ISDIR(mode):
@@ -104,8 +115,14 @@ def _link_to_nothing_on_the_way(path: str) -> Optional[str]:
     """The refusal of *path*, which is not there, when making it would fail on a link
     to nothing: the path itself, or the nearest part of it that is there. mkdir
     cannot make a directory where a link is, and fails with EEXIST, as mkdir -p
-    does in ./ash. None when there is no such link."""
-    current = os.path.abspath(path)
+    does in ./ash. None when there is no such link.
+
+    The path is walked as written, made absolute with the working directory and
+    no more: ``os.path.abspath`` folds a ``..`` lexically, so after a symbolic
+    link to a directory it named a sibling of the link, not of the directory
+    the link leads to, which is the one mkdir reaches. Each ``lexists`` here
+    hands the path to the OS, which resolves such a ``..`` as mkdir does."""
+    current = path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
     while not os.path.lexists(current):
         parent = os.path.dirname(current)
         if parent == current:
