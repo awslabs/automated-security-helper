@@ -163,7 +163,8 @@ def is_tightening_value(scanner: str, option: str, value: Any) -> bool:
         try:
             if _same_json_value(value, listed):
                 return True
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):
+            # Not JSON data, or nested past what the encoder will follow.
             return False
     return False
 

@@ -932,14 +932,15 @@ def _equals_as_json(value: Any, expected: Any) -> bool:
 
     ``1 == True`` and ``0 == False`` in Python, so a comparison that decides what a
     delivered file may write has to go through the JSON comparison the denial
-    check uses. A value that is not JSON data at all (a YAML date, a cycle) is
-    not ``expected``; the comparison does not raise.
+    check uses. A value that is not JSON data at all (a YAML date, a cycle) or
+    is nested past what the encoder will follow is not ``expected``; the
+    comparison does not raise.
     """
     from automated_security_helper.config.runtime_patch import _same_json_value
 
     try:
         return _same_json_value(value, expected)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return False
 
 

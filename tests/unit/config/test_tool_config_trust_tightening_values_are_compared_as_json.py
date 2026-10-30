@@ -15,6 +15,7 @@ tested ``current in TIGHTENING_VALUES[...]``, which is Python equality, so
 from __future__ import annotations
 
 import datetime
+import sys
 from typing import Any
 
 import pytest
@@ -54,6 +55,13 @@ def test_a_value_that_is_not_json_is_not_a_tightening_and_does_not_raise() -> No
     assert (
         is_tightening_value("opengrep", "metrics", datetime.date(2026, 1, 1)) is False
     )
+
+
+def test_a_value_nested_too_deep_is_not_a_tightening_and_does_not_raise() -> None:
+    deep: Any = []
+    for _ in range(10 * sys.getrecursionlimit()):
+        deep = [deep]
+    assert is_tightening_value("opengrep", "metrics", deep) is False
 
 
 def test_the_reading_holds_for_zero_and_false_listed_values(monkeypatch) -> None:
