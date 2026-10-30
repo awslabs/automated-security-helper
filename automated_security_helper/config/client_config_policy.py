@@ -1511,12 +1511,18 @@ def trusted_default_config(
     from automated_security_helper.core.exceptions import ASHConfigValidationError
     from automated_security_helper.utils.log import ASH_LOGGER
 
-    def built_in_defaults() -> AshConfig:
-        ASH_LOGGER.warning(
-            "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
-            "client delivered, so ASH's built-in defaults are the trusted config "
-            "instead. Keep the server's config outside the MCP workspace root."
-        )
+    delivered = (
+        "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
+        "client delivered, so ASH's built-in defaults are the trusted config "
+        "instead. Keep the server's config outside the MCP workspace root."
+    )
+    unreported = (
+        "ASH_CONFIG names a file, but loading it reported no chain of files to "
+        "judge, so ASH's built-in defaults are the trusted config instead."
+    )
+
+    def built_in_defaults(reason: str) -> AshConfig:
+        ASH_LOGGER.warning(reason)
         return AshConfig()
 
     # The file ASH_CONFIG names is judged before it is loaded: a client's file
@@ -1528,7 +1534,7 @@ def trusted_default_config(
     except ASHConfigValidationError:
         named_file = None
     if named_file is not None and config_is_client_supplied(named_file):
-        return built_in_defaults()
+        return built_in_defaults(delivered)
     # One read: the chain is judged from the files the load itself read
     # (``views``, the carry get_default_config fills from the same read), not
     # from a second resolution of ASH_CONFIG that a file changed in between
@@ -1544,8 +1550,8 @@ def trusted_default_config(
         )
     # A file named and a load that reports no chain: nothing was judged.
     if named_file is not None and not views:
-        return built_in_defaults()
+        return built_in_defaults(unreported)
     for chain, named, _environment_paths in views:
         if any(config_is_client_supplied(path) for path in (*chain, *named)):
-            return built_in_defaults()
+            return built_in_defaults(delivered)
     return config

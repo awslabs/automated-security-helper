@@ -49,6 +49,7 @@ from automated_security_helper.config.client_config_policy import (
     trusted_default_config,
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
@@ -229,11 +230,18 @@ def test_an_ash_config_a_client_delivered_is_judged_before_it_is_parsed(
         return real_read(*args, **kwargs)
 
     monkeypatch.setattr(default_config, "get_default_config", counted_read)
+    warnings = []
+
+    def recorded(message, *_args, **_kwargs):
+        warnings.append(message)
+
+    monkeypatch.setattr(ASH_LOGGER, "warning", recorded)
 
     trusted = trusted_default_config()
 
     assert loads == [], "the delivered ASH_CONFIG file was loaded"
     assert trusted.project_name == AshConfig().project_name
+    assert len(warnings) == 1 and "client delivered" in warnings[0], warnings
 
 
 def test_an_ash_config_the_operator_owns_that_does_not_parse_still_raises(
@@ -257,12 +265,20 @@ def test_an_ash_config_whose_chain_the_load_did_not_report_is_not_trusted(
 ):
     """ASH_CONFIG names a file, and the load hands back a config without the
     chain it read (``views`` left empty). Nothing was judged, so the built-in
-    defaults are the trusted config, not what the load returned."""
+    defaults are the trusted config, not what the load returned. The warning
+    says what was established, that no chain was reported, and does not say a
+    client delivered the file."""
     operator = tmp_path / "operator" / "ash.yaml"
     operator.parent.mkdir()
     operator.write_text(yaml.safe_dump({"project_name": "op"}), encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+    warnings = []
+
+    def recorded(message, *_args, **_kwargs):
+        warnings.append(message)
+
+    monkeypatch.setattr(ASH_LOGGER, "warning", recorded)
 
     def unreported_read(*args, **kwargs):
         return AshConfig.model_validate({"project_name": "unjudged"})
@@ -272,6 +288,9 @@ def test_an_ash_config_whose_chain_the_load_did_not_report_is_not_trusted(
     trusted = trusted_default_config()
 
     assert trusted.project_name == AshConfig().project_name
+    assert len(warnings) == 1, warnings
+    assert "no chain" in warnings[0], warnings
+    assert "client delivered" not in warnings[0], warnings
 
 
 def test_a_kebab_spelled_trusted_option_still_denies_the_delivered_default():
