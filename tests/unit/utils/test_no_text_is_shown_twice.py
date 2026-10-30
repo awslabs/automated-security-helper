@@ -160,24 +160,6 @@ _BY_DESIGN: Dict[Site, str] = {
         "cleanup_scan_resources",
         "Failed to cancel scan",
     ): "it logs the cancel result's message, which is raw; only its error is shown",
-    # write_report_file returns the path it wrote, report_dir / filename, and the
-    # check takes its result for shown text whenever the content it is given (a
-    # report that quotes shown values) is. Each of these logs only that path.
-    (
-        "automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py",
-        "_write_markdown_files",
-        "Executive summary written to",
-    ): "exec_path is the file write_report_file wrote, not the report's content",
-    (
-        "automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py",
-        "_write_markdown_files",
-        "Technical analysis written to",
-    ): "tech_path is the file write_report_file wrote, not the report's content",
-    (
-        "automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py",
-        "report",
-        "self._write_markdown_files(",
-    ): "summary is only written into the report file; the line logged is its path",
 }
 
 
