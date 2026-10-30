@@ -286,20 +286,27 @@ def ignored_entries(
     whole = {
         directory for directory, count in total.items() if hit.get(directory) == count
     }
-    # A link whose destination holds a walked file that is not ignored, or no
-    # walked file at all (nothing proven ignored; a nested link to scanned files
-    # may sit there, unentered): no directory holding the link is whole. Every
-    # link is applied before any is judged, so a destination that is itself
-    # unmade whole by a link below it (a further link on to scanned files, which
-    # a tool reaches through the first link too) is not skipped under the first
-    # link's name either.
+    # A link whose destination is not whole (it holds a walked file that is not
+    # ignored, or no walked file at all: nothing proven ignored, and a nested link
+    # to scanned files may sit there, unentered) unmakes every directory holding
+    # the link. That can unmake another link's destination, so the discard runs
+    # to a fixpoint: a chain of links (src/vendored -> third_party/lib, which holds
+    # bridge -> third_party/hub, which holds a link on to scanned files) is
+    # followed back link by link, where one pass judged each link by its
+    # destination's own counts and left the first link's name hiding files
+    # reached three hops down.
     links = dict(directory_links or {})
-    for link, leads_to in links.items():
-        walked = total.get(leads_to, 0)
-        if walked == 0 or walked > hit.get(leads_to, 0):
-            parts = link.split("/")
-            for depth in range(1, len(parts)):
-                whole.discard("/".join(parts[:depth]))
+    pending = [link for link, leads_to in links.items() if leads_to not in whole]
+    queued = set(pending)
+    while pending:
+        link = pending.pop()
+        parts = link.split("/")
+        for depth in range(1, len(parts)):
+            whole.discard("/".join(parts[:depth]))
+        for other, leads_to in links.items():
+            if other not in queued and leads_to not in whole:
+                queued.add(other)
+                pending.append(other)
 
     def _under_whole(relative: str) -> bool:
         parts = relative.split("/")
