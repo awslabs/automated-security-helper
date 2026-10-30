@@ -13,7 +13,12 @@ was kept as the scan's baseline and failed every source scan in
 ``load_from_baseline``.
 
 Every such baseline now takes the fallback: a warning, the default settings,
-and a scan with no baseline, as for a missing file.
+and a scan with no baseline, as for a missing file. A ``results`` entry whose
+items are not objects with a string ``type`` and ``hashed_secret`` is malformed
+too: ``load_from_baseline`` reads both by key. And a malformed file is scanned
+like any other file: it is not in use, so it is not taken out of the scan set
+(gated on the baseline being chosen, a repository could put anything in a file
+of that name and detect-secrets never read it).
 """
 
 from __future__ import annotations
@@ -80,7 +85,21 @@ MALFORMED = {
             "results": {},
         }
     ).encode(),
+    "a results item not a mapping": json.dumps(
+        {"version": "1.5.0", "results": {"a.py": [1]}}
+    ).encode(),
+    "a results item without a type": json.dumps(
+        {"version": "1.5.0", "results": {"a.py": [{}]}}
+    ).encode(),
+    "a results item with a hashed secret of the wrong type": json.dumps(
+        {"version": "1.5.0", "results": {"a.py": [{"type": "x", "hashed_secret": 5}]}}
+    ).encode(),
 }
+
+
+def _scanned(seen: dict) -> set[str]:
+    """The names, relative to the source, of the files the worker was asked to scan."""
+    return {Path(item).name for item in seen["scan_paths"]}
 
 
 @pytest.mark.parametrize("content", list(MALFORMED.values()), ids=list(MALFORMED))
@@ -110,6 +129,9 @@ def test_a_malformed_baseline_warns_and_the_scan_runs_without_it(
     assert seen, "the worker was not reached"
     assert seen["baseline"] is None
     assert report.runs[0].results == []
+    # Not in use, so scanned like any other file.
+    assert ".secrets.baseline" in _scanned(seen)
+    assert "settings.py" in _scanned(seen)
 
 
 def test_a_well_formed_baseline_is_the_scans(tmp_path, monkeypatch):
@@ -137,4 +159,8 @@ def test_a_well_formed_baseline_is_the_scans(tmp_path, monkeypatch):
 
     scanner.scan(target=context.source_dir, target_type="source")
 
-    assert seen["baseline"] == document
+    # The worker is never seeded with the baseline (the scanner applies the
+    # entries to the scan's own findings); the baseline in use is not scanned.
+    assert seen["baseline"] is None
+    assert ".secrets.baseline" not in _scanned(seen)
+    assert "settings.py" in _scanned(seen)
