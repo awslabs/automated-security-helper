@@ -991,10 +991,15 @@ class TestScan:
         report = self._run(scanner, fake)
         assert scanner.targets_attempted == 2
         assert scanner.targets_failed == 1
-        assert any(
-            "templates/compliant.yaml: cfn-guard exited 255" in e
+        # Recorded once: the ERROR log puts the line in self.errors, and at an
+        # earlier tip an append beside it recorded the template twice in the
+        # invocation's exitCodeDescription.
+        recorded = [
+            e
             for e in scanner.errors
-        )
+            if "templates/compliant.yaml: cfn-guard exited 255" in e
+        ]
+        assert len(recorded) == 1, scanner.errors
         assert _observed(report.runs[0].results) == EXPECTED_INSECURE
 
     def test_a_failing_templates_stderr_is_redacted_with_the_scanners_values(
