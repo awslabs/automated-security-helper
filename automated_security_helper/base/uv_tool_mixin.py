@@ -1873,20 +1873,16 @@ class UVToolMixin:
             checked_requirement(tool_spec, "the tool spec", package=tool_name)
             # Each --with dependency, as the scan-time install checks them
             # (UVToolRunner.install_tool_with_version): unchecked here, a URL,
-            # a path or a marker reached `ash dependencies install`. The stored
-            # command is one string that get_installation_commands splits on
-            # whitespace, so a dependency carrying any (PEP 508 allows
-            # "jupyter >= 1.0") would break into argv pieces there: refused
-            # rather than mis-split, with the whole command cleared as for a
-            # refused tool spec.
+            # a path or a marker reached `ash dependencies install`. Whitespace
+            # inside one (PEP 508 allows "jupyter >= 1.0") is not refused here:
+            # the command builder below stores every requirement in the
+            # canonical spelling, which carries none, exactly as it does for
+            # the tool spec's own constraint, and the torn check after it
+            # refuses whatever still holds whitespace. A refusal at this point
+            # cleared the command for a dependency the builder would have
+            # spelled safely.
             for position, dependency in enumerate(with_dependencies, start=1):
                 checked_requirement(dependency, f"--with dependency {position}")
-                if any(character.isspace() for character in dependency):
-                    raise UVToolRunnerError(
-                        f"Refusing to store --with dependency {position} in the "
-                        "install command: it carries whitespace, and the stored "
-                        "command is split on whitespace"
-                    )
         except UVToolRunnerError as error:
             self.uv_tool_install_commands = []
             # The refusal's text carries no part of the spec, and the tool is
