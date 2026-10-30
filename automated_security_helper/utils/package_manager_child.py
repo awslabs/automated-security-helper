@@ -45,7 +45,11 @@ names in place of itself, ``yarn --version`` included.
 The repository's own ``package.json`` keeps its ``pnpm.auditConfig`` (pnpm's
 advisory ignore lists), a suppression the repository holds, as ASH honors repository
 suppressions; under ``--ignore-suppressions`` it is removed from the copy, as that
-flag lifts every suppression.
+flag lifts every suppression. pnpm 10 reads the same lists from ``auditConfig`` in
+``pnpm-workspace.yaml``, beside the registry and every other setting that file
+holds, so the copy gets a ``pnpm-workspace.yaml`` holding that one key and nothing
+else when the repository's file has it (and the flag is not set); the rest of the
+file, the settings the first paragraph distrusts, is never copied.
 
 The same shape as ``utils/python_child.py``: the private directory is made for the
 child and removed when the block ends. yarn 2+ itself was not measured: none was
@@ -56,7 +60,10 @@ versions above, offline under bwrap: a ``package-lock.json`` linking to a file
 outside the scanned tree was read by each). So every file the tool reads from the
 package (``package_manager_inputs``) has to resolve inside the scanned tree and be a
 regular file (``input_refusal``). The scanner refuses a package with any other one
-before starting anything for it, and the copy here never holds one either.
+before starting anything for it, and the copy here never holds one either: each
+input is opened first and judged through the open descriptor (``_read_admitted``),
+so a file swapped for a link or a FIFO between the scanner's check and the copy is
+refused rather than read through its new shape.
 """
 
 from __future__ import annotations
@@ -75,13 +82,26 @@ from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from automated_security_helper.utils.process_env import snapshot_environ
 
-#: The files npm and pnpm get in their private directory: the manifest and the
-#: lockfiles they read, and no settings file.
+#: pnpm's workspace settings file: pnpm 10 keeps ``auditConfig`` there as well as
+#: under ``pnpm`` in the manifest.
+PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml"
+
+#: The files npm and pnpm read from the package: the manifest and the lockfiles,
+#: and for pnpm the workspace settings file, which is copied reduced to its
+#: ``auditConfig`` (``_pnpm_workspace_copy``) and is otherwise no settings file.
 _PACKAGE_MANAGER_INPUTS: Dict[str, Tuple[str, ...]] = {
     "npm": ("package.json", "package-lock.json", "npm-shrinkwrap.json"),
-    "pnpm": ("package.json", "pnpm-lock.yaml"),
+    "pnpm": ("package.json", "pnpm-lock.yaml", PNPM_WORKSPACE_FILE),
     "yarn": ("package.json", "yarn.lock"),
 }
+
+#: The lockfile names a package manager audits. A link of one of these names that
+#: resolves to nothing is listed as an input like a dangling ``package.json`` link,
+#: so the package is refused with the reason rather than read as having no
+#: lockfile and passed over with nothing recorded.
+_LOCKFILE_NAMES = frozenset(
+    {"package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock"}
+)
 
 #: The prefix of the settings file name yarn 2+ is told to look for
 #: (YARN_RC_FILENAME) when it must read no ``.yarnrc.yml``. The rest of the name
@@ -134,10 +154,21 @@ def _sandboxed() -> bool:
 
 
 def _within(path: Path, root: Optional[Path]) -> bool:
+    """Whether ``path`` is ``root`` or below it, by file identity.
+
+    ``sandbox_grants.is_within`` compares the resolved path and each of its
+    parents with the root as files, so a root named through a bind mount or,
+    on a case-folding filesystem, in another case still counts; comparing
+    real-path strings read those as outside, and yarn's copy then went inside
+    the scanned tree. A path that does not exist yet (an output directory
+    about to be made) is judged by its nearest existing parent, as before.
+    """
     if root is None:
         return False
-    real, real_root = os.path.realpath(path), os.path.realpath(root)
-    return real == real_root or real.startswith(real_root.rstrip(os.sep) + os.sep)
+    # Imported here: sandbox_grants imports ash_config, which imports the scanners.
+    from automated_security_helper.config.sandbox_grants import is_within
+
+    return is_within(Path(path), Path(root))
 
 
 def _operator_cache_dir() -> Optional[Path]:
@@ -194,10 +225,12 @@ def _write_copy(target: Path, data: bytes, private: Path) -> None:
 
 
 def _copy_manifest(
-    source: Path, target: Path, *, ignore_suppressions: bool, private: Path
+    data: bytes, target: Path, *, ignore_suppressions: bool, private: Path
 ) -> None:
-    """Copy ``package.json``, without ``pnpm.auditConfig`` when suppressions are off."""
-    data = source.read_bytes()
+    """Copy ``package.json``, without ``pnpm.auditConfig`` when suppressions are off.
+
+    ``data`` is the manifest's bytes, read by ``_read_admitted``.
+    """
     if not ignore_suppressions:
         _write_copy(target, data, private)
         return
@@ -206,8 +239,11 @@ def _copy_manifest(
         # the package managers, and json.loads refuses the mark, so the
         # auditConfig stayed in the copy of such a manifest and pnpm applied
         # the repository's ignore lists under the flag that lifts them.
+        # RecursionError: a manifest nested past the interpreter's limit is
+        # refused by json.loads with that, not ValueError, and it escaped the
+        # copy step as a crash of the scan instead of reaching the tool.
         manifest = json.loads(data.decode("utf-8-sig"))
-    except ValueError:
+    except (ValueError, RecursionError):
         # Not JSON (or not UTF-8): the tool reports it as it would.
         _write_copy(target, data, private)
         return
@@ -216,6 +252,31 @@ def _copy_manifest(
         pnpm.pop("auditConfig")
         data = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
     _write_copy(target, data, private)
+
+
+def _pnpm_workspace_copy(data: bytes, *, ignore_suppressions: bool) -> Optional[bytes]:
+    """The ``pnpm-workspace.yaml`` the copy gets, or None for no file.
+
+    Only ``auditConfig`` crosses: pnpm 10 reads its advisory ignore lists from
+    that key of the workspace file as well as from ``pnpm.auditConfig`` in the
+    manifest, and a repository that keeps them there lost its suppressions when
+    the file was left out of the copy. Every other key (the registry among them)
+    is a setting the module does not let the repository set, and stays out.
+    Under ``--ignore-suppressions`` nothing crosses, as the manifest's key is
+    dropped. A file that is not YAML, or not a mapping, gives no file: pnpm then
+    runs as it did without one.
+    """
+    if ignore_suppressions:
+        return None
+    import yaml
+
+    try:
+        document = yaml.safe_load(data.decode("utf-8-sig"))
+    except (ValueError, RecursionError, yaml.YAMLError):
+        return None
+    if not isinstance(document, dict) or "auditConfig" not in document:
+        return None
+    return yaml.safe_dump({"auditConfig": document["auditConfig"]}).encode("utf-8")
 
 
 def package_manager_inputs(
@@ -229,14 +290,16 @@ def package_manager_inputs(
 
     npm and pnpm: the manifest and each lockfile they read that is present
     (``_PACKAGE_MANAGER_INPUTS``; npm reads ``npm-shrinkwrap.json`` ahead of
-    ``package-lock.json``). yarn: its lockfile and every ``package.json`` below the
-    package, a linked one and those in a linked directory included, since yarn
-    follows both when it looks for a workspace's members; ``node_modules``,
-    ``.git`` and the ``skip`` directories are left out. A name that resolves to
-    nothing is not listed: no tool can read it. The package's own ``package.json``
-    is the exception: it is listed when it is a link, even one to nothing, so that
-    a dangling link is refused with its reason rather than the tool started
-    without a manifest.
+    ``package-lock.json``), and for pnpm its workspace settings file. yarn: its
+    lockfile and every ``package.json`` below the package, a linked one and those
+    in a linked directory included, since yarn follows both when it looks for a
+    workspace's members; ``node_modules``, ``.git`` and the ``skip`` directories
+    are left out. A name that resolves to nothing is not listed: no tool can read
+    it. The package's own ``package.json`` and the lockfiles are the exception:
+    each is listed when it is a link, even one to nothing, so that a dangling
+    link is refused with its reason rather than the tool started without a
+    manifest, or the package read as having no lockfile and passed over with
+    nothing recorded.
 
     A ``skip`` directory that holds the package itself (ASH's output directory,
     when the package sits in the converted work directory below it) skips nothing:
@@ -256,12 +319,17 @@ def package_manager_inputs(
     inputs: List[Path] = []
     if manifest.is_symlink() and not manifest.exists():
         inputs.append(manifest)
+
+    def _present(name: str) -> bool:
+        # A lockfile link to nothing is listed too, for the same reason the
+        # manifest's is: refused with its reason, never read as "no lockfile".
+        path = package_dir / name
+        return path.exists() or (name in _LOCKFILE_NAMES and path.is_symlink())
+
     if binary != "yarn":
         names = _PACKAGE_MANAGER_INPUTS.get(binary, ("package.json",))
-        return inputs + [
-            package_dir / name for name in names if (package_dir / name).exists()
-        ]
-    if (package_dir / "yarn.lock").exists():
+        return inputs + [package_dir / name for name in names if _present(name)]
+    if _present("yarn.lock"):
         inputs.append(package_dir / "yarn.lock")
     skipped = [
         Path(os.path.realpath(p)) for p in skip if not _within(package_dir, Path(p))
@@ -340,6 +408,47 @@ def refused_inputs(
     return refused
 
 
+def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
+    """The bytes of ``path`` when it may be handed to the tool, else None.
+
+    The file is opened FIRST and judged through the open descriptor: a regular
+    file by ``fstat``, admitted by ``input_refusal`` on its name, and the same
+    file under that name as the one opened (device and inode). Checking the
+    name and then reading by name left a window in which the file could be
+    swapped for a link out of the tree or a FIFO, and the read followed the
+    new shape; here a swap before the open is caught by the check on the new
+    object, a swap after it by the identity compare, and whatever is read came
+    from the descriptor the checks judged. ``O_NONBLOCK`` keeps the open of a
+    FIFO from waiting for a writer; it is cleared before the read.
+    """
+    roots = list(roots)
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            return None
+        if input_refusal(path, roots) is not None:
+            return None
+        try:
+            named = os.stat(path)
+        except OSError:
+            return None
+        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+            return None
+        if hasattr(os, "set_blocking"):
+            os.set_blocking(fd, True)
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            return handle.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def _copy_inputs(
     binary: str,
     package_dir: Path,
@@ -352,22 +461,31 @@ def _copy_inputs(
 ) -> None:
     """Each input that stays in the tree, at its place below ``project``.
 
-    Written through fs_guard (``_write_copy``), which makes the parents and refuses
-    a link on the way, with ``private`` as the guarded root.
+    Read through ``_read_admitted`` (a refused input is skipped, as the scanner
+    has already recorded it) and written through fs_guard (``_write_copy``),
+    which makes the parents and refuses a link on the way, with ``private`` as
+    the guarded root.
     """
     for source in package_manager_inputs(binary, package_dir, skip=skip, roots=roots):
-        if input_refusal(source, roots) is not None:
+        data = _read_admitted(source, roots)
+        if data is None:
             continue
         target = project / source.relative_to(package_dir)
         if source.name == "package.json":
             _copy_manifest(
-                source,
+                data,
                 target,
                 ignore_suppressions=ignore_suppressions,
                 private=private,
             )
+        elif binary == "pnpm" and source.name == PNPM_WORKSPACE_FILE:
+            reduced = _pnpm_workspace_copy(
+                data, ignore_suppressions=ignore_suppressions
+            )
+            if reduced is not None:
+                _write_copy(target, reduced, private)
         else:
-            _write_copy(target, source.read_bytes(), private)
+            _write_copy(target, data, private)
 
 
 @contextmanager
