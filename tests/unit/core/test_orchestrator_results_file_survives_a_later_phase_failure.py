@@ -12,8 +12,8 @@ scan phase ran to its end: the engine holds its model from construction, so a
 failure in the convert phase, or a scan phase that raised midway, must write
 nothing (as the base did), not an empty or partial file the MCP progress
 tracker would read as a complete scan. Whether the scan phase completed is read
-from the phase's own record, the completeness checkpoint it appends as its last
-validation step. A cancel is not an Exception and still writes nothing.
+from the phase's own record, the marker it appends once its last step has
+returned. A cancel is not an Exception and still writes nothing.
 
 The engine here is a stub shaped like the real one: it holds ``_asharp_model``
 from construction (the same object the phases mutate) and its ``execute_phases``
@@ -72,12 +72,12 @@ class _EngineStub:
 
 
 def _scan_phase_ran_to_its_end(model: AshAggregatedResults) -> None:
-    # The scan phase's last validation step appends this checkpoint.
+    # The scan phase appends this marker once its last step has returned.
     model.validation_checkpoints.append(_checkpoint(SCAN_PHASE_COMPLETION_CHECKPOINT))
 
 
 def _scan_phase_raised_midway(model: AshAggregatedResults) -> None:
-    # A mid-phase checkpoint is on the model; the completeness one never came.
+    # A mid-phase checkpoint is on the model; the completion marker never came.
     model.validation_checkpoints.append(_checkpoint("task_queue_validation"))
 
 
@@ -203,21 +203,24 @@ def test_a_report_over_loaded_results_leaves_the_saved_file_on_failure(
     assert saved.read_bytes() == saved_bytes
 
 
-def test_the_completion_record_is_the_checkpoint_the_validation_manager_names():
-    """The fact the orchestrator reads is the one the scan phase's last step writes.
+def test_the_completion_record_is_the_phases_own_marker_not_the_managers_checkpoint():
+    """The fact the orchestrator reads is a marker of the phase's own.
 
-    Read from the checkpoint the real manager returns, not from its source: the
-    manager's method is a delegate to the checkpointer, so a source read of it
-    never held the literal, and the name is the checkpointer's to change.
+    The completeness checkpoint the real manager returns is NOT it: that
+    checkpoint is appended inside the completeness pass's try, which swallows
+    the pass's errors, so its presence says the pass finished, not that the
+    phase did. A model that holds every validation checkpoint but the marker
+    reads as not completed; the marker alone reads as completed.
     """
     manager = ScannerValidationManager(plugin_context=MagicMock())
     checkpoint = manager.ensure_complete_results(AshAggregatedResults())
-    assert checkpoint.checkpoint_name == SCAN_PHASE_COMPLETION_CHECKPOINT
-    assert manager.checkpoints[-1] is checkpoint
+    assert checkpoint.checkpoint_name == "result_completeness"
+    assert checkpoint.checkpoint_name != SCAN_PHASE_COMPLETION_CHECKPOINT
 
     model = AshAggregatedResults()
     assert scan_phase_completed(model) is False
     model.validation_checkpoints.append(_checkpoint("task_queue_validation"))
+    model.validation_checkpoints.append(_checkpoint(checkpoint.checkpoint_name))
     assert scan_phase_completed(model) is False
     model.validation_checkpoints.append(_checkpoint(SCAN_PHASE_COMPLETION_CHECKPOINT))
     assert scan_phase_completed(model) is True

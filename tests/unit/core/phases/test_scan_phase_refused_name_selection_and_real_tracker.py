@@ -18,7 +18,10 @@ the defect it names:
   executes is recorded ERROR and the other runs, and the later passes do not
   raise on the refused name again;
 * the key the REAL loader records for a lost built-in package is the one the
-  scan phase reads as "every built-in scanner is lost".
+  scan phase reads as "every built-in scanner is lost";
+* the record the orchestrator reads for "the scan phase ran to its end" is
+  written after the completeness pass has returned, so a pass that raised
+  (and was swallowed) still leaves it.
 
 The fixtures mirror the sibling module's.
 """
@@ -35,8 +38,10 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.phases.scan_phase import (
     _BUILTIN_PLUGIN_MODULE_PREFIX,
+    SCAN_PHASE_COMPLETION_CHECKPOINT,
     ScanPhase,
     _loses_builtin_scanners,
+    scan_phase_completed,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scanner_validation import (
@@ -314,3 +319,75 @@ class TestTheLoaderRecordsTheKeyTheScanPhaseReads:
         assert _loses_builtin_scanners(key)
         assert key == _BUILTIN_PLUGIN_MODULE_PREFIX
         assert "ImportError" in record[key].recorded
+
+
+class TheCompletenessPassRaised(RuntimeError):
+    pass
+
+
+class TestACompletedPhaseIsRecordedWhenItsCompletenessPassRaises:
+    def test_the_marker_is_written_after_a_raising_completeness_pass(
+        self, mock_plugin_context, mock_progress_display
+    ):
+        """The orchestrator's record of a finished scan does not ride the diagnostic.
+
+        The completeness pass catches its own errors and lets the phase return
+        normally ("scan will continue"), and the record the orchestrator read
+        used to be the checkpoint that pass appends inside its try. A pass that
+        raised then left a completed phase with no record of it, and a later
+        phase's failure wrote no results file. Red at the base: no checkpoint
+        at all was appended by the raising pass, so ``scan_phase_completed``
+        read False on a phase that returned its results.
+        """
+        phase = ScanPhase(
+            plugin_context=mock_plugin_context,
+            plugins=[_make_scanner_class("bandit")],
+            progress_display=mock_progress_display,
+        )
+        assert isinstance(phase.validation_manager, ScannerValidationManager)
+
+        def ensure_complete_results_raises(aggregated_results):
+            raise TheCompletenessPassRaised("forced by the test")
+
+        phase.validation_manager.ensure_complete_results = (
+            ensure_complete_results_raises
+        )
+
+        results = phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        names = [
+            checkpoint.get("checkpoint_name")
+            for checkpoint in results.validation_checkpoints
+            if isinstance(checkpoint, dict)
+        ]
+        # The pass raised before its checkpoint, so the diagnostic is absent...
+        assert "result_completeness" not in names
+        # ...and the phase's own marker, written after the pass returned, is
+        # the one the orchestrator reads.
+        assert names[-1] == SCAN_PHASE_COMPLETION_CHECKPOINT
+        assert scan_phase_completed(results) is True
+
+    def test_the_marker_is_the_last_checkpoint_of_a_phase_whose_pass_ran(
+        self, mock_plugin_context, mock_progress_display
+    ):
+        """The control: with the pass intact, both records are there, marker last."""
+        phase = ScanPhase(
+            plugin_context=mock_plugin_context,
+            plugins=[_make_scanner_class("bandit")],
+            progress_display=mock_progress_display,
+        )
+
+        results = phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        names = [
+            checkpoint.get("checkpoint_name")
+            for checkpoint in results.validation_checkpoints
+            if isinstance(checkpoint, dict)
+        ]
+        assert "result_completeness" in names
+        assert names[-1] == SCAN_PHASE_COMPLETION_CHECKPOINT
+        assert scan_phase_completed(results) is True

@@ -1,5 +1,6 @@
 """Implementation of the Scan phase."""
 
+from datetime import datetime
 from typing import Callable, Dict, Iterable, List, Any, Optional, Set, Tuple
 
 from automated_security_helper.base.converter_plugin import ConverterPluginBase
@@ -329,22 +330,26 @@ def _is_one_path_component(name: str) -> bool:
     return "/" not in name and "\\" not in name and ":" not in name
 
 
-#: The checkpoint the scan phase appends as its last validation step
-#: (``_validate_result_completeness``, ``ScannerValidationManager
-#: .ensure_complete_results``). Its presence in a model's validation_checkpoints
-#: is the record that the scan phase ran to its end on that model.
-SCAN_PHASE_COMPLETION_CHECKPOINT = "result_completeness"
+#: The checkpoint the scan phase appends to a model's validation_checkpoints
+#: once its last step has returned (``_record_scan_phase_completed``, called
+#: right after ``_validate_result_completeness``). Its presence is the record
+#: that the scan phase ran to its end on that model. A marker of its own, not
+#: the completeness checkpoint (``result_completeness``): that one is written
+#: inside ``_validate_result_completeness``'s try, which catches every error of
+#: the completeness pass and lets the phase return normally, so a pass that
+#: raised left a completed scan with no record of it.
+SCAN_PHASE_COMPLETION_CHECKPOINT = "scan_phase_completed"
 
 
 def scan_phase_completed(aggregated_results: Any) -> bool:
     """Whether the scan phase ran to its end on *aggregated_results*.
 
-    Read from the phase's own record, the completeness checkpoint it appends as
-    its last validation step, not from the model's existence: the engine holds
-    its model from construction, so a model exists before any phase ran, and a
-    scan phase that raised midway leaves a partial one. The orchestrator asks
-    this before writing a results file for a run that failed after the scan
-    phase, so that a failure before or inside the scan phase writes nothing.
+    Read from the phase's own record, the marker it appends once its last step
+    has returned, not from the model's existence: the engine holds its model
+    from construction, so a model exists before any phase ran, and a scan phase
+    that raised midway leaves a partial one. The orchestrator asks this before
+    writing a results file for a run that failed after the scan phase, so that a
+    failure before or inside the scan phase writes nothing.
     """
     checkpoints = getattr(aggregated_results, "validation_checkpoints", None) or []
     return any(
@@ -2161,6 +2166,10 @@ class ScanPhase(EnginePhase):
 
             # Validate result completeness before finalizing scan results
             self._validate_result_completeness(aggregated_results)
+            # Unconditional, and after the completeness pass has returned: the
+            # pass swallows its own errors, so its checkpoint is not a record
+            # that the phase reached its end. The orchestrator reads this one.
+            self._record_scan_phase_completed(aggregated_results)
 
             # A scanner busy in Python, not waiting on a child process, returns
             # after a cancel rather than stopping at it, and when it was the last
@@ -2771,6 +2780,32 @@ class ScanPhase(EnginePhase):
             ASH_LOGGER.debug(
                 f"Execution completion validation error stack trace: {traceback_text()}"
             )
+
+    def _record_scan_phase_completed(
+        self, aggregated_results: AshAggregatedResults
+    ) -> None:
+        """Append the marker ``scan_phase_completed`` reads, in the checkpoint shape.
+
+        The orchestrator used to read the completeness checkpoint as this
+        record. That checkpoint is appended inside ``_validate_result_completeness``'s
+        try, whose except logs "scan will continue" and returns: a completeness
+        pass that raised (``ensure_complete_results``, the report, a state read)
+        left the phase returning normally with no marker, and the orchestrator
+        then treated a completed scan as incomplete and wrote no results file
+        after a later phase's failure. The marker is written here, after that
+        pass has returned, whatever it did.
+        """
+        aggregated_results.validation_checkpoints.append(
+            {
+                "checkpoint_name": SCAN_PHASE_COMPLETION_CHECKPOINT,
+                "timestamp": datetime.now().isoformat(),
+                "expected_scanners": [],
+                "actual_scanners": [],
+                "discrepancies": [],
+                "errors": [],
+                "metadata": {"phase": "scan"},
+            }
+        )
 
     def _validate_result_completeness(
         self, aggregated_results: AshAggregatedResults
