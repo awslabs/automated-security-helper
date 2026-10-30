@@ -315,15 +315,22 @@ class TestParseResponse:
 
     def test_exit_19_with_results_is_a_completed_run(self):
         failure, report = CfnGuardScanner._parse_response(
-            {"returncode": 19, "stdout": self._stdout(), "stderr": ""}
+            {"returncode": 19, "stdout": self._stdout(), "stderr": ""}, values=()
         )
         assert failure is None and report.runs[0].results
 
     def test_exit_0_with_no_results_is_a_completed_run(self):
         failure, report = CfnGuardScanner._parse_response(
-            {"returncode": 0, "stdout": self._stdout(CAPTURED_COMPLIANT), "stderr": ""}
+            {"returncode": 0, "stdout": self._stdout(CAPTURED_COMPLIANT), "stderr": ""},
+            values=(),
         )
         assert failure is None and not report.runs[0].results
+
+    def test_the_redaction_values_are_required(self):
+        """A default of "redact nothing" let a caller that forgot the values print
+        the stderr unredacted; the parameter is keyword-only with no default."""
+        with pytest.raises(TypeError):
+            CfnGuardScanner._parse_response({"returncode": 0, "stdout": "{}"})  # type: ignore[call-arg]
 
     @pytest.mark.parametrize(
         "response, reason",
@@ -344,12 +351,17 @@ class TestParseResponse:
         ],
     )
     def test_failures_are_named(self, response, reason):
-        failure, report = CfnGuardScanner._parse_response(response)
+        failure, report = CfnGuardScanner._parse_response(response, values=())
         assert report is None and reason in failure
 
     def test_a_failing_exit_with_no_results_is_not_read_as_clean(self):
         failure, _ = CfnGuardScanner._parse_response(
-            {"returncode": 19, "stdout": self._stdout(CAPTURED_COMPLIANT), "stderr": ""}
+            {
+                "returncode": 19,
+                "stdout": self._stdout(CAPTURED_COMPLIANT),
+                "stderr": "",
+            },
+            values=(),
         )
         assert "no results" in failure
 

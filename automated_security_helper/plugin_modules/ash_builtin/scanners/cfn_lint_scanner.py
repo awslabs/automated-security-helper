@@ -1664,7 +1664,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             env=child_env,
             timeout=self._effective_scan_timeout(),
         )
-        failure = self._batch_failure(response, batch_file, guarded_values(self))
+        failure = self._batch_failure(response, batch_file, values=guarded_values(self))
         batch_report = None
         if failure is None:
             try:
@@ -1698,14 +1698,17 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def _batch_failure(
         response: object,
         batch_file: Path,
-        values: Optional[Iterable[str]] = (),
+        *,
+        values: Optional[Iterable[str]],
     ) -> Optional[str]:
         """Why one cfn-lint invocation produced nothing usable, or None if it did.
 
         ``values`` are the scanner's redaction values (``guarded_values(self)`` at
         the call site): the tool's stderr is redacted with them before it is cut
         for the message, and ``None`` (the values could not be read) shows a note in
-        place of the stderr rather than the text unredacted.
+        place of the stderr rather than the text unredacted. Required, with no
+        default: a default of "redact nothing" let a caller that forgot it print
+        the stderr unredacted, the gap the parameter closes.
         """
         if not isinstance(response, dict):
             return "cfn-lint did not run"

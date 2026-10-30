@@ -317,6 +317,13 @@ def test_unreadable_redaction_values_withhold_cfn_lints_stderr():
     assert "withheld" in failure
 
 
+def test_the_redaction_values_are_required():
+    """A default of "redact nothing" let a caller that forgot the values print the
+    stderr unredacted; the parameter is keyword-only with no default."""
+    with pytest.raises(TypeError):
+        CfnLintScanner._batch_failure({"returncode": 1}, Path("batch.sarif"))  # type: ignore[call-arg]
+
+
 def test_the_scan_passes_its_redaction_values_to_the_failure_message(ash_temp_path):
     """At the base the excerpt was cut unredacted, so the head of a value that
     straddled the cut reached ``self.errors``."""

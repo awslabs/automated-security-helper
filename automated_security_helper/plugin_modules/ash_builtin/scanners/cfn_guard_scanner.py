@@ -1031,7 +1031,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     if str(stderr_text).strip():
                         stderr_sections.append(f"--- {shown}\n{stderr_text}")
                 failure, template_report = self._parse_response(
-                    response, guarded_values(self)
+                    response, values=guarded_values(self)
                 )
                 if failure is not None or template_report is None:
                     failure = failure or "cfn-guard output could not be read"
@@ -1112,14 +1112,17 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     @staticmethod
     def _parse_response(
         response: object,
-        values: Optional[Iterable[str]] = (),
+        *,
+        values: Optional[Iterable[str]],
     ) -> Tuple[Optional[str], Optional[SarifReport]]:
         """(failure reason or None, parsed report or None) for one invocation.
 
         ``values`` are the scanner's redaction values (``guarded_values(self)`` at
         the call site): the tool's stderr is redacted with them before it is cut
         for the message, and ``None`` (the values could not be read) shows a note in
-        place of the stderr rather than the text unredacted.
+        place of the stderr rather than the text unredacted. Required, with no
+        default: a default of "redact nothing" let a caller that forgot it print
+        the stderr unredacted, the gap the parameter closes.
         """
         if not isinstance(response, dict):
             return "cfn-guard did not run", None
