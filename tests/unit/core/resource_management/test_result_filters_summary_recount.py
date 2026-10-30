@@ -10,7 +10,8 @@ Four mechanisms, each pinned against the behavior it replaced:
   scan read exactly like a clean one.
 * ``filter_actionable_only`` on results whose SARIF was asked for and is null
   returned an empty findings list with no error, beside a nonzero
-  ``summary_stats.actionable``.
+  ``summary_stats.actionable``; the view now says the findings cannot be
+  listed (``findings_available`` False and a warning) and keeps the counts.
 * A ``scanners`` filter narrowed ``scanner_results`` and the SARIF findings but
   left ``summary_stats``, ``actionable_findings`` and ``total_scanners`` at
   whole-scan values, so the summary reported the other scanners' findings.
@@ -111,13 +112,14 @@ class TestFilterSummaryWithoutSummaryStats:
         """SummaryStats has five outcome counters; scan_stats used to carry four, so
         the counters did not sum to the scanner count when scanners ERRORed."""
         results = _results()
-        results["summary_stats"]["error"] = 2
+        # grype ERRORed instead of going MISSING: three scanners, three outcomes.
+        results["summary_stats"]["error"] = 1
         results["summary_stats"]["missing"] = 0
 
         scan_stats = filter_summary(results)["findings_summary"]["scan_stats"]
 
-        assert scan_stats["error"] == 2
-        assert sum(scan_stats.values()) == 4
+        assert scan_stats["error"] == 1
+        assert sum(scan_stats.values()) == 3
 
         results = _results(with_summary_stats=False)
         results["raw_results"]["scanner_results"]["trivy"] = _scanner(
@@ -201,7 +203,14 @@ class TestAMissingActionableCountIsUnknownNotZero:
 
 class TestACounterTheSummaryDoesNotCarryIsNone:
     """filter_summary's docstring says None means the document records no such
-    count; a counter missing from a recorded summary_stats read 0."""
+    count; a counter missing from a recorded summary_stats read 0.
+
+    The two cases below differ on purpose: SummaryStats always writes its five
+    outcome counters, so a missing one is a document that never recorded it
+    (None), while it writes all six severity buckets too, and a recorded
+    summary that lacks one has nothing in that bucket (0), the reading the
+    producer's own ``severity_counts.get(bucket, 0)`` gives it.
+    """
 
     def test_a_missing_outcome_counter_is_none(self):
         results = _results()
@@ -222,12 +231,23 @@ class TestACounterTheSummaryDoesNotCarryIsNone:
 
 
 class TestActionableOnlyRefusesAnUnlistableCount:
-    def test_null_sarif_with_actionable_findings_is_refused(self):
+    def test_null_sarif_with_actionable_findings_marks_them_unlistable(self):
+        """The summary is right (3 actionable) and only the list is missing, so
+        the response says so instead of failing the whole call: it used to raise,
+        and the server's handler turned the client's own results into a server
+        fault with no category."""
         results = _results()
         results["raw_results"]["sarif"] = None
 
-        with pytest.raises(ValueError, match="no SARIF"):
-            filter_actionable_only(results)
+        filtered = filter_actionable_only(results)
+
+        assert filtered["findings_available"] is False
+        assert filtered["summary_stats"]["actionable"] == 3
+        assert filtered["summary_stats"]["total"] == 3
+        assert any("3 actionable" in w for w in filtered["warnings"])
+        listed = add_findings_list(filtered)
+        assert listed["findings"] == []
+        assert listed["findings_available"] is False
 
     def test_null_sarif_with_nothing_actionable_passes(self):
         results = _results()
@@ -357,6 +377,7 @@ class TestASeveritiesFilterRecountsTheTotal:
                     "results": [
                         result("B-HIGH", "HIGH"),
                         result("B-LOW", "LOW"),
+                        result("B-LOW-2", "LOW"),
                         result("S-CRIT", "CRITICAL", "semgrep"),
                     ]
                 }
@@ -366,18 +387,35 @@ class TestASeveritiesFilterRecountsTheTotal:
 
         filtered = apply_content_filters(results, severities="high,low")
 
-        # HIGH is at the threshold and kept; LOW is kept by the filter but is
-        # not actionable; the critical one is filtered out.
+        # HIGH is at the threshold and kept; the two LOW ones are kept by the
+        # filter but are not actionable; the critical one is filtered out. The
+        # SARIF carries the same findings the summary counts (1 high, 2 low).
         assert filtered["summary_stats"]["actionable"] == 1
         assert filtered["actionable_findings"] == 1
         assert filtered["summary_stats"]["total"] == 3
+        assert len(add_findings_list(filtered)["findings"]) == 3
 
-    def test_actionable_stays_when_the_sarif_is_not_loaded(self):
+    def test_actionable_is_unknown_when_the_sarif_is_not_loaded(self):
         """Without the SARIF the per-severity split of the actionable count is
-        not in the document; the recorded value is kept rather than guessed."""
+        not in the document, so a partial selection cannot say how many of its
+        findings are actionable: None, where the whole scan's 3 used to stay
+        and reported the critical and high findings as the low view's."""
         filtered = apply_content_filters(_results(), severities="low")
 
-        assert filtered["summary_stats"]["actionable"] == 3
+        assert filtered["summary_stats"]["actionable"] is None
+        assert filtered["actionable_findings"] is None
+
+    def test_actionable_is_known_when_the_selection_decides_it(self):
+        """Every counted bucket selected is the whole scan's count; only the
+        suppressed bucket selected has nothing actionable in it."""
+        every_bucket = apply_content_filters(
+            _results(), severities="critical,high,medium,low,info"
+        )
+        suppressed_only = apply_content_filters(_results(), severities="suppressed")
+
+        assert every_bucket["summary_stats"]["actionable"] == 3
+        assert suppressed_only["summary_stats"]["actionable"] == 0
+        assert suppressed_only["actionable_findings"] == 0
 
 
 class TestActionableOnlyRecountsTheSeverityBuckets:
