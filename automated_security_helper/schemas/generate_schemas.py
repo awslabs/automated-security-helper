@@ -147,8 +147,31 @@ SHAPE_KEEPING_SERIALIZERS = frozenset(
         "AshAggregatedResults._record_ash_config",
         "AshAggregatedResults._record_metadata",
         "AshAggregatedResults._used_suppressions_in_order",
+        # Typed ``List[str]``: the names of the ExportFormat members, which are
+        # the members' JSON form, so the field's own schema (the enum, with the
+        # reference admitted beside each entry) is the dump's shape; the return
+        # type alone described every string as a valid format.
+        "AshConfig._output_format_values",
     }
 )
+
+
+#: The core schema kinds that wrap another schema without changing what the
+#: value is: a validator around it, or a default for it.
+_WRAPPING_CORE_TYPES = frozenset(
+    {"function-before", "function-after", "function-wrap", "default", "nullable"}
+)
+
+
+def _is_enum_core(core_schema: Any) -> bool:
+    """Whether ``core_schema`` is an ``Enum``, under any validator or default."""
+    while isinstance(core_schema, dict):
+        if core_schema.get("type") == "enum":
+            return True
+        if core_schema.get("type") not in _WRAPPING_CORE_TYPES:
+            return False
+        core_schema = core_schema.get("schema")
+    return False
 
 
 def _serializer_name(schema: Any) -> str:
@@ -188,8 +211,15 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
       value is recorded) and the load refuses one as any other wrong value;
       never a fixed-choice field of another model (a SARIF level, the CycloneDX
       ``bomFormat``);
-    - an ``output_formats`` entry needs nothing: in serialization mode its Enum
-      renders as the string a dump writes, which admits a reference already.
+    - an ``Enum`` field likewise, and each entry of a list of ``Enum`` values
+      (``output_formats``; the load drops the whole list for one reference
+      entry, recorded_config._a_choice_refused). An Enum is a shared
+      definition, so the reference goes beside the field's use of it
+      (``default_schema``, ``list_schema``), never into the definition.
+      ``output_formats`` is dumped through a serializer typed ``List[str]``,
+      which would describe every string as a valid format where the load
+      refuses a name that is not one; it is listed in
+      :data:`SHAPE_KEEPING_SERIALIZERS` so the enum is what the schema says.
 
     The schema is generated in serialization mode, because a results file is
     what ``model_dump_json`` writes: it carries every computed field (the
@@ -347,9 +377,18 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
         was = self._under_default[-1]
         self._under_default[-1] = True
         try:
-            return super().default_schema(schema)
+            json_schema = super().default_schema(schema)
+            if _is_enum_core(schema.get("schema")):
+                json_schema = self._beside_reference(json_schema)
         finally:
             self._under_default[-1] = was
+        return json_schema
+
+    def list_schema(self, schema: Any) -> Any:
+        json_schema = super().list_schema(schema)
+        if _is_enum_core(schema.get("items_schema")):
+            json_schema["items"] = self._beside_reference(json_schema["items"])
+        return json_schema
 
     def literal_schema(self, schema: Any) -> Any:
         return self._beside_reference(super().literal_schema(schema))

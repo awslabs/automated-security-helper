@@ -107,12 +107,56 @@ def test_an_output_formats_entry_admits_a_reference(results_schema):
     assert validator.is_valid({"output_formats": ["sarif", "${ASH_FORMAT}"]})
     assert validator.is_valid({"output_formats": "${ASH_FORMAT}"})
     assert validator.is_valid({"output_formats": ["sarif"]})
+    assert validator.is_valid({"output_formats": "sarif"})
     assert not validator.is_valid({"output_formats": [5]})
-    # The results schema is generated in serialization mode, where the entries
-    # render as the strings a dump writes and the Enum has no definition of its
-    # own; a definition it does have is left as pydantic emits it.
-    enum = results_schema["$defs"].get("ExportFormat")
-    assert enum is None or "anyOf" not in enum, enum
+
+
+def test_an_output_formats_entry_that_is_not_a_format_is_refused(results_schema):
+    """The enum survives serialization mode. The field is dumped through a
+    serializer typed ``List[str]``, and described by that return type alone every
+    string was a valid format, where the load refuses a name that is not one
+    (``ash_config._export_format_name``; recorded_config admits only a reference
+    there). The serializer is named in SHAPE_KEEPING_SERIALIZERS, so the enum is
+    what the schema says; a wrong name is refused in the list and single forms."""
+    validator = _validator_for(results_schema, "AshConfig")
+    assert not validator.is_valid({"output_formats": ["not-a-format"]})
+    assert not validator.is_valid({"output_formats": "not-a-format"})
+    assert not validator.is_valid({"output_formats": ["sarif", "not-a-format"]})
+    # The reference sits beside the enum at the field, never in the shared
+    # definition, which is left as pydantic emits it.
+    enum = results_schema["$defs"]["ExportFormat"]
+    assert "anyOf" not in enum, enum
+    assert "sarif" in enum["enum"]
+
+
+def test_an_enum_field_with_a_default_admits_a_reference_in_a_stored_model():
+    """The same rule as a Literal's, for an Enum field used directly."""
+    from enum import Enum
+
+    from automated_security_helper.base.options import PluginOptionsBase
+    from automated_security_helper.schemas.generate_schemas import (
+        StoredResultsJsonSchema,
+    )
+
+    class _Level(str, Enum):
+        low = "low"
+        high = "high"
+
+    class _Options(PluginOptionsBase):
+        level: _Level = _Level.low
+        pinned: _Level
+
+    schema = _Options.model_json_schema(
+        schema_generator=StoredResultsJsonSchema, mode="serialization"
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    assert validator.is_valid({"pinned": "high", "level": "${ASH_LEVEL}"})
+    assert validator.is_valid({"pinned": "high", "level": "low"})
+    assert not validator.is_valid({"pinned": "high", "level": "medium"})
+    assert not validator.is_valid({"pinned": "${ASH_LEVEL}", "level": "low"}), (
+        "a required Enum field has no default to fall back to"
+    )
+    assert "anyOf" not in schema["$defs"]["_Level"]
 
 
 def test_control_a_true_false_field_keeps_refusing_a_reference(results_schema):
@@ -165,7 +209,12 @@ def test_the_shape_keeping_serializers_are_exactly_the_models_any_typed_ones():
     AshAggregatedResults.model_json_schema(
         schema_generator=Recording, mode="serialization"
     )
-    assert any_typed == set(SHAPE_KEEPING_SERIALIZERS)
+    # AshConfig._output_format_values is typed List[str] and listed for another
+    # reason (its return type hides the enum); every Any-typed serializer of the
+    # results model is listed, and nothing Any-typed is missing from the list.
+    assert any_typed == set(SHAPE_KEEPING_SERIALIZERS) - {
+        "AshConfig._output_format_values"
+    }
 
 
 @pytest.mark.parametrize(
