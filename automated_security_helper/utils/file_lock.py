@@ -49,12 +49,18 @@ Failure modes
   does ``EBADF`` from a network mount for a lock file this account can only read:
   there the emulated exclusive lock needs write access the account does not have.
 * A link at the lock file's name raises ``OSError`` where ``O_NOFOLLOW`` exists.
+* Anything but a regular file at the lock file's name (a FIFO, a device, a socket)
+  raises ``OSError`` naming the lock file. The file is opened without blocking,
+  because opening a FIFO blocks until its other end is opened: a FIFO planted at
+  the name held the scan before any lock was asked for, outside every timeout.
 * The lock is advisory: only code that takes it is serialized.
 """
 
 from __future__ import annotations
 
+import errno
 import os
+import stat
 import threading
 import time
 from contextlib import contextmanager
@@ -103,12 +109,32 @@ def _open_lock_file(path: Path) -> int:
     exclusive lock on a read-only descriptor, so the second account's update is
     serialized rather than failing. A link at the name is not followed where the
     platform can refuse one (``O_NOFOLLOW``).
+
+    Opened without blocking (``O_NONBLOCK``, where it exists) and refused unless
+    what was opened is a regular file. Opening a FIFO blocks until its other end
+    is opened, so a FIFO planted at the name (the read-only fallback reaches it
+    whenever this account may not open it for writing) held the scan before the
+    lock was asked for and outside its timeout; opened without blocking it is
+    opened at once, and ``fstat`` then says what it is. A device or a socket at
+    the name is refused the same way. The flag is left on the descriptor, which
+    is only ever locked and closed, never read or written.
     """
-    common = os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    common = os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        return os.open(path, os.O_RDWR | common, 0o644)
+        fd = os.open(path, os.O_RDWR | common, 0o644)
     except PermissionError:
-        return os.open(path, os.O_RDONLY | common, 0o644)
+        fd = os.open(path, os.O_RDONLY | common, 0o644)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(
+                errno.EINVAL,
+                f"The lock file {path.as_posix()} is not a regular file. Remove "
+                "what is at that name and run ASH again.",
+            )
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def _flock_within(fd: int, timeout: Optional[float], path: Path) -> None:

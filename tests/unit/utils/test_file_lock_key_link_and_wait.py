@@ -12,6 +12,9 @@
   directory where another user can plant a link.
 - The wait for another process's OS lock is bounded, and ends in ``TimeoutError``
   naming the lock file, where it held the scan for good.
+- Anything but a regular file at the lock file's name is refused at once: a FIFO
+  there was opened blocking and held the scan before the lock was asked for, or,
+  where the open did not block, was locked as if it were the lock file.
 
 Every path here is under ``tmp_path``.
 """
@@ -20,6 +23,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 
 import pytest
 
@@ -91,3 +95,35 @@ def test_control_a_free_lock_is_taken_at_once(tmp_path):
 
     assert entered
     assert file_lock.LOCK_TIMEOUT_SECONDS > 60
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on this platform")
+def test_a_fifo_at_the_lock_files_name_is_refused_without_waiting(tmp_path):
+    """The lock file's name holds a FIFO. Before, the open either blocked until the
+    FIFO's other end was opened (the read-only fallback, for a FIFO this account may
+    not write) or, on Linux for a read-write open, succeeded and locked the FIFO as
+    if it were the lock file. Either way no error named the lock file."""
+    lock_file = tmp_path / "cache" / ".lock"
+    lock_file.parent.mkdir()
+    os.mkfifo(lock_file)
+
+    started = time.monotonic()
+    with pytest.raises(OSError) as refused:
+        with file_lock.exclusive_lock(lock_file, timeout=0.3):
+            pass
+
+    assert lock_file.as_posix() in str(refused.value)
+    assert "regular file" in str(refused.value)
+    assert time.monotonic() - started < 5
+
+
+def test_control_an_existing_regular_lock_file_is_accepted(tmp_path):
+    lock_file = tmp_path / "cache" / ".lock"
+    lock_file.parent.mkdir()
+    lock_file.write_text("", encoding="utf-8")
+
+    entered = False
+    with file_lock.exclusive_lock(lock_file, timeout=0.3):
+        entered = True
+
+    assert entered
