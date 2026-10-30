@@ -803,23 +803,76 @@ def get_available_models(
 
 #: The area prefix of the cross-region inference profiles the fallback chains
 #: are written with. A configured model under another area is looked up by its
-#: family as its ``us.`` spelling; its candidates are answered under its own
-#: area only when that area is one of ``_MIRRORED_AREAS``.
+#: family as its ``us.`` spelling, and its candidates are answered under its
+#: own area; which spellings of a candidate the calling region lists is the
+#: walk's question (``candidate_spellings``), never this table's.
 _CHAIN_AREA = "us"
 
-#: The geographic cross-region areas whose inference profiles mirror the
-#: ``us.`` chains model for model (``eu.amazon.nova-pro-v1:0`` exists as
-#: ``us.amazon.nova-pro-v1:0`` does). ``global.``, ``jp.``, ``au.`` and the
-#: others carry profiles for a few models only, none of them the chain models,
-#: so a candidate under one of those would pass no listing; their candidates
-#: stay under ``us.``, which the US regions list. Compared lower-cased: the
-#: area of a configured id is read case-insensitively, and the candidates
-#: carry the area's own spelling, never the operator's casing.
-_MIRRORED_AREAS = frozenset({"us", "eu", "apac"})
-
 #: The model every chain ends in, and the fallback for a model of no known
-#: family, under the configured model's area when that area is mirrored.
+#: family, under the configured model's area.
 _DEFAULT_FALLBACK = "amazon.nova-pro-v1:0"
+
+#: The cross-region inference profile area whose source regions a region's own
+#: name prefix places it in: a request from us-gov-west-1 may name ``us-gov.``
+#: profiles, one from eu-west-1 ``eu.`` profiles, one from ap-northeast-1
+#: ``apac.`` profiles, one from us-east-1 ``us.`` profiles. Longest prefix
+#: first (``us-gov-`` before ``us-``). A region of no row here (ca-, sa-, me-,
+#: af-, il-, mx-) has no geography spelling of its own in this table; its
+#: candidates are checked under their own and the ``us.`` spelling only. Which
+#: profiles a source region lists is what ListInferenceProfiles from that
+#: region answers, and the walk reads that listing; this table only names the
+#: spellings worth asking it about
+#: (https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html:
+#: "Don't rely on the geographic prefix in an inference profile ID alone").
+_REGION_AREAS = (
+    ("us-gov-", "us-gov"),
+    ("us-", "us"),
+    ("eu-", "eu"),
+    ("ap-", "apac"),
+)
+
+
+def region_area(region: Optional[str]) -> Optional[str]:
+    """The inference-profile area a region's own name prefix places it in
+    (``_REGION_AREAS``), or None for a region of no known geography or no
+    region at all. Read case-insensitively."""
+    if not region:
+        return None
+    lowered = region.lower()
+    for prefix, area in _REGION_AREAS:
+        if lowered.startswith(prefix):
+            return area
+    return None
+
+
+def candidate_spellings(model_id: str, region: Optional[str] = None) -> List[str]:
+    """The spellings of one chain candidate worth checking against the calling
+    region's listing, in the order to check them: the candidate as the chain
+    spells it (the configured model's own area), then the same model under the
+    region's own geography (``region_area``), then under ``us.``, the area the
+    chains are written in; each spelling once. A model id with no area (an
+    on-demand id) has one spelling.
+
+    Why more than one: a profile's geographic prefix says nothing about where
+    it can be called from (the Bedrock docs say so in as many words), so a
+    ``global.`` configured model in us-east-1 needs the ``us.`` spelling of
+    its candidates (us-east-1 lists those), a ``us-gov.`` one in GovCloud needs
+    the ``us-gov.`` spelling (GovCloud lists no ``us.`` profile), and an
+    ``eu.`` one called from us-east-1 needs ``us.`` too. The listing, read once
+    per walk, decides; a spelling it does not name costs one dictionary lookup.
+    """
+    area = _profile_area(model_id)
+    if area is None:
+        return [model_id]
+    rest = model_id[len(area) + 1 :]
+    spellings = [model_id]
+    for other in (region_area(region), _CHAIN_AREA):
+        if other is None or other == area.lower():
+            continue
+        spelling = f"{other}.{rest}"
+        if spelling not in spellings:
+            spellings.append(spelling)
+    return spellings
 
 
 def _profile_area(model_id: str) -> Optional[str]:
@@ -839,17 +892,17 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
     Get a fallback model ID if the current model is unavailable.
 
     The chains are written as the ``us.`` cross-region profiles. A model under
-    another area (``eu.anthropic.claude-...``) is looked up as its ``us.``
-    spelling, so its family's chain is found whatever the area, and its
-    fallback is answered under its own area (``eu.anthropic.claude-...``) when
-    that area mirrors the ``us.`` profiles (``_MIRRORED_AREAS``), so a run
-    outside the US regions is offered candidates its region can route; whether
-    the region does is the walk's check. Under any other area (``global.``,
-    ``jp.``) the candidates keep their ``us.`` spelling, the one the US regions
-    list; a translated candidate there would pass no listing at all. The area
-    is read case-insensitively and the candidates carry the area's own spelling
-    (``US.anthropic...`` gets ``us.amazon.nova-...``, never ``US.amazon...``,
-    which Converse does not know).
+    another area (``eu.anthropic.claude-...``, ``us-gov.anthropic...``,
+    ``global.anthropic...``) is looked up as its ``us.`` spelling, so its
+    family's chain is found whatever the area, and its fallback is answered
+    under its own area (``eu.anthropic.claude-...``): the operator's geography
+    is the first spelling to try. Whether the calling region lists that
+    spelling, its own geography's, or the ``us.`` one is the walk's question,
+    answered by the listing through ``candidate_spellings``; this function
+    only names the next candidate. The area is read case-insensitively and
+    the candidates carry the area's own spelling (``US.anthropic...`` gets
+    ``us.amazon.nova-...``, never ``US.amazon...``, which Converse does not
+    know).
 
     Args:
         current_model_id: The current model ID that failed
@@ -858,8 +911,8 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
         A fallback model ID: the next model of the current model's chain, the
         chain's first model when the current one is not in it, or the default
         model (``_DEFAULT_FALLBACK``) for a model of no known family and for a
-        chain's last member, under the current model's area when that area is
-        mirrored. The walk ends a chain on a repeat, never on None here.
+        chain's last member, under the current model's area. The walk ends a
+        chain on a repeat, never on None here.
     """
     area = _profile_area(current_model_id)
     area_lower = area.lower() if area is not None else None
@@ -868,11 +921,7 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
         lookup = f"{_CHAIN_AREA}.{current_model_id[len(area) + 1 :]}"
 
     def under_area(model: str) -> str:
-        if (
-            area_lower is None
-            or area_lower == _CHAIN_AREA
-            or area_lower not in _MIRRORED_AREAS
-        ):
+        if area_lower is None or area_lower == _CHAIN_AREA:
             return model
         if model.startswith(f"{_CHAIN_AREA}."):
             return f"{area_lower}.{model[len(_CHAIN_AREA) + 1 :]}"

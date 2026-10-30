@@ -412,6 +412,60 @@ def test_the_walk_calls_a_candidate_by_the_listings_spelling(monkeypatch, tmp_pa
 
 
 # ---------------------------------------------------------------------------
+# A candidate is called by the spelling the calling region lists
+# ---------------------------------------------------------------------------
+
+CHAIN_SPELLING = "global.test-vendor.listed-model-v1:0"
+REGION_SPELLING = "us.test-vendor.listed-model-v1:0"
+
+
+def test_the_walk_calls_a_candidate_by_the_spelling_the_region_lists(
+    monkeypatch, tmp_path
+):
+    """The chain names its candidate under the configured model's area
+    (``global.``); the calling region (us-east-1) lists the same model under
+    ``us.`` only. The walk asks the one listing for both spellings and calls
+    the one it names, which is the run's model from then on."""
+    runtime = _RuntimeThatRefusesOne(PRIMARY_MODEL)
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session",
+        _session_double(runtime, ControlPlaneDouble(PRIMARY_MODEL, REGION_SPELLING)),
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_fallback_model",
+        {PRIMARY_MODEL: CHAIN_SPELLING, CHAIN_SPELLING: PRIMARY_MODEL}.get,
+    )
+    reporter = make_reporter(plugin_context_in(tmp_path), max_retries=0)
+    client = reporter._make_model_client(runtime)
+
+    outcome = reporter._outcome_with_fallback(client, "prompt", "system")
+
+    assert outcome.ok is True, outcome.text
+    assert runtime.models == [PRIMARY_MODEL, REGION_SPELLING], runtime.models
+    assert reporter._run_model == REGION_SPELLING
+
+
+def test_the_dependency_check_finds_a_fallback_under_the_regions_spelling(
+    monkeypatch, tmp_path
+):
+    """The configured model is not listed and its chain names the candidate
+    under another area; the region lists that candidate under ``us.``. The
+    dependency check walks the chain as the run does, so it finds the fallback
+    and keeps the reporter enabled."""
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session",
+        _session_double(RuntimeDouble(), ControlPlaneDouble(REGION_SPELLING)),
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_fallback_model",
+        {PRIMARY_MODEL: CHAIN_SPELLING, CHAIN_SPELLING: PRIMARY_MODEL}.get,
+    )
+    reporter = make_reporter(plugin_context_in(tmp_path))
+
+    assert reporter.validate_plugin_dependencies() is True
+
+
+# ---------------------------------------------------------------------------
 # The answer cache keeps answers, for the prompt they answered
 # ---------------------------------------------------------------------------
 

@@ -18,9 +18,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    candidate_spellings,
     check_model_id,
     get_available_models,
     get_fallback_model,
+    region_area,
     validate_bedrock_model,
 )
 
@@ -109,17 +111,86 @@ def test_a_model_with_no_area_keeps_the_us_default():
     assert get_fallback_model("amazon.titan-text-lite-v1") == "us.amazon.nova-pro-v1:0"
 
 
-def test_an_area_with_no_mirrored_chain_keeps_the_us_candidates():
-    """``global.``, ``jp.`` and the like have no inference profiles for the
-    chain models, so a model under one is looked up by its family and gets the
-    chain's ``us.`` spelling, which the US regions list. The configured
-    model's area never becomes the candidates' area here."""
+def test_any_area_keeps_its_own_spelling_in_the_chain():
+    """A ``global.``, ``jp.`` or ``us-gov.`` model is looked up by its family
+    and its candidates are answered under its own area, the operator's
+    geography: which spellings the calling region lists is the walk's question
+    (``candidate_spellings``), not this function's."""
     fallback = get_fallback_model("global.anthropic.claude-sonnet-4-20250514-v1:0")
 
-    assert fallback == "us.anthropic.claude-3-7-sonnet-20250219-v1:0", fallback
+    assert fallback == "global.anthropic.claude-3-7-sonnet-20250219-v1:0", fallback
     assert get_fallback_model("jp.test-vendor.test-model-v1:0") == (
-        "us.amazon.nova-pro-v1:0"
+        "jp.amazon.nova-pro-v1:0"
     )
+    assert get_fallback_model("us-gov.anthropic.claude-3-7-sonnet-20250219-v1:0") == (
+        "us-gov.anthropic.claude-3-5-sonnet-20240620-v1:0"
+    )
+
+
+def test_the_spellings_a_region_may_list_are_asked_in_order():
+    """One chain candidate is checked under its own spelling, the calling
+    region's geography and ``us.``, each once: a ``global.`` candidate in
+    us-east-1 is also asked for as ``us.`` (which us-east-1 lists), a
+    ``us-gov.`` one in GovCloud as itself first (GovCloud lists no ``us.``
+    profile, so that spelling costs a lookup and nothing more), a ``jp.`` one
+    in Tokyo as ``apac.`` too, and an ``eu.`` one called from us-east-1 as
+    ``us.``. A model id with no area has one spelling."""
+    assert candidate_spellings(
+        "global.anthropic.claude-3-7-sonnet-20250219-v1:0", "us-east-1"
+    ) == [
+        "global.anthropic.claude-3-7-sonnet-20250219-v1:0",
+        "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+    ]
+    assert candidate_spellings("us-gov.test-vendor.m-v1:0", "us-gov-west-1") == [
+        "us-gov.test-vendor.m-v1:0",
+        "us.test-vendor.m-v1:0",
+    ]
+    assert candidate_spellings("jp.test-vendor.m-v1:0", "ap-northeast-1") == [
+        "jp.test-vendor.m-v1:0",
+        "apac.test-vendor.m-v1:0",
+        "us.test-vendor.m-v1:0",
+    ]
+    assert candidate_spellings("eu.test-vendor.m-v1:0", "us-east-1") == [
+        "eu.test-vendor.m-v1:0",
+        "us.test-vendor.m-v1:0",
+    ]
+    assert candidate_spellings("eu.test-vendor.m-v1:0", "eu-west-1") == [
+        "eu.test-vendor.m-v1:0",
+        "us.test-vendor.m-v1:0",
+    ]
+    assert candidate_spellings("us.test-vendor.m-v1:0", "us-east-1") == [
+        "us.test-vendor.m-v1:0"
+    ]
+    assert candidate_spellings("test-vendor.m-v1:0", "eu-west-1") == [
+        "test-vendor.m-v1:0"
+    ]
+    # No region, or one of no known geography: the chain's own spelling and us.
+    assert candidate_spellings("global.test-vendor.m-v1:0", None) == [
+        "global.test-vendor.m-v1:0",
+        "us.test-vendor.m-v1:0",
+    ]
+    assert candidate_spellings("au.test-vendor.m-v1:0", "ca-central-1") == [
+        "au.test-vendor.m-v1:0",
+        "us.test-vendor.m-v1:0",
+    ]
+
+
+@pytest.mark.parametrize(
+    "region, area",
+    [
+        ("us-gov-west-1", "us-gov"),
+        ("us-east-1", "us"),
+        ("US-WEST-2", "us"),
+        ("eu-central-2", "eu"),
+        ("ap-southeast-2", "apac"),
+        ("ca-central-1", None),
+        ("sa-east-1", None),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_a_regions_own_geography_is_read_from_its_prefix(region, area):
+    assert region_area(region) == area
 
 
 def test_an_upper_cased_area_gets_lower_cased_candidates():

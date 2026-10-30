@@ -83,6 +83,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRY_DELAY_SECONDS,
     UNEXPECTED_LISTING_ERROR,
     ListingsOnce,
+    candidate_spellings,
     check_is_transient,
     check_listing_client_side,
     check_listing_failure,
@@ -1167,13 +1168,15 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     fallback_model = get_fallback_model(model_id)
                     while fallback_model and fallback_model not in visited:
                         visited.add(fallback_model)
-                        is_valid, error_message = validate_bedrock_model(
-                            listings, fallback_model, values=values
+                        # Each candidate under every spelling this region may
+                        # list, as the run's walk checks it.
+                        check, spelling = self._check_candidate(
+                            listings, fallback_model, values
                         )
-                        if is_valid:
+                        if check[0]:
                             self._plugin_log(
                                 text_without_values(
-                                    f"Fallback model '{fallback_model}' is available; "
+                                    f"Fallback model '{spelling}' is available; "
                                     "the run falls back to it if the configured model "
                                     "still fails",
                                     values,
@@ -2153,6 +2156,34 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             primary_check=primary_check,
         ).text
 
+    def _check_candidate(
+        self, bedrock_client: Any, model: str, values: Iterable[str]
+    ) -> Tuple[Any, str]:
+        """Check one chain candidate against the listing under each spelling
+        the calling region may list (``candidate_spellings``: the chain's own
+        area, the region's geography, ``us.``), in that order, and answer the
+        first check that is True or that the listing itself decided (a
+        throttled or refused listing answers the same for every spelling).
+        Returns the check and the spelling it is about, so a candidate the
+        listing names under another spelling is called by that one. Every
+        spelling is read from the one cached listing (``ListingsOnce``), so
+        the extra spellings cost no control-plane call. A reporter built
+        without ``__init__`` and without a region checks the chain's own
+        spelling and ``us.`` only."""
+        region = getattr(getattr(self, "config", None), "options", None)
+        region = getattr(region, "aws_region", None)
+        check: Any = None
+        spelling = model
+        for spelling in candidate_spellings(model, region):
+            check = validate_bedrock_model(bedrock_client, spelling, values=values)
+            if (
+                check[0]
+                or check_is_transient(check)
+                or check_listing_failure(check) is not None
+            ):
+                break
+        return check, spelling
+
     def _walk_outcome(
         self,
         bedrock_client: Any,
@@ -2265,13 +2296,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             ASH_LOGGER.info(
                 text_without_values(f"Trying fallback model: {model}", values)
             )
-            check = validate_bedrock_model(bedrock_client, model, values=values)
+            check, spelling = self._check_candidate(bedrock_client, model, values)
             if not check[0]:
                 leave_unchecked(model, check)
             else:
                 # A candidate the listing matched case-insensitively is called
                 # by the listing's spelling, the one Converse knows.
-                called_id = check_model_id(check) or model
+                called_id = check_model_id(check) or spelling
                 called.append(called_id)
                 outcome = call_model(called_id)
                 if outcome.ok:
