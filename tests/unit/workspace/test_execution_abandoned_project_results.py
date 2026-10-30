@@ -23,7 +23,8 @@ The contract these cases pin:
 
 - a project that finishes after being abandoned has the results file and the
   reports the scan saved removed, and the tools' own output kept, so its subtree
-  agrees with the FAILED verdict;
+  agrees with the FAILED verdict; the discard follows no link at any depth, so a
+  link nested under what it removes is unlinked and its target left as it was;
 - a project whose future is already done when the poll overruns it keeps its
   completed outcome;
 - the commit-or-abandon decision is taken once: a worker that has claimed its
@@ -33,6 +34,7 @@ The contract these cases pin:
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 
@@ -135,6 +137,38 @@ def test_the_discard_leaves_the_tools_output_and_every_link_alone(tmp_path):
     assert (project_output / "scanners" / "bandit" / "raw.json").exists()
     assert (project_output / "linked").is_symlink()
     assert (outside / "kept.txt").read_text(encoding="utf-8") == "outside\n"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_the_discard_follows_no_link_nested_below_the_projects_output(tmp_path):
+    """A link below a directory the discard removes is unlinked, never followed.
+
+    The top-level walk skips a link by name; a link nested under ``reports/`` is
+    reached by ``shutil.rmtree`` on ``reports/`` itself. This pins that the
+    removal unlinks the link entries (a linked file and a linked directory) and
+    leaves both targets as they were, so nothing outside ``projects/<key>/`` is
+    touched by the discard at any depth.
+    """
+    project_output = tmp_path / "out" / "projects" / "api"
+    reports = project_output / "reports"
+    reports.mkdir(parents=True)
+    (reports / "ash.sarif").write_text("{}", encoding="utf-8")
+    outside = tmp_path / "outside"
+    (outside / "dir").mkdir(parents=True)
+    (outside / "notes.txt").write_text("kept\n", encoding="utf-8")
+    (outside / "dir" / "inner.txt").write_text("kept too\n", encoding="utf-8")
+    (reports / "linked-file").symlink_to(outside / "notes.txt")
+    (reports / "linked-dir").symlink_to(outside / "dir", target_is_directory=True)
+
+    execution._discard_project_output(project_output)
+
+    assert not reports.exists(), "the report directory survived the discard"
+    assert not (reports / "linked-file").is_symlink()
+    assert not (reports / "linked-dir").is_symlink()
+    assert (outside / "notes.txt").read_text(encoding="utf-8") == "kept\n"
+    assert (outside / "dir" / "inner.txt").read_text(encoding="utf-8") == "kept too\n"
 
 
 def test_the_gate_takes_the_decision_once():
