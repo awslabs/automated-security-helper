@@ -90,11 +90,16 @@ class TestSessionSandboxRefusesTheIdsEveryOtherBuilderRefuses:
             "x" * 300,
             "has space",
             hidden_deleting_name("gone"),
+            ".",
         ],
-        ids=["control-char", "too-long", "space", "hidden-delete-shape"],
+        ids=["control-char", "too-long", "space", "hidden-delete-shape", "dot"],
     )
     def test_an_id_the_registry_refuses_gets_no_sandbox(self, session_id):
-        """Red at the base: each of these passed the separator-only rule."""
+        """Red at the base: each of these passed the separator-only rule.
+
+        The single period is the one pathlib drops: ``shared / "."`` is the
+        shared root itself, so a sandbox for it would own every sibling.
+        """
         with pytest.raises(ValueError):
             session_sandbox(session_id)
 
@@ -122,6 +127,44 @@ class TestSessionSandboxRefusesTheIdsEveryOtherBuilderRefuses:
 
     def test_a_plain_id_still_gets_its_sandbox(self):
         assert session_sandbox("session-a").root is not None
+
+    @pytest.mark.parametrize(
+        "session_id",
+        [
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "tab\there",
+            "x" * 300,
+            "has space",
+            "ends.",
+            "CON",
+            hidden_deleting_name("gone"),
+            "session-a",
+            "a.b_c-d~e+f=g",
+        ],
+    )
+    def test_the_sandbox_and_the_path_validator_agree(self, session_id):
+        """Parity: the sandbox refuses an id exactly when the shared validator does.
+
+        Every builder of a session path (the registry, source delivery, the TTL
+        sweep) applies ``session_paths.validated_path_component``; the sandbox
+        applies it through ``_validated_session_component``. This asserts the
+        two cannot drift: an id the validator refuses gets no sandbox, and an id
+        it admits gets one with a root.
+        """
+        from automated_security_helper.cli.mcp.session_paths import (
+            validated_path_component,
+        )
+
+        try:
+            validated_path_component(session_id, "session_id")
+        except ValueError:
+            with pytest.raises(ValueError):
+                session_sandbox(session_id)
+        else:
+            assert session_sandbox(session_id).root is not None
 
 
 class TestAMalformedIdDegradesToARemoteCallersSandbox:
