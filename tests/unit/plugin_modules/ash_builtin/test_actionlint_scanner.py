@@ -1406,6 +1406,35 @@ def test_many_workflows_are_linted_in_several_runs_and_one_report(
 
 
 @pytest.mark.unit
+def test_scan_timeout_bounds_the_target_not_each_batch(repo, monkeypatch, on_path):
+    """scan_timeout is the limit for one target. With two batches, the first is
+    given the whole limit; when it has used it all (the clock here jumps past
+    the deadline between the runs), the second never starts and the scan ends
+    as a timeout, instead of each batch getting the whole limit again."""
+    monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30)
+    readings = [0.0, 0.0, 10.0]
+
+    def monotonic():
+        return readings.pop(0) if len(readings) > 1 else readings[0]
+
+    monkeypatch.setattr(module.time, "monotonic", monotonic)
+    scanner = _scanner(repo, scan_timeout=7)
+    calls = _through_the_base_class(
+        monkeypatch,
+        [
+            {"returncode": 0, "stdout": _EMPTY_RUN},
+            {"returncode": 0, "stdout": _EMPTY_RUN},
+        ],
+    )
+
+    with pytest.raises(ScannerError, match="timed out after '7' s"):
+        scanner.scan(target=repo, target_type="source")
+
+    assert len(calls) == 1
+    assert calls[0]["timeout"] == 7.0
+
+
+@pytest.mark.unit
 def test_an_earlier_batchs_raw_output_is_not_kept_when_a_later_batch_fails(
     repo, monkeypatch, on_path
 ):

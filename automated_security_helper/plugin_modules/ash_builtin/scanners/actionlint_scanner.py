@@ -164,6 +164,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path, PurePosixPath
 from typing import (
     Annotated,
@@ -1635,6 +1636,15 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 "--",
             ]
             effective_timeout = self._effective_scan_timeout()
+            # One deadline for the target: scan_timeout is the limit for one
+            # target, so each batch below gets the time left under it. Given
+            # the whole limit per batch, a target split into N batches could run
+            # for N times the limit the operator set.
+            deadline = (
+                None
+                if effective_timeout is None
+                else time.monotonic() + effective_timeout
+            )
             uri_base = Path(target).absolute() if target_type == "converted" else None
             # The workflows go on the command line in batches that fit the
             # platform's limit (workflow_batches); each run is judged by its own
@@ -1649,6 +1659,24 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             worst_exit_code: Optional[int] = None
             for batch in workflow_batches(workflows):
                 final_args = [*common_args, *batch]
+                batch_timeout = effective_timeout
+                if deadline is not None:
+                    batch_timeout = deadline - time.monotonic()
+                    if batch_timeout <= 0:
+                        # The earlier batches used the whole limit; this one
+                        # never starts. Worded as the timeout below is, with
+                        # the limit through the shared token.
+                        limit = self._timeout_limit_token(effective_timeout)
+                        raise ScannerError(
+                            text_without_values(
+                                f"actionlint timed out after {limit}: the runs "
+                                "over this target's earlier workflow batches used "
+                                "the whole limit before this one could start. "
+                                "Raise scanners.actionlint.options.scan_timeout if "
+                                "this target legitimately needs longer.",
+                                self._values_to_redact(),
+                            )
+                        )
                 tool_started = True
                 response = self._run_subprocess(
                     command=final_args,
@@ -1656,7 +1684,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     stdout_preference="return",
                     stderr_preference="write",
                     cwd=target,
-                    timeout=effective_timeout,
+                    timeout=batch_timeout,
                 )
                 # This run's code, not the largest of the batches so far.
                 self._record_target_exit_code(response)
