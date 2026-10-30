@@ -6,10 +6,14 @@
 What each test pins, and what it read at the base before the fix:
 
 * a run built without a configuration records the default it substitutes
-  (``results.ash_config`` was None beside a run that used ASH's defaults);
+  (``results.ash_config`` was None beside a run that used ASH's defaults), and a
+  model a caller passed keeps the configuration it records (the backfill stamped
+  this run's configuration onto a loaded model whose ash_config was null);
 * ``get_scanner`` finds a scanner by its declared name and honors
   ``check_enabled`` (it matched the lowercased class name only, and never read
-  the parameter);
+  the parameter), finds it by its configured name and judges the selection by it
+  (the renamed scanner the phase runs was "not found" and refused), and refuses a
+  scanner its section disables (the phase records it SKIPPED);
 * the construction-time selection refusal compares the names the scan phase
   matches, the configured section's name first (a scanner the configuration
   renamed was refused as a misspelling);
@@ -68,7 +72,11 @@ class _RaisingScanPhase(_StubPhase):
         raise RuntimeError("the scan phase broke")
 
 
-def _engine(tmp_path, config: Optional[AshConfig] = "default", **kwargs):
+def _engine(
+    tmp_path, config: Optional[AshConfig] = "default", own_model: bool = False, **kwargs
+):
+    """An engine over a fresh passed-in model, or (``own_model``) over the model
+    the engine builds for itself in ``__init__``."""
     source_dir = tmp_path / "source"
     source_dir.mkdir(exist_ok=True)
     output_dir = tmp_path / "output"
@@ -83,12 +91,13 @@ def _engine(tmp_path, config: Optional[AshConfig] = "default", **kwargs):
     elif config is not None:
         context_kwargs["config"] = config
     context = PluginContext(**context_kwargs)
+    if not own_model:
+        kwargs["asharp_model"] = AshAggregatedResults()
     with patch("automated_security_helper.plugins.loader.load_internal_plugins"):
         engine = ScanExecutionEngine(
             context=context,
             show_progress=False,
             show_summary=False,
-            asharp_model=AshAggregatedResults(),
             **kwargs,
         )
     engine.progress_display = MagicMock()
@@ -148,10 +157,22 @@ def _run(engine, phases, manager, scan_phase=_StubPhase, report_phase=_StubPhase
 def test_a_run_without_a_configuration_records_the_default_it_ran_with(tmp_path):
     """Red before the fix: the model took ash_config=None at construction and the
     default AshConfig was substituted into the context only."""
-    engine = _engine(tmp_path, config=None)
+    engine = _engine(tmp_path, config=None, own_model=True)
 
     assert isinstance(engine._context.config, AshConfig)
     assert engine._asharp_model.ash_config is engine._context.config
+
+
+def test_a_model_a_caller_passed_keeps_the_configuration_it_records(tmp_path):
+    """A passed-in model (one loaded from an existing results file, a library
+    caller's own) records the configuration of the scan that produced it; a
+    results file whose ash_config is null loads as None, and stamping this run's
+    configuration onto it misattributed the scan. Red at the base: the backfill
+    tested ``ash_config is None`` alone, so the passed model took the default."""
+    engine = _engine(tmp_path, config=None)
+
+    assert isinstance(engine._context.config, AshConfig)
+    assert engine._asharp_model.ash_config is None
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +227,61 @@ def test_get_scanner_refuses_a_scanner_the_allowlist_leaves_out(tmp_path):
 
     with pytest.raises(ValueError, match="does not name it"):
         engine.get_scanner("fake-scan")
+
+
+def _renamed_section(self, plugin_type, plugin_name):
+    if plugin_type == "scanner" and plugin_name == "fake-scan":
+        return {"name": "renamed-scan", "enabled": True}
+    return None
+
+
+def test_get_scanner_finds_a_scanner_by_its_configured_name(tmp_path, monkeypatch):
+    """The configured section's name is the one ScanPhase selects and reports the
+    scanner by, and the one ensure_initialized judges --scanners against. Red at
+    the base: get_scanner compared the declared and class names only, so the
+    configured name was "not found" and, with an allowlist naming it, the declared
+    name was refused as unselected although the phase runs that scanner."""
+    engine = _engine(tmp_path)
+    monkeypatch.setattr(AshConfig, "get_plugin_config", _renamed_section)
+    engine.plugins["scanner"] = [_FakeScanner]
+
+    assert isinstance(engine.get_scanner("renamed-scan"), _FakeScanner)
+
+    engine._init_enabled_scanners = ["renamed-scan"]
+    assert isinstance(engine.get_scanner("fake-scan"), _FakeScanner)
+
+
+def test_get_scanner_refuses_a_scanner_excluded_by_its_configured_name(
+    tmp_path, monkeypatch
+):
+    """The reverse: an exclusion naming the configured name leaves the scanner
+    out of the phase, so a lookup by any of its names is refused."""
+    engine = _engine(tmp_path, excluded_scanners=["renamed-scan"])
+    monkeypatch.setattr(AshConfig, "get_plugin_config", _renamed_section)
+    engine.plugins["scanner"] = [_FakeScanner]
+
+    with pytest.raises(ValueError, match="exclusion list"):
+        engine.get_scanner("fake-scan")
+
+
+def test_get_scanner_refuses_a_scanner_its_section_disables(tmp_path, monkeypatch):
+    """ScanPhase records a scanner whose section says enabled: false as SKIPPED,
+    so check_enabled refuses it; the documented opt-out still builds it."""
+    engine = _engine(tmp_path)
+
+    def disabled_section(self, plugin_type, plugin_name):
+        if plugin_type == "scanner" and plugin_name == "fake-scan":
+            return {"enabled": False}
+        return None
+
+    monkeypatch.setattr(AshConfig, "get_plugin_config", disabled_section)
+    engine.plugins["scanner"] = [_FakeScanner]
+
+    with pytest.raises(ValueError, match="disables it"):
+        engine.get_scanner("fake-scan")
+    assert isinstance(
+        engine.get_scanner("fake-scan", check_enabled=False), _FakeScanner
+    )
 
 
 # ---------------------------------------------------------------------------

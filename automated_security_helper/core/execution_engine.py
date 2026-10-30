@@ -6,12 +6,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import platform
 import time
-from typing import List, Literal, Mapping, Optional, Set
+from typing import Any, List, Literal, Mapping, Optional, Set
 
 
 from automated_security_helper.base.plugin_config import (
     declared_plugin_name,
     plugin_config_key,
+    section_enabled,
     split_plugin_names,
 )
 from automated_security_helper.base.plugin_context import PluginContext
@@ -158,6 +159,12 @@ class ScanExecutionEngine:
         if context is None:
             raise ValueError("Context must be provided")
 
+        # Whether this engine built its results model, which decides whether
+        # ensure_initialized may stamp the run's configuration onto it: a model
+        # a caller passed (one loaded from an existing results file by
+        # --use-existing, a library caller's own) records the configuration of
+        # the scan that produced it, which this run's is not.
+        self._built_model = asharp_model is None
         if asharp_model is None:
             asharp_model = AshAggregatedResults(
                 name=f"ASH Scan {datetime.now().isoformat()}",
@@ -529,11 +536,15 @@ class ScanExecutionEngine:
 
         Args:
             scanner_name: Name of the scanner to retrieve: its declared name
-                (``bandit``, the key its config is looked up by) or its class
-                name (``BanditScanner``), compared case-insensitively.
+                (``bandit``, the key its config is looked up by), the name its
+                configured section gives it (``scanners.bandit.name``, the name
+                ScanPhase selects and reports it by) or its class name
+                (``BanditScanner``), compared case-insensitively.
             check_enabled: If True, refuse a scanner this engine's selection
-                leaves out: one named by the exclusion list, or one the allowlist
-                (when there is one) does not name.
+                leaves out: one named by the exclusion list, one the allowlist
+                (when there is one) does not name, or one whose configured
+                section disables it (``enabled: false``), which ScanPhase
+                records SKIPPED.
 
         Returns:
             Scanner instance configured with current engine paths
@@ -550,19 +561,26 @@ class ScanExecutionEngine:
         # Get all scanner plugins
         scanner_plugins = self.plugins.get("scanner", [])
 
-        # Find the scanner by name. Both spellings are accepted: the lookup used
+        # Find the scanner by name. Every spelling is accepted: the lookup used
         # to compare the lowercased class name only, so get_scanner("bandit"),
-        # the name every other surface uses, raised "not found".
+        # the name every other surface uses, raised "not found"; and it read the
+        # declared name only, so a scanner the configuration renames
+        # (scanners.bandit.name: my-bandit), which ScanPhase selects and reports
+        # as my-bandit and which ensure_initialized judges the selection by, was
+        # "not found" under that name and judged against the wrong one.
         for scanner_class in scanner_plugins:
             names = {
                 getattr(scanner_class, "__name__", "Unknown").lower(),
                 plugin_config_key(scanner_class).lower(),
             }
+            configured = self._selectable_scanner_name(scanner_class)
+            if configured is not None:
+                names.add(configured.lower().strip())
             if lookup_name in names:
                 # The documented check: the parameter was accepted and never
                 # read, so an excluded or unselected scanner was returned.
                 if check_enabled:
-                    self._refuse_unselected_scanner(scanner_name, names)
+                    self._refuse_unselected_scanner(scanner_name, names, scanner_class)
                 # Create and return the scanner instance
                 scanner = scanner_class(
                     context=self._context,
@@ -580,13 +598,17 @@ class ScanExecutionEngine:
         # If we get here, the scanner wasn't found
         raise ValueError(f"Scanner {lookup_name} not found")
 
-    def _refuse_unselected_scanner(self, scanner_name: str, names: Set[str]) -> None:
+    def _refuse_unselected_scanner(
+        self, scanner_name: str, names: Set[str], scanner_class: type
+    ) -> None:
         """Raise ValueError when this engine's selection leaves the scanner out.
 
-        *names* are the lowercased spellings the scanner answers to. The
-        exclusion list wins, as it does in ScanPhase; an allowlist that was
-        given and names none of them leaves the scanner out too. An empty
-        allowlist means every scanner.
+        *names* are the lowercased spellings the scanner answers to, the
+        configured name among them. The exclusion list wins, as it does in
+        ScanPhase; an allowlist that was given and names none of them leaves the
+        scanner out too, and so does a configured section that disables the
+        scanner (ScanPhase records such a scanner SKIPPED, "disabled in the
+        configuration"). An empty allowlist means every scanner.
         """
         excluded = {name.lower().strip() for name in self._init_excluded_scanners}
         if names & excluded:
@@ -599,6 +621,28 @@ class ScanExecutionEngine:
             raise ValueError(
                 f"Scanner {scanner_name} is not enabled: the selection does not name it"
             )
+        if not section_enabled(self._scanner_section(scanner_class)):
+            raise ValueError(
+                f"Scanner {scanner_name} is not enabled: its configuration "
+                "disables it (enabled: false)"
+            )
+
+    def _scanner_section(self, plugin_class: type) -> Any:
+        """The configured section of *plugin_class*, or None when there is none.
+
+        A section that cannot be read (a config whose lookup raises) is None
+        too: it names nothing and disables nothing, so the declared name and
+        the enabled default stand, as ``_selectable_scanner_name`` reads them.
+        """
+        config = self._context.config
+        if config is None:
+            return None
+        try:
+            return config.get_plugin_config(
+                plugin_type="scanner", plugin_name=plugin_config_key(plugin_class)
+            )
+        except Exception:  # noqa: BLE001 -- a section that cannot be read names nothing
+            return None
 
     def _selectable_scanner_name(self, plugin_class: type) -> Optional[str]:
         """The name ``--scanners`` selects *plugin_class* by, or None.
@@ -612,14 +656,8 @@ class ScanExecutionEngine:
         refusal to the phase (see ensure_initialized).
         """
         declared = declared_plugin_name(plugin_class)
-        config = self._context.config
-        if config is None:
-            return declared
-        try:
-            section = config.get_plugin_config(
-                plugin_type="scanner", plugin_name=plugin_config_key(plugin_class)
-            )
-        except Exception:  # noqa: BLE001 -- a section that cannot be read names nothing
+        section = self._scanner_section(plugin_class)
+        if section is None:
             return declared
         if isinstance(section, dict):
             name = section.get("name")
@@ -650,9 +688,13 @@ class ScanExecutionEngine:
             # The results model was built in __init__ with the context's config
             # as it was then. A run that had none records the configuration it
             # actually ran with, the default substituted just above, instead of
-            # None beside a run that used ASH's defaults.
+            # None beside a run that used ASH's defaults. Only the model this
+            # engine built: a model a caller passed records the configuration of
+            # the scan that produced it (a results file whose ash_config is null
+            # loads as None), and this run's configuration is not that one.
             if (
-                self._asharp_model is not None
+                self._built_model
+                and self._asharp_model is not None
                 and getattr(self._asharp_model, "ash_config", None) is None
             ):
                 self._asharp_model.ash_config = self._context.config
