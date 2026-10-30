@@ -25,6 +25,9 @@ import pytest
 
 from automated_security_helper.cli import entrypoint, mcp_server
 
+#: In-process, the root app replaced by a recorder, no child started: the unit tier.
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def root_app(monkeypatch) -> List[Tuple[List[str], Dict[str, Any]]]:

@@ -24,6 +24,9 @@ import pytest
 from automated_security_helper.cli import mcp_server
 from automated_security_helper.core.resource_management import result_filters
 
+#: In-process, the producer and the working directory patched: the unit tier.
+pytestmark = pytest.mark.unit
+
 #: Every coverage key of an incomplete scan, with a value a view must carry
 #: through unchanged. ``could_not_stop`` is the key the tool module's own tuple
 #: left out.
