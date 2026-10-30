@@ -47,6 +47,7 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from tests.unit.cli import test_merge as _merge_tests
+from tests.unit.cli.merge_shard_support import SCANNERS, _sarif_for, _skipped_entries
 from tests.unit.cli.test_merge import as_loaded, build_shards
 
 pytestmark = pytest.mark.unit
@@ -78,6 +79,41 @@ class TestAShardWithoutASelectionRecordIntendedWhatItOwned:
             or "no shard intended to run them" in record.getMessage()
         ]
         assert named == [], named
+
+    def test_a_scanner_the_older_shard_recorded_skipped_is_still_named(self, capture):
+        """A shard with no selection record that skipped one of its own scanners
+        (its own ``--exclude-scanners`` or config left it out) left a hole: no
+        shard ran it. Reading the whole assignment as intended hid that hole; the
+        shard's own row says it was skipped, so it is named, and the scanners it
+        ran are not."""
+        shards = build_shards(3)
+        for model in shards:
+            assignment = read_shard_assignment(model)
+            assignment.selected_scanners = list(assignment.assigned_scanners)
+            stamp_shard_assignment(model, assignment)
+        older = read_shard_assignment(shards[1])
+        older.selected_scanners = None
+        stamp_shard_assignment(shards[1], older)
+        skipped = older.assigned_scanners[0]
+        _skipped_entries(shards[1], skipped)
+        shards[1].sarif = _sarif_for(
+            [s for s in older.assigned_scanners if s != skipped]
+        )
+
+        merge_shard_results(as_loaded(shards))
+
+        named = [
+            record.getMessage()
+            for record in capture.records
+            if "ran on no shard" in record.getMessage()
+            or "no shard intended to run them" in record.getMessage()
+        ]
+        assert len(named) == 1, named
+        assert skipped in named[0], named
+        # The control: every scanner some shard ran is not in the warning.
+        for ran in SCANNERS:
+            if ran != skipped:
+                assert ran not in named[0], named
 
     def test_a_shard_that_recorded_an_empty_selection_is_still_named(self, capture):
         """The control: an empty selection says the shard intended nothing."""

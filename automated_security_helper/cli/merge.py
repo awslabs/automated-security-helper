@@ -1154,10 +1154,15 @@ def _report_scanners_no_shard_selected(
     recorded a selection, which is every results file written before
     ``selected_scanners`` existed. Inferring a hole from that absence would name
     every scanner on every merge of an older fan-out's artifacts. For the same
-    reason a shard that recorded no selection beside shards that did is read as
-    having intended every scanner it was assigned: its rows say what became of
-    them, and naming them as intended by no shard would call scanners that ran
-    SKIPPED.
+    reason a shard that recorded no selection beside shards that did is read
+    from its own rows: an assigned scanner it recorded as anything but SKIPPED
+    was intended, since it ran, and naming it as intended by no shard would call
+    a scanner that ran SKIPPED; one it recorded SKIPPED was left out, by its own
+    selection or by a config, and is named as it was before the field existed,
+    because the shard's assignment covers scanners it never meant to run
+    (``ShardAssignment``: ``--scanners bandit`` leaves grype assigned and
+    SKIPPED), so reading the whole assignment as intended hid a scanner one job
+    excluded and no job ran.
 
     A scanner its owning shard recorded as left out by ``--python-only`` is not in
     the warning when every shard ran with that flag. The flag is a selection too, so
@@ -1196,11 +1201,17 @@ def _report_scanners_no_shard_selected(
         if assignment.selected_scanners is None:
             # Written before the field existed, so it says nothing about what the
             # shard left out, and its row for each scanner it owned says what
-            # became of it. Read as having intended everything it was assigned:
-            # the alternative, an empty selection, named every one of its scanners
-            # as intended by no shard whenever any other shard recorded one, and
-            # said they show SKIPPED when they ran.
-            selected.update(_normalized(s) for s in assignment.assigned_scanners)
+            # became of it: a scanner that ran (any status but SKIPPED, a missing
+            # row included, which the contribution check names) was intended; a
+            # SKIPPED one was left out by that shard's own selection or config.
+            # Reading the whole assignment as intended hid the second kind, since
+            # an assignment covers scanners the shard never meant to run; reading
+            # it as an empty selection named the first kind as intended by no
+            # shard and said they show SKIPPED when they ran.
+            for scanner in assignment.assigned_scanners:
+                name = _normalized(scanner)
+                if _recorded_status(results, name) != ScannerStatus.SKIPPED.value:
+                    selected.add(name)
             continue
         for scanner in assignment.selected_scanners:
             selected.add(_normalized(scanner))
@@ -1330,6 +1341,20 @@ def _report_scanners_no_shard_selected(
         ),
         extra=NO_MARKUP,
     )
+
+
+def _recorded_status(results: AshAggregatedResults, name: str) -> str | None:
+    """The status value *results* recorded for the scanner *name* normalizes to.
+
+    None when no row names it. Read from ``scanner_results`` under the recorded
+    key, as :func:`_ran_partially` reads it, so a row recorded under another
+    spelling of the name is still found.
+    """
+    for recorded, entry in (results.scanner_results or {}).items():
+        if _normalized(recorded) == name:
+            status = getattr(entry, "status", None)
+            return getattr(status, "value", status)
+    return None
 
 
 def _skipped_reason(results: AshAggregatedResults, name: str) -> str | None:
