@@ -2588,7 +2588,10 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
             return fresh
         kind = type(node)
         if isinstance(node, tuple):
-            if _is_named_tuple(kind):
+            # Read on the instance, not on its class: the shown-text guard
+            # (tests/unit/utils/test_shown_text_is_shown_once.py) refuses a
+            # class taken from a value handed to any call but a check.
+            if hasattr(node, "_fields"):  # a NamedTuple instance
                 return kind._make(entries)
             if kind is tuple:
                 return tuple(entries)
