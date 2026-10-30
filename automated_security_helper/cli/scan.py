@@ -440,7 +440,13 @@ def _settle_output_dir(
     # exists it is asked after: its write probe makes and removes a file in the
     # directory, and a directory of the tree's that the scan refuses to clear is
     # not written into first, not even for a moment.
-    probe_after_containment = output_resolved.is_dir()
+    # A directory on the way that cannot be searched: before CPython 3.13,
+    # Path.is_dir() re-raised that PermissionError (3.13 reads it as False), so
+    # the run ended in a traceback where the refusal below names the reason.
+    try:
+        probe_after_containment = output_resolved.is_dir()
+    except OSError:
+        probe_after_containment = False
     if not probe_after_containment:
         output_refusal = output_dir_refusal(output_dir)
         if output_refusal is not None:

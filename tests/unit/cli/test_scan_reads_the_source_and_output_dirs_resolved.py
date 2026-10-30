@@ -300,6 +300,47 @@ class TestAnOutputDirectoryThatWouldClearTheScannedTreeIsRefused:
             )
             assert probed == ["src/afile"], probed
 
+    def test_an_output_path_whose_directory_check_raises_is_still_settled(
+        self, tmp_path, monkeypatch
+    ):
+        """Before CPython 3.13, Path.is_dir() re-raises the PermissionError of an
+        unsearchable directory on the way (3.13 answers False). Either way the
+        output directory's own refusal is the one that names the reason, so the
+        check's error is read as "not a directory that exists" and the run goes
+        on to that refusal, never to a traceback."""
+        real_is_dir = Path.is_dir
+
+        def raising(self, *args, **kwargs):
+            if self.name == "out":
+                raise PermissionError(13, "Permission denied", str(self))
+            return real_is_dir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "is_dir", raising)
+
+        run = _scan(source_dir="src", output_dir="out")
+
+        assert run.call_args.kwargs["output_dir"] == "out"
+
+    @pytest.mark.skipif(
+        os.name == "nt" or os.geteuid() == 0,
+        reason="a directory mode is not honored for root or on Windows",
+    )
+    def test_an_output_path_under_an_unsearchable_directory_is_refused(
+        self, tmp_path, capsys
+    ):
+        blocked = tmp_path / "src" / "blocked"
+        blocked.mkdir()
+        blocked.chmod(0o000)
+        try:
+            code = _refused(source_dir="src", output_dir="src/blocked/out")
+        finally:
+            blocked.chmod(0o755)
+
+        assert code == ASH_EXIT_USAGE_ERROR
+        err = capsys.readouterr().err
+        assert "Output directory cannot be created" in err, err
+        assert "Permission denied" in err, err
+
     def test_the_default_output_directory_with_old_results_is_not_refused(
         self, tmp_path
     ):
