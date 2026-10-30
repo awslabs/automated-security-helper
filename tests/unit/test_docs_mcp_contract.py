@@ -1165,6 +1165,11 @@ async def clone_on_thread(url):
 async def progress_on_thread(scan_id):
     registry = get_registry()
     return await to_thread(registry.progress, scan_id, **_scoped("s"))
+
+
+@mcp.tool()
+async def literal_on_thread():
+    return await asyncio.to_thread("not a callable")
 """
 
 PLANTED_EXECUTOR_TOOLS = """
@@ -1277,6 +1282,18 @@ def test_a_tool_that_runs_its_implementation_on_a_thread_returns_its_types(
     assert {"success", "error_type", "scan_id", "status"} <= set(
         progress.response.keys()
     )
+
+
+@pytest.mark.unit
+def test_a_thread_run_of_a_non_callable_stays_unread(planted_executor_contracts):
+    """The planted-negative control for the runner: ``asyncio.to_thread`` of a
+    string literal names no function the reader can follow, so the tool's
+    response is the unread value it was before the reader followed the runner,
+    with no error type and nothing read into its keys."""
+    reader = _reader()
+    literal = planted_executor_contracts["literal_on_thread"]
+    assert literal.error_types == ()
+    assert [type(v) for v in literal.response.variants] == [reader.UnreadV]
 
 
 @pytest.mark.unit
