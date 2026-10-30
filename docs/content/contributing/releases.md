@@ -284,5 +284,6 @@ every version reference it finds into the placeholder, including deliberately ol
 ones.
 
 `scripts/version_bump.py` and `scripts/build_integration.py` are not part of the release
-process. `version_bump.py` changes only the first `version =` line of `pyproject.toml`, so
-using it leaves `[tool.commitizen] version` behind; bump with commitizen instead.
+process. `version_bump.py set` writes the same version into both `version =` lines of
+`pyproject.toml`, `[project]` and `[tool.commitizen]`, and regenerates the templated pages;
+it is a local helper, and the release process bumps with commitizen instead.
