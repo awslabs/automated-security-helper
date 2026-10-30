@@ -46,6 +46,7 @@ import ssl
 import stat
 import sys
 import tempfile
+import time
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -486,6 +487,43 @@ def test_a_file_with_a_second_name_is_reinstalled_not_repaired(
     (tmp_path / "other-name").unlink()
     assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
     assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0o111
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs os.mkfifo")
+def test_a_fifo_at_the_install_path_is_refused_without_blocking(
+    receipt_home, tmp_path, caplog
+):
+    """A FIFO planted at the install path, in a directory other users can write,
+    must be refused by the regular-file check; an open that followed the FIFO's
+    own rules would block there, with no writer ever coming, and the check would
+    never return."""
+    import hashlib
+
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    os.mkfifo(destination / "tool")
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING):
+        assert not du._already_installed(
+            destination, "tool", "https://x.example/tool", digest
+        )
+    # Promptly: a blocked open would hold the test until its runner's timeout,
+    # which is the failure this pins; the bound only has to be far below that.
+    assert time.monotonic() - started < 5
+    assert "not a regular file" in caplog.text
+    # The control: the same path holding a regular file with those bytes is
+    # installed.
+    (destination / "tool").unlink()
+    (destination / "tool").write_bytes(payload)
+    (destination / "tool").chmod(0o755)
+    assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
 
 
 # --- archive members ---------------------------------------------------------------
