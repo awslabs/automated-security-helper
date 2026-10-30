@@ -864,7 +864,11 @@ def check(
     for pin in pins:
         note = ""
         if pin.ecosystem == BUNDLED:
-            results.append(Result(pin, None, "held", f"version set by {pin.project}"))
+            # The reason goes in ``note``, which the report prints for every result
+            # that has one; ``detail`` is printed only for lookup failures.
+            results.append(
+                Result(pin, None, "held", note=f"version set by {pin.project}")
+            )
             continue
         try:
             answer = fetchers[pin.ecosystem](pin.project)
