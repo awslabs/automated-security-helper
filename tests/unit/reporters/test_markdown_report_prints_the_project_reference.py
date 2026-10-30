@@ -5,10 +5,11 @@
 
 The configuration records a project name read from the environment as the
 reference it was written as, ``${NAME}``, and every report is meant to show that
-reference rather than the value. The Markdown report escapes ``{`` and ``}``
-along with the Markdown syntax characters, so the project line read
-``$\\{NAME\\}``, which is not what the file says. Only the project line keeps the
-braces; every other line still escapes them.
+reference rather than the value. The Markdown report escapes ``{``, ``}`` and
+``_`` along with the other Markdown syntax characters, so the project line read
+``$\\{MY\\_NAME\\}``, which is not what the file says. Only a ``${NAME}`` reference
+in the project line is written as it is; every other character in the line, and
+every other line, is still escaped.
 """
 
 import pytest
@@ -27,7 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import Result
 pytestmark = pytest.mark.unit
 
 REFERENCE = "${ZZ_PROJECT_REFERENCE}"
-ESCAPED = "$\\{ZZ_PROJECT_REFERENCE\\}"
+ESCAPED = "$\\{ZZ\\_PROJECT\\_REFERENCE\\}"
 
 
 def _model(project_name: str) -> AshAggregatedResults:
