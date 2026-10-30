@@ -222,6 +222,26 @@ class TestTheEndOfAScan:
         # does not, so nothing wrote it.
         assert (orchestrator.output_dir / "ash_aggregated_results.json").is_file()
 
+    def test_a_scan_with_no_existing_results_returns_the_engines_model(
+        self, tmp_path, monkeypatch
+    ):
+        """The model class is read after the phases (the held model before
+        them, the returned model at the write), by the module-level import.
+        A function-local import of the same name inside the existing-results
+        branch made the name local to the whole function, so a scan that did
+        not take that branch, which is every ordinary scan, raised
+        UnboundLocalError at those reads, right after the phases had run."""
+        orchestrator = _with_stub_phases(tmp_path, monkeypatch)
+        assert orchestrator.existing_results_path is None
+        engine_model = orchestrator.execution_engine.execute_phases.return_value
+
+        results = orchestrator._execute_scan(phases=["scan"])
+
+        assert results is engine_model
+        # The mechanism, pinned: no local binding of the name in the function.
+        code = ASHScanOrchestrator._execute_scan.__code__
+        assert "AshAggregatedResults" not in code.co_varnames
+
 
 class TestMetadataAndThresholds:
     def test_a_project_name_read_from_the_environment_is_not_applied(self, tmp_path):
