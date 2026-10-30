@@ -48,6 +48,7 @@ def test_an_interrupt_during_the_tree_stops_grace_survives_a_refused_kill():
     process.pid = _NO_SUCH_PGID
     process.returncode = None
     process.poll.return_value = None
+    process.args = ["tool"]
     sent = []
 
     def signal_group(pgid, signum):
@@ -136,6 +137,9 @@ def _child_the_kernel_will_not_kill() -> MagicMock:
     process = MagicMock(spec=subprocess.Popen)
     process.pid = 4242
     process.returncode = None
+    # `args` is set on a real Popen in __init__, not on the class, so a spec'd
+    # mock lacks it; the refusal's WARNING names the program through it.
+    process.args = ["tool"]
     process.kill.side_effect = PermissionError(1, "Operation not permitted")
     return process
 
