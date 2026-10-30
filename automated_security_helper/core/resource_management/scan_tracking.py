@@ -510,13 +510,67 @@ def is_regular_result_file(
     return max_bytes is None or info.st_size <= max_bytes
 
 
-def _read_scanner_result_document(result_file: Path) -> Optional[Dict[str, Any]]:
-    """The JSON object a scanner wrote into its ``ASH.ScanResults.json``, or None."""
-    if not is_regular_result_file(result_file):
+#: How a result file is opened for reading: by descriptor, never following a
+#: link at its name (O_NOFOLLOW, where the platform has it), never blocking on a
+#: FIFO left there (O_NONBLOCK), closed on exec.
+_RESULT_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+
+def _read_result_file_bytes(path: Path, max_bytes: Optional[int]) -> Optional[bytes]:
+    """The bytes of the regular file at ``path``, or None.
+
+    None when the name cannot be opened, when what was opened is not a regular
+    file, or when the file is larger than ``max_bytes`` (a bound of None reads
+    the whole file). The check and the read are one descriptor: the name is
+    opened without following a link and without blocking, the descriptor is
+    ``fstat``-ed, and at most ``max_bytes + 1`` bytes are read from that same
+    descriptor. :func:`is_regular_result_file` looks at the name; a scanner
+    that swaps a link or a FIFO in between its look and a read by name had the
+    link followed or the reader held, and a file that grew after the look was
+    read in full. Through this, nothing past the bound is read and what is read
+    is what was checked.
+    """
+    try:
+        fd = os.open(path, _RESULT_READ_FLAGS)
+    except OSError:
         return None
     try:
-        data = json.loads(result_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        if max_bytes is not None and info.st_size > max_bytes:
+            return None
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            if max_bytes is None:
+                return handle.read()
+            data = handle.read(max_bytes + 1)
+            return data if len(data) <= max_bytes else None
+    except OSError:
+        return None
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
+def _read_scanner_result_document(result_file: Path) -> Optional[Dict[str, Any]]:
+    """The JSON object a scanner wrote into its ``ASH.ScanResults.json``, or None.
+
+    Read through :func:`_read_result_file_bytes` with the per-scanner bound, so
+    the regular-file check, the bound and the read are one descriptor.
+    """
+    raw = _read_result_file_bytes(result_file, _SCANNER_RESULT_FILE_MAX_BYTES)
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError):
         return None
     return data if isinstance(data, dict) else None
 
@@ -588,6 +642,13 @@ def _progress_counts_of_document(
     suppressed count the moment the aggregated file appeared. Reported this way
     the count is SummaryStats' ``total``: the non-suppressed findings, with
     ``suppressed`` a bucket beside it, mid-scan and after.
+
+    A recorded count beside NO usable buckets (no ``severity_counts``, or one
+    that is not an object) is graded by the findings array, and whatever that
+    array does not account for lands in ``unknown``: the module's rule is that
+    a finding is never in the total and in no bucket, and the aggregated path
+    puts such a count under ``unknown`` too, so the breakdown does not change
+    when the aggregated file appears.
     """
     findings = _findings_of_document(document)
     recorded_count, recorded_counts = _counts_of_document(document)
@@ -603,27 +664,10 @@ def _progress_counts_of_document(
         count = max(recorded_count - counts["suppressed"], 0)
     else:
         count = recorded_count
+        ungraded = recorded_count - sum(counts.values())
+        if ungraded > 0:
+            counts[UNKNOWN_SEVERITY] += ungraded
     return findings, count, counts
-
-
-def _recorded_scanner_status(result_file: Path) -> Optional[str]:
-    """The ``status`` a scanner wrote into its ``ASH.ScanResults.json``, or None."""
-    data = _read_scanner_result_document(result_file)
-    return _status_of_document(data) if data is not None else None
-
-
-def _recorded_scanner_counts(
-    result_file: Path,
-) -> Tuple[Optional[int], Optional[Dict[str, int]]]:
-    """:func:`_counts_of_document` of the file at ``result_file``, or Nones.
-
-    The progress views read each file once with
-    :func:`_read_scanner_result_document` and derive findings, counts and status
-    from that one document; this file-based form is for a caller that holds only
-    the path.
-    """
-    data = _read_scanner_result_document(result_file)
-    return _counts_of_document(data) if data is not None else (None, None)
 
 
 def check_scan_completion(
@@ -725,9 +769,14 @@ def find_scanner_result_files(
 
             # The file itself gets the same care as the directories above it:
             # only a regular file, not a link (which would read another tree's
-            # file as this scan's) nor a FIFO (which would block the poll).
+            # file as this scan's) nor a FIFO (which would block the poll), and
+            # not one past the per-scanner bound. A file that is there and is
+            # left out is said once, so a scanner does not vanish from every
+            # view in silence (this runs on every poll, so once per file).
             if is_regular_result_file(result_file):
                 targets[target_type] = result_file
+            elif os.path.lexists(result_file):
+                _report_irregular_result_file(result_file)
 
         # A scanner is listed once it has written a result for at least one
         # target. Listed as soon as its directory existed, it read as a
@@ -738,11 +787,36 @@ def find_scanner_result_files(
     return scanner_results
 
 
+#: Result files already reported as left out of the progress view (a link, a
+#: FIFO, a file past the bound), so each is said once per process, not once per
+#: poll.
+_REPORTED_IRREGULAR_RESULT_FILES: Set[str] = set()
+
+
+def _report_irregular_result_file(result_file: Path) -> None:
+    """Say once that a result file that is there is left out of every view."""
+    key = str(result_file)
+    if key in _REPORTED_IRREGULAR_RESULT_FILES:
+        return
+    _REPORTED_IRREGULAR_RESULT_FILES.add(key)
+    _logger.warning(
+        f"Result file {result_file} is not a regular file, or is larger than "
+        f"{_SCANNER_RESULT_FILE_MAX_BYTES} bytes; it is left out of the progress "
+        "view, so its scanner is reported from its other targets or not at all"
+    )
+
+
 def get_completed_scanners(
     output_dir: Path | None = None,
 ) -> Set[str]:
     """
     Get the set of scanners that have completed at least one target.
+
+    A target is completed when its result file is a readable JSON object: a
+    file that is not one yet (empty, truncated, mid-write) is a scanner that
+    has not finished writing, which ``create_scan_progress_from_files`` reports
+    as running. Read from the file's presence alone, such a scanner was
+    completed here and running there.
 
     Args:
         output_dir: Path to the scan output directory
@@ -752,8 +826,11 @@ def get_completed_scanners(
     """
     if output_dir is None:
         output_dir = Path.cwd().joinpath(".ash", "ash_output")
-    scanner_results = find_scanner_result_files(output_dir)
-    return set(scanner_results.keys())
+    return {
+        scanner_name
+        for scanner_name, info in get_scanner_progress(output_dir).items()
+        if info["targets_completed"]
+    }
 
 
 def get_scanner_progress(
@@ -761,6 +838,12 @@ def get_scanner_progress(
 ) -> Dict[str, Dict[str, Any]]:
     """
     Get progress information for each scanner.
+
+    ``targets_completed`` and ``targets_count`` name the targets whose result
+    file is a readable JSON object. A scanner whose only result file is not one
+    yet is listed with none, as ``create_scan_progress_from_files`` lists it as
+    running; counted from the file's presence, the same file read as a
+    completed target here and a running scanner there.
 
     Args:
         output_dir: Path to the scan output directory
@@ -775,8 +858,8 @@ def get_scanner_progress(
 
     for scanner_name, target_results in scanner_results.items():
         scanner_progress[scanner_name] = {
-            "targets_completed": list(target_results.keys()),
-            "targets_count": len(target_results),
+            "targets_completed": [],
+            "targets_count": 0,
             "findings": [],
             # What the scanner recorded, for the per-target file ASH writes,
             # which has finding_count and severity_counts and no findings
@@ -796,6 +879,8 @@ def get_scanner_progress(
                 if document is None:
                     continue
                 findings, count, counts = _progress_counts_of_document(document)
+                scanner_progress[scanner_name]["targets_completed"].append(target_type)
+                scanner_progress[scanner_name]["targets_count"] += 1
                 scanner_progress[scanner_name]["findings"].extend(findings)
                 scanner_progress[scanner_name]["finding_count"] += count
                 totals = scanner_progress[scanner_name]["severity_counts"]
@@ -825,15 +910,30 @@ def parse_scanner_result_file(
         result_file = Path.cwd().joinpath(
             ".ash", "ash_output", "ash_aggregated_results.json"
         )
-    from automated_security_helper.core.resource_management.error_handling import (
-        safe_read_json_file,
-    )
 
-    # Use safe_read_json_file for robust error handling
-    data, error = safe_read_json_file(result_file, required=True)
-
-    if error:
-        _logger.warning(f"Error reading result file {result_file}: {str(error)}")
+    # The same guarded read as the progress views (_read_result_file_bytes):
+    # by a checked descriptor, never through a link or a FIFO at the name. No
+    # bound: the default path is the aggregated results file, which carries the
+    # whole SARIF. This was the one exported per-scanner reader that went
+    # through a read by name.
+    raw = _read_result_file_bytes(Path(result_file), max_bytes=None)
+    if raw is None:
+        _logger.warning(
+            f"Error reading result file {result_file}: it is absent, cannot be "
+            "opened, or is not a regular file"
+        )
+        return []
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError) as e:
+        _logger.warning(f"Error reading result file {result_file}: {str(e)}")
+        return []
+    if not isinstance(data, dict):
+        _logger.warning(
+            f"Unexpected result file structure in {result_file}. "
+            f"Expected either 'findings' array or 'scanner_name' metadata. "
+            f"Found a {type(data).__name__}, not an object"
+        )
         return []
 
     # Extract findings from the result file
@@ -958,17 +1058,20 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
             info.get("dependencies_satisfied"), True
         )
 
+        # The status is read as scanner_status_from_results reads it from the
+        # same document, case-insensitively, and reported in the form the
+        # enum writes, so one payload does not say "missing" here and
+        # "MISSING" in skipped_scanners for the same scanner. A status that is
+        # not a string is reported as recorded.
+        recorded_status = status.upper() if isinstance(status, str) else None
         statuses[scanner_name] = {
-            "status": status,
+            "status": recorded_status if recorded_status is not None else status,
             "excluded": excluded,
             "dependencies_satisfied": dependencies_satisfied,
         }
 
         # FAILED and ERROR are deliberately not included. Those scanners ran;
         # reporting them as skipped would send a user looking for a missing tool.
-        # The status is read in any case, as scanner_status_from_results reads it
-        # from the same document.
-        recorded_status = status.upper() if isinstance(status, str) else None
         if recorded_status not in ("MISSING", "SKIPPED"):
             continue
 
@@ -1037,15 +1140,16 @@ def parse_aggregated_results(
 
     aggregated_results_path = output_dir / "ash_aggregated_results.json"
 
-    # A FIFO or a link at the results name is refused before any open:
-    # safe_read_json_file's own check follows links, and a FIFO would hold the
-    # reader (the registry's readers hold its lock while they read). The lock
-    # is not what makes a read consistent: it serializes the registry's own
-    # readers, not the scan that replaces the file, so two reads of the file
-    # by one caller can be two documents. A caller that needs one view parses
-    # once and derives everything from that dict (get_scan_progress_info does;
-    # the registry's progress poll still reads the file more than once under
-    # its lock).
+    # A FIFO or a link at the results name is refused here, before the read,
+    # with this function's own error (naming output_dir in its context);
+    # safe_read_json_file refuses the same shapes with its own text, and the
+    # registry's readers hold its lock while they read, so an early answer
+    # keeps a poll short. The lock is not what makes a read consistent: it
+    # serializes the registry's own readers, not the scan that replaces the
+    # file, so two reads of the file by one caller can be two documents. A
+    # caller that needs one view parses once and derives everything from that
+    # dict (get_scan_progress_info does; the registry's progress poll still
+    # reads the file more than once under its lock).
     if os.path.lexists(aggregated_results_path) and not is_regular_result_file(
         aggregated_results_path, max_bytes=None
     ):
@@ -1216,13 +1320,14 @@ def _add_aggregated_scanner_progress(
         # Filter findings for this scanner
         scanner_findings = [f for f in findings if f.get("scanner") == scanner_name]
 
-        # What the document recorded for the scanner. A count the results model
-        # accepts as null is no recorded count, and neither is anything that is
-        # not an integer.
-        recorded_count = scanner_info.get("finding_count")
-        if isinstance(recorded_count, bool) or not isinstance(recorded_count, int):
-            recorded_count = None
-        recorded_counts = scanner_info.get("severity_counts")
+        # What the document recorded for the scanner, read as the per-target
+        # path reads a document (_counts_of_document): a count the results
+        # model accepts as null is no recorded count, and neither is anything
+        # that is not a non-negative integer; a bucket whose value is not one
+        # is dropped, and the bucket names are lowercased. Stored as recorded,
+        # a bucket holding a string reached update_totals, whose TypeError
+        # failed the whole document.
+        recorded_count, recorded_counts = _counts_of_document(scanner_info)
 
         # Create scanner progress for source target, carrying the status the
         # document recorded rather than assuming success. The results model reads a
@@ -1238,18 +1343,23 @@ def _add_aggregated_scanner_progress(
             finding_count=recorded_count or 0,
         )
 
-        # The breakdown the scanner recorded; failing that, the one its SARIF
+        # The breakdown the scanner recorded, folded into the named buckets
+        # with anything else under unknown; failing that, the one its SARIF
         # results give. A recorded count with neither goes under the catch-all
         # bucket, so it is not in the total and in no bucket, and the count of
         # results that matched no scanner (none, when the SARIF names no scanner)
-        # does not replace it.
-        if isinstance(recorded_counts, dict):
-            source_progress.severity_counts = recorded_counts
+        # does not replace it. A null count beside recorded buckets is the
+        # non-suppressed sum, SummaryStats' total, the count the per-target
+        # path reports for the same scanner; summed over every bucket it
+        # counted the suppressed findings the recorded count leaves out.
+        if recorded_counts is not None:
+            counts = empty_severity_counts()
+            for severity, value in recorded_counts.items():
+                counts[severity if severity in counts else UNKNOWN_SEVERITY] += value
+            source_progress.severity_counts = counts
             if recorded_count is None:
                 source_progress.finding_count = sum(
-                    value
-                    for value in recorded_counts.values()
-                    if isinstance(value, int) and not isinstance(value, bool)
+                    value for bucket, value in counts.items() if bucket != "suppressed"
                 )
         elif scanner_findings:
             source_progress.update_findings(scanner_findings)
@@ -1481,18 +1591,32 @@ def get_scan_progress_info(
       then what the scanners recorded (their non-suppressed count, the rule
       :func:`_progress_counts_of_document` states), which is more than
       ``len(findings)`` for the files ASH writes, since those carry counts and
-      no findings array; for a completed scan the two agree.
+      no findings array.
     * ``error``: the file cannot be read as results, or the directory holds the
       results put back after a scan that ended without any
-      (:func:`restored_results_refusal`), which are not this scan's.
+      (:func:`restored_results_refusal`), which are not this scan's. The
+      put-back check runs before the read and again after it: a restore
+      writes its marker first and moves the previous results back after, so a
+      restore that lands between the check and the read leaves a marker to
+      see once the read is done.
 
+    ``findings_count`` has one meaning in every state: the non-suppressed
+    findings, SummaryStats' ``total``. For a completed scan it is
+    ``metadata.summary_stats.total`` when the document carries one, else the
+    SARIF results less the suppressed ones; counted as every SARIF result it
+    rose by the suppressed count the moment the scan completed.
     ``findings_summary`` has one shape in every state: the severity buckets
     (``SEVERITY_BUCKETS`` and ``unknown``). For a completed scan they are
     ``metadata.summary_stats``' counts, or, with no summary stats, the SARIF
     results graded by ``result_severity``, a suppressed result counted in
-    ``suppressed`` and not by its severity, so the buckets add up to
-    ``findings_count``. The summary stats themselves are returned as
-    ``summary_stats``.
+    ``suppressed`` and not by its severity, so the buckets other than
+    ``suppressed`` add up to ``findings_count``. The summary stats themselves
+    are returned as ``summary_stats``.
+
+    ``scanners_completed`` are the scanners whose recorded status maps to
+    passed or failed (:func:`scanner_status_from_results`: case-insensitive, an
+    absent status read as PASSED as the results model reads it), the reading
+    ``create_scan_progress_from_files`` makes of the same document.
 
     Args:
         output_dir: Path to the scan output directory
@@ -1513,7 +1637,7 @@ def get_scan_progress_info(
             ErrorCategory,
         )
 
-        if holds_restored_results(Path(output_dir)):
+        def put_back_results() -> Dict[str, Any]:
             return {
                 "status": "error",
                 "is_complete": False,
@@ -1529,11 +1653,23 @@ def get_scan_progress_info(
                     "output_holds_previous_results": True,
                 },
             }
+
+        if holds_restored_results(Path(output_dir)):
+            return put_back_results()
         try:
             # Parse aggregated results for completed scans
             results = parse_aggregated_results(output_dir)
             if not isinstance(results, dict):
                 results = {}
+
+            # The check above ran before the read, and a restore can land
+            # between the two. It writes its marker first and moves the
+            # previous results back after it (core/previous_results.py), so
+            # results read after it put them back are followed by a marker
+            # that is there to see now; the same second look
+            # get_scan_results_with_error_handling takes.
+            if holds_restored_results(Path(output_dir)):
+                return put_back_results()
 
             if results.get("sarif") is None and results.get("scanner_results") is None:
                 # Not a results document yet; see create_scan_progress_from_files.
@@ -1550,7 +1686,12 @@ def get_scan_progress_info(
             # them: PASSED or FAILED. scanner_results names every scanner
             # ASH considered, MISSING, SKIPPED and ERROR included, and
             # listing them all here reported a tool that never ran as
-            # completed.
+            # completed. The status is read as the registry's progress view
+            # reads it from the same document (scanner_status_from_results):
+            # an absent status is PASSED, as the results model reads it, and
+            # the case does not matter; compared as a string against two
+            # upper-case literals, {"bandit": {}} and {"status": "passed"}
+            # were one completed scanner there and none here.
             scanner_results = results.get("scanner_results")
             scanners_completed = [
                 name
@@ -1558,7 +1699,8 @@ def get_scan_progress_info(
                     scanner_results if isinstance(scanner_results, dict) else {}
                 ).items()
                 if isinstance(info, dict)
-                and info.get("status", "UNKNOWN") in ("PASSED", "FAILED")
+                and scanner_status_from_results(info.get("status", "PASSED"))
+                in (MCScannerStatus.COMPLETED, MCScannerStatus.FAILED)
             ]
 
             metadata = results.get("metadata")
@@ -1596,6 +1738,7 @@ def get_scan_progress_info(
                     extra=NO_MARKUP,
                 )
 
+            findings_summary = _completed_findings_summary(summary_stats, findings)
             return {
                 "status": "completed",
                 "is_complete": True,
@@ -1603,11 +1746,11 @@ def get_scan_progress_info(
                 "incomplete_scanners": incomplete_scanners,
                 "scanners_completed": scanners_completed,
                 "total_scanners": len(scanners_completed),
-                "findings_count": len(findings),
-                "findings": findings,
-                "findings_summary": _completed_findings_summary(
-                    summary_stats, findings
+                "findings_count": _completed_findings_count(
+                    summary_stats, findings, findings_summary
                 ),
+                "findings": findings,
+                "findings_summary": findings_summary,
                 "summary_stats": summary_stats,
                 "completion_time": metadata.get(
                     "generated_at", datetime.now().isoformat()
@@ -1653,11 +1796,45 @@ def _completed_findings_summary(
     return summary
 
 
+def _completed_findings_count(
+    summary_stats: Dict[str, Any],
+    findings: List[Dict[str, Any]],
+    findings_summary: Dict[str, int],
+) -> int:
+    """The non-suppressed findings of a completed scan: SummaryStats' ``total``.
+
+    From ``summary_stats.total`` when the document carries one; else the SARIF
+    results less the suppressed ones, which is what the buckets of
+    ``findings_summary`` other than ``suppressed`` add up to. The running view
+    reports the same quantity (the scanners' non-suppressed recorded counts),
+    so a scan's count no longer rises by its suppressed findings the moment it
+    completes.
+    """
+    total = summary_stats.get("total")
+    if isinstance(total, int) and not isinstance(total, bool) and total >= 0:
+        return total
+    return max(len(findings) - findings_summary.get("suppressed", 0), 0)
+
+
 def _partial_progress_info(output_dir: Path) -> Dict[str, Any]:
-    """Progress from the per-scanner files, for a scan with no results document."""
+    """Progress from the per-scanner files, for a scan with no results document.
+
+    ``scanners_completed`` are the scanners with a readable result document for
+    at least one target, the targets ``get_scanner_progress`` lists as
+    completed; a scanner whose only file is not a JSON object yet is one that
+    has not finished writing (``create_scan_progress_from_files`` reports it
+    as running), and listing it as completed here from the file's presence put
+    the two views of one file at odds. ``total_scanners`` counts every scanner
+    that has written a file, finished or not; it is still an estimate, since
+    a scanner that has written nothing is not seen.
+    """
     # Get partial progress for incomplete scans
     scanner_progress = get_scanner_progress(output_dir)
-    completed_scanners = get_completed_scanners(output_dir)
+    completed_scanners = [
+        scanner_name
+        for scanner_name, scanner_info in scanner_progress.items()
+        if scanner_info.get("targets_completed")
+    ]
 
     # Aggregate findings from all scanners. The count and the summary come
     # from what each scanner recorded (get_scanner_progress), so a scanner
@@ -1676,10 +1853,8 @@ def _partial_progress_info(output_dir: Path) -> Dict[str, Any]:
     return {
         "status": "in_progress",
         "is_complete": False,
-        "scanners_completed": list(completed_scanners),
-        "total_scanners": len(
-            completed_scanners
-        ),  # This is an estimate since we don't know the total yet
+        "scanners_completed": completed_scanners,
+        "total_scanners": len(scanner_progress),
         "findings_count": findings_count,
         "findings": all_findings,
         "findings_summary": findings_summary,

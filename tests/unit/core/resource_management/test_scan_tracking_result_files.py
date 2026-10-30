@@ -27,6 +27,7 @@ Five mechanisms, each pinned against the behavior it replaced:
 import json
 import os
 import threading
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -230,6 +231,10 @@ class TestEachResultFileIsReadOnceThroughTheGuard:
         assert sorted(p.name for p in guarded) == [_RESULTS_FILE, _RESULTS_FILE]
         assert len(guarded) == 2
         assert unguarded == []
+        # The patch above reaches every call only while scan_tracking resolves
+        # the name through error_handling at call time; a module-level
+        # from-import would bind its own name and the patch would see nothing.
+        assert not hasattr(st, "safe_read_json_file")
 
     def test_the_per_scanner_view_reads_each_file_once_too(self, tmp_path, monkeypatch):
         import automated_security_helper.core.resource_management.scan_tracking as st
@@ -279,12 +284,165 @@ class TestTheCompletedProgressInfoReadsTheFileOnce:
             "parse_aggregated_results",
             lambda *args, **kwargs: parses.append(args) or real_parse(*args, **kwargs),
         )
+        # Counted below the module's own parser too: a second parse made by
+        # load_aggregated_results_model, or by any other reader of the file,
+        # would escape the patch above and be counted here.
+        from automated_security_helper.core.resource_management import error_handling
+
+        reads = []
+        real_safe_read = error_handling.safe_read_json_file
+        monkeypatch.setattr(
+            error_handling,
+            "safe_read_json_file",
+            lambda *a, **k: reads.append(a) or real_safe_read(*a, **k),
+        )
 
         info = get_scan_progress_info(out)
 
         assert info["status"] == "completed"
         assert info["coverage_complete"] is True
         assert len(parses) == 1
+        assert len(reads) == 1
+        assert not hasattr(st, "safe_read_json_file")
+
+
+class TestTheReadIsTheCheck:
+    """The regular-file check and the read are one descriptor.
+
+    ``is_regular_result_file`` looks at the name (lstat) and the read followed by
+    name, so a link or a FIFO swapped in between the two was followed or waited
+    on, and a file that grew after the look was read in full past the bound. The
+    document is now read through ``_read_result_file_bytes``: the name is opened
+    without following a link and without blocking, the descriptor is fstat-ed,
+    and at most the bound plus one byte is read from it. The tests make the look
+    report what it would have before the swap, so the read is what decides.
+    """
+
+    def test_a_link_swapped_in_after_the_look_is_not_followed(
+        self, tmp_path, monkeypatch
+    ):
+        import automated_security_helper.core.resource_management.scan_tracking as st
+
+        if not hasattr(os, "O_NOFOLLOW"):
+            pytest.skip("the platform has no O_NOFOLLOW")
+        out = tmp_path / "ash_output"
+        other = tmp_path / "other-tree.json"
+        other.write_text(json.dumps({"status": "FAILED"}), encoding="utf-8")
+        link = _target_dir(out, "bandit", "source") / _RESULTS_FILE
+        _symlink_or_skip(link, other)
+        monkeypatch.setattr(st, "is_regular_result_file", lambda *a, **k: True)
+
+        # Red before: the reopen by name followed the link and returned the
+        # other tree's document as this scan's.
+        assert st._read_scanner_result_document(link) is None
+
+    def test_a_file_grown_past_the_bound_after_the_look_is_not_read(
+        self, tmp_path, monkeypatch
+    ):
+        import automated_security_helper.core.resource_management.scan_tracking as st
+
+        out = tmp_path / "ash_output"
+        path = _write_result(out, "bandit", "source", {"status": "PASSED"})
+        path.write_text(
+            json.dumps({"status": "PASSED", "pad": "x" * 200}), encoding="utf-8"
+        )
+        monkeypatch.setattr(st, "_SCANNER_RESULT_FILE_MAX_BYTES", 64)
+        monkeypatch.setattr(st, "is_regular_result_file", lambda *a, **k: True)
+
+        # Red before: the look said the file was within the bound and the read
+        # by name then read the whole grown file.
+        assert st._read_scanner_result_document(path) is None
+
+    def test_a_fifo_at_the_name_is_refused_without_waiting(self, tmp_path):
+        import automated_security_helper.core.resource_management.scan_tracking as st
+
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("FIFOs are not available on this platform")
+        fifo = tmp_path / _RESULTS_FILE
+        os.mkfifo(fifo)
+
+        # A read-only open of a FIFO with no writer blocks without O_NONBLOCK;
+        # with it the open returns and the fstat refuses what it opened.
+        assert (
+            _returns_within(5, lambda: st._read_result_file_bytes(fifo, None)) is None
+        )
+
+    def test_the_control_a_regular_file_within_the_bound_is_read(self, tmp_path):
+        import automated_security_helper.core.resource_management.scan_tracking as st
+
+        out = tmp_path / "ash_output"
+        path = _write_result(out, "bandit", "source", {"status": "PASSED"})
+
+        assert st._read_scanner_result_document(path) == {"status": "PASSED"}
+        assert st._read_result_file_bytes(path, None) == path.read_bytes()
+
+
+class TestAnUnreadableTargetIsNotACompletedTarget:
+    """One file, one reading in every view.
+
+    A per-target file that is not a JSON object yet (empty, truncated,
+    mid-write) is a scanner that has not finished writing:
+    ``create_scan_progress_from_files`` reports it as running. The per-scanner
+    view listed the same target as completed from the file's presence, and the
+    running progress info listed the scanner in ``scanners_completed``: the
+    "completed before it wrote anything" reading in the other views.
+    """
+
+    def test_a_truncated_file_is_no_completed_target_in_any_view(self, tmp_path):
+        out = tmp_path / "ash_output"
+        path = _write_result(out, "bandit", "source", {"status": "PASSED"})
+        path.write_text('{"scanner_name": "bandit", "sta', encoding="utf-8")
+
+        view = get_scanner_progress(out)
+        info = get_scan_progress_info(out)
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert view["bandit"]["targets_completed"] == []
+        assert view["bandit"]["targets_count"] == 0
+        assert get_completed_scanners(out) == set()
+        assert info["scanners_completed"] == []
+        assert info["total_scanners"] == 1
+        assert progress.scanner_status_counts["running"] == 1
+
+    def test_a_scanner_with_one_finished_target_is_completed_by_that_target(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        _write_result(out, "bandit", "source", {"status": "PASSED", "finding_count": 1})
+        pending = _write_result(out, "bandit", "converted", {"status": "PASSED"})
+        pending.write_text("", encoding="utf-8")
+
+        view = get_scanner_progress(out)
+        info = get_scan_progress_info(out)
+
+        assert view["bandit"]["targets_completed"] == ["source"]
+        assert view["bandit"]["targets_count"] == 1
+        assert view["bandit"]["finding_count"] == 1
+        assert get_completed_scanners(out) == {"bandit"}
+        assert info["scanners_completed"] == ["bandit"]
+
+    def test_a_result_file_left_out_of_the_view_is_said_once(
+        self, tmp_path, monkeypatch
+    ):
+        """A link (or a FIFO, or a file past the bound) at a result name is left
+        out of every view; it used to be left out in silence, so the scanner
+        vanished. It is said once per process, not once per poll."""
+        import automated_security_helper.core.resource_management.scan_tracking as st
+
+        out = tmp_path / "ash_output"
+        other = tmp_path / "other-tree.json"
+        other.write_text(json.dumps({"status": "FAILED"}), encoding="utf-8")
+        link = _target_dir(out, "bandit", "source") / _RESULTS_FILE
+        _symlink_or_skip(link, other)
+        monkeypatch.setattr(st, "_REPORTED_IRREGULAR_RESULT_FILES", set())
+        logger = MagicMock()
+        monkeypatch.setattr(st, "_logger", logger)
+
+        assert find_scanner_result_files(out) == {}
+        assert find_scanner_result_files(out) == {}
+
+        assert logger.warning.call_count == 1
+        assert str(link) in logger.warning.call_args[0][0]
 
 
 class TestCompletedScannersAreTheOnesThatRan:
@@ -509,8 +667,8 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
             pytest.param(
                 {"finding_count": 4, "severity_counts": ["high", "high"]},
                 4,
-                {},
-                id="non-dict-severity_counts-yields-no-buckets",
+                {"unknown": 4},
+                id="non-dict-severity_counts-counts-under-unknown",
             ),
             pytest.param(
                 {"finding_count": 2, "severity_counts": {"high": 1, "weird": 1}},
@@ -548,7 +706,11 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
         a non-negative int is dropped; a bucket name the model lacks lands in
         ``unknown``; and the recorded finding_count is the total even when the
         buckets do not sum to it (the scanner's record wins), less its own
-        suppressed bucket, which the aggregated total leaves out too."""
+        suppressed bucket, which the aggregated total leaves out too. A
+        recorded count beside NO usable buckets is graded by the findings
+        array and the rest lands in ``unknown`` (the module's rule: never in
+        the total and in no bucket), as the aggregated path counts the same
+        shape; it used to give total 4 with every bucket 0."""
         out = tmp_path / "ash_output"
         _write_result(out, "bandit", "source", {"scanner_name": "bandit", **document})
 

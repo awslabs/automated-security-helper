@@ -522,11 +522,192 @@ class TestTheCompletedProgressInfoOnSparseDocuments:
         info = get_scan_progress_info(out)
 
         summary = info["findings_summary"]
-        assert info["findings_count"] == 2
+        # findings_count is the non-suppressed count, SummaryStats' total, the
+        # same quantity the running view reports; counted as every SARIF
+        # result it read 2 here against 1 mid-scan for the same scanner.
+        assert info["findings_count"] == 1
         assert summary["critical"] == 1
         assert summary["suppressed"] == 1
         assert summary["unknown"] == 0
-        assert sum(summary.values()) == info["findings_count"]
+        assert sum(summary.values()) == info["findings_count"] + summary["suppressed"]
+
+    def test_the_completed_count_is_the_summary_stats_total_when_recorded(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "sarif": {
+                    "runs": [
+                        {
+                            "results": [
+                                {"ruleId": "B105", "level": "error"},
+                                {
+                                    "ruleId": "B303",
+                                    "level": "error",
+                                    "suppressions": [{"kind": "inSource"}],
+                                },
+                            ]
+                        }
+                    ]
+                },
+                "scanner_results": {"bandit": {"status": "FAILED"}},
+                "metadata": {
+                    "summary_stats": {
+                        "total": 1,
+                        "critical": 1,
+                        "high": 0,
+                        "medium": 0,
+                        "low": 0,
+                        "info": 0,
+                        "suppressed": 1,
+                    }
+                },
+            },
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["findings_count"] == 1
+        assert info["findings_summary"]["suppressed"] == 1
+
+
+class TestTheAggregatedEntryIsReadAsThePerTargetFileIs:
+    """One scanner, one reading of its counts, whichever file carries them.
+
+    ``_add_aggregated_scanner_progress`` stored a scanner's ``severity_counts``
+    as recorded and, for a null ``finding_count``, summed every bucket,
+    suppressed included, where the per-target path reports the non-suppressed
+    count; a bucket holding a string reached ``update_totals`` and its TypeError
+    failed the whole document.
+    """
+
+    def test_a_null_count_beside_buckets_is_the_non_suppressed_sum(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "scanner_results": {
+                    "bandit": {
+                        "status": "FAILED",
+                        "finding_count": None,
+                        "severity_counts": {"high": 1, "suppressed": 2},
+                    }
+                }
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.status == "completed"
+        assert progress.scanners["bandit"]["source"].finding_count == 1
+        assert progress.total_findings == 1
+        assert progress.severity_counts["suppressed"] == 2
+
+    def test_a_bucket_that_is_not_a_count_is_dropped_not_fatal(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "scanner_results": {
+                    "bandit": {
+                        "status": "PASSED",
+                        "finding_count": 1,
+                        "severity_counts": {"high": "2", "low": 1},
+                    }
+                }
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.status == "completed"
+        assert progress.error_message is None
+        assert progress.severity_counts["low"] == 1
+        assert progress.severity_counts["high"] == 0
+        assert progress.total_findings == 1
+
+
+class TestScannersCompletedReadsTheStatusAsTheRegistryViewDoes:
+    """``get_scan_progress_info`` compared the recorded status as a string
+    against two upper-case literals and read an absent one as UNKNOWN, while
+    ``create_scan_progress_from_files`` reads it through
+    ``scanner_status_from_results`` (absent is PASSED, case does not matter);
+    ``{"bandit": {}}`` and ``{"status": "passed"}`` were one completed scanner
+    in the registry's view and none here. ``summarize_scanner_statuses`` gave
+    the raw status in ``scanner_statuses`` and the upper-cased one in
+    ``skipped_scanners`` for the same scanner.
+    """
+
+    def test_an_absent_or_lower_case_status_is_a_completed_scanner(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "scanner_results": {
+                    "bandit": {},
+                    "semgrep": {"status": "passed"},
+                    "grype": {"status": "missing"},
+                }
+            },
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "completed"
+        assert info["scanners_completed"] == ["bandit", "semgrep"]
+        assert info["total_scanners"] == 2
+
+    def test_the_status_summary_reports_one_spelling(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "scanner_results": {
+                    "semgrep": {"status": "missing", "dependencies_satisfied": False}
+                }
+            },
+        )
+
+        summary = summarize_scanner_statuses(out)
+
+        assert summary["scanner_statuses"]["semgrep"]["status"] == "MISSING"
+        assert summary["skipped_scanners"][0]["status"] == "MISSING"
+
+
+class TestPutBackResultsAreRefusedByTheProgressInfoToo:
+    """``get_scan_progress_info`` checked ``holds_restored_results`` and only then
+    parsed; a restore landing between the two returned the previous scan's
+    results as completed. The restore writes its marker first and moves the
+    previous results back after it, so the marker is there to see after the
+    read: the same second look ``get_scan_results_with_error_handling`` takes."""
+
+    def test_a_marker_written_after_the_first_check_is_seen(
+        self, tmp_path, monkeypatch
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {"scanner_results": {"bandit": {"status": "PASSED", "finding_count": 0}}},
+        )
+        real_parse = scan_tracking.parse_aggregated_results
+
+        def parse_during_a_restore(output_dir):
+            (Path(output_dir) / RESTORED_MARKER_NAME).write_text(
+                "put back\n", encoding="utf-8"
+            )
+            return real_parse(output_dir)
+
+        monkeypatch.setattr(
+            scan_tracking, "parse_aggregated_results", parse_during_a_restore
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "error"
+        assert info["is_complete"] is False
+        assert info["context"]["output_holds_previous_results"] is True
 
     def test_results_put_back_after_a_scan_that_ended_without_any_are_not_this_scans(
         self, tmp_path

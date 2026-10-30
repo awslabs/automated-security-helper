@@ -112,8 +112,10 @@ class TestFindScannerResultFiles:
 class TestGetScannerProgress:
     def test_an_unparseable_result_file_reads_as_nothing_found_yet(self, tmp_path):
         """A file that is not a JSON object is a scanner that has not finished
-        writing (_read_scanner_result_document): nothing is counted from it and
-        nothing is warned about, as the per-file reader both progress paths
+        writing (_read_scanner_result_document): nothing is counted from it,
+        its target is not a completed one (create_scan_progress_from_files
+        reports the same file as running, and the two views used to disagree),
+        and nothing is warned about, as the per-file reader both progress paths
         share decides. It used to be read through parse_scanner_result_file
         and warned about; patching that name no longer reaches the read."""
         out = tmp_path / "ash_output"
@@ -127,7 +129,8 @@ class TestGetScannerProgress:
 
         assert progress["bandit"]["findings"] == []
         assert progress["bandit"]["finding_count"] == 0
-        assert progress["bandit"]["targets_completed"] == ["source"]
+        assert progress["bandit"]["targets_completed"] == []
+        assert progress["bandit"]["targets_count"] == 0
         logger.warning.assert_not_called()
 
     def test_findings_from_each_target_are_accumulated(self, tmp_path):
