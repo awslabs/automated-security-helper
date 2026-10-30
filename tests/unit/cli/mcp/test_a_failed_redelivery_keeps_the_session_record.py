@@ -90,15 +90,30 @@ def delivery(tmp_path, monkeypatch) -> Path:
     reset_default_registry_for_tests()
 
 
+#: The commit id the double's ``rev-parse`` answers: a ref-less clone is refused
+#: unless its HEAD names a commit, so the double names one.
+HEAD_COMMIT = "f" * 40
+
+
 def _git_that_fails_at(step: str):
-    """A ``_run_git`` double: every step works, except ``step``, which fails."""
+    """A ``_run_git`` double: every step works, except ``step``, which fails.
+
+    The delivery runs four git commands: ``clone``, then for a delivery with no
+    ref a ``rev-parse`` that must name a commit (an empty clone is refused), and
+    for one with a ref a ``fetch`` and a ``checkout``. The double answers each
+    by the command word in its argv.
+    """
 
     def run_git(cmd, *, env):
-        name = next(part for part in cmd if part in ("clone", "fetch", "checkout"))
+        name = next(
+            part for part in cmd if part in ("clone", "fetch", "checkout", "rev-parse")
+        )
         if name == "clone":
             target = Path(cmd[-1])
             target.mkdir(parents=True, exist_ok=True)
             (target / "cloned.txt").write_text("from git\n")
+        if name == "rev-parse":
+            return subprocess.CompletedProcess(cmd, 0, HEAD_COMMIT + "\n", "")
         if name != step:
             return subprocess.CompletedProcess(cmd, 0, "", "")
         if name == "fetch":
