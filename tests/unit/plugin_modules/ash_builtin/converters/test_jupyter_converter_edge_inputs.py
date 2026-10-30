@@ -186,6 +186,10 @@ def _uv_install_only(monkeypatch, uv_version):
         ),
     )
     monkeypatch.setattr(JupyterConverter, "candidate_input_count", lambda self: 1)
+    # The dependency check asks the yes-or-no read, not the count, whether any
+    # notebook needs nbconvert; both say "one candidate" here, so the check goes
+    # on to the uv probe the test is about instead of answering early.
+    monkeypatch.setattr(JupyterConverter, "_has_candidate_input", lambda self: True)
     monkeypatch.setattr(f"{MODULE}.sandbox_requested", lambda context: False)
 
 

@@ -101,7 +101,9 @@ def _converter(context, monkeypatch, archive: Path) -> ArchiveConverter:
         pytest.param("lib/b.tar", b"not a tar at all\n", id="named-as-a-tar"),
         pytest.param("c.zip", _damaged_zip(), id="damaged-zip"),
         pytest.param("d.zip", _corrupted_deflate_zip(), id="corrupted-deflate"),
-        pytest.param("lib/t.tar.bz2", _cut_tar_bz2(), id="damaged-bz2-stream"),
+        # Named .tar: the converter sniffs bzip2 by content and never extracts a
+        # file named .tar.bz2 (that suffix is refused by name, not read).
+        pytest.param("lib/t.tar", _cut_tar_bz2(), id="damaged-bz2-stream"),
     ],
 )
 def test_an_archive_that_cannot_be_read_is_an_input_error(
