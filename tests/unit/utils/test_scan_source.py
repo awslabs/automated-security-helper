@@ -1019,15 +1019,17 @@ def test_a_relative_git_work_tree_is_read_against_the_scanned_directory(
     """git reads a relative GIT_WORK_TREE against the directory it is started in,
     which for the root lookup and the diff is the scanned directory. The check
     that the named tree exists read the value against this process's own
-    working directory instead, so ``../deployed`` named from ``<tree>/src`` was
-    not honored, the variables were dropped, and the tree, which has no ``.git``
-    entry, read as no repository. The value is now joined onto the scanned
-    directory, and the root and the diff describe the named tree."""
+    working directory instead, so ``../../deployed`` named from ``<tree>/src``
+    (the tree is ``<parent>/deployed``) was not honored, the variables were
+    dropped, and the tree, which has no ``.git`` entry, read as no repository.
+    The value is now joined onto the scanned directory, and the root and the diff
+    describe the named tree."""
     bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
     monkeypatch.setenv("GIT_DIR", bare.as_posix())
-    monkeypatch.setenv("GIT_WORK_TREE", "../deployed")
+    monkeypatch.setenv("GIT_WORK_TREE", "../../deployed")
     monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
-    assert not Path("../deployed").is_dir()
+    assert (tree / "src" / "../../deployed").resolve() == tree.resolve()
+    assert not Path("../../deployed").is_dir()
 
     found_root = git_repository_root(tree / "src")
     changed = get_changed_files("HEAD~1", cwd=tree / "src")
@@ -1049,7 +1051,8 @@ def test_the_diff_with_no_directory_reads_a_work_tree_from_this_process_director
     bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
     monkeypatch.chdir(tree / "src")
     monkeypatch.setenv("GIT_DIR", bare.as_posix())
-    monkeypatch.setenv("GIT_WORK_TREE", "../deployed")
+    # From <tree>/src the tree itself is ../../deployed (it is <parent>/deployed).
+    monkeypatch.setenv("GIT_WORK_TREE", "../../deployed")
     monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
 
     changed = get_changed_files("HEAD~1")
