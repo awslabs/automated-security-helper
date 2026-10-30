@@ -225,8 +225,8 @@ def test_descendants_with_the_highest_pids_are_read_before_the_cap_is_met(
 def test_a_scan_with_a_deadline_is_bounded_by_the_deadline_not_the_cap(
     procfs, monkeypatch
 ):
-    """With a deadline to honor, the entry cap does not apply: a scan with time
-    left reads every entry."""
+    """With a deadline to honor, the entry cap is a floor, not a ceiling: a scan
+    with time left reads every entry."""
     monkeypatch.setattr(landlock_exec, "PROC_SCAN_LIMIT", 1)
     monkeypatch.setattr(
         landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
@@ -237,6 +237,36 @@ def test_a_scan_with_a_deadline_is_bounded_by_the_deadline_not_the_cap(
     procfs(files)
 
     assert landlock_exec._parent_map(until=lambda: 20.0) == {ME: [1, 2, 3, 4]}
+
+
+def test_a_walk_with_time_left_is_not_capped_on_a_kernel_without_children_files(
+    procfs, monkeypatch
+):
+    """The whole walk on the fallback path reads the one listing it is handed:
+    with time left, that listing goes past PROC_SCAN_LIMIT, so a descendant
+    listed after the cap (a host with more processes than the cap, or a pid
+    wraparound that put the tree below the wrapper's pid) is still found."""
+    monkeypatch.setattr(landlock_exec, "PROC_SCAN_LIMIT", 2)
+    monkeypatch.setattr(
+        landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
+    )
+    files: Dict[str, Entry] = {
+        _task("self"): ["7"],
+        f"{_task('self')}/7": [],
+        "/proc": ["1", "2", "3", str(ME), "1001", "2002", "3003", "self"],
+        f"/proc/{ME}/stat": _stat(ME, 1),
+        "/proc/1001/stat": _stat(1001, ME),
+        "/proc/2002/stat": _stat(2002, 1001),
+        "/proc/3003/stat": _stat(3003, 2002),
+    }
+    for pid in range(1, 4):
+        files[f"/proc/{pid}/stat"] = _stat(pid, 1)
+    proc = procfs(files)
+
+    assert landlock_exec._descendants(until=lambda: 20.0) == [1001, 2002, 3003]
+    assert proc.listed.count("/proc") == 1
+    # Control: with no deadline the same walk stops at the cap.
+    assert landlock_exec._descendants() == [1001, 2002]
 
 
 def test_a_live_descendant_whose_stat_cannot_be_read_is_left_alone_and_named(

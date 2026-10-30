@@ -533,10 +533,13 @@ def _parent_map(
     milliseconds. The entries are read from just above this process's pid
     upward and then from the lowest pid on: the wrapper's descendants were
     forked after it, so they usually carry the highest pids on the host, and a
-    bounded read meets them before anything older. The bound is ``until()`` (a
-    time.monotonic() deadline, asked again before every entry so a stop that
-    arrives mid-scan moves it) when one is given, else at most ``limit`` entries
-    (PROC_SCAN_LIMIT); the map holds what was read by then.
+    bounded read meets them before anything older. At most ``limit`` entries
+    (PROC_SCAN_LIMIT) are read whatever the clock says, so the newest processes,
+    the wrapper's own children among them, are met by every read; past that
+    many the read goes on only while ``until()`` (a time.monotonic() deadline,
+    asked again before every further entry, so a stop that arrives mid-scan ends
+    it) has not passed, and stops there when no deadline is given. The map
+    holds what was read by then.
     """
     if limit is None:
         limit = PROC_SCAN_LIMIT
@@ -544,10 +547,7 @@ def _parent_map(
     pids = sorted(int(entry) for entry in os.listdir("/proc") if entry.isdigit())
     start = next((i for i, pid in enumerate(pids) if pid > os.getpid()), len(pids))
     for read, pid in enumerate(pids[start:] + pids[:start]):
-        if until is None:
-            if read >= limit:
-                break
-        elif time.monotonic() >= until():
+        if read >= limit and (until is None or time.monotonic() >= until()):
             break
         try:
             with open(f"/proc/{pid}/stat", "rb") as f:
@@ -649,17 +649,19 @@ def _descendants(until: Optional[Callable[[], float]] = None) -> List[int]:
     a stop that arrives mid-walk moves it: once it has passed the walk returns
     what it has found by then, so one reap pass ends inside
     STOP_REAP_DEADLINE_SECONDS however deep the tree or slow /proc, and that
-    pass kills that much. The
-    direct children are always read, on either path: the listing that finds them
-    is bounded by PROC_SCAN_LIMIT alone, so a late pass still kills what the
-    scanner itself started. On a kernel without children files /proc is listed
-    once for the whole walk (``_parent_map``), not once per descendant.
+    pass kills that much. The direct children are always read, on either path:
+    the listing that finds them reads at least PROC_SCAN_LIMIT entries whatever
+    the clock says, so a late pass still kills what the scanner itself started,
+    and with time left it reads every entry, so a pass with time is complete
+    however many processes the host carries. On a kernel without children files
+    /proc is listed once for the whole walk (``_parent_map``), not once per
+    descendant.
     """
     found: List[int] = []
     parents: Optional[Dict[int, List[int]]] = None
     frontier = _children_files()
     if frontier is None:
-        parents = _parent_map()
+        parents = _parent_map(until)
         frontier = parents.get(os.getpid(), [])
     while frontier:
         found += frontier
@@ -805,8 +807,9 @@ def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
     stopping process before it SIGKILLs this wrapper. The first pass walks the
     whole tree whatever the clock says, so a stop that left the scanner's exit
     past the deadline still gets one complete reap (on the fallback path, as much
-    as PROC_SCAN_LIMIT entries of /proc hold, newest first); later passes end at
-    the deadline, which they ask again before every read.
+    as PROC_SCAN_LIMIT entries of /proc hold, newest first); later passes read at
+    least that much and go on while the deadline, which they ask again before
+    every read, allows.
     """
     quiet = 0
     passes = 0
