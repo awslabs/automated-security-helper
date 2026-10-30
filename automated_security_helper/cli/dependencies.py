@@ -1371,111 +1371,126 @@ def install_dependencies(
     # Through the one normalizer every redaction reads values with, so a lone
     # string is one value, never its characters.
     install_values = _INSTALL_VALUES.set(value_tuple(environment_values))
-    for plugin_type, plugin_name, plugin_instance in selected:
-        outcome = PluginInstallOutcome(
-            name=plugin_name,
-            plugin_type=plugin_type,
-            command=getattr(plugin_instance, "command", None),
-            uv_managed=getattr(plugin_instance, "use_uv_tool", False) is True,
-            external_executables=tuple(
-                getattr(plugin_instance, "external_executables", ()) or ()
-            ),
-            runs_in_ash_interpreter=getattr(
-                plugin_instance, "runs_in_ash_interpreter", False
-            )
-            is True,
-            plugin=plugin_instance,
-        )
-        outcomes.append(outcome)
-
-        print(
-            f"Installing dependencies for {escape(plugin_type)} plugin: "
-            f"{escape(plugin_name)}"
-        )
-        try:
-            outcome.unsupported_platform, outcome.disabled_by_config = _scan_skip(
-                plugin_instance
-            )
-        except Exception as e:
-            # Counted as needed, and failing, since it is unknown that a scan
-            # would skip it; its install still runs.
-            print(
-                f"[bold red]ASH could not tell whether a scan runs "
-                f"{escape(plugin_name)} here: "
-                f"{escape(error_text(e, environment_values))}[/bold red]"
-            )
-            outcome.errors.append(error_text(e, environment_values))
-        try:
-            commands = plugin_instance.get_installation_commands(platform_name, arch)
-        except Exception as e:
-            print(
-                f"[bold red]Error getting installation commands for plugin "
-                f"{escape(plugin_name)}: "
-                f"{escape(error_text(e, environment_values))}[/bold red]"
-            )
-            outcome.errors.append(error_text(e, environment_values))
-            continue
-
-        for cmd in commands:
-            # An empty argv is not a command. These reached run_command before this
-            # change, failed, and pushed the run's exit code to 1 -- which then went
-            # nowhere, because the returned code was discarded. Skipping them and
-            # counting them separately keeps a declared-but-empty entry from
-            # masquerading as an attempt.
-            if not cmd:
-                print(
-                    f"[yellow]Skipping an empty install command declared by "
-                    f"{escape(plugin_name)}[/yellow]"
+    try:
+        for plugin_type, plugin_name, plugin_instance in selected:
+            outcome = PluginInstallOutcome(
+                name=plugin_name,
+                plugin_type=plugin_type,
+                command=getattr(plugin_instance, "command", None),
+                uv_managed=getattr(plugin_instance, "use_uv_tool", False) is True,
+                external_executables=tuple(
+                    getattr(plugin_instance, "external_executables", ()) or ()
+                ),
+                runs_in_ash_interpreter=getattr(
+                    plugin_instance, "runs_in_ash_interpreter", False
                 )
-                outcome.commands_skipped_empty += 1
+                is True,
+                plugin=plugin_instance,
+            )
+            outcomes.append(outcome)
+
+            print(
+                f"Installing dependencies for {escape(plugin_type)} plugin: "
+                f"{escape(plugin_name)}"
+            )
+            try:
+                outcome.unsupported_platform, outcome.disabled_by_config = _scan_skip(
+                    plugin_instance
+                )
+            except Exception as e:
+                # Counted as needed, and failing, since it is unknown that a scan
+                # would skip it; its install still runs.
+                print(
+                    f"[bold red]ASH could not tell whether a scan runs "
+                    f"{escape(plugin_name)} here: "
+                    f"{escape(error_text(e, environment_values))}[/bold red]"
+                )
+                outcome.errors.append(error_text(e, environment_values))
+            try:
+                commands = plugin_instance.get_installation_commands(
+                    platform_name, arch
+                )
+            except Exception as e:
+                print(
+                    f"[bold red]Error getting installation commands for plugin "
+                    f"{escape(plugin_name)}: "
+                    f"{escape(error_text(e, environment_values))}[/bold red]"
+                )
+                outcome.errors.append(error_text(e, environment_values))
                 continue
 
-            # Fix for opengrep download command
-            if (
-                len(cmd) > 2
-                and cmd[0] == sys.executable
-                and cmd[1] == "-c"
-                and "opengrep" in cmd[2]
-            ):
-                # Fix the Python command by properly importing Path
-                cmd = [sys.executable, "-c", "from pathlib import Path; " + cmd[2]]
+            for cmd in commands:
+                # An empty argv is not a command. These reached run_command before
+                # this change, failed, and pushed the run's exit code to 1 -- which
+                # then went nowhere, because the returned code was discarded.
+                # Skipping them and counting them separately keeps a
+                # declared-but-empty entry from masquerading as an attempt.
+                if not cmd:
+                    print(
+                        f"[yellow]Skipping an empty install command declared by "
+                        f"{escape(plugin_name)}[/yellow]"
+                    )
+                    outcome.commands_skipped_empty += 1
+                    continue
 
-            # A pinned binary that is already on disk, byte for byte, is not
-            # installed a second time. The image installs syft, grype and trivy into
-            # /usr/local/bin before this runs, and this used to write another copy of
-            # each into the bin path -- twice, once per image stage. Decided by the
-            # bytes, never the name: a same-named binary that does not hash to the
-            # pinned executable digest is installed over as before.
-            present = pinned_install_already_satisfied(cmd)
-            if present is not None:
-                print(
-                    f"Already present: {escape(present.tool)} "
-                    f"{escape(present.version)} at {escape(str(present.path))} matches "
-                    f"the pinned SHA256 {present.sha256}; not installing a second copy"
+                # Fix for opengrep download command
+                if (
+                    len(cmd) > 2
+                    and cmd[0] == sys.executable
+                    and cmd[1] == "-c"
+                    and "opengrep" in cmd[2]
+                ):
+                    # Fix the Python command by properly importing Path
+                    cmd = [
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path; " + cmd[2],
+                    ]
+
+                # A pinned binary that is already on disk, byte for byte, is not
+                # installed a second time. The image installs syft, grype and trivy
+                # into /usr/local/bin before this runs, and this used to write
+                # another copy of each into the bin path -- twice, once per image
+                # stage. Decided by the bytes, never the name: a same-named binary
+                # that does not hash to the pinned executable digest is installed
+                # over as before.
+                present = pinned_install_already_satisfied(cmd)
+                if present is not None:
+                    print(
+                        f"Already present: {escape(present.tool)} "
+                        f"{escape(present.version)} at {escape(str(present.path))} "
+                        f"matches the pinned SHA256 {present.sha256}; not installing "
+                        "a second copy"
+                    )
+                    outcome.commands_satisfied += 1
+                    continue
+
+                # An argv routinely carries brackets -- `pip install ash[sarif,toml]`
+                # -- and rich would read `[sarif,toml]` as a tag and drop it from the
+                # line. On one line, unfolded, so it can be copied; it carries the
+                # absolute bin directory, whose length differs from machine to
+                # machine. Shown as run_command shows it: without the values the
+                # configuration read from the environment, and whatever the plugin
+                # put in its argv.
+                console.print(
+                    "Running command: "
+                    f"{escape(_shown_command(cmd, environment_values))}",
+                    soft_wrap=True,
                 )
-                outcome.commands_satisfied += 1
-                continue
-
-            # An argv routinely carries brackets -- `pip install ash[sarif,toml]` --
-            # and rich would read `[sarif,toml]` as a tag and drop it from the line.
-            # On one line, unfolded, so it can be copied; it carries the absolute
-            # bin directory, whose length differs from machine to machine. Shown
-            # as run_command shows it: without the values the configuration read
-            # from the environment, and whatever the plugin put in its argv.
-            console.print(
-                f"Running command: {escape(_shown_command(cmd, environment_values))}",
-                soft_wrap=True,
-            )
-            outcome.commands_attempted += 1
-            cmd_exit_code = run_command(cmd)
-            if cmd_exit_code != 0:
-                print(f"Command failed with exit code: {cmd_exit_code}")
-                outcome.commands_failed += 1
-            else:
-                print(f"Command succeeded with exit code: {cmd_exit_code}")
-                outcome.commands_succeeded += 1
-                ash_environment_requirements.extend(_ash_environment_install(cmd))
-    _INSTALL_VALUES.reset(install_values)
+                outcome.commands_attempted += 1
+                cmd_exit_code = run_command(cmd)
+                if cmd_exit_code != 0:
+                    print(f"Command failed with exit code: {cmd_exit_code}")
+                    outcome.commands_failed += 1
+                else:
+                    print(f"Command succeeded with exit code: {cmd_exit_code}")
+                    outcome.commands_succeeded += 1
+                    ash_environment_requirements.extend(_ash_environment_install(cmd))
+    finally:
+        # Whatever escapes the loop (a plugin helper raising, an interrupt), the
+        # values are reset: an in-process caller (a test runner, an embedding
+        # host) would otherwise redact its next run with this run's values.
+        _INSTALL_VALUES.reset(install_values)
 
     # Said once, after the installs, for packages added to ASH's own environment
     # when the tool that owns it removes them again later (uv tool upgrade, a

@@ -172,6 +172,23 @@ def test_the_running_command_line_hides_the_values(tmp_path, monkeypatch):
     assert CANARY not in printed, printed
 
 
+def test_the_values_are_reset_when_the_install_loop_raises(tmp_path, monkeypatch):
+    """An in-process caller (this runner, an embedding host) must not find the
+    previous run's values still set after an exception escaped the loop."""
+    _one_scanner_with(monkeypatch, tmp_path, [["fetch", "x"]])
+
+    def boom(cmd):
+        raise RuntimeError("the pinned-install check failed")
+
+    monkeypatch.setattr(dependencies_module, "pinned_install_already_satisfied", boom)
+    assert dependencies_module._INSTALL_VALUES.get() == ()
+
+    result = _install(tmp_path)
+
+    assert isinstance(result.exception, RuntimeError), result.exception
+    assert dependencies_module._INSTALL_VALUES.get() == ()
+
+
 def test_an_argv_with_a_path_element_is_shown_and_run(tmp_path, monkeypatch):
     """A Path in a plugin's argv ended the run with a TypeError from ' '.join."""
     lines = _one_scanner_with(monkeypatch, tmp_path, [["copy", Path("plain-path")]])
