@@ -242,7 +242,12 @@ class TestAConstructorFailureIsKeyedLikeABuiltConverter:
         assert not any(
             key.startswith("_declared") for key in results.converter_results
         ), sorted(results.converter_results)
-        assert "ValueError" in results.converter_results["declared-name"].failure
+        # The model machinery wraps a ValueError raised while a converter is
+        # built, so the row names the cause by its message, not its type.
+        assert (
+            "options are malformed"
+            in results.converter_results["declared-name"].failure
+        )
         assert results.converter_results["built-fine"].converted_paths == ["a"]
 
 
