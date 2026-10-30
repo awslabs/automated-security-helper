@@ -1853,17 +1853,22 @@ def install_pinned_tool(
     return target
 
 
-def _executable_by_caller(info: os.stat_result) -> bool:
-    """Whether the file behind ``info`` is executable by this process, read from
-    the mode bits as ``os.access(path, X_OK)`` would read them for a non-root
-    caller, so the judgment is made on the descriptor's own stat rather than by
-    a second look-up by name."""
-    mode = info.st_mode
-    if info.st_uid == os.getuid():
-        return bool(mode & stat.S_IXUSR)
-    if info.st_gid == os.getgid() or info.st_gid in os.getgroups():
-        return bool(mode & stat.S_IXGRP)
-    return bool(mode & stat.S_IXOTH)
+def _executable_by_caller(candidate: Path, info: os.stat_result) -> bool:
+    """Whether the file behind ``info``, found at ``candidate``, is executable by
+    this process.
+
+    Two readings, both required. The kernel's, ``os.access(candidate, X_OK)``,
+    which knows what a reimplementation from the mode bits did not: ACLs, a
+    ``noexec`` mount (where the bits say executable and the kernel refuses to
+    run the file, so the install was skipped in favour of a copy that could not
+    run), and root's rule that any execute bit is enough (the image runs
+    ``ash dependencies install`` as root). And the mode bits on ``info``, the
+    descriptor's own stat: a candidate with no execute bit at all is not
+    installed, whatever the kernel would let this caller do with it. The file
+    type and the hash are read on the same descriptor, so the by-name access
+    check adds nothing a swapped link could exploit.
+    """
+    return bool(info.st_mode & 0o111) and os.access(candidate, os.X_OK)
 
 
 @dataclass(frozen=True)
@@ -1976,7 +1981,9 @@ def find_verified_pinned_executable(
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             return None
-        if platform.system() != "Windows" and not _executable_by_caller(info):
+        if platform.system() != "Windows" and not _executable_by_caller(
+            candidate, info
+        ):
             return None
         actual = _sha256_of_open_file(fd)
     except OSError as e:

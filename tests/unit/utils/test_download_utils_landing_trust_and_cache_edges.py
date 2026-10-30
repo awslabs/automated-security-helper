@@ -482,6 +482,28 @@ def test_a_verified_binary_that_lost_its_execute_bit_gets_it_back(
     assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0
 
 
+@POSIX_ONLY
+def test_a_present_tool_is_executable_only_when_the_kernel_says_so(
+    tmp_path, monkeypatch
+):
+    """``_executable_by_caller`` asks the kernel (ACLs, a noexec mount, root's
+    rule) and requires an execute bit on the descriptor's stat; a reimplementation
+    from the mode bits alone said "executable" where the kernel refused to run the
+    file, so the install was skipped for a copy that could not run."""
+    binary = tmp_path / "tool"
+    binary.write_bytes(b"binary")
+    binary.chmod(0o755)
+    info = os.stat(binary)
+    assert du._executable_by_caller(binary, info) is True
+    monkeypatch.setattr(du.os, "access", lambda path, mode: False)
+    assert du._executable_by_caller(binary, info) is False
+    # The control the other way: the kernel's yes does not make a file with no
+    # execute bit an installed tool.
+    monkeypatch.setattr(du.os, "access", lambda path, mode: True)
+    binary.chmod(0o644)
+    assert du._executable_by_caller(binary, os.stat(binary)) is False
+
+
 class _RecordingOs:
     """The ``os`` module as the download module sees it, with the calls that open
     the installed file or set a mode recorded; everything else is the real one."""
