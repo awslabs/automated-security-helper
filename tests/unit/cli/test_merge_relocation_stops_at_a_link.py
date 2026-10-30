@@ -34,22 +34,39 @@ def _relocate_within(seconds: float, output_dir: Path):
     """The relocation's answer, or None when it has not returned in *seconds*.
 
     Run on a daemon thread: before the fix the call never returns, and a test
-    that waited on it would hang the whole run instead of failing.
+    that waited on it would hang the whole run instead of failing. An exception
+    the call raises on the thread is re-raised here, so a crash reads as a
+    crash and not as the timeout.
     """
     answer: list = []
-    worker = threading.Thread(
-        target=lambda: answer.append(_relocate_colliding_output_dir(output_dir)),
-        daemon=True,
-    )
+    failure: list = []
+
+    def run() -> None:
+        try:
+            answer.append(_relocate_colliding_output_dir(output_dir))
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the test thread
+            failure.append(exc)
+
+    worker = threading.Thread(target=run, daemon=True)
     worker.start()
     worker.join(seconds)
+    if failure:
+        raise failure[0]
     return answer[0] if answer else None
+
+
+def _link_or_skip(link: Path, target: str) -> None:
+    """Create the directory link, or skip where this process may not."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover
+        pytest.skip(f"symlinks are unavailable here: {exc}")
 
 
 def test_a_link_folding_the_step_back_ends_the_relocation(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / ".ash").mkdir(parents=True)
-    (repo / ".ash" / "ash_output").symlink_to("..")
+    _link_or_skip(repo / ".ash" / "ash_output", "..")
     monkeypatch.chdir(repo)
 
     relocated = _relocate_within(5.0, Path("."))

@@ -77,7 +77,14 @@ def _shards_with_bandit_recorded_nowhere():
             ]
     assert "bandit" in read_shard_assignment(owner).assigned_scanners
     assert not any("bandit" in model.scanner_results for model in shards)
-    assert len(owner.scanner_results) > 0
+    # The comment above claims the owner completed another of its own scanners.
+    # Every shard records skip markers for scanners it does not own, so a count
+    # of its rows would hold even if bandit were its only assignment, and the
+    # first test would then fail on the whole-shard arm's message instead.
+    others = set(read_shard_assignment(owner).assigned_scanners) - {"bandit"}
+    assert any(name in owner.scanner_results for name in others), (
+        f"the fixture needs the owner to have completed one of {sorted(others)}"
+    )
     return shards
 
 

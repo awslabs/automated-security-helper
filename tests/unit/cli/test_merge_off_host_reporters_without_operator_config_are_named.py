@@ -52,10 +52,6 @@ class S3:
     sends_off_host: ClassVar[bool] = True
 
 
-_OffHost = FakeOffHost
-_S3 = S3
-
-
 # ``capture`` (conftest) routes ASH's logger into caplog: plain ``caplog`` sees
 # nothing of it, so ``records == []`` below would pass with no capture at all.
 
@@ -66,11 +62,11 @@ def test_an_empty_list_stays_empty_and_says_nothing(capture):
 
 
 def test_with_an_operator_config_the_list_is_returned_unchanged():
-    assert off_host_reporters_to_run([_OffHost], AshConfig()) == [_OffHost]
+    assert off_host_reporters_to_run([FakeOffHost], AshConfig()) == [FakeOffHost]
 
 
 def test_without_an_operator_config_the_reporters_are_named_and_not_run(capture):
-    assert off_host_reporters_to_run([_OffHost], None) == []
+    assert off_host_reporters_to_run([FakeOffHost], None) == []
     messages = [record.getMessage() for record in capture.records]
     assert any(
         "fakeoffhost" in message and "did not run" in message for message in messages
@@ -78,12 +74,12 @@ def test_without_an_operator_config_the_reporters_are_named_and_not_run(capture)
 
 
 def test_a_requested_format_whose_reporter_runs_is_not_named(capture):
-    assert log_off_host_formats_not_run(["s3"], [_S3]) == []
+    assert log_off_host_formats_not_run(["s3"], [S3]) == []
     assert capture.records == []
 
 
 def test_a_requested_format_no_phase_runs_keeps_the_report_phases_line(capture):
-    assert log_off_host_formats_not_run(["s3", "s3", "fakeoffhost"], [_S3]) == [
+    assert log_off_host_formats_not_run(["s3", "s3", "fakeoffhost"], [S3]) == [
         "fakeoffhost"
     ]
     messages = [record.getMessage() for record in capture.records]
@@ -100,12 +96,12 @@ def test_the_off_host_phase_is_given_only_the_formats_it_runs():
     so handing it the format log_off_host_formats_not_run has just named made
     the operator read two ERROR lines for one format with two different reasons.
     """
-    assert off_host_formats_to_run(["s3", "fakeoffhost", "s3"], [_S3]) == ["s3"]
+    assert off_host_formats_to_run(["s3", "fakeoffhost", "s3"], [S3]) == ["s3"]
 
 
 def test_a_request_naming_no_running_reporter_leaves_the_phase_nothing():
-    assert off_host_formats_to_run(["fakeoffhost"], [_S3]) == []
+    assert off_host_formats_to_run(["fakeoffhost"], [S3]) == []
 
 
 def test_no_format_request_leaves_the_phase_to_its_own_reporters():
-    assert off_host_formats_to_run([], [_S3]) == []
+    assert off_host_formats_to_run([], [S3]) == []
