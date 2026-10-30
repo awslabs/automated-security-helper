@@ -158,8 +158,11 @@ def escape_for_pattern(
     backslash as the separator on Windows. ``]``, ``}`` and ``,`` are literal once
     nothing opens a class or an alternation. A backslash in a POSIX name is doubled
     for ``GLOB``, the one place a backslash escape is needed; when *separator* is a
-    backslash it is a separator and left as it is. ``fnmatch`` reads a backslash
-    as itself. ``REGEX`` is :func:`re.escape`.
+    backslash it is a separator and left as it is. A space that ends a ``GLOB``
+    pattern on a POSIX name is escaped with a backslash too: the gitignore-style
+    syntax semgrep and opengrep read trims an unescaped trailing space, so a
+    directory named with one was matched by the name without it. ``fnmatch``
+    reads a backslash as itself. ``REGEX`` is :func:`re.escape`.
 
     Measured, as ``--exclude`` values naming a directory such as ``out[1]`` beside a
     real ``out1``, offline, on grype 0.120.1 and syft 1.54.1 (both linking doublestar
@@ -183,6 +186,8 @@ def escape_for_pattern(
             out.append("\\\\")
         else:
             out.append(char)
+    if syntax is PatternSyntax.GLOB and separator != "\\" and out and out[-1] == " ":
+        out[-1] = "\\ "
     return "".join(out)
 
 
@@ -198,23 +203,36 @@ def holds_ash_output(file_names: Iterable[str]) -> bool:
 
 
 def warn_about_look_alike(directory: str | Path) -> None:
-    """Say that *directory* looks like ASH output and is scanned anyway."""
+    """Say that *directory* looks like ASH output and is scanned anyway.
+
+    Said during the walk, before the ignore files are applied, so it says "as far
+    as the ignore files allow": an ignore file other than the root ``.gitignore``
+    can still leave the directory out, and the warning once said it was scanned
+    without that qualification.
+    """
     ASH_LOGGER.warning(
         f"{Path(directory).as_posix()} holds files ASH writes to its output "
         "directory, but it is not this scan's output directory or .ash/ash_output, "
-        "so it is scanned like the rest of the tree. If it is the output of another "
-        "ASH run, such as another shard's, write that output outside the scanned "
-        "tree or list it in .gitignore."
+        "so it is scanned like the rest of the tree, as far as the ignore files "
+        "allow. If it is the output of another ASH run, such as another shard's, "
+        "write that output outside the scanned tree or list it in .gitignore."
     )
 
 
 def warn_about_committed_files(directory: str | Path, count: int) -> None:
-    """Say that ASH's output directory *directory* holds *count* committed files."""
+    """Say that ASH's output directory *directory* holds *count* committed files.
+
+    Said during the walk, before the ignore files are applied: a committed file an
+    ignore file lists (the ``.ash/.gitignore`` that ``ash config init`` writes, say)
+    is still left out, so the warning says the files are scanned as far as the
+    ignore files allow.
+    """
     ASH_LOGGER.warning(
         f"ASH's output directory {Path(directory).as_posix()} holds {count} "
-        f"{'file' if count == 1 else 'files'} committed to git. They are scanned; "
-        "the rest of the directory is ASH's own output and is not. Move committed "
-        "files out of it, or write ASH's output elsewhere with --output-dir."
+        f"{'file' if count == 1 else 'files'} committed to git. They are scanned, as "
+        "far as the ignore files allow; the rest of the directory is ASH's own "
+        "output and is not. Move committed files out of it, or write ASH's output "
+        "elsewhere with --output-dir."
     )
 
 
@@ -266,7 +284,11 @@ def _repository_root_of(directory: Path) -> Optional[Path]:
     *directory* itself is always looked at, listed or not, and the search stops
     before it would move up into a listed directory. Measured on git 2.50.1: a
     repository whose root is listed is found from that root, and from a listed
-    directory git goes on up into its unlisted parent.
+    directory git goes on up into its unlisted parent. Each entry is compared
+    with its links resolved, as git resolves them (setup.c,
+    ``canonicalize_ceiling_entry``) and as *directory* is given here (every link
+    resolved, by :func:`git_index_below`): compared as written, a ceiling spelled
+    through a link never matched the resolved walk and did not stop it.
 
     Deliberately a third rule beside the other two ``.git`` judgments. The
     nesting walk (``scan_source._marks_a_checkout``) takes the shapes git's
@@ -280,14 +302,14 @@ def _repository_root_of(directory: Path) -> Optional[Path]:
     would instead hand the question to an enclosing repository the entry's
     directory never belonged to.
     """
-    ceilings = {
-        # Resolved, as *directory* is by its caller and as git resolves a listed
-        # entry: a ceiling spelled through a link stops the walk at the directory it
-        # names, compared where the walk really is.
-        _resolved(Path(entry))
-        for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep)
-        if entry and os.path.isabs(entry)
-    }
+    # Each entry both as spelled and resolved, as *directory* is by its caller
+    # and as git resolves a listed entry: a ceiling spelled through a link stops
+    # the walk at the directory it names, compared where the walk really is.
+    ceilings = set()
+    for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep):
+        if entry and os.path.isabs(entry):
+            ceilings.add(_absolute(entry))
+            ceilings.add(_resolved(_absolute(entry)))
     candidate = directory
     while True:
         if os.path.lexists(candidate / ".git"):
@@ -385,9 +407,32 @@ def committed_files_at_results_paths(output_dir: str | Path) -> List[Path]:
             raise GitIndexUnavailable(answer)
         return []
     found = entries_at_results_paths(answer.base, answer.names)
-    if "" in answer.names:
+    if "" in answer.names or _an_enclosing_repository_tracks_the_root(answer):
         found.insert(0, answer.base)
     return found
+
+
+def _an_enclosing_repository_tracks_the_root(answer: GitIndexAnswer) -> bool:
+    """Whether *answer*'s directory is itself a repository's root that an enclosing
+    repository tracks as an entry: a checked-out submodule.
+
+    A submodule holds a ``.git`` file of its own, so :func:`_repository_root_of`
+    names the submodule itself and its index says nothing about the gitlink the
+    superproject tracks at its path; only when the directory is below the root
+    does the listing come back with the ``""`` entry that marks the directory
+    itself as tracked. So when the answer's repository is the directory itself,
+    the repository above it is asked once whether it lists the directory's path
+    exactly. A scan would clear and write inside the submodule's checkout.
+    """
+    if answer.repository is None or answer.repository != _resolved(answer.base):
+        return False
+    outer = _repository_root_of(answer.repository.parent)
+    if outer is None:
+        return False
+    relative = answer.repository.relative_to(outer).as_posix()
+    # An entry at the listed path itself (the gitlink) comes back as "".
+    listed, _, _ = _index_listing(outer, relative)
+    return listed is not None and "" in listed
 
 
 @dataclass(frozen=True)
@@ -540,12 +585,15 @@ def git_index_below(
     finds by itself (measured on git 2.50.1 with
     ``GIT_TEST_ASSUME_DIFFERENT_OWNER``).
     """
-    # Through the spawn helper every ASH subprocess uses. The scan set is built by
-    # the orchestrator before any scanner runs, outside a scanner's sandbox.
-    from automated_security_helper.utils.subprocess_utils import spawn_run
-
     base = _absolute(directory)
-    if not base.is_dir():
+    # Path.is_dir lets a PermissionError through on CPython 3.10-3.12 when a
+    # parent cannot be searched; a directory that cannot be looked up is one git
+    # cannot be asked about, so it is answered as one that is not there.
+    try:
+        is_dir = base.is_dir()
+    except OSError:
+        is_dir = False
+    if not is_dir:
         return GitIndexAnswer(base)
     # The repository is found from where the directory really is, every link
     # resolved, as git would find it: a directory reached through a link that
@@ -558,6 +606,29 @@ def git_index_below(
     if root is None:
         return GitIndexAnswer(base)
     relative = real.relative_to(root).as_posix()
+    names, error, could_not_run = _index_listing(root, relative, values=values)
+    if names is None:
+        return GitIndexAnswer(
+            base, repository=root, error=error, could_not_run=could_not_run
+        )
+    return GitIndexAnswer(base, names=names, repository=root)
+
+
+def _index_listing(
+    root: Path, relative: str, *, values: Iterable[str] = ()
+) -> Tuple[Optional[List[str]], Optional[str], bool]:
+    """The index entries of the repository at *root* below *relative*, or why not.
+
+    *relative* is ``/``-separated under *root*, ``.`` for the root itself. The
+    names come back spelled under *relative* (:func:`_names_below`), an entry at
+    *relative* itself as ``""``. When git gave no list the names are None, the
+    second value says why (its exit status and first stderr lines, or why it could
+    not be run) and the third whether git could not be started at all.
+    """
+    # Through the spawn helper every ASH subprocess uses. The scan set is built by
+    # the orchestrator before any scanner runs, outside a scanner's sandbox.
+    from automated_security_helper.utils.subprocess_utils import spawn_run
+
     pathspec = "." if relative == "." else relative
     try:
         result = spawn_run(
@@ -579,41 +650,31 @@ def git_index_below(
             env=_git_index_environ(),
         )
     except subprocess.TimeoutExpired:
-        return GitIndexAnswer(
-            base,
-            repository=root,
-            error=f"git did not answer within {GIT_INDEX_TIMEOUT_SECONDS} seconds",
+        return (
+            None,
+            f"git did not answer within {GIT_INDEX_TIMEOUT_SECONDS} seconds",
+            False,
         )
     except OSError as error:  # git missing, not executable, or not startable
-        return GitIndexAnswer(
-            base,
-            repository=root,
-            error=f"git could not be run: {_quoted_for_a_message(str(error))}",
-            could_not_run=True,
-        )
+        return None, f"git could not be run: {_quoted_for_a_message(str(error))}", True
     except Exception as error:  # a refused sandbox, or anything else spawning
-        return GitIndexAnswer(
-            base,
-            repository=root,
-            error=f"git could not be run: {_quoted_for_a_message(str(error))}",
-        )
+        return None, f"git could not be run: {_quoted_for_a_message(str(error))}", False
     if result.returncode != 0:
         said = _first_lines(result.stderr, values=values)
-        return GitIndexAnswer(
-            base,
-            repository=root,
-            error=f"git exited with status {result.returncode}"
+        return (
+            None,
+            f"git exited with status {result.returncode}"
             + (f": {said}" if said else ""),
+            False,
         )
     # Decoded as Python decodes a file name, so each name matches the directory
     # entry it is compared with: GIT_OUTPUT_ENCODING (UTF-8 on Windows, whatever
     # the filesystem encoding is there) with surrogateescape, so a byte that does
-    # not decode is kept as a surrogate and never raises. An entry at *directory*
+    # not decode is kept as a surrogate and never raises. An entry at *relative*
     # itself (git tracks it as a link or a submodule, which a filesystem walk
     # follows into) comes back as "".
     listed = decode_git_output(result.stdout)
-    names = _names_below(listed, relative)
-    return GitIndexAnswer(base, names=names, repository=root)
+    return _names_below(listed, relative), None, False
 
 
 def _first_lines(stderr: Optional[bytes], *, values: Iterable[str]) -> str:
@@ -827,20 +888,31 @@ def _reached_through_a_link(directory: Path, base: Path) -> bool:
     return False
 
 
-def _through_a_link_in_the_tree(candidate: Path, root_resolved: Path) -> bool:
+def _through_a_link_in_the_tree(
+    candidate: Path, root: Path, root_resolved: Path
+) -> bool:
     """Whether a component of *candidate*, as given, is a link placed in the tree.
 
     A link whose own directory resolves to the tree's root (*root_resolved*) or
     below it is the tree's: its author chose where it leads. A link above the
-    tree, such as ``/var`` on macOS, is the operator's path and is followed.
-    Each component is ``lstat``-ed from the top down; one that does not exist
-    ends the check.
+    tree, such as ``/var`` on macOS, is the operator's path and is followed, and
+    so are the components of *root*'s own spelling: when the source directory is
+    itself spelled through a link inside the tree (``<repo>/self`` to ``.``), that
+    link is the operator's path too, and examining it rejected every candidate,
+    this run's output directory included. A candidate spelled under *root* is
+    walked from *root* down; any other from the top. Each component is
+    ``lstat``-ed; one that does not exist ends the check.
     """
     # Imported here, as in _reached_through_a_link.
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
-    current = Path(candidate.anchor)
-    for part in candidate.parts[1:]:
+    if _strictly_inside(candidate, root):
+        current = root
+        parts = candidate.parts[len(root.parts) :]
+    else:
+        current = Path(candidate.anchor)
+        parts = candidate.parts[1:]
+    for part in parts:
         parent, current = current, current / part
         try:
             info = os.lstat(current)
@@ -972,7 +1044,7 @@ def _output_dir_candidates_with_owner(
         if (
             candidate.is_relative_to(checked_from)
             and _reached_through_a_link(candidate, checked_from)
-        ) or _through_a_link_in_the_tree(candidate, root_resolved):
+        ) or _through_a_link_in_the_tree(candidate, root, root_resolved):
             ASH_LOGGER.debug(
                 f"Not treating {candidate} as ASH's output directory: it is reached "
                 "through a link inside the scanned tree"
@@ -1221,21 +1293,57 @@ def output_dirs_to_exclude(
     named, _ = _classified_output_dirs(source_dir, output_dir, workspace_output_dir)
     dirs = sorted(named)
     held = scanned_files_in(dirs, scanned_files)
+    workspace = (
+        None if workspace_output_dir is None else _absolute(workspace_output_dir)
+    )
     excluded: List[Path] = []
     for directory in dirs:
-        if any(
-            directory == done or _strictly_inside(directory, done) for done in excluded
-        ):
+        if any(_at_or_below(directory, done) for done in excluded):
             continue
         committed = held[directory]
         if not committed:
             excluded.append(directory)
             continue
-        for name in ash_own_dir_names():
+        own_names = ash_own_dir_names()
+        if workspace is not None and _same_directory(directory, workspace):
+            own_names += _workspace_own_dir_names()
+        for name in own_names:
             own = directory / name
-            if not any(path == own or path.is_relative_to(own) for path in committed):
+            # Compared as the filesystem compares names (output_name_key): on
+            # macOS a committed Reports/x.md is inside the reports/ a scan
+            # clears, and an exact comparison excluded the directory over it.
+            if not any(_at_or_below(path, own) for path in committed):
                 excluded.append(own)
     return excluded
+
+
+def _workspace_own_dir_names() -> Tuple[str, ...]:
+    """The directories a workspace scan fills under its own output directory:
+    every project's output and the aggregator's spool (``output_dir_links``).
+
+    Only for the workspace's output directory, when it holds a committed file: the
+    directory is then not excluded whole, and without these every project's
+    reports and scanner outputs under ``projects/`` reached the tools. Not among
+    :func:`ash_own_dir_names`, since a single-directory scan neither clears nor
+    writes them, so a committed ``projects/`` in its output directory is no reason
+    to refuse the scan.
+    """
+    # Imported here: output_dir_links imports this module lazily for its git read.
+    from automated_security_helper.utils.output_dir_links import WORKSPACE_OUTPUT_DIRS
+
+    return WORKSPACE_OUTPUT_DIRS
+
+
+def _name_keys(path: Path) -> Tuple[str, ...]:
+    """*path*'s parts, each as its filesystem compares it (:func:`output_name_key`)."""
+    return tuple(output_name_key(part) for part in path.parts)
+
+
+def _at_or_below(path: Path, directory: Path) -> bool:
+    """Whether *path* is *directory* or below it, each name compared as the
+    filesystem compares it (:func:`output_name_key`)."""
+    keys, prefix = _name_keys(path), _name_keys(directory)
+    return keys[: len(prefix)] == prefix
 
 
 def ash_own_dir_names() -> Tuple[str, ...]:
@@ -1312,7 +1420,13 @@ def _result_paths(result: Any, source: Path) -> Iterable[Path]:
     ``sanitize_sarif_paths`` leaves encoded. Read literally, that path named no
     directory, and a finding in an output directory named ``out(1)`` stayed in
     the results. The decoded path is used unless the URI names a file as it is
-    written, as it does when a tool did not encode a name holding a ``%``.
+    written, as it does when a tool did not encode a name holding a ``%``. It is
+    decoded as the filesystem decodes a name (surrogateescape), as the ``file://``
+    parser decodes its path: ``unquote``'s default replaced a byte that is not
+    UTF-8 with U+FFFD, so the decoded path of a committed file whose name is not
+    UTF-8 matched no file and its result was placed nowhere. A ``file:`` URI with
+    no authority (``file:/abs/x``, which RFC 8089 admits) is read as the path it
+    names too; read as a relative path it was joined under the source.
 
     A URI holds a file name that is not UTF-8 in its record form, each lone
     surrogate as ``\\udcNN`` (utils/undecodable_text.py). It is resolved by the
@@ -1337,12 +1451,12 @@ def _result_paths(result: Any, source: Path) -> Iterable[Path]:
         uri = getattr(artifact, "uri", None)
         if not uri:
             continue
-        if uri.startswith("file://"):
+        if uri.startswith("file:"):
             uri = _file_uri_to_path_text(uri)
         elif "://" in uri:
             continue
         else:
-            decoded = unquote(uri)
+            decoded = unquote(uri, errors="surrogateescape")
             if decoded != uri and not _names_a_file(source / undecodable_of_text(uri)):
                 uri = decoded
         resolved = resolve_uri_reading(uri, base=source)
@@ -1670,10 +1784,13 @@ def drop_results_in_ash_output_dirs(
         return 0
     source = Path(context.source_dir).resolve()
     # _result_paths yields the record form, so the directories and the committed
-    # files are compared in that form too.
+    # files are compared in that form too, and each name as the filesystem
+    # compares it (output_name_key): on macOS a result reported at the on-disk
+    # spelling of a committed file git lists in another case is that file, and
+    # a result under the output directory spelled in another case is in it.
     resolved_dirs = [path_in_record_form(directory.resolve()) for directory in dirs]
     committed = {
-        path_in_record_form(path)
+        _name_keys(path_in_record_form(path))
         for path in committed_output_files(context, scanned_files, dirs)
     }
     work = path_in_record_form(_work_dir_of(context))
@@ -1685,10 +1802,10 @@ def drop_results_in_ash_output_dirs(
         # later (related) location points at, and was dropped when that later
         # location sat in an output directory.
         for candidate in _result_paths(result, source):
-            if candidate.is_relative_to(work):
+            if _at_or_below(candidate, work):
                 return False
-            if any(candidate.is_relative_to(d) for d in resolved_dirs):
-                return candidate not in committed
+            if any(_at_or_below(candidate, d) for d in resolved_dirs):
+                return _name_keys(candidate) not in committed
             return False
         return False
 
