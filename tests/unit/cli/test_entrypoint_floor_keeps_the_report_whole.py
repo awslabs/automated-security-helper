@@ -184,7 +184,9 @@ def test_an_installed_hook_is_called_when_there_is_no_stderr(monkeypatch):
 
     def hook(exc_type, exc, tb):
         calls.append(exc)
-        print("::reporter:: saw", exc_type.__name__, file=sys.stderr)
+        # Through the stream object, as the interpreter's printer writes: a
+        # print(file=sys.stderr) falls back to stdout on its own when it is None.
+        sys.stderr.write(f"::reporter:: saw {exc_type.__name__}\n")
 
     monkeypatch.setattr(sys, "excepthook", hook)
     monkeypatch.setattr(sys, "stderr", None)
