@@ -312,7 +312,9 @@ async def test_check_installation(monkeypatch, snapshot, snapshot_normalizer):
         monkeypatch.setattr(
             cls, "validate_plugin_dependencies", lambda self, ok=satisfied: ok
         )
-    monkeypatch.setattr(scanner_inventory, "_probe_tool_version", lambda _: None)
+    monkeypatch.setattr(
+        scanner_inventory, "_probe_tool_version", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(cdk_nag_scanner, "_cdk_nag_version", "0.0.0-snapshot")
     monkeypatch.setattr(shutil, "which", lambda name: f"/opt/ash/bin/{name}")
 
@@ -343,7 +345,9 @@ async def test_list_scanners(monkeypatch, snapshot, snapshot_normalizer):
 
     for cls in mcp_tools._loaded_scanner_classes():
         monkeypatch.setattr(cls, "validate_plugin_dependencies", lambda self: True)
-    monkeypatch.setattr(scanner_inventory, "_probe_tool_version", lambda _: None)
+    monkeypatch.setattr(
+        scanner_inventory, "_probe_tool_version", lambda *args, **kwargs: None
+    )
     # cdk-nag reads its version from installed metadata at import: present when ASH's
     # `cdk` extra is in the venv (CI), "unavailable" (reported as None) without it.
     # Pinned to a present version, as for every other dependency here.
