@@ -50,8 +50,22 @@ _MODULE = "automated_security_helper.core.resource_management.scan_management"
 
 @pytest.fixture
 def registry():
-    """A registry double restricted to ScanRegistry's real method surface."""
-    return MagicMock(spec=ScanRegistry)
+    """A registry double restricted to ScanRegistry's real method surface.
+
+    The output delete goes through the registry: ``cleanup_scan_resources``
+    hands ``remove_output_of_scan`` the remover and reads back ``(reason,
+    removed)``. The double runs the remover and answers as a registry that
+    found no other scan on the directory does, so the rmtree the tests patch
+    is reached and its outcome is what the tool reports. A bare MagicMock
+    there unpacked into nothing, and every removal read as a failure to
+    unpack rather than the outcome under test.
+    """
+    registry = MagicMock(spec=ScanRegistry)
+    registry.remove_output_of_scan.side_effect = lambda entry, remover: (
+        None,
+        remover(),
+    )
+    return registry
 
 
 @contextmanager

@@ -110,26 +110,25 @@ class TestFindScannerResultFiles:
 
 
 class TestGetScannerProgress:
-    def test_an_unparseable_result_file_is_warned_about_and_skipped(self, tmp_path):
+    def test_an_unparseable_result_file_reads_as_nothing_found_yet(self, tmp_path):
+        """A file that is not a JSON object is a scanner that has not finished
+        writing (_read_scanner_result_document): nothing is counted from it and
+        nothing is warned about, as the per-file reader both progress paths
+        share decides. It used to be read through parse_scanner_result_file
+        and warned about; patching that name no longer reaches the read."""
         out = tmp_path / "ash_output"
-        _write_scanner_result(out, "bandit", "source", {"scanner_name": "bandit"})
+        path = _write_scanner_result(
+            out, "bandit", "source", {"scanner_name": "bandit"}
+        )
+        path.write_text('{"scanner_name": "bandit", "finding_count": 3, "sta')
 
-        with (
-            patch(
-                f"{_MODULE}.parse_scanner_result_file",
-                side_effect=ValueError("truncated file"),
-            ),
-            patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)) as logger,
-        ):
+        with patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)) as logger:
             progress = get_scanner_progress(out)
 
         assert progress["bandit"]["findings"] == []
+        assert progress["bandit"]["finding_count"] == 0
         assert progress["bandit"]["targets_completed"] == ["source"]
-        warning = logger.warning.call_args[0][0]
-        assert (
-            "Failed to parse result file for scanner bandit, target source" in warning
-        )
-        assert "truncated file" in warning
+        logger.warning.assert_not_called()
 
     def test_findings_from_each_target_are_accumulated(self, tmp_path):
         out = tmp_path / "ash_output"
@@ -376,24 +375,27 @@ class TestCreateScanProgressFromFiles:
         assert progress.scanners["bandit"]["source"].finding_count == 1
         assert progress.severity_counts["high"] == 1
 
-    def test_a_per_scanner_file_that_cannot_be_parsed_is_warned_about_and_skipped(
+    def test_a_per_scanner_file_that_cannot_be_parsed_is_a_scanner_still_running(
         self, tmp_path
     ):
+        """A file that is not a JSON object yet (empty, truncated, mid-write) is a
+        scanner that has not finished writing, reported as running until a later
+        poll reads a document; not one that PASSED with 0 findings, and not a
+        warning. (The per-shape cases are in test_scan_tracking_progress_views.)
+        It used to be read through parse_scanner_result_file and skipped with a
+        warning; patching that name no longer reaches the read."""
         out = tmp_path / "ash_output"
-        _write_scanner_result(out, "bandit", "source", {"findings": []})
+        path = _write_scanner_result(out, "bandit", "source", {"findings": []})
+        path.write_text('{"findings": [')
 
-        with (
-            patch(
-                f"{_MODULE}.parse_scanner_result_file",
-                side_effect=ValueError("truncated file"),
-            ),
-            patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)) as logger,
-        ):
+        with patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)) as logger:
             progress = create_scan_progress_from_files("scan-1", out)
 
-        assert progress.total_scanners == 0
-        warning = logger.warning.call_args[0][0]
-        assert "Error parsing result file for scanner bandit, target source" in warning
+        assert progress.total_scanners == 1
+        assert progress.completed_scanners == 0
+        assert progress.scanner_status_counts["running"] == 1
+        assert progress.scanners["bandit"]["source"].finding_count == 0
+        logger.warning.assert_not_called()
 
 
 class TestGetScanProgressInfo:
