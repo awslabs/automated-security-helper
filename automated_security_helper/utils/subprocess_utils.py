@@ -2774,8 +2774,13 @@ def _run_plain(
     sleep say, is left running and named, never waited for without end. What it
     adds is the record of its child right after Popen returns (_note_start), and
     for a failure while waiting, whether the child still ran and what it had
-    written (_note_failed_wait). Called with no record held, it is
-    subprocess.run with that bound.
+    written (_note_failed_wait). A child that leads its own group also takes the
+    server-stop handshake a cancellable spawn takes: counted before Popen
+    (_begin_spawn, which refuses the spawn once the server is stopping) and
+    recorded once started (_record_spawn, which kills a child the server began
+    stopping under), so kill_running_groups never misses a group this runner
+    made; such a spawn ends as a ScanCancelled. Called with no record held
+    and no group of its own, it is subprocess.run with that bound.
     """
     input_data = kwargs.pop("input", None)
     _pipes_for(kwargs, input_data, capture_output)
@@ -2789,9 +2794,11 @@ def _run_plain(
     # make one, fails), gets no SIGHUP, SIGTSTP or SIGQUIT from the terminal,
     # and is missed by a group-wide kill from outside, and a spawn with no bound
     # to enforce has nothing to gain for that. A group this runner makes is
-    # registered as a cancellable spawn's is, so the server's last stop and the
-    # SIGTERM handler's die-now kill reach it when ASH ends without unwinding;
-    # _reap forgets it.
+    # counted and recorded as a cancellable spawn's is (_begin_spawn and
+    # _record_spawn below), so the server's last stop and the SIGTERM handler's
+    # die-now kill reach it when ASH ends without unwinding, and a server
+    # already stopping refuses or kills it instead of missing it; _reap forgets
+    # it.
     if timeout is not None:
         _start_in_own_group(kwargs)
     # Whether the child leads a group this runner can treat as its own: read
@@ -2812,20 +2819,49 @@ def _run_plain(
     # before Popen returns it, left this runner no process to stop, and a child
     # that leads a session of its own (the timeout case above) never had the
     # terminal's Ctrl-C, so it ran on, orphaned. Released inside the try that
-    # stops the child, once the start is noted and registered; leaving the
+    # stops the child, once the start is noted and recorded; leaving the
     # block puts the previous handler back in any case and hands it a Ctrl-C
     # that was held.
+    argv = _as_argv(popenargs[0] if popenargs else kwargs.get("args", []))
     with HeldInterrupt() as held:
-        process = subprocess.Popen(*popenargs, **kwargs)  # nosec B603 - callers pass list argv
+        # A child that leads its own group is counted before it starts and
+        # recorded once it has, as _run_cancellable counts its spawn, so a
+        # server stopping in between still kills it (kill_running_groups waits
+        # for the count), and one already stopping refuses the spawn here. A
+        # child in ASH's own group is never registered, so nothing counts it.
+        if own_group:
+            _begin_spawn(argv)
+        try:
+            process = subprocess.Popen(*popenargs, **kwargs)  # nosec B603 - callers pass list argv
+        except BaseException:
+            if own_group:
+                _end_spawn()
+            raise
         started: Optional[_StartedChild] = None
+        # Whether _begin_spawn's count is still held. Cleared just before the
+        # _record_spawn call, which never raises past its decrement, so the
+        # failure handling gives the count up exactly once (see
+        # _run_cancellable's count_spent for the one window left).
+        count_held = own_group
+        # Whether the child was already stopped at the server's stop, so the
+        # failure handling raises the cancel as it is instead of stopping it a
+        # second time.
+        stopped = False
         try:
             try:
                 # Inside this handling: the child started when Popen returned,
-                # so a raise while noting or registering the start is a failure
+                # so a raise while noting or recording the start is a failure
                 # after it, and the child is stopped like any other.
                 started = _note_start(process)
                 if own_group:
-                    _register_group(process)
+                    count_held = False
+                    spawn_recorded = _record_spawn(process)
+                    if not spawn_recorded:
+                        # The server is stopping: _record_spawn killed the
+                        # child, or the kernel refused that kill and the tool
+                        # may still run; the cancel says which.
+                        stopped = True
+                        raise _server_stop_cancel(spawn_recorded, argv, process)
                 # A Ctrl-C held while the child was started is raised here,
                 # after the start is noted, inside the try that stops it.
                 held.release()
@@ -2848,6 +2884,16 @@ def _run_plain(
                 expired.stdout, expired.stderr = _output_after_stop(process, expired)
                 raise
             except BaseException as error:
+                if count_held:
+                    # A raise before _record_spawn took the count: given up
+                    # here, or every later kill_running_groups waits the full
+                    # spawn settle on a spawn that is not settling.
+                    _end_spawn()
+                if stopped:
+                    # Killed at the server's stop, or that kill refused: the
+                    # cancel says which, and a second stop here would signal a
+                    # group that is gone or repeat the refusal.
+                    raise
                 if started is None:
                     started = _claim_started(process)
                 was_running = process.poll() is None
@@ -2940,10 +2986,14 @@ def _shown_tool(args: List[Any], values: Tuple[str, ...]) -> str:
     return text_without_values(str(shown_arguments(list(args))[0]), values)
 
 
+def _as_argv(args: Any) -> List[Any]:
+    """A command as a list, for naming it in a log line or a cancel's text."""
+    return list(args) if isinstance(args, (list, tuple)) else [args]
+
+
 def _argv_of(process: subprocess.Popen) -> List[Any]:
     """The child's command as a list, for naming it in a log line."""
-    args = process.args
-    return list(args) if isinstance(args, (list, tuple)) else [args]
+    return _as_argv(process.args)
 
 
 def _send_stop(process: subprocess.Popen, stop: Callable[[], None]) -> bool:
@@ -3639,6 +3689,36 @@ def _record_spawn(process: subprocess.Popen) -> _SpawnRecord:
     return _SpawnRecord.KILLED
 
 
+def _server_stop_cancel(
+    record: _SpawnRecord, args: List[Any], process: subprocess.Popen
+) -> ScanCancelled:
+    """The cancel a spawn ends in when _record_spawn found the server stopping.
+
+    For KILLED, _record_spawn killed the child, and the spawn ends as the
+    cancel a child killed at the server's stop is promised. For KILL_REFUSED
+    the kernel refused that kill: the tool may still run, so the cancel says
+    so, and carries the tool and pid as data the way the stop path's cancel
+    does -- the exit line names survivors from the field, never from the text.
+    The record also goes on the scan's event chain, so a later
+    raise_if_cancelled names it too. The tool through _shown_tool, record and
+    text both: argv0 can hold the caller's environment value, and
+    shown_arguments alone passes argv0 through. Shared by the runners that
+    take the handshake (_run_cancellable, and _run_plain for a child that
+    leads its own group), so the two texts have one home.
+    """
+    tool = _shown_tool(args, _SPAWN_VALUES.get())
+    if record is _SpawnRecord.KILL_REFUSED:
+        event = current_cancel_event()
+        if isinstance(event, CancelEvent):
+            event.note_could_not_stop(tool, process.pid)
+        return ScanCancelled(
+            "the server is stopping; "
+            + could_not_stop_sentence(f"{tool} (pid {process.pid})"),
+            could_not_stop=((tool, process.pid),),
+        )
+    return ScanCancelled(f"the server is stopping, so {tool} was stopped")
+
+
 def _server_stopping() -> bool:
     """Whether the server's last stop (kill_running_groups) has begun."""
     with _RUNNING_GROUPS_LOCK:
@@ -4097,32 +4177,13 @@ def _run_cancellable(
                 started = _note_start(process)
                 count_spent = True
                 spawn_recorded = _record_spawn(process)
-                if spawn_recorded is _SpawnRecord.KILL_REFUSED:
-                    # The server is stopping, and the kernel refused
-                    # _record_spawn's kill: the tool may still run, so the
-                    # cancel says so, and carries the tool and pid as data the
-                    # way the stop path's cancel does (below) -- the exit line
-                    # names survivors from the field, never from the text. The
-                    # tool through _shown_tool, record and text both: argv0 can
-                    # hold the caller's environment value, and shown_arguments
-                    # alone passes argv0 through.
-                    stopped = True
-                    tool = _shown_tool(args, _SPAWN_VALUES.get())
-                    event = current_cancel_event()
-                    if isinstance(event, CancelEvent):
-                        event.note_could_not_stop(tool, process.pid)
-                    raise ScanCancelled(
-                        "the server is stopping; "
-                        + could_not_stop_sentence(f"{tool} (pid {process.pid})"),
-                        could_not_stop=((tool, process.pid),),
-                    )
                 if not spawn_recorded:
-                    # The server is stopping, and _record_spawn killed the child.
+                    # The server is stopping: _record_spawn killed the child,
+                    # or the kernel refused that kill and the tool may still
+                    # run. The cancel says which (_server_stop_cancel), and
+                    # ``stopped`` keeps the handler below from a second stop.
                     stopped = True
-                    raise ScanCancelled(
-                        "the server is stopping, so "
-                        f"{_shown_tool(args, _SPAWN_VALUES.get())} was stopped"
-                    )
+                    raise _server_stop_cancel(spawn_recorded, args, process)
                 # A Ctrl-C held while the child was started is raised here,
                 # after the child is noted and recorded, inside the try that
                 # stops it, as one that came during the wait is. The server-stop
