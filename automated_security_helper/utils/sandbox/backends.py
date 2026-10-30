@@ -22,6 +22,7 @@ import shutil
 import subprocess  # nosec B404 - probing and wrapping sandboxed scanner processes is this module's purpose
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
@@ -513,7 +514,10 @@ class BwrapBackend(SandboxBackend):
         self._overlay = False
         #: Whether a throwaway overlay mounts over each filesystem (by st_dev) a
         #: cache path was found on, probed once per filesystem; see _overlay_over.
+        #: Scanner threads plan at the same time, so the probe of a filesystem and
+        #: the record of its answer happen under one lock.
         self._overlay_devices: Dict[int, bool] = {}
+        self._overlay_lock = threading.Lock()
 
     @property
     def caches_are_throwaway(self) -> bool:
@@ -570,36 +574,43 @@ class BwrapBackend(SandboxBackend):
             device = os.stat(real).st_dev
         except OSError:
             return False
-        if device not in self._overlay_devices:
-            failure = _probe_run(
-                [
-                    self._executable or "",
-                    *_BWRAP_PROBE_BASE,
-                    "--overlay-src",
-                    real.as_posix(),
-                    "--tmp-overlay",
-                    real.as_posix(),
-                    _true(),
-                ]
-            )
-            self._overlay_devices[device] = failure is None
-            if failure:
-                # The path and bwrap's own words can name a value an option chose:
-                # redacted with the active scope's env-read values, as run_cleanup
-                # redacts what it logs.
-                from automated_security_helper.utils.sandbox.scope import (
-                    scope_shown_text,
-                )
-
-                ASH_LOGGER.warning(
-                    scope_shown_text(
-                        f"bwrap cannot mount a throwaway overlay over "
-                        f"{real.as_posix()} ({failure}): the caches on that "
-                        "filesystem are mounted read-only, and a tool that has to "
-                        "write its cache gets an empty private one."
+        with self._overlay_lock:
+            if device not in self._overlay_devices:
+                # A probe that cannot run or does not finish (bwrap gone since the
+                # probe, a filesystem that hangs the mount) answers as a refusal:
+                # the caches are mounted read-only rather than the spawn failing.
+                try:
+                    failure = _probe_run(
+                        [
+                            self._executable or "",
+                            *_BWRAP_PROBE_BASE,
+                            "--overlay-src",
+                            real.as_posix(),
+                            "--tmp-overlay",
+                            real.as_posix(),
+                            _true(),
+                        ]
                     )
-                )
-        return self._overlay_devices[device]
+                except (OSError, subprocess.SubprocessError) as e:
+                    failure = f"{type(e).__name__}: {e}"
+                self._overlay_devices[device] = failure is None
+                if failure:
+                    # The path and bwrap's own words can name a value an option
+                    # chose: redacted with the active scope's env-read values, as
+                    # run_cleanup redacts what it logs.
+                    from automated_security_helper.utils.sandbox.scope import (
+                        scope_shown_text,
+                    )
+
+                    ASH_LOGGER.warning(
+                        scope_shown_text(
+                            f"bwrap cannot mount a throwaway overlay over "
+                            f"{real.as_posix()} ({failure}): the caches on that "
+                            "filesystem are mounted read-only, and a tool that has "
+                            "to write its cache gets an empty private one."
+                        )
+                    )
+            return self._overlay_devices[device]
 
     def plan(
         self, argv: Sequence[str], env: Mapping[str, str], policy: SandboxPolicy

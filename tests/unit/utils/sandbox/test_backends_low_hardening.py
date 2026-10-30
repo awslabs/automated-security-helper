@@ -29,6 +29,7 @@ import re
 import subprocess  # nosec B404 - CompletedProcess is built by hand, nothing runs
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -238,6 +239,79 @@ def test_a_cache_whose_filesystem_refuses_an_overlay_is_mounted_read_only(
         assert "UV_CACHE_DIR" not in plan.env
     finally:
         plan.run_cleanup()
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [OSError(2, "bwrap is gone"), subprocess.TimeoutExpired(["bwrap"], 20)],
+    ids=["oserror", "timeout"],
+)
+def test_a_cache_overlay_probe_that_raises_mounts_the_cache_read_only(
+    layout, monkeypatch, raised
+):
+    """The probe of a cache's filesystem cannot run, or does not finish.
+
+    The answer is the one a refusal gives: the cache is mounted read-only and a
+    tool that writes one gets a private directory; the spawn is not refused, and
+    the filesystem is not probed again on the next plan.
+    """
+    cache = layout.tmp / "cache"
+    cache.mkdir()
+    probes = []
+
+    def probe_run(argv, env=None):
+        probes.append(list(argv))
+        if "--overlay-src" in argv:
+            raise raised
+        return None
+
+    monkeypatch.setattr(backends, "_probe_run", probe_run)
+    monkeypatch.setattr(backends, "_true", lambda: "/fake/true")
+    policy = _policy(layout, cache=(cache,), cache_env=("UV_CACHE_DIR",))
+    backend = _bwrap(overlay=True)
+
+    for _ in range(2):
+        plan = backend.plan(["/bin/true"], {}, policy)
+        try:
+            assert "--overlay-src" not in plan.argv
+            assert _real(cache) in _mounts(plan.argv, "--ro-bind")
+            assert Path(plan.env["UV_CACHE_DIR"]).is_dir()
+        finally:
+            plan.run_cleanup()
+    assert len([p for p in probes if "--overlay-src" in p]) == 1
+
+
+def test_concurrent_plans_probe_a_filesystem_once(layout, monkeypatch):
+    """Two scanner threads meeting the same filesystem share one probe and one answer."""
+    cache = layout.tmp / "cache"
+    cache.mkdir()
+    entered = threading.Event()
+    release = threading.Event()
+    probes = []
+
+    def probe_run(argv, env=None):
+        probes.append(list(argv))
+        entered.set()
+        assert release.wait(5)
+        return "exit 1: refused"
+
+    monkeypatch.setattr(backends, "_probe_run", probe_run)
+    monkeypatch.setattr(backends, "_true", lambda: "/fake/true")
+    backend = _bwrap(overlay=True)
+    answers = []
+    workers = [
+        threading.Thread(target=lambda: answers.append(backend._overlay_over(cache)))
+        for _ in range(2)
+    ]
+    workers[0].start()
+    assert entered.wait(5)
+    workers[1].start()
+    release.set()
+    for worker in workers:
+        worker.join(5)
+
+    assert answers == [False, False]
+    assert len(probes) == 1
 
 
 @POSIX
