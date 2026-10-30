@@ -257,9 +257,68 @@ def test_a_severity_line_inside_the_artifact_path_does_not_decide_the_severity()
 
 
 def test_control_trivys_own_severity_line_is_read():
+    """The rule's tag disagrees with the message line (and with the level), so
+    only the message line can answer HIGH: a reader that fell through to the tag
+    would answer None."""
     message = (
         "Artifact: iac/main.tf\nType: terraform\nMisconfiguration AVD-AWS-0001\n"
         "Severity: HIGH\nMessage: Bucket has no logging"
     )
 
+    assert trivy_severity(*_run(message, level="error", tags=("MEDIUM",))) == "HIGH"
+
+
+def test_a_severity_line_inside_the_checks_message_does_not_decide_the_severity():
+    """``Message:`` comes AFTER trivy's own line and quotes names from the manifest
+    (a Kubernetes check names the container). A name holding a line break and the
+    prefix spells a severity line after trivy's. The injected line disagrees with
+    the result's level, which the manifest cannot write, so trivy's line is read;
+    the rule tag disagrees too, so only that line can answer HIGH."""
+    message = (
+        "Artifact: k8s/deploy.yaml\nType: kubernetes\nMisconfiguration KSV001\n"
+        "Severity: HIGH\n"
+        "Message: Container 'app\nSeverity: LOW\n' of Deployment 'web' runs as root\n"
+        "Link: [KSV001](https://example.invalid/KSV001)"
+    )
+
+    assert trivy_severity(*_run(message, level="error", tags=("MEDIUM",))) == "HIGH"
+
+
+def test_a_carriage_return_inside_the_matched_line_does_not_start_a_severity_line():
+    """``Match:`` is the scanned line itself. trivy writes ``\\n`` between its
+    lines, so a ``\\r`` inside the match stays inside that line (``str.splitlines``
+    would have broken on it)."""
+    message = (
+        "Artifact: config.ini\nType: secret\nSecret AWS Access Key ID\n"
+        "Severity: HIGH\n"
+        "Match: key = AKIA****\rSeverity: LOW\n"
+        "Link: [aws-access-key-id](https://example.invalid/aws-access-key-id)"
+    )
+
+    assert trivy_severity(*_run(message, level="error", tags=("MEDIUM",))) == "HIGH"
+
+
+def test_a_message_whose_only_severity_line_disagrees_with_the_level_falls_to_the_tag():
+    """With no line agreeing with the level, every severity line is tree text, and
+    the rule's tag, which agrees with the level, rates the result."""
+    message = (
+        "Artifact: iac/a\nSeverity: LOW\n.tf\nType: terraform\n"
+        "Misconfiguration AVD-AWS-0001\nMessage: Bucket has no logging"
+    )
+
     assert trivy_severity(*_run(message, level="error", tags=("HIGH",))) == "HIGH"
+
+
+def test_a_rating_of_unknown_from_trivy_is_left_to_the_generic_mapping():
+    """trivy's fifth severity, written with the ``note`` level: not one ASH reports
+    by name, and not replaced by another package's tag either."""
+    message = "Misconfiguration AVD-AWS-0001\nSeverity: UNKNOWN\nMessage: Bucket"
+
+    assert trivy_severity(*_run(message, level="note", tags=("LOW",))) is None
+
+
+def test_with_no_severity_line_the_tag_rates_the_result_only_when_the_level_agrees():
+    message = "Misconfiguration AVD-AWS-0001\nMessage: Bucket has no logging"
+
+    assert trivy_severity(*_run(message, level="note", tags=("LOW",))) == "LOW"
+    assert trivy_severity(*_run(message, level="error", tags=("LOW",))) is None

@@ -15,9 +15,11 @@ into a second module that would drift from the first.
 Only behaviour is shared. Each scanner keeps its own config classes, because their
 names and defaults differ (``trivy-repo`` runs all four trivy scanners and drops
 unfixed vulnerabilities; ``trivy`` runs ``vuln`` only and keeps them), and its own
-scan path: ``trivy-repo`` keeps the ``scan()`` override it has always had, so its
-findings, names and outputs are byte-identical to what its users get today, and
-``trivy`` uses the template-method ``scan()`` the builtin scanners use.
+scan path: ``trivy-repo`` keeps the ``scan()`` override it has always had (its
+names and output files are unchanged, while its results carry trivy's own
+severity and its command ASH's scan timeout and the output-directory skips, as
+the builtin scanner's do), and ``trivy`` uses the template-method ``scan()`` the
+builtin scanners use.
 
 The options are read by attribute (``scanners``, ``license_full``,
 ``ignore_unfixed``, ``disable_telemetry``, ``offline``), so both config classes
@@ -188,6 +190,12 @@ _SARIF_LEVEL = {
     "LOW": "note",
 }
 
+#: ``_SARIF_LEVEL`` with trivy's fifth severity: ``toSarifErrorLevel`` gives
+#: UNKNOWN the ``note`` level, LOW's. Read against a message's ``Severity:`` lines
+#: (``trivy_severity``), so a line trivy wrote for an UNKNOWN rating still reads as
+#: trivy's own, and the result is left to ASH's generic mapping as before.
+_MESSAGE_LEVEL = {**_SARIF_LEVEL, "UNKNOWN": "note"}
+
 #: Characters ``trivy --skip-dirs`` reads as glob syntax.
 _GLOB_SPECIAL = frozenset("*?[]{}\\")
 
@@ -236,26 +244,39 @@ def trivy_severity(
 ) -> Optional[str]:
     """trivy's severity for *result*: its message's ``Severity:`` line, else its rule's tag.
 
-    The LAST ``Severity:`` line of the message, not the first. trivy writes the
-    message as fixed lines, and the scanned file's path (``Artifact:``, for a
-    misconfiguration or secret finding) and the package name (``Package:``) come
-    before its own ``Severity:`` line, so a path or name holding a line break
-    followed by that prefix would otherwise decide the finding's ASH severity. The
-    lines after trivy's severity (``Fixed Version:``, ``Message:``, ``Match:``,
-    ``Link:``) are trivy's own text and hold no file name. The lines are split on
-    ``\\n`` alone, the separator trivy writes: ``str.splitlines`` also breaks on
-    characters a file name can hold (a form feed, a next-line or line-separator
+    trivy writes the message as fixed lines around text from the scanned tree: the
+    file's path (``Artifact:``) and the package name (``Package:``) come before
+    its own ``Severity:`` line, and for a misconfiguration or secret finding the
+    check's message (``Message:``, which quotes names from the manifest) and the
+    matched text itself (``Match:``) come after it. Any of these can hold a line
+    break followed by the prefix, so neither the first nor the last such line is
+    trivy's by its position alone. What the tree cannot write is the result's
+    SARIF ``level``, which trivy sets from the same severity (``_SARIF_LEVEL``,
+    its ``toSarifErrorLevel``): the severity read is the last ``Severity:`` line
+    whose level is the result's, a line that disagrees is tree text, and a message
+    with no agreeing line falls through to the rule's tag. Within one level
+    (CRITICAL and HIGH both read as ``error``) the message's line decides, as
+    trivy wrote it. The lines are split on ``\\n`` alone, the separator trivy
+    writes: ``str.splitlines`` also breaks on characters a file name or a matched
+    line can hold (a carriage return, a form feed, a next-line or line-separator
     character), which would let tree-derived text supply the line.
 
-    A result with no severity line of its own takes its rule's single severity
-    tag, and only when the result's own SARIF level agrees with it; see the
-    builtin trivy scanner's module docstring, "Severity".
+    A result trivy rates UNKNOWN (a line agreeing with its ``note`` level) is left
+    to ASH's generic mapping. A result with no severity line of its own takes its
+    rule's single severity tag, and only when the result's own SARIF level agrees
+    with it; see the builtin trivy scanner's module docstring, "Severity".
     """
     message = result.message.root.text if result.message else None
+    level = getattr(result.level, "value", result.level)
     own: Optional[str] = None
     for line in (message or "").split("\n"):
-        if line.startswith("Severity: "):
-            own = line[len("Severity: ") :].strip()
+        if not line.startswith("Severity: "):
+            continue
+        named = line[len("Severity: ") :].strip()
+        if named not in _MESSAGE_LEVEL:
+            continue
+        if level is None or _MESSAGE_LEVEL[named] == level:
+            own = named
     if own is not None:
         return own if own in TRIVY_SEVERITIES else None
     rule = None
@@ -274,7 +295,6 @@ def trivy_severity(
     # The tag is the rating of the last result trivy wrote for the rule. A
     # result whose own level differs is rated otherwise, and is left to the
     # generic mapping rather than given another package's severity.
-    level = getattr(result.level, "value", result.level)
     if level is not None and level != _SARIF_LEVEL[found[0]]:
         return None
     return found[0]
