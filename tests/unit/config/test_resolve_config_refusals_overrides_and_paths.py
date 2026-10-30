@@ -525,6 +525,70 @@ def test_a_registry_rules_name_passes_with_no_working_directory(
     assert _anchored_operator_overrides([override]) == [override]
 
 
+@pytest.mark.parametrize(
+    "override, key",
+    [
+        (
+            'scanners.semgrep.options={"config": "rules/zz-own.yml"}',
+            "scanners.semgrep.options",
+        ),
+        (
+            'scanners.opengrep={"options": {"config": "rules/zz-own.yml"}}',
+            "scanners.opengrep",
+        ),
+        (
+            'scanners={"semgrep": {"options": {"config": "rules/zz-own.yml"}}}',
+            "scanners",
+        ),
+    ],
+)
+def test_a_relative_rules_file_inside_a_mapping_is_refused_with_no_working_directory(
+    tmp_path, monkeypatch, override, key
+):
+    """The rules value set inside a mapping, at the options, at the section or
+    at the ``scanners`` key: with the directory live the anchoring walks a
+    mapping value down to the option and reads the disk for it, so with the
+    directory gone it is the same relative value with nothing to read, refused
+    the same way, naming the key as written and not the value. Read at the
+    option's own key only, these passed as written."""
+    from automated_security_helper.config.resolve_config import (
+        _anchored_operator_overrides,
+    )
+
+    _delete_the_working_directory(tmp_path, monkeypatch)
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        _anchored_operator_overrides([override])
+
+    text = str(refused.value)
+    assert key in text, text
+    assert "zz-own" not in text, text
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        'scanners.semgrep.options={"config": "p/ci"}',
+        'scanners.semgrep.options={"config": ["rules/zz-own.yml"]}',
+        "scanners.semgrep.options.config+=rules/zz-own.yml",
+    ],
+)
+def test_a_rules_value_the_anchoring_leaves_as_written_passes_inside_a_mapping(
+    tmp_path, monkeypatch, override
+):
+    """A registry name inside a mapping names no file, as at the option's own
+    key. A list, and an appended value (which the anchoring places in a list),
+    are left as written with the directory live too (``anchored_path`` reads a
+    string only), so the gone directory changes nothing for them."""
+    from automated_security_helper.config.resolve_config import (
+        _anchored_operator_overrides,
+    )
+
+    _delete_the_working_directory(tmp_path, monkeypatch)
+
+    assert _anchored_operator_overrides([override]) == [override]
+
+
 def test_a_path_that_climbs_out_of_its_root_is_refused_with_no_working_directory(
     tmp_path, monkeypatch
 ):

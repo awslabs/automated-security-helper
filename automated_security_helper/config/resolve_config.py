@@ -333,28 +333,78 @@ def _rules_value_needs_the_directory(override: str) -> bool:
     the disk. With the directory gone nothing is there to read, and a relative
     value left as written reaches the scanner, which joins it to the scanned
     tree: the repository's file in the operator's place, the case
-    ``_anchored_operator_overrides`` refuses. Admitted as written: a registry
-    ruleset, rule or snippet (``p/``, ``r/``, ``s/``), ``auto``, a URL, an
-    absolute or ``~`` path and a value holding ``$``, the shapes
-    ``operator_paths.anchored_path`` never rewrites.
+    ``_anchored_operator_overrides`` refuses. The value may sit at the option's
+    own key (``scanners.semgrep.options.config=<value>``) or inside a mapping
+    set higher up (``scanners.semgrep.options={...}``, ``scanners.semgrep={...}``,
+    ``scanners={...}``): the live anchoring walks a mapping value down to the
+    option (``operator_paths.anchor_relative_paths``), so the probe here walks
+    the same way, placing the parsed value at the key's segments and reading
+    every scanner section's options for the rules option, under either
+    spelling. Read at the option's own key only, a relative file inside a
+    mapping passed as written with the directory gone. Admitted as written: a
+    registry ruleset, rule or snippet (``p/``, ``r/``, ``s/``), ``auto``, a URL,
+    an absolute or ``~`` path and a value holding ``$``, the shapes
+    ``operator_paths.anchored_path`` never rewrites; a list, which the live
+    anchoring leaves as written too (``anchored_path`` reads a string only);
+    and an append (``config+=``), whose value the live anchoring places in a
+    list.
     """
     key, separator, raw = override.partition("=")
     if not separator or key.endswith("+"):
         return False
     segments = [segment.strip() for segment in key.split(".")]
-    if len(segments) != 4 or segments[0] != "scanners":
+    if segments[0] != "scanners":
         return False
-    if segments[2].replace("-", "_") != "options":
+    scanners: Any = _parse_config_value(raw)
+    for segment in reversed(segments[1:]):
+        scanners = {segment: scanners}
+    if not isinstance(scanners, dict):
         return False
-    option = segments[3].replace("-", "_")
-    names = plugin_key_lookup_names(segments[1])
-    if not any(
-        (segments[1] == scanner or reduced_plugin_name(scanner) in names)
-        and option in {name.replace("-", "_") for name in rules_options}
-        for scanner, rules_options in SCANNER_RULES_OPTIONS.items()
-    ):
-        return False
-    value = _parse_config_value(raw)
+    for scanner_key, section in scanners.items():
+        if not isinstance(scanner_key, str) or not isinstance(section, dict):
+            continue
+        option_names = _rules_option_names(scanner_key)
+        for options in _spelled(section, "options"):
+            if not isinstance(options, dict):
+                continue
+            for option in option_names:
+                if any(
+                    _relative_rules_file(value) for value in _spelled(options, option)
+                ):
+                    return True
+    return False
+
+
+def _rules_option_names(scanner_key: str) -> List[str]:
+    """The rules options (``operator_paths.SCANNER_RULES_OPTIONS``) of the grep
+    scanner a ``scanners`` key names, as ``_``-spelled option names; empty for a
+    key naming no grep scanner. The key matches a scanner as the live anchoring
+    matches it (``operator_paths._scanner_matches``)."""
+    lookup = plugin_key_lookup_names(scanner_key)
+    return list(
+        dict.fromkeys(
+            name.replace("-", "_")
+            for scanner, rules_options in SCANNER_RULES_OPTIONS.items()
+            if scanner_key == scanner or reduced_plugin_name(scanner) in lookup
+            for name in rules_options
+        )
+    )
+
+
+def _spelled(container: Dict[str, Any], name: str) -> List[Any]:
+    """The values ``container`` holds under ``name`` spelled with ``-`` or
+    ``_``, the live anchoring's rule (``operator_paths._spellings``)."""
+    wanted = name.replace("-", "_")
+    return [
+        value
+        for key, value in container.items()
+        if isinstance(key, str) and key.replace("-", "_") == wanted
+    ]
+
+
+def _relative_rules_file(value: Any) -> bool:
+    """Whether a rules option's value is a relative path and no registry form,
+    the one shape ``operator_paths.anchored_path`` reads the disk for."""
     if not isinstance(value, str) or not value.strip():
         return False
     if value.startswith("~") or "$" in value or "://" in value or "\x00" in value:
