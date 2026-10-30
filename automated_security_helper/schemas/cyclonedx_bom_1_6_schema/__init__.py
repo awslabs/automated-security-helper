@@ -9,14 +9,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
     RootModel,
     StringConstraints,
+    model_validator,
 )
 
 from . import spdx
@@ -27,6 +29,17 @@ from . import spdx
 # carried openCre, an empty list included, raised TypeError instead of
 # validating.
 OpenCreIdentifier = Annotated[str, StringConstraints(pattern=r"^CRE:[0-9]+-[0-9]+$")]
+
+
+def _spdx_id_text(value: object) -> object:
+    """A license id as text: a member of the SPDX enum becomes its value."""
+    return value.value if isinstance(value, Enum) else value
+
+
+# Not from the codegen: a license id as text (see the license note below). The
+# schema still lists the ids the bundled SPDX list knows; a string is a string
+# whether or not the list has it, so an id a newer ASH wrote still loads.
+LicenseId = Annotated[Union[spdx.Schema, str], AfterValidator(_spdx_id_text)]
 
 # Not from the codegen: every model below that declares an aliased field
 # (`bom-ref`, `mime-type`) carries serialize_by_alias=True and
@@ -55,14 +68,17 @@ OpenCreIdentifier = Annotated[str, StringConstraints(pattern=r"^CRE:[0-9]+-[0-9]
 #   results file keeps wrote them, so the SBOM `ash report` re-emitted stated
 #   fields the scanner never wrote.
 # - LicenseChoice entries are typed (LicenseEntry, LicenseExpression) where the
-#   codegen left a bare list, so a malformed entry is refused and a license's
-#   fields are validated; a license id, known to the SPDX list in this snapshot
-#   or not, is kept as the text the BOM carries (the schema still lists the known
-#   ids), because the SPDX list grows faster than this snapshot and a scanner's
-#   BOM may carry a newer id, which must not refuse the stored BOM when a results
-#   file is read by another ASH version. The spec's rule that a BOM holds
-#   either license entries or exactly one expression is not enforced: a scanner
-#   may write several expression entries, and that BOM still loads.
+#   codegen left a bare list, so a license's fields are validated; a license id,
+#   known to the SPDX list in this snapshot or not, is kept as the text the BOM
+#   carries (the schema still lists the known ids), because the SPDX list grows
+#   faster than this snapshot and a scanner's BOM may carry a newer id. An entry
+#   that fits neither form is kept as the object it was written as, with a
+#   warning, because a results file written by another ASH version can hold what
+#   the bare list accepted, and one entry must not refuse the component that
+#   carries it; a list entry that is not an object at all is refused. The spec's
+#   rule that a BOM holds either license entries or exactly one expression is
+#   not enforced: a scanner may write several expression entries, and that BOM
+#   still loads.
 # - Signer.algorithm is text where the codegen used AnyUrl, which re-emitted a
 #   URI normalized (a trailing slash added to a path-less one).
 
@@ -328,11 +344,35 @@ class LicenseExpression(BaseModel):
 
 
 class LicenseChoice(RootModel):
-    root: List[Union[LicenseEntry, LicenseExpression]] = Field(
+    # The typed forms come first and are tried in order (left_to_right), because
+    # in the default smart mode a dict would match the last member exactly and
+    # win. An entry that fits neither form is kept as the object it was written
+    # as, with a warning (below): a results file written by another ASH version
+    # can hold what the old bare list accepted, and one entry must not refuse
+    # the component that carries it.
+    root: List[
+        Annotated[
+            Union[LicenseEntry, LicenseExpression, Dict[str, Any]],
+            Field(union_mode="left_to_right"),
+        ]
+    ] = Field(
         ...,
         description="EITHER (list of SPDX licenses and/or named licenses) OR (tuple of one SPDX License Expression)",
         title="License Choice",
     )
+
+    @model_validator(mode="after")
+    def _warn_about_entries_kept_as_written(self) -> "LicenseChoice":
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        for index, entry in enumerate(self.root):
+            if isinstance(entry, dict):
+                ASH_LOGGER.warning(
+                    f"License entry {index} of a CycloneDX license list fits neither "
+                    "license form (a license, or an SPDX expression); it is kept as "
+                    "written."
+                )
+        return self
 
 
 class Type1(str, Enum):
@@ -2082,8 +2122,6 @@ class License1(BaseModel):
         extra="forbid",
         serialize_by_alias=True,
         validate_by_name=True,
-        # A recognized SPDX id is stored as its plain string, as an unknown one is.
-        use_enum_values=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2092,7 +2130,7 @@ class License1(BaseModel):
         description="An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
         title="BOM Reference",
     )
-    id: Union[spdx.Schema, str] = Field(
+    id: LicenseId = Field(
         ...,
         description="A valid SPDX license identifier. If specified, this value must be one of the enumeration of valid SPDX license identifiers defined in the spdx.schema.json (or spdx.xml) subschema which is synchronized with the official SPDX license list.",
         examples=["Apache-2.0"],
@@ -2282,8 +2320,6 @@ class License2(BaseModel):
         extra="forbid",
         serialize_by_alias=True,
         validate_by_name=True,
-        # A recognized SPDX id is stored as its plain string, as an unknown one is.
-        use_enum_values=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2292,7 +2328,7 @@ class License2(BaseModel):
         description="An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
         title="BOM Reference",
     )
-    id: Optional[Union[spdx.Schema, str]] = Field(
+    id: Optional[LicenseId] = Field(
         None,
         description="A valid SPDX license identifier. If specified, this value must be one of the enumeration of valid SPDX license identifiers defined in the spdx.schema.json (or spdx.xml) subschema which is synchronized with the official SPDX license list.",
         examples=["Apache-2.0"],

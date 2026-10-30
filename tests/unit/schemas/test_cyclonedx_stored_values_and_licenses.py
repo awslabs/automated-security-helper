@@ -16,15 +16,18 @@ so the model has to hand back what the scanner wrote:
   keeps wrote it, so ``ash report`` emitted a field the scanner never wrote.
 * ``Signer.algorithm`` is text, not ``AnyUrl``, which added a trailing slash to a
   path-less URI.
-* ``LicenseChoice`` entries are typed, so a malformed entry is refused. A license
-  id the bundled SPDX list lacks is kept as text, so a BOM written by a newer
-  ASH still loads.
+* ``LicenseChoice`` entries are typed. An entry that fits neither license form
+  is kept as written with a warning, and a list entry that is not an object is
+  refused, so a stored BOM written by another ASH version still loads. A license
+  id the bundled SPDX list lacks is kept as text, and an enum member given as an
+  id is stored as its text.
 """
 
 from __future__ import annotations
 
 import json
 import warnings
+from unittest.mock import patch
 
 import pydantic
 import pytest
@@ -34,6 +37,9 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
     Component,
     CycloneDXReport,
     IdentifiableAction,
+    License1,
+    License2,
+    LicenseAcknowledgementEnumeration,
     LicenseChoice,
     LicenseEntry,
     LicenseExpression,
@@ -44,6 +50,7 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
     Versions,
     Versions1,
     Volume,
+    spdx,
 )
 
 pytestmark = pytest.mark.unit
@@ -255,27 +262,96 @@ def test_a_license_expression_is_typed_and_keeps_its_bom_ref():
     ]
 
 
+LOGGER = "automated_security_helper.utils.log.ASH_LOGGER"
+
+
 @pytest.mark.parametrize(
     "entries",
     [
         [{"license": {}}],
         [{"license": {"id": "MIT"}, "expression": "MIT"}],
         [{"licence": {"id": "MIT"}}],
-        ["MIT"],
         [{"license": {"id": "MIT", "unknown_key": 1}}],
     ],
-    ids=["no-id-or-name", "both-forms", "misspelled-key", "not-an-object", "extra-key"],
+    ids=["no-id-or-name", "both-forms", "misspelled-key", "extra-key"],
 )
-def test_a_malformed_license_entry_is_refused(entries):
+def test_an_entry_that_fits_neither_form_is_kept_as_written_with_a_warning(entries):
+    """A results file written by another ASH version can hold what the old bare
+    list accepted; one such entry must not refuse the stored BOM."""
+    with patch(LOGGER) as logger:
+        choice = LicenseChoice.model_validate(entries)
+    assert choice.root == entries
+    assert logger.warning.call_count == 1
+    assert "MIT" not in logger.warning.call_args.args[0]
+
+
+def test_a_stray_entry_leaves_its_neighbors_typed_and_warns_once():
+    entries = [
+        {"license": {"id": "MIT"}},
+        {"license": {}},
+        {"expression": "MIT OR Apache-2.0"},
+    ]
+    with patch(LOGGER) as logger:
+        choice = LicenseChoice.model_validate(entries)
+    assert isinstance(choice.root[0], LicenseEntry)
+    assert choice.root[1] == {"license": {}}
+    assert isinstance(choice.root[2], LicenseExpression)
+    assert logger.warning.call_count == 1
+    assert "entry 1" in logger.warning.call_args.args[0]
+
+
+def test_control_a_well_formed_list_warns_nothing():
+    with patch(LOGGER) as logger:
+        LicenseChoice.model_validate(
+            [{"license": {"id": "MIT"}}, {"license": {"name": "Acme"}}]
+        )
+    logger.warning.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [["MIT"], [1], [[{"license": {"id": "MIT"}}]]],
+    ids=["string", "number", "list"],
+)
+def test_a_list_entry_that_is_not_an_object_is_still_refused(entries):
     with pytest.raises(pydantic.ValidationError):
         LicenseChoice.model_validate(entries)
 
 
-def test_a_malformed_license_refuses_the_component_that_carries_it():
-    with pytest.raises(pydantic.ValidationError):
-        Component.model_validate(
+def test_a_stray_license_entry_does_not_refuse_the_component_that_carries_it():
+    with patch(LOGGER):
+        component = Component.model_validate(
             {"type": "library", "name": "lib", "licenses": [{"license": {}}]}
         )
+    assert component.name == "lib"
+    dumped = component.model_dump(by_alias=True, exclude_none=True)
+    assert dumped["licenses"] == [{"license": {}}]
+
+
+def test_the_acknowledgement_of_a_license_keeps_its_enum_in_every_form():
+    choice = LicenseChoice.model_validate(
+        [
+            {"license": {"id": "MIT", "acknowledgement": "declared"}},
+            {"license": {"name": "Acme", "acknowledgement": "concluded"}},
+            {"expression": "MIT", "acknowledgement": "declared"},
+        ]
+    )
+    by_id, by_name, expression = choice.root
+    declared = LicenseAcknowledgementEnumeration.declared
+    assert by_id.license.root.acknowledgement is declared
+    assert by_name.license.root.acknowledgement is (
+        LicenseAcknowledgementEnumeration.concluded
+    )
+    assert expression.acknowledgement is declared
+
+
+def test_an_spdx_enum_member_is_stored_as_its_text():
+    by_id = License1.model_validate({"id": spdx.Schema.MIT})
+    assert type(by_id.id) is str
+    assert by_id.id == "MIT"
+    by_name = License2.model_validate({"id": spdx.Schema.Apache_2_0, "name": "n"})
+    assert type(by_name.id) is str
+    assert by_name.id == "Apache-2.0"
 
 
 def test_a_stored_bom_with_an_unlisted_license_id_loads_and_round_trips():
