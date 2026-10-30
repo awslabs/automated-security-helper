@@ -370,6 +370,17 @@ def test_two_deep_archives_get_two_target_names():
     assert archive_converter._target_name("short.zip", "short.zip") == "short__zip"
 
 
+def test_the_target_name_follows_the_archives_path_in_the_tree_not_the_working_directory():
+    """The folded name was the archive's path relative to the process working
+    directory: a run from outside the tree wrote the host's absolute path into
+    the directory's name, and two runs named one archive two ways."""
+    name = archive_converter._target_name(
+        "/srv/checkout/lib/bundle.zip", "lib/bundle.zip"
+    )
+
+    assert name == "lib_sbundle__zip"
+
+
 # ---------------------------------------------------------------- workspace output
 
 

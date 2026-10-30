@@ -52,7 +52,6 @@ from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
     scan_set,
 )
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.scan_output_dirs import record_converted_sources
@@ -1405,15 +1404,17 @@ _TARGET_DIGEST_CHARS = 12
 
 def _target_name(archive_file: str, archive_display: str) -> str:
     """The name of the directory ``archive_file`` is extracted into, under
-    ``results_dir``: its path folded into one component (get_normalized_filename
-    of get_shortest_name, as it was), and where that is longer than
-    _TARGET_NAME_MAX_BYTES, cut to that and given a digest of its path relative
-    to the scanned tree, so two cut names stay apart. The folded path of a deep
-    or absolute archive path ran past the 255 bytes a file name may take, so
-    making the directory failed and the archive was recorded as a failed input
-    for the length of its own path.
+    ``results_dir``: ``archive_display``, its path relative to the scanned tree,
+    folded into one component (get_normalized_filename), and where that is
+    longer than _TARGET_NAME_MAX_BYTES, cut to that and given a digest of the
+    same path, so two cut names stay apart. The folded path was the one relative
+    to the process working directory, so a run from outside the tree wrote the
+    host's absolute path into the directory's name and two runs named one
+    archive two ways; and a deep or absolute path ran past the 255 bytes a file
+    name may take, so making the directory failed and the archive was recorded
+    as a failed input for the length of its own path.
     """
-    folded = get_normalized_filename(get_shortest_name(archive_file))
+    folded = get_normalized_filename(archive_display)
     if len(folded.encode("utf-8")) <= _TARGET_NAME_MAX_BYTES:
         return folded
     cut = (
@@ -1460,9 +1461,8 @@ def member_source_path(
 
     *archive* is the archive's path relative to the scanned tree, with ``/``. The
     member's extracted path, ``archive/<the archive's folded name>/<member>`` below
-    ASH's work directory, follows the directory ASH runs from
-    (get_shortest_name), so an ignore path written against it matches from one
-    directory and not another; this one does not move.
+    ASH's work directory, is ASH's own layout, not the tree's; an ignore path is
+    written in the tree's terms, so this is the path it is matched against.
 
     The member is named by the file its extraction writes on this host. Its name is
     split where the extractor splits it, on ``/`` and on the host's separators, and
