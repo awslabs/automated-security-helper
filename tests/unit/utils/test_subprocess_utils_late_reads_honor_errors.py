@@ -113,6 +113,30 @@ def test_a_strict_stream_falls_back_to_replacement_so_the_late_read_cannot_raise
     assert subprocess_utils._decoded(UNDECODABLE, process) == "caf�\n"
 
 
+def test_a_run_that_pipes_stderr_alone_reads_with_that_streams_handler():
+    """stdout went elsewhere (inherited, or a file), so only stderr carries a
+    wrapper, and the late read takes its encoding and handler from there."""
+    process = SimpleNamespace(
+        stdout=None,
+        stderr=SimpleNamespace(encoding="utf-8", errors="backslashreplace"),
+        pid=4242,
+    )
+    assert subprocess_utils._decoded(UNDECODABLE, process) == "caf\\xe9\n"
+
+
+def test_with_two_wrappers_the_first_piped_streams_handler_governs_both_reads():
+    """_decoded takes the process, not a stream, so one handler serves both late
+    reads: stdout's where it is piped, as the stream wrappers were opened with
+    one handler by the same call. Pinned as it is: a stderr handler that differs
+    from stdout's is not what Popen's own text mode produces."""
+    process = SimpleNamespace(
+        stdout=SimpleNamespace(encoding="utf-8", errors="backslashreplace"),
+        stderr=SimpleNamespace(encoding="utf-8", errors="strict"),
+        pid=4242,
+    )
+    assert subprocess_utils._decoded(UNDECODABLE, process) == "caf\\xe9\n"
+
+
 @pytest.mark.parametrize("entry_point", ENTRY_POINTS)
 @patch(
     "automated_security_helper.utils.subprocess_utils.find_executable",
