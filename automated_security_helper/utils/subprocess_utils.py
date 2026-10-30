@@ -5735,12 +5735,18 @@ def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
     progress) no finalizer can interrupt an allocation, and the cleanup runs
     inline so the temporary files are gone before the interpreter is. A thread
     that cannot be started (Thread.start raises RuntimeError) runs the cleanup
-    inline only once the interpreter is finalizing, where no registry call of
-    this thread can be in progress for the cleanup to wait on. Thread.start
-    raises the same error when the process is out of threads or memory, and
-    inline there is the self-deadlock the thread exists to avoid, so the
-    cleanup is left to the interpreter's exit pass instead (atexit, which runs
-    on the main thread with no registry call in progress), and logged.
+    inline once the interpreter is shutting down: when the main thread is no
+    longer alive (threading's shutdown has run, which is what makes Thread.start
+    refuse) or once the interpreter is finalizing. By CPython's order threading's
+    shutdown and the atexit pass both run before the finalizing flag is set, and
+    a callback registered with atexit DURING its pass never runs (the pass
+    iterates the count it read at entry), so a finalizer firing inside another
+    atexit callback with the collector on has nothing to leave the cleanup to
+    but itself; no registry call of this thread can be in progress then.
+    Thread.start raises the same error mid-run when the process is out of
+    threads or memory, and inline there is the self-deadlock the thread exists
+    to avoid, so the cleanup is left to the exit pass instead (atexit, which
+    runs on the main thread with no registry call in progress), and logged.
     """
     if not gc.isenabled():
         plan.run_cleanup()
@@ -5751,7 +5757,7 @@ def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
     try:
         worker.start()
     except RuntimeError as error:
-        if sys.is_finalizing():
+        if sys.is_finalizing() or not threading.main_thread().is_alive():
             plan.run_cleanup()
             return
         atexit.register(plan.run_cleanup)

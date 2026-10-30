@@ -75,6 +75,32 @@ def test_a_thread_that_cannot_start_while_finalizing_runs_the_cleanup_inline():
     assert plan.cleanup == []
 
 
+def test_a_thread_that_cannot_start_after_threadings_shutdown_runs_inline():
+    """threading's shutdown runs before atexit and before the finalizing flag is
+    set, and Thread.start refuses from then on. A finalizer firing inside the
+    atexit pass cannot leave the cleanup to atexit (a callback registered during
+    the pass never runs), so the main thread being dead is read as shutdown."""
+    seen: dict = {}
+    done = threading.Event()
+    plan = _plan_recording_its_thread(seen, done)
+    assert gc.isenabled()
+    with (
+        patch.object(
+            threading.Thread,
+            "start",
+            side_effect=RuntimeError("can't create new thread at interpreter shutdown"),
+        ),
+        patch.object(subprocess_utils.sys, "is_finalizing", return_value=False),
+        patch.object(threading.main_thread(), "is_alive", return_value=False),
+        patch.object(subprocess_utils.atexit, "register") as register,
+    ):
+        subprocess_utils._run_cleanup_off_the_finalizer(plan)
+    assert done.is_set()
+    assert seen["thread"] == threading.get_ident()
+    assert plan.cleanup == []
+    register.assert_not_called()
+
+
 def test_a_thread_that_cannot_start_mid_run_leaves_the_cleanup_to_the_exit_pass():
     """Thread.start also raises RuntimeError when the process is out of threads.
     Running the cleanup inline then would bring back the self-deadlock the
