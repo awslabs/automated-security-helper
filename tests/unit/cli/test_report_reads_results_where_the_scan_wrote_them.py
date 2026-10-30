@@ -305,6 +305,45 @@ def test_a_reporter_that_cannot_be_built_is_a_failed_run_not_a_mistyped_format(
     assert "the client library is missing" in result.output, result.output
 
 
+def test_a_reporter_is_built_once_from_its_section(tmp_path, monkeypatch):
+    """The reporter was built twice, first from its defaults before the results
+    were read, so a reporter whose default build raises but whose configured
+    build works failed the run with "could not be built"; it is built once, from
+    the section the configuration has for it."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+        text_reporter,
+    )
+
+    results = _write_results(tmp_path / "out")
+    config = tmp_path / "ash.yaml"
+    config.write_text(
+        "project_name: fixture\nreporters:\n  text:\n    enabled: true\n",
+        encoding="utf-8",
+    )
+    original = text_reporter.TextReporter.__init__
+    builds: list[bool] = []
+
+    def from_its_section_only(self, *args, **kwargs):
+        builds.append(kwargs.get("config") is not None)
+        if kwargs.get("config") is None:
+            raise RuntimeError("the defaults are not a configuration")
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(text_reporter.TextReporter, "__init__", from_its_section_only)
+
+    result = _report(
+        "--format",
+        "text",
+        "--config",
+        str(config),
+        "--output-dir",
+        str(results.parent),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert builds == [True], builds
+
+
 def test_a_closed_stdout_pipe_is_not_a_render_error(tmp_path, monkeypatch):
     results = _write_results(tmp_path / "out")
 

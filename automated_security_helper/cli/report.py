@@ -903,21 +903,10 @@ def report_command(
         # the usage-error code rather than 1, which reports a failed run.
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
 
-    try:
-        reporter_plugin = reporter_class(context=plugin_context)
-    except Exception as e:
-        # The reporter exists and cannot be built: a failed run, with its cause,
-        # not a mistyped --format.
-        _print_error(
-            "[red]Error: reporter '{}' could not be built: {}[/red]",
-            report_format,
-            e,
-        )
-        raise typer.Exit(1)
-
-    # The order is configuration (exit 3), then the reporter (an unknown --format
-    # is the command line's mistake whatever is on disk), then the results (exit 1,
-    # a state problem), and nothing is created on the way: `ash report` in an
+    # The order is configuration (exit 3), then the reporter's name (an unknown
+    # --format is the command line's mistake whatever is on disk, exit 5), then
+    # the results (exit 1, a state problem), then the reporter itself, built once
+    # from its section below; nothing is created on the way: `ash report` in an
     # empty directory leaves no .ash/ash_output behind.
     if len(found_results_files) > 1:
         # A usage error, as the docs say (how-to/read-results.md, exit-codes.md):
@@ -1017,20 +1006,37 @@ def report_command(
         )
         raise typer.Exit(1)
 
-    # Generate the report
+    # The reporter is built once: from its section when the configuration has one
+    # (reporter_section returns the section as get_plugin_config gives it, a plain
+    # dict; constructing the reporter with it lets the plugin validate it into its
+    # own config model, as the report phase of a scan does
+    # (core/phases/report_phase.py), where assigning the dict to reporter.config
+    # left a dict that every reporter reads attributes of), and from its defaults
+    # otherwise. It used to be built twice, first from its defaults before the
+    # results were read: a reporter whose default build raises (a required option,
+    # a client made from the defaults) but whose configured build works failed the
+    # run with "could not be built", and an off-host reporter's __init__ ran before
+    # the refusal above.
     try:
-        if plugin_config is not None and reporter_class is not None:
-            # reporter_section returns the section as get_plugin_config gives it,
-            # a plain dict. Assigning that to reporter.config left a dict where
-            # every reporter reads attributes, so `self.config.options...` raised
-            # AttributeError (junitxml: 'dict' object has no attribute 'options')
-            # and the command exited 1. Constructing the reporter with it lets the
-            # plugin validate it into its own config model, which is what the
-            # report phase of a scan does (core/phases/report_phase.py).
+        if plugin_config is not None:
             reporter_plugin = reporter_class(
                 context=plugin_context,
                 config=plugin_config,
             )
+        else:
+            reporter_plugin = reporter_class(context=plugin_context)
+    except Exception as e:
+        # The reporter exists and cannot be built: a failed run, with its cause,
+        # not a mistyped --format.
+        _print_error(
+            "[red]Error: reporter '{}' could not be built: {}[/red]",
+            report_format,
+            e,
+        )
+        raise typer.Exit(1)
+
+    # Generate the report
+    try:
         # The report goes to stdout, but a reporter that writes files of its own
         # writes them to the reports directory. A name among them that is not a file
         # there, or a link at one of them, refuses the command before the reporter
