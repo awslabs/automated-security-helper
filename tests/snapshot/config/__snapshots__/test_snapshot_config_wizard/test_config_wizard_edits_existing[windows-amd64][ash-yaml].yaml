@@ -127,7 +127,7 @@ content_db_staleness: fail
 content_db_staleness_overrides: []
 content_db_staleness_offline_image_default: true
 ash_plugin_modules:
-- my_org.ash_plugins
+- my_org_ash_plugins
 external_reports_to_include: []
 converters:
   archive:
