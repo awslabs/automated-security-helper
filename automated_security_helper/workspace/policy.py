@@ -98,7 +98,10 @@ Failure modes and known limitations
   (lower-cased, ``-`` and ``_`` folded together), because ``--scanners`` and the
   config accept ``cdk-nag`` while the Python field is ``cdk_nag``. Treating
   those as two scanners would run a second copy under default config and report
-  its findings as policy-origin duplicates of the project's own.
+  its findings as policy-origin duplicates of the project's own. The same fold
+  decides which of the policy's own entries are one scanner: ``cdk-nag`` and
+  ``cdk_nag`` listed together, or a name listed twice, are carried once, as
+  the first spelling.
 * A policy suppression is pushed down per project, so one workspace-level entry
   can become N project-level entries. Each is a copy: mutating in place would
   leave the second project rewriting the first project's already-rewritten path.
@@ -256,6 +259,8 @@ def ceiling_unreachable_counts(
     results: Iterable[Mapping[str, Any]],
     declared_threshold: str | None,
     effective_threshold: str | None,
+    *,
+    non_gating_scanners: Iterable[str] = (),
 ) -> dict[str, int]:
     """Per scanner, how many findings the severity ceiling could not affect.
 
@@ -277,12 +282,22 @@ def ceiling_unreachable_counts(
       IS reached, and so is not counted.
 
     Suppressed findings are skipped: they are not actionable at any threshold, so
-    the ceiling is irrelevant to them.
+    the ceiling is irrelevant to them. So are the findings of a scanner in
+    ``non_gating_scanners``: a policy scanner whose findings do not reach the
+    project's exit code (``policy_scanners_gate`` off) is actionable at no
+    threshold either, and counting its level-only findings told the operator the
+    ceiling could not reach findings the gate never judged.
+
+    ``issue_severity`` is read as the gate reads it (``severity_ladder``):
+    stripped of surrounding whitespace and upper-cased, so a padded severity the
+    gate honors is not counted here as a level-only finding.
 
     Args:
         results: The project's SARIF results.
         declared_threshold: The threshold the project's own config asked for.
         effective_threshold: The threshold after the workspace ceiling.
+        non_gating_scanners: Scanner names whose findings the project's exit
+            code does not count, compared by :func:`normalise_scanner_name`.
 
     Returns:
         Scanner name to count, for scanners with at least one such finding.
@@ -293,6 +308,7 @@ def ceiling_unreachable_counts(
     if declared_threshold == effective_threshold:
         return {}
 
+    not_gating = {normalise_scanner_name(str(name)) for name in non_gating_scanners}
     counts: dict[str, int] = {}
     for result in results:
         if not isinstance(result, Mapping):
@@ -303,10 +319,15 @@ def ceiling_unreachable_counts(
         properties = result.get("properties")
         issue_severity = ""
         if isinstance(properties, Mapping):
-            issue_severity = str(properties.get("issue_severity") or "").upper()
+            issue_severity = str(properties.get("issue_severity") or "").strip().upper()
         if issue_severity in SEVERITIES:
             # The ceiling reaches severity-carrying findings; nothing to disclose.
             continue
+        if not_gating and isinstance(properties, Mapping):
+            scanner_name = properties.get("scanner_name")
+            if scanner_name and normalise_scanner_name(str(scanner_name)) in not_gating:
+                # Judged at no threshold, so the ceiling never claimed it.
+                continue
 
         level = result.get("level")
         if sarif_level_fails_threshold(
@@ -373,11 +394,19 @@ def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object
     value itself (config_sources.unparsed_config_reason). ``quote_values``
     governs the schema problems only (_load_policy), where the operator's own
     file shows the value it wrote.
+
+    The format is the one ``named`` says, as the JSON project configs are read
+    (``config_sources._read_config_file`` goes by the path it was given): a
+    ``.yaml`` name that links to a ``.json`` file is read as YAML. A leading
+    byte order mark is dropped (``utf-8-sig``), as the JSON config reader drops
+    it; YAML and TOML drop their own. A document nested past the interpreter's
+    recursion limit raises ``RecursionError`` from either parser, which is
+    refused like any other parse failure rather than escaping as a traceback.
     """
     label = f"workspace policy file '{named.as_posix()}'"
     undecoded = ""
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8-sig")
     except OSError as exc:
         reason = f": {exc}" if quote_values else f" ({exc.strerror or 'OSError'})"
         raise _refuse(f"{label} could not be read{reason}") from exc
@@ -391,10 +420,10 @@ def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object
 
     kind = ""
     try:
-        if path.suffix.lower() == ".json":
+        if named.suffix.lower() == ".json":
             return json.loads(raw)
         return load_config_yaml(raw)
-    except (yaml.YAMLError, ValueError) as exc:
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
         # json.JSONDecodeError and a constructor's ValueError (!!int) are
         # ValueErrors. The type and place only: the parser's message quotes the
         # file, a snippet of the line included, since this parse is of a str,
@@ -435,7 +464,26 @@ def load_workspace_policy(
             does not say which to open.
     """
     named = _as_named(path)
-    return _load_policy(named.resolve(), named, quote_values)
+    return _load_policy(_resolved(named), named, quote_values)
+
+
+def _resolved(named: Path) -> Path:
+    """The file *named* reaches, or the refusal for a path that reaches none.
+
+    ``Path.resolve`` raises ``RuntimeError`` for a symlink loop on CPython 3.10
+    to 3.12 and ``OSError`` for a few unreadable shapes; 3.13 and later return
+    the path as far as it goes. Either way the policy cannot be read, and the
+    module docstring says that is a refusal (exit 4), never a traceback.
+    """
+    try:
+        return named.resolve()
+    except (RuntimeError, OSError) as exc:
+        raise _refuse(
+            f"workspace policy file '{named.as_posix()}' cannot be resolved: a "
+            f"component on the way to it is a symlink loop or cannot be read "
+            f"({type(exc).__name__}); a policy file that cannot be read is not "
+            f"treated as no policy"
+        ) from exc
 
 
 def _policy_problems(error: ValidationError) -> str:
@@ -457,9 +505,19 @@ def _policy_problems(error: ValidationError) -> str:
 def _load_policy(path: Path, named: Path, quote_values: bool) -> AshWorkspaceConfig:
     """``load_workspace_policy`` for the file ``path``, reached by ``named``."""
     label = f"workspace policy file '{named.as_posix()}'"
-    if not path.exists():
-        raise _refuse(f"{label} does not exist")
-    if not path.is_file():
+    # os.stat with the error kept, not Path.exists()/is_file(): those raised a
+    # bare PermissionError for an unsearchable parent on Python 3.10-3.13 and
+    # read the file as absent on 3.14.
+    try:
+        mode = os.stat(path).st_mode
+    except FileNotFoundError as exc:
+        raise _refuse(f"{label} does not exist") from exc
+    except OSError as exc:
+        raise _refuse(
+            f"{label} could not be examined ({exc.strerror or type(exc).__name__}); "
+            f"a policy file that cannot be read is not treated as no policy"
+        ) from exc
+    if not stat.S_ISREG(mode):
         raise _refuse(f"{label} is not a file")
 
     document = _read_policy_document(path, named, quote_values)
@@ -497,22 +555,27 @@ def _policy_not_permitted(candidate: Path, root: Path) -> WorkspaceDefinitionErr
     """The refusal of a policy file *permit* refused: its name in *root*, and nothing
     the file holds or its resolved path, which may be outside what the caller may
     read. Raised from an ``ASHConfigInputNotPermittedError``, so a caller reports it
-    as the other confinement refusals of a config input."""
+    as the other confinement refusals of a config input.
+
+    A candidate below *root* is named relative to it. One elsewhere, an explicit
+    ``--workspace-config`` outside the root, is named as the caller gave it: the
+    caller's own spelling says nothing the caller does not know, and saying it
+    was "in" the root named a directory it was never in.
+    """
     try:
-        name = candidate.relative_to(root).as_posix()
+        where = f"'{candidate.relative_to(root).as_posix()}' in '{root.as_posix()}'"
     except ValueError:
-        name = candidate.name
+        where = f"'{candidate.as_posix()}'"
     if candidate == root / _POLICY_SUBDIR:
         # A linked .ash, refused before anything in it is looked at.
         message = (
-            f"The workspace policy directory '{name}' in '{root.as_posix()}' is "
-            f"outside the directories this caller may read config from, so nothing "
-            f"in it was read."
+            f"The workspace policy directory {where} is outside the directories "
+            f"this caller may read config from, so nothing in it was read."
         )
     else:
         message = (
-            f"The workspace policy file '{name}' in '{root.as_posix()}' is outside "
-            f"the directories this caller may read config from, so it was not read."
+            f"The workspace policy file {where} is outside the directories this "
+            f"caller may read config from, so it was not read."
         )
     refusal = _refuse(message)
     refusal.__cause__ = ASHConfigInputNotPermittedError(message)
@@ -620,10 +683,22 @@ def named_workspace_policy_path(
     for parent in (directory, directory / _POLICY_SUBDIR):
         for name in WORKSPACE_POLICY_FILE_NAMES:
             candidate = parent / name
-            if candidate.is_file():
-                if candidate.is_absolute():
-                    return candidate
-                return Path(os.getcwd()) / candidate
+            # The entry itself, as discovery reads it: Path.is_file() raised a
+            # bare PermissionError for an unsearchable .ash on Python 3.10-3.13
+            # and read it as no policy on 3.14.
+            try:
+                os.lstat(candidate)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except OSError as exc:
+                raise _refuse(
+                    f"workspace policy file '{candidate.as_posix()}' could not be "
+                    f"examined ({exc.strerror or type(exc).__name__}); a policy "
+                    f"file that cannot be read is not treated as no policy"
+                ) from exc
+            if candidate.is_absolute():
+                return candidate
+            return Path(os.getcwd()) / candidate
     return None
 
 
@@ -633,14 +708,21 @@ def _refuse_project_config_as_policy(
     """Refuse a policy file that is actually some project's config.
 
     Compared by resolved path rather than by name, so a symlink to a project's
-    config, or a differently-spelled path to it, is caught as well.
+    config, or a differently-spelled path to it, is caught as well. The by-name
+    check reads the name the path was given and the name of the file it reaches:
+    a link ``pol.yaml`` to the root's own ``ash.yaml`` names a project config
+    under another name, and the root project's config is in no project list.
     """
     from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 
+    try:
+        target = policy_path.resolve()
+    except (OSError, RuntimeError):  # pragma: no cover - unresolvable path
+        target = policy_path
     for project_config in project_config_paths:
         try:
-            same = policy_path.resolve() == Path(project_config).resolve()
-        except OSError:  # pragma: no cover - unresolvable path
+            same = target == Path(project_config).resolve()
+        except (OSError, RuntimeError):  # pragma: no cover - unresolvable path
             same = False
         if same:
             raise _refuse(
@@ -654,11 +736,21 @@ def _refuse_project_config_as_policy(
 
     # Also refuse by name. This catches the workspace root's own config even when
     # the caller passed no project list -- the common CLI shape, since the root
-    # project's config path is not known to argument parsing.
-    if policy_path.name in ASH_CONFIG_FILE_NAMES:
+    # project's config path is not known to argument parsing. The name the path
+    # was given and the name of the file it reaches both count: a link named
+    # otherwise still reads the root's config as the siblings' ceiling.
+    named_like_a_config = next(
+        (
+            name
+            for name in (policy_path.name, target.name)
+            if name in ASH_CONFIG_FILE_NAMES
+        ),
+        None,
+    )
+    if named_like_a_config is not None:
         raise _refuse(
             f"'{policy_path.as_posix()}' is named like an ASH project config "
-            f"('{policy_path.name}'), so it cannot be the workspace policy file. "
+            f"('{named_like_a_config}'), so it cannot be the workspace policy file. "
             f"Workspace policy must live in a distinct file -- "
             f"'{_POLICY_SUBDIR}/ash-workspace.yaml', or any name passed to "
             f"'--workspace-config' that is not a project config name."
@@ -707,13 +799,6 @@ def resolve_workspace_policy(
         policy_path = Path(explicit)
         if permit_base is not None and not permit_base(policy_path):
             raise _policy_not_permitted(policy_path, Path(root))
-        if not policy_path.exists():
-            raise _refuse(
-                f"workspace policy file '{policy_path.as_posix()}' does not "
-                f"exist. '--workspace-config' names the file to use; ASH does "
-                f"not fall back to searching, because that would apply different "
-                f"policy than the one asked for."
-            )
     else:
         discovered = discover_workspace_policy_file(root, permit=permit_base)
         if discovered is None:
@@ -721,11 +806,22 @@ def resolve_workspace_policy(
         policy_path = discovered
 
     named = _as_named(policy_path)
-    target = named.resolve()
+    target = _resolved(named)
+    # The gate on the file the path reaches comes before any existence test: a
+    # link inside the permitted directories to a file outside them was told
+    # "does not exist" when that file was absent and refused by this gate when
+    # it was present, so the two refusals said whether the outside file exists.
     if permit_base is not None and not permit_base(target):
         raise ASHConfigInputNotPermittedError(
             f"workspace policy file '{named.as_posix()}' reaches a file outside "
             "the directories this caller may read config from."
+        )
+    if explicit is not None and not _entry_exists(named):
+        raise _refuse(
+            f"workspace policy file '{policy_path.as_posix()}' does not "
+            f"exist. '--workspace-config' names the file to use; ASH does "
+            f"not fall back to searching, because that would apply different "
+            f"policy than the one asked for."
         )
 
     _refuse_project_config_as_policy(named, [Path(p) for p in project_config_paths])
@@ -734,11 +830,29 @@ def resolve_workspace_policy(
     return _load_policy(target, named, quote_values), named
 
 
+def _entry_exists(path: Path) -> bool:
+    """Whether an entry is at *path*, a link to a missing file included.
+
+    ``os.lstat`` with its error read: ``Path.exists()`` raised a bare
+    ``PermissionError`` for an unsearchable parent on Python 3.10-3.13, and the
+    refusal for that is the resolved-target gate's or the loader's, not a
+    traceback here.
+    """
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def _push_down(
     entries: Sequence[IgnorePathWithReason],
     project_prefix: PathLike,
     *,
     kind: PatternKind,
+    quote_values: bool = True,
 ) -> tuple[IgnorePathWithReason, ...]:
     """Rewrite each entry's path into *project_prefix*'s coordinates.
 
@@ -748,16 +862,26 @@ def _push_down(
 
     Entries whose pattern cannot match inside the project are dropped -- they are
     about a different project. Entries with no sound rewrite are refused, because
-    dropping one would leave a stated suppression unapplied and invisible.
+    dropping one would leave a stated suppression unapplied and invisible. With
+    ``quote_values`` False (a client's file) the refusal names the entry by its
+    kind and position and quotes neither the pattern nor the converter's reason,
+    which repeats the pattern: a delivered file's content is not shown.
 
     Each surviving entry is a COPY, so the shared policy object is not mutated
     as it is pushed into successive projects.
     """
     pushed: list[IgnorePathWithReason] = []
-    for entry in entries:
+    for position, entry in enumerate(entries, start=1):
         try:
             rewritten = to_project_pattern(entry.path, project_prefix, kind=kind)
         except WorkspacePatternError as exc:
+            if not quote_values:
+                raise _refuse(
+                    f"workspace policy {kind} entry {position} cannot be applied to "
+                    f"project '{Path(project_prefix).as_posix()}': it has no sound "
+                    f"rewrite for that project. The pattern is not shown because "
+                    f"an MCP client supplied the file."
+                ) from None
             raise _refuse(
                 f"workspace policy pattern '{entry.path}' cannot be applied to "
                 f"project '{Path(project_prefix).as_posix()}': {exc}"
@@ -777,6 +901,14 @@ def _push_down(
                     package_path, project_prefix, kind=SUPPRESSION
                 )
             except WorkspacePatternError as exc:
+                if not quote_values:
+                    raise _refuse(
+                        f"workspace policy {kind} entry {position} has a "
+                        f"package_path that cannot be applied to project "
+                        f"'{Path(project_prefix).as_posix()}': it has no sound "
+                        f"rewrite for that project. The value is not shown because "
+                        f"an MCP client supplied the file."
+                    ) from None
                 raise _refuse(
                     f"workspace policy package_path '{package_path}' cannot be "
                     f"applied to project '{Path(project_prefix).as_posix()}': {exc}"
@@ -796,6 +928,7 @@ def policy_for_project(
     project_prefix: PathLike,
     project_threshold: str | None,
     project_scanners: Iterable[str],
+    quote_values: bool = True,
 ) -> ProjectPolicy:
     """Apply workspace *policy* to one project.
 
@@ -809,9 +942,14 @@ def policy_for_project(
             LOOSER than any ceiling and so is tightened by one.
         project_scanners: The scanners the project already enables. Used to tell
             a scanner the project owns from one this policy adds.
+        quote_values: False for a client's policy file: a refusal of a pattern
+            then names the entry's position and not its text.
 
     Returns:
-        The policy as it applies to this project.
+        The policy as it applies to this project. ``threshold_tightened`` reads
+        ``None`` and ``""`` as the one gate-off value they are to ``stricter_of``,
+        so a project that declared ``""`` under a policy with no ceiling is not
+        reported tightened.
 
     Raises:
         WorkspaceDefinitionError: Exit code 4, when a policy pattern has no sound
@@ -834,24 +972,38 @@ def policy_for_project(
     effective = stricter_of(project_threshold, ceiling)
 
     declared = {normalise_scanner_name(name) for name in project_scanners}
-    policy_scanners = tuple(
-        name
-        for name in policy.additional_scanners
-        if normalise_scanner_name(name) not in declared
-    )
+    # One entry per scanner the project does not declare, under the policy's
+    # first spelling of it: "cdk-nag" and "cdk_nag" listed together, or a name
+    # listed twice, would otherwise run the scanner twice under default config.
+    added: dict[str, str] = {}
+    for name in policy.additional_scanners:
+        folded = normalise_scanner_name(name)
+        if folded not in declared:
+            added.setdefault(folded, name)
+    policy_scanners = tuple(added.values())
 
     return ProjectPolicy(
         effective_threshold=effective,
-        threshold_tightened=effective != project_threshold,
+        # "" and None are the same value to stricter_of (the gate off), so a
+        # project that declared "" under no ceiling is not reported tightened.
+        threshold_tightened=effective != (project_threshold or None),
         suppressions=tuple(
             # _push_down returns the base type; suppressions keep their own type
             # because model_copy preserves the class it was called on.
             entry  # type: ignore[misc]
             for entry in _push_down(
-                policy.suppressions, project_prefix, kind=SUPPRESSION
+                policy.suppressions,
+                project_prefix,
+                kind=SUPPRESSION,
+                quote_values=quote_values,
             )
         ),
-        ignore_paths=_push_down(policy.ignore_paths, project_prefix, kind=IGNORE_PATH),
+        ignore_paths=_push_down(
+            policy.ignore_paths,
+            project_prefix,
+            kind=IGNORE_PATH,
+            quote_values=quote_values,
+        ),
         policy_scanners=policy_scanners,
         policy_scanners_gate=policy.policy_scanners_gate,
     )
