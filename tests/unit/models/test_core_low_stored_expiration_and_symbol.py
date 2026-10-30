@@ -8,9 +8,10 @@
   ``expiration`` that was not text (a number, a list), so one such stored entry
   failed the load of the whole file. It is now kept as its text and recorded the
   same way. A config file still refuses it.
-* ``SYMBOL_PATTERN`` ends in ``$``, which also matches before a trailing newline,
-  so a ``symbol`` written as a YAML block scalar was stored and then matched no
-  definition. The entry now refuses it.
+* A ``symbol`` written as a YAML block scalar ends in a newline and matches no
+  definition, so an entry must refuse it. ``is_valid_symbol`` already reads the
+  whole text with ``fullmatch``, so these cases pass without any change in this
+  module; they pin that behavior and are not red before it.
 """
 
 from __future__ import annotations

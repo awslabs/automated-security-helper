@@ -759,9 +759,7 @@ class AshSuppression(IgnorePathWithReason):
             if notes is not None and _is_environment_reference(v):
                 notes.append(UNREADABLE_SYMBOL_NOTE)
                 return v
-        # SYMBOL_PATTERN ends in ``$``, which also matches before a trailing
-        # newline (a YAML block scalar ends in one), so that is refused here.
-        if not isinstance(v, str) or v.endswith("\n") or not is_valid_symbol(v):
+        if not isinstance(v, str) or not is_valid_symbol(v):
             raise ValueError(SYMBOL_RULE)
         return v
 
