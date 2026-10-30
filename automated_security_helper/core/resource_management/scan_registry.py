@@ -10,6 +10,7 @@ active scans. It implements a thread-safe registry to track active scans and
 provides functions for listing, cancelling, and cleaning up scans.
 """
 
+import itertools
 import os
 import signal
 import uuid
@@ -142,6 +143,13 @@ def _empty_coverage() -> Dict[str, Any]:
     }
 
 
+#: The order scans were registered in, process-wide. Two registrations inside
+#: one clock tick tie on ``start_time``, and a wall clock that steps back
+#: reverses them, so "a later scan of this directory" is decided by this
+#: counter and never by the clock.
+_REGISTRATION_SEQUENCE = itertools.count(1)
+
+
 class ScanRegistryEntry:
     """Entry in the scan registry."""
 
@@ -205,6 +213,8 @@ class ScanRegistryEntry:
         # would write one tree, so register_scan refuses the second.
         self.canonical_output_directory = _canonical_directory(output_directory)
         self.start_time = datetime.now()
+        # Position in the registration order; see _REGISTRATION_SEQUENCE.
+        self.registration_seq = next(_REGISTRATION_SEQUENCE)
         self.end_time: Optional[datetime] = None
         self.status = MCScanStatus.PENDING
         self.severity_threshold = severity_threshold
@@ -1219,11 +1229,18 @@ class ScanRegistry:
                 # later scan's, whatever its state. Read as this scan's, they
                 # reported another scan's scanners and findings (another session's
                 # too) under this id, and could re-close this entry on them.
+                #
+                # Except a later scan that ended without writing and had the
+                # previous results put back: what the directory holds then is
+                # what was there before it, this scan's own results, and they
+                # are not hidden. "Later" is the registration order, never the
+                # clock (see _REGISTRATION_SEQUENCE).
                 previous_only = entry.output_holds_previous_results
                 superseded = entry.status in ENDED and any(
                     other.scan_id != scan_id
                     and other.canonical_directory == entry.canonical_directory
-                    and other.start_time > entry.start_time
+                    and other.registration_seq > entry.registration_seq
+                    and not other.output_holds_previous_results
                     for other in self._registry.values()
                 )
                 foreign_output = previous_only or superseded or output_missing
@@ -1411,6 +1428,11 @@ class ScanRegistry:
                     "is_complete": entry.status in ENDED,
                     "results_available": entry.status in FINISHED_WITH_RESULTS,
                     "output_holds_previous_results": previous_only,
+                    # True once a later scan of the same directory has taken the
+                    # one output tree over: nothing below is read from the files,
+                    # so without this a superseded scan read exactly like a scan
+                    # that completed and found nothing.
+                    "output_superseded": superseded,
                     "coverage_complete": coverage_complete,
                     **(coverage if coverage is not None else _empty_coverage()),
                     "completed_scanners": scan_progress.completed_scanners,

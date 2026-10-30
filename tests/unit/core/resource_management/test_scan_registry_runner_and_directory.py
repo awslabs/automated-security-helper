@@ -250,6 +250,85 @@ class TestProgressOfASupersededScanReadsNoFiles:
         # The later scan still reads its own files.
         assert "semgrep" in registry.check_scan_progress(new)["scanners"]
 
+    def test_a_superseded_scan_says_so(self, tmp_path):
+        """Reading no files made a superseded scan look exactly like a clean one:
+        completed, results_available, 0 findings, no scanners. The response now
+        carries output_superseded so a client can tell the two apart."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+        assert registry.check_scan_progress(old)["output_superseded"] is False
+
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.RUNNING)
+
+        progress = registry.check_scan_progress(old)
+
+        assert progress["output_superseded"] is True
+        assert progress["total_findings"] == 0
+        assert registry.check_scan_progress(new)["output_superseded"] is False
+
+    def test_a_later_scan_that_put_the_previous_results_back_does_not_supersede(
+        self, tmp_path
+    ):
+        """A later scan that failed before writing anything has the previous
+        results put back, which are the earlier scan's own; they are not hidden."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.FAILED, "ASH exited with code 1")
+        registry.get_scan(new).output_holds_previous_results = True
+
+        progress = registry.check_scan_progress(old)
+
+        assert progress["output_superseded"] is False
+        assert "bandit" in progress["scanners"]
+
+    def test_the_order_of_scans_is_the_order_of_registration_not_the_clock(
+        self, tmp_path
+    ):
+        """Two registrations inside one clock tick, or a clock that steps back,
+        used to tie or reverse under datetime.now() ordering."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.RUNNING)
+        # The clock stepped back between the two registrations.
+        registry.get_scan(new).start_time = registry.get_scan(
+            old
+        ).start_time - timedelta(hours=1)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("semgrep")), encoding="utf-8"
+        )
+
+        assert (
+            registry.get_scan(new).registration_seq
+            > registry.get_scan(old).registration_seq
+        )
+        assert registry.check_scan_progress(old)["output_superseded"] is True
+        assert registry.check_scan_progress(old)["scanners"] == {}
+
     def test_a_running_scan_is_not_superseded_by_an_older_one(self, tmp_path):
         registry = ScanRegistry()
         project = tmp_path / "proj"
