@@ -272,6 +272,42 @@ def test_a_transitive_entry_with_no_nodes_still_produces_a_result(scanner):
     assert grades[("npm-audit-transitive-child", "*")] == "HIGH"
 
 
+def test_a_later_lockfile_s_score_reaches_the_rule_the_first_lockfile_kept(scanner):
+    """Two lockfiles hit one advisory. The first (an unscored record, as a yarn
+    4 one always is) makes the rule, and the merge keeps the first rule per id.
+    The second lockfile's result had a usable score, so it declares no grade of
+    its own and relies on the rule's score; with the kept rule carrying none it
+    fell to the SARIF level, CRITICAL for a high advisory. The kept rule takes
+    the score the later rule carries."""
+    first = _report(
+        pkg=("high", [_via("pkg", "high", score=0, vector=None)], ["node_modules/pkg"])
+    )
+    second = _report(
+        pkg=(
+            "high",
+            [_via("pkg", "high", score=7.5, vector="CVSS:3.1/AV:N")],
+            ["node_modules/pkg"],
+        )
+    )
+    # Outside the scanned tree, so no lockfile is indexed for either part.
+    locks = scanner.context.output_dir / "elsewhere"
+
+    report = normalize_sarif_result_severities(
+        scanner._convert_per_lockfile(
+            [
+                (locks / "a" / "package-lock.json", first),
+                (locks / "b" / "package-lock.json", second),
+            ],
+            {"metadata": {"vulnerabilities": {}}},
+            scanner.context.source_dir,
+        )
+    )
+
+    (rule,) = report.runs[0].tool.driver.rules
+    assert rule.properties.model_extra["security_severity"] == 7.5
+    assert [result_severity(r) for r in report.runs[0].results] == ["HIGH", "HIGH"]
+
+
 def test_a_root_with_no_nodes_still_gives_the_transitive_result_a_ref(scanner):
     """The transitive result's root_advisories names every root result, placed
     as that result is, so a suppression on the advisory reaches it. A root npm

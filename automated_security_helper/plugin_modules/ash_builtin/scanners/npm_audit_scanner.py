@@ -1609,6 +1609,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         Converting the merged dict instead loses findings: it is keyed by
         package name, so a package vulnerable in two lockfiles kept only the
         last lockfile's nodes.
+
+        One rule per advisory id across the lockfiles, the first one kept. A
+        yarn 4 record carries no CVSS object, and a yarn 1 or pnpm advisory may
+        not, so the kept rule could lack the ``security_severity`` a later
+        lockfile's npm rule carries for the same advisory. That lockfile's
+        results declare no grade of their own when their score was usable (the
+        normalizer copies the rule's score onto them), so they fell to the
+        SARIF level, which grades a high advisory CRITICAL: the misgrade the
+        per-advisory grading is meant to end. The first rule to carry a score
+        lends it to the kept rule.
         """
         report: SarifReport | None = None
         for lock_file, audit_results in per_lock_results:
@@ -1620,11 +1630,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 continue
             run, part_run = report.runs[0], part.runs[0]
             run.results.extend(part_run.results or [])
-            known = {rule.id for rule in run.tool.driver.rules or []}
+            known = {rule.id: rule for rule in run.tool.driver.rules or []}
             for rule in part_run.tool.driver.rules or []:
-                if rule.id not in known:
+                kept = known.get(rule.id)
+                if kept is None:
                     run.tool.driver.rules.append(rule)
-                    known.add(rule.id)
+                    known[rule.id] = rule
+                    continue
+                score = self._rule_security_severity(rule)
+                if score is not None and self._rule_security_severity(kept) is None:
+                    if kept.properties is None:
+                        kept.properties = PropertyBag()
+                    setattr(kept.properties, "security_severity", score)  # noqa: B010
         if report is None:
             return self._convert_npm_audit_to_sarif(merged_results, target_path)
         # A v1 report can carry the metadata KEY with a null value, so the
@@ -1638,6 +1655,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             else {}
         )
         return report
+
+    @staticmethod
+    def _rule_security_severity(rule: ReportingDescriptor) -> Any:
+        """The ``security_severity`` a rule carries, or None when it has none."""
+        if rule.properties is None:
+            return None
+        return (rule.properties.model_extra or {}).get("security_severity")
 
     def _convert_npm_audit_to_sarif(
         self,
