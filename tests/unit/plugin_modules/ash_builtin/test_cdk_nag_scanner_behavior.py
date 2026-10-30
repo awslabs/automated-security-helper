@@ -1202,7 +1202,11 @@ def test_the_unevaluated_rule_notification_carries_no_templates_exception_text()
 
     assert len(notifications) == 1
     text = notifications[0].message.root.text
-    assert "AwsSolutions-EC26" in text and "AwsSolutions" in text
+    # The pack is named as the pack, in its own clause: every cdk-nag rule id starts
+    # with its pack name, so `"AwsSolutions" in text` could never fail beside the id.
+    assert "Rule AwsSolutions-EC26 from pack 'AwsSolutions' could not be evaluated" in (
+        text
+    ), text
     assert "VolumeEncrypted" not in text, text
     assert "OtherParam" not in text, text
     assert "could not be evaluated" in text
@@ -1273,7 +1277,9 @@ def test_a_yaml_error_from_the_worker_on_a_template_that_parses_is_a_failed_targ
 def test_a_yaml_error_on_a_file_that_does_not_parse_is_still_the_not_parseable_skip(
     scanner, cdk_available, wrapper_double
 ):
-    """The negative control: a file no parser reads stays an un-counted skip."""
+    """The negative control: a file no parser reads stays an un-counted skip. The
+    wrapper is asserted called, so a candidate dropped before the wrapper (which would
+    leave both counters at 0 too) cannot pass for the branch this controls."""
     from yaml import YAMLError
 
     (scanner.context.work_dir / "broken.yaml").write_text(
@@ -1283,6 +1289,7 @@ def test_a_yaml_error_on_a_file_that_does_not_parse_is_still_the_not_parseable_s
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
+    wrapper_double.assert_called_once()
     assert scanner.targets_attempted == 0
     assert scanner.targets_failed == 0
 
@@ -1382,7 +1389,8 @@ def test_a_worker_child_ash_could_not_stop_is_recorded_on_the_plugin(
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    assert scanner.scan_could_not_stop is not None
+    # The recorded state carries the response's own reason, not only a flag.
+    assert scanner.scan_could_not_stop == response["error"], scanner.scan_could_not_stop
     assert scanner.targets_failed == 1
 
 
@@ -1407,9 +1415,12 @@ def test_the_batchs_records_are_read_directly_so_a_renamed_field_cannot_pass_in_
 
     A ``getattr`` default here would read a renamed ``could_not_stop_response`` as
     "nothing to record" and switch the run-level could-not-stop gate off without a
-    word; the direct read raises instead, the way the scanner's ``ignore_suppressions``
-    read does. Before this read the two fields were read through defaults to suit a
-    test double that yielded None."""
+    word; the direct read raises instead, out of ``scan()``, which is where a broken
+    seam between two modules of this package belongs: a per-template record (the shape
+    the scanner's ``ignore_suppressions`` read takes for a config value) would grade the
+    scan as if the records had been read. Either field may be the one read first; the
+    match admits both. Before this read the two fields were read through defaults to
+    suit a test double that yielded None."""
     import contextlib
 
     @contextlib.contextmanager
@@ -1421,7 +1432,9 @@ def test_the_batchs_records_are_read_directly_so_a_renamed_field_cannot_pass_in_
     )
     wrapper_double.return_value = CdkNagWrapperResponse(results={}, failure=None)
 
-    with pytest.raises(AttributeError, match="failed_child_responses"):
+    with pytest.raises(
+        AttributeError, match="failed_child_responses|could_not_stop_response"
+    ):
         scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
 
