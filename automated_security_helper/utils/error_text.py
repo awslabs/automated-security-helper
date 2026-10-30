@@ -669,20 +669,96 @@ _ESCAPE_CODES = re.compile(rf"(?:{_CSI_CODES.pattern}|{_OSC_CODES.pattern})")
 ESCAPE_CODES = _ESCAPE_CODES
 
 
+#: The bytes a CSI sequence may hold between its "[" and its final byte: the
+#: parameter bytes 0x30-0x3F and the intermediate bytes 0x20-0x2F, as
+#: _CSI_CODES admits them.
+_CSI_MIDDLE = frozenset(chr(code) for code in range(0x20, 0x40))
+
+#: The final byte of a CSI sequence, 0x40-0x7E, as _CSI_CODES admits it.
+_CSI_FINAL = frozenset(chr(code) for code in range(0x40, 0x7F))
+
+#: What ends an OSC sequence on its own: BEL or the C1 string terminator. The
+#: third ending, ESC then a backslash, arrives as two characters and is read
+#: where the ESC's next character is.
+_OSC_END = frozenset({"\x07", "\x9c"})
+
+#: What an OSC body may not hold (_OSC_CODES): a sequence that meets one of
+#: these before its end is never completed.
+_OSC_BREAK = frozenset({"\r", "\n"})
+
+
 def _without_escape_codes(text: str) -> str:
     """*text* with every complete escape sequence removed, until none is left.
 
-    One pass is not enough: removing an inner sequence can join the bytes on
+    One removal is not enough: removing an inner sequence can join the bytes on
     either side of it into a sequence that was not there before ("\\x1b[" then
-    "\\x1b[2K" then "m" is "\\x1b[m" once the inner one goes), and that one
-    would stay in the returned text. Each pass removes at least one character,
-    so the loop ends.
+    "\\x1b[2K" then "m" is "\\x1b[m" once the inner one goes), and that one has
+    to be removed too. The result is the fixed point of removing complete sequences,
+    read in ONE pass over the text: each ESC that could still begin a sequence
+    is kept open on a stack, a character is read against the innermost open one,
+    a sequence that completes is dropped (so what came before its ESC and what
+    follows now touch, and the next character is read against the sequence
+    outside it), and an open sequence that meets a character no sequence admits
+    is closed as text, together with every one outside it, since a text ESC
+    inside a sequence's body ends that sequence for good. A sequence is matched
+    against the patterns above at most once, when it completes or when it is
+    closed, so the cost is linear in the text: removing sequences pass by pass
+    until none was left re-read the whole text once per nesting level, and
+    "\\x1b[" repeated k times before "m" repeated k times cost about k squared.
     """
-    while True:
-        stripped = _ESCAPE_CODES.sub("", text)
-        if stripped == text:
-            return text
-        text = stripped
+    if "\x1b" not in text:
+        return text
+    kept: List[str] = []
+    # Indexes in ``kept`` of each ESC that may still begin a sequence, innermost
+    # last.
+    open_escapes: List[int] = []
+    for character in text:
+        kept.append(character)
+        if character == "\x1b":
+            open_escapes.append(len(kept) - 1)
+            continue
+        while open_escapes:
+            start = open_escapes[-1]
+            if len(kept) - start == 2:
+                # The character after an ESC: "[" opens a CSI, "]" an OSC. A
+                # backslash may end an OSC this ESC sits inside, so the ESC is
+                # closed as text and the backslash is read against that OSC.
+                if character in "[]":
+                    break
+                open_escapes.pop()
+                if character == "\\" and open_escapes:
+                    continue
+                open_escapes.clear()
+                break
+            kind = kept[start + 1]
+            if kind not in "[]":
+                # An ESC whose next character was itself an ESC that is now
+                # closed as text: no sequence starts with two of them.
+                open_escapes.clear()
+                break
+            if kind == "[":
+                if character in _CSI_FINAL:
+                    if _CSI_CODES.fullmatch("".join(kept[start:])):
+                        del kept[start:]
+                        open_escapes.pop()
+                    else:
+                        open_escapes.clear()
+                    break
+                if character in _CSI_MIDDLE:
+                    break
+                open_escapes.clear()
+                break
+            if character in _OSC_END or (character == "\\" and kept[-2] == "\x1b"):
+                if _OSC_CODES.fullmatch("".join(kept[start:])):
+                    del kept[start:]
+                    open_escapes.pop()
+                else:
+                    open_escapes.clear()
+                break
+            if character in _OSC_BREAK:
+                open_escapes.clear()
+            break
+    return "".join(kept)
 
 
 def shown_tool_stderr(text: str, values: Iterable[str]) -> str:
