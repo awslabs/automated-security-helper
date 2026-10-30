@@ -759,11 +759,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _node_place(
         self,
         pkg_name: str,
-        node_path: str,
+        node_path: str | None,
         lock_rel: str | None,
         lock_index: NpmLockIndex | None,
     ) -> tuple[str, Dict[str, str]]:
-        """The result URI's package location and the identity of one node."""
+        """The result URI's package location and the identity of one node.
+
+        For a vulnerability entry that lists no node, the package by name alone:
+        npm counted the advisory, so it is reported against
+        ``node_modules/<name>/package.json`` with no installed version or path.
+        """
+        if node_path is None:
+            return pkg_name, identity_properties(pkg_name, None, None)
         return (
             str(node_path).replace("node_modules/", ""),
             self._node_identity(pkg_name, node_path, lock_rel, lock_index),
@@ -1764,10 +1771,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         )
                         rules_dict[vuln_id] = rule
 
-                    # Create a result for each installed copy (node). An entry
-                    # with no node names no installed copy, so it stays a rule
-                    # with no result.
-                    for node_path in vuln_info.get("nodes") or []:
+                    # Create a result for each installed copy (node), or one
+                    # for the package by name when npm lists no node: the
+                    # advisory is counted in the report's metadata, so a rule
+                    # with no result silently dropped a finding.
+                    for node_path in vuln_info.get("nodes") or [None]:
                         # The URI keeps its historical shape, which existing
                         # path-based suppressions match; package_path holds
                         # the real install path.
@@ -1869,7 +1877,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         lock_rel,
                         lock_index,
                     )
-                    for node_path in vuln_info.get("nodes") or []:
+                    for node_path in vuln_info.get("nodes") or [None]:
                         pkg_location, identity = self._node_place(
                             pkg_name, node_path, lock_rel, lock_index
                         )

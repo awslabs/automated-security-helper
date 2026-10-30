@@ -11,10 +11,8 @@ entry's severity and range, not the advisory's own, so an unscored low or
 moderate advisory on a package with a critical one was graded critical; a
 ``via`` entry with ``"cvss": null`` raised; npm's ``{"score": 0, "vectorString":
 null}`` reached the rule as security-severity 0, which GHAS forwards as "0";
-and a yarn or pnpm record with no ``versions`` produced a rule and no result
-while the report's metadata counted the advisory. An npm entry with no ``nodes``
-names no installed copy and stays a rule with no result, as the behavior tests
-pin.
+and an entry with no ``nodes`` (npm) or no ``versions`` (yarn, pnpm) produced a
+rule and no result while the report's metadata counted the advisory.
 """
 
 from __future__ import annotations
@@ -233,6 +231,45 @@ def test_an_advisory_without_a_version_range_keeps_the_package_s(scanner):
 
     (result,) = report.runs[0].results
     assert result.properties.model_extra["vulnerable_versions"] == "<3.0.0"
+
+
+def test_an_npm_entry_with_no_nodes_still_produces_a_result(scanner):
+    """npm counted the advisory in the report's metadata; a rule with no result
+    dropped it. One result for the package by name, no installed path."""
+    document = _report(pkg=("high", [_via("pkg", "high", score=0, vector=None)], []))
+
+    report, grades = _graded(scanner, document)
+
+    (result,) = report.runs[0].results
+    location = result.locations[0].model_dump(by_alias=True, exclude_none=True)
+    assert (
+        location["physicalLocation"]["artifactLocation"]["uri"]
+        == "node_modules/pkg/package.json"
+    )
+    props = result.properties.model_extra
+    assert props["package_name"] == "pkg"
+    assert "package_path" not in props
+    assert "package_version" not in props
+    assert list(grades.values()) == ["HIGH"], grades
+
+
+def test_a_transitive_entry_with_no_nodes_still_produces_a_result(scanner):
+    document = _report(
+        root=(
+            "high",
+            [_via("root", "high", score=0, vector=None)],
+            ["node_modules/root"],
+        ),
+        child=("high", ["root"], []),
+    )
+
+    report, grades = _graded(scanner, document)
+
+    transitive = [
+        r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-child"
+    ]
+    assert len(transitive) == 1, [r.ruleId for r in report.runs[0].results]
+    assert grades[("npm-audit-transitive-child", "*")] == "HIGH"
 
 
 def test_a_yarn_or_pnpm_record_with_no_versions_still_produces_a_result(scanner):
