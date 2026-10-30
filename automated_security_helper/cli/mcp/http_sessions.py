@@ -235,11 +235,12 @@ def _query_value(scope: Scope, name: str) -> Optional[str]:
 
 
 #: How long a session workspace may go unused before the sweep removes it, by
-#: default. It bounds the sessions whose end this app cannot see: the sweep keeps
-#: every session the app still holds as issued whatever its age, so an open sse
-#: stream or a stateful session the SDK has not ended never loses its tree to a
-#: TTL shorter than its idle time, and every request naming a session refreshes
-#: its workspace.
+#: default. It bounds the sessions whose end this app cannot see: every
+#: stateless one, and a stateful session the SDK dropped for being idle without
+#: telling this app. Every request naming a session refreshes its workspace, and
+#: the sweep keeps a session whose sse event stream is open whatever its age, so
+#: an open but idle stream never loses its tree to a TTL shorter than its idle
+#: time.
 DEFAULT_SESSION_WORKSPACE_TTL_SECONDS = 24 * 60 * 60
 
 #: How often, at most, the sweep runs after the first request.
@@ -308,12 +309,15 @@ class SessionBoundary:
     down, ended at the shutdown request, before the app's own lifespan exit,
     which can end the process, and again before shutdown is reported complete
     for a removal that failed. Sessions whose end it cannot see -- every
-    stateless one -- are removed by the TTL sweep, which runs before the first
-    request is answered and then at most every five minutes, and which keeps
-    every session this app still holds as issued. A stateful session the SDK
-    closed for being idle that no client asks about again is such a session:
-    nothing tells this app it ended, so its id stays issued and its workspace is
-    kept from the sweep until the app shuts down.
+    stateless one, and a stateful session the SDK closed for being idle that no
+    client asks about again, since nothing tells this app it ended -- are
+    removed by the TTL sweep, which runs before the first request is answered
+    and then at most every five minutes. The sweep keeps only the sessions
+    whose sse event stream is open, whatever their age, and marks their
+    workspaces used so another server sharing the root keeps them too; an
+    issued stateful id is not kept on its own account, or the tree of every
+    client that disconnects without a ``DELETE`` would stay for the life of the
+    process.
     """
 
     def __init__(
@@ -357,6 +361,11 @@ class SessionBoundary:
         # the app's own responses. sse: ids read from the endpoint event of an
         # event stream that is still open.
         self._issued: Set[str] = set()
+        # The sessions whose sse event stream is open right now: the one kind
+        # of session the TTL sweep keeps whatever its age (_sweep_if_due). A
+        # stateful id stays issued after the SDK drops its idle session, since
+        # nothing tells this app, so it is not kept on that account.
+        self._open_streams: Set[str] = set()
         self._next_sweep = 0.0
         self._sweep_lock: Optional[Any] = None
 
@@ -417,8 +426,6 @@ class SessionBoundary:
 
         import anyio
 
-        from automated_security_helper.cli.mcp.sessions import sweep_stale_workspaces
-
         if time.monotonic() < self._next_sweep:
             return
         if self._sweep_lock is None:
@@ -430,15 +437,22 @@ class SessionBoundary:
         async with self._sweep_lock:
             if time.monotonic() < self._next_sweep:
                 return
+            # The sessions whose sse event stream is open right now are kept
+            # whatever their age: an open but idle stream has not ended, and its
+            # end comes through _end, not the sweep. Each is also marked used
+            # now, since another server sharing the root sweeps by age alone
+            # and cannot see this app's open streams. A stateful session is not
+            # kept by being issued: the SDK drops an idle stateful session
+            # without telling this app, so its id would stay issued, and its
+            # workspace kept, for the life of the process; every request that
+            # names it refreshes its workspace instead, and the TTL covers it.
+            open_streams = frozenset(self._open_streams)
             try:
-                # The sessions this app still holds as issued are kept: an sse
-                # stream that is open but idle, a stateful session the SDK has
-                # not ended. Their end comes through _end, not the sweep.
                 await anyio.to_thread.run_sync(
                     functools.partial(
-                        sweep_stale_workspaces,
+                        _sweep_keeping_open_streams,
                         self.session_workspace_ttl,
-                        in_use=frozenset(self._issued),
+                        open_streams,
                     )
                 )
             except Exception as exc:
@@ -615,6 +629,7 @@ class SessionBoundary:
                     opened["session"] = session
                     if session:
                         self._issued.add(session)
+                        self._open_streams.add(session)
             await send(message)
 
         try:
@@ -622,7 +637,27 @@ class SessionBoundary:
         finally:
             session = opened.get("session")
             if session:
+                self._open_streams.discard(session)
                 await self._end(session)
+
+
+def _sweep_keeping_open_streams(ttl_seconds: float, open_streams: FrozenSet[str]):
+    """Run the TTL sweep with the open event streams' sessions kept and marked used.
+
+    On the worker thread the sweep runs on. Each open stream's workspace is
+    touched first: this process keeps it by name (``in_use``), and another
+    server sharing the root, which sweeps by age alone and cannot see this
+    app's streams, then reads it as used now, so an open stream's workspace is
+    kept there too for as long as the stream stays open and the sweeps run.
+    """
+    from automated_security_helper.cli.mcp.sessions import (
+        sweep_stale_workspaces,
+        touch_session_workspace,
+    )
+
+    for session_id in open_streams:
+        touch_session_workspace(session_id)
+    return sweep_stale_workspaces(ttl_seconds, in_use=open_streams)
 
 
 def _logger() -> ASHLogger:

@@ -1950,12 +1950,14 @@ def sweep_stale_workspaces(
 ) -> List[str]:
     """Remove session workspaces nobody used for longer than ``ttl_seconds``.
 
-    ``in_use`` names the sessions the caller still holds as issued (the HTTP
-    boundary's: an sse event stream that is still open, a stateful session the
-    SDK has not ended). Those are kept whatever their age: an open stream that
-    has sent no message for longer than the TTL is idle, not ended, and its
-    workspace, bound profile and delivered-source record end with the stream
-    (``end_session``), not with the sweep.
+    ``in_use`` names the sessions the caller knows to be live (the HTTP
+    boundary's: the sessions whose sse event stream is open right now). Those
+    are kept whatever their age: an open stream that has sent no message for
+    longer than the TTL is idle, not ended, and its workspace, bound profile and
+    delivered-source record end with the stream (``end_session``), not with the
+    sweep. The keep is this process's knowledge only; a caller that shares the
+    root with other servers also marks those workspaces used
+    (``touch_session_workspace``), since another server's sweep reads age alone.
 
     Only directories ASH created are considered. A session workspace carries
     ``session_paths.SESSION_MARKER``, and anything else under the root (an
