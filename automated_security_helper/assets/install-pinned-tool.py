@@ -331,6 +331,30 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
         self._refuse_unless_https(req, code, msg, newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
+    def http_error_302(self, req, fp, code, msg, headers):
+        """Check the Location before urllib's own handler reads it.
+
+        ``HTTPRedirectHandler.http_error_302`` refuses a scheme outside http,
+        https and ftp (``file:``, ``data:``, ``gopher:``) before it ever calls
+        ``redirect_request``, by raising an ``HTTPError`` that names the whole
+        Location, query included, and leaves as a traceback with status 1. The
+        Location is joined to the request URL here, as urllib will join it, and
+        anything but https leaves through the refusal in ``redirect_request``.
+        """
+        location = headers.get("location") or headers.get("uri")
+        if location:
+            try:
+                target = urllib.parse.urljoin(req.full_url, location)
+            except ValueError:
+                target = location
+            self._refuse_unless_https(req, code, msg, target)
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    # urllib binds these names to its own http_error_302, so each has to be bound
+    # again here. 308 is an alias only from Python 3.11; binding it on every version
+    # keeps the scheme check on all of them.
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
 
 def download(url: str, target: Path) -> str:
     """Fetch ``url`` to ``target`` and return the SHA256 of what landed.

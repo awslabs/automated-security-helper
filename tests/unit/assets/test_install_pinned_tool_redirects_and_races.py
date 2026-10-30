@@ -8,7 +8,10 @@
   https URL could be fetched over plain http. The opener ``download`` builds now
   refuses a redirect that leaves https, and the refusal exits ``_EXIT_INTEGRITY``
   with one line on standard error. It used to escape as an ``HTTPError``
-  traceback with status 1, which with-retry repeats.
+  traceback with status 1, which with-retry repeats. A Location with a scheme
+  CPython refuses outright (``file:``, ``data:``, ``gopher:``) is caught before
+  urllib raises its own ``HTTPError`` carrying the whole URL, so it exits the same
+  way.
 * Two installs of one rules bundle into one directory raced on the last rename: the
   loser failed with "Directory not empty" although the bundle was in place, or with
   "No such file" when the winner had already moved the old directory aside.
@@ -21,6 +24,7 @@ Nothing here reaches the network or starts a process.
 
 from __future__ import annotations
 
+import email.message
 import errno
 import hashlib
 import importlib.util
@@ -164,6 +168,77 @@ class TestARedirectLeavingHttpsIsRefused:
         assert plain("file:///etc/passwd?x=1") == "file:///etc/passwd"
         assert plain("http://[::1/x") == "<unparseable URL>"
         assert len(plain("https://h.invalid/" + "a" * 5000)) <= 200
+
+    @staticmethod
+    def _answer(location: str, code: int = 302, source: str = "https://h.invalid/x"):
+        """Hand a 3xx response to the handler's ``http_error_<code>``, as urllib does.
+
+        CPython's ``http_error_302`` refuses schemes other than http, https and ftp
+        before it calls ``redirect_request``, so only a call through it reaches that
+        branch.
+        """
+        headers = email.message.Message()
+        headers["Location"] = location
+        handler = installer._HttpsOnlyRedirects()
+        return getattr(handler, f"http_error_{code}")(
+            urllib.request.Request(source), io.BytesIO(b""), code, "Found", headers
+        )
+
+    @pytest.mark.parametrize("code", [301, 302, 303, 307, 308])
+    def test_a_file_location_exits_with_the_integrity_status(self, code, capsys):
+        # Red before: CPython raised HTTPError naming the whole Location, status 1;
+        # and http_error_308 did not exist on this class at all.
+        with pytest.raises(SystemExit) as raised:
+            self._answer("file:///etc/passwd?token=LOC-SECRET", code)
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        printed = capsys.readouterr().err
+        assert "file:///etc/passwd" in printed
+        assert "LOC-SECRET" not in printed
+
+    @pytest.mark.parametrize("location", ["data:text/plain,x", "gopher://h.invalid/x"])
+    def test_other_schemes_exit_with_the_integrity_status(self, location):
+        with pytest.raises(SystemExit) as raised:
+            self._answer(location)
+        assert raised.value.code == installer._EXIT_INTEGRITY
+
+    def test_a_location_that_does_not_parse_exits_with_the_integrity_status(self):
+        with pytest.raises(SystemExit) as raised:
+            self._answer("http://[::1/x?token=T")
+        assert raised.value.code == installer._EXIT_INTEGRITY
+
+    def test_a_relative_location_on_https_is_followed(self):
+        """Control: the check joins the Location to the request URL, as urllib will."""
+        handler = installer._HttpsOnlyRedirects()
+        opened = []
+        handler.add_parent(
+            types.SimpleNamespace(
+                open=lambda new, timeout=None: opened.append(new.full_url) or "ok"
+            )
+        )
+        headers = email.message.Message()
+        headers["Location"] = "/c?x=1"
+        request = urllib.request.Request("https://h.invalid/a/b")
+        # OpenerDirector.open sets the timeout; urllib reads it when it follows.
+        request.timeout = 5
+
+        answered = handler.http_error_302(
+            request, io.BytesIO(b""), 302, "Found", headers
+        )
+
+        assert answered == "ok"
+        assert opened == ["https://h.invalid/c?x=1"]
+
+    def test_an_answer_with_no_location_is_left_to_urllib(self):
+        """Control: nothing to check, and urllib's own handler returns None."""
+        handler = installer._HttpsOnlyRedirects()
+        answered = handler.http_error_302(
+            urllib.request.Request("https://h.invalid/x"),
+            io.BytesIO(b""),
+            302,
+            "Found",
+            email.message.Message(),
+        )
+        assert answered is None
 
     def test_the_refusal_leaves_download_with_the_integrity_status(
         self, monkeypatch, tmp_path
