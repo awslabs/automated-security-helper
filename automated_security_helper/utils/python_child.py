@@ -324,9 +324,13 @@ _UV_SUBCOMMANDS = frozenset(
     }
 )
 
-#: ``UV_SYSTEM_PYTHON`` values uv reads as false, so an operator who set it to one
-#: of these chose no interpreter.
-_UV_FALSE = frozenset({"", "0", "false", "no", "off"})
+#: ``UV_SYSTEM_PYTHON`` values uv reads as true (clap's boolish parser, case
+#: folded): only one of these is an operator's choice of interpreter. uv reads
+#: ``0``, ``false``, ``f``, ``no``, ``n`` and ``off`` as false and refuses any other
+#: value, so the complement was the wrong test: a ``UV_SYSTEM_PYTHON=f`` was counted
+#: as a choice, UV_PYTHON was left out, and uv, reading the variable as false, ran
+#: the scanned tree's ``.venv``.
+_UV_TRUE = frozenset({"1", "true", "t", "yes", "y", "on"})
 
 
 def _uv_arguments(argv: Sequence[str]) -> Optional[List[str]]:
@@ -443,7 +447,7 @@ def uv_child_overrides(
         a in ("--python", "-p", "--system") or a.startswith("--python=") for a in own
     )
     operator_chose = bool(environment.get("UV_PYTHON")) or (
-        environment.get("UV_SYSTEM_PYTHON", "").strip().lower() not in _UV_FALSE
+        environment.get("UV_SYSTEM_PYTHON", "").strip().lower() in _UV_TRUE
     )
     if not names_interpreter and not operator_chose:
         overrides["UV_PYTHON"] = sys.executable

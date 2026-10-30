@@ -213,14 +213,20 @@ def test_the_value_of_an_unknown_global_option_is_not_the_subcommand():
     assert uv_child_overrides(["uv", "--new-option", "value", "pip", "list"]) == BOTH
 
 
-@pytest.mark.parametrize("value", ["0", "false", "no", "off", ""])
+@pytest.mark.parametrize(
+    "value", ["0", "false", "f", "F", "no", "n", "N", "off", "OFF", "False", ""]
+)
 def test_a_false_uv_system_python_is_no_choice_of_interpreter(monkeypatch, value):
+    """Every spelling uv's boolish parser reads as false, ``n`` and ``f``
+    included: counted as a choice, they left UV_PYTHON out while uv read them as
+    false and ran the tree's ``.venv``."""
     monkeypatch.setenv("UV_SYSTEM_PYTHON", value)
     assert uv_child_overrides(["uv", "pip", "list"]) == BOTH
 
 
-def test_a_true_uv_system_python_is_a_choice_of_interpreter(monkeypatch):
-    monkeypatch.setenv("UV_SYSTEM_PYTHON", "1")
+@pytest.mark.parametrize("value", ["1", "true", "t", "yes", "y", "on", "TRUE", " 1 "])
+def test_a_true_uv_system_python_is_a_choice_of_interpreter(monkeypatch, value):
+    monkeypatch.setenv("UV_SYSTEM_PYTHON", value)
     assert uv_child_overrides(["uv", "pip", "list"]) == {"UV_NO_PROJECT": "1"}
 
 
