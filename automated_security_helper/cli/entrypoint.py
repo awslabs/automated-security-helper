@@ -117,8 +117,9 @@ def _descriptor_is_closed(fd: int) -> bool:
     return False
 
 
-def _reserve_descriptor(fd: int) -> bool:
-    """Hold the closed descriptor *fd* with ``os.devnull``.
+def _reserve_descriptor(fd: int, flags: int = os.O_WRONLY) -> bool:
+    """Hold the closed descriptor *fd* with ``os.devnull``, opened with *flags*
+    (for writing by default; stdin is held for reading).
 
     Returns whether it is held. Opening the null device may itself be handed
     *fd*, the lowest free number; then it is already in place and stays open.
@@ -131,7 +132,7 @@ def _reserve_descriptor(fd: int) -> bool:
     the two paths cannot drift apart.
     """
     try:
-        null = os.open(os.devnull, os.O_WRONLY)
+        null = os.open(os.devnull, flags)
     except OSError:
         return False
     if null != fd:
@@ -179,9 +180,15 @@ def ensure_std_streams() -> tuple[str, ...]:
     A descriptor that is closed outright gets no stream, and is held with
     ``os.devnull`` instead (:data:`_RESERVED_DESCRIPTORS`): left free, the next
     file ASH opened would take its number, and the raw floor and every child's
-    inherited stderr would then write into that file.
+    inherited stderr would then write into that file. A closed stdin is held
+    the same way, for reading: left free, the next file ASH opened would become
+    descriptor 0, and every child that inherits stdin would read from it. No
+    stream is attached for it; nothing in ASH reads a stdin that was closed.
     """
     repaired = []
+    if getattr(sys, "stdin", None) is None and _descriptor_is_closed(0):
+        _RESERVED_DESCRIPTORS.add(0)
+        _reserve_descriptor(0, os.O_RDONLY)
     for name, fd in (("stdout", 1), ("stderr", 2)):
         if getattr(sys, name, None) is not None:
             continue

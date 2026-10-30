@@ -58,7 +58,7 @@ def recorded_os(monkeypatch):
         return real_set_inheritable(fd, inheritable)
 
     def fake_open(path, flags, *args, **kwargs):
-        if path == os.devnull and flags == os.O_WRONLY:
+        if path == os.devnull:
             calls.append(("open", path, flags))
             return NULL_FD
         return real_open(path, flags, *args, **kwargs)
@@ -99,6 +99,26 @@ def test_a_closed_stderr_is_held_with_the_null_device(
         ("inheritable", 2, True),
     ], recorded_os
     assert no_reservations == {2}
+
+
+def test_a_closed_stdin_is_held_for_reading(monkeypatch, no_reservations, recorded_os):
+    """`ash 0<&-`: left free, the next file ASH opened would become descriptor 0
+    and every child that inherits stdin would read from it."""
+    monkeypatch.setattr(sys, "stdin", None)
+    monkeypatch.setattr(entrypoint, "_descriptor_is_closed", lambda fd: fd == 0)
+
+    repaired = entrypoint.ensure_std_streams()
+
+    assert repaired == (), repaired
+    assert recorded_os == [
+        ("open", os.devnull, os.O_RDONLY),
+        ("dup2", NULL_FD, 0),
+        ("close", NULL_FD),
+        ("inheritable", 0, True),
+    ], recorded_os
+    assert no_reservations == {0}
+    # No stream is attached for a held stdin.
+    assert sys.stdin is None
 
 
 def test_an_unattached_but_open_descriptor_is_not_held(
