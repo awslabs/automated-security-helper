@@ -4,8 +4,10 @@
 """Four readings of ``config/client_config_policy.py``.
 
 * ``_with_own_patch``, the per-op walk the restrict-only check reads a delivered
-  file's ``patch`` through: a failed ``test`` op ends it with the unpatched
-  document, as resolution aborts the whole patch; a ``test`` that passes is
+  file's ``patch`` through: a failed ``test`` op is skipped and the walk goes
+  on to the ops after it, since the walk does not read the bases the file
+  extends and a ``test`` that passes in the load can fail over its starting
+  document; a ``test`` that passes is
   applied without error and the walk goes on to the ops after it; and the walk
   starts from the trusted base merged with the document's own fields, so a
   ``test`` of a value the document itself sets passes here as it passes in the
@@ -64,12 +66,13 @@ def test_a_patch_whose_sibling_op_fails_still_shows_the_op_that_applies():
     assert seen.get("sandbox", {}).get("extra_read_paths") == ["/etc"], seen
 
 
-def test_a_failed_test_op_leaves_the_document_unpatched_in_the_per_op_walk():
-    """Resolution aborts the whole patch when a ``test`` op fails, so the ops
-    after it are never applied by the load. The per-op walk follows: a failed
-    test ends it with the unpatched document, so the walk does not read a
-    grant the load never makes and refuse a file the load treats as
-    unpatched."""
+def test_a_failed_test_op_does_not_hide_the_grant_after_it_in_the_per_op_walk():
+    """A ``test`` op that fails over the walk's own starting document does not
+    end the per-op walk: the walk goes on to the ops after it and reads the
+    grant one of them writes. The walk starts from the trusted base plus the
+    file's own keys, not from the bases the file extends, so a ``test`` that
+    passes in the load can fail here; reading on from it over-reports, which
+    refuses, where ending the walk would leave the grant unjudged."""
     document = {
         "patch": [
             {"op": "remove", "path": "/no/such/place/at/all"},
@@ -80,7 +83,27 @@ def test_a_failed_test_op_leaves_the_document_unpatched_in_the_per_op_walk():
 
     seen = _with_own_patch(document, AshConfig())
 
-    assert seen is document, seen
+    assert seen.get("sandbox", {}).get("extra_read_paths") == ["/etc"], seen
+
+
+def test_a_test_op_of_an_extended_bases_value_does_not_hide_the_grant_after_it():
+    """The shape of the load: the file extends a base that sets the tested
+    path, the load merges that base before it applies the patch, so the
+    ``test`` op passes there and the ``add`` after it applies. The walk does not
+    read the extended base, the same ``test`` op fails over its starting
+    document, and the ``add`` after it must still reach the walk's judgment."""
+    document = {
+        "extends": "bases/sets-the-project-name.yaml",
+        "patch": [
+            {"op": "test", "path": "/project_name", "value": "set-by-the-base"},
+            {"op": "add", "path": "/sandbox/extra_read_paths", "value": ["/etc"]},
+        ],
+    }
+    assert AshConfig().project_name != "set-by-the-base"
+
+    seen = _with_own_patch(document, AshConfig())
+
+    assert seen.get("sandbox", {}).get("extra_read_paths") == ["/etc"], seen
 
 
 def test_a_passing_test_op_does_not_end_the_per_op_walk():

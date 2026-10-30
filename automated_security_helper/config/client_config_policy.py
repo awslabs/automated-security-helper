@@ -844,12 +844,16 @@ def _with_own_patch(document: Any, base: AshConfig) -> Any:
     there as a whole, each op is applied on its own and the ones that apply are
     kept: an op that writes a sandbox grant or a plugin module still reaches the
     walk when a sibling op fails, instead of the whole patch falling back to the
-    unpatched document. A ``test`` op that fails ends the per-op walk and
-    answers the unpatched document: resolution aborts the whole patch on a
-    failed test, so no later op of that patch is ever applied, and a walk that
-    kept applying them could read a widening the load never makes. An op that
-    applies in neither form is left to resolution, which applies it over the
-    real chain, and to the confinement that drops whatever it widens.
+    unpatched document. A ``test`` op that fails is skipped like any other op
+    that does not apply, and the walk goes on to the ops after it. The walk
+    starts from ``base`` and the file's own keys, while the load merges the
+    bases the file extends before it applies the patch, so a ``test`` that
+    passes in the load can fail here; ending the walk at it would leave a grant
+    written after it unjudged. Reading on can show a widening the load, which
+    aborts the patch at a failed test, never makes, and that over-report
+    refuses where the other answer would not. An op that applies in neither form
+    is left to resolution, which applies it over the real chain, and to the
+    confinement that drops whatever it widens.
     """
     from automated_security_helper.config.config_sources import (
         EXTENDS_KEY,
@@ -878,8 +882,6 @@ def _with_own_patch(document: Any, base: AshConfig) -> Any:
         try:
             current = _apply_patch(current, [op], where).document
         except ASHConfigSourceError:
-            if isinstance(op, dict) and op.get("op") == "test":
-                return document
             continue
     return current
 
