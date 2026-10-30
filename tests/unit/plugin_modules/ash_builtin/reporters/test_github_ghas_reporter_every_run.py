@@ -292,7 +292,16 @@ def test_a_projects_own_document_keeps_its_uris_and_base_ids(reporter):
 
 
 @pytest.mark.parametrize(
-    "project_path", ["../other", "/abs/other", "services/../../other", "C:/other"]
+    "project_path",
+    [
+        "../other",
+        "/abs/other",
+        "services/../../other",
+        "C:/other",
+        "%2e%2e/other",
+        "services/%2E%2E/%2e%2e/other",
+        "%2Fabs/other",
+    ],
 )
 def test_a_project_path_outside_the_workspace_root_refuses_the_document(
     reporter, caplog, project_path

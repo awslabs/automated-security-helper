@@ -241,12 +241,17 @@ def _project_path_is_placeable(project_path: str) -> bool:
 
     Rooted (``/x``, ``\\x``, ``C:``) or escaping (a ``..`` component) paths
     cannot, so a URI prefixed with one names nothing GitHub can resolve against
-    the repository the document is uploaded for.
+    the repository the document is uploaded for. The path is read
+    percent-decoded as well as written, because it is joined into a URI that
+    GitHub decodes: a component spelled ``%2e%2e`` is ``..`` to the consumer.
     """
     text = project_path.strip().replace("\\", "/")
     if text.startswith("/") or _DRIVE_ANCHOR.match(text):
         return False
-    return ".." not in PurePosixPath(text).parts
+    for spelling in (text, unquote(text)):
+        if spelling.startswith("/") or ".." in PurePosixPath(spelling).parts:
+            return False
+    return True
 
 
 def _result_workspace_uri(result: Any) -> Optional[str]:
