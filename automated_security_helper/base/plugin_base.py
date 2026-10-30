@@ -747,6 +747,11 @@ def _response_text(response: Dict, keys: Tuple[str, ...], default: str) -> str:
     return default
 
 
+def _raised_key(recorder: str) -> str:
+    """What ``_record_response`` adds to ``invoked`` when ``recorder`` raised."""
+    return f"{recorder}:raised"
+
+
 def _error_text_read_once(error: BaseException, read: Any) -> str:
     """``error`` as text for a record, redacted with a values read already taken.
 
@@ -1709,9 +1714,11 @@ class PluginBase(UVToolMixin, BaseModel):
         Each is named in ``invoked`` before its call, so a recorder that raises
         counts as run and is never called again for this response: its report
         was given twice, and a recorder raising at every call escaped the
-        handler through its second call. Under ``guard``, for the handler, a
-        recorder that raises stays inside this call, with its error added to the
-        response's reason once.
+        handler through its second call. Outside ``guard`` a recorder that
+        raised is also named in ``invoked`` by ``_raised_key``, for the handler
+        that catches the raise to tell it from one that finished. Under
+        ``guard``, for the handler, a recorder that raises stays inside this
+        call, with its error added to the response's reason once.
 
         Recording a response retires its processed mark: once recorded, the
         response is done with, and the mark must not outlive it.
@@ -1728,7 +1735,15 @@ class PluginBase(UVToolMixin, BaseModel):
                 continue
             invoked.add(name)
             if not guard:
-                record()
+                try:
+                    record()
+                except BaseException:
+                    # Remembered beside the name for the handler that catches
+                    # this: a recorder that raised has had its one call, and
+                    # must not be given a second by a handler that wants the
+                    # ones the raise skipped (see _raised_key).
+                    invoked.add(_raised_key(name))
+                    raise
                 continue
             try:
                 record()
@@ -2174,8 +2189,12 @@ class PluginBase(UVToolMixin, BaseModel):
                 # The post-run recorder may have run already, as a no-op on the
                 # response as it was (a later recorder raised before the flag
                 # was added). It is called for the flagged copy, or its line
-                # and errors entry are never written.
-                invoked.discard("post_run_error")
+                # and errors entry are never written. Not when it raised: that
+                # raise is the error this handler caught, and a second call
+                # would raise it again, with the recorder's side effects and
+                # its text on the response's reason twice.
+                if _raised_key("post_run_error") not in invoked:
+                    invoked.discard("post_run_error")
             # The tool's stderr: what the run returned, or under "write", where the
             # run returns none, its stderr log read back.
             # Not carried without the values: the log holds the tool's text in
