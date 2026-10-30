@@ -152,16 +152,51 @@ class TestThePolicyGateIsNamed:
 
         assert "workspace-policy" not in row["detail"]
 
+    def test_a_record_written_before_the_field_reads_as_gating(self, tmp_path):
+        """A pre-field file's verdict applied the gate before it wrote.
+
+        Loaded from its JSON the field is absent (None); the row says the
+        findings gate the project, the fail-closed side.
+        """
+        legacy = WorkspaceProjectResult.model_validate(
+            {
+                "project": "legacy",
+                "relative_path": "legacy",
+                "display_label": "legacy",
+                "status": "completed",
+                "severity_threshold": "MEDIUM",
+                "output_path": "projects/legacy",
+                "policy_origin_finding_count": 2,
+            }
+        )
+        assert legacy.policy_scanners_gate is None
+
+        (row,) = workspace_project_rows(_model(tmp_path, legacy))
+
+        # RED at the base: the absent field read as False, so the row said the
+        # findings "do not gate this project" for a verdict that counted them.
+        assert (
+            "2 finding(s) from workspace-policy scanners gate this project"
+            in row["detail"]
+        )
+
 
 class TestTheReaderTables:
     def test_the_gate_table_names_every_project(self, tmp_path):
         model = _model(
             tmp_path,
-            _project("watch"),
+            _project("legacy"),
+            _project("watch", policy_scanners_gate=False),
             _project("strict", policy_scanners_gate=True),
         )
 
-        assert workspace_policy_gates(model) == {"watch": False, "strict": True}
+        # RED at the base: the table read the absent gate as False, so a reader
+        # could not tell a pre-field record from a project that turned the gate off.
+        assert workspace_policy_gates(model) == {
+            "legacy": None,
+            "watch": False,
+            "strict": True,
+        }
 
     def test_the_scanner_threshold_table_normalizes_and_drops_unknown_values(
         self, tmp_path

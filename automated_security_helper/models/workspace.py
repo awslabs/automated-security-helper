@@ -484,9 +484,9 @@ class WorkspaceProjectResult(RecordModel):
         ),
     ] = 0
     policy_scanners_gate: Annotated[
-        bool,
+        Optional[bool],
         Field(
-            False,
+            None,
             description=(
                 "Whether findings from scanners only `workspace.additional_scanners` "
                 "asked for decided this project's verdict (the policy's "
@@ -494,11 +494,15 @@ class WorkspaceProjectResult(RecordModel):
                 "policy-origin finding is reported and excluded from "
                 "actionable_finding_count; a reader that regrades findings (the "
                 "merged JUnit report, the MCP result filters) reads this to grade "
-                "such a finding as the verdict did instead of as a failure. False "
-                "in a workspace file written before the field existed."
+                "such a finding as the verdict did instead of as a failure. The "
+                "executor always records True or False. None (absent) means a "
+                "workspace file written before the field existed; such a file's "
+                "verdict applied the gate, so a reader treats None as gating and "
+                "grades a policy-origin finding by the threshold, the fail-closed "
+                "side."
             ),
         ),
-    ] = False
+    ] = None
     exceeds_threshold: Annotated[
         bool,
         Field(

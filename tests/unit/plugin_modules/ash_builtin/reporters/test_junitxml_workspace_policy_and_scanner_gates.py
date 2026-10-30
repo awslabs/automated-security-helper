@@ -75,7 +75,9 @@ def workspace_model(tmp_path) -> AshAggregatedResults:
     ``watch`` and ``strict`` each hold a policy-origin finding; ``watch`` does not
     gate on policy scanners, ``strict`` does. ``tuned`` recorded bandit's own
     CRITICAL threshold and holds a bandit HIGH and a semgrep HIGH; ``plain``
-    recorded no scanner threshold and holds a bandit HIGH.
+    recorded no scanner threshold and holds a bandit HIGH. ``legacy`` holds a
+    policy-origin finding and records no gate at all, as a file written before
+    the field existed does.
     """
     model = AshAggregatedResults()
     model.ash_config = None
@@ -101,6 +103,12 @@ def workspace_model(tmp_path) -> AshAggregatedResults:
                         _result("tuned", rule="TUNED-BANDIT", scanner="bandit"),
                         _result("tuned", rule="TUNED-SEMGREP", scanner="semgrep"),
                         _result("plain", rule="PLAIN-BANDIT", scanner="bandit"),
+                        _result(
+                            "legacy",
+                            rule="POLICY-LEGACY",
+                            scanner="semgrep",
+                            origin="workspace-policy",
+                        ),
                     ],
                     "invocations": [],
                 }
@@ -120,6 +128,7 @@ def workspace_model(tmp_path) -> AshAggregatedResults:
             ),
             _project("tuned", scanner_thresholds={"bandit": "CRITICAL"}),
             _project("plain"),
+            _project("legacy", policy_origin_finding_count=1),
         ],
     )
     return model
@@ -151,6 +160,20 @@ def test_a_gating_policy_finding_is_still_an_error(tmp_path, workspace_model):
     cases = _cases(tmp_path, workspace_model)
 
     assert _outcome(cases["POLICY-STRICT"]) == "actionable"
+
+
+def test_a_policy_finding_in_a_record_without_the_field_is_an_error(
+    tmp_path, workspace_model
+):
+    """A file written before the field existed applied the gate before it wrote."""
+    assert workspace_model.workspace.projects[4].policy_scanners_gate is None
+
+    cases = _cases(tmp_path, workspace_model)
+
+    # RED at the base: the absent gate read as False and the finding rendered
+    # Skipped "policy-not-gating" where the base rendered an <error> and the
+    # recorded verdict counted it.
+    assert _outcome(cases["POLICY-LEGACY"]) == "actionable"
 
 
 def test_a_policy_tag_alone_marks_the_finding(tmp_path, workspace_model):

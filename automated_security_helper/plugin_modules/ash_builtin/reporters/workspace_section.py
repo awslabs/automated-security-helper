@@ -153,23 +153,27 @@ def workspace_project_scanner_thresholds(
     return by_project
 
 
-def workspace_policy_gates(model: "AshAggregatedResults") -> Dict[str, bool]:
+def workspace_policy_gates(model: "AshAggregatedResults") -> Dict[str, Optional[bool]]:
     """``{project key: policy_scanners_gate}`` for every project in the workspace.
 
     Whether a finding from a scanner only the workspace policy added decided
     that project's verdict. A reader grading such a finding (its
     ``properties.origin`` is ``workspace-policy``) reads this before the
-    threshold: with the gate off the verdict excluded the finding from
-    ``actionable_finding_count``, so grading it as a failure contradicts the
-    project's own outcome and the exit code. Empty for a single-directory scan;
-    False for a project in a workspace file written before the field existed.
+    threshold: only an explicit False says the verdict excluded the finding from
+    ``actionable_finding_count``, so grading it as a failure would contradict
+    the project's own outcome and the exit code. Empty for a single-directory
+    scan. None for a project in a workspace file written before the field
+    existed: that file's verdict applied the gate before it wrote, so a reader
+    treats None as gating and grades the finding by the threshold, the
+    fail-closed side; a project the table does not list is read the same way.
     """
     if not is_workspace_scan(model):
         return {}
-    return {
-        project.project: bool(getattr(project, "policy_scanners_gate", False))
-        for project in model.workspace.projects
-    }
+    gates: Dict[str, Optional[bool]] = {}
+    for project in model.workspace.projects:
+        value = getattr(project, "policy_scanners_gate", None)
+        gates[project.project] = value if isinstance(value, bool) else None
+    return gates
 
 
 def workspace_project_threshold(
@@ -277,11 +281,12 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
         if policy_findings:
             # Whether those findings decided the verdict: with the gate off they are
             # reported and excluded from the Actionable column, which the counts
-            # alone cannot say.
+            # alone cannot say. Only an explicit False is "off": a file written
+            # before the field existed applied the gate before it wrote.
             gating = (
-                "gate this project"
-                if getattr(project, "policy_scanners_gate", False)
-                else "do not gate this project"
+                "do not gate this project"
+                if getattr(project, "policy_scanners_gate", None) is False
+                else "gate this project"
             )
             policy = (
                 f"{policy_findings} finding(s) from workspace-policy scanners {gating}"

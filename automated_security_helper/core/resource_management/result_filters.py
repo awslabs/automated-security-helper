@@ -307,9 +307,10 @@ def _workspace_project_gates(raw_results: Any) -> Dict[str, Dict[str, Any]]:
     and the reports) and a single scan's does not. Each entry holds the project's
     gate threshold (``severity_threshold``), its recorded per-scanner thresholds
     (``scanner_thresholds``) and whether a policy scanner's findings decided its
-    verdict (``policy_scanners_gate``), as ``WorkspaceProjectResult`` records
-    them. Empty for a single scan, so every reader of it falls through to the
-    scanner-keyed ``severity_thresholds`` map.
+    verdict (``policy_scanners_gate``: True, False, or None for a file written
+    before the field existed, whose verdict applied the gate), as
+    ``WorkspaceProjectResult`` records them. Empty for a single scan, so every
+    reader of it falls through to the scanner-keyed ``severity_thresholds`` map.
 
     Why this is needed: ``severity_thresholds`` is resolved from the results'
     ``ash_config``, which a workspace's unified file does not carry, so for that
@@ -341,7 +342,11 @@ def _workspace_project_gates(raw_results: Any) -> Dict[str, Dict[str, Any]]:
                 )
                 if isinstance(value, str) and value
             },
-            "policy_gate": bool(entry.get("policy_scanners_gate", False)),
+            "policy_gate": (
+                entry["policy_scanners_gate"]
+                if isinstance(entry.get("policy_scanners_gate"), bool)
+                else None
+            ),
         }
     return gates
 
@@ -392,10 +397,13 @@ def _excluded_by_policy(
 
     A finding from a scanner only the workspace policy added carries
     ``properties.origin: workspace-policy``; with the project's
-    ``policy_scanners_gate`` off, the verdict reported it and left it out of
-    ``actionable_finding_count`` (``execution.py``'s gating results). The
-    actionable view follows the verdict, so such a finding is not kept. A result
-    whose project the workspace block does not list is judged as before.
+    ``policy_scanners_gate`` explicitly off, the verdict reported it and left it
+    out of ``actionable_finding_count`` (``execution.py``'s gating results). The
+    actionable view follows the verdict, so such a finding is not kept. Only an
+    explicit False excludes: a project whose entry carries no gate (a file
+    written before the field existed, whose verdict applied the gate) and a
+    project the workspace block does not list are both judged by the threshold,
+    the fail-closed side.
     """
     if not projects:
         return False
@@ -404,7 +412,7 @@ def _excluded_by_policy(
         return False
     project = _project_of(result)
     gate = projects.get(project) if project is not None else None
-    return gate is not None and not gate["policy_gate"]
+    return gate is not None and gate["policy_gate"] is False
 
 
 def _actionable_in_view(

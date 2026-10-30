@@ -24256,10 +24256,17 @@
           "type": "integer"
         },
         "policy_scanners_gate": {
-          "default": false,
-          "description": "Whether findings from scanners only `workspace.additional_scanners` asked for decided this project's verdict (the policy's policy_scanners_gate, as the plan applied it). False means a policy-origin finding is reported and excluded from actionable_finding_count; a reader that regrades findings (the merged JUnit report, the MCP result filters) reads this to grade such a finding as the verdict did instead of as a failure. False in a workspace file written before the field existed.",
-          "title": "Policy Scanners Gate",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether findings from scanners only `workspace.additional_scanners` asked for decided this project's verdict (the policy's policy_scanners_gate, as the plan applied it). False means a policy-origin finding is reported and excluded from actionable_finding_count; a reader that regrades findings (the merged JUnit report, the MCP result filters) reads this to grade such a finding as the verdict did instead of as a failure. The executor always records True or False. None (absent) means a workspace file written before the field existed; such a file's verdict applied the gate, so a reader treats None as gating and grades a policy-origin finding by the threshold, the fail-closed side.",
+          "title": "Policy Scanners Gate"
         },
         "project": {
           "description": "The project key -- its workspace-relative path with separators replaced by dashes. Every other attribution in the results joins on this.",

@@ -52,12 +52,13 @@ def _workspace_document() -> dict:
     """Three projects with gates no single threshold reproduces.
 
     ``strict`` gates at HIGH; ``lax`` gates at LOW but recorded bandit's own
-    CRITICAL; ``watch`` gates at LOW and does not gate on policy scanners. The
-    scanner-keyed map says MEDIUM for everything, as it does for a workspace file
-    with no configuration.
+    CRITICAL; ``watch`` gates at LOW and does not gate on policy scanners;
+    ``legacy`` gates at LOW and records no policy gate at all, as a file written
+    before the field existed does. The scanner-keyed map says MEDIUM for
+    everything, as it does for a workspace file with no configuration.
     """
     return {
-        "summary_stats": {"actionable": 7, "total": 7, "suppressed": 0},
+        "summary_stats": {"actionable": 8, "total": 8, "suppressed": 0},
         "raw_results": {
             "sarif": {
                 "runs": [
@@ -75,6 +76,13 @@ def _workspace_document() -> dict:
                                 origin="workspace-policy",
                             ),
                             _result("WATCH-OWN", "watch", "bandit", "LOW"),
+                            _result(
+                                "LEGACY-POLICY",
+                                "legacy",
+                                "semgrep",
+                                "HIGH",
+                                origin="workspace-policy",
+                            ),
                             _result("UNATTRIBUTED-LOW", None, "bandit", "LOW"),
                         ]
                     }
@@ -95,6 +103,7 @@ def _workspace_document() -> dict:
                         policy_scanners_gate=False,
                         policy_origin_finding_count=1,
                     ),
+                    _project("legacy", "LOW", policy_origin_finding_count=1),
                 ]
             },
         },
@@ -143,6 +152,14 @@ class TestEachProjectIsJudgedByItsOwnGates:
 
         assert "WATCH-POLICY" in kept
 
+    def test_a_policy_finding_in_a_record_without_the_field_is_kept(self):
+        """A file written before the field existed applied the gate before it wrote."""
+        kept = _rule_ids(filter_actionable_only(_workspace_document()))
+
+        # RED at the base: the absent gate read as False and the finding was
+        # dropped from the actionable view where the recorded verdict counted it.
+        assert "LEGACY-POLICY" in kept
+
     def test_a_finding_no_project_claims_is_judged_by_the_map(self):
         """Control: the scanner-keyed map still governs an unattributed finding."""
         kept = _rule_ids(filter_actionable_only(_workspace_document()))
@@ -152,7 +169,7 @@ class TestEachProjectIsJudgedByItsOwnGates:
     def test_the_kept_count_is_the_actionable_count(self):
         filtered = filter_actionable_only(_workspace_document())
 
-        assert len(_rule_ids(filtered)) == 4
+        assert len(_rule_ids(filtered)) == 5
         assert (
             filtered["summary_stats"]["total"]
             == filtered["summary_stats"]["actionable"]
@@ -169,6 +186,7 @@ class TestEachProjectIsJudgedByItsOwnGates:
             "STRICT-MEDIUM",
             "LAX-BANDIT-HIGH",
             "WATCH-POLICY",
+            "LEGACY-POLICY",
         ]
 
 
@@ -177,16 +195,16 @@ class TestTheSeverityViewRecountsByProject:
         document = _workspace_document()
         document["summary_stats"] = {
             "critical": 0,
-            "high": 3,
+            "high": 4,
             "medium": 1,
             "low": 3,
             "info": 0,
             "suppressed": 0,
-            "total": 7,
-            "actionable": 7,
+            "total": 8,
+            "actionable": 8,
             "severity_counts": {
                 "critical": 0,
-                "high": 3,
+                "high": 4,
                 "medium": 1,
                 "low": 3,
                 "info": 0,

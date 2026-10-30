@@ -411,18 +411,23 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 elif (
                     project
                     and _is_policy_origin(props, extra)
-                    and not policy_gates.get(project, False)
+                    and policy_gates.get(project) is False
                 ):
                     # A finding from a scanner only the workspace policy added, in
-                    # a project whose policy_scanners_gate is off. The project's
-                    # verdict reported it and excluded it from the actionable count
-                    # (execution.py's gating_results), and the exit code followed
-                    # that verdict; an <error> here would say the finding failed
-                    # the project when the scan said it did not. Decided ahead of
-                    # the threshold, because it is not a question of severity: the
-                    # operator added the scanner for visibility, not as a gate.
-                    # Skipped rather than a bare passing case, so the finding is
-                    # still visible in the report with the reason it is not red.
+                    # a project whose policy_scanners_gate is explicitly off. The
+                    # project's verdict reported it and excluded it from the
+                    # actionable count (execution.py's gating_results), and the
+                    # exit code followed that verdict; an <error> here would say
+                    # the finding failed the project when the scan said it did
+                    # not. Decided ahead of the threshold, because it is not a
+                    # question of severity: the operator added the scanner for
+                    # visibility, not as a gate. Skipped rather than a bare
+                    # passing case, so the finding is still visible in the report
+                    # with the reason it is not red. Only an explicit False takes
+                    # this arm: a project whose entry carries no gate (a file
+                    # written before the field existed, whose verdict applied the
+                    # gate) and a project the workspace block does not list fall
+                    # to the threshold grading below, the fail-closed side.
                     test_case.result = [
                         Skipped(
                             message=(
