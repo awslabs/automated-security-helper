@@ -122,3 +122,70 @@ class TestASourceDirectoryTheScanWouldClearIsRefused:
 
         _, kwargs = run.call_args
         assert Path(kwargs["output_dir"]) == Path("src/.ash/ash_output")
+
+
+class TestAnOutputDirectoryThatWouldClearTheScannedTreeIsRefused:
+    """The other direction: the output directory inside the source directory, with
+    a working directory of the scan's name already holding the tree's own files.
+    The scan removed it before it started."""
+
+    @pytest.mark.parametrize("cleared", OUTPUT_WORKING_DIRS)
+    def test_a_tree_directory_at_a_cleared_name(self, tmp_path, cleared, capsys):
+        (tmp_path / "src" / "docs" / cleared).mkdir(parents=True)
+        (tmp_path / "src" / "docs" / cleared / "index.md").write_text("# docs\n")
+
+        code = _refused(source_dir="src", output_dir="src/docs")
+
+        assert code == ASH_EXIT_USAGE_ERROR
+        err = capsys.readouterr().err
+        assert "already holds files that are not ASH's" in err, err
+        assert f"docs/{cleared}" in err, err
+
+    def test_an_empty_directory_at_a_cleared_name_is_not_refused(self, tmp_path):
+        (tmp_path / "src" / "docs" / "reports").mkdir(parents=True)
+
+        run = _scan(source_dir="src", output_dir="src/docs")
+
+        assert run.call_args.kwargs["output_dir"] == "src/docs"
+
+    @pytest.mark.parametrize(
+        "marker, text",
+        [
+            ("ash_aggregated_results.json", "{}\n"),
+            ("ash.log", "a previous run\n"),
+            (
+                ".gitignore",
+                "# ASH's output directory, not part of the scanned tree.\n*\n",
+            ),
+        ],
+    )
+    def test_an_output_directory_ash_wrote_before_is_still_cleared(
+        self, tmp_path, marker, text
+    ):
+        out = tmp_path / "src" / "out"
+        (out / "reports").mkdir(parents=True)
+        (out / "reports" / "ash.summary.txt").write_text("old\n")
+        (out / marker).write_text(text)
+
+        run = _scan(source_dir="src", output_dir="src/out")
+
+        assert run.call_args.kwargs["output_dir"] == "src/out"
+
+    def test_the_default_output_directory_with_old_results_is_not_refused(
+        self, tmp_path
+    ):
+        old = tmp_path / "src" / ".ash" / "ash_output" / "scanners"
+        old.mkdir(parents=True)
+        (old / "bandit.json").write_text("{}\n")
+
+        run = _scan(source_dir="src")
+
+        assert Path(run.call_args.kwargs["output_dir"]) == Path("src/.ash/ash_output")
+
+    def test_an_output_directory_outside_the_source_is_not_refused(self, tmp_path):
+        (tmp_path / "out" / "reports").mkdir(parents=True)
+        (tmp_path / "out" / "reports" / "old.html").write_text("<p>old</p>\n")
+
+        run = _scan(source_dir="src", output_dir="out")
+
+        assert run.call_args.kwargs["output_dir"] == "out"

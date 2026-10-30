@@ -75,7 +75,13 @@ from automated_security_helper.utils.log import (
     configure_last_resort_level,
     escape_markup,
 )
-from automated_security_helper.utils.output_dir_links import OUTPUT_WORKING_DIRS
+from automated_security_helper.utils.output_dir_links import (
+    OUTPUT_GITIGNORE,
+    OUTPUT_GITIGNORE_TEXT,
+    OUTPUT_LOG_FILES,
+    OUTPUT_RESULT_FILES,
+    OUTPUT_WORKING_DIRS,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
@@ -272,6 +278,40 @@ def _resolved(path: str | Path) -> Path:
         return Path(path).absolute()
 
 
+def _ash_output_dir(source_dir: str, output_resolved: Path) -> bool:
+    """Whether *output_resolved*, inside the scanned tree, is ASH's own output
+    directory and not a directory of the tree's: the default
+    ``<source_dir>/.ash/ash_output``, or one holding a result, log or ignore file a
+    run of ASH wrote (the ``.gitignore`` is written before any scanner starts, so a
+    run that got no further still left it)."""
+    if output_resolved == _resolved(Path(source_dir).joinpath(".ash", "ash_output")):
+        return True
+    for name in (*OUTPUT_RESULT_FILES, *OUTPUT_LOG_FILES):
+        if output_resolved.joinpath(name).is_file():
+            return True
+    ignore_file = output_resolved.joinpath(OUTPUT_GITIGNORE)
+    try:
+        if ignore_file.is_symlink() or not ignore_file.is_file():
+            return False
+        if ignore_file.stat().st_size > 4 * len(OUTPUT_GITIGNORE_TEXT):
+            return False
+        text = ignore_file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return text == OUTPUT_GITIGNORE_TEXT
+
+
+def _holds_anything(directory: Path) -> bool:
+    """Whether *directory* is a directory, not a link, with an entry in it."""
+    if directory.is_symlink() or not directory.is_dir():
+        return False
+    try:
+        with os.scandir(directory) as entries:
+            return next(entries, None) is not None
+    except OSError:
+        return False
+
+
 def _settle_output_dir(
     source_dir: str,
     output_dir: str | Path | None,
@@ -329,6 +369,35 @@ def _settle_output_dir(
                     "directory, or scan a directory outside the output directory."
                 )
             )
+    # The reverse: an output directory inside the scanned tree whose working
+    # directories already hold something of the tree's. The scan removes each of
+    # them before it starts (the orchestrator's ensure_directories), so
+    # `--source-dir . --output-dir docs` with a real docs/reports/ deleted part of
+    # the tree it was asked to scan. What git tracks at those paths is refused by
+    # the orchestrator (core/committed_output.py); this covers what that does not
+    # see: files git ignores or was never told about, and a tree outside git. An
+    # output directory ASH wrote before is still cleared, as it always was
+    # (_ash_output_dir); so is an empty directory, which is recreated as it was.
+    if (
+        output_resolved != source_resolved
+        and output_resolved.is_relative_to(source_resolved)
+        and not _ash_output_dir(source_dir, output_resolved)
+    ):
+        for working_dir in OUTPUT_WORKING_DIRS:
+            cleared = output_resolved.joinpath(working_dir)
+            if _holds_anything(cleared):
+                _fail_usage(
+                    shown_on_one_line(
+                        f"Output directory {os.fspath(output_dir)} is inside the "
+                        f"source directory {os.fspath(source_dir)}, and "
+                        f"{cleared.as_posix()} already holds files that are not "
+                        f"ASH's: the scan removes {working_dir}/ from the output "
+                        "directory before it starts, so it would delete part of the "
+                        "tree it was asked to scan. Point --output-dir at a "
+                        "directory of its own (the default, .ash/ash_output, is "
+                        "one), or move those files out of it."
+                    )
+                )
     # A file where the output directory goes ended the run in a FileExistsError
     # traceback, from the first mkdir of it. A missing one is still made.
     output_refusal = output_dir_refusal(output_dir)
