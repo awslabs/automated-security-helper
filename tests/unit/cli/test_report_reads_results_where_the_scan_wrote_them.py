@@ -196,7 +196,10 @@ def test_a_config_the_user_cannot_reach_is_refused_with_the_real_cause(tmp_path)
         locked.chmod(0o700)
 
     assert result.exit_code == 3, result.output
-    assert "could not read" in result.output, result.output
+    # The loader stats the named file before it opens it and refuses an
+    # unreadable one by the errno's code ("Config file cannot be read (EACCES)");
+    # "could not read" is the open-failure text, which this path never reaches.
+    assert "cannot be read" in result.output, result.output
     assert "not found" not in result.output, result.output
 
 
