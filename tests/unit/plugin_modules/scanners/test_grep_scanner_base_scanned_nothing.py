@@ -416,7 +416,12 @@ def test_a_size_skip_is_refused_without_claiming_the_language_is_covered(
         )
     message = str(refused.value)
     assert "cannot be told" in message, message
-    assert "max-target-bytes" in message, message
+    # The one remedy that ends in SKIPPED is named; the tool's size limit is not
+    # reachable through ASH's configuration (neither options model exposes it),
+    # and a scanner `exclude` pattern is the operator's, so the refusal names
+    # neither as a way out.
+    assert "global_settings.ignore_paths" in message, message
+    assert "max-target-bytes" not in message, message
     assert "a language its rules cover" not in message, message
 
 

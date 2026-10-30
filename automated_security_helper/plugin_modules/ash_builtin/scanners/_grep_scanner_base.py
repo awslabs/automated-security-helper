@@ -1220,9 +1220,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         f"(skipped: {', '.join(sorted(unread))}). The tool reports a "
                         "size or permission skip before it chooses a language, so "
                         "whether a rule covers them cannot be told, and its result "
-                        "says nothing about them. Raise the tool's size limit "
-                        "(--max-target-bytes) or fix the permissions, or exclude the "
-                        "files on purpose."
+                        "says nothing about them. Fix the permissions, or leave the "
+                        "files out on purpose with global_settings.ignore_paths, "
+                        "under which a target holding only such files is graded "
+                        "SKIPPED. The tool's size limit is not configurable through "
+                        "ASH, and an exclude pattern of this scanner is read as the "
+                        "operator's patterns, which keeps the scan refused."
                     )
                 unknown = sorted(
                     r for r in by_reason if r not in KNOWN_SKIP_REASONS and r != "none"
