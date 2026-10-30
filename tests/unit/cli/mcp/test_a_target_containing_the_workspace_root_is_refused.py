@@ -18,6 +18,8 @@ refused. The refusal shows the caller's own path and names no other session.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from automated_security_helper.cli.mcp.sandbox import (
@@ -112,12 +114,16 @@ def test_the_refusal_shows_the_callers_path_and_no_session(tmp_path):
 
 
 def test_a_directory_beside_the_workspace_root_is_not_taken_for_an_ancestor(
-    tmp_path,
+    monkeypatch, tmp_path
 ):
     """Control: a sibling directory of the root contains nothing of it.
 
     Its name is a prefix of the root's, so a text prefix match would refuse it;
-    the gate compares path components and file identity, not characters.
+    the gate compares path components and file identity, not characters. The
+    two directories are granted: a caller with a session id is a network caller
+    (``caller_is_remote``), and a network caller reaches a directory outside its
+    own sandbox only through the operator's grant. The grant does not admit an
+    ancestor (the test above), so what admits these two is the gate not firing.
     """
     _delivered(OWN)
     shared = shared_workspace_root()
@@ -126,6 +132,9 @@ def test_a_directory_beside_the_workspace_root_is_not_taken_for_an_ancestor(
     beside.mkdir()
     checkout = tmp_path / "checkout"
     checkout.mkdir()
+    monkeypatch.setenv(
+        ASH_MCP_ALLOWED_ROOTS_ENV, os.pathsep.join([str(beside), str(checkout)])
+    )
 
     for outside in (beside, checkout):
         refusal = validate_scan_target_in_sandbox(outside, session_id=OWN)
