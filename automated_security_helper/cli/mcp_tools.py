@@ -2854,7 +2854,7 @@ async def _run_scan(
         refuses to close a scan as incomplete with no gap attached.
         """
         try:
-            return _work_out_the_close(ended, results)
+            status, coverage, threshold = _work_out_the_close(ended, results)
         except Exception as close_error:  # noqa: BLE001
             fallback: Tuple[MCScanStatus, Optional[Dict[str, Any]], Optional[str]]
             if isinstance(ended, ScanIncompleteExit):
@@ -2871,7 +2871,42 @@ async def _run_scan(
                 f"{fallback[0].value} without the full set: "
                 f"{error_text(close_error, environment_values)}"
             )
-            return fallback
+            status, coverage, threshold = fallback
+        return status, _coverage_as_the_caller_may_see_it(coverage), threshold
+
+    def _coverage_as_the_caller_may_see_it(
+        coverage: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """The coverage to store, its could_not_stop reasons shown as this caller may see them.
+
+        A reason names the process id of the tool ASH could not end
+        (``could_not_stop_default``). The cancel warning withholds that id from a
+        network transport and the workspace tool withholds it from a remote
+        caller (``_project_coverage``); the stored coverage is what a later
+        progress call returns, so it is stored the same way, decided by the
+        request-scoped predicate the response uses (``remote_client``, from
+        ``caller_is_remote``), never by the process-wide transport. Every close
+        of this scan passes through here, so the stored and the returned rows
+        agree. A progress call by a different caller than the one that scanned
+        reads this caller's choice; redacting at the read would cover that and
+        is not done here.
+        """
+        if not coverage or not remote_client:
+            return coverage
+        rows = coverage.get("could_not_stop")
+        if not rows:
+            return coverage
+        from automated_security_helper.utils.subprocess_utils import (
+            without_process_ids,
+        )
+
+        return {
+            **coverage,
+            "could_not_stop": [
+                {**row, "reason": without_process_ids(str(row.get("reason", "")))}
+                for row in rows
+            ],
+        }
 
     def _settle_previous_results(
         ended: Optional[BaseException], results: Any = None
