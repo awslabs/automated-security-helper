@@ -124,6 +124,17 @@ class OffHostReporter(ReporterPluginBase[OffHostReporterConfig]):
         return json.dumps({"title": self.config.options.title})
 
 
+# The listing selects as a scan selects: a class whose module is neither ASH's
+# built-in package nor one the run's ash_plugin_modules names is left out. The
+# stand-in reporters are defined here, so they are given a built-in module name,
+# as the scanner stand-ins are; without it the reporters table is empty.
+BUILTIN_REPORTERS_MODULE = (
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.stub"
+)
+OptInReporter.__module__ = BUILTIN_REPORTERS_MODULE
+OffHostReporter.__module__ = BUILTIN_REPORTERS_MODULE
+
+
 def _listing(
     tmp_path: Path,
     args: list,
