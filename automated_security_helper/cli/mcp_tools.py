@@ -3143,6 +3143,9 @@ async def _run_scan(
             keep_previous_results=True,
         )
 
+    # The exception that ended the scan on its thread, for the record step.
+    ending: Dict[str, Optional[BaseException]] = {"exception": None}
+
     def _record_the_tools_the_stop_could_not_end() -> None:
         """Put the tools the stop could not end on the entry before the directory is let go.
 
@@ -3165,7 +3168,15 @@ async def _run_scan(
                 transport_is_networked,
             )
 
-            records = entry.cancel_event.could_not_stop_records()
+            # The event's records, then any the ScanCancelled that ended the
+            # scan carries and the event does not: a raise site may build the
+            # exception with its own pairs (scanner_executor's union of a
+            # pool's cancels, a stand-in in a test) without noting them on the
+            # event, and those pairs are the stop's outcome all the same.
+            records = tuple(entry.cancel_event.could_not_stop_records())
+            for record in getattr(ending["exception"], "could_not_stop", ()):
+                if record not in records:
+                    records = records + (record,)
             if not records:
                 return
             if registry.record_cancel_outcome(
@@ -3222,6 +3233,9 @@ async def _run_scan(
                     _start_the_clock()
                     results = _scan()
         except BaseException as ended:
+            # Kept for the record step in the finally: a ScanCancelled may
+            # carry pairs the cancel event never saw.
+            ending["exception"] = ended
             _settle_previous_results(ended)
             raise
         else:

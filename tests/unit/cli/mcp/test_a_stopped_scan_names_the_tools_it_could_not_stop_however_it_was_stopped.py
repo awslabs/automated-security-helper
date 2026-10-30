@@ -38,6 +38,7 @@ from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
 from automated_security_helper.core.cancellation import (
+    ScanCancelled,
     current_cancel_event,
     raise_if_cancelled,
 )
@@ -206,6 +207,41 @@ async def test_on_a_network_transport_the_warning_names_the_tool_not_its_pid(
     assert warnings, entry.warnings
     assert all("4242" not in w for w in warnings), warnings
     assert entry.could_not_stop == (("bandit", 4242),)
+
+
+@pytest.mark.asyncio
+async def test_pairs_carried_by_the_exception_alone_are_recorded(tmp_path, monkeypatch):
+    """A raise site may build the ScanCancelled with its own pairs and note
+    nothing on the cancel event (scanner_executor's union of a pool's cancels
+    does; so does a stand-in). The record reads both.
+
+    Red at the round's earlier tips: the thread read the event alone and the
+    arm no longer recorded, so a pair that rode the exception was dropped
+    (the venue read it on the neighbor module's cancelled-entry id)."""
+    registry, scan_id, output_dir = _registered(tmp_path, monkeypatch)
+
+    def a_scan_cancelled_with_a_pair_on_the_exception(*a: Any, **k: Any) -> None:
+        assert registry.cancel_scan(scan_id) is True
+        raise ScanCancelled(
+            "the scan was cancelled", could_not_stop=(("semgrep", 7777),)
+        )
+
+    async def run() -> None:
+        await mcp_tools._run_scan_async(
+            scan_id=scan_id,
+            directory_path=str(tmp_path),
+            output_dir=str(output_dir),
+            severity_threshold=None,
+        )
+
+    await _run_to_the_end(
+        registry, scan_id, a_scan_cancelled_with_a_pair_on_the_exception, run
+    )
+
+    entry = registry.get_scan(scan_id)
+    assert entry.status == MCScanStatus.CANCELLED
+    assert any("semgrep" in w and "7777" in w for w in entry.warnings), entry.warnings
+    assert entry.could_not_stop == (("semgrep", 7777),)
 
 
 @pytest.mark.asyncio
