@@ -493,8 +493,8 @@ def _print_tables(
                             )
                         )
                     )
-                    # Enabled may be a bool; Rich requires str cells. A str
-                    # cell is markup, and the config's values, the tool's
+                    # Enabled may be a bool; Rich requires str entries. A str
+                    # entry is markup, and the config's values, the tool's
                     # version and the names are not ASH's: each is escaped,
                     # with the values the config read from the environment
                     # masked first -- the config column dumps the typed
@@ -502,8 +502,8 @@ def _print_tables(
                     # masks the same values.
                     table.add_row(
                         *[
-                            escape_markup(text_without_values(str(cell), hidden))
-                            for cell in row
+                            escape_markup(text_without_values(str(entry), hidden))
+                            for entry in row
                         ]
                     )
                 except Exception as e:
@@ -511,7 +511,7 @@ def _print_tables(
                     # error. The row must fill every column of the table, so it is
                     # built from the same column order rather than a fixed 3-arg
                     # call (the pre-existing bug: a 5- or 7-column table given 3
-                    # cells raised "Not enough columns" and masked the real error).
+                    # entries raised "Not enough columns" and masked the real error).
                     # error_text, with the config's environment values: a
                     # plugin's own model error quotes its input otherwise.
                     described = error_text(e, ash_config._environment_values)
@@ -529,10 +529,10 @@ def _print_tables(
                         *[
                             escape_markup(
                                 text_without_values(
-                                    str(cell), ash_config._environment_values
+                                    str(entry), ash_config._environment_values
                                 )
                             )
-                            for cell in error_row
+                            for entry in error_row
                         ]
                     )
 

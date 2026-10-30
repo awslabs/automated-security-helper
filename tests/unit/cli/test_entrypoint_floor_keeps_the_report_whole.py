@@ -115,9 +115,9 @@ def test_a_descriptor_that_fails_part_way_hands_the_rest_on(monkeypatch):
     monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
     monkeypatch.setattr(sys, "stdout", io.StringIO())
 
-    assert entrypoint._write_raw("0123456789abcdef") is True
-    assert writes.written[2] == b"01234567"
-    assert writes.written[1] == b"89abcdef"
+    assert entrypoint._write_raw("stderr-1stdout-2") is True
+    assert writes.written[2] == b"stderr-1"
+    assert writes.written[1] == b"stdout-2"
 
 
 def test_a_descriptor_closed_at_start_is_never_written(monkeypatch):

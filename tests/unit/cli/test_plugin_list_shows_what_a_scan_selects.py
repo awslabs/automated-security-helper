@@ -168,7 +168,7 @@ def test_a_plugins_own_redaction_values_mask_its_config_column():
     """An option default a plugin read straight from the environment is in
     its dump and in none of the config's recorded values; the row masked
     with the config's values alone and printed it."""
-    secret = "zq7ownvalue-55667788"
+    secret = "zq7ownvalue-x5y6z7w8"
 
     class Reads(_Stub):
         _name = "reads"

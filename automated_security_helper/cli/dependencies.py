@@ -417,7 +417,7 @@ class PluginInstallOutcome:
             return "FAILED"
         # A tool named with --tool is counted (see _report_and_exit), so its row
         # says what is wrong with it, not that a scan would skip it: "DISABLED IN
-        # CONFIG" beside a verdict that failed for its absence read as two stories.
+        # CONFIG" beside a run that failed for its absence read as two stories.
         if self.is_absent and not self.requested:
             if self.unsupported_platform is not None:
                 return "NOT AVAILABLE ON THIS PLATFORM"
@@ -1229,7 +1229,7 @@ def install_dependencies(
             # other community plugin would not import, and name that other plugin
             # in the failure panel.
             # A plugin its configuration disables is one a scan never runs, so
-            # its error does not decide a full run's verdict (the documented
+            # its error does not decide a full run's exit code (the documented
             # rule, PluginInstallOutcome.needed); read from its section, since
             # the built plugin that would have said so does not exist.
             failure = PluginInstallOutcome(
