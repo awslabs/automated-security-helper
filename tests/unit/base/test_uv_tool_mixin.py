@@ -96,6 +96,17 @@ class TestGetUvToolVersion:
 
         plugin = FakePlugin(use_uv_tool=True)
         runner = UVToolRunner()
+        # The unit guard stubs every runner's ``uv_availability`` to
+        # (False, None) for this module (tests/utils/tool_guard.py; only the
+        # runner's own module is a probe subject), so the probe whose refusal
+        # arm would record the scope's refusal never runs here, and the stub
+        # stands: a probe that spawns is what the guard keeps out of the unit
+        # tier. What the arm records is seeded in its place -- the refusal's
+        # text on this thread's check state -- and the stubbed answer stays
+        # "not available", the state the product reads: unavailable_reason
+        # names the recorded refusal, and the mixin words it over the bare
+        # answer.
+        runner._check_state().refusal = "firejail is not installed"
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
