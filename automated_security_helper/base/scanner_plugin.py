@@ -1031,12 +1031,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         ``SPAWN_FAILURE_RETURNCODE`` (127) never does, even for a scanner that
         lists it: it is what ASH reports for a command the OS could not start,
         and a tool that never ran found nothing.
+
+        The rule is :meth:`_code_is_accepted`'s, the one the fold of several
+        runs' codes ranks by too, so a scanner that changes it changes both.
         """
-        if success_codes is None:
-            success_codes = self.success_exit_codes
-        if self.exit_code == SPAWN_FAILURE_RETURNCODE:
-            return False
-        return self.exit_code in success_codes
+        return self._code_is_accepted(self.exit_code, success_codes)
 
     def _worse_exit_code(self, current: int | None, new: int) -> int:
         """The worse of two runs' exit codes, by this scanner's accepted set.
@@ -1058,10 +1057,19 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return worse_exit_code(current, new)
         return current if accepted_new else new
 
-    def _code_is_accepted(self, code: int) -> bool:
-        """Whether *code*, as ``exit_code``, would be one this scanner accepts:
-        ``_exit_code_accepted``'s rule for a code other than the current one."""
-        return code != SPAWN_FAILURE_RETURNCODE and code in self.success_exit_codes
+    def _code_is_accepted(
+        self, code: Optional[int], success_codes: Optional[Set[int]] = None
+    ) -> bool:
+        """Whether *code* is one this scanner accepts: in *success_codes* (the
+        class's ``success_exit_codes`` when none are given), and never the
+        spawn-failure code. The one rule behind :meth:`_exit_code_accepted`, which
+        applies it to the current code, and :meth:`_worse_exit_code`, which
+        applies it to two."""
+        if success_codes is None:
+            success_codes = self.success_exit_codes
+        if code == SPAWN_FAILURE_RETURNCODE:
+            return False
+        return code in success_codes
 
     def _sarif_execution_successful(self) -> bool:
         """SARIF ``executionSuccessful`` under the graded rule: the counter rule
