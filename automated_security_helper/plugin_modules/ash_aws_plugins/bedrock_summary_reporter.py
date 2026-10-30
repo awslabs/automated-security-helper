@@ -1198,12 +1198,18 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     def _scan_outcome(model: "AshAggregatedResults") -> str:
         emitter = ReportContentEmitter(model, human_presentation=True)
         summary = emitter.get_scan_summary()
+        # The project name as the emitter's metadata records it: where the
+        # configuration read it from the environment, the written reference,
+        # not the resolved value, which is what every other sink and the
+        # three human reports print. Read raw off model.metadata this line was
+        # the one place the resolved value still reached a document.
+        project = emitter.get_metadata()["project"]
         return "\n\n".join(
             part
             for part in (
                 "# ASH security scan analysis",
                 outcome_markdown(summary).strip(),
-                f"Project: {_text(shown_on_one_line(str(model.metadata.project_name or 'Unknown')))}",
+                f"Project: {_text(shown_on_one_line(str(project)))}",
                 coverage_markdown(summary).strip(),
             )
             if part

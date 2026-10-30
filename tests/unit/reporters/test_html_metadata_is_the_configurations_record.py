@@ -121,6 +121,28 @@ def test_the_markdown_and_text_project_lines_print_the_reference(
     assert "zz-secret-project" not in document
 
 
+def test_the_bedrock_outcome_project_line_prints_the_reference(tmp_path, monkeypatch):
+    """The Bedrock summary builds its outcome block from the same emitter.
+
+    Its ``Project:`` line read ``model.metadata.project_name`` directly, so a
+    name the configuration read from the environment reached that report, and
+    its written Markdown files, resolved. The block is built by a static method
+    the report calls before any model invocation, so it is read here without a
+    Bedrock client; the Markdown escaping is removed as for the Markdown report.
+    """
+    from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+        BedrockSummaryReporter,
+    )
+
+    model = _env_named_project(tmp_path, monkeypatch)
+
+    outcome = BedrockSummaryReporter._scan_outcome(model)
+
+    assert "Project: " in outcome
+    assert "${" + PROJECT_VAR + "}" in outcome.replace("\\", "")
+    assert "zz-secret-project" not in outcome
+
+
 def test_a_literal_scanner_key_prints_as_written(
     tmp_path, monkeypatch, test_plugin_context
 ):
