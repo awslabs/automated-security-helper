@@ -693,6 +693,21 @@ def _log_identity(path: Path | None) -> Tuple[int, int, int, int] | None:
 #: scan() made of the run, the scan is graded ERROR (_record_kept_flag).
 _UNFINISHED_RUN_FLAGS = ("timed_out", "cancelled", "result_rejected", "signaled")
 
+#: How a run whose stop failed is keyed in ``scan_could_not_stop_runs``: the flag
+#: it ended with, then the wait that failed after the tool ran. A response that
+#: carries none of these recorded only the failed stop, and is keyed "unflagged".
+_COULD_NOT_STOP_RUN_KEYS = _UNFINISHED_RUN_FLAGS + ("post_run_error",)
+
+
+def _could_not_stop_run_key(response: Dict) -> str:
+    """Which run of one ``scan()`` a could-not-stop response belongs to: the first
+    of :data:`_COULD_NOT_STOP_RUN_KEYS` the response carries as True, else
+    ``unflagged``."""
+    for flag in _COULD_NOT_STOP_RUN_KEYS:
+        if response.get(flag) is True:
+            return flag
+    return "unflagged"
+
 
 def worse_exit_code(current: int | None, new: int) -> int:
     """The worse of two runs' exit codes, for a plugin's accumulated ``exit_code``.
@@ -918,6 +933,9 @@ class PluginBase(UVToolMixin, BaseModel):
     # The recorded reason this plugin's most recent run ended with a tool ASH
     # could not stop, or None. See scan_could_not_stop.
     _scan_could_not_stop: str | None = PrivateAttr(default=None)
+    # The same reason for every run of this plugin's current scan() whose stop
+    # failed, keyed by the flag that run ended with. See scan_could_not_stop_runs.
+    _scan_could_not_stop_runs: Dict[str, str] = PrivateAttr(default_factory=dict)
 
     # Why the last UVToolMixin._try_uv_tool_execution could not run the tool
     # through uv, or None. _run_subprocess reports it.
@@ -1700,10 +1718,31 @@ class PluginBase(UVToolMixin, BaseModel):
         """
         return self._scan_could_not_stop
 
+    @property
+    def scan_could_not_stop_runs(self) -> Dict[str, str]:
+        """Every run of this plugin's current ``scan()`` whose stop failed: the
+        flag the run ended with (``timed_out``, ``cancelled``,
+        ``result_rejected``, ``signaled``; ``post_run_error`` for a wait that
+        failed after the tool ran; ``unflagged`` for a response that recorded
+        only the failed stop) mapped to the reason recorded for it.
+
+        ``scan_could_not_stop`` keeps the most recent of these reasons alone, so
+        when one ``scan()`` launched its tool more than once it cannot say WHICH
+        run ASH could not stop: a first launch that timed out and was killed,
+        then a second that was cancelled and could not be stopped, left one
+        record, and the timeout headline read it as the timed-out tool still
+        running. A reader that attributes a failed stop to a run reads this
+        mapping instead (``"timed_out" in scan_could_not_stop_runs``). Cleared
+        with ``clear_scan_could_not_stop``. A copy: a reader cannot change it.
+        """
+        return dict(self._scan_could_not_stop_runs)
+
     def clear_scan_could_not_stop(self) -> None:
-        """Forget a recorded could-not-stop ending. ``ScannerExecutor`` calls this
-        before each ``scan()``, as it does ``clear_scan_kept_flag``."""
+        """Forget a recorded could-not-stop ending, and the per-run records with
+        it. ``ScannerExecutor`` calls this before each ``scan()``, as it does
+        ``clear_scan_kept_flag``."""
         self._scan_could_not_stop = None
+        self._scan_could_not_stop_runs = {}
 
     def _could_not_stop_state(self, response: Dict) -> None:
         """Set the could-not-stop state from ``response``: state only, shared with
@@ -1731,9 +1770,11 @@ class PluginBase(UVToolMixin, BaseModel):
         # degrades to the value-free pid fallback, never to the raw text an
         # empty value set would print.
         values = guarded_values(self)
-        self._scan_could_not_stop = (
-            default if values is None else text_without_values(reason, values)
-        )
+        recorded = default if values is None else text_without_values(reason, values)
+        self._scan_could_not_stop = recorded
+        # Kept per run as well, under the flag this run ended with, so a reader
+        # can tell which run's stop failed when scan() launched more than once.
+        self._scan_could_not_stop_runs[_could_not_stop_run_key(response)] = recorded
 
     def _record_could_not_stop(self, response: Dict) -> None:
         self._could_not_stop_state(response)
@@ -2293,7 +2334,13 @@ class PluginBase(UVToolMixin, BaseModel):
                 self._post_run_error_state(post_run)
             if self._scan_kept_flag is None:
                 self._kept_flag_state(post_run)
-            if self._scan_could_not_stop is None:
+            # Unset for THIS run: a second launch whose stop failed has its own
+            # key, so an earlier run's record does not stand in for it.
+            if (
+                self._scan_could_not_stop is None
+                or _could_not_stop_run_key(post_run)
+                not in self._scan_could_not_stop_runs
+            ):
                 self._could_not_stop_state(post_run)
             return post_run
 
