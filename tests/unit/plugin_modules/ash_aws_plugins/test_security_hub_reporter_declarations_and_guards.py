@@ -14,7 +14,8 @@ that could not be written aborted the import; the findings an earlier batch
 rejected were not logged when a later batch raised, and the lines that were
 logged carried Security Hub's message unredacted; a stored CreatedAt later than
 the import's UpdatedAt was copied onto the finding; a generated_at that does not
-parse was replaced with the current time; and a scan target longer than a
+parse was replaced with the current time, and once refused, was refused only
+after the account lookup; and a scan target longer than a
 ProductFields value compared uncut with the cut stored value, so archiving
 silently stopped.
 
@@ -241,18 +242,22 @@ def test_a_stderr_that_cannot_be_written_does_not_abort_the_import(
 
 def test_a_generated_at_that_does_not_parse_refuses_the_import(tmp_path):
     """Replacing it with the current time would overrule every newer scan's
-    findings in Security Hub; nothing is sent."""
+    findings in Security Hub; nothing is sent, and nothing is asked of AWS
+    first: with no STS client prepared (``caller=None``), a lookup of the
+    account before the refusal would fail the test with a KeyError."""
     with pytest.raises(SecurityHubImportError) as raised:
         _asff_timestamp("yesterday-ish")
     assert "generated_at" in str(raised.value)
 
     securityhub, stub = _stubbed_client("securityhub")
-    with pytest.raises(SecurityHubImportError):
+    with pytest.raises(SecurityHubImportError) as refused:
         _report_with(
             _reporter(tmp_path),
             _model([_result()], generated_at="yesterday-ish"),
             {"securityhub": securityhub},
+            caller=None,
         )
+    assert "generated_at" in str(refused.value)
     stub.assert_no_pending_responses()
 
 

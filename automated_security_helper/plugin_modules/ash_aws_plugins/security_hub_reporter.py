@@ -621,6 +621,10 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         region = options.aws_region
         if not region:
             raise SecurityHubImportError(_missing_region_message())
+        # The scan time orders this import against the stored findings; a
+        # generated_at that does not parse is refused here, before the account
+        # lookup, so that it is not found only once the credentials work.
+        timestamp = _asff_timestamp(model.metadata.generated_at)
         base_key = _target_key(self._scan_target(), _model_project(model))
         # The stored forms: a ProductFields value is cut at
         # MAX_PRODUCT_FIELD_VALUE_LENGTH when a finding is sent, so the
@@ -673,7 +677,6 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             )
         account_id = caller_account
         product_arn = _product_arn(region, account_id)
-        timestamp = _asff_timestamp(model.metadata.generated_at)
 
         findings, duplicates = _unique_by_id(
             self.build_asff_findings(model, account_id=account_id, region=region)
