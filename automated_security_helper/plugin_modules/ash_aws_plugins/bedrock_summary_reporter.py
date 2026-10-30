@@ -496,12 +496,20 @@ _ASH_BEDROCK_DEFAULT_VALUES: Tuple[str, ...] = _read_ash_bedrock_defaults()
 
 
 def _number_or_default(
-    raw: Optional[str], default: str, parse: Callable[[str], Any], name: str
+    raw: Optional[str],
+    default: str,
+    parse: Callable[[str], Any],
+    name: str,
+    *,
+    low: Optional[float] = None,
+    high: Optional[float] = None,
 ) -> Any:
     """``parse`` of ``raw``, the value the environment's ``name`` holds, or of
-    ``default`` when it is unset, empty, not a number ``parse`` reads, or a
+    ``default`` when it is unset, empty, not a number ``parse`` reads, a
     float that is not finite ("nan", "inf": ``float`` reads them, Converse
-    refuses them).
+    refuses them), or a number below ``low`` or above ``high`` when the caller
+    names a bound (Converse's own ranges: a temperature of 0 to 1, at least one
+    token; a value outside is refused by every candidate alike).
 
     The options model is built for every scan, the reporter enabled or not, so
     a value ``parse`` refuses used to make every scan fail with the model's
@@ -524,6 +532,19 @@ def _number_or_default(
     if isinstance(value, float) and not math.isfinite(value):
         ASH_LOGGER.warning(
             f"{name} is set but is not a finite number; using the default {default}"
+        )
+        return parse(default)
+    if (low is not None and value < low) or (high is not None and value > high):
+        bounds = (
+            f"at least {low}"
+            if high is None
+            else f"{low} to {high}"
+            if low is not None
+            else f"at most {high}"
+        )
+        ASH_LOGGER.warning(
+            f"{name} is set but is outside the range Converse takes ({bounds}); "
+            f"using the default {default}"
         )
         return parse(default)
     return value
@@ -595,6 +616,16 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
             description="Bedrock model ID to use for generating summaries.",
         ),
     ]
+    # The ranges are Converse's own (InferenceConfiguration: temperature "Minimum
+    # value of 0. Maximum value of 1."; maxTokens "Minimum value of 1."), read
+    # from https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InferenceConfiguration.html.
+    # A value outside them is copied to every fallback candidate and refused
+    # by each with a ValidationException, so the walk exhausts for nothing. A
+    # config-file value outside the range is a configuration error, like a
+    # finding count below one; an environment value outside it takes the
+    # default with a WARNING, like a non-numeric one (the options are built for
+    # every scan, the reporter enabled or not). ``allow_inf_nan=False`` refuses
+    # a config-file ``.nan`` or ``.inf``, which the range check alone admits.
     temperature: Annotated[
         float,
         Field(
@@ -603,8 +634,13 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
                 "0.5",
                 float,
                 "ASH_BEDROCK_TEMPERATURE",
+                low=0,
+                high=1,
             ),
-            description="Temperature parameter for the Bedrock model. Higher values make output more random.",
+            ge=0,
+            le=1,
+            allow_inf_nan=False,
+            description="Temperature parameter for the Bedrock model, 0 to 1 (Converse's range). Higher values make output more random.",
         ),
     ]
     max_tokens: Annotated[
@@ -615,8 +651,10 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
                 "4000",
                 int,
                 "ASH_BEDROCK_MAX_TOKENS",
+                low=1,
             ),
-            description="Maximum number of tokens to generate in the response.",
+            ge=1,
+            description="Maximum number of tokens to generate in the response, at least 1 (Converse's range).",
         ),
     ]
     top_p: Annotated[

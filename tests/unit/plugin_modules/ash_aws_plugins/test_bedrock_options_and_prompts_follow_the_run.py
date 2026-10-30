@@ -173,6 +173,57 @@ def test_a_numeric_knob_is_still_read(monkeypatch):
     assert options.max_tokens == 77
 
 
+@pytest.mark.parametrize(
+    "variable, value, attribute, default",
+    [
+        ("ASH_BEDROCK_TEMPERATURE", "-1", "temperature", 0.5),
+        ("ASH_BEDROCK_TEMPERATURE", "5", "temperature", 0.5),
+        ("ASH_BEDROCK_MAX_TOKENS", "0", "max_tokens", 4000),
+        ("ASH_BEDROCK_MAX_TOKENS", "-5", "max_tokens", 4000),
+    ],
+)
+def test_a_knob_the_environment_sets_outside_converses_range_takes_the_default(
+    monkeypatch, variable, value, attribute, default
+):
+    """Converse takes a temperature of 0 to 1 and at least one token; a finite
+    value outside that is refused by every candidate alike, so it is as bad as
+    a non-number and takes the default the same way."""
+    monkeypatch.setenv(variable, value)
+
+    options = BedrockSummaryReporterConfigOptions()
+
+    assert getattr(options, attribute) == default
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("temperature", -0.1),
+        ("temperature", 1.5),
+        ("temperature", float("nan")),
+        ("temperature", float("inf")),
+        ("max_tokens", 0),
+        ("max_tokens", -5),
+    ],
+)
+def test_a_config_value_outside_converses_range_is_refused(field, value):
+    """A value a config file sets is the operator's explicit choice, so one
+    outside Converse's range is a configuration error, as a finding count
+    below one is; ``.nan`` and ``.inf`` are refused too."""
+    with pytest.raises(pydantic.ValidationError):
+        BedrockSummaryReporterConfigOptions(**{field: value})
+
+
+@pytest.mark.parametrize(
+    "field, value", [("temperature", 0.0), ("temperature", 1.0), ("max_tokens", 1)]
+)
+def test_a_config_value_at_converses_bounds_is_accepted(field, value):
+    """The control: the bounds themselves are in the range."""
+    options = BedrockSummaryReporterConfigOptions(**{field: value})
+
+    assert getattr(options, field) == value
+
+
 # ---------------------------------------------------------------------------
 # The finding counts have a floor
 # ---------------------------------------------------------------------------
