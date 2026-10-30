@@ -112,6 +112,7 @@ from automated_security_helper.utils.terminal_text import (
     shown_not_obeyed,
     shown_on_one_line,
 )
+from automated_security_helper.utils.threads import ash_thread
 
 if TYPE_CHECKING:
     from automated_security_helper.utils.sandbox.backends import SpawnPlan
@@ -5765,9 +5766,9 @@ def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
     if not gc.isenabled():
         plan.run_cleanup()
         return
-    worker = threading.Thread(
-        target=plan.run_cleanup, name="ash-sandbox-plan-cleanup", daemon=False
-    )
+    # Through the factory, so the cleanup's lines belong to the run that made
+    # the plan (its log scope rides the copied context), not to no run.
+    worker = ash_thread(plan.run_cleanup, name="ash-sandbox-plan-cleanup", daemon=False)
     try:
         worker.start()
     except RuntimeError as error:
