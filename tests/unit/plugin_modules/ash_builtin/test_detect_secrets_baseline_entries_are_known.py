@@ -356,6 +356,129 @@ def test_a_baseline_entry_without_a_line_number_fails_nothing(
         assert len(_suppressed(report)["settings.py"]) == 1
 
 
+def test_the_repositorys_baseline_is_never_the_operators_whatever_the_scan_root(
+    tmp_path, monkeypatch
+):
+    """A baseline the scan found in the tree may only mark, by structure.
+
+    The answer used to fall through to the settings-trust rule for a baseline
+    that did not come from the ``baseline_file`` option. That rule reads the
+    configured scan root (``_scanned_root``, the workspace root in workspace
+    mode), and when that root did not hold the source directory and no other
+    checkout did, it found nothing to say against the tree's own
+    ``.secrets.baseline`` and read it as the operator's: its known candidates
+    left the report. Now a baseline the operator did not name is never trusted,
+    and the configured root changes nothing."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
+    (source / ".secrets.baseline").write_text(
+        json.dumps(_baseline(KNOWN_ENTRIES)), encoding="utf-8"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    context.config._scanned_root = elsewhere
+
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_entries_trusted() is False
+    _worker_returning(scanner, monkeypatch, {"settings.py": [(1, KEPT_SECRET)]})
+    report = scanner.scan(target=source, target_type="source")
+    assert _findings(report) == [("settings.py", 1)]
+    assert len(_suppressed(report)["settings.py"]) == 1
+
+
+def test_a_baseline_in_an_enclosing_checkout_is_read_relative_to_its_own_directory(
+    tmp_path, monkeypatch
+):
+    """A monorepo: ``repo/service`` is scanned and its ``.secrets.baseline`` is a
+    link to the checkout's own ``repo/.secrets.baseline``, which detect-secrets
+    wrote from ``repo``: its result keys read ``service/settings.py`` and its
+    ``should_exclude_file`` pattern ``^service/tests/``. Matched relative to the
+    scanned subdirectory, no key met a finding (the listed candidate was
+    reported unsuppressed) and no pattern met a file (``service/tests`` was
+    scanned). Both are now matched relative to the baseline's own directory."""
+    from detect_secrets.core.potential_secret import PotentialSecret
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        SHOULD_EXCLUDE_FILE_FILTER,
+        _detect_secrets_api,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    checkout = tmp_path / "repo"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    service = checkout / "service"
+    (service / "tests").mkdir(parents=True)
+    (service / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
+    (service / "tests" / "fixture.py").write_text(
+        f"KEY = '{NEW_SECRET}'\n", encoding="utf-8"
+    )
+    shared = _baseline(
+        {
+            "service/settings.py": [
+                {
+                    "type": SECRET_TYPE,
+                    "hashed_secret": _hash(KEPT_SECRET),
+                    "line_number": 1,
+                    "is_secret": False,
+                }
+            ]
+        }
+    )
+    shared["filters_used"] = [
+        {"path": SHOULD_EXCLUDE_FILE_FILTER, "pattern": ["^service/tests/"]}
+    ]
+    (checkout / ".secrets.baseline").write_text(json.dumps(shared), encoding="utf-8")
+    try:
+        (service / ".secrets.baseline").symlink_to(Path("..") / ".secrets.baseline")
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlinks unavailable on this platform: {exc}")
+    context = PluginContext(
+        source_dir=service,
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    context.output_dir.mkdir(parents=True)
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_entries_trusted() is False
+
+    seen: dict = {}
+
+    def scanned(self, *, baseline, scan_paths, scan_settings_dict, **kwargs):
+        seen["paths"] = list(scan_paths)
+        collection_cls, _, _ = _detect_secrets_api()
+        collection = collection_cls()
+        collection.root = self._secrets_collection.root
+        collection["settings.py"].add(
+            PotentialSecret(
+                SECRET_TYPE, "settings.py", secret=KEPT_SECRET, line_number=1
+            )
+        )
+        return collection
+
+    monkeypatch.setattr(type(scanner), "_scan_in_worker", scanned)
+
+    report = scanner.scan(target=service, target_type="source")
+
+    # The listed candidate is known: kept, suppressed, under the scan's URI.
+    assert _findings(report) == [("settings.py", 1)]
+    assert len(_suppressed(report)["settings.py"]) == 1
+    # The checkout-relative exclude pattern took the tests directory out.
+    assert seen["paths"], seen
+    assert not any(Path(path).name == "fixture.py" for path in seen["paths"]), seen[
+        "paths"
+    ]
+    assert any(Path(path).name == "settings.py" for path in seen["paths"]), seen[
+        "paths"
+    ]
+
+
 def test_without_a_baseline_every_secret_is_reported(tmp_path, monkeypatch):
     """Control: the known set is empty when no baseline is in use."""
     monkeypatch.chdir(tmp_path)
