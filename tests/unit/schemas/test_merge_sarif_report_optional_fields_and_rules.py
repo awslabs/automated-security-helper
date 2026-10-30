@@ -59,6 +59,79 @@ class TestNullOptionalFieldsMerge:
         assert [r.ruleId for r in aggregated.runs[0].results] == ["T-1"]
         assert len(aggregated.runs[0].invocations) == 1
 
+    @pytest.mark.parametrize(
+        ("aggregate_side", "incoming_side", "expected"),
+        [(None, 1, 1), (1, None, 1), (None, None, 0)],
+        ids=["aggregate-null", "incoming-null", "both-null"],
+    )
+    def test_invocations_merge_from_either_null_side(
+        self, aggregate_side, incoming_side, expected
+    ):
+        """The test above covers an incoming None into an aggregate list only;
+        an aggregate None receiving a list is where an extend on None raises,
+        and both None at once is the shape every ``_run_with_tables`` run has."""
+
+        def invocations(side):
+            if side is None:
+                return None
+            return [{"executionSuccessful": True} for _ in range(side)]
+
+        aggregated = SarifReport(
+            runs=[_run("aggregate", [], invocations(aggregate_side))]
+        )
+        incoming = SarifReport(
+            runs=[_run("tool", [_finding("T-1")], invocations(incoming_side))]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert [r.ruleId for r in aggregated.runs[0].results] == ["T-1"]
+        assert len(aggregated.runs[0].invocations or []) == expected
+
+    @pytest.mark.parametrize(
+        ("aggregate_side", "incoming_side", "expected"),
+        [
+            (None, 1, 1),
+            (1, None, 1),
+            (None, None, 0),
+        ],
+        ids=["aggregate-null", "incoming-null", "both-null"],
+    )
+    def test_inline_external_properties_merge_from_either_null_side(
+        self, aggregate_side, incoming_side, expected
+    ):
+        """The merged value is asserted, not only the results: a guard that
+        skipped the field whenever the incoming side was empty would pass the
+        both-null case and still lose an incoming list over an aggregate None."""
+
+        def report(driver, results, side):
+            return SarifReport.model_validate(
+                {
+                    "runs": [_run(driver, results, []).model_dump(exclude_unset=True)],
+                    "inlineExternalProperties": (
+                        None
+                        if side is None
+                        else [{"version": "2.1.0"} for _ in range(side)]
+                    ),
+                }
+            )
+
+        aggregated = report("aggregate", [], aggregate_side)
+        incoming = report("tool", [_finding("T-1")], incoming_side)
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert [r.ruleId for r in aggregated.runs[0].results] == ["T-1"]
+        merged = aggregated.inlineExternalProperties or []
+        assert len(merged) == expected
+        if incoming_side is not None:
+            # A copy of the incoming item, not the item itself.
+            item = incoming.inlineExternalProperties[0]
+            assert merged[-1] is not item
+            assert merged[-1].model_dump(exclude_none=True) == item.model_dump(
+                exclude_none=True
+            )
+
     def test_null_report_level_lists_on_either_side_merge(self):
         aggregated = SarifReport.model_validate(
             {
@@ -97,6 +170,15 @@ class TestNullOptionalFieldsMerge:
         aggregated.merge_sarif_report(incoming)
 
         assert aggregated.properties.tags == ["scanner:tool"]
+
+        # A copy, not the incoming bag: a later merge's tags must not reach the
+        # report that was merged first.
+        later = SarifReport(
+            runs=[_run("other", [], [])], properties={"tags": ["other"]}
+        )
+        aggregated.merge_sarif_report(later)
+        assert aggregated.properties.tags == ["scanner:tool", "other"]
+        assert incoming.properties.tags == ["scanner:tool"]
 
 
 class TestReportTagsAreDistinct:
@@ -141,6 +223,74 @@ class TestResultsKeepTheirRuleById:
         merged = aggregated.runs[0].results[0]
         assert merged.ruleId == "T-1"
         assert "ruleIndex" not in merged.model_fields_set
+
+    @pytest.mark.parametrize(
+        ("finding", "extensions", "expected"),
+        [
+            (_finding(None, ruleIndex=1), None, "D-1"),
+            (_finding(None, rule={"index": 1}), None, "D-1"),
+            (
+                _finding(
+                    None, ruleIndex=1, rule={"index": -1, "toolComponent": {"index": 0}}
+                ),
+                [
+                    {
+                        "name": "pack",
+                        "rules": [{"id": "P-0"}, {"id": "P-1"}, {"id": "P-2"}],
+                    }
+                ],
+                "P-1",
+            ),
+            (
+                _finding(None, rule={"index": 1, "toolComponent": {"name": "pack"}}),
+                [
+                    {
+                        "name": "pack",
+                        "rules": [{"id": "P-0"}, {"id": "P-1"}, {"id": "P-2"}],
+                    }
+                ],
+                "P-1",
+            ),
+        ],
+        ids=["ruleIndex", "rule.index", "component-by-index", "component-by-name"],
+    )
+    def test_a_middle_index_names_the_middle_rule(self, finding, extensions, expected):
+        """Every positive case elsewhere reads the LAST rule of its array, which
+        ``rules[-1]`` also returns, so code that indexed with SARIF's "no index"
+        value of -1 passed them all. Three rules and the middle one here."""
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [finding],
+                    [],
+                    rules=[{"id": "D-0"}, {"id": "D-1"}, {"id": "D-2"}],
+                    extensions=extensions,
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert aggregated.runs[0].results[0].ruleId == expected
+
+    @pytest.mark.parametrize(
+        "finding",
+        [_finding(None), _finding(None, ruleIndex=-1), _finding(None, ruleIndex=5)],
+        ids=["nothing-named", "index-minus-one", "index-past-the-rules"],
+    )
+    def test_a_result_naming_no_rule_keeps_no_rule_id(self, finding):
+        """The negative controls: no id, SARIF's -1, and an index past the
+        driver's rules each leave the id unset and raise no IndexError."""
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[_run("tool", [finding], [], rules=[{"id": "D-0"}, {"id": "D-1"}])]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert aggregated.runs[0].results[0].ruleId is None
 
     def test_a_rule_reference_by_index_into_the_driver_gains_its_rule_id(self):
         aggregated = SarifReport(runs=[_run("aggregate", [], [])])
@@ -564,6 +714,69 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
 
         location = _first_artifact_location(aggregated)
         assert (location.uri, location.uriBaseId) == ("x.py", "SRCROOT")
+
+    def test_a_base_without_a_trailing_slash_is_expanded_with_one(self):
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="src/x.py", uri_base_id="SRCROOT")],
+                    bases={"SRCROOT": "file:///repo-two"},
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert location.uri == "file:///repo-two/src/x.py"
+        assert location.uriBaseId is None
+
+    def test_a_base_with_no_uri_both_runs_declare_is_kept(self):
+        """SARIF lets a base be declared without a uri, for the consumer to
+        supply; two identical declarations read as the same base and the id
+        stays on the location."""
+        declared = {"SRCROOT": {"description": {"text": "the consumer's root"}}}
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], bases=declared)]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="src/x.py", uri_base_id="SRCROOT")],
+                    bases=declared,
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert (location.uri, location.uriBaseId) == ("src/x.py", "SRCROOT")
+
+    def test_a_base_with_no_uri_only_the_incoming_run_declares_is_left_as_written(
+        self,
+    ):
+        """Nothing to expand with and nothing is added to the aggregate's table,
+        so the location keeps its id as the scanner wrote it."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="src/x.py", uri_base_id="SRCROOT")],
+                    bases={"SRCROOT": {"description": {"text": "the consumer's root"}}},
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert (location.uri, location.uriBaseId) == ("src/x.py", "SRCROOT")
+        assert aggregated.runs[0].originalUriBaseIds is None
 
     def test_a_base_id_both_runs_define_alike_is_kept(self):
         aggregated = SarifReport(
@@ -1083,3 +1296,6 @@ class TestTheIncomingRunsExtensionsAreFolded:
         ]
         assert len(packs) == 1
         assert [rule.id for rule in packs[0].rules] == ["P-1", "P-2"]
+        # The union was made on a copy: the first report's pack still lists its
+        # own rule only, so the rules list was not shared with the aggregate.
+        assert [rule.id for rule in first.runs[0].tool.extensions[0].rules] == ["P-1"]
