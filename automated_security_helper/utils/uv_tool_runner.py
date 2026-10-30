@@ -263,7 +263,10 @@ def _install_retry_delay(config: UVToolRetryConfig, attempt: int) -> float:
     construction can overflow a float for a late attempt (``OverflowError`` out
     of the retry loop, as a failed install), so an overflowing or infinite
     growth reads as the cap, and the result is always a finite number no larger
-    than ``_MAX_RETRY_DELAY_SECONDS``.
+    than ``_MAX_RETRY_DELAY_SECONDS``. Unless ``base_delay`` is zero: zero
+    times an infinite growth is NaN, which read as the cap too, so a config
+    asking for no wait between attempts slept ``max_delay`` from the attempt
+    the power overflowed. A zero base stays zero.
     """
     try:
         growth = config.exponential_base**attempt
@@ -271,7 +274,7 @@ def _install_retry_delay(config: UVToolRetryConfig, attempt: int) -> float:
         growth = math.inf
     delay = config.base_delay * growth
     if math.isnan(delay) or math.isinf(delay):
-        delay = config.max_delay
+        delay = 0.0 if config.base_delay <= 0 else config.max_delay
     if config.jitter:
         delay += random.uniform(0, 1)  # nosec B311 — retry jitter, not security
     bounded = max(0.0, min(delay, config.max_delay, _MAX_RETRY_DELAY_SECONDS))

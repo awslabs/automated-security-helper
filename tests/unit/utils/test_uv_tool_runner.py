@@ -2144,6 +2144,22 @@ class TestRetryDelayIsAlwaysSleepable:
         intervals = [_install_retry_delay(config, n) for n in range(3)]
         assert intervals == [0.0, 0.0, 0.0], intervals
 
+    def test_a_zero_base_delay_stays_zero_when_the_power_overflows(self):
+        """``0.0 * inf`` is NaN, and NaN read as the cap: a config asking for
+        no wait between attempts slept ``max_delay`` from the attempt the
+        power overflowed. The base is assigned after construction, past the
+        bound ``__post_init__`` puts on it, as the clamp test above does."""
+        config = UVToolRetryConfig(base_delay=0.0, max_delay=60.0, jitter=False)
+        config.exponential_base = 1e6
+        late = [_install_retry_delay(config, n) for n in (0, 51, 52, 60)]
+        assert late == [0.0, 0.0, 0.0, 0.0], late
+
+    def test_a_positive_base_whose_power_overflows_reads_as_the_cap(self):
+        """The control: with a base to grow from, the overflow is the cap."""
+        config = UVToolRetryConfig(base_delay=1.0, max_delay=60.0, jitter=False)
+        config.exponential_base = 1e6
+        assert _install_retry_delay(config, 60) == 60.0
+
 
 class TestTheAttemptCountCannotFallBelowOne:
     """``1 + max_retries`` must never collapse ``range(attempts)`` to empty.
