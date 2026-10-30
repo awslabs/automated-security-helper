@@ -691,6 +691,7 @@ def _plugin_error_text(plugin_report: Mapping) -> str:
 def _violations_from_validation_report(
     report_path: Path,
     expected_plugins: Sequence[str] | None = None,
+    every_requested_named: bool = True,
 ) -> tuple[Dict[str, List["_NagFinding"]], str | None]:
     """Read CDK's policy validation report into per-pack normalized finding dicts.
 
@@ -710,6 +711,10 @@ def _violations_from_validation_report(
     ``pluginReports`` emptiness guard below cannot see that once CDK's own
     ``CloudFormation Validate`` plugin writes an entry into every report, which it does from
     aws-cdk-lib 2.262.0, so the requested packs are checked for presence by name.
+    ``every_requested_named`` is False when the caller could not read the name of one of its
+    requested packs: that pack's failed entry cannot be told from an unrequested plugin's, so
+    every failed entry then counts (fail closed), and only the named packs are checked for
+    presence.
 
     Replaces the ``*-NagReport.json`` reader used with cdk-nag 2.x. In v3 the packs are
     ``IPolicyValidationPlugin`` implementations rather than aspects, and their output lands in
@@ -767,10 +772,16 @@ def _violations_from_validation_report(
             # template. That fails the template only for a pack the caller REQUESTED;
             # CDK's own CloudFormation Validate plugin writes into the same report, and
             # its failure says nothing about the requested packs' rules, so it is logged
-            # and not counted. With no requested names known, every failed entry counts.
+            # and not counted. With no requested names known, or with one requested pack
+            # whose name could not be read (its entry would be mistaken for an unrequested
+            # plugin's), every failed entry counts.
             error = _plugin_error_text(plugin_report)
             detail = f": {error}" if error else ""
-            if not expected_plugins or pack_name in expected_plugins:
+            if (
+                not expected_plugins
+                or not every_requested_named
+                or pack_name in expected_plugins
+            ):
                 failed_packs.append(f"{pack_name}{detail}")
                 ASH_LOGGER.error(
                     f"cdk-nag pack '{pack_name}' reported '{conclusion}' with no "
@@ -1219,8 +1230,11 @@ def run_cdk_nag_against_cfn_template(
             # it, because some packs did register.
             # The names the registered packs report under, so the report reader can tell a
             # requested pack with no entry from one that ran and found nothing. A pack whose
-            # name cannot be read (a test double, an older cdk-nag) is not checked for.
+            # name cannot be read (a test double, an older cdk-nag) is not checked for, and
+            # its presence makes the reader count every failed entry, since that pack's own
+            # failure could not be told from an unrequested plugin's.
             registered_plugin_names: List[str] = []
+            every_requested_named = True
             for pack in nag_packs:
                 if pack not in nag_pack_lookup:
                     raise KeyError(
@@ -1233,6 +1247,8 @@ def run_cdk_nag_against_cfn_template(
                 plugin_name = _plugin_report_name(plugin)
                 if plugin_name is not None:
                     registered_plugin_names.append(plugin_name)
+                else:
+                    every_requested_named = False
 
             if not nag_packs:
                 # No pack means no rule can fire, which would otherwise yield an empty report
@@ -1305,6 +1321,7 @@ def run_cdk_nag_against_cfn_template(
             cdk_nag_report_lines, report_failure = _violations_from_validation_report(
                 Path(app_outdir) / "validation-report.json",
                 expected_plugins=registered_plugin_names,
+                every_requested_named=every_requested_named,
             )
 
             if not cdk_nag_report_lines:

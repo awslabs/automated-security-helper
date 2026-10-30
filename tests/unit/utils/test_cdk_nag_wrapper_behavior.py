@@ -3071,6 +3071,43 @@ def test_a_requested_packs_failure_still_fails_the_template_when_names_are_known
     assert "AwsSolutions" in response.failure
 
 
+def test_a_nameless_requested_packs_failure_still_fails_the_template_beside_a_named_one(
+    cdk_doubles, template_file, outdir, monkeypatch, caplog
+):
+    """Two packs requested; only one exposes a readable name. The nameless pack's failed,
+    violation-less entry is not in the requested-name set, so a reader that trusts that set
+    takes it for an unrequested plugin's failure and the template reads clean on the named
+    pack's success. With a requested pack unnamed, every failed entry counts (fail closed)."""
+    monkeypatch.setattr(
+        cdk_nag_wrapper,
+        "_plugin_report_name",
+        lambda plugin: (
+            "AwsSolutions" if type(plugin).__name__ == "AwsSolutionsChecks" else None
+        ),
+    )
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="success"),
+        _plugin_report(
+            plugin_name="HIPAA.Security", violations=[], conclusion="failure"
+        ),
+    )
+
+    with caplog.at_level("WARNING"):
+        response = _run(
+            template_file,
+            outdir,
+            nag_packs=["AwsSolutionsChecks", "HIPAASecurityChecks"],
+        )
+
+    assert response.failure is not None, (
+        "the nameless pack's failure was read as unrequested"
+    )
+    assert "HIPAA.Security" in response.failure
+    assert not any("not requested" in r.message for r in caplog.records), [
+        r.message for r in caplog.records
+    ]
+
+
 TEMPLATE_WITH_OUTPUT_FIRST = """Outputs:
   MyDataBucket:
     Value: !Ref MyDataBucket
