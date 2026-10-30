@@ -53,6 +53,7 @@ as a general normalizer.
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import re
 import stat
@@ -264,10 +265,23 @@ def make_private_dir(directory: Path) -> List[Path]:
     under is warned about, once per path, when other accounts can list it
     (POSIX only): under the workspace root that listing is the live session
     ids. Returns the directories made, deepest last.
+
+    Raises:
+        FileExistsError: ``errno.EEXIST`` naming the level at which something
+            that is not a directory sits where ``directory`` or an ancestor
+            goes, as ``Path.mkdir(parents=True, exist_ok=True)`` raises for it.
+            Without this the file was taken for an existing level, and the
+            caller's next open under it failed as ``ENOTDIR`` on its own path,
+            naming the file it tried to open rather than the directory that
+            could not be made.
     """
     missing: List[Path] = []
     for ancestor in (directory, *directory.parents):
         if ancestor.exists():
+            if not ancestor.is_dir():
+                raise FileExistsError(
+                    errno.EEXIST, os.strerror(errno.EEXIST), str(ancestor)
+                )
             break
         missing.append(ancestor)
     if missing:
