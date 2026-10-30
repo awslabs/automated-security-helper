@@ -196,8 +196,22 @@ class _ChainedPrompt(threading.Event):
     def is_set(self) -> bool:
         if super().is_set() or self._owner._signalled:
             return True
+        # Walk the ancestors here, with the seen set CancelEvent.is_set keeps,
+        # and not by reading each parent's stop_promptly: that read recurses up
+        # the chain, and two links made at once can close a cycle that the
+        # unlocked cycle checks missed, which made it a RecursionError.
+        seen = {id(self._owner)}
         parent = self._owner._parent
-        return parent is not None and bool(getattr(parent, "stop_promptly", False))
+        while parent is not None and id(parent) not in seen:
+            seen.add(id(parent))
+            prompt = getattr(parent, "prompt", None)
+            if not isinstance(prompt, _ChainedPrompt):
+                # Not a CancelEvent: its own answer ends the climb.
+                return bool(getattr(parent, "stop_promptly", False))
+            if threading.Event.is_set(prompt) or parent._signalled:
+                return True
+            parent = parent._parent
+        return False
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         return _poll_wait(self, timeout)
@@ -321,6 +335,20 @@ def _chains_to(event: threading.Event, target: threading.Event) -> bool:
     return False
 
 
+#: Orders the cycle check and the parent store of the two linking paths
+#: (:func:`cancel_scope`, :func:`link_parent`). Unlocked, two threads linking
+#: two events to each other each saw no cycle and each stored its link, closing
+#: one. Only normal thread frames take it; the signal handlers never do.
+_PARENT_LINK_LOCK = threading.Lock()
+
+
+def _link_if_unlinked(event: "CancelEvent", parent: threading.Event) -> None:
+    """Chain *event* to *parent* when it has no parent and no cycle would close."""
+    with _PARENT_LINK_LOCK:
+        if event._parent is None and not _chains_to(parent, event):
+            event._parent = parent
+
+
 _CANCEL_EVENT: contextvars.ContextVar[Optional[threading.Event]] = (
     contextvars.ContextVar("ash_scan_cancel_event", default=None)
 )
@@ -337,8 +365,8 @@ def cancel_scope(event: threading.Event) -> Iterator[None]:
     """
     if isinstance(event, CancelEvent) and event._parent is None:
         ambient = _CANCEL_EVENT.get()
-        if ambient is not None and not _chains_to(ambient, event):
-            event._parent = ambient
+        if ambient is not None:
+            _link_if_unlinked(event, ambient)
     token = _CANCEL_EVENT.set(event)
     try:
         yield
@@ -362,11 +390,9 @@ def link_parent(event: threading.Event, parent: Optional[threading.Event]) -> No
     that would close a cycle (*parent* already chains to *event*) is
     refused. A link is never removed (see :class:`CancelEvent`).
     """
-    if not isinstance(event, CancelEvent) or event._parent is not None:
+    if not isinstance(event, CancelEvent) or parent is None:
         return
-    if parent is None or _chains_to(parent, event):
-        return
-    event._parent = parent
+    _link_if_unlinked(event, parent)
 
 
 def current_cancel_event() -> Optional[threading.Event]:
@@ -718,6 +744,12 @@ def _handle_sigterm(signum: int, frame: object) -> None:
         signal.raise_signal(signal.SIGTERM)
         return
     _SIGTERM_SEEN = True
+    # Published BEFORE the scopes are read. shutdown_cancels appends its event
+    # and then reads this flag, so with the flag first, a registration is seen
+    # by one side or the other: either the append is in the snapshot below, or
+    # the registrar's read finds the flag set. Read in the other order, an
+    # append between the snapshot and the store was seen by neither.
+    _SHUTDOWN_REQUESTED = True
     scopes = _SHUTDOWN_SCOPES
     if not scopes:
         # No scan to stop cooperatively: keep SIGTERM's kill semantics rather
@@ -729,7 +761,6 @@ def _handle_sigterm(signum: int, frame: object) -> None:
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         signal.raise_signal(signal.SIGTERM)
         return
-    _SHUTDOWN_REQUESTED = True
     for event in scopes:
         # The process is going away: the running tool gets the short grace a
         # stdio shutdown gets (subprocess_utils._stop_grace). The flag covers
@@ -779,22 +810,31 @@ def _handle_sigint(signum: int, frame: object) -> None:
         signal.raise_signal(signal.SIGINT)
         return
     _SIGINT_SEEN = True
+    # Published before the scopes are read and whether or not any is
+    # registered, as shutdown_requested() promises: a scope that registers
+    # after this Ctrl-C is cancelled at once, and one that registers while
+    # this runs is seen by the snapshot or by its own read of the flag (see
+    # _handle_sigterm).
+    _SHUTDOWN_REQUESTED = True
     scopes = _SHUTDOWN_SCOPES
-    if scopes:
-        _SHUTDOWN_REQUESTED = True
-        for event in scopes:
-            # The same plain store as the SIGTERM handler's, for the same
-            # deadlock reason; it covers cancel and prompt both.
-            event._signalled = True
+    for event in scopes:
+        # The same plain store as the SIGTERM handler's, for the same
+        # deadlock reason; it covers cancel and prompt both.
+        event._signalled = True
     if _GRACE_WAITS > 0:
         # A stop is waiting out a tool's grace (stop_grace_in_progress): the
         # latch above is what this Ctrl-C asks for, and chaining the default
         # handler would raise KeyboardInterrupt inside that wait and abort the
         # SIGKILL escalation. The stop completes; the scan unwinds after it.
         return
+    # The first interrupt stays an interrupt. A previous disposition that is
+    # not a Python callable (SIG_DFL, or a handler set in C) has nothing to
+    # chain to, and skipping it left the Ctrl-C without any effect, so the
+    # interpreter's own handler raises KeyboardInterrupt in its place.
     previous = _PREVIOUS_SIGINT
-    if callable(previous):
-        previous(signum, frame)
+    if not callable(previous):
+        previous = signal.default_int_handler
+    previous(signum, frame)
 
 
 @contextlib.contextmanager
@@ -822,12 +862,17 @@ def shutdown_cancels(event: CancelEvent) -> Iterator[None]:
     # store erases the first thread's registration. The handlers keep
     # reading the tuple lock-free, so a signal landing while the lock is
     # held cannot deadlock on it.
+    registered = False
     try:
         # The append sits inside the try so an interrupt delivered at the
         # lock's exit, after the store has landed, still reaches the finally
-        # and unregisters the event. The removal there is an identity filter,
-        # so it is also safe when the append never happened.
+        # and unregisters the event. The same event can be registered more than
+        # once (an inner scope around an outer one), so the finally removes one
+        # copy, and only if this call reached the store: the flag is set just
+        # before it, so an interrupt in between removes a copy at worst and
+        # never leaves a registration behind.
         with _TOOL_GROUPS_WRITE_LOCK:
+            registered = True
             _SHUTDOWN_SCOPES = _SHUTDOWN_SCOPES + (event,)
         # After the append, so a signal between the two lines is seen by one
         # side or the other, never neither. This arm runs on a normal thread
@@ -838,8 +883,14 @@ def shutdown_cancels(event: CancelEvent) -> Iterator[None]:
             event.set()
         yield
     finally:
-        with _TOOL_GROUPS_WRITE_LOCK:
-            _SHUTDOWN_SCOPES = tuple(e for e in _SHUTDOWN_SCOPES if e is not event)
+        if registered:
+            with _TOOL_GROUPS_WRITE_LOCK:
+                scopes = list(_SHUTDOWN_SCOPES)
+                for index in range(len(scopes) - 1, -1, -1):
+                    if scopes[index] is event:
+                        del scopes[index]
+                        break
+                _SHUTDOWN_SCOPES = tuple(scopes)
 
 
 def install_sigterm_shutdown() -> None:
