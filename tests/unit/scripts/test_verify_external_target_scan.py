@@ -7,11 +7,20 @@
   GATE_SCANNERS is a violation, not a narrowing of the gate to one scanner;
 * a finding whose location normalizes to no path is reported, not counted as
   located;
-* the scan child's environment carries no ASH_* variable;
+* the scan child's environment carries no ASH_* variable, and no PYTHONSAFEPATH;
 * a timed-out scan is stopped with SIGTERM to its process group first, even when
   the child has already exited, and killed only after the grace period;
 * the output of a stopped scan is read with a deadline and a final kill, so a
-  tool that outlives the child cannot hang the gate.
+  tool that outlives the child cannot hang the gate;
+* a missing scanner exit code is reported as absent, not as 0;
+* each selected scanner must have found something, some finding must be
+  actionable, and the exit code must agree with the actionable count;
+* rules with no scanner attribution satisfy no producer;
+* a repository file is seen as inside the repository in every URI shape the
+  scanners emit, and a symlink loop is not a traceback;
+* a finding with no location is reported even when others have one;
+* an unreadable results file is a FAIL report, --timeout is validated, the
+  cleanup hint is shell-quoted and a failed precondition leaves no directory.
 """
 
 from __future__ import annotations
@@ -305,3 +314,197 @@ class TestDrainOutput:
         with pytest.raises(subprocess.TimeoutExpired) as raised:
             gate.run_scan(tmp_path, tmp_path / "src", tmp_path / "out", timeout=0.01)
         assert raised.value.output == "tail"
+
+
+class TestExitCodeRecords:
+    def test_a_missing_exit_code_is_none_not_zero(self, gate):
+        """At the base _as_int read the absent code as 0 and the reports printed it."""
+        states = gate.parse_scanner_states(
+            {"scanner_results": {"bandit": {"status": "ERROR", "finding_count": 0}}}
+        )
+        assert states[0].exit_code is None
+        violations = gate.check_no_scanner_errors(states)
+        assert "exit_code=none (no tool ran)" in violations[0]
+        table = gate.format_summary_table(states)
+        assert table.splitlines()[-1].split()[-1] == "-"
+
+    def test_an_infinite_count_is_read_as_zero(self, gate):
+        assert gate._as_int(float("inf")) == 0
+        assert gate._as_optional_int(float("inf")) is None
+
+
+class TestRecordedErrors:
+    def test_a_string_checkpoint_value_is_one_entry(self, gate):
+        """At the base a string iterated character by character."""
+        results = {
+            "scanner_results": {"bandit": {"status": "ERROR"}},
+            "validation_checkpoints": [
+                {"checkpoint_name": "post", "errors": "bandit failed to start"}
+            ],
+        }
+        recorded = gate.collect_recorded_errors(results)
+        assert recorded["bandit"] == ("post.errors: bandit failed to start",)
+
+
+class TestFindingsPerScanner:
+    def test_one_selected_scanner_at_zero_is_a_violation(self, gate):
+        """At the base the sum across scanners hid the zero."""
+        states = [
+            _state(gate, "bandit", findings=3),
+            _state(gate, "checkov", findings=0),
+        ]
+        violations = gate.check_findings_present(states)
+        assert len(violations) == 1
+        assert "checkov" in violations[0] and "zero findings" in violations[0]
+
+    def test_both_with_findings_is_clean(self, gate):
+        states = [
+            _state(gate, "bandit", findings=3),
+            _state(gate, "checkov", findings=7),
+        ]
+        assert gate.check_findings_present(states) == []
+
+    def test_findings_with_no_actionable_one_is_a_violation(self, gate):
+        states = [
+            gate.ScannerState("bandit", "PASSED", 3, 0, 0, True, False),
+            gate.ScannerState("checkov", "PASSED", 7, 0, 0, True, False),
+        ]
+        violations = gate.check_actionable_findings_present(states)
+        assert len(violations) == 1
+        assert "no finding is actionable" in violations[0]
+
+
+class TestExitCodeAgreesWithThePayload:
+    def test_exit_zero_with_actionable_findings_is_a_violation(self, gate):
+        states = [_state(gate, "bandit", findings=3)]
+        violations = gate.check_exit_code(0, states)
+        assert len(violations) == 1 and "exited 0" in violations[0]
+
+    def test_exit_two_with_no_actionable_finding_is_a_violation(self, gate):
+        states = [gate.ScannerState("bandit", "PASSED", 3, 0, 0, True, False)]
+        assert any("exited 2" in v for v in gate.check_exit_code(2, states))
+
+    def test_exit_two_with_actionable_findings_is_clean(self, gate):
+        assert gate.check_exit_code(2, [_state(gate, "bandit", findings=3)]) == []
+
+    def test_without_states_both_codes_are_tolerated(self, gate):
+        assert gate.check_exit_code(0) == []
+        assert gate.check_exit_code(2) == []
+
+
+class TestUnattributedRules:
+    def test_rules_with_no_scanner_name_cannot_satisfy_a_producer(self, gate):
+        """At the base the union fallback let every producer match everybody's rules."""
+        states = [_state(gate, "bandit"), _state(gate, "checkov")]
+        evidence = gate.SarifEvidence(
+            unattributed={"B307": 1, "CKV_AWS_18": 1}, uris=("insecure_app.py",)
+        )
+        violations = gate.check_expected_rules_present(states, evidence)
+        assert len(violations) == 1
+        assert "properties.scanner_name" in violations[0]
+
+
+class TestNormalizeUri:
+    def test_a_file_uri_is_decoded_and_the_drive_separator_dropped(self, gate):
+        assert gate._normalize_uri("file:///C:/a%20b/x.py") == "C:/a b/x.py"
+        assert gate._normalize_uri("file:///tmp/a%20b/x.py") == "/tmp/a b/x.py"
+
+
+class TestInsideTheRepository:
+    @pytest.fixture
+    def repo(self, tmp_path):
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "insecure_app.py").write_text("x = 1\n", encoding="utf-8")
+        return tmp_path
+
+    def test_a_root_relative_uri_with_a_leading_separator_is_inside(self, gate, repo):
+        """At the base Path(root, '/pkg/x.py') read the URI as filesystem-absolute."""
+        evidence = gate.SarifEvidence(uris=("/pkg/insecure_app.py",))
+        violations = gate.check_findings_are_from_the_fixture(evidence, repo)
+        assert any("inside the repository" in v for v in violations)
+
+    def test_checkovs_stripped_absolute_shape_is_inside(self, gate, repo):
+        stripped = str((repo / "pkg" / "insecure_app.py").resolve()).lstrip("/")
+        evidence = gate.SarifEvidence(uris=(stripped,))
+        violations = gate.check_findings_are_from_the_fixture(evidence, repo)
+        assert any("inside the repository" in v for v in violations)
+
+    def test_a_fixture_uri_outside_the_repository_is_clean(self, gate, repo):
+        evidence = gate.SarifEvidence(uris=("/elsewhere/target/insecure_app.py",))
+        assert gate.check_findings_are_from_the_fixture(evidence, repo) == []
+
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+    def test_a_symlink_loop_is_not_a_traceback(self, gate, repo):
+        """At the base resolve() raised RuntimeError or OSError past the suppress."""
+        loop = repo / "loop"
+        try:
+            loop.symlink_to(loop)
+        except (OSError, NotImplementedError):  # pragma: no cover - no symlinks here
+            pytest.skip("symlinks are not available")
+        evidence = gate.SarifEvidence(uris=("loop/insecure_app.py",))
+        violations = gate.check_findings_are_from_the_fixture(evidence, repo)
+        assert not any("inside the repository" in v for v in violations)
+
+
+class TestUnlocatedFindings:
+    def test_some_findings_without_a_location_are_reported(self, gate, tmp_path):
+        """At the base a mix passed and the PASS line claimed every finding was located."""
+        evidence = gate.SarifEvidence(
+            uris=("/elsewhere/target/insecure_app.py",), results_without_location=2
+        )
+        violations = gate.check_findings_are_from_the_fixture(evidence, tmp_path)
+        assert len(violations) == 1
+        assert "2 of 3 finding(s) carry no location" in violations[0]
+
+
+class TestChildEnvironmentSafePath:
+    def test_pythonsafepath_is_dropped(self, gate):
+        env = gate.child_environment({"PATH": "/usr/bin", "PYTHONSAFEPATH": "1"})
+        assert "PYTHONSAFEPATH" not in env
+
+
+class TestLoadResults:
+    def test_invalid_utf8_is_reported_not_raised_raw(self, gate, tmp_path):
+        """At the base UnicodeDecodeError escaped main as a traceback."""
+        (tmp_path / gate.RESULTS_FILENAME).write_bytes(b"\xff\xfe{}")
+        with pytest.raises(gate.ResultsUnreadable, match="not valid UTF-8"):
+            gate.load_results(tmp_path)
+
+
+class TestScanTimeout:
+    @pytest.mark.parametrize("text", ["nan", "inf", "0", "-5", "1800", "2000", "x"])
+    def test_an_unusable_timeout_is_refused(self, gate, text):
+        import argparse
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            gate._scan_timeout(text)
+
+    def test_a_timeout_under_the_budget_is_accepted(self, gate):
+        assert gate._scan_timeout("600") == 600.0
+
+
+class TestRemoveHint:
+    def test_the_hint_is_shell_quoted(self, gate, tmp_path):
+        hint = gate._remove_hint(tmp_path / "with space")
+        assert hint == f"rm -rf '{tmp_path / 'with space'}'"
+
+
+class TestPreconditionFailure:
+    def test_the_empty_temp_directory_is_removed(
+        self, gate, monkeypatch, tmp_path, capsys
+    ):
+        """At the base the mkdtemp directory stayed and a fixture never written was named."""
+        made = tmp_path / "ash-external-target-x"
+        made.mkdir()
+        monkeypatch.setattr(gate.tempfile, "mkdtemp", lambda prefix: str(made))
+        monkeypatch.setattr(
+            gate, "check_paths_outside_repo", lambda *paths: ["inside the repository"]
+        )
+
+        def never(*args, **kwargs):  # pragma: no cover - the gate must not get here
+            raise AssertionError("the scan ran after a failed precondition")
+
+        monkeypatch.setattr(gate, "run_scan", never)
+        assert gate.main([]) == 1
+        assert not made.exists()
+        assert "EVIDENCE KEPT" not in capsys.readouterr().out
