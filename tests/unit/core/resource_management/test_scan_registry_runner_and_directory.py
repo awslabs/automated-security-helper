@@ -358,6 +358,54 @@ class TestProgressOfASupersededScanReadsNoFiles:
         assert progress["output_superseded"] is False
         assert "bandit" in progress["scanners"]
 
+    def test_supersession_survives_the_later_scans_removal(self, tmp_path):
+        """Worked out from registry membership alone, cleaning the later scan
+        up made the old scan read the later scan's files as its own again."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("semgrep")), encoding="utf-8"
+        )
+        assert registry.cleanup_scan(new) is True
+
+        progress = registry.check_scan_progress(old)
+
+        assert progress["output_superseded"] is True
+        assert progress["superseded_by"] == [new]
+        assert progress["scanners"] == {}
+
+    def test_a_later_scan_writing_elsewhere_does_not_supersede(self, tmp_path):
+        """Supersession is about the output tree, not the source directory: a
+        later scan of the same source that writes to another output directory
+        leaves the old scan's files untouched."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        elsewhere = project / ".ash" / "other_output"
+        elsewhere.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+        new = _register(registry, project, elsewhere)
+        registry.update_scan_status(new, MCScanStatus.RUNNING)
+
+        progress = registry.check_scan_progress(old)
+
+        assert progress["output_superseded"] is False
+        assert progress["superseded_by"] == []
+        assert "bandit" in progress["scanners"]
+
     def test_the_order_of_scans_is_the_order_of_registration_not_the_clock(
         self, tmp_path
     ):

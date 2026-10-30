@@ -208,13 +208,23 @@ class ScanRegistryEntry:
         # an unrelated one.
         self.canonical_directory = _canonical_directory(directory_path)
         self.output_directory = output_directory
-        # The output directory as one comparable form too: two scans of
-        # different source directories that name the same output directory
-        # would write one tree, so register_scan refuses the second.
+        # The output tree as one comparable form too, fixed at registration like
+        # canonical_directory. Two uses: two scans of different source
+        # directories that name the same output directory would write one
+        # tree, so register_scan refuses the second; and whether a later scan
+        # took this scan's results over is a question about the OUTPUT tree,
+        # not the source directory, so a later scan of the same source that
+        # writes elsewhere leaves this scan's files untouched.
         self.canonical_output_directory = _canonical_directory(output_directory)
         self.start_time = datetime.now()
         # Position in the registration order; see _REGISTRATION_SEQUENCE.
         self.registration_seq = next(_REGISTRATION_SEQUENCE)
+        # The ids of the scans registered after this one for the same output
+        # tree, recorded by register_scan. Kept on this entry so the fact
+        # survives the later scan's removal from the registry: worked out from
+        # registry membership alone, cleaning the later scan up made this
+        # scan read the later scan's files as its own again.
+        self.later_scan_ids: List[str] = []
         self.end_time: Optional[datetime] = None
         self.status = MCScanStatus.PENDING
         self.severity_threshold = severity_threshold
@@ -614,6 +624,15 @@ class ScanRegistry:
                     requested_severity_threshold=requested_severity_threshold,
                     environment_values=value_tuple(environment_values),
                 )
+                # Every earlier scan of this output tree is now superseded by
+                # this one, and remembers so on its own entry: see
+                # ScanRegistryEntry.later_scan_ids.
+                for other in self._registry.values():
+                    if (
+                        other.canonical_output_directory
+                        == entry.canonical_output_directory
+                    ):
+                        other.later_scan_ids.append(scan_id)
                 self._registry[scan_id] = entry
                 self._logger.info(
                     f"Registered scan {scan_id} for directory {directory_path}"
@@ -734,13 +753,17 @@ class ScanRegistry:
         Returns ``(reason, removed)``: the reason the remover was not run and
         False, or None and what the remover returned.
 
-        Every scan of one source directory writes the same output tree under
-        it. The tree is another scan's while that scan occupies the directory
+        Scans of one source directory write the same output tree under it by
+        default, and the question is about that tree, so the comparison is on
+        ``canonical_output_directory``: a scan of the same source that was given
+        another output directory shares nothing with this one. The tree is
+        another scan's while that scan occupies it
         (:meth:`ScanRegistryEntry.occupies_its_directory`), and it holds a LATER
-        scan's results once one has been registered, whatever that scan's state:
-        ``cleanup_old_scans`` reaches here for an old scan while a newer,
-        completed scan's results sit in the shared tree, and removing them left
-        that scan reporting results_available over an empty directory.
+        scan's results once one has been registered for it (``later_scan_ids``),
+        whatever that scan's state: ``cleanup_old_scans`` reaches here for an old
+        scan while a newer, completed scan's results sit in the shared tree, and
+        removing them left that scan reporting results_available over an empty
+        directory.
 
         The check and the delete run under the registry lock, so a scan of the
         directory registered while the tree is being removed waits for the
@@ -753,22 +776,19 @@ class ScanRegistry:
             for other in self._registry.values():
                 if other.scan_id == entry.scan_id:
                     continue
-                if other.canonical_directory != entry.canonical_directory:
+                if other.canonical_output_directory != entry.canonical_output_directory:
                     continue
                 if other.occupies_its_directory():
                     return (
                         (
-                            "another scan of the same directory is running or "
-                            "stopping and shares this output directory"
+                            "another scan is running or stopping and shares this "
+                            "output directory"
                         ),
                         False,
                     )
-                if other.registration_seq > entry.registration_seq:
+                if other.scan_id in entry.later_scan_ids:
                     return (
-                        (
-                            "a later scan of the same directory holds its results "
-                            "in this output directory"
-                        ),
+                        "a later scan holds its results in this output directory",
                         False,
                     )
             return None, remover()
@@ -1281,16 +1301,19 @@ class ScanRegistry:
                 # Except a later scan that ended without writing and had the
                 # previous results put back: what the directory holds then is
                 # what was there before it, this scan's own results, and they
-                # are not hidden. "Later" is the registration order, never the
-                # clock (see _REGISTRATION_SEQUENCE).
+                # are not hidden. The later scans are the ones register_scan
+                # recorded on this entry (later_scan_ids), keyed by the OUTPUT
+                # tree, so a later scan that wrote elsewhere does not count,
+                # and one that has since been removed from the registry still
+                # does: its files are what the tree holds.
                 previous_only = entry.output_holds_previous_results
-                superseded = entry.status in ENDED and any(
-                    other.scan_id != scan_id
-                    and other.canonical_directory == entry.canonical_directory
-                    and other.registration_seq > entry.registration_seq
-                    and not other.output_holds_previous_results
-                    for other in self._registry.values()
-                )
+                superseded_by = [
+                    later
+                    for later in entry.later_scan_ids
+                    if later not in self._registry
+                    or not self._registry[later].output_holds_previous_results
+                ]
+                superseded = entry.status in ENDED and bool(superseded_by)
                 foreign_output = previous_only or superseded or output_missing
                 scan_progress = (
                     ScanProgress(scan_id=scan_id)
@@ -1481,6 +1504,11 @@ class ScanRegistry:
                     # so without this a superseded scan read exactly like a scan
                     # that completed and found nothing.
                     "output_superseded": superseded,
+                    # The later scans whose files the output tree holds, oldest
+                    # first; empty when output_superseded is False. A client that
+                    # wants this scan's results has none to read, and this names
+                    # the scan whose results it would be reading instead.
+                    "superseded_by": superseded_by if superseded else [],
                     "coverage_complete": coverage_complete,
                     **(coverage if coverage is not None else _empty_coverage()),
                     "completed_scanners": scan_progress.completed_scanners,
