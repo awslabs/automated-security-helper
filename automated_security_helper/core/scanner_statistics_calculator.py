@@ -945,9 +945,12 @@ class ScannerStatisticsCalculator:
         if scanner_threshold_def != "config":
             shown_threshold = None
             threshold_from_env = False
-        # resolve_scanner_threshold answers source "config" for every non-None
-        # scanner threshold and never substitutes the global one, so a kept
-        # reference form cannot be paired with another source.
+        # resolve_scanner_threshold answers source "config" for a scanner
+        # threshold that is set and not blank, and "global" otherwise: a blank
+        # scanner value falls through to the global threshold, and a blank
+        # global one to ASH_DEFAULT_SEVERITY_LEVEL. So a kept reference form
+        # whose value resolved blank was dropped just above with its source, and
+        # a kept form is never paired with another source.
         if shown_threshold is None and scanner_threshold_def == "global":
             # The global threshold is a validated field too; same record read.
             shown_threshold = ScannerStatisticsCalculator._recorded_reference_shown(
