@@ -32,6 +32,7 @@ import pytest
 
 import automated_security_helper.config.sandbox_grants as sandbox_grants
 from automated_security_helper.utils.get_scan_set import (
+    get_changed_files,
     git_common_dir,
     git_index_paths_below,
     git_repository_root,
@@ -902,19 +903,53 @@ def test_a_gitfile_pointing_at_a_real_worktrees_admin_dir_is_nested(isolated_tmp
 
 
 @pytest.mark.integration
-def test_git_dir_set_to_a_worktree_admin_dir_records_nothing(isolated_tmp, monkeypatch):
+def test_git_dir_set_to_a_worktree_admin_dir_does_not_move_the_root(
+    isolated_tmp, monkeypatch
+):
     """A pre-commit hook in a linked worktree runs with GIT_DIR set to that
-    worktree's admin dir (git 2.50.1). git then calls the current directory the
-    root, so a scan of services/api from the hook was labeled "."."""
+    worktree's admin dir and no GIT_WORK_TREE (git 2.50.1). git then calls the
+    current directory the root, so a scan of services/api from the hook was
+    labeled ".", and later recorded nothing. The root lookup now leaves GIT_DIR
+    out and lets git discover the repository from the scanned directory, so the
+    root is the real one and the label is the directory's own."""
     root = _repo_with_a_commit(isolated_tmp / "super")
     _git("worktree", "add", "-q", "-b", "side", "wt/x", cwd=root)
     api = root / "services" / "api"
     api.mkdir(parents=True)
     monkeypatch.setenv("GIT_DIR", (root / ".git" / "worktrees" / "x").as_posix())
-    assert git_repository_root(api) == api.resolve()
+    assert git_repository_root(api) == root.resolve()
 
-    assert recorded_scan_source(api, git_repository_root, {}) is None
-    assert host_scan_source_label(api, git_repository_root) is None
+    assert recorded_scan_source(api, git_repository_root, {}) == "services/api"
+    assert host_scan_source_label(api, git_repository_root) == "services/api"
+
+
+@pytest.mark.integration
+def test_a_hook_scanning_a_subdirectory_joins_the_diff_onto_the_real_root(
+    isolated_tmp, monkeypatch
+):
+    """With GIT_DIR and no GIT_WORK_TREE, ``rev-parse --show-toplevel`` in
+    ``<worktree>/src`` named ``<worktree>/src`` while ``diff --name-only`` named
+    ``src/app.py`` from the real root, so a ``--source-dir src
+    --changed-files-only`` scan from a pre-commit hook joined ``<worktree>/src/
+    src/app.py``, matched no finding, and reported nothing at exit 0."""
+    root = _repo_with_a_commit(isolated_tmp / "super")
+    _git("worktree", "add", "-q", "-b", "side", "wt/x", cwd=root)
+    worktree = root / "wt" / "x"
+    src = worktree / "src"
+    src.mkdir()
+    (src / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git("add", "src/app.py", cwd=worktree)
+    _git("commit", "-qm", "add app", cwd=worktree)
+    monkeypatch.setenv("GIT_DIR", (root / ".git" / "worktrees" / "x").as_posix())
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+
+    found_root = git_repository_root(src)
+    changed = get_changed_files("HEAD~1", cwd=src)
+
+    assert found_root == worktree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+    joined = [found_root / p for p in changed]
+    assert all(p.is_file() for p in joined), joined
 
 
 @pytest.mark.integration

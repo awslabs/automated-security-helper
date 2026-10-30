@@ -2053,22 +2053,25 @@ _GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
 
 
 def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
-    """The environment the nesting check's git commands are started with.
+    """The environment every git command in this module is started with.
 
     ``child_environ`` (a copy, never the live environ; PATH reduced to its anchored
     entries, so a program git starts by name, a credential helper or a textconv
     driver, cannot be found through the working directory), less GIT_DIR and its
-    siblings (:data:`_GIT_LOCATION_ENV`), so that the common dir, the git dir, the
-    worktree list and the index listing describe the directory git is started in
-    and not the repository ASH's own environment names. *without* names more
-    variables to leave out.
+    siblings (:data:`_GIT_LOCATION_ENV`), so that git discovers the repository
+    from the directory it is started in and answers about that one. *without*
+    names more variables to leave out.
 
-    The repository-root lookup and the diff deliberately keep those variables
-    (plain ``child_environ``): a pre-commit hook in a linked worktree runs ASH
-    with GIT_DIR set to that worktree's admin dir, git then calls the scanned
-    directory the root, and the nesting check records nothing for it. Dropping
-    GIT_DIR there made the root the enclosing checkout and the scan recorded a
-    label for a directory that is not its own repository.
+    The repository-root lookup and the diff drop them too. A git hook exports
+    GIT_DIR and not GIT_WORK_TREE, and with that pair git takes its working
+    directory for the top of the work tree: ``rev-parse --show-toplevel`` in a
+    subdirectory then named that subdirectory, while ``diff --name-only`` kept
+    naming the changed files from the real root, so a ``--source-dir src
+    --changed-files-only`` scan started by a pre-commit hook joined ``src/app.py``
+    onto ``<tree>/src``, matched no finding, and reported nothing at exit 0; a
+    workspace project below a larger repository became a root of its own the same
+    way. With discovery the root is the real one for the hook's own tree and for a
+    subdirectory alike, and the nesting check reads the same root.
     """
     dropped = set(_GIT_LOCATION_ENV).union(without)
     return {key: value for key, value in child_environ().items() if key not in dropped}
@@ -2253,8 +2256,7 @@ def _rev_parse_toplevel(
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=path,
-            # GIT_DIR is kept on purpose: see _git_environ.
-            env=child_environ(),
+            env=_git_environ(),
         )
     except FileNotFoundError as error:
         return None, _why_git_did_not_start(error, path)
@@ -2753,10 +2755,10 @@ def get_changed_files(
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=cwd,
-            # GIT_DIR is kept on purpose, as the root lookup keeps it: see
-            # _git_environ. The diff and the root it is resolved against must
-            # describe the same repository.
-            env=child_environ(),
+            # The same environment as the root lookup's (_git_environ), so the
+            # diff and the root its names are joined onto describe one repository,
+            # the one git discovers from cwd.
+            env=_git_environ(),
         )
     except FileNotFoundError as error:
         ASH_LOGGER.warning(
