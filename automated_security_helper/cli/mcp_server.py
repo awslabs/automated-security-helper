@@ -11,6 +11,7 @@ the MCP protocol for ASH security scanning.
 
 import asyncio
 import contextvars
+import errno
 import functools
 import json
 import logging
@@ -28,6 +29,7 @@ from typing import (
     Dict,
     Any,
     Iterable,
+    List,
     Literal,
     NamedTuple,
     Optional,
@@ -108,7 +110,10 @@ from automated_security_helper.cli.mcp.profile_registry import (
     resolve_session_config_path,
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
-from automated_security_helper.cli.mcp.sandbox import check_config_input
+from automated_security_helper.cli.mcp.sandbox import (
+    caller_is_remote,
+    check_config_input,
+)
 from automated_security_helper.cli.mcp.scan_target import (
     OUTPUT_TREE_REFUSED_EXIT_CODE,
     resolve_scan_target,
@@ -387,6 +392,22 @@ def _holds_an_entry(directory: Path) -> bool:
         return False
 
 
+def _entries_of(directory: Path) -> List[Path]:
+    """The entries of ``directory``, sorted; none when it cannot be listed.
+
+    The results readers walk a scan's output while the scan thread may be
+    moving or rewriting that tree, and a results reader that walks the output
+    of a scan another call is setting up meets the same. A directory that is
+    gone, or is a file, by the time it is listed holds no results to add, and
+    the poll goes on with what it has, instead of failing as a whole on one
+    vanished directory.
+    """
+    try:
+        return sorted(directory.iterdir())
+    except OSError:
+        return []
+
+
 def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     """Decide what ``run_ash_scan()`` with no arguments should scan.
 
@@ -573,6 +594,31 @@ async def _tell_client_error(ctx: Context, message: str) -> None:
     await _tell_client(ctx, "error", message)
 
 
+async def _profile_needs_a_session(
+    ctx: Context, session_id: str, profile: Optional[str], operation: str
+) -> Optional[Dict[str, Any]]:
+    """The refusal a workspace tool returns when an unidentified caller names a profile.
+
+    The workspace tools need no session of their own, but a ``profile`` named
+    on the call is materialized into the caller's session workspace, and a
+    caller the server could not identify has none. Left to the workspace
+    module, that call fails on the missing workspace, which it reports as an
+    invalid config (exit 3): a config refusal for a request that named a valid
+    profile, with nothing in the answer naming the cause. The cause is the
+    request's missing session, so it is refused here the way every session
+    tool refuses it, with the same error_type (session_identity_required) and
+    the same usage code. None when no profile was named, or the caller has a
+    session.
+    """
+    if profile is None:
+        return None
+    refusal = session_identity_refusal(session_id, operation, ctx=ctx)
+    if refusal is None:
+        return None
+    await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
+    return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
+
+
 @mcp.tool()
 async def run_ash_scan(
     ctx: Context,
@@ -694,10 +740,17 @@ async def run_ash_scan(
                 )
                 return resolved.error
             source_dir = resolved.source_dir
+        # The working directory is the server's filesystem layout, which this
+        # module withholds from a network caller (_resolve_omitted_source_dir):
+        # only the local client, whose directory it is, is told it.
         await _tell_client(
             ctx,
             "info",
-            raw_controls_on_one_line(f"run_ash_scan tool called in cwd: {Path.cwd()}"),
+            "run_ash_scan tool called"
+            if caller_is_remote(session_id)
+            else raw_controls_on_one_line(
+                f"run_ash_scan tool called in cwd: {Path.cwd()}"
+            ),
         )
         if not Path(source_dir).is_absolute():
             source_dir = str(Path.cwd() / source_dir)
@@ -908,6 +961,13 @@ async def run_ash_scan(
                     f"Failed to start scan: {result.get('error', 'Unknown error')}"
                 ),
             )
+            if "exit_code" not in result:
+                # Every refusal this tool returns carries the code the CLI exits
+                # with (the docstring's contract). The ones mcp_scan_directory
+                # shapes without one, a session whose delivered source is being
+                # changed and a session at its scan limit, are the "anything
+                # else" case there, with another scan of the same directory.
+                with_exit_code(result, REFUSED_INTERNAL_EXIT_CODE)
             return result
         if "scan_id" not in result:
             await _tell_client_error(
@@ -1037,6 +1097,12 @@ async def resolve_ash_workspace(
         await _tell_client_error(ctx, raw_controls_on_one_line(error_text(e)))
         return _scan_session_error(e)
 
+    profile_refusal = await _profile_needs_a_session(
+        ctx, session_id, profile, "resolve_ash_workspace"
+    )
+    if profile_refusal is not None:
+        return profile_refusal
+
     try:
         await _tell_client(
             ctx,
@@ -1103,7 +1169,10 @@ async def run_ash_workspace_scan(
     Every project gets its own entry in the scan registry, so the `scan_ids` map in
     the response can be used with get_scan_progress and get_scan_results per
     project. A project skipped at resolution gets no entry and no id. cancel_scan
-    with one project's id stops that project, and the others carry on.
+    with one project's id stops that project, and the others carry on. A caller
+    with no session the server issued still gets its results in this response,
+    but get_scan_progress and cancel_scan need a session, so they refuse that
+    caller's `scan_ids`.
 
     Server limits: the scan counts as one scan against the server's
     max_concurrent_scans however many projects it has, and is refused the way
@@ -1149,9 +1218,13 @@ async def run_ash_workspace_scan(
             call, instead of whatever select_profile bound to this session. An
             unknown name refuses the whole scan; running N repository scans under
             the default config because a profile name was misspelled, and
-            reporting success, is exactly what the confinement refusal above
-            exists to prevent. The fields the profile sets are final for every
-            project, and a project's own config fills the rest.
+            reporting success, is the outcome a whole-workspace refusal exists
+            to prevent, as one project outside the permitted roots refuses the
+            whole workspace. The fields the profile sets are final for every
+            project, and a project's own config fills the rest. Needs a session:
+            refused (error_type session_identity_required) for a caller with no
+            session the server issued, because the profile is materialized into
+            the caller's session workspace.
 
     Returns:
         Dict with `scan_ids` (project key to registry scan id), `projects` (each
@@ -1184,6 +1257,12 @@ async def run_ash_workspace_scan(
     except ValueError as e:
         await _tell_client_error(ctx, raw_controls_on_one_line(error_text(e)))
         return _scan_session_error(e)
+
+    profile_refusal = await _profile_needs_a_session(
+        ctx, session_id, profile, "run_ash_workspace_scan"
+    )
+    if profile_refusal is not None:
+        return profile_refusal
 
     try:
         await _tell_client(
@@ -1428,23 +1507,31 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
         # The files in output_dir are the previous scan's when this one ended
         # without results and they were put back; check_scan_progress read nothing
-        # from them, and neither does this.
-        previous_only = bool(progress_info.get("output_holds_previous_results"))
+        # from them, and neither does this. They are the previous scan's as well
+        # while this one is still pending: a scan queued behind another of its
+        # session, or started with clean_output false and not yet through its
+        # own set-up, has written nothing there, and what is there is not its.
+        previous_only = (
+            bool(progress_info.get("output_holds_previous_results"))
+            or progress_info.get("status") == "pending"
+        )
 
         # The scanners directory, each scanner's and each target's are read only
         # when they resolve to a directory inside the output directory, as every
         # other results reader does: through a link, a results file would be read
-        # from another tree and returned as this scan's.
+        # from another tree and returned as this scan's. Each is listed through
+        # _entries_of: the scan thread may move or rewrite the tree between the
+        # check and the listing, and one vanished directory does not fail the poll.
         scanners_dir = output_dir / "scanners"
         if not previous_only and resolves_to_directory_inside(scanners_dir, output_dir):
-            for scanner_dir in scanners_dir.iterdir():
+            for scanner_dir in _entries_of(scanners_dir):
                 if not resolves_to_directory_inside(scanner_dir, output_dir):
                     continue
 
                 scanner_name = scanner_dir.name
                 scanner_results.setdefault(scanner_name, {})
 
-                for target_dir in scanner_dir.iterdir():
+                for target_dir in _entries_of(scanner_dir):
                     if not resolves_to_directory_inside(target_dir, output_dir):
                         continue
 
@@ -1523,13 +1610,42 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         }
 
 
+#: The keys of a results document that name a coverage gap; see the
+#: get_scan_progress docstring for each. Every filter level carries them.
+_COVERAGE_KEYS = (
+    "coverage_complete",
+    "incomplete_scanners",
+    "no_scanner_ran",
+    "incomplete_converters",
+    "unevaluated_rules",
+    "stale_content_databases",
+)
+
+
+def _with_coverage(filtered: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
+    """``filtered`` with the coverage keys of ``results`` carried over.
+
+    The summary and minimal levels are built from a fixed key set, which left
+    out whether every scanner ran: a summary read as complete for a scan whose
+    results said a scanner was MISSING. The docstring of get_scan_results
+    promises the gap keys at every level, as get_scan_progress reports them, so
+    the ones the document carries are copied onto the filtered response.
+    """
+    for key in _COVERAGE_KEYS:
+        if key in results:
+            filtered[key] = results[key]
+    return filtered
+
+
 @mcp.tool()
 async def get_scan_results(
     ctx: Context,
     output_dir: str = ".ash/ash_output",
     filter_level: str = "full",
-    scanners: str = None,
-    severities: str = None,
+    # Optional in the schema as well as in the default: a client that sends an
+    # explicit null for "no filter" is validated, not refused.
+    scanners: Optional[str] = None,
+    severities: Optional[str] = None,
     actionable_only: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -1645,9 +1761,9 @@ async def get_scan_results(
         if filter_level == "full":
             return results
         elif filter_level == "summary":
-            return filter_summary(results)
+            return _with_coverage(filter_summary(results), results)
         elif filter_level == "minimal":
-            return filter_minimal(results)
+            return _with_coverage(filter_minimal(results), results)
         else:
             await _tell_client(
                 ctx,
@@ -1741,6 +1857,12 @@ def _directory_not_read(directory: Path, output_path: Path) -> Optional[str]:
     )
 
 
+#: The errors a stat raises for a path with nothing at it, the ones
+#: ``Path.exists`` reads as False: no entry, a file on the way, a bad
+#: descriptor, a link loop. Any other error on a stat is reported as before.
+_NOT_THERE_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP})
+
+
 def _result_path_entry(
     file_path: Path, output_path: Path, not_read: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -1765,12 +1887,16 @@ def _result_path_entry(
             "size_bytes": None,
             "error": raw_controls_on_one_line(not_read),
         }
-    exists = file_path.exists()
-    return {
-        "path": str(file_path),
-        "exists": exists,
-        "size_bytes": file_path.stat().st_size if exists else 0,
-    }
+    # One stat, read for both fields: a file that goes away between an existence
+    # check and its stat, as when a new scan sets the previous results aside,
+    # is listed as not there instead of failing the whole call.
+    try:
+        size = file_path.stat().st_size
+    except OSError as error:
+        if error.errno not in _NOT_THERE_ERRNOS:
+            raise
+        return {"path": str(file_path), "exists": False, "size_bytes": 0}
+    return {"path": str(file_path), "exists": True, "size_bytes": size}
 
 
 @mcp.tool()
@@ -1904,7 +2030,9 @@ async def get_scan_result_paths(
             result["scanners_dir"] = str(scanners_dir)
             result["scanner_results"] = {}
 
-            for scanner_dir in scanners_dir.iterdir():
+            # Listed through _entries_of: a directory a new scan moves away
+            # between the check above and its listing is listed as empty.
+            for scanner_dir in _entries_of(scanners_dir):
                 if (
                     _directory_not_read(scanner_dir, output_path) is None
                     and scanner_dir.is_dir()
@@ -1912,7 +2040,7 @@ async def get_scan_result_paths(
                     scanner_name = scanner_dir.name
                     result["scanner_results"][scanner_name] = {}
 
-                    for target_dir in scanner_dir.iterdir():
+                    for target_dir in _entries_of(scanner_dir):
                         # A target directory that is a link is listed by its
                         # name here; its results file is checked like any other.
                         if target_dir.is_symlink() or target_dir.is_dir():
@@ -2214,7 +2342,7 @@ async def get_config(
 
 
 @mcp.tool()
-def list_scanners() -> list:
+async def list_scanners() -> list:
     """List all registered ASH scanners with their metadata.
 
     Returns one entry per scanner with:
@@ -2247,7 +2375,11 @@ def list_scanners() -> list:
     scan whose config or --ash-plugin-modules names its module.
     """
     try:
-        return mcp_list_scanners()
+        # Off the event loop, as check_installation runs the same inventory: the
+        # probes run each scanner's dependency check in turn and then wait on
+        # the process-wide inventory lock, seconds during which every other
+        # session's calls would otherwise stall.
+        return await asyncio.to_thread(mcp_list_scanners)
     except Exception as e:
         log_unexpected_error(logger, e, "Error in list_scanners")
         return [
@@ -3000,7 +3132,8 @@ def get_ash_status() -> str:
 
 ASH version {version}
 
-ASH is installed and ready to perform security scans in local mode.
+ASH is installed and scans run in local mode. Whether each scanner's tool is
+installed is not checked here.
 Built-in scanners:
 {scanners}
 
@@ -3009,9 +3142,11 @@ each scanner's version and whether its dependencies are met.
 """
     except Exception as e:
         log_unexpected_error(logger, e, "Error getting ASH status")
+        # Client-visible, so written as every other error text the module hands
+        # a client: controls as escapes, on one line.
         return f"""ASH Status: ❌ ERROR
 
-Error: {error_text(e)}
+Error: {raw_controls_on_one_line(error_text(e))}
 
 Please check your ASH installation.
 """
@@ -3057,6 +3192,21 @@ ASH is a security scanning orchestrator that runs multiple security tools.
     )
 
 
+#: What the two prompts name when the caller names no source_dir. A prompt has
+#: no request context, so it cannot tell a local client from a network one, and
+#: the server's working directory is the right target only for the first: on a
+#: network session it is the server's own tree, which run_ash_scan refuses to
+#: fall back to (_resolve_omitted_source_dir). Naming it here steered a remote
+#: agent to pass it explicitly. The prompt names the session's directory instead
+#: and has the agent omit source_dir, which run_ash_scan resolves the same way
+#: for both: the delivered tree, or the working directory for the local client.
+_SESSION_SOURCE_DIR_WORDS = (
+    "this session's source directory (the tree delivered with set_source_git or "
+    "set_source_zip_finalize, or the server's working directory for the local "
+    "client that started it over stdio)"
+)
+
+
 @mcp.prompt(
     title="Run ASH Security Scan",
     description="This prompt invokes an ASH security scan of the source directory, defaulting to the current one",
@@ -3064,10 +3214,21 @@ ASH is a security scanning orchestrator that runs multiple security tools.
 def run_ash_security_scan(source_dir: Optional[str] = None) -> str:
     """Create a prompt for analyzing ASH security scan results"""
     if source_dir is None:
-        source_dir = str(Path.cwd().absolute())
-    return f"""Please run an ASH security scan of the following directory: {source_dir}
+        target = _SESSION_SOURCE_DIR_WORDS
+        how = (
+            "The scan should be done using the `run_ash_scan` MCP tool from the "
+            "`ash` MCP Server, called with no source_dir: the tool resolves that "
+            "directory itself and refuses to guess when nothing was delivered."
+        )
+    else:
+        target = f"the following directory: {source_dir}"
+        how = (
+            "The scan should be done using the `run_ash_scan` MCP tool from the "
+            "`ash` MCP Server."
+        )
+    return f"""Please run an ASH security scan of {target}
 
-The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
+{how}
 
 Once the scan has started, an ID will be returned. Using that scan ID, call the
 `get_scan_progress` MCP tool with the scan ID to monitor until completion.
@@ -3083,10 +3244,12 @@ provided in an actionable summary."""
 )
 def analyze_security_findings(source_dir: Optional[str] = None) -> str:
     """Create a prompt for analyzing ASH security scan results"""
-    if source_dir is None:
-        source_dir = str(Path.cwd().absolute())
-    return f"""Please analyze these ASH security scan results in the source_dir:
-{source_dir} and provide:
+    where = (
+        _SESSION_SOURCE_DIR_WORDS
+        if source_dir is None
+        else f"the source_dir:\n{source_dir}"
+    )
+    return f"""Please analyze these ASH security scan results in {where} and provide:
 
 1. **Summary**: Brief overview of the security scan results
 2. **Key Findings**: Most important security issues discovered
@@ -3186,6 +3349,31 @@ async def _stop_on_signal(signals: Optional[Iterable[int]] = None) -> None:
             exit_at_once(_STOP_SIGNALS[signum])
 
 
+#: The stdio server's presence entry while run_mcp_server serves, for exit_at_once:
+#: os._exit skips the finally that would leave it, and with it the removal of
+#: the default workspace when this is the last stdio server.
+_stdio_presence: Optional[Any] = None
+
+
+def _leave_stdio_presence() -> None:
+    """Drop this server's presence entry, and the default workspace if it is the last.
+
+    What run_mcp_server's finally does on a return; called by exit_at_once,
+    which never returns there. Idempotent, so the finally after a recorded exit
+    (tests replace os._exit) finds nothing left to do. A failure to leave does
+    not keep the process from exiting: the entry's lock is released with the
+    process either way, and the next stdio server drops the dead entry when it
+    registers.
+    """
+    presence = _stdio_presence
+    if presence is None:
+        return
+    try:
+        presence.__exit__(None, None, None)
+    except Exception as e:
+        logger.warning(f"Could not remove the stdio session workspace: {e}")
+
+
 def exit_at_once(status: int) -> None:
     """End the process with ``status``, without waiting for any scan's thread.
 
@@ -3194,9 +3382,12 @@ def exit_at_once(status: int) -> None:
     the wait ran out has its tool running in a session of its own, which
     os._exit does not end, so what is left of the tools' groups is killed first.
     os._exit skips the interpreter's own cleanup, so stdout and the log
-    handlers are flushed here.
+    handlers are flushed here, and the stdio server's presence entry is left
+    (_leave_stdio_presence), which removes the default workspace when this was
+    the last stdio server, as a return through run_mcp_server does.
     """
     kill_running_groups()
+    _leave_stdio_presence()
     _flush_stdout()
     logging.shutdown()
     os._exit(status)
@@ -3357,7 +3548,7 @@ def run_mcp_server():
     with ignored stays ignored there too (cli/mcp._uvicorn_server_class and
     cli/mcp._ask_server_to_stop_on_sighup), so on every transport.
     """
-    global _serving_stdio, _source_jobs_left_running
+    global _serving_stdio, _source_jobs_left_running, _stdio_presence
     _source_jobs_left_running = False
     # The sinks that are not handlers write to sys.stderr as given: lastResort
     # for a library logger with no handler, warnings, and the thread and sys
@@ -3393,6 +3584,9 @@ def run_mcp_server():
         # (PresenceLockError) still clears the stdio flag and puts the signal
         # handlers back as the error propagates: it does not start.
         stdio_presence.__enter__()
+        # Known to exit_at_once from here: SIGTERM, SIGHUP and Ctrl-C end the
+        # process without reaching the finally below, and leave the entry through it.
+        _stdio_presence = stdio_presence
         with serving_local_client():
             anyio.run(_serve_stdio)
     except KeyboardInterrupt:
@@ -3412,6 +3606,7 @@ def run_mcp_server():
             raise
     finally:
         _serving_stdio = False
+        _stdio_presence = None
         try:
             stdio_presence.__exit__(None, None, None)
         except Exception as e:
