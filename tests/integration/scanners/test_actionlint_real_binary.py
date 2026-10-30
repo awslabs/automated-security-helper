@@ -182,6 +182,11 @@ def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
     else:
         assert note not in caplog.text
     stderr_log = Path(scanner.results_dir) / "source" / "ActionlintScanner.stderr.log"
+    # The log exists only when actionlint wrote to stderr: an empty stream
+    # creates no file (subprocess_utils._write_stream_log), and a clean lint
+    # writes none. Had the outside file been read, actionlint would have quoted
+    # it on stderr and the file would be here, so a missing log is a clean run,
+    # not a wrong path.
     if stderr_log.exists():
         assert "OUTSIDE-MARKER-LABEL" not in stderr_log.read_text(
             encoding="utf-8", errors="replace"
