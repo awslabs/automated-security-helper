@@ -4,7 +4,9 @@
 
 A config path the operator named is "not found" only when the stat says so:
 ENOENT, ENOTDIR for a path through a non-directory, or a path the OS cannot
-take at all (an embedded NUL). A symbolic link loop or a denied stat is not a
+take at all (an embedded NUL, which Python refuses before the stat; a name the
+OS refuses with EINVAL, as Windows does for one holding ``<`` or ``?``; a path
+longer than the OS allows, ENAMETOOLONG). A symbolic link loop or a denied stat is not a
 missing file, and falling back to the default configuration for one would run a
 scan with settings the operator did not choose. ``Path.exists()`` and
 ``Path.is_file()`` cannot tell these apart, and before Python 3.14 they raise
@@ -27,6 +29,14 @@ from typing import Optional, Union
 
 #: ENOENT, ENOTDIR, or a path the OS cannot take: the documented "not found".
 MISSING = "missing"
+#: The errnos of a path the OS cannot take: an invalid name (EINVAL, Windows's
+#: answer for a reserved character) and a name longer than it allows. Neither
+#: can be a file that is there, so both are MISSING with ENOENT and ENOTDIR.
+_CANNOT_TAKE = frozenset(
+    code
+    for code in (getattr(errno, "EINVAL", None), getattr(errno, "ENAMETOOLONG", None))
+    if code is not None
+)
 #: ELOOP: a symbolic link loop.
 LOOP = "loop"
 #: Any other errno (EACCES among them): the path may be there, and cannot be read.
@@ -82,7 +92,7 @@ def stat_named_path(
         strerror = error.strerror if isinstance(error.strerror, str) else ""
     except ValueError:
         return StatProblem(MISSING, "", None)
-    if number in (errno.ENOENT, errno.ENOTDIR):
+    if number in (errno.ENOENT, errno.ENOTDIR) or number in _CANNOT_TAKE:
         return StatProblem(MISSING, errno.errorcode[number], number)
     if number == errno.ELOOP:
         return StatProblem(LOOP, errno.errorcode[number], number)
