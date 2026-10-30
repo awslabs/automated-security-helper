@@ -425,6 +425,69 @@ def _is_skipped_key(key: str, parent: Optional[str] = None) -> bool:
     )
 
 
+#: The pattern the SARIF models declare on every GUID field.
+_GUID_PATTERN = (
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}"
+    r"-[0-9a-fA-F]{12}$"
+)
+#: A GUID that is plainly no GUID of anything: all zeros but the version and
+#: variant digits the pattern requires.
+_SYNTHETIC_GUID = "-".join(("0" * 8, "0" * 4, "4" + "0" * 3, "8" + "0" * 3, "0" * 12))
+#: One value for each distinct pattern the SARIF models declare on a string: the
+#: GUID, ``dottedQuadFileVersion``, a language tag and a MIME type. A field whose
+#: text was masked to something its pattern refuses takes the first of these the
+#: pattern accepts, which keeps the report loadable without keeping the value.
+_SYNTHETIC_PATTERN_VALUES = (_SYNTHETIC_GUID, "0.0.0.0", "en", "x/x")
+#: The GUID fields of a report already reduced to plain JSON, which carries no
+#: declarations (``deprecatedGuids`` holds a list of GUID strings). ``guid`` and
+#: ``correlationGuid`` are skipped outright (``_SKIPPED_FIELDS``).
+_GUID_KEYS = frozenset(
+    {
+        "baselineGuid",
+        "runGuid",
+        "firstDetectionRunGuid",
+        "lastDetectionRunGuid",
+        "deprecatedGuids",
+    }
+)
+
+
+def _field_pattern(model_type: type, name: str) -> Optional[str]:
+    """The pattern a model declares on its string field ``name``, or None."""
+    field = getattr(model_type, "model_fields", {}).get(name)
+    for item in getattr(field, "metadata", None) or ():
+        pattern = getattr(item, "pattern", None)
+        if isinstance(pattern, str):
+            return pattern
+    return None
+
+
+def _keep_the_pattern(pattern: str, original: str, masked: str) -> str:
+    """``masked``, or a synthetic value the pattern accepts when masking left a
+    field that matched its pattern with text that does not.
+
+    The models do not validate on assignment, so a masked GUID was written
+    without complaint and then refused when the report was read again (``ash
+    merge``, the findings browser). The mask has already removed the value; the
+    replacement is a fixed value that carries none of it.
+    """
+    if masked == original or re.search(pattern, masked):
+        return masked
+    if not re.search(pattern, original):
+        return masked
+    for candidate in _SYNTHETIC_PATTERN_VALUES:
+        if re.search(pattern, candidate):
+            return candidate
+    return masked
+
+
+def _keep_the_key_pattern(key: Optional[str], original: Any, masked: Any) -> Any:
+    """``_keep_the_pattern`` for a plain-JSON key that names a GUID field."""
+    if key in _GUID_KEYS and isinstance(original, str) and isinstance(masked, str):
+        return _keep_the_pattern(_GUID_PATTERN, original, masked)
+    return masked
+
+
 _WORD_CHARACTER = re.compile(r"\w")
 
 #: The line breaks scanners number lines by: universal newlines.
@@ -2104,11 +2167,19 @@ def _mask_tree(
                 continue
             masked = _mask_tree(value, index, seen)
             if _changed(value, masked):
+                if isinstance(value, str):
+                    # A string field that declares a pattern (every GUID field)
+                    # has to match it after masking too.
+                    pattern = _field_pattern(type(node), name)
+                    if pattern is not None:
+                        masked = _keep_the_pattern(pattern, value, masked)
                 setattr(node, name, masked)
         return node
     if isinstance(node, list):
         for position, item in enumerate(node):
-            masked = _mask_tree(item, index, seen, parent)
+            masked = _keep_the_key_pattern(
+                parent, item, _mask_tree(item, index, seen, parent)
+            )
             if _changed(item, masked):
                 node[position] = masked
         return node
@@ -2119,6 +2190,9 @@ def _mask_tree(
             item = node[key]
             masked = _mask_tree(
                 item, index, seen, key if isinstance(key, str) else None
+            )
+            masked = _keep_the_key_pattern(
+                key if isinstance(key, str) else None, item, masked
             )
             if _changed(item, masked):
                 node[key] = masked
