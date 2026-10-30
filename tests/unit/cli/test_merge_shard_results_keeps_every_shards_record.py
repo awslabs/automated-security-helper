@@ -21,7 +21,9 @@ Seven shapes a sharded fan-out produces that the merge read wrong:
   check exempts from its refusal so that the report still names it, was dropped
   while its ``additional_reports`` marker was carried;
 * two shards whose recorded suppressions differ were refused under
-  ``--ignore-suppressions``, where neither setting reaches the exit code.
+  ``--ignore-suppressions``, where that setting does not reach the exit code;
+  shards whose ignore paths differ stay refused under the flag, because an
+  ignore path dropped results the merge cannot bring back.
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ from automated_security_helper.models.asharp_model import (
     FailedInputInfo,
     ScannerStatusInfo,
 )
-from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from tests.unit.cli import test_merge as _merge_tests
 from tests.unit.cli.test_merge import as_loaded, build_shards
 
@@ -345,13 +347,32 @@ class TestIgnoreSuppressionsLiftsTheSuppressionAgreement:
                 as_loaded(self._disagreeing_on_ignore_paths())
             )
 
-    def test_the_disagreement_is_not_refused_under_the_flag(self):
-        verify_verdict_settings_agree(
-            as_loaded(self._disagreeing_on_ignore_paths()), ignore_suppressions=True
-        )
+    def test_the_disagreement_is_still_refused_under_the_flag(self):
+        """An ignore path drops results from a shard's SARIF; nothing lifts them.
+
+        So two shards that disagree on their ignore paths hand the merge two
+        different sets of findings, flag or no flag, and the merged report would
+        carry a vendor finding or not depending on which shard's scanner found it.
+        """
+        with pytest.raises(ShardSettingsDisagreeError, match="ignore_paths"):
+            verify_verdict_settings_agree(
+                as_loaded(self._disagreeing_on_ignore_paths()),
+                ignore_suppressions=True,
+            )
+
+    def test_differing_suppressions_are_not_refused_under_the_flag(self):
+        """The control: the flag lifts the suppressions, so it lifts their agreement."""
+        shards = build_shards(2)
+        shards[1].ash_config.global_settings.suppressions = [
+            AshSuppression(rule_id="B101", path="src/app.py", reason="reviewed")
+        ]
+
+        verify_verdict_settings_agree(as_loaded(shards), ignore_suppressions=True)
+        with pytest.raises(ShardSettingsDisagreeError, match="suppressions"):
+            verify_verdict_settings_agree(as_loaded(shards))
 
     def test_a_verdict_setting_is_still_refused_under_the_flag(self):
-        """The control: the flag lifts the two suppression settings only."""
+        """The second control: the flag lifts the suppression setting only."""
         shards = build_shards(2)
         shards[1].ash_config.fail_on_findings = False
 
