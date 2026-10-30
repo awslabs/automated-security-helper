@@ -628,6 +628,39 @@ def _same_file(first: str, second: str) -> bool:
 #: Where a reported range runs to when where it ends is unknown.
 _TO_END_OF_FILE = 2**62
 
+#: Property a masking writes on a key finding whose range ran to the end of the
+#: file (no END line in any snippet): the next masking takes the same range. A
+#: masking that finds the END line removes it. Without the record the next
+#: masking would read the finding's own endLine, which the first masking left
+#: reading as a masked line, as a bound, and show the key's tail.
+MASKED_TO_END_OF_FILE_PROPERTY = "masked_to_end_of_file"
+
+
+def _masked_to_end_of_file(result: Any) -> bool:
+    """Whether an earlier masking recorded this finding's range as running to the file's end."""
+    properties = getattr(result, "properties", None)
+    return bool(_extra_of(properties).get(MASKED_TO_END_OF_FILE_PROPERTY))
+
+
+def _mark_masked_to_end_of_file(result: Any, to_end_of_file: bool) -> None:
+    """Record on ``result`` whether its range ran to the end of the file."""
+    properties = getattr(result, "properties", None)
+    if properties is None:
+        if not to_end_of_file:
+            return
+        from automated_security_helper.schemas.sarif_schema_model import PropertyBag
+
+        properties = PropertyBag()
+        result.properties = properties
+    extra = getattr(properties, "__pydantic_extra__", None)
+    if not isinstance(extra, dict):
+        return
+    if to_end_of_file:
+        extra[MASKED_TO_END_OF_FILE_PROPERTY] = True
+    else:
+        extra.pop(MASKED_TO_END_OF_FILE_PROPERTY, None)
+
+
 #: A private-key finding's rule, message or tag.
 _PRIVATE_KEY = re.compile(r"(?i)private[\s_-]*key")
 _PEM_BEGIN = "-----BEGIN"
@@ -767,6 +800,10 @@ class _SecretIndex:
         #: (region, END line) of each key block found from other snippets, for the
         #: masking to write back into the finding's region (``_mask_report``).
         self.block_ends: List[Tuple[Any, int]] = []
+        #: (key finding, whether its range ran to the end of the file) for the
+        #: masking to record on the finding (``_mask_report``), so the next
+        #: masking takes the same range instead of reading it off snippet text.
+        self.end_marks: List[Tuple[Any, bool]] = []
         self._pattern: Optional[re.Pattern[str]] = None
 
     def add_values(self, values: Iterable[str]) -> None:
@@ -996,23 +1033,35 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                 # With no END line known, every later line is masked.
                 if known is None:
                     known = _known_lines(sarif_report)
-                if private_key or _starts_a_block(known, uri, start):
+                # A finding recorded as running to the end of the file is a key
+                # block on every later masking too, though its BEGIN line now
+                # reads as a masked line.
+                if (
+                    private_key
+                    or _starts_a_block(known, uri, start)
+                    or _masked_to_end_of_file(result)
+                ):
                     block_end = _block_end(known, uri, start)
                     if block_end is not None:
                         end = block_end
                         index.block_ends.append((region, block_end))
-                    elif not (
+                        index.end_marks.append((result, False))
+                    elif _masked_to_end_of_file(result) or not (
                         isinstance(end, int)
                         and end > start
                         and _line_is_masked(known, uri, end)
                     ):
-                        # No END line in any snippet. The finding's own endLine
-                        # stands only when an earlier masking wrote it: that
-                        # masking replaced the END line with MASKED_LINE, which
-                        # is what the line at endLine then reads. A producer's
-                        # own endLine says nothing about where the key ends, and
-                        # every later line is masked, as before.
+                        # No END line in any snippet. A producer's own endLine
+                        # says nothing about where the key ends, so every later
+                        # line is masked, and the finding records that
+                        # (_mask_report) so the next masking takes the same
+                        # range: by then the line at endLine reads as a masked
+                        # line too, which alone cannot tell "the END line an
+                        # earlier masking wrote here" from "masked through here".
+                        # Without the record, the finding's own endLine stands
+                        # only when an earlier masking wrote it.
                         end = _TO_END_OF_FILE
+                        index.end_marks.append((result, True))
                 elif resource_only and not (isinstance(end, int) and end > start):
                     # cdk-nag writes endLine == startLine for the resource's
                     # first line; a one-line region says nothing about where
@@ -1634,6 +1683,11 @@ def _mask_report(
         current = getattr(region, "endLine", None)
         if not (isinstance(current, int) and current >= block_end):
             region.endLine = block_end
+    # A key block with no END line in any snippet ran to the end of the file;
+    # the finding records that, so the next masking does the same instead of
+    # taking its own endLine, which this masking left reading as a masked line.
+    for result, to_end_of_file in index.end_marks:
+        _mark_masked_to_end_of_file(result, to_end_of_file)
     for result in _all_results(sarif_report):
         message = getattr(result, "message", None)
         root: Any = getattr(message, "root", message)

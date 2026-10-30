@@ -15,6 +15,7 @@ time.
 """
 
 import hashlib
+import json
 import string
 
 import pytest
@@ -148,6 +149,76 @@ class TestAKeyBlocksRangeOnLaterMaskings:
 
         assert _context(model, 1) == BEFORE_PEM + (MASKED_LINE + "\n") * 3
         assert _context(model, 2) == MASKED_LINE + "\n"
+
+    def _key_with_no_end_in_sight(self):
+        key = _key_finding()
+        key["locations"][0]["physicalLocation"]["region"]["endLine"] = 12
+        return _results(
+            key,
+            _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES[:3]),
+            _neighbor("keys.py", 40, 40, [FAR_LINE]),
+        )
+
+    def test_a_second_masking_of_a_key_with_no_end_in_sight_runs_to_the_end(self):
+        """The first masking left the line at the producer's endLine reading as a
+        masked line, which alone looks like an END line an earlier masking wrote;
+        the finding records that its range ran to the end of the file, so every
+        reload masks the same lines and the browser shows none of the key's tail."""
+        model = self._key_with_no_end_in_sight()
+        mask_secrets_in_results(model)
+        loaded = AshAggregatedResults.model_validate_json(model.model_dump_json())
+
+        mask_secrets_in_results(loaded)
+        mask = source_snippet_masker(loaded)
+        shown = mask("keys.py", 10, "".join([BEFORE_PEM] + PEM_LINES + [AFTER_PEM]))
+
+        assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 5
+        assert _context(loaded, 2) == MASKED_LINE + "\n"
+        recorded = loaded.sarif.runs[0].results[0].properties.model_dump()
+        assert recorded["masked_to_end_of_file"] is True
+
+    def test_an_end_line_found_later_bounds_the_range_and_drops_the_record(self):
+        """Control: a later masking whose snippets show the END line keeps it on
+        the finding and the range stops there again."""
+        model = self._key_with_no_end_in_sight()
+        mask_secrets_in_results(model)
+        key = json.loads(
+            model.sarif.runs[0].results[0].model_dump_json(exclude_none=True)
+        )
+        later = _results(
+            key,
+            _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES + [AFTER_PEM]),
+            _neighbor("keys.py", 40, 40, [FAR_LINE]),
+        )
+
+        mask_secrets_in_results(later)
+
+        assert _region(later, 0).endLine == 14
+        assert _context(later, 1) == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
+        assert _context(later, 2) == FAR_LINE
+        recorded = later.sarif.runs[0].results[0].properties.model_dump()
+        assert "masked_to_end_of_file" not in recorded
+
+    def test_a_begin_line_finding_with_no_end_in_sight_keeps_its_range_on_reload(
+        self,
+    ):
+        """A rule that is not a private-key rule is known to start a block only
+        from the BEGIN line, which the first masking replaced; the record on the
+        finding is what keeps the range to the end of the file afterwards."""
+        model = _results(
+            _key_finding(rule_id="CUSTOM-1", tags=["secret"]),
+            _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES[:3]),
+            _neighbor("keys.py", 40, 40, [FAR_LINE]),
+        )
+        mask_secrets_in_results(model)
+        loaded = AshAggregatedResults.model_validate_json(model.model_dump_json())
+
+        mask_secrets_in_results(loaded)
+        mask = source_snippet_masker(loaded)
+        shown = mask("keys.py", 10, "".join([BEFORE_PEM] + PEM_LINES + [AFTER_PEM]))
+
+        assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 5
+        assert _context(loaded, 2) == MASKED_LINE + "\n"
 
     def test_the_findings_browser_masks_the_body_of_a_begin_line_finding(self):
         """A rule that is not a private-key rule is known to start a block only
