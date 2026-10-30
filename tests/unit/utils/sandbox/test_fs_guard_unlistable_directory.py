@@ -182,3 +182,34 @@ def test_a_root_that_cannot_be_checked_is_refused_not_skipped(tmp_path, caplog):
     ]
     assert lines, [record.getMessage() for record in caplog.records]
     assert os.path.lexists(root / "escape"), "the link is left as found"
+
+
+def test_a_root_check_error_is_refused_on_every_interpreter(
+    tmp_path, monkeypatch, caplog
+):
+    """The root check reads the root with os.lstat, not Path.is_symlink: since
+    Python 3.14 is_symlink is os.path.islink, which turns every OSError into
+    False, so the refusal above would never fire there and the error would come
+    unlogged from the walk instead. Measured here with the error injected at
+    lstat, so the pin holds whatever the interpreter and platform."""
+    root = tmp_path / "results"
+    root.mkdir()
+    real_lstat = os.lstat
+
+    def refusing_lstat(path, *args, **kwargs):
+        if os.fspath(path) == os.fspath(root) and not kwargs.get("dir_fd"):
+            raise PermissionError(13, "Permission denied", os.fspath(path))
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        with pytest.raises(PermissionError):
+            fs_guard.sweep_writable([root], ("SWEEPSECRET-4475",))
+
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Could not check or remove the root" in record.getMessage()
+    ]
+    assert lines, [record.getMessage() for record in caplog.records]

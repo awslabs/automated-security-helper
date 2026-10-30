@@ -455,7 +455,10 @@ def sweep_writable(
     for root in roots:
         root = Path(root)
         try:
-            if root.is_symlink():
+            # os.lstat, not Path.is_symlink: since Python 3.14 is_symlink is
+            # os.path.islink, which reads every OSError as "not a link", so a
+            # root that cannot be checked would pass through here in silence.
+            if stat.S_ISLNK(os.lstat(root).st_mode):
                 root.unlink()
                 removed += 1
                 continue
