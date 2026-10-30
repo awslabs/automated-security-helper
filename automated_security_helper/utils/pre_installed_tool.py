@@ -26,9 +26,11 @@ How the check works
    is also the first import of the tool from that environment, done once and
    serially, before parallel scans can race to build stevedore's per-user
    entry-point cache (see ``UVToolRunner.get_tool_version``).
-2. The executable's Python environment is located: a ``python`` next to the
-   resolved executable (a venv's ``bin``/``Scripts`` directory, which is where a
-   ``uv tool`` symlink leads), else the interpreter named by its shebang.
+2. The executable's Python environment is located: the interpreter its ``#!``
+   line names (a console script's own environment), else, for a script another
+   interpreter runs or a Windows launcher, a ``python`` next to the resolved
+   executable (a venv's ``bin``/``Scripts`` directory, which is where a
+   ``uv tool`` symlink leads). A native binary with neither has no environment.
    A program packaged by nixpkgs is neither: see "Nix-wrapped programs" below.
 3. ``uv pip install --dry-run --offline --no-cache --no-config --python <env>
    <requirement>`` decides. uv evaluates extras, environment markers and the
@@ -70,9 +72,9 @@ Verdicts
 ``satisfied``: run the executable directly.
 ``unsatisfied``: it runs, but its environment does not satisfy the requirement;
 ``detail`` names the missing extras or the version mismatch.
-``unverifiable``: no Python environment could be located (a native binary, a
-Windows launcher), uv is absent, or uv failed for a reason other than
-resolution. Callers keep their previous behavior for this verdict rather than
+``unverifiable``: no Python environment could be located (a native binary;
+a Windows launcher takes the interpreter beside it), uv is absent, or uv
+failed for a reason other than resolution. Callers keep their previous behavior for this verdict rather than
 guessing in either direction.
 """
 
@@ -691,9 +693,9 @@ def verify_pre_installed_tool(
 ) -> PreInstalledToolVerdict:
     """Decide whether ``executable`` satisfies ``package[extras]version_constraint``.
 
-    Memoized per (resolved path, file mtime, requirement, values): scanners
-    call their dependency check several times per run, and the ``--version``
-    probe of a large tool takes seconds. ``values`` is the caller's env-read
+    Memoized per (resolved path, file mtime, requirement, values, uv path) for
+    ``_VERDICT_MEMO_SECONDS``: scanners call their dependency check several
+    times per run, and the ``--version`` probe of a large tool takes seconds. ``values`` is the caller's env-read
     set: the probe's stderr excerpt is redacted with it BEFORE it is cut, so
     a cut cannot split a value and leave a fragment the downstream
     whole-spelling redaction misses; it is part of the memo key because the
@@ -890,6 +892,10 @@ def _verify(
 
     if uv_executable is None:
         # The uv installed with ASH first, then PATH; see find_uv_or_none.
+        # Reached only by a caller that did not resolve uv itself: the
+        # memoizing caller (verify_pre_installed_tool) resolves it before
+        # building its key and passes it here, so the key and the judgment
+        # there share one uv.
         from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
 
         uv_executable = find_uv_or_none()
