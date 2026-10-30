@@ -52,7 +52,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterator, List, Mapping, Optional, Sequence
+from typing import Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -172,6 +172,51 @@ def runs_module_or_code(argv: Sequence[str]) -> bool:
     return False
 
 
+#: The interpreter's single-letter options that take a value: the rest of their
+#: argument, or the next argument when nothing follows the letter.
+_PYTHON_LETTERS_WITH_A_VALUE = frozenset("cmWX")
+
+
+def python_module_arguments(options: Sequence[str]) -> Optional[Tuple[str, List[str]]]:
+    """The module ``options`` runs with ``-m`` and the arguments after it, or None.
+
+    ``options`` are an interpreter's arguments after the program. Read the way
+    CPython reads them: single-letter options cluster (``-Im uv``, ``-IXutf8``),
+    and a letter that takes a value (``-c``, ``-m``, ``-W``, ``-X``) takes the rest
+    of its argument (``-muv``) or, when nothing follows it, the next argument.
+    ``-c``, a script, ``-`` or ``--`` means no module runs. A ``-m`` with no module
+    after it is no module either. The one reader of a Python command line's
+    module in ASH: ``cli/dependencies.py`` and :func:`uv_child_overrides` both ask
+    it, so a spelling one of them accepts the other accepts too.
+    """
+    index = 0
+    while index < len(options):
+        arg = os.fspath(options[index])
+        if arg in _PYTHON_OPTIONS_WITH_A_VALUE:
+            index += 2
+            continue
+        if arg in ("-", "--") or not arg.startswith("-"):
+            return None
+        if arg.startswith("--"):
+            index += 1
+            continue
+        for position in range(1, len(arg)):
+            letter = arg[position]
+            if letter not in _PYTHON_LETTERS_WITH_A_VALUE:
+                continue
+            value: Optional[str] = arg[position + 1 :]
+            if not value:
+                index += 1
+                value = os.fspath(options[index]) if index < len(options) else None
+            if letter == "c" or value is None:
+                return None
+            if letter == "m":
+                return value, [os.fspath(a) for a in options[index + 1 :]]
+            break  # -W or -X took the rest of this argument, or the next one.
+        index += 1
+    return None
+
+
 #: uv options that come before the subcommand and take a value (uv 0.12).
 _UV_OPTIONS_WITH_A_VALUE = frozenset(
     {
@@ -234,6 +279,9 @@ _UV_RUN_OPTIONS_WITH_A_VALUE = _UV_OPTIONS_WITH_A_VALUE | frozenset(
 #: The spellings a uv launcher goes by: the binary, and Windows' shims for it.
 _UV_PROGRAM_NAMES = frozenset({"uv", "uv.exe", "uv.cmd", "uv.bat"})
 
+#: The modules that run uv: ``python -m uv`` and ``python -m uv.__main__``.
+_UV_MODULES = frozenset({"uv", "uv.__main__"})
+
 #: uv's subcommands (uv 0.12), so a value of a global option this module does not
 #: list (a new option, say) is not read as the subcommand: the first positional
 #: argument that is a subcommand is it, and any other positional before it is a
@@ -274,7 +322,12 @@ def _uv_arguments(argv: Sequence[str]) -> Optional[List[str]]:
 
     uv is the binary by any of its names, or ASH's own interpreter running the
     ``uv`` module (``<python> -m uv ...``), which reads the same settings. The
-    program may be a path-like, as subprocess accepts it.
+    program may be a path-like, as subprocess accepts it. The module is read by
+    :func:`python_module_arguments`, in every spelling the interpreter reads
+    (``-muv``, ``-Im uv``, ``-m uv.__main__``): a loop here that looked for a
+    separate ``-m`` then ``uv`` gave those spellings no overrides, so the uv they
+    started found the scanned tree's project and ``.venv``, the hazard the
+    overrides exist for.
     """
     if not argv:
         return None
@@ -282,14 +335,9 @@ def _uv_arguments(argv: Sequence[str]) -> Optional[List[str]]:
     if name in _UV_PROGRAM_NAMES:
         return list(argv[1:])
     if runs_module_or_code(argv):
-        options = list(argv[1:])
-        for index, arg in enumerate(options):
-            if arg == "-m":
-                if options[index + 1 : index + 2] == ["uv"]:
-                    return options[index + 2 :]
-                return None
-            if arg == "-c":
-                return None
+        found = python_module_arguments(argv[1:])
+        if found is not None and found[0] in _UV_MODULES:
+            return found[1]
     return None
 
 
@@ -344,6 +392,7 @@ def uv_child_overrides(
     # it while this reads (utils/process_env.py).
     environment: Mapping[str, str] = snapshot_environ() if env is None else env
     subcommand = None
+    first_positional = None
     index = 0
     while index < len(rest):
         arg = rest[index]
@@ -356,9 +405,20 @@ def uv_child_overrides(
                 break
             # The value of a global option this module does not list: not the
             # subcommand, which is the next positional that names one.
+            if first_positional is None:
+                first_positional = index
             index += 1
             continue
         index += 1
+    if subcommand is None and first_positional is not None:
+        # No listed name anywhere: a subcommand uv gained since the list was
+        # written, or an alias it lacks. The first positional is it, and it gets
+        # the overrides: a gap in the list adds them, never drops them, as a gap
+        # in _UV_RUN_OPTIONS_WITH_A_VALUE does. Only ``tool`` is left out, and
+        # only when it is named. Returning nothing here left such a command on
+        # the scanned tree's project and ``.venv``.
+        index = first_positional
+        subcommand = rest[index]
     if subcommand in (None, "tool"):
         return {}
     # uv's own arguments: the global options before the subcommand and the

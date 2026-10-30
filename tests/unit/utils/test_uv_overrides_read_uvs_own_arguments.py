@@ -4,14 +4,17 @@
 """uv_child_overrides knows uv by every name it runs under, and reads only uv's
 own arguments.
 
-Two properties of utils/python_child.py's uv_child_overrides that nothing else
+Properties of utils/python_child.py's uv_child_overrides that nothing else
 pinned:
 
 - the program is uv when argv names the binary by any of its spellings (uv,
   uv.exe, and Windows' uv.cmd and uv.bat shims) or when ASH's own interpreter runs
-  the uv module (``<python> -m uv ...``). Only ``uv`` and ``uv.exe`` counted, so
-  the other forms got no UV_NO_PROJECT and no UV_PYTHON, and read the scanned
-  tree's project and ``.venv``;
+  the uv module in any spelling the interpreter reads (``-m uv``, ``-muv``,
+  ``-Im uv``, ``-m uv.__main__``). Only ``uv`` and ``uv.exe``, and a separate
+  ``-m`` then ``uv``, counted, so the other forms got no UV_NO_PROJECT and no
+  UV_PYTHON, and read the scanned tree's project and ``.venv``;
+- a subcommand the module's list lacks is read from the first positional
+  argument and gets the overrides; only ``tool``, by name, gets none;
 - for ``uv run`` the scan for ``--project``, ``--python``, ``-p`` and ``--system``
   stops where the program uv runs begins (the first positional argument, or
   ``--``). That program's own ``-p`` or ``--system`` says nothing about uv's
@@ -63,6 +66,32 @@ def test_the_uv_module_run_by_ashs_interpreter_is_uv(no_operator_choice):
     assert (
         uv_child_overrides([sys.executable, "-P", "-m", "uv", "run", "bandit"]) == BOTH
     )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [sys.executable, "-muv", "run", "x"],
+        [sys.executable, "-Im", "uv", "pip", "install", "x"],
+        [sys.executable, "-m", "uv.__main__", "pip", "install", "x"],
+        [sys.executable, "-W", "ignore", "-Bm", "uv", "sync"],
+    ],
+    ids=["-muv attached", "-Im cluster", "uv.__main__", "-W value then -Bm"],
+)
+def test_every_spelling_of_the_uv_module_is_uv(no_operator_choice, argv):
+    """The module is read as the interpreter reads its options: attached to
+    ``-m``, in a cluster, or as ``uv.__main__``. These spellings got no overrides,
+    so the uv they ran found the scanned tree's project and ``.venv``."""
+    assert uv_child_overrides(argv) == BOTH
+
+
+def test_a_subcommand_the_list_lacks_still_gets_the_overrides(no_operator_choice):
+    """A uv subcommand this module does not list (one uv gained, or an alias) is
+    read from the first positional argument: a gap in the list adds the
+    overrides, never drops them. Only ``tool`` is left out, and only by name."""
+    assert uv_child_overrides(["uv", "virtualenv", ".venv"]) == BOTH
+    assert uv_child_overrides(["uv", "--new-option", "value", "newcmd", "x"]) == BOTH
+    assert uv_child_overrides(["uv", "--new-option", "value", "tool", "run", "x"]) == {}
 
 
 def test_other_interpreters_modules_and_programs_are_not_uv(no_operator_choice):

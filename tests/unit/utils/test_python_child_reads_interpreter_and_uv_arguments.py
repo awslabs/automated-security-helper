@@ -8,6 +8,8 @@ Properties of ``utils/python_child.py`` that nothing else pins:
 - ``runs_module_or_code`` sees ``-m`` and ``-c`` attached to their value
   (``-mpip``), combined with other short options (``-Bc``), and behind an
   option that takes the next argument (``--check-hash-based-pycs always``);
+- ``python_module_arguments`` reads the module and its arguments out of the same
+  spellings, and nothing out of ``-c``, a script, ``-`` or ``--``;
 - ``python_code_argv`` builds a source that compiles when it opens with a
   compound statement or a ``from __future__`` import, and the dropping
   statement runs before anything of the caller's source, a one-line source
@@ -28,6 +30,7 @@ import pytest
 
 from automated_security_helper.utils.python_child import (
     python_code_argv,
+    python_module_arguments,
     runs_module_or_code,
     uv_child_overrides,
 )
@@ -85,6 +88,47 @@ def test_runs_module_or_code_reads_every_spelling_of_the_option(argv):
 )
 def test_runs_module_or_code_stops_at_the_script(argv):
     assert runs_module_or_code(argv) is False
+
+
+@pytest.mark.parametrize(
+    "options, expected",
+    [
+        (["-m", "uv", "run", "x"], ("uv", ["run", "x"])),
+        (["-muv", "run", "x"], ("uv", ["run", "x"])),
+        (["-Im", "uv", "pip", "list"], ("uv", ["pip", "list"])),
+        (["-m", "uv.__main__"], ("uv.__main__", [])),
+        (["-W", "ignore", "-Bm", "pip", "install", "x"], ("pip", ["install", "x"])),
+        (["--check-hash-based-pycs", "always", "-m", "uv"], ("uv", [])),
+        (["-Xutf8", "-m", "uv"], ("uv", [])),
+        (["-c", "import uv"], None),
+        (["-Bc", "pass", "-m", "uv"], None),
+        (["script.py", "-m", "uv"], None),
+        (["-", "-m", "uv"], None),
+        (["--", "-m", "uv"], None),
+        (["-m"], None),
+        ([], None),
+    ],
+    ids=[
+        "-m uv",
+        "-muv",
+        "-Im cluster",
+        "uv.__main__",
+        "-W value then -Bm",
+        "long option value",
+        "-X attached",
+        "-c",
+        "-Bc then -m",
+        "script",
+        "stdin",
+        "end of options",
+        "-m alone",
+        "nothing",
+    ],
+)
+def test_python_module_arguments_reads_the_module_as_the_interpreter_does(
+    options, expected
+):
+    assert python_module_arguments(options) == expected
 
 
 @pytest.mark.parametrize(
