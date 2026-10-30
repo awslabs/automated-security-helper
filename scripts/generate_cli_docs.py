@@ -151,6 +151,13 @@ def format_default(param: Any) -> str:
     """The default as a reader would type it, or the reason there is none."""
     if param.required:
         return "required"
+    # A string show_default is the text the option's author chose for --help in
+    # place of the resolved value (`~/.ash/bin` for a path resolved from $HOME at
+    # import), so it is the text the page shows too: the resolved value is the
+    # generator host's, not the reader's.
+    shown = getattr(param, "show_default", None)
+    if isinstance(shown, str) and shown:
+        return code(normalize_paths(shown))
     default = param.default
     if callable(default):
         return "computed at run time"
@@ -400,10 +407,32 @@ def _param_row(path: list[str], param: Any, seen: set[str]) -> str:
         # Said of commands too: a reader who finds the option here will not find
         # it in --help.
         description = f"{description} This option is hidden from `--help` output."
-    return (
-        f'| <a id="{anchor}"></a>{format_flags(param)} | {format_type(param)} | '
-        f"{format_default(param)} | {format_envvar(param)} | {description} |"
-    )
+    columns = [
+        f'<a id="{anchor}"></a>{format_flags(param)}',
+        format_type(param),
+        format_default(param),
+        format_envvar(param),
+        description,
+    ]
+    return "| " + " | ".join(table_cell(column) for column in columns) + " |"
+
+
+_CODE_SPAN_PARTS = re.compile(r"(`+[^`]*`+)")
+
+
+def table_cell(text: str) -> str:
+    """``text`` with every pipe outside a code span escaped, so it stays in one column.
+
+    A pipe in a type name or a help sentence used to split the row into extra
+    columns and shift every value after it. Inside a code span nothing is
+    escaped, for the reason ``md_prose`` gives: python-markdown, which renders
+    the docs, does not end a column on a pipe inside backticks and would show the
+    backslash literally.
+    """
+    parts = _CODE_SPAN_PARTS.split(text)
+    for index in range(0, len(parts), 2):
+        parts[index] = parts[index].replace(r"\|", "|").replace("|", r"\|")
+    return "".join(parts)
 
 
 def generate(root: Any) -> tuple[str, dict]:
