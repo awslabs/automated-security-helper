@@ -2051,13 +2051,25 @@ def _resolve_for_spawn(
             f"{name} is a path relative to the working directory, which is not run",
             name,
         )
-    found = find_executable(name) or _found_on_the_childs_path(name, env)
+    # The child's own PATH first, when the caller gave one that differs from
+    # ASH's: a tool's bin directory put first there names the copy the child
+    # would run, which ASH's PATH may shadow with another copy, and an in-tree
+    # copy refused on that PATH is a refusal to report, not a miss to fall
+    # through.
+    found, child_refused = _found_on_the_childs_path(name, env)
+    if found is None:
+        found = find_executable(name)
     if found:
         args[0] = found
         if _starts_through_cmd_exe(found):
             return _refusal_for_cmd_exe(args)
         return None
     refusal = in_tree_refusal(name)
+    if refusal is None and child_refused is not None:
+        refusal = (
+            f"{name} resolves on the child's PATH to {child_refused}, inside the "
+            "scanned tree, which is not run"
+        )
     if refusal is not None:
         return FileNotFoundError(errno.ENOENT, refusal, name)
     if os.path.dirname(name):
@@ -2077,26 +2089,30 @@ def _resolve_for_spawn(
 
 def _found_on_the_childs_path(
     name: str, env: Optional[Dict[str, str]]
-) -> Optional[str]:
-    """The program as the CHILD's PATH names it, when the caller gave one.
+) -> Tuple[Optional[str], Optional[str]]:
+    """The program as the CHILD's PATH names it, when the caller gave one, and
+    the in-tree copy that PATH named and the scan refused when nothing was chosen.
 
     ``find_executable`` searches ASH's own PATH. A caller that hands the child
     an environment of its own (a tool's bin directory put first) had argv[0]
     resolved against ASH's PATH, or refused as not found, while the child's own
     search would have found it. The child's anchored entries are searched the
-    way ASH's are, with the scan's in-tree refusal applied (``_first_usable``).
-    None when the caller gave no PATH of its own, or when it names nothing.
+    way ASH's are, with the scan's in-tree refusal applied (``_first_usable``),
+    and before ASH's PATH, which may shadow the child's copy with another.
+    ``(None, None)`` when the caller gave no PATH of its own, or when it names
+    nothing; ``(None, refused)`` when its only copies were inside the scanned
+    tree, for the caller to report as the refusal it is.
     """
     if env is None or os.path.dirname(name):
-        return None
+        return None, None
     path_value = env.get("PATH")
     if not path_value or path_value == os.environ.get("PATH"):
-        return None
+        return None, None
     entries = [
         entry for entry in path_value.split(os.pathsep) if entry and _is_anchored(entry)
     ]
     if not entries:
-        return None
+        return None, None
 
     def candidates() -> Iterator[str]:
         for candidate in _executable_candidate_names(name):
@@ -2105,8 +2121,7 @@ def _found_on_the_childs_path(
                 if found:
                     yield found
 
-    found, _refused = _first_usable(name, candidates(), _TREE_SCOPE.get())
-    return found
+    return _first_usable(name, candidates(), _TREE_SCOPE.get())
 
 
 #: Whether a bare name ASH's lookup cannot resolve is refused on Windows instead of
@@ -2939,10 +2954,16 @@ def _note_stop_refused(process: subprocess.Popen) -> None:
     try:
         # Through _group_survives: as PID 1 a group left with nothing but the
         # tool's unreaped children is a tool that is gone, not a survivor.
-        if _has_exited(process) and (
-            os.name == "nt" or not _group_survives(process.pid)
-        ):
-            return
+        if _has_exited(process):
+            # Reaped here, once its exit is known: an exited leader not yet
+            # reaped is a zombie, and a zombie leader alone keeps its group id
+            # alive, so the group probe below read a tool that had ended before
+            # the stop as one the stop could not end, and its exit code was lost
+            # to the refusal. The poll of an ended child takes nothing a later
+            # reader would miss: Popen keeps the code it reaps.
+            process.poll()
+            if os.name == "nt" or not _group_survives(process.pid):
+                return
     except OSError:
         return
     started.stop_refused = True
@@ -3134,9 +3155,12 @@ def _stop(
         )
     except BaseException:
         # A Ctrl-C during the grace: the SIGKILL still follows, so the child is
-        # not left SIGTERMed only while the interrupt goes on.
-        if process.poll() is None:
-            process.kill()
+        # not left SIGTERMed only while the interrupt goes on. A kill the kernel
+        # refuses (EPERM on a child that switched user) must not replace the
+        # interrupt being raised with an OSError the caller reads as a failure.
+        with contextlib.suppress(OSError):
+            if process.poll() is None:
+                process.kill()
         raise
     if process.poll() is None:
         process.kill()
@@ -3314,8 +3338,12 @@ def _stop_tree(
                 # A Ctrl-C during the grace: the group is still SIGKILLed, so
                 # the tool is not left SIGTERMed only while the interrupt goes
                 # on. The group id is still the child's: the leader is not
-                # reaped before the wait returns.
-                _signal_group(pgid, signal.SIGKILL)
+                # reaped before the wait returns. A refused kill (EPERM on a
+                # member the server may not signal) is swallowed here: the
+                # interrupt is what the caller handles, not an OSError in its
+                # place; the refusal is read by the survivor check elsewhere.
+                with contextlib.suppress(OSError):
+                    _signal_group(pgid, signal.SIGKILL)
                 raise
             if process.poll() is not None and not _group_survives(pgid):
                 # The wait reaps the leader and can end with the group
