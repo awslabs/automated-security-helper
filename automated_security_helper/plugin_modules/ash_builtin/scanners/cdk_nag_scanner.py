@@ -1284,7 +1284,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # their findings are kept, and the run summary says "not every requested pack
         # was evaluated" for them, not "no rules were evaluated".
         self.targets_partly_evaluated = 0
-        self.errors = []
+        self._reset_errors()
         self.exit_code = 0
         self._nothing_scanned_reason = None
 

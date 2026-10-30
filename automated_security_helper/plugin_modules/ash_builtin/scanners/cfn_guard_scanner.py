@@ -888,7 +888,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         self.targets_attempted = 0
         self.targets_failed = 0
         self.exit_code = None
-        self.errors = []
+        self._reset_errors()
 
         report = self._empty_report()
         # The unevaluated targets are cleared as cfn-nag clears them, for a

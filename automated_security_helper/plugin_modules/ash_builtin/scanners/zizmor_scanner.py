@@ -1278,7 +1278,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         self.start_time = None
         self.end_time = None
         self.output = []
-        self.errors = []
+        self._reset_errors()
         if not (target.exists() and any(target.iterdir())):
             return super().scan(
                 target, target_type, global_ignore_paths, config, *args, **kwargs

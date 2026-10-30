@@ -685,7 +685,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         # self.errors too, as cdk_nag_scanner resets it: the executor runs this
         # instance over the source and then the converted target, and the error
         # lines of the first were reported again as the second's.
-        self.errors = []
+        self._reset_errors()
         self.exit_code = None
         self._nothing_scanned_reason = None
         self.clear_unevaluated_targets()

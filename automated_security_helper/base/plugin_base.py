@@ -1175,6 +1175,20 @@ class PluginBase(UVToolMixin, BaseModel):
         elif append_to_stream == "stdout":
             self.output.append(f"({name}) " + written)
 
+    def _reset_errors(self) -> None:
+        """Start a run's error lines afresh.
+
+        ``errors`` is cleared together with the record of which of its lines
+        are ASH's own notes (``_plugin_log_lines``). The two belong together: a
+        reset of ``errors`` alone leaves the record holding notes of a run that
+        is over, which grows across targets and, when a later tool line reads
+        the same, drops that line from ``_tool_error_lines``. Anything that
+        starts a run's lines over, such as a ``scan()`` override, calls this
+        instead of assigning ``errors``.
+        """
+        self.errors = []
+        self._plugin_log_lines = []
+
     def _tool_error_lines(self) -> List[str]:
         """``errors`` without the lines ``_plugin_log`` added: what the tool's
         stderr put there.

@@ -425,7 +425,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # failed converted-target run does not quote the source target's stderr.
         self.exit_code = 0
         self.output = []
-        self.errors = []
+        self._reset_errors()
         # Check if the target directory is empty or doesn't exist
         if _target_is_empty(target):
             message = (

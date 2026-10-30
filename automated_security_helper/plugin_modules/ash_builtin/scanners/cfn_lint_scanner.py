@@ -1356,7 +1356,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # invocation record carried the source target's error lines. The
         # unevaluated targets as cfn-nag clears them, for a caller that is not
         # the executor (which clears them before each scan).
-        self.errors = []
+        self._reset_errors()
         self.clear_unevaluated_targets()
 
         report = self._empty_report(target)

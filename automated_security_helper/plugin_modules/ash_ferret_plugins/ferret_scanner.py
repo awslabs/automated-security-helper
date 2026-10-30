@@ -1620,7 +1620,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # its own (exitCodeDescription).
         self.exit_code = 0
         self.output = []
-        self.errors = []
+        self._reset_errors()
         self.targets_attempted = None
         self.targets_failed = 0
         # Check if the target directory is empty or doesn't exist

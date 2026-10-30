@@ -1561,7 +1561,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         Subclasses with bespoke logic (file-iteration, Python-API scanners) should
         override this method directly and leave _execute_scan unimplemented, and
-        start it with the same ``exit_code`` reset as this one.
+        start it with the same ``exit_code`` reset as this one, and with
+        ``_reset_errors()`` where this one clears the error lines: the record of
+        which of them are ASH's own notes is cleared with them.
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
@@ -1583,9 +1585,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # converted-target run's record led with the source target's lines, and
         # the quoted stderr described the wrong run.
         self.output = []
-        self.errors = []
-        # The record of which of those lines are ASH's own goes with them.
-        self._plugin_log_lines = []
+        # The record of which of the error lines are ASH's own goes with them.
+        self._reset_errors()
 
         # Only a directory can be empty: listing a file target raised
         # NotADirectoryError out of scan(), and a file is something to scan.

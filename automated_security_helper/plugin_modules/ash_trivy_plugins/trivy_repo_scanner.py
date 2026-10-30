@@ -331,7 +331,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         # own (exitCodeDescription).
         self.exit_code = 0
         self.output = []
-        self.errors = []
+        self._reset_errors()
         global_ignore_paths = list(global_ignore_paths or [])
         # Check if the target directory is empty or doesn't exist
         if _target_is_empty(target):
