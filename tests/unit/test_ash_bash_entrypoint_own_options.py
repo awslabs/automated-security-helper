@@ -348,8 +348,9 @@ def test_the_scripts_directory_is_read_with_cdpath_unset(runner, tmp_path):
 
 
 def test_the_containers_stdin_is_kept_open_for_piped_input(runner, tmp_path):
-    """An MCP client drives `./ash mcp` over stdin, and `ash inspect` reads keys from
-    a terminal: without -i the container got no input. Here stdin is not a terminal."""
+    """An MCP client drives `./ash mcp` over stdin: without -i the container got no
+    input. Here stdin is not a terminal (a file), so the container's stdin is kept
+    open."""
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,
@@ -364,3 +365,31 @@ def test_the_containers_stdin_is_kept_open_for_piped_input(runner, tmp_path):
     # Captured stdout is not a terminal, so no pseudo-terminal is asked for.
     assert "-t" not in options, options
     assert _inner(run) == ["ash", "mcp"], run
+
+
+def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(runner, tmp_path):
+    """With a terminal on stdin and stdout captured (`./ash scan > log`, or `./ash
+    scan &` from an interactive shell), -i would have the runner read the terminal,
+    and a background job stops on that read. So a terminal stdin gets no -i. The
+    terminal is a real pseudo-terminal, not a faked check."""
+    source, out = _dirs(tmp_path)
+    try:
+        controller, terminal = os.openpty()
+    except OSError as error:  # pragma: no cover - a venue without pseudo-terminals
+        pytest.skip(f"no pseudo-terminal on this host: {error}")
+    try:
+        result, calls = _run(
+            runner,
+            ["--no-build", "--source-dir", str(source), "--output-dir", str(out)],
+            stdin=terminal,
+        )
+    finally:
+        os.close(terminal)
+        os.close(controller)
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    run = _only_run(calls, shown)
+    options = _runner_options(run)
+    assert "-i" not in options, options
+    # Captured stdout is not a terminal either, so no pseudo-terminal is asked for.
+    assert "-t" not in options, options

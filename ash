@@ -1658,14 +1658,15 @@ else
       if [[ "${COLOR_OUTPUT}" = "true" ]] && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
-      # The container's stdin is kept open (-i) when the caller's stdin is not a
-      # terminal (a pipe or a file: an MCP client driving `./ash mcp` on its default
-      # stdio transport, or input redirected into the scan) and when the caller sits at
-      # a terminal that is also stdout (`./ash inspect`, the Textual app, reads keys
-      # from it). Without -i the container got no input at all. The one case left out
-      # is a terminal stdin with stdout redirected: there -i would make the runner read
-      # the terminal, and in a background job that stops the job.
-      if [ ! -t 0 ] || [ -t 1 ]; then
+      # The container's stdin is kept open (-i) only when the caller's stdin is not a
+      # terminal: a pipe or a file, such as an MCP client driving `./ash mcp` on its
+      # default stdio transport, or input redirected into the scan, which without -i
+      # never reached the container. A terminal stdin gets no -i: with one, the runner
+      # reads the terminal, and a wrapper started in the background (`./ash scan &`)
+      # stops on that read. A terminal stdin with input redirected to the wrapper
+      # (`while read x; do ./ash ...; done < list`) is a file, so the container reads
+      # it, as -i means.
+      if [ ! -t 0 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -i"
       fi
       # --quiet and --no-color are this script's options as well as ash's, and they
