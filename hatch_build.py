@@ -177,6 +177,40 @@ GENAI_GUIDE_PACKAGE_PATH = "automated_security_helper/assets/genai-steering-guid
 # back to the release tag.
 _COMMIT_ID = re.compile(r"[0-9a-f]{40}")
 
+# The most GIT_CONFIG_KEY_<n> entries read: a count from the environment is not
+# trusted to bound a loop.
+_MAX_GIT_CONFIG_ENTRIES = 1000
+
+
+def _safe_directory_config(environ) -> dict:
+    """The safe.directory entries of GIT_CONFIG_COUNT/KEY_<n>/VALUE_<n>, renumbered.
+
+    git refuses a repository owned by another user unless safe.directory names it,
+    and a build in a container or CI checkout often passes that through these
+    variables. Dropping them with the rest of GIT_* made git fail there and the
+    commit record read "unknown-commit". Only entries whose key is safe.directory
+    are kept, since any other key set this way (core.worktree, core.fsmonitor, a
+    hook path) can point git at another repository or run a program. A count that
+    is not a number, and an entry with a key and no value, give nothing.
+    """
+    try:
+        count = int(environ.get("GIT_CONFIG_COUNT", ""))
+    except ValueError:
+        return {}
+    values = []
+    for index in range(min(count, _MAX_GIT_CONFIG_ENTRIES)):
+        key = environ.get(f"GIT_CONFIG_KEY_{index}")
+        value = environ.get(f"GIT_CONFIG_VALUE_{index}")
+        if key is not None and value is not None and key.lower() == "safe.directory":
+            values.append(value)
+    if not values:
+        return {}
+    kept = {"GIT_CONFIG_COUNT": str(len(values))}
+    for index, value in enumerate(values):
+        kept[f"GIT_CONFIG_KEY_{index}"] = "safe.directory"
+        kept[f"GIT_CONFIG_VALUE_{index}"] = value
+    return kept
+
 
 class CustomBuildHook(BuildHookInterface):
     """Build hook to stage build assets before packaging."""
@@ -334,7 +368,9 @@ class CustomBuildHook(BuildHookInterface):
         some paths in two.
 
         git sees none of the caller's GIT_* variables except
-        GIT_CEILING_DIRECTORIES. So a tree that has no .git of its own, built with
+        GIT_CEILING_DIRECTORIES and the safe.directory entries of GIT_CONFIG_COUNT,
+        GIT_CONFIG_KEY_<n> and GIT_CONFIG_VALUE_<n> (every other config entry there
+        can move the worktree or run a program, so it is dropped). So a tree that has no .git of its own, built with
         GIT_DIR (and GIT_WORK_TREE) naming its repository from outside, is
         treated as a tree with no git metadata: it keeps an earlier record or
         records "unknown-commit". That is accepted: the alternative would read whichever repository the caller's
@@ -365,6 +401,9 @@ class CustomBuildHook(BuildHookInterface):
             for k, v in os.environ.items()
             if not k.startswith("GIT_") or k == "GIT_CEILING_DIRECTORIES"
         }
+        # The one GIT_CONFIG_* setting that is kept: safe.directory, the caller's
+        # own statement that git may read this tree despite its owner.
+        git_env.update(_safe_directory_config(os.environ))
         try:
             git_result_full = subprocess.run(  # nosec B603 - This code is run during package build
                 [git_path, "rev-parse", "--show-prefix", "HEAD"],
