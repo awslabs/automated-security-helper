@@ -21,6 +21,11 @@ leaves the remaining list (a later SCAN_COMPLETE no longer names it as running)
 without a SCAN_COMPLETE of its own: a failure is not a completion, the rule the
 run-loop tests (tests/unit/core/phases/test_scanner_executor_rows_and_run_loops.py)
 pin for a scanner whose bookkeeping raised.
+
+A refiled row that the processor raises on AGAIN (whatever on the row caused the
+first raise is still on it) is followed by a fresh failure row for the same target,
+carrying its target type and its could-not-stop record, so the target still has a
+row in the results; offered once and logged, it had none.
 """
 
 from __future__ import annotations
@@ -102,21 +107,25 @@ def _run(
     parallel: bool = False,
     before_raise=None,
     with_clean_scanner: bool = False,
+    raise_once: bool = False,
 ):
     """Run one scanner over source and converted; the processor raises on one target.
 
     The processor raises on EVERY container for ``failing_target`` (one name, or a
-    tuple of names), the failure record filed for it included, so ``seen`` shows
-    the record's target. ``before_raise`` is called with the container before each
-    raise. The events the executor sends are collected on ``executor.events`` as
-    ``(event_type, kwargs)`` pairs. ``with_clean_scanner`` queues a second scanner,
-    ``clean-tool``, after ``shape-tool``, over the source target only, so none of
-    its containers is a ``failing_target`` and the processor merges them all: its
-    SCAN_COMPLETE shows what the remaining list holds once the first scanner's turn
-    is over.
+    tuple of names), the failure record filed for it and the fresh row the handler
+    falls back to included, so ``seen`` shows the record's target; with
+    ``raise_once`` it raises on the FIRST container of each failing target only, so
+    the refiled row is merged. ``before_raise`` is called with the container before
+    each raise. The events the executor sends are collected on ``executor.events``
+    as ``(event_type, kwargs)`` pairs. ``with_clean_scanner`` queues a second
+    scanner, ``clean-tool``, after ``shape-tool``, over the source target only, so
+    none of its containers is a ``failing_target`` and the processor merges them
+    all: its SCAN_COMPLETE shows what the remaining list holds once the first
+    scanner's turn is over.
     """
     seen: list = []
     events: list = []
+    raised: set = set()
     failing = (
         {failing_target}
         if isinstance(failing_target, str)
@@ -125,7 +134,10 @@ def _run(
 
     def process(container, aggregated):
         seen.append(container)
-        if container.target_type in failing:
+        if container.target_type in failing and not (
+            raise_once and container.target_type in raised
+        ):
+            raised.add(container.target_type)
             if before_raise is not None:
                 before_raise(container)
             raise RuntimeError("the report could not be read")
@@ -228,7 +240,14 @@ def _scan_complete_events(executor) -> list:
 def test_the_other_targets_are_still_merged(plugin_context, tmp_path):
     seen, executor = _run(plugin_context, tmp_path, failing_target="source")
 
-    assert [c.target_type for c in seen] == ["source", "converted", "source"], seen
+    # source raises, converted merges, source's row is refiled and raises again,
+    # and the fresh fallback row for source is offered last.
+    assert [c.target_type for c in seen] == [
+        "source",
+        "converted",
+        "source",
+        "source",
+    ], seen
     assert executor.completed_scanners == []
 
 
@@ -237,16 +256,27 @@ def test_the_failure_is_filed_on_the_row_of_the_target_that_failed(
 ):
     """The failed target's own row is filed again, ERROR, with the reason added
     to the errors it already carried, so its report keeps what the scan recorded
-    and no other target's record is touched."""
+    and no other target's record is touched. When that row raises again, a fresh
+    failure row for the same target is filed in its place."""
     seen, _ = _run(plugin_context, tmp_path, failing_target="converted")
 
-    record = seen[-1]
-    assert [c.target_type for c in seen] == ["source", "converted", "converted"]
+    assert [c.target_type for c in seen] == [
+        "source",
+        "converted",
+        "converted",
+        "converted",
+    ]
+    record = seen[2]
     assert record is seen[1], "the row itself is filed again, not a new container"
     assert record.status == ScannerStatus.ERROR
     reasons = " ".join(str(e) for e in record.errors)
     assert "the report could not be read" in reasons
     assert "converted" in reasons
+    fresh = seen[3]
+    assert fresh is not seen[1], "the refiled row raised again: a fresh row follows"
+    assert fresh.status == ScannerStatus.ERROR
+    assert fresh.target_type == "converted"
+    assert "the report could not be read" in " ".join(str(e) for e in fresh.errors)
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
@@ -274,10 +304,16 @@ def test_the_refiled_row_keeps_its_could_not_stop_record(
         before_raise=mark_unstoppable,
     )
 
-    record = seen[-1]
+    record = seen[2]
+    assert record is seen[1]
     assert record.target_type == "converted"
     assert record.status == ScannerStatus.ERROR
     assert record.could_not_stop == (
+        "shape-tool (pid 4242), which may still be running"
+    )
+    # The fresh row the handler falls back to when the refiled row raises again
+    # carries the record too: it is what the gate reads off the target's report.
+    assert seen[3].could_not_stop == (
         "shape-tool (pid 4242), which may still be running"
     )
     assert seen[0].could_not_stop is None, "the merged target's row is untouched"
@@ -297,19 +333,75 @@ def test_every_failed_target_is_filed_not_only_the_first(
         parallel=parallel,
     )
 
+    # Each failed target: its row refiled, then (the refile raised too) a fresh row.
     assert [c.target_type for c in seen] == [
         "source",
         "converted",
         "source",
+        "source",
+        "converted",
         "converted",
     ], seen
-    assert seen[2] is seen[0] and seen[3] is seen[1]
+    assert seen[2] is seen[0] and seen[4] is seen[1]
+    assert seen[3] is not seen[0] and seen[5] is not seen[1]
     for record in seen[2:]:
         assert record.status == ScannerStatus.ERROR
         reasons = " ".join(str(e) for e in record.errors)
         assert "the report could not be read" in reasons
         assert record.target_type in reasons
     assert executor.completed_scanners == []
+
+
+class TestARefiledRowReachesTheReport:
+    """A results-processing failure is refiled on the target's own row. Before, the
+    handler offered that row once: when the processor raised on it again (whatever
+    on the row caused the first raise is still there), the failure was only logged
+    and the target had no row in the results at all. Now a refiled row that raises
+    again is followed by a fresh failure row for the same target, and a refiled row
+    the processor accepts is the one that reaches the report."""
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_a_refiled_row_the_processor_accepts_is_the_report(
+        self, plugin_context, tmp_path, parallel
+    ):
+        seen, executor = _run(
+            plugin_context,
+            tmp_path,
+            failing_target="converted",
+            parallel=parallel,
+            raise_once=True,
+        )
+
+        assert [c.target_type for c in seen] == ["source", "converted", "converted"]
+        assert seen[2] is seen[1], "the refiled row itself was merged"
+        assert seen[2].status == ScannerStatus.ERROR
+        assert executor.completed_scanners == []
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_a_refiled_row_that_raises_again_is_replaced_by_a_fresh_row(
+        self, plugin_context, tmp_path, parallel
+    ):
+        seen, _ = _run(
+            plugin_context, tmp_path, failing_target="converted", parallel=parallel
+        )
+
+        fresh = seen[-1]
+        assert fresh is not seen[1]
+        assert isinstance(fresh, ScanResultsContainer)
+        assert fresh.scanner_name == "shape-tool"
+        assert fresh.target_type == "converted"
+        assert fresh.status == ScannerStatus.ERROR
+        assert fresh.raw_results["status"] == "failed"
+
+    def test_control_a_fresh_failure_row_gets_no_second_offer(
+        self, plugin_context, tmp_path
+    ):
+        """A row the handler built fresh (a substituted runner handed the processor
+        no row) carries nothing of the scan's, so a raise on it is logged once."""
+        seen, _ = _run_with_substituted_runner(plugin_context, tmp_path, False)
+
+        fresh_rows = [c for c in seen if isinstance(c, ScanResultsContainer)]
+        assert len(fresh_rows) == 1, seen
 
 
 def test_every_target_merged_completes_the_scanner(plugin_context, tmp_path):

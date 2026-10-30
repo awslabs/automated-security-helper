@@ -925,6 +925,65 @@ class ScannerExecutor:
             raise failed
         return aggregated_results
 
+    def _file_failure_row(
+        self,
+        scanner_name: str,
+        failure_container: ScanResultsContainer,
+        aggregated_results: AshAggregatedResults,
+        *,
+        refiled: bool,
+        head: str,
+        exception: BaseException,
+        environment_values: Iterable[str],
+    ) -> AshAggregatedResults:
+        """Offer *failure_container* to the processor; a refiled row that raises
+        again is filed as a fresh failure row.
+
+        A results-processing failure is refiled on the target's own row with the
+        failure added, so the report keeps what the scan recorded. Everything
+        else on that row stays as it was (its metadata, its unscanned inputs,
+        its counts, its target path), and when one of those is what the
+        processor raised on, the second offer raises too; logged alone, that
+        target had no row in the results, and a single-target scanner had none
+        at all. The fallback is the fresh container the handler filed before
+        rows were refiled, carrying the target type so its file lands under the
+        target's key, the could-not-stop record run_ash_scan's gate reads off
+        the target's report, and the same failure record. A raise on the fresh
+        row is logged, as before; a fresh row (*refiled* False) gets no second
+        offer, since nothing of the scan's is on it to raise on.
+        """
+        try:
+            return self._process_results_fn(failure_container, aggregated_results)
+        except Exception as process_error:
+            # Redacted like every other handler's text: the error can quote
+            # a value the plugin's config read from the environment.
+            ASH_LOGGER.error(
+                f"Failed to process error results for {scanner_name}: "
+                f"{error_text(process_error, environment_values)}",
+                extra=NO_MARKUP,
+            )
+            if not refiled:
+                return aggregated_results
+        fresh = ScanResultsContainer.for_failure(
+            scanner_name,
+            errors=[head],
+            exception=exception,
+            values=environment_values,
+        )
+        fresh.target_type = failure_container.target_type
+        fresh.could_not_stop = failure_container.could_not_stop
+        fresh.status = ScannerStatus.ERROR
+        fresh.raw_results = failure_container.raw_results
+        try:
+            return self._process_results_fn(fresh, aggregated_results)
+        except Exception as process_error:
+            ASH_LOGGER.error(
+                f"Failed to process error results for {scanner_name} on a fresh "
+                f"row: {error_text(process_error, environment_values)}",
+                extra=NO_MARKUP,
+            )
+            return aggregated_results
+
     def _file_later_failures(
         self,
         scanner_name: str,
@@ -967,17 +1026,15 @@ class ScannerExecutor:
                 "exception": home_as_tilde(described),
                 "stack_trace": home_as_tilde(stack_trace),
             }
-            try:
-                aggregated_results = self._process_results_fn(
-                    container, aggregated_results
-                )
-            except Exception as process_error:
-                # Redacted like every other handler's text here.
-                ASH_LOGGER.error(
-                    f"Failed to process error results for {scanner_name}: "
-                    f"{error_text(process_error, environment_values)}",
-                    extra=NO_MARKUP,
-                )
+            aggregated_results = self._file_failure_row(
+                scanner_name,
+                container,
+                aggregated_results,
+                refiled=True,
+                head=f"{row_head}: {described}",
+                exception=later,
+                environment_values=environment_values,
+            )
         return aggregated_results
 
     def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> list:
@@ -2506,9 +2563,10 @@ class ScannerExecutor:
                 ASH_LOGGER.error(
                     f"Scanner failed: {scanner_name} - {described}", extra=NO_MARKUP
                 )
-                if isinstance(e, ResultsProcessingFailed) and isinstance(
+                refiled = isinstance(e, ResultsProcessingFailed) and isinstance(
                     e.container, ScanResultsContainer
-                ):
+                )
+                if refiled:
                     # A results-processing failure carries the target's own row:
                     # it is filed again with the failure added, so the report
                     # keeps what the scan recorded (its errors, its counts, its
@@ -2541,19 +2599,15 @@ class ScannerExecutor:
                     "exception": home_as_tilde(described),
                     "stack_trace": home_as_tilde(stack_trace),
                 }
-                try:
-                    processed = self._process_results_fn(
-                        failure_container, aggregated_results
-                    )
-                    aggregated_results = processed
-                except Exception as process_error:
-                    # Redacted like every other handler's text: the error can
-                    # quote a value the plugin's config read from the environment.
-                    ASH_LOGGER.error(
-                        f"Failed to process error results for {scanner_name}: "
-                        f"{error_text(process_error, environment_values)}",
-                        extra=NO_MARKUP,
-                    )
+                aggregated_results = self._file_failure_row(
+                    scanner_name,
+                    failure_container,
+                    aggregated_results,
+                    refiled=refiled,
+                    head=f"Scanner {scanner_name} failed: {described}",
+                    exception=e,
+                    environment_values=environment_values,
+                )
                 if isinstance(e, ResultsProcessingFailed):
                     # The merge of the scanner's targets' results failed: the
                     # first failure is filed above, any later one here.
@@ -2849,9 +2903,10 @@ class ScannerExecutor:
                         f"Scanner execution failed in thread pool: {scanner_name} - {described}",
                         extra=NO_MARKUP,
                     )
-                    if isinstance(e, ResultsProcessingFailed) and isinstance(
+                    refiled = isinstance(e, ResultsProcessingFailed) and isinstance(
                         e.container, ScanResultsContainer
-                    ):
+                    )
+                    if refiled:
                         # See run_sequential: a results-processing failure
                         # carries the target's own row, filed again with the
                         # failure added; matched by type, not by attribute, and
@@ -2882,18 +2937,15 @@ class ScannerExecutor:
                         "exception": home_as_tilde(described),
                         "stack_trace": home_as_tilde(stack_trace),
                     }
-                    try:
-                        processed = self._process_results_fn(
-                            failure_container, aggregated_results
-                        )
-                        aggregated_results = processed
-                    except Exception as process_error:
-                        # Redacted like every other handler's text here.
-                        ASH_LOGGER.error(
-                            f"Failed to process error results for {scanner_name}: "
-                            f"{error_text(process_error, environment_values)}",
-                            extra=NO_MARKUP,
-                        )
+                    aggregated_results = self._file_failure_row(
+                        scanner_name,
+                        failure_container,
+                        aggregated_results,
+                        refiled=refiled,
+                        head=f"Scanner {scanner_name} failed in thread pool: {described}",
+                        exception=e,
+                        environment_values=environment_values,
+                    )
                     if isinstance(e, ResultsProcessingFailed):
                         # See run_sequential: the first merge failure is filed
                         # above, any later one here.
