@@ -28,11 +28,17 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional, Set
 
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 
 TOOL_TYPE_TAG_PREFIX = "tool_type::"
 SECRETS_TOOL_TYPE = "SECRETS"  # pragma: allowlist secret
 UNKNOWN_TOOL_TYPE = "UNKNOWN"
+
+#: The types a scanner can declare (``ScannerToolType``'s values), UNKNOWN left out.
+KNOWN_TOOL_TYPES = frozenset(member.value for member in ScannerToolType) - {
+    UNKNOWN_TOOL_TYPE
+}
 
 _ENUM_PREFIX = "SCANNERTOOLTYPE."
 #: Spellings of a type that mean the same type.
@@ -42,13 +48,17 @@ _ALIASES = {"SECRET": SECRETS_TOOL_TYPE}
 def normalize_tool_type(value: Any) -> Optional[str]:
     """``value`` as a ``ScannerToolType`` value: upper case, without an enum prefix.
 
-    ``SECRET`` and ``SECRETS`` both give ``SECRETS``. An empty value or
-    ``UNKNOWN`` gives None, since neither says what the scanner is.
+    ``SECRET`` and ``SECRETS`` both give ``SECRETS``. An empty value, ``UNKNOWN``
+    and any text that is no ``ScannerToolType`` value give None, since none says
+    what the scanner is: the ``None`` a ``tool_type::None`` tag was formatted
+    with, pydantic's undefined-default marker read from a ``tool_type`` field
+    with no plain default, free text. Each used to come back upper-cased as a
+    type of its own, which turned the callers' unknown-type handling off.
     """
     text = str(getattr(value, "value", value) or "").strip().upper()
     text = text.removeprefix(_ENUM_PREFIX)
     text = _ALIASES.get(text, text)
-    if not text or text == UNKNOWN_TOOL_TYPE:
+    if text not in KNOWN_TOOL_TYPES:
         return None
     return text
 
