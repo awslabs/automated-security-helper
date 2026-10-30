@@ -499,10 +499,18 @@ def _absolute_base(uri: str) -> Optional[str]:
     Joined undecoded, the text ``/Users/me/My%20Repo/api/src/app.py`` is not
     under ``/Users/me/My Repo/api`` and the finding was counted unconvertible,
     where the project-relative reading before the base was honoured had placed
-    it. Decoded here, once, before anything compares paths. A base with no scheme
-    is a path as written and is not decoded (a ``%`` in a file name stays).
+    it. Decoded here, once, before anything compares paths, and returned as a
+    bare rooted path with the scheme stripped: a ``file:`` text handed on would
+    be decoded a second time by :func:`_posix_text` when the joined location is
+    read, which mis-read a directory named with a literal ``%xx`` and decoded a
+    relative artifact's own ``%20`` that the same artifact keeps when it has no
+    base. A base with no scheme is a path as written and is not decoded (a ``%``
+    in a file name stays).
     """
-    decoded = unquote(uri) if uri.lower().startswith("file:") else uri
+    if uri.lower().startswith("file:"):
+        decoded = _strip_file_scheme(unquote(uri))
+    else:
+        decoded = uri
     if not _rooted(_posix_text(decoded)):
         return None
     return decoded

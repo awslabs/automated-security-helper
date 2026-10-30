@@ -303,6 +303,60 @@ def test_a_scheme_less_name_keeps_its_percent_sign(project):
     )
 
 
+def test_a_relative_percent_artifact_under_a_declared_base_keeps_its_percent(
+    project, tmp_path
+):
+    """Red at the base: the declared ``file:`` base was decoded and handed on with
+    its scheme, so the joined text was decoded AGAIN when read, and the artifact's
+    own ``%20`` (part of its name, kept when it has no base) became a space: the
+    two coordinates named two files."""
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "src/odd%20name.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={"%SRCROOT%": {"uri": _dir_uri(tmp_path / "ws" / "api")}},
+        ),
+        project,
+    )
+
+    assert unconvertible == 0
+    assert _artifact(rebased)["uri"] == "src/odd%20name.py"
+    assert (
+        rebased["results"][0]["properties"]["workspace_uri"] == "api/src/odd%20name.py"
+    )
+
+
+def test_a_directory_named_with_a_literal_percent_is_placed_through_one_decoding(
+    tmp_path,
+):
+    """Red at the base: ``Path.as_uri()`` writes ``%2520`` for a directory named
+    ``My%20Repo``; decoded twice that read ``My Repo``, a path outside the project,
+    and the finding was counted where the one decoding places it."""
+    root = tmp_path / "ws" / "My%20Repo" / "api"
+    project = ProjectPlan(
+        key="api",
+        relative_path="api",
+        path=root.as_posix(),
+        label="api",
+        display_label="api",
+    )
+    base = _dir_uri(root)
+    assert "%2520" in base, (
+        "Path.as_uri() no longer encodes a literal %; nothing measured"
+    )
+
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "src/app.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={"%SRCROOT%": {"uri": base}},
+        ),
+        project,
+    )
+
+    assert unconvertible == 0
+    assert _artifact(rebased)["uri"] == "src/app.py"
+    assert rebased["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
+
+
 def test_a_chained_base_is_resolved_to_its_root(project, tmp_path):
     """Red at the base: the anchored base answered None and ``app.py`` was placed
     at the project root, dropping the ``src/`` and naming another file."""
