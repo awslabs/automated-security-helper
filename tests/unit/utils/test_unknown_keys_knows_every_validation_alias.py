@@ -6,7 +6,9 @@
 A validation alias can be one name, an ``AliasChoices`` of several or an
 ``AliasPath`` into a nested value. known_keys read only a plain string, so
 refuse_unknown_keys refused a key that pydantic would have accepted by one of the
-choices or by a path's first segment.
+choices or by a path's first segment. An aliased field's own name is a key only
+when the model populates by name: this model does not, so pydantic never reads
+``reason``, ``plain`` or ``aliased`` as keys, and neither does known_keys.
 """
 
 from __future__ import annotations
@@ -36,13 +38,16 @@ def test_the_first_segment_of_an_alias_path_is_a_known_key():
     keys = known_keys(_Choosy)
 
     assert "details" in keys
-    assert "reason" in keys  # the field's own name
+    # The field's own name: the model does not populate by name, so pydantic
+    # would not read it, and a key spelled so is an extra, not a value.
+    assert "reason" not in keys
 
 
 def test_a_plain_validation_alias_and_an_alias_are_still_known():
     keys = known_keys(_Choosy)
 
-    assert {"spelled", "plain", "alias_name", "aliased"} <= keys
+    assert {"spelled", "alias_name"} <= keys
+    assert not {"plain", "aliased"} & keys
 
 
 def test_the_known_keys_are_what_the_model_accepts():
