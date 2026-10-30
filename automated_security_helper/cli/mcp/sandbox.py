@@ -873,7 +873,16 @@ def _names_a_windows_share(path: object) -> bool:
     text = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
     text = text.replace("/", "\\")
     if text.startswith(("\\\\?\\", "\\\\.\\", "\\??\\")):
-        return not _is_a_drive_spelling(text[4:])
+        rest = text[4:]
+        if not _is_a_drive_spelling(rest):
+            return True
+        # Behind a device prefix a ``..`` component is not a step up a local
+        # tree: Win32 normalizes a ``\\.\`` path before the object manager sees
+        # it, so ``\\.\C:\..\UNC\server\share`` is the share and ``\\.\C:\..\pipe\x``
+        # the pipe, each spelled with a drive letter in front. Such a spelling is
+        # judged by what it reaches, whatever it reaches: a caller that means a
+        # local directory names it without the step.
+        return any(part == ".." for part in rest.split("\\"))
     return text.startswith("\\\\")
 
 
@@ -962,6 +971,13 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
     linked checkout, a junction in a repository and a link to nothing are judged
     as the directory or file they name rather than refused for being links.
     Nothing is refused on other platforms, where resolving opens nothing.
+
+    Every component of the path is read, not only its last: ``os.lstat`` on the
+    whole path follows a link in a PARENT component (only the final one is left
+    unfollowed), so ``C:\\granted\\lnk\\repo`` with ``lnk`` a link to a share
+    opened the share at the check meant to prevent it. The walk goes from the
+    anchor down; the first component that is a link is judged as the last one
+    was, and a local link is followed to judge the components under it.
     """
     if not _running_on_windows():
         return None
@@ -976,31 +992,65 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
         )
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
-    try:
-        is_link = _is_link_stat(os.lstat(text))
-    except OSError:
-        return None
-    if not is_link:
-        return None
-    reaches_a_share = _link_chain_names_a_windows_share(text)
-    if reaches_a_share is False:
-        return None
-    if reaches_a_share:
+    components = _components_down_to(text)
+    for index, component in enumerate(components):
+        try:
+            is_link = _is_link_stat(os.lstat(component))
+        except OSError:
+            # Not there, or not examinable: nothing below it is either, and
+            # the gates judge the path as they do on every other platform.
+            return None
+        if not is_link:
+            continue
+        reaches_a_share = _link_chain_names_a_windows_share(component)
+        if reaches_a_share is False:
+            # A local link: what it names is local, so the components under it
+            # are judged through it, as resolving would read them.
+            continue
+        where = (
+            "It is a link"
+            if index == len(components) - 1
+            else f"Its component {_shown_path(component)} is a link"
+        )
+        if reaches_a_share:
+            return _refusal(
+                what,
+                path,
+                Path(text),
+                f"{where} that leads to a network share or a device path, which "
+                "the MCP server does not open. Name a directory on a local volume.",
+            )
         return _refusal(
             what,
             path,
             Path(text),
-            "It is a link that leads to a network share or a device path, which the "
-            "MCP server does not open. Name a directory on a local volume.",
+            f"{where} whose target the MCP server cannot read, so it is not "
+            "resolved on Windows: resolving one can open a connection to the host "
+            "its target names. Name the directory itself.",
         )
-    return _refusal(
-        what,
-        path,
-        Path(text),
-        "It is a link whose target the MCP server cannot read, so it is not "
-        "resolved on Windows: resolving one can open a connection to the host "
-        "its target names. Name the directory itself.",
-    )
+    return None
+
+
+def _components_down_to(text: str) -> List[str]:
+    """``text``'s ancestors from its anchor down, then ``text`` itself.
+
+    ``C:\\a\\b`` gives ``C:\\a`` and ``C:\\a\\b``; the anchor alone (a drive root
+    or a share root) is not a component to judge. A relative path starts at its
+    first component. The spelling is kept as given: nothing here resolves.
+    """
+    parsed = Path(text)
+    parts = list(parsed.parts)
+    if parsed.anchor and parts and parts[0] == parsed.anchor:
+        current = parts[0]
+        rest = parts[1:]
+    else:
+        current = ""
+        rest = parts
+    components: List[str] = []
+    for part in rest:
+        current = os.path.join(current, part) if current else part
+        components.append(current)
+    return components or [text]
 
 
 def _sibling_refusal(
