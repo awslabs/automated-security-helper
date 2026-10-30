@@ -528,8 +528,11 @@ def _finalize_staged(
     # after the hash, so an entry renamed over the staging name in between (the
     # directory can be writable by others) had its mode set instead, and a symlink
     # there was followed to whatever file it named. The post-rename hash still
-    # covers a swap between this open and the rename.
-    fd = os.open(staging, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    # covers a swap between this open and the rename. O_BINARY where the platform
+    # has it: without it Windows opens the descriptor in text mode, the read folds
+    # CR LF and stops at the first 0x1A, and every executable or archive, which
+    # holds both, hashed short of its bytes and was refused as replaced.
+    fd = os.open(staging, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
     try:
         staged = _sha256_of_open_file(fd)
         if staged != expected_sha256:

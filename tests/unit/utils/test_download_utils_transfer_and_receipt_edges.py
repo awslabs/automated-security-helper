@@ -229,3 +229,25 @@ def test_a_whole_body_download_is_still_verified(monkeypatch, tmp_path, quick_re
     )
     with pytest.raises(ToolDownloadIntegrityError):
         download_utils.download_file(_URL, tmp_path / "bin", expected_sha256="0" * 64)
+
+
+#: Bytes a text-mode read mangles: CR LF pairs, which it folds to LF, and 0x1A,
+#: the CRT's end-of-file mark, which stops it. Every executable and archive holds
+#: both, so a staged file hashed through a text-mode descriptor hashed short.
+_BINARY_BODY = b"MZ\x90\x00\r\n\x1a\x00rest of the image\r\n" * 3 + b"\x1a"
+_BINARY_DIGEST = hashlib.sha256(_BINARY_BODY).hexdigest()
+
+
+def test_the_staged_file_is_hashed_byte_for_byte_whatever_bytes_it_holds(tmp_path):
+    """The staging open carries O_BINARY where the platform has it: the body below
+    hashes to its pinned digest and lands, instead of being refused as replaced
+    because a text-mode read folded its CR LF pairs and stopped at its 0x1A."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    staging = bin_dir / ".tool.ash-partial"
+    staging.write_bytes(_BINARY_BODY)
+    target = bin_dir / "tool"
+    landed = download_utils._finalize_staged(staging, target, _BINARY_DIGEST)
+    assert landed == _BINARY_DIGEST
+    assert target.read_bytes() == _BINARY_BODY
+    assert not staging.exists()
