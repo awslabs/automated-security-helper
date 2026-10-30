@@ -91,7 +91,9 @@ _FORM_PREFIX = {name: prefix for name, prefix, _branch in INSTALL_REF_FORMS}
 # `convert` patterns in find_version_references.
 ASH_PIN_PATTERNS = {
     "@ (git URL, uses:)": (
-        rf"((?<![\w./-])@v|{_REPO_NAME}(?:\.git)?(?:/[\w./-]+)?@v){_SEMVER}",
+        # The ellipsis form is prose for "the workflow of this repository":
+        # `uses: ...@v<version>`.
+        rf"((?<![\w./-])@v|\.\.\.@v|{_REPO_NAME}(?:\.git)?(?:/[\w./-]+)?@v){_SEMVER}",
     ),
     "--branch": _in_an_ash_command(_FORM_PREFIX["--branch"]),
     "rev:": (
@@ -111,13 +113,15 @@ ASH_PIN_PATTERNS = {
 }
 
 
-def _ash_pins(text: str) -> List[Tuple[str, str]]:
-    """(form name, release number) of every release pin of ASH in text."""
+def _ash_pins(text: str) -> List[Tuple[str, str, int]]:
+    """(form name, release number, where the number starts) of every ASH pin in text."""
     found = []
     for form, patterns in ASH_PIN_PATTERNS.items():
         for pattern in patterns:
             for match in re.finditer(pattern, text):
-                found.append((form, match.string[match.end(1) : match.end()]))
+                found.append(
+                    (form, match.string[match.end(1) : match.end()], match.end(1))
+                )
     return found
 
 
@@ -319,13 +323,38 @@ class VersionTemplateManager:
         Another project's `rev:`, `--branch` or `@v` pin is not one: a pin counts when
         ASH_PIN_PATTERNS matches it, the same test `convert` applies.
         """
-        return {version for _form, version in _ash_pins(text)}
+        return {version for _form, version, _start in _ash_pins(text)}
 
     @staticmethod
     def forms_pinning_a_release(text: str) -> List[str]:
         """The names of the install-command forms that pin an ASH release in text."""
-        pinned = {form for form, _version in _ash_pins(text)}
+        pinned = {form for form, _version, _start in _ash_pins(text)}
         return [name for name, _prefix, _branch in INSTALL_REF_FORMS if name in pinned]
+
+    @staticmethod
+    def unrecognized_pins(text: str) -> List[Tuple[str, str, str]]:
+        """(form name, release number, line) of every pin ASH_PIN_PATTERNS rejects.
+
+        The readers above take only what ASH_PIN_PATTERNS anchors on this repository,
+        so another project's tag is not counted as ASH's. The same rule hides a pin of
+        ASH written in a shape no anchor knows (a `rev:` before its `repo:`, a
+        flow-style `{repo: ..., rev: ...}` entry, a clone of a URL held in a variable),
+        which then renders stale on every build and passes the checks that read pins.
+        This lists every `<install-ref prefix>v<version>` that no pattern accepted, so
+        a check can name it: the pin is either another project's, to be allowed
+        explicitly, or ASH's, and needs its shape added to ASH_PIN_PATTERNS.
+        """
+        recognized = {start for _form, _version, start in _ash_pins(text)}
+        found = []
+        for name, prefix, _branch in INSTALL_REF_FORMS:
+            for match in re.finditer(rf"(?:{prefix})v(?P<version>{_SEMVER})", text):
+                if match.start("version") in recognized:
+                    continue
+                line_start = text.rfind("\n", 0, match.start()) + 1
+                line_end = text.find("\n", match.end())
+                line = text[line_start : line_end if line_end >= 0 else len(text)]
+                found.append((name, match.group("version"), line.strip()))
+        return found
 
     @staticmethod
     def branch_ref_pattern(form: str, branch: str) -> "re.Pattern[str]":

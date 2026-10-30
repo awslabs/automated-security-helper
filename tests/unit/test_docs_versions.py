@@ -405,6 +405,16 @@ DEFECTS = [
         ),
     ),
     (
+        # YAML keys come in any order; the pin readers anchor a rev: on the repo: line
+        # above it, so this stale-able pin is one no reader counts.
+        "a pin in a shape no pattern knows",
+        {
+            "install_template": INSTALL_TEMPLATE
+            + f"\n```yaml\n- rev: v{{{{VERSION}}}}\n  repo: {REPO_URL}\n```\n"
+        },
+        f"{PINNED_URL}/ has a rev: pin of",
+    ),
+    (
         "the branch renderer leaves the tag lookup",
         {
             "manager": _patched(
@@ -718,6 +728,49 @@ def test_the_readers_see_no_pin_across_two_code_spans(html):
     text = dv.page_text(html.encode())
     assert _manager().release_pins(text) == set(), text
     assert _manager().forms_pinning_a_release(text) == [], text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "form, text",
+    [
+        ("rev:", f"- rev: v3.3.0\n  repo: {REPO_URL}\n"),
+        ("rev:", f"- {{repo: {REPO_URL}, rev: v3.3.0}}\n"),
+        ("--branch", 'git clone --branch v3.3.0 "$ASH_REPO_URL"\n'),
+    ],
+    ids=["rev-before-repo", "flow-style", "url-in-a-variable"],
+)
+def test_a_pin_in_a_shape_no_pattern_knows_fails_the_check(form, text):
+    """Red before: the readers counted only the anchored shapes and said nothing about
+    the rest, so a stale pin of this repository in one of these shapes stayed in its
+    template, rendered stale on every build, and passed both pin checks."""
+    manager = _manager()
+    assert manager.release_pins(text) == set()
+    problems = dv.unrecognized_pin_problems(manager, text, "1.2.3/page/")
+    assert len(problems) == 1, problems
+    assert problems[0].startswith(f"1.2.3/page/ has a {form} pin of 3.3.0 "), problems
+    assert "KNOWN_THIRD_PARTY_PINS" in problems[0]
+
+
+@pytest.mark.unit
+def test_a_third_party_pin_passes_only_when_its_line_is_allowed():
+    manager = _manager()
+    text = f"git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n"
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    allowed = (OTHER_PROJECT_URL.rsplit("/", 1)[1],)
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+    # An allowance names one project; it excuses no other line.
+    other = "- rev: v3.3.0\n  repo: " + REPO_URL + "\n"
+    assert len(dv.unrecognized_pin_problems(manager, other, "page/", allowed)) == 1
+
+
+@pytest.mark.unit
+def test_a_recognized_pin_is_not_reported():
+    """The control: every form's own pin, and the ellipsis prose, are counted, not listed."""
+    manager = _manager()
+    text = manager.render(INSTALL_TEMPLATE, "1.2.3") + "\nuses: ...@v1.2.3\n"
+    assert dv.unrecognized_pin_problems(manager, text, "page/") == []
+    assert manager.release_pins(text) == {"1.2.3"}
 
 
 @pytest.mark.unit

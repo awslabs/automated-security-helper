@@ -640,6 +640,43 @@ def page_text(content: bytes, *, commands_only: bool = False) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", markup))
 
 
+#: Pins of other projects that a version-pinned page keeps as written. Each entry is a
+#: text of the line that holds the pin (the project's name and tag, say). The pin
+#: readers count only the pins of this repository, so a pin they reject is either one of
+#: these or a pin of this repository in a shape scripts/version_template_manager.py does
+#: not know, which no template or check would ever move. None exists today.
+KNOWN_THIRD_PARTY_PINS: tuple[str, ...] = ()
+
+
+def unrecognized_pin_problems(
+    manager: Any,
+    text: str,
+    where: str,
+    allowed: tuple[str, ...] | None = None,
+) -> list[str]:
+    """One problem per pin in text that the manager's ASH patterns reject.
+
+    Reading only what the patterns anchor on this repository would also hide a stale
+    pin of this repository in a shape they miss (a `rev:` before its `repo:`, a
+    flow-style entry, a clone of a URL held in a variable); the pages would render it
+    stale on every build and pass the pins check. So a rejected pin fails the check
+    unless the line holding it names an entry of allowed (KNOWN_THIRD_PARTY_PINS).
+    """
+    if allowed is None:
+        allowed = KNOWN_THIRD_PARTY_PINS
+    problems = []
+    for form, version, line in manager.unrecognized_pins(text):
+        if any(entry in line for entry in allowed):
+            continue
+        problems.append(
+            f"{where} has a {form} pin of {version} that no pattern of "
+            f"ASH_PIN_PATTERNS accepts: {line!r}; if it is another project's, add it "
+            "to KNOWN_THIRD_PARTY_PINS in scripts/docs_versions.py, otherwise add its "
+            "shape to scripts/version_template_manager.py"
+        )
+    return problems
+
+
 def _read_branch(repo: Path, branch: str) -> dict[str, tuple[str, bytes]]:
     """Every file on branch: path -> (mode, content)."""
     entries = [
@@ -862,7 +899,9 @@ def check_published(
             if built is None:
                 problems.append(f"{directory}/ has no page {url}")
                 continue
-            pins |= manager.release_pins(page_text(built[1]))
+            text = page_text(built[1])
+            pins |= manager.release_pins(text)
+            problems += unrecognized_pin_problems(manager, text, f"{directory}/{url}")
         if urls and pins != wanted:
             problems.append(
                 f"the version-pinned pages of {directory}/ pin {sorted(pins)}, not "
@@ -878,6 +917,7 @@ def check_published(
             continue
         commands = page_text(built[1], commands_only=True)
         main_pins |= manager.release_pins(commands)
+        problems += unrecognized_pin_problems(manager, commands, f"{DEV_VERSION}/{url}")
         for form in manager.forms_pinning_a_release(
             page_text(release[1], commands_only=True)
         ):

@@ -328,6 +328,7 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
             ASH_PINS["flake ref"],
             f"uses: awslabs/{REPO}/.github/workflows/run.yml@v3.4.0\n",
             "Pin (`@v3.4.0`) for repeatable installs\n",
+            "- `uses: ...@v3.4.0` selects the workflow file\n",
             f"Run `git clone --branch v3.4.0 {ASH_URL}.git` first.\n",
         ],
     )
@@ -339,6 +340,48 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
         """
         converted = _convert(text) != text
         assert converted == bool(VersionTemplateManager(REPO_ROOT).release_pins(text))
+
+    def test_the_ellipsis_form_is_ash_s_pin(self):
+        """Red before: the bare form refuses a `@` after a dot, so the page's prose
+        `uses: ...@v<version>` was no pin to the anchored readers (the old readers
+        counted it, and the check lost it)."""
+        text = "- `uses: ...@v3.4.0` selects the workflow file\n"
+        manager = VersionTemplateManager(REPO_ROOT)
+        assert manager.release_pins(text) == {"3.4.0"}
+        assert manager.unrecognized_pins(text) == []
+        assert (
+            _convert(text) == "- `uses: ...@v{{VERSION}}` selects the workflow file\n"
+        )
+
+    @pytest.mark.parametrize(
+        "form, text",
+        [
+            ("rev:", f"- rev: v3.3.0\n  repo: {ASH_URL}\n"),
+            ("rev:", f"- {{repo: {ASH_URL}, rev: v3.3.0}}\n"),
+            ("--branch", 'git clone --branch v3.3.0 "$ASH_REPO_URL"\n'),
+        ],
+        ids=["rev-before-repo", "flow-style", "url-in-a-variable"],
+    )
+    def test_a_pin_in_a_shape_no_anchor_knows_is_listed_not_dropped(self, form, text):
+        """Red before: the readers counted only the anchored shapes, so a pin of this
+        repository written one of these ways was invisible to every check."""
+        manager = VersionTemplateManager(REPO_ROOT)
+        assert manager.release_pins(text) == set()
+        found = manager.unrecognized_pins(text)
+        assert [(name, version) for name, version, _line in found] == [(form, "3.3.0")]
+        assert _convert(text) == text  # convert misses it too: the gap is real
+
+    @pytest.mark.parametrize("text", list(ASH_PINS.values()))
+    def test_a_recognized_pin_is_not_listed_as_unrecognized(self, text):
+        assert VersionTemplateManager(REPO_ROOT).unrecognized_pins(text) == []
+
+    @pytest.mark.parametrize(
+        "text", list(OTHER_PROJECTS_PINS.values()), ids=list(OTHER_PROJECTS_PINS)
+    )
+    def test_another_project_s_pin_is_listed_for_an_explicit_allowance(self, text):
+        found = VersionTemplateManager(REPO_ROOT).unrecognized_pins(text)
+        assert len(found) == 1, found
+        assert found[0][2] in text
 
     def test_every_form_has_patterns_with_one_group(self):
         """A form added to INSTALL_REF_FORMS needs its ASH anchor in ASH_PIN_PATTERNS."""
