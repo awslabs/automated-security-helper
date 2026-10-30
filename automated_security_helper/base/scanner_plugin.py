@@ -1834,8 +1834,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         (``shown_uv_output``, with the run's plugin-built inputs, unbounded):
         uv respells what it quotes ("9.9.9-RC777" prints as "9.9.9rc777") and
         the plain layer matches a value only as written. A raise from that
-        layer (its setup or the shower) falls back to the plain layer: it
-        must not replace the error being reported either.
+        layer (its setup or the shower) leaves the text out, as a failing
+        values hook does, and does not fall back to the plain layer, which
+        would print what uv respelled; *withheld* still says what happened,
+        and the raise does not replace the error being reported either.
         """
         read = guarded_values_read(self)
         if read.values is None:
@@ -1857,7 +1859,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     limit=None,
                 )
             except Exception:  # noqa: BLE001 -- the error being reported outranks it
-                pass
+                return f"{withheld} (text not shown: the uv redaction layer failed)"
         return text_without_values(text, read.values)
 
     def _config_as_written(self, dumped: Any) -> Any:

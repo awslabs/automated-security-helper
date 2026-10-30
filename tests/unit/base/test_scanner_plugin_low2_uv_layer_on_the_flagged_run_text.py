@@ -10,7 +10,8 @@
 written. uv respells a version it quotes ("9.9.9-RC777" prints as "9.9.9rc777"),
 so the respelled form was left in the message. For a uv run the text now goes
 through ``shown_uv_output``, as the stderr lines and the log excerpt do. A raise
-from that layer falls back to the plain one and never replaces the real error.
+from that layer leaves the text out and keeps the headline: the plain layer
+would print the respelled form, and the real error is still not replaced.
 """
 
 from __future__ import annotations
@@ -98,17 +99,23 @@ def test_a_value_as_written_is_still_hidden_in_a_flagged_runs_message(
     assert VALUE not in message, message
 
 
+@pytest.mark.parametrize("spelling", [VALUE, RESPELLED], ids=["written", "respelled"])
 @pytest.mark.parametrize("flag,headline", FLAGS)
-def test_a_raise_from_the_uv_layer_leaves_the_error_and_the_plain_layer(
-    tmp_path, flag, headline
+def test_a_raise_from_the_uv_layer_withholds_the_text_and_keeps_the_headline(
+    tmp_path, flag, headline, spelling
 ):
+    # The plain layer matches a value only as it was written, so it would
+    # print the form uv respelled: the text is left out, as it is when the
+    # values hook raises, and the headline still says what happened.
     message = _message(
         tmp_path,
         _UvRunWhoseInputsRaise,
         flag,
-        f"uv was ended while it resolved {VALUE}",
+        f"uv was ended while it resolved {spelling}",
     )
 
     assert headline in message, message
-    assert "while it resolved" in message, message
+    assert "text not shown" in message, message
+    assert "while it resolved" not in message, message
     assert VALUE not in message, message
+    assert RESPELLED not in message, message
