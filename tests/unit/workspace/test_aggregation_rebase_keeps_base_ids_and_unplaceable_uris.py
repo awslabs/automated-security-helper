@@ -29,7 +29,16 @@ The contract these cases pin:
 - a relative URI anchored to a base of the scanner's own takes its
   ``workspace_uri`` from base + uri read back through the project, so the two
   coordinates name one file; a base outside the project counts the finding as
-  unconvertible and anchors nothing.
+  unconvertible and anchors nothing;
+- a ``file:`` base is a URI and is percent-encoded (``Path.as_uri()`` writes a
+  space as ``%20``): it is decoded before the join, so a project whose path holds
+  a space places its findings as it did before bases were honoured;
+- a base anchored to another base (``SRCROOT`` under ``REPOROOT``) is followed to
+  its root and the chain joined; a chain the run does not resolve (an undeclared
+  parent, a cycle) counts the finding instead of placing it at the project root
+  under another file's name;
+- ``_rooted`` reads a backslash-rooted or UNC path as absolute, and the
+  policy-origin marker and its reader have one home, ``aggregation``.
 """
 
 from __future__ import annotations
@@ -38,6 +47,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.workspace import aggregation, execution
 from automated_security_helper.workspace.aggregation import (
     PROJECT_ROOT_URI_BASE_ID,
     rebase_run_for_project,
@@ -208,3 +218,135 @@ def test_a_reduced_absolute_uri_is_anchored_to_the_project_root(project, tmp_pat
     assert artifact["uriBaseId"] == PROJECT_ROOT_URI_BASE_ID
     assert rebased["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
     assert unconvertible == 0
+
+
+# ---------------------------------------------------------------------------
+# A percent-encoded base, and a base anchored to another base
+# ---------------------------------------------------------------------------
+
+
+def test_a_percent_encoded_base_places_the_uri_through_the_decoded_path(tmp_path):
+    """Red at the base: ``My%20Repo`` is not under ``My Repo``, so ``relative_to``
+    raised, the location was counted unconvertible, and a finding the
+    project-relative reading had placed before bases were honoured went missing
+    from the workspace coordinates."""
+    root = tmp_path / "ws" / "My Repo" / "api"
+    project = ProjectPlan(
+        key="api",
+        relative_path="api",
+        path=root.as_posix(),
+        label="api",
+        display_label="api",
+    )
+    base = _dir_uri(root)
+    assert "%20" in base, "Path.as_uri() no longer percent-encodes; nothing measured"
+
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "src/app.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={"%SRCROOT%": {"uri": base}},
+        ),
+        project,
+    )
+
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "src/app.py"
+    assert artifact["uriBaseId"] == "%SRCROOT%"
+    assert rebased["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
+    assert unconvertible == 0
+    # The declared base is carried as the scanner wrote it, encoded.
+    assert rebased["originalUriBaseIds"]["%SRCROOT%"] == {"uri": base}
+
+
+def test_a_chained_base_is_resolved_to_its_root(project, tmp_path):
+    """Red at the base: the anchored base answered None and ``app.py`` was placed
+    at the project root, dropping the ``src/`` and naming another file."""
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "app.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={
+                "%SRCROOT%": {"uri": "src/", "uriBaseId": "%REPOROOT%"},
+                "%REPOROOT%": {"uri": _dir_uri(tmp_path / "ws" / "api")},
+            },
+        ),
+        project,
+    )
+
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "app.py"
+    assert artifact["uriBaseId"] == "%SRCROOT%"
+    assert rebased["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
+    assert unconvertible == 0
+
+
+def test_a_chain_ending_nowhere_declared_is_counted_not_placed(project):
+    """Red at the base: placed at the project root as ``api/app.py``."""
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "app.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={"%SRCROOT%": {"uri": "src/", "uriBaseId": "%NOWHERE%"}},
+        ),
+        project,
+    )
+
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "app.py"
+    assert artifact["uriBaseId"] == "%SRCROOT%"
+    assert "workspace_uri" not in rebased["results"][0]["properties"]
+    assert unconvertible == 1
+
+
+def test_a_cyclic_base_chain_is_counted_not_placed(project):
+    """A chain that never reaches a root ends in a count, not in a loop."""
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "app.py", "uriBaseId": "%A%"},
+            base_ids={
+                "%A%": {"uri": "x/", "uriBaseId": "%B%"},
+                "%B%": {"uri": "y/", "uriBaseId": "%A%"},
+            },
+        ),
+        project,
+    )
+
+    assert "workspace_uri" not in rebased["results"][0]["properties"]
+    assert unconvertible == 1
+
+
+def test_a_chain_rooted_in_a_relative_base_is_counted_not_placed(project):
+    """Control for the resolved chain: a root that is itself relative places
+    nothing, as an unanchored relative base places nothing."""
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "app.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={
+                "%SRCROOT%": {"uri": "src/", "uriBaseId": "%REPOROOT%"},
+                "%REPOROOT%": {"uri": "repo/"},
+            },
+        ),
+        project,
+    )
+
+    assert "workspace_uri" not in rebased["results"][0]["properties"]
+    assert unconvertible == 1
+
+
+def test_rooted_reads_a_backslash_rooted_and_a_unc_path_as_absolute():
+    """Red at the base for the first two: ``_rooted`` read only ``/`` and a drive."""
+    assert aggregation._rooted("\\\\server\\share\\nb.ipynb") is True
+    assert aggregation._rooted("\\x.py") is True
+    assert aggregation._rooted("C:\\ws\\x.py") is True
+    assert aggregation._rooted("/ws/x.py") is True
+    assert aggregation._rooted("src/app.py") is False
+    assert aggregation._rooted("") is False
+
+
+def test_the_policy_origin_marker_and_its_reader_have_one_home():
+    """Red at the base: execution kept its own ``_is_policy_origin`` beside
+    aggregation's copy, and nothing failed when the two drifted."""
+    assert execution.POLICY_ORIGIN == aggregation.POLICY_ORIGIN == "workspace-policy"
+    assert execution.is_policy_origin is aggregation.is_policy_origin
+    assert not hasattr(execution, "_is_policy_origin")
+    assert aggregation.is_policy_origin({"properties": {"origin": "workspace-policy"}})
+    assert not aggregation.is_policy_origin({"properties": {"origin": "project"}})
+    assert not aggregation.is_policy_origin({"properties": None})

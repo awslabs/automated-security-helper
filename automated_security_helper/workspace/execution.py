@@ -388,6 +388,7 @@ from automated_security_helper.utils.secret_masking import (
     shapes_of_secret_values,
 )
 from automated_security_helper.workspace.aggregation import (
+    POLICY_ORIGIN,
     RESULTS_FILENAME,
     ThresholdResolver,
     WorkspaceAggregator,
@@ -396,6 +397,7 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
     incomplete_converters_for_project,
     inputs_not_scanned_for_project,
+    is_policy_origin,
     result_is_suppressed,
     rewrite_workspace_block,
     stale_content_databases_for_project,
@@ -447,12 +449,10 @@ _REPORT_PHASE = "report"
 #: The subtree each project's own output lands in.
 PROJECTS_DIR_NAME = "projects"
 
-#: Marks a finding that came from a scanner only ``workspace.additional_scanners``
-#: asked for, rather than one the project enables itself. Written to
-#: ``properties.origin`` on the SARIF result and added to ``properties.tags``.
-#: The spelling is the one the CLI reference and ``AshWorkspaceConfig.json``
-#: already document, so it is a constant rather than a literal at each use.
-POLICY_ORIGIN = "workspace-policy"
+# POLICY_ORIGIN, the marker of a finding from a scanner only
+# ``workspace.additional_scanners`` asked for, and is_policy_origin, its reader,
+# are imported from workspace.aggregation above: one home, read by the executor
+# that writes the marker and by the rollup that honours it.
 
 OrchestratorFactory = Callable[..., Any]
 
@@ -1511,7 +1511,7 @@ def _reduce_project_scan(
     # A suppression that has not taken effect (rejected, underReview) hides
     # nothing: the same reading the per-scanner counts and the flat finding make.
     unsuppressed = [entry for entry in results_list if not result_is_suppressed(entry)]
-    policy_origin = [entry for entry in unsuppressed if _is_policy_origin(entry)]
+    policy_origin = [entry for entry in unsuppressed if is_policy_origin(entry)]
 
     # What the verdict is allowed to see. Findings from a scanner only the policy
     # added are REPORTED either way -- they are in `unsuppressed` above and carry
@@ -1521,7 +1521,7 @@ def _reduce_project_scan(
     gating_results = (
         results_list
         if project.policy_scanners_gate
-        else [entry for entry in results_list if not _is_policy_origin(entry)]
+        else [entry for entry in results_list if not is_policy_origin(entry)]
     )
 
     # gate_threshold, not severity_threshold: this is where a workspace severity
@@ -2039,14 +2039,6 @@ def _enable_policy_scanners(config: Any, names: Iterable[str]) -> None:
         ASH_LOGGER.verbose(
             f"Workspace policy enabled scanner '{name}' for this project."
         )
-
-
-def _is_policy_origin(result: Mapping[str, Any]) -> bool:
-    """Whether this SARIF result came from a scanner only the policy added."""
-    properties = result.get("properties")
-    if not isinstance(properties, Mapping):
-        return False
-    return properties.get("origin") == POLICY_ORIGIN
 
 
 def _tag_policy_origin_findings(results: Any, project: ProjectPlan) -> None:

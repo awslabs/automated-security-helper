@@ -137,6 +137,7 @@ import shutil
 import stat
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from urllib.parse import unquote
 
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
 from automated_security_helper.core.exceptions import WorkspacePatternError
@@ -190,18 +191,23 @@ _STAMP_READ_LIMIT = 1 << 20
 #: changed between 3.11 and 3.12 and this project supports 3.10 through 3.14.
 _DRIVE_ANCHOR = re.compile(r"^[A-Za-z]:[/\\]")
 
-#: ``properties.origin`` of a finding from a scanner only the workspace policy
-#: added (``execution.POLICY_ORIGIN``; spelled here because execution imports
-#: this module). The verdict excludes such findings unless the policy gate is on.
-_POLICY_ORIGIN = "workspace-policy"
+#: Marks a finding that came from a scanner only ``workspace.additional_scanners``
+#: asked for, rather than one the project enables itself. Written to
+#: ``properties.origin`` on the SARIF result and added to ``properties.tags`` by
+#: the executor; the verdict and the rollup exclude such findings unless the
+#: policy gate is on. The spelling is the one the CLI reference and
+#: ``AshWorkspaceConfig.json`` document. One home: ``execution`` imports this
+#: module, so the constant and the predicate live here and it imports them
+#: (a second copy let the two drift with no test failing on the drift).
+POLICY_ORIGIN = "workspace-policy"
 
 
-def _is_policy_origin(result: Mapping[str, Any]) -> bool:
+def is_policy_origin(result: Mapping[str, Any]) -> bool:
     """Whether this SARIF result came from a scanner only the policy added."""
     properties = result.get("properties")
     if not isinstance(properties, Mapping):
         return False
-    return properties.get("origin") == _POLICY_ORIGIN
+    return properties.get("origin") == POLICY_ORIGIN
 
 
 #: Stands in for a backslash that is part of a file name while a URI passes
@@ -296,13 +302,15 @@ def _posix_text(uri: str, project_path: Optional[str] = None) -> str:
 def _rooted(text: str) -> bool:
     """Whether recorded path text is absolute on either platform's spelling.
 
-    A leading separator (POSIX, or a Windows path written with ``/``) or a
-    drive anchor (``C:\\`` or ``C:/``). ``PurePosixPath(text).is_absolute()``
-    reads a Windows absolute path as relative, so a converter's or scanner's
-    ``C:\\ws\\api\\nb.ipynb`` was shown as ``api/C:\\ws\\api\\nb.ipynb``, against
-    the fields' contract that an absolute recorded path is kept as recorded.
+    A leading separator (POSIX, or a Windows path written with ``/`` or with
+    ``\\``, a UNC path's ``\\\\server\\share`` included) or a drive anchor (``C:\\``
+    or ``C:/``). ``PurePosixPath(text).is_absolute()`` reads a Windows absolute
+    path as relative, so a converter's or scanner's ``C:\\ws\\api\\nb.ipynb`` was
+    shown as ``api/C:\\ws\\api\\nb.ipynb``, against the fields' contract that an
+    absolute recorded path is kept as recorded; a backslash-rooted path was read
+    the same way until the leading backslash was admitted here.
     """
-    return text.startswith("/") or bool(_DRIVE_ANCHOR.match(text))
+    return text.startswith(("/", "\\")) or bool(_DRIVE_ANCHOR.match(text))
 
 
 def project_relative_uri(uri: str, project_path: str) -> Any:
@@ -360,8 +368,7 @@ def project_relative_uri(uri: str, project_path: str) -> Any:
     if not text:
         return None
 
-    rooted = text.startswith("/") or bool(_DRIVE_ANCHOR.match(text))
-    if not rooted:
+    if not _rooted(text):
         return NOT_ABSOLUTE
 
     # ".." would make relative_to lie about containment, and Phase 0 rejects it
@@ -420,7 +427,7 @@ def to_workspace_uri(
             return None
         if reduced is not NOT_ABSOLUTE:
             text = reduced
-    elif text.startswith("/") or _DRIVE_ANCHOR.match(text):
+    elif _rooted(text):
         # No project path to relativize against, so an absolute URI cannot be
         # placed. Refusing beats prefixing it into a path that names nothing.
         return None
@@ -451,26 +458,95 @@ def _artifact_location(location: Any) -> Optional[Dict[str, Any]]:
     return artifact
 
 
-def _declared_base(table: Mapping[str, Any], base_id: Any) -> Optional[str]:
-    """The absolute ``uri`` *table* declares for *base_id*, or None.
+#: Answered by :func:`_declared_base` for a base the run anchors to a chain of
+#: other bases it cannot resolve (an undeclared parent, a relative root, a cycle,
+#: a chain deeper than ``_BASE_CHAIN_LIMIT``): the file the location names is
+#: unknown, so the location is counted as unconvertible, and is NOT read as
+#: project-relative, which placed it at the project root under the wrong name.
+UNRESOLVED_BASE = object()
+
+#: How many ``uriBaseId`` hops a base chain may take. SARIF puts no bound on
+#: chaining; one real-world chain is two deep (``SRCROOT`` under ``REPOROOT``).
+_BASE_CHAIN_LIMIT = 8
+
+
+def _join_under_base(base_uri: str, uri: str) -> str:
+    """*uri* placed under *base_uri* as a SARIF consumer joins them.
+
+    3.4.4: a base ends with its separator. Not ``rstrip("/")`` on the base: that
+    ate the scheme's own slashes of a filesystem-root base, ``file:///`` ->
+    ``file:``, and the joined text then read as unrooted, so the uri was placed at
+    the project root as if it had no base at all.
+    """
+    return (base_uri if base_uri.endswith("/") else base_uri + "/") + uri.lstrip("/")
+
+
+def _absolute_base(uri: str) -> Optional[str]:
+    """*uri* as an absolute base, its percent-escapes decoded, or None.
+
+    A ``file:`` base is a URI, and ``Path.as_uri()`` (which ``project_root_uri``
+    and the scanners' own writers use) percent-encodes it: a project at
+    ``/Users/me/My Repo/api`` declares ``file:///Users/me/My%20Repo/api/``.
+    Joined undecoded, the text ``/Users/me/My%20Repo/api/src/app.py`` is not
+    under ``/Users/me/My Repo/api`` and the finding was counted unconvertible,
+    where the project-relative reading before the base was honoured had placed
+    it. Decoded here, once, before anything compares paths. A base with no scheme
+    is a path as written and is not decoded (a ``%`` in a file name stays).
+    """
+    decoded = unquote(uri) if uri.lower().startswith("file:") else uri
+    if not _rooted(_posix_text(decoded)):
+        return None
+    return decoded
+
+
+def _declared_base(table: Mapping[str, Any], base_id: Any) -> Any:
+    """The absolute ``uri`` *table* declares for *base_id*, None, or UNRESOLVED_BASE.
 
     None for the project root (the ordinary anchor, which the project-relative
-    reading already assumes), for an id the run does not declare, and for a base
-    whose own ``uri`` is relative or is itself anchored (a ``uriBaseId`` on the
-    base entry): only an absolute base places a relative uri on disk.
+    reading already assumes), for an id the run does not declare, and for an
+    unanchored base whose own ``uri`` is relative: only an absolute base places a
+    relative uri on disk. A base anchored to another (``uriBaseId`` on the base
+    entry: ``SRCROOT`` -> ``{"uri": "src/", "uriBaseId": "REPOROOT"}``) is followed
+    to its root and the chain joined, so the location is placed where a SARIF
+    consumer places it; before this the chained base answered None and the
+    location was placed at the project root, dropping the ``src/`` and naming
+    another file. A chain this function cannot follow answers
+    :data:`UNRESOLVED_BASE`, which the caller counts instead of placing.
     """
     if not base_id or base_id == PROJECT_ROOT_URI_BASE_ID:
         return None
     entry = table.get(str(base_id))
-    if not isinstance(entry, Mapping) or entry.get("uriBaseId"):
+    if not isinstance(entry, Mapping):
         return None
     uri = entry.get("uri")
     if not isinstance(uri, str) or not uri:
         return None
-    text = _posix_text(uri)
-    if not (text.startswith("/") or _DRIVE_ANCHOR.match(text)):
-        return None
-    return uri
+    parent_id = entry.get("uriBaseId")
+    if not parent_id:
+        return _absolute_base(uri)
+
+    segments = [uri]
+    seen = {str(base_id)}
+    while parent_id:
+        key = str(parent_id)
+        if key in seen or len(seen) >= _BASE_CHAIN_LIMIT:
+            return UNRESOLVED_BASE
+        seen.add(key)
+        parent = table.get(key)
+        if not isinstance(parent, Mapping):
+            return UNRESOLVED_BASE
+        parent_uri = parent.get("uri")
+        if not isinstance(parent_uri, str) or not parent_uri:
+            return UNRESOLVED_BASE
+        segments.append(parent_uri)
+        parent_id = parent.get("uriBaseId")
+    root = _absolute_base(segments[-1])
+    if root is None:
+        return UNRESOLVED_BASE
+    joined = root
+    for segment in reversed(segments[:-1]):
+        joined = _join_under_base(joined, segment)
+    return joined
 
 
 def rebase_run_for_project(
@@ -548,22 +624,20 @@ def rebase_run_for_project(
             if reduced is NOT_ABSOLUTE:
                 placed: Optional[str] = str(uri)
                 base_uri = _declared_base(table, artifact.get("uriBaseId"))
-                if base_uri is not None:
+                if base_uri is UNRESOLVED_BASE:
+                    # Anchored to a chain of bases the run does not resolve: the
+                    # file it names is unknown. Counted below, and not read as
+                    # project-relative, which named another file.
+                    placed = None
+                elif base_uri is not None:
                     # The scanner anchored this relative uri to a base of its
                     # own, which need not be the project root, and the file it
                     # names is base + uri. workspace_uri has to come from that
                     # path read back through the project, or the two
                     # coordinates name two files. The artifact itself stays as
                     # the scanner wrote it: its uri and its uriBaseId agree.
-                    # Joined as a SARIF consumer joins them (3.4.4: a base ends
-                    # with its separator). Not `rstrip("/")` on the base: that
-                    # ate the scheme's own slashes of a filesystem-root base,
-                    # `file:///` -> `file:`, and the joined text then read as
-                    # unrooted, so the uri was placed at the project root as if
-                    # it had no base at all.
-                    joined = (
-                        base_uri if base_uri.endswith("/") else base_uri + "/"
-                    ) + str(uri).lstrip("/")
+                    # Joined as a SARIF consumer joins them (_join_under_base).
+                    joined = _join_under_base(base_uri, str(uri))
                     anchored = project_relative_uri(joined, project.path)
                     if anchored is None:
                         # Inside the base, outside this project: counted, and
@@ -1284,7 +1358,7 @@ class WorkspaceAggregator:
                 counted = [
                     result
                     for result in results
-                    if not (gate_off and _is_policy_origin(result))
+                    if not (gate_off and is_policy_origin(result))
                 ]
                 actionable = count_actionable_results(
                     counted,
