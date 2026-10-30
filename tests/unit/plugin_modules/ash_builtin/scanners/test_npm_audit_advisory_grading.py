@@ -92,12 +92,20 @@ def _graded(scanner, document):
     report = normalize_sarif_result_severities(
         scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
     )
-    return report, {
+    grades = {
         (r.ruleId, r.properties.model_extra.get("installed_version")): result_severity(
             r
         )
         for r in report.runs[0].results
     }
+    # Two results of one advisory at two nodes carry the same installed
+    # version (or none) and would share a key, one overwriting the other, so a
+    # duplicate result went unnoticed by every check on the grades. Such a
+    # document needs the results read as a list.
+    assert len(grades) == len(report.runs[0].results), (
+        "two results share a (rule, installed_version) key; read the results list"
+    )
+    return report, grades
 
 
 @pytest.mark.parametrize(
