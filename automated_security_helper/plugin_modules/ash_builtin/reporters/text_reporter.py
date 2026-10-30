@@ -4,6 +4,8 @@
 from datetime import datetime, timezone
 from typing import Literal, TYPE_CHECKING
 
+from pydantic import field_validator
+
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
@@ -25,6 +27,7 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
     coverage_shortfall_text,
+    refuse_negative_limit,
 )
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.core.unified_metrics import (
@@ -53,6 +56,11 @@ class TextReporterConfigOptions(ReporterOptionsBase):
         20  # Number of top hotspots (files with most findings) to include
     )
 
+    @field_validator("max_detailed_findings", "top_hotspots_limit")
+    @classmethod
+    def _limits_are_not_negative(cls, value: int) -> int:
+        return refuse_negative_limit(value)
+
 
 class TextReporterConfig(ReporterPluginConfigBase):
     """Configuration for the Text reporter."""
@@ -61,6 +69,59 @@ class TextReporterConfig(ReporterPluginConfigBase):
     extension: str = "summary.txt"
     enabled: bool = True
     options: TextReporterConfigOptions = TextReporterConfigOptions()
+
+
+def _coverage_sections(model: "AshAggregatedResults") -> list[str]:
+    """The sections that say what the scan did not examine, as lines.
+
+    Inputs a scanner found and did not scan, stale content databases, and
+    converter inputs nobody read. No scanner status carries them, so they stay
+    in the report whether or not its summary tables are on.
+    """
+    lines: list[str] = []
+
+    # See the matching section in the markdown reporter: no status value says
+    # which input went unexamined.
+    not_scanned = inputs_not_scanned(model)
+    if not_scanned:
+        lines.append("INPUTS NOT SCANNED")
+        lines.append("------------------")
+        # The path is the scanned repository's; its control characters are
+        # escaped so it stays on its line (see utils/display_text.py) and
+        # its CI command forms are broken, as this report lands in a job
+        # log. The scanner's name and the reason are the results file's
+        # text: each is one shown line.
+        for scanner_name, path, reason in not_scanned:
+            lines.append(
+                f"- {shown_on_one_line(scanner_name)}: "
+                f"{commands_broken(escape_controls(path))}: "
+                f"{shown_on_one_line(reason)}"
+            )
+        lines.append("")
+
+    # See the matching section in the markdown reporter: no status value carries this.
+    stale_dbs = stale_content_databases(model)
+    if stale_dbs:
+        lines.append("STALE CONTENT DATABASES")
+        lines.append("-----------------------")
+        for record in stale_dbs:
+            verdict = "FAILED THE SCAN" if record.enforced else "WARNING"
+            lines.append(str(shown_on_one_line(f"- [{verdict}] {record.message()}")))
+        lines.append("")
+
+    # See the matching section in the markdown reporter.
+    refusals = converter_refusals(model)
+    if refusals:
+        lines.append("CONVERTER INPUTS NOT SCANNED")
+        lines.append("----------------------------")
+        for line in summary_lines(refusals):
+            # A converter input's name is the scanned tree's text. The line
+            # holds its controls as escapes already, so only the CI command
+            # forms are left to break.
+            lines.append(commands_broken(f"- {line}"))
+        lines.append("")
+
+    return lines
 
 
 @ash_reporter_plugin
@@ -195,6 +256,9 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
         # Add summary section if enabled
         if isinstance(self.config, dict):
             self.config = TextReporterConfig.model_validate(self.config)
+        # Coverage facts no scanner row carries: they follow the summary's
+        # tables when it is on and stand in its place when it is off.
+        coverage_parts = _coverage_sections(model)
         if self.config.options.include_summary:
             text_parts.append("SUMMARY")
             text_parts.append("-------")
@@ -206,10 +270,10 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             # Create header row with proper spacing
             text_parts.append(
-                f"{'Scanner':<20} {'Suppressed':>8} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Duration':>10} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
+                f"{'Scanner':<20} {'Suppressed':>10} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Duration':>10} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
             )
             text_parts.append(
-                f"{'-' * 20} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 10} {'-' * 8} {'-' * 15}"
+                f"{'-' * 20} {'-' * 10} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 10} {'-' * 8} {'-' * 15}"
             )
 
             # Add scanner result rows
@@ -225,7 +289,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
                 text_parts.append(
                     f"{scanner_name:<20} "
-                    f"{result['suppressed']:>8} "
+                    f"{result['suppressed']:>10} "
                     f"{result['critical']:>8} "
                     f"{result['high']:>8} "
                     f"{result['medium']:>8} "
@@ -248,45 +312,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 ]
             )
 
-            # See the matching section in the markdown reporter: no status value says
-            # which input went unexamined.
-            not_scanned = inputs_not_scanned(model)
-            if not_scanned:
-                text_parts.append("INPUTS NOT SCANNED")
-                text_parts.append("------------------")
-                # The path is the scanned repository's; its control characters are
-                # escaped so it stays on its line (see utils/display_text.py) and
-                # its CI command forms are broken, as this report lands in a job
-                # log. The scanner's name and the reason are the results file's
-                # text: each is one shown line.
-                for scanner_name, path, reason in not_scanned:
-                    text_parts.append(
-                        f"- {shown_on_one_line(scanner_name)}: "
-                        f"{commands_broken(escape_controls(path))}: "
-                        f"{shown_on_one_line(reason)}"
-                    )
-                text_parts.append("")
-
-            # See the matching section in the markdown reporter: no status value carries this.
-            stale_dbs = stale_content_databases(model)
-            if stale_dbs:
-                text_parts.append("STALE CONTENT DATABASES")
-                text_parts.append("-----------------------")
-                for record in stale_dbs:
-                    verdict = "FAILED THE SCAN" if record.enforced else "WARNING"
-                    text_parts.append(
-                        str(shown_on_one_line(f"- [{verdict}] {record.message()}"))
-                    )
-                text_parts.append("")
-
-            # See the matching section in the markdown reporter.
-            refusals = converter_refusals(model)
-            if refusals:
-                text_parts.append("CONVERTER INPUTS NOT SCANNED")
-                text_parts.append("----------------------------")
-                for line in summary_lines(refusals):
-                    text_parts.append(f"- {line}")
-                text_parts.append("")
+            text_parts.extend(coverage_parts)
 
             # Add top hotspots (files with most findings)
             top_hotspots = emitter.get_top_hotspots(
@@ -296,13 +322,16 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 text_parts.append(f"Top {len(top_hotspots)} Hotspots:")
                 text_parts.append("Files with the highest number of security findings:")
                 text_parts.append("")
-                text_parts.append(f"{'Finding Count':>12} {'File Location':<60}")
-                text_parts.append(f"{'-' * 12} {'-' * 60}")
+                text_parts.append(f"{'Finding Count':>13} {'File Location':<60}")
+                text_parts.append(f"{'-' * 13} {'-' * 60}")
                 for hotspot in top_hotspots:
                     # A path from the scanned repository: shown on one line.
                     location = str(shown_on_one_line(hotspot["location"]))
-                    text_parts.append(f"{hotspot['count']:>12} {location:<60}")
+                    text_parts.append(f"{hotspot['count']:>13} {location:<60}")
                 text_parts.append("")
+        else:
+            # The disclosures stay when the summary is off.
+            text_parts.extend(coverage_parts)
 
         # Add findings table if enabled
         if self.config.options.include_findings_table:
@@ -326,8 +355,10 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                     title = str(shown_on_one_line(finding["title"]))[:30]
                     file_path = str(shown_on_one_line(finding["file_path"]))[:30]
 
+                    # An additional report's severity is the results file's text.
+                    severity = str(shown_on_one_line(finding["severity"]))
                     text_parts.append(
-                        f"{finding['severity']:<10} "
+                        f"{severity:<10} "
                         f"{scanner:<15} "
                         f"{rule_id:<15} "
                         f"{title:<30} "
@@ -352,7 +383,9 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                     text_parts.append(
                         str(shown_on_one_line(f"Finding {i + 1}: {finding['title']}"))
                     )
-                    text_parts.append(f"Severity: {finding['severity']}")
+                    text_parts.append(
+                        str(shown_on_one_line(f"Severity: {finding['severity']}"))
+                    )
                     text_parts.append(
                         str(shown_on_one_line(f"Scanner: {finding['scanner']}"))
                     )
