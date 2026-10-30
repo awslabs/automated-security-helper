@@ -853,10 +853,15 @@ class TestScannersUseThePreparedDatabase:
         # and its skip flags for trivy and trivy-repo alike.
         from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 
+        # The stand-in answers as a completed run: the scanner grades the exit
+        # code before it reads anything else, and a response with no code is
+        # refused as a tool that never ran.
         monkeypatch.setattr(
             ScannerPluginBase,
             "_run_subprocess",
-            lambda self, command, **kwargs: commands.append(list(command)) or {},
+            lambda self, command, **kwargs: (
+                commands.append(list(command)) or {"returncode": 0}
+            ),
         )
         target = tmp_path / "repo"
         target.mkdir()
@@ -962,10 +967,14 @@ def _trivy_scanner(context, monkeypatch):
         lambda *args, **kwargs: None,
     )
     commands = []
+    # A completed run, as above: a response with no exit code is refused as a
+    # tool that never ran.
     monkeypatch.setattr(
         ScannerPluginBase,
         "_run_subprocess",
-        lambda self, command, **kwargs: commands.append(list(command)) or {},
+        lambda self, command, **kwargs: (
+            commands.append(list(command)) or {"returncode": 0}
+        ),
     )
     return scanner, commands
 
