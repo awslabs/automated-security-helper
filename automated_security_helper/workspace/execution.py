@@ -1348,10 +1348,15 @@ def _scan_one_project(
         )
     except Exception as exc:  # noqa: BLE001 -- one project must not sink the workspace
         ASH_LOGGER.error(f"Project '{project.key}' failed: {error_text(exc)}")
-        if abandoned is not None and abandoned.is_set():
+        if abandoned is not None and not _claim_commit(abandoned):
             # The scan may have saved its results and reports under
             # projects/<key>/ before it raised; the workspace already recorded
             # this project FAILED at its timeout, so those leftovers go too.
+            # Claimed, not read: a plain is_set() read left a window in which
+            # a poll abandon landing after it recorded the timeout verdict
+            # while these files stayed. The claim takes the decision once: a
+            # worker that raised owns its FAILED outcome, and the poll can no
+            # longer abandon it.
             _discard_project_output(project_output)
         return _failed_outcome(
             project,
@@ -2400,6 +2405,41 @@ def _claim_commit(abandoned: Any) -> bool:
     return not abandoned.is_set()
 
 
+def _close_never_started(future: Any, gate: Any, key: str) -> bool:
+    """Decide a queued project the closing pool found not started.
+
+    True: record it FAILED as never started. False: it started in the moment
+    between the pool's read of it as queued and this call, and its worker has
+    already claimed its write, so its own outcome stands and the next pass
+    collects it.
+
+    Cancel first: a queued future can still be cancelled, and that stops it
+    starting after it has been reported failed. A future the cancel could not
+    stop had started in that window (the start_lock gap the pool's read cannot
+    see through). The gate then decides as it does for every other worker: an
+    abandon that takes it marks the worker's output for discard when the scan
+    returns, and a worker that has already committed keeps its outcome, so the
+    never-started verdict is not written over a project that ran. Both shapes
+    of the window are logged; before this the sweep cancelled, abandoned and
+    recorded the project in that order with no read of what the cancel found.
+    """
+    cancelled = future.cancel()
+    if not gate.set():
+        ASH_LOGGER.warning(
+            f"Project '{key}' started as the pool was closing and committed its "
+            f"results before it could be abandoned; its own outcome stands and is "
+            f"collected, not recorded as never started."
+        )
+        return False
+    if not cancelled:
+        ASH_LOGGER.warning(
+            f"Project '{key}' started as the pool was closing, after it was read as "
+            f"queued; it is abandoned, and the output its scan writes is discarded "
+            f"when it returns."
+        )
+    return True
+
+
 def _discard_project_output(project_output: Path) -> None:
     """Remove what a scan wrote under ``projects/<key>/`` before it was abandoned.
 
@@ -3009,10 +3049,13 @@ def _run_projects(
             ]
             for future in never_started:
                 project = futures[future]
-                # Cancel first: a queued future can still be cancelled, and that
-                # stops it starting after we have already reported it failed.
-                future.cancel()
-                abandoned[project.key].set()
+                # Cancel, then abandon through the gate; a worker that started in
+                # the window and already claimed its write keeps its outcome, and
+                # the next pass collects it (_close_never_started).
+                if not _close_never_started(
+                    future, abandoned[project.key], project.key
+                ):
+                    continue
                 _cancel(project)
                 ASH_LOGGER.error(
                     f"Project '{project.key}' never started: all {bound} worker "

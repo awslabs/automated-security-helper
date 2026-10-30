@@ -45,6 +45,7 @@ from tests.unit.workspace.test_execution import (
     _make_workspace,
     _run,
     _sarif,
+    _settings,
 )
 
 pytestmark = pytest.mark.unit
@@ -150,6 +151,104 @@ def test_the_gate_takes_the_decision_once():
     # Idempotent on the side that won.
     assert abandoned.set() is True
     assert committed.try_commit() is True
+
+
+def test_a_worker_that_raises_claims_the_gate_so_a_later_abandon_cannot_land(
+    tmp_path,
+):
+    """The exception arm takes the decision, as the normal path does.
+
+    A plain ``is_set()`` read left a window: a poll abandon landing after it
+    recorded the timeout verdict while the files the scan wrote before it raised
+    stayed. With the claim, a poll that comes afterwards finds the decision
+    taken (``set()`` is False) and leaves the worker's own FAILED outcome to be
+    collected.
+    """
+    _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"))
+    FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
+    gate = execution._AbandonGate()
+
+    run = execution._scan_one_project(
+        plan.projects[0], _settings(tmp_path), FakeOrchestrator.create, gate
+    )
+
+    assert run.outcome.status is ProjectRunStatus.FAILED
+    assert "boom" in (run.outcome.error or "")
+    assert gate.set() is False, (
+        "a poll abandon after the worker raised must find the decision taken"
+    )
+
+
+def test_a_worker_abandoned_before_it_raised_discards_what_the_scan_left(tmp_path):
+    """Must-not-regress control: an abandon that came first still discards."""
+    _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"))
+    FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
+    project_output = tmp_path / "out" / "projects" / "broken"
+    (project_output / "reports").mkdir(parents=True)
+    (project_output / "ash_aggregated_results.json").write_text("{}", encoding="utf-8")
+    (project_output / "reports" / "ash.sarif").write_text("{}", encoding="utf-8")
+    gate = execution._AbandonGate()
+    assert gate.set() is True
+
+    run = execution._scan_one_project(
+        plan.projects[0], _settings(tmp_path), FakeOrchestrator.create, gate
+    )
+
+    assert run.outcome.status is ProjectRunStatus.FAILED
+    assert not (project_output / "ash_aggregated_results.json").exists()
+    assert not (project_output / "reports").exists()
+
+
+class _QueuedFuture:
+    """A future whose cancel answers as the sweep's window shapes it."""
+
+    def __init__(self, cancellable: bool) -> None:
+        self._cancellable = cancellable
+        self.cancel_calls = 0
+
+    def cancel(self) -> bool:
+        self.cancel_calls += 1
+        return self._cancellable
+
+
+def test_a_queued_project_the_pool_cancels_is_recorded_never_started():
+    gate = execution._AbandonGate()
+    future = _QueuedFuture(cancellable=True)
+
+    assert execution._close_never_started(future, gate, "queued") is True
+    assert future.cancel_calls == 1
+    assert gate.is_set() is True
+    assert gate.try_commit() is False
+
+
+def test_a_project_that_started_in_the_window_is_abandoned_and_logged(caplog):
+    """The cancel found it running: abandoned through the gate, and said so."""
+    caplog.set_level(logging.WARNING, logger="ash")
+    gate = execution._AbandonGate()
+    future = _QueuedFuture(cancellable=False)
+
+    assert execution._close_never_started(future, gate, "late") is True
+    assert gate.is_set() is True
+    assert any(
+        "started as the pool was closing" in record.getMessage()
+        and "discarded when it returns" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_a_project_that_committed_in_the_window_keeps_its_outcome(caplog):
+    """The worker claimed its write first: not failed as never started."""
+    caplog.set_level(logging.WARNING, logger="ash")
+    gate = execution._AbandonGate()
+    assert gate.try_commit() is True
+    future = _QueuedFuture(cancellable=False)
+
+    assert execution._close_never_started(future, gate, "committed") is False
+    assert gate.is_set() is False
+    assert any(
+        "committed its results before it could be abandoned" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_a_project_that_finished_before_the_poll_read_the_clock_is_not_abandoned(
