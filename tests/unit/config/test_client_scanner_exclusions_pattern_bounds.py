@@ -1,32 +1,39 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A delivered checkov skip path runs in ASH's process under the scanner's time bound.
+"""A delivered checkov skip path runs under the scanner's time bound, in a child process.
 
 ``checkov_skips`` compiles a ``skip_path`` entry a delivered config supplied as a
-regular expression and searches it in every finding's path, in the host process,
-once per finding per entry. It ran with no bound: one entry that backtracks
-heavily held the result processing for as long as it liked, where checkov's own
-run would have been killed at ``scan_timeout``. The search now runs in a thread
-bounded by that same ``scan_timeout``, carried on the exclusion when it is moved
-out of the options (``ClientScannerExclusion.scan_timeout``), and a search still
-running at the deadline fails the pass with a ScannerError that names the option;
-the thread itself cannot be stopped and is left running until the process exits.
-A literal entry cannot backtrack and is searched inline, with no thread.
+regular expression and searches it in every finding's path, once per finding per
+entry. It ran with no bound: one entry that backtracks heavily held the result
+processing for as long as it liked, where checkov's own run would have been
+killed at ``scan_timeout``. The search now runs in a child process bounded by
+that same ``scan_timeout``, carried on the exclusion when it is moved out of the
+options (``ClientScannerExclusion.scan_timeout``); a search still running at the
+deadline is killed and fails the pass with a ScannerError that names the option.
+A literal entry cannot backtrack and is searched inline, in this process.
 
-The overrunning search is a stand-in whose ``search`` sleeps for a known time
-(``_SlowSearch``), put in place of the compiled pattern through
-``_checkov_pattern``: a real backtracking pattern takes an interpreter-dependent
-time (``a*a*a*b`` over 300 ``a`` characters read 0.41 s on Python 3.9 and under the
-20 ms bound on Python 3.12), so it cannot pin the bound. The stand-in's thread
-ends on its own half a second later.
+Why a process and not a thread: Python's matcher holds the interpreter lock for
+the whole of a search, so a thread joined with a timeout learned of the overrun
+only when the search finished on its own. The overrunning search here is a real
+one, ``(a+)+$`` over a run of 64 ``a`` characters ending in ``b``, which
+backtracks through 2**64 states and finishes on no machine. Under the thread the
+call never returned, so each test that runs it runs it inside a child of its own
+(``_outcome_of``) and reads back what the call did, within a limit of its own:
+at the deadline a killed search reads ``ScannerError``, a search the bound could
+not end reads as no answer within the limit.
 """
 
 from __future__ import annotations
 
+import multiprocessing
+import operator
+import os
+import re
+import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable
 
 import pytest
 
@@ -48,25 +55,79 @@ pytestmark = pytest.mark.unit
 STAR_PATTERN = "a*a*a*b"
 QUICK_RELATIVE = "a" * 120
 QUICK_ABSOLUTE = "/scan/" + QUICK_RELATIVE
-#: A skip path with regular-expression syntax, so the bounded path is taken.
-REGEX_PATTERN = "vend.r"
-TINY_TIMEOUT = 0.02
-SLOW_SECONDS = 0.5
+#: A search that finishes on no machine: the nested quantifier backtracks through
+#: 2**64 states before it fails against the trailing ``b``.
+NEVER_ENDING_PATTERN = r"(a+)+$"
+NEVER_ENDING_TEXT = "a" * 64 + "b"
+NEVER_ENDING_ABSOLUTE = "/scan/" + NEVER_ENDING_TEXT
+#: The bound an overrunning search is stopped at, and the time a bounded fast
+#: search may take (a child process has to start inside it).
+TINY_TIMEOUT = 0.5
+FAST_TIMEOUT = 5.0
+#: How long a test waits for the bounded call before reading it as unbounded.
+GUARD_LIMIT = 20.0
 
 
-class _SlowSearch:
-    """Stands in for a compiled pattern whose search overruns the bound."""
-
-    def search(self, text: str) -> Optional[Any]:
-        time.sleep(SLOW_SECONDS)
-        return None
+def _never_ending_search() -> None:
+    re.search(NEVER_ENDING_PATTERN, NEVER_ENDING_TEXT)
 
 
-def _searches_slowly(monkeypatch) -> None:
-    """Every compiled skip path becomes the overrunning stand-in."""
-    monkeypatch.setattr(
-        exclusions_module, "_checkov_pattern", lambda pattern: _SlowSearch()
-    )
+def _five() -> int:
+    return 5
+
+
+def _missing_key() -> Any:
+    return {}["missing"]
+
+
+def _hides(entry: ClientScannerExclusion, relative: str, absolute: str) -> bool:
+    return entry.hides(relative=relative, absolute=absolute, rule_id=None)
+
+
+def _reported(connection: Any, function: Callable[..., Any], args: tuple) -> None:
+    """In the guard's child: run the call and send back one line saying what it did."""
+    try:
+        function(*args)
+        connection.send("returned")
+    except ScannerError as error:
+        connection.send(f"ScannerError: {error}")
+    except Exception as error:  # the test reads the type
+        connection.send(type(error).__name__)
+    finally:
+        connection.close()
+
+
+def _outcome_of(
+    function: Callable[..., Any], *args: Any, limit: float = GUARD_LIMIT
+) -> str:
+    """What ``function(*args)`` did, read from a child of the test's own.
+
+    The bounded call is made in a forked child so a bound that does not hold
+    (the thread of the first cut, which the search never returned to) leaves a
+    hanging child the test kills after ``limit`` seconds, not a hanging test.
+    Where there is no ``fork`` the call is made inline: the bound under test
+    holds there too, and the guard is only against the unbounded shape.
+    """
+    if "fork" not in multiprocessing.get_all_start_methods():
+        try:
+            function(*args)
+            return "returned"
+        except ScannerError as error:
+            return f"ScannerError: {error}"
+    context = multiprocessing.get_context("fork")
+    receiving, sending = context.Pipe(duplex=False)
+    child = context.Process(target=_reported, args=(sending, function, args))
+    child.start()
+    sending.close()
+    try:
+        if receiving.poll(limit):
+            return receiving.recv()
+        return f"no answer within {limit} s"
+    finally:
+        receiving.close()
+        if child.is_alive():
+            child.kill()
+        child.join()
 
 
 # ---------------------------------------------------------------------------
@@ -75,21 +136,39 @@ def _searches_slowly(monkeypatch) -> None:
 
 
 def test_evaluated_within_returns_the_result_or_re_raises():
-    assert evaluated_within(1, "x", lambda: 5) == 5
-    assert evaluated_within(None, "x", lambda: 7) == 7
+    assert evaluated_within(FAST_TIMEOUT, "x", _five) == 5
+    assert evaluated_within(None, "x", _five) == 5
+    assert evaluated_within(FAST_TIMEOUT, "x", operator.add, 2, 3) == 5
     with pytest.raises(KeyError):
-        evaluated_within(1, "x", lambda: {}["missing"])
+        evaluated_within(FAST_TIMEOUT, "x", _missing_key)
+
+
+def test_evaluated_within_runs_the_bounded_call_in_another_process():
+    assert evaluated_within(FAST_TIMEOUT, "x", os.getpid) != os.getpid()
+    assert evaluated_within(None, "x", os.getpid) == os.getpid()
 
 
 def test_evaluated_within_fails_at_the_deadline_naming_the_source():
     started = time.monotonic()
 
     with pytest.raises(ScannerError) as raised:
-        evaluated_within(TINY_TIMEOUT, "the slow thing", lambda: time.sleep(0.5))
+        evaluated_within(TINY_TIMEOUT, "the slow thing", time.sleep, 10)
 
-    assert time.monotonic() - started < 0.45
+    assert time.monotonic() - started < 5
     assert "the slow thing" in str(raised.value)
     assert "scan_timeout" in str(raised.value)
+
+
+def test_a_search_that_holds_the_interpreter_lock_is_stopped_at_the_bound():
+    started = time.monotonic()
+
+    outcome = _outcome_of(
+        evaluated_within, TINY_TIMEOUT, "the search", _never_ending_search
+    )
+
+    assert outcome.startswith("ScannerError: ")
+    assert "the search" in outcome
+    assert time.monotonic() - started < GUARD_LIMIT / 2
 
 
 # ---------------------------------------------------------------------------
@@ -97,29 +176,29 @@ def test_evaluated_within_fails_at_the_deadline_naming_the_source():
 # ---------------------------------------------------------------------------
 
 
-def test_a_slow_skip_path_is_stopped_at_the_bound(monkeypatch):
-    _searches_slowly(monkeypatch)
-    started = time.monotonic()
+def test_a_slow_skip_path_is_stopped_at_the_bound():
+    outcome = _outcome_of(
+        checkov_skips,
+        NEVER_ENDING_PATTERN,
+        NEVER_ENDING_ABSOLUTE,
+        NEVER_ENDING_TEXT,
+        TINY_TIMEOUT,
+    )
 
-    with pytest.raises(ScannerError) as raised:
-        checkov_skips(
-            REGEX_PATTERN, "/scan/vendor/x.tf", "vendor/x.tf", timeout=TINY_TIMEOUT
-        )
-
-    assert time.monotonic() - started < SLOW_SECONDS
-    assert "scanners.checkov.options.skip_path" in str(raised.value)
-    assert REGEX_PATTERN not in str(raised.value)
+    assert outcome.startswith("ScannerError: ")
+    assert "scanners.checkov.options.skip_path" in outcome
+    assert NEVER_ENDING_PATTERN not in outcome
 
 
 def test_a_fast_skip_path_answers_under_the_bound():
     assert (
         checkov_skips(
-            "vend.r", "/scan/vendor/x.tf", "vendor/x.tf", timeout=TINY_TIMEOUT
+            "vend.r", "/scan/vendor/x.tf", "vendor/x.tf", timeout=FAST_TIMEOUT
         )
         is True
     )
     assert (
-        checkov_skips("vend.r", "/scan/src/x.tf", "src/x.tf", timeout=TINY_TIMEOUT)
+        checkov_skips("vend.r", "/scan/src/x.tf", "src/x.tf", timeout=FAST_TIMEOUT)
         is False
     )
 
@@ -153,13 +232,13 @@ def test_a_pattern_the_compiler_refuses_is_read_as_a_substring(pattern):
 
 
 def test_a_literal_skip_path_is_searched_inline(monkeypatch):
-    """A literal cannot backtrack, so no thread is spent on it; a pattern with
+    """A literal cannot backtrack, so no process is spent on it; a pattern with
     regular-expression syntax goes through the bound."""
     bounded: list = []
 
-    def recording(timeout, source, run):
+    def recording(timeout, source, function, *args):
         bounded.append(source)
-        return run()
+        return function(*args)
 
     monkeypatch.setattr(exclusions_module, "evaluated_within", recording)
 
@@ -173,19 +252,19 @@ def test_a_literal_skip_path_is_searched_inline(monkeypatch):
     assert len(bounded) == 1
 
 
-def test_an_exclusion_carries_the_bound_into_hides(monkeypatch):
-    _searches_slowly(monkeypatch)
+def test_an_exclusion_carries_the_bound_into_hides():
     entry = ClientScannerExclusion(
         scanner="checkov",
         option="skip_path",
         kind="checkov",
-        pattern=REGEX_PATTERN,
+        pattern=NEVER_ENDING_PATTERN,
         reason="r",
         scan_timeout=TINY_TIMEOUT,
     )
 
-    with pytest.raises(ScannerError):
-        entry.hides(relative="vendor/x.tf", absolute="/scan/vendor/x.tf", rule_id=None)
+    outcome = _outcome_of(_hides, entry, NEVER_ENDING_TEXT, NEVER_ENDING_ABSOLUTE)
+
+    assert outcome.startswith("ScannerError: ")
 
 
 def test_an_exclusion_without_a_bound_searches_as_before():
@@ -202,6 +281,12 @@ def test_an_exclusion_without_a_bound_searches_as_before():
         entry.hides(relative=QUICK_RELATIVE, absolute=QUICK_ABSOLUTE, rule_id=None)
         is False
     )
+
+
+def test_the_evaluation_child_is_a_fork_on_linux():
+    if not sys.platform.startswith("linux"):
+        pytest.skip("the fork is chosen on Linux only")
+    assert exclusions_module._process_context().get_start_method() == "fork"
 
 
 # ---------------------------------------------------------------------------

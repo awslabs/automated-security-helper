@@ -72,9 +72,10 @@ on a finding's path after the fact:
 * checkov ``skip_path``: as checkov's own filter reads it, a regular
   expression found in, or a substring of, the absolute path of the file or of a
   directory above it (``checkov_skips``). The expression is the client's and
-  runs in ASH's own process, so it runs under the scanner's ``scan_timeout``,
-  carried on the entry when it is moved (``evaluated_within``); checkov itself
-  would have been killed at that limit.
+  would run in ASH's own process, so it runs in a child process under the
+  scanner's ``scan_timeout``, carried on the entry when it is moved, and is
+  killed at that limit (``evaluated_within``); checkov itself would have been
+  killed at it.
 * opengrep and semgrep ``exclude``, ferret-scan ``exclude_patterns``, syft
   ``exclude``: a glob read as those tools read it (gitignore syntax for the
   grep family, doublestar globs for syft): ``*``, ``?`` and ``[...]`` match
@@ -126,9 +127,10 @@ Known limitations
   a ``/`` inside, at their project root, the top level of the repository the
   scanned tree is in, while the matching here anchors at the scan root. The
   two are one directory when the scanned tree is the repository's root.
-* A regular expression still running at its bound cannot be interrupted: the
-  thread evaluating it is left behind and holds one core until it finishes or
-  the process exits (``evaluated_within``). The scan it was part of fails.
+* A regular expression is bounded by running it in a child process that is
+  killed at the deadline (``evaluated_within``): one process start per
+  bounded search, which on Linux is a fork of ASH's own process. The scan it
+  was part of fails at the deadline.
 
 Rejected alternatives
 ---------------------
@@ -144,9 +146,10 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import multiprocessing
 import os
 import re
-import threading
+import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -360,52 +363,151 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
     )
 
 
-def evaluated_within(timeout: Optional[float], source: str, run: Callable[[], T]) -> T:
-    """``run()``, finished within ``timeout`` seconds, or a ScannerError naming ``source``.
+def evaluated_within(
+    timeout: Optional[float], source: str, function: Callable[..., T], *args: Any
+) -> T:
+    """``function(*args)``, finished within ``timeout`` seconds, or a ScannerError naming ``source``.
 
     For a regular expression the scanned repository or a delivered config wrote
     and ASH evaluates in its own process (a detect-secrets baseline's
     ``should_exclude_file`` patterns, checkov's ``skip_path`` entries): the tool
     would have run it under the scanner's ``scan_timeout``, so here it gets the
-    same bound. ``run`` is started in a daemon thread and waited for; its result,
-    or the exception it raised, comes back as if it had run inline. With
-    ``timeout`` None (the scanner left unbounded) it runs inline.
+    same bound. The call runs in a child process, which is killed at the
+    deadline; its result, or the exception it raised, comes back as if the call
+    had run inline. With ``timeout`` None (the scanner left unbounded) it runs
+    inline, in this process.
 
-    A search still running at the deadline cannot be interrupted: Python's
-    matcher returns to no one until it is done. The thread is left behind,
-    holding one core until it finishes or the process exits, and the
-    ScannerError fails the scan it was part of. That is the known cost of
-    bounding the evaluation in the host process; moving it into a process of
-    its own is a later design.
+    A thread cannot bound it. Python's matcher holds the interpreter lock for
+    the whole of a search and returns to no one until it is done, so a thread
+    joined with a timeout learned of the overrun only once the search had
+    finished on its own, which is when the bound no longer mattered; the first
+    cut did that, and a search that backtracked for an hour held the scan for
+    an hour. A process of its own can be killed. ``function`` is a module-level
+    function and ``args`` are plain values (the pattern's text, the candidate
+    paths): they cross to the child, which on platforms without ``fork`` is a
+    fresh interpreter that imports this module by name (``_process_context``).
     """
     if timeout is None:
-        return run()
-    outcome: Dict[str, Any] = {}
+        return function(*args)
+    return _evaluated_in_a_child(timeout, source, function, args)
 
-    def target() -> None:
+
+def _evaluated_in_a_child(
+    timeout: float, source: str, function: Callable[..., T], args: Tuple[Any, ...]
+) -> T:
+    """``function(*args)`` in a child process, killed when ``timeout`` seconds pass.
+
+    The child sends the result, or the exception, back over a pipe; the parent
+    waits for it up to ``timeout`` and kills the child when nothing has arrived
+    by then. A child that ends without answering (killed from outside, or its
+    answer could not be sent) fails the evaluation too, named as such, so the
+    scan never guesses at a match it did not see.
+    """
+    context = _process_context()
+    receiving, sending = context.Pipe(duplex=False)
+    child = context.Process(
+        target=_answer_through,
+        args=(sending, function, args),
+        name="ash-pattern-evaluation",
+        daemon=True,
+    )
+    child.start()
+    sending.close()
+    try:
+        if not receiving.poll(timeout):
+            raise ScannerError(
+                f"A regular expression from {source} did not finish matching within "
+                f"{timeout} seconds, the scanner's scan_timeout. Its evaluation was "
+                "stopped, and the scan fails rather than wait on it."
+            )
         try:
-            outcome["value"] = run()
-        except BaseException as error:  # re-raised below, in the caller's thread
-            outcome["error"] = error
+            answered, payload = receiving.recv()
+        except EOFError:
+            raise ScannerError(
+                f"The evaluation of a regular expression from {source} ended without "
+                "an answer, so the scan fails rather than guess at one."
+            ) from None
+    finally:
+        receiving.close()
+        if child.is_alive():
+            child.kill()
+        child.join()
+    if answered:
+        return payload
+    raise payload
 
-    thread = threading.Thread(target=target, name="ash-pattern-evaluation", daemon=True)
-    thread.start()
-    thread.join(timeout)
-    if thread.is_alive():
-        raise ScannerError(
-            f"A regular expression from {source} did not finish matching within "
-            f"{timeout} seconds, the scanner's scan_timeout. It is left running, "
-            "and the scan fails rather than wait on it."
-        )
-    if "error" in outcome:
-        raise outcome["error"]
-    return outcome["value"]
+
+def _answer_through(
+    connection: Any, function: Callable[..., Any], args: Tuple[Any, ...]
+) -> None:
+    """In the child: run ``function(*args)`` and send ``(True, result)`` or ``(False, error)``.
+
+    A result or an error that cannot be pickled is replaced by a ScannerError
+    that names its type, so the parent always reads one answer.
+    """
+    try:
+        answer: Tuple[bool, Any] = (True, function(*args))
+    except BaseException as error:  # re-raised in the caller's process
+        answer = (False, error)
+    try:
+        try:
+            connection.send(answer)
+        except Exception:
+            what = "result" if answer[0] else type(answer[1]).__name__
+            connection.send(
+                (
+                    False,
+                    ScannerError(
+                        f"The evaluation's {what} could not be handed back from the "
+                        "process it ran in."
+                    ),
+                )
+            )
+    finally:
+        connection.close()
+
+
+def _process_context() -> Any:
+    """The multiprocessing context the evaluation child is started with.
+
+    ``fork`` on Linux: the child starts with this module and the compiled
+    pattern already in memory, in milliseconds, which is what a search per
+    finding can afford (the detect-secrets scanner forces the same method for
+    its worker). Elsewhere the platform's default (``spawn`` on Windows and
+    macOS), which starts a fresh interpreter and imports the evaluated function
+    by its module and name, which is why every function handed to
+    ``evaluated_within`` is defined at module level.
+    """
+    if sys.platform.startswith("linux"):
+        return multiprocessing.get_context("fork")
+    return multiprocessing.get_context()
+
+
+def files_kept_by_patterns(
+    items: Sequence[Tuple[str, str]], patterns: Sequence[Tuple[str, int]]
+) -> List[str]:
+    """The files of ``items`` whose relative text no pattern of ``patterns`` is found in.
+
+    ``items`` pairs each file with the text the patterns are searched in (its
+    path relative to the scan root, as the baseline wrote them); ``patterns``
+    are ``(text, flags)`` pairs of compiled regular expressions, compiled again
+    here. The detect-secrets scanner's baseline filter, in the shape
+    ``evaluated_within`` can hand to a child process: a compiled pattern is
+    rebuilt from its text rather than crossing as an object, and the relative
+    paths are computed by the caller, so the child does nothing but search.
+    """
+    compiled = [re.compile(text, flags) for text, flags in patterns]
+    return [
+        file
+        for file, relative in items
+        if not any(pattern.search(relative) for pattern in compiled)
+    ]
 
 
 #: The characters that give a checkov skip path regular-expression meaning. An
 #: entry holding none of them is a literal, and ``re.search`` of a literal is
 #: linear in the path, so it is searched inline; only an entry with syntax takes
-#: the bounded thread (``checkov_skips``).
+#: the bounded child process (``checkov_skips``).
 _REGEX_SYNTAX = re.compile(r"[.*+?^$|()\[\]{}\\]")
 
 
@@ -432,20 +534,30 @@ def checkov_skips(
         candidates.append(f"{base}/{'/'.join(parts[:end])}")
     compiled = _checkov_pattern(pattern)
 
-    def search() -> bool:
-        return any(
-            (compiled is not None and compiled.search(candidate) is not None)
-            or pattern in candidate
-            for candidate in candidates
-        )
-
     if compiled is None or timeout is None or _REGEX_SYNTAX.search(pattern) is None:
-        return search()
+        return _checkov_search(pattern, candidates)
     return evaluated_within(
         timeout,
         "scanners.checkov.options.skip_path, an entry of a config an MCP client "
         "delivered",
-        search,
+        _checkov_search,
+        pattern,
+        candidates,
+    )
+
+
+def _checkov_search(pattern: str, candidates: List[str]) -> bool:
+    """Whether ``pattern`` is found in, or is a substring of, any of ``candidates``.
+
+    The search of ``checkov_skips``, a module-level function so the bounded
+    evaluation can hand it to a child process (``evaluated_within``), where the
+    pattern is compiled again (``_checkov_pattern``, cached per process).
+    """
+    compiled = _checkov_pattern(pattern)
+    return any(
+        (compiled is not None and compiled.search(candidate) is not None)
+        or pattern in candidate
+        for candidate in candidates
     )
 
 

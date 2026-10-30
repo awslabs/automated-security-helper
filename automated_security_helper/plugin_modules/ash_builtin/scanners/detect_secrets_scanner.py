@@ -33,6 +33,7 @@ from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.config.client_scanner_exclusions import (
     evaluated_within,
+    files_kept_by_patterns,
 )
 from automated_security_helper.config.path_trust import (
     derived_roots,
@@ -1618,10 +1619,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         The patterns are the baseline's, so the scanned repository's or a
         delivered config's, and they run here in ASH's own process, before the
         worker and its time limit start. ``timeout`` is the scanner's
-        ``scan_timeout``: the whole filter runs under it
-        (``evaluated_within``), and a filter still running at the deadline
-        raises ScannerError naming ``source``. None runs it unbounded, as
-        ``scan_timeout: null`` runs the scan.
+        ``scan_timeout``: the whole filter runs under it in a child process
+        (``evaluated_within``, ``files_kept_by_patterns``), and a filter still
+        running at the deadline is killed and raises ScannerError naming
+        ``source``. None runs it unbounded, inline, as ``scan_timeout: null``
+        runs the scan.
 
         Args:
             files: List of file paths to filter.
@@ -1638,18 +1640,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """
         if not exclude_patterns:
             return files
-
-        def kept() -> List[str]:
-            return [
-                f
-                for f in files
-                if not any(
-                    pattern.search(DetectSecretsScanner._root_relative(f, root))
-                    for pattern in exclude_patterns
-                )
-            ]
-
-        return evaluated_within(timeout, source, kept)
+        # The relative texts are computed here and the patterns cross as their
+        # text and flags: the child that runs the search does nothing else.
+        items = [(f, DetectSecretsScanner._root_relative(f, root)) for f in files]
+        specs = [(pattern.pattern, pattern.flags) for pattern in exclude_patterns]
+        return evaluated_within(timeout, source, files_kept_by_patterns, items, specs)
 
     @staticmethod
     def _ensure_fork_multiprocessing() -> None:

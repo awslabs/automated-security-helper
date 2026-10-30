@@ -1,31 +1,33 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A baseline's ``should_exclude_file`` patterns run in ASH's process under ``scan_timeout``.
+"""A baseline's ``should_exclude_file`` patterns run under ``scan_timeout``, in a child process.
 
 The scanner applies the baseline's file filter to the scan set itself, before
 the worker starts (``_apply_file_exclusions``), so a regular expression the
 scanned repository wrote in its ``.secrets.baseline`` is searched in every file
 path by the host process. It ran with no bound: a pattern that backtracks
 heavily held the scan for as long as it liked, while the worker's own time
-limit never started. The filter now runs in a thread bounded by the scanner's
-``scan_timeout``, and a filter still running at the deadline fails the scan
-with a ScannerError that names the filter; the thread itself cannot be stopped
-and is left running until the process exits.
+limit never started. The filter now runs in a child process bounded by the
+scanner's ``scan_timeout``; a filter still running at the deadline is killed
+and fails the scan with a ScannerError that names the filter.
 
-The overrunning filter is a stand-in pattern whose ``search`` sleeps for a known
-time (``_SlowSearch``): a real backtracking pattern takes an interpreter-dependent
-time (``a*a*a*b`` over 300 ``a`` characters read 0.41 s on Python 3.9 and under
-the 20 ms bound on Python 3.12), so it cannot pin the bound. The stand-in's thread
-ends on its own half a second later.
+Why a process and not a thread: Python's matcher holds the interpreter lock for
+the whole of a search, so a thread joined with a timeout learned of the overrun
+only when the search finished on its own. The overrunning filter here is a real
+pattern, ``(a+)+$`` over a file named by 64 ``a`` characters and a ``b``, which
+finishes on no machine. Under the thread the call never returned, so each test
+that runs it runs it inside a child of its own (``_outcome_of``) and reads back
+what the call did, within a limit of its own.
 """
 
 from __future__ import annotations
 
+import multiprocessing
 import re
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable
 
 import pytest
 
@@ -41,31 +43,74 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
-TINY_TIMEOUT = 0.02
-SLOW_SECONDS = 0.5
+NEVER_ENDING_PATTERN = r"(a+)+$"
+NEVER_ENDING_NAME = "a" * 64 + "b"
+TINY_TIMEOUT = 0.5
+FAST_TIMEOUT = 5.0
+GUARD_LIMIT = 20.0
 
 
-class _SlowSearch:
-    """Stands in for a compiled pattern whose search overruns the bound."""
+def _reported(connection: Any, function: Callable[..., Any], args: tuple) -> None:
+    """In the guard's child: run the call and send back one line saying what it did."""
+    try:
+        function(*args)
+        connection.send("returned")
+    except ScannerError as error:
+        connection.send(f"ScannerError: {error}")
+    except Exception as error:  # the test reads the type
+        connection.send(type(error).__name__)
+    finally:
+        connection.close()
 
-    def search(self, text: str) -> Optional[Any]:
-        time.sleep(SLOW_SECONDS)
-        return None
+
+def _outcome_of(
+    function: Callable[..., Any], *args: Any, limit: float = GUARD_LIMIT
+) -> str:
+    """What ``function(*args)`` did, read from a child of the test's own.
+
+    A bound that does not hold (the thread of the first cut) leaves a hanging
+    child the test kills after ``limit`` seconds, not a hanging test. Where
+    there is no ``fork`` the call is made inline.
+    """
+    if "fork" not in multiprocessing.get_all_start_methods():
+        try:
+            function(*args)
+            return "returned"
+        except ScannerError as error:
+            return f"ScannerError: {error}"
+    context = multiprocessing.get_context("fork")
+    receiving, sending = context.Pipe(duplex=False)
+    child = context.Process(target=_reported, args=(sending, function, args))
+    child.start()
+    sending.close()
+    try:
+        if receiving.poll(limit):
+            return receiving.recv()
+        return f"no answer within {limit} s"
+    finally:
+        receiving.close()
+        if child.is_alive():
+            child.kill()
+        child.join()
 
 
 def test_a_slow_pattern_fails_the_filter_at_the_bound(tmp_path):
     root = tmp_path / "repo"
-    files = [str(root / "settings.py"), str(root / "src" / "app.py")]
+    files = [str(root / NEVER_ENDING_NAME), str(root / "src" / "app.py")]
     started = time.monotonic()
 
-    with pytest.raises(ScannerError) as raised:
-        DetectSecretsScanner._apply_file_exclusions(
-            files, [_SlowSearch()], root, timeout=TINY_TIMEOUT
-        )
+    outcome = _outcome_of(
+        DetectSecretsScanner._apply_file_exclusions,
+        files,
+        [re.compile(NEVER_ENDING_PATTERN)],
+        root,
+        TINY_TIMEOUT,
+    )
 
-    assert time.monotonic() - started < SLOW_SECONDS
-    assert "should_exclude_file" in str(raised.value)
-    assert "scan_timeout" in str(raised.value)
+    assert outcome.startswith("ScannerError: ")
+    assert "should_exclude_file" in outcome
+    assert "scan_timeout" in outcome
+    assert time.monotonic() - started < GUARD_LIMIT / 2
 
 
 def test_a_fast_pattern_filters_under_the_bound(tmp_path):
@@ -73,7 +118,18 @@ def test_a_fast_pattern_filters_under_the_bound(tmp_path):
     files = [str(root / "src" / "app.py"), str(root / "tests" / "test_app.py")]
 
     kept = DetectSecretsScanner._apply_file_exclusions(
-        files, [re.compile(r"^tests/")], root, timeout=TINY_TIMEOUT
+        files, [re.compile(r"^tests/")], root, timeout=FAST_TIMEOUT
+    )
+
+    assert kept == [str(root / "src" / "app.py")]
+
+
+def test_a_pattern_keeps_its_flags_across_the_bound(tmp_path):
+    root = tmp_path / "repo"
+    files = [str(root / "src" / "app.py"), str(root / "TESTS" / "test_app.py")]
+
+    kept = DetectSecretsScanner._apply_file_exclusions(
+        files, [re.compile(r"^tests/", re.IGNORECASE)], root, timeout=FAST_TIMEOUT
     )
 
     assert kept == [str(root / "src" / "app.py")]
@@ -93,18 +149,19 @@ def test_without_a_bound_the_filter_runs_as_before(tmp_path):
 
 def test_the_error_names_the_baseline_the_filter_came_from(tmp_path):
     root = tmp_path / "repo"
-    files = [str(root / "settings.py")]
+    files = [str(root / NEVER_ENDING_NAME)]
 
-    with pytest.raises(ScannerError) as raised:
-        DetectSecretsScanner._apply_file_exclusions(
-            files,
-            [_SlowSearch()],
-            root,
-            timeout=TINY_TIMEOUT,
-            source="the baseline repo/.secrets.baseline",
-        )
+    outcome = _outcome_of(
+        DetectSecretsScanner._apply_file_exclusions,
+        files,
+        [re.compile(NEVER_ENDING_PATTERN)],
+        root,
+        TINY_TIMEOUT,
+        "the baseline repo/.secrets.baseline",
+    )
 
-    assert "repo/.secrets.baseline" in str(raised.value)
+    assert outcome.startswith("ScannerError: ")
+    assert "repo/.secrets.baseline" in outcome
 
 
 # ---------------------------------------------------------------------------
