@@ -187,9 +187,11 @@ def test_a_stop_is_passed_on_as_sent_and_a_lingering_scanner_is_killed(monkeypat
         signal, "setitimer", lambda which, seconds: timers.append((which, seconds))
     )
     running = [True]
+    stopped_at = []
 
-    landlock_exec._forward_stop(4242, signal.SIGTERM, lambda: running[0])
+    landlock_exec._forward_stop(4242, signal.SIGTERM, lambda: running[0], stopped_at)
 
+    assert len(stopped_at) == 1
     assert kills == [(4242, signal.SIGTERM)]
     assert timers == [(signal.ITIMER_REAL, landlock_exec.STOP_REAP_DEADLINE_SECONDS)]
     handlers[signal.SIGALRM](signal.SIGALRM, None)
