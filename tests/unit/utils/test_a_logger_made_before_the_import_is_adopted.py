@@ -49,6 +49,20 @@ def test_a_plain_ash_logger_is_adopted_in_place(monkeypatch):
     assert callable(adopted.verbose) and callable(adopted.trace)
 
 
+def test_the_ash_logger_itself_made_before_the_import_is_adopted(monkeypatch):
+    """The bug as it was: the logger named "ash", not one under it, was the plain
+    Logger severity_ladder made at import."""
+    plain = _made_before_the_import(monkeypatch, "ash")
+    assert type(plain) is logging.Logger
+
+    ash_log.adopt_early_ash_loggers()
+
+    assert logging.getLogger("ash") is plain
+    assert isinstance(plain, ASHLogger)
+    # The method that never ran for ASH's records while it was plain.
+    assert type(plain).callHandlers is ASHLogger.callHandlers
+
+
 def test_the_adopted_logger_keeps_what_it_had(monkeypatch):
     plain = _made_before_the_import(monkeypatch, "ash.made_with_state")
     handler = logging.NullHandler()

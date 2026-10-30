@@ -514,9 +514,17 @@ def as_written(text: str) -> str:
     (``\\xNN``, ``\\uNNNN``, ``\\UNNNNNNNN``, ":" and "#" of a command among them)
     and double a run of backslashes before text that reads as an escape, so an odd
     run ends in an escape and an even run stands for half as many backslashes.
-    That is exact for :func:`shown_not_obeyed` and :func:`shown_on_one_line`; a
-    character :func:`shown_in_ascii` put as a replacement stays as the
-    replacement.
+    That is exact for :func:`shown_not_obeyed` and :func:`shown_on_one_line`
+    called with the default *lookalikes*; a character :func:`shown_in_ascii` put
+    as a replacement stays as the replacement.
+
+    It is not exact for text made with ``lookalikes="written"`` or
+    ``lookalikes="ascii"``. Those modes leave single the run before text that
+    reads as an escape but is none the sink writes (``\\u00e9`` in ascii mode), so
+    the reading above takes that text for the escape and returns the character.
+    They are for the last sink before a screen, a terminal that shows the report
+    or a console put in ASCII, where nothing reads the text back; text stored to
+    be shown later is made with the default.
     """
     if not isinstance(text, ShownText):
         return text

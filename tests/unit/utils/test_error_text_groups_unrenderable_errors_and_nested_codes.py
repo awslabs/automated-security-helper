@@ -67,6 +67,8 @@ def test_an_unexpected_group_is_logged_without_its_members_inputs():
 
     log_unexpected_error(logger, group)
 
+    # The control: both lines were logged, so the loop below has calls to read.
+    assert logger.error.called and logger.debug.called
     for call in [*logger.error.call_args_list, *logger.debug.call_args_list]:
         assert REFUSED not in str(call), call
 

@@ -15,14 +15,17 @@ a separate lstat check, so a link put at the name in between was followed.
 from __future__ import annotations
 
 import json
+import os
 import string
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from automated_security_helper.utils.inner_run_outcome import (
     INNER_RUN_OUTCOME_FILE,
+    not_a_regular_file,
     read_refusal_outcome,
     record_refusal_outcome,
     record_reports_written,
@@ -107,6 +110,35 @@ def test_a_link_put_at_the_outcome_file_is_not_followed(tmp_path):
     (out / INNER_RUN_OUTCOME_FILE).symlink_to(elsewhere / INNER_RUN_OUTCOME_FILE)
 
     assert read_refusal_outcome(out, RUN) is None
+    assert read_refusal_outcome(elsewhere, RUN) is not None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+def test_a_link_put_at_the_name_after_the_callers_check_is_not_followed(
+    tmp_path, monkeypatch
+):
+    """The caller's check (not_a_regular_file) passes on the regular file; the
+    link lands between it and the open, so only the open can refuse it."""
+    elsewhere = tmp_path / "elsewhere"
+    assert record_refusal_outcome(elsewhere, "refused for a reason", RUN)
+    out = tmp_path / "out"
+    assert record_refusal_outcome(out, "refused for a reason", RUN)
+    name = out / INNER_RUN_OUTCOME_FILE
+    assert not_a_regular_file(name) is None
+    real_open = os.open
+
+    def swap_then_open(path, flags, *args, **kwargs):
+        if Path(path) == name:
+            name.unlink()
+            name.symlink_to(elsewhere / INNER_RUN_OUTCOME_FILE)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap_then_open)
+
+    assert read_refusal_outcome(out, RUN) is None
+    # The control: the link was put there, and what it names reads back.
+    assert name.is_symlink()
+    monkeypatch.setattr(os, "open", real_open)
     assert read_refusal_outcome(elsewhere, RUN) is not None
 
 

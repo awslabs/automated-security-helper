@@ -83,12 +83,24 @@ def test_the_text_of_a_character_beyond_the_sixteen_bit_plane_is_doubled():
     shown = controls_shown(text, lookalikes="ascii")
 
     assert shown == "a" + BACKSLASH * 2 + GRINNING_FACE_TEXT + "b"
+    assert as_written(shown_not_obeyed(text, lookalikes="ascii")) == text
 
 
 def test_an_escape_text_beyond_any_code_point_is_left_as_text():
     text = "a" + BACKSLASH + "U" + "f" * 8 + "b"
 
     assert controls_shown(text, lookalikes="ascii") == text
+
+
+def test_the_ascii_mode_is_not_read_back_one_to_one_by_as_written():
+    """The convention: a ShownText made with ``lookalikes="ascii"`` is for the
+    last sink, which nothing reads back. It leaves JSON's text single, and
+    as_written, which reads a single backslash before escape text as the
+    escape, returns the letter; the default mode's text reads back as it was."""
+    text = "a" + BACKSLASH + "u00e9b"
+
+    assert as_written(shown_not_obeyed(text)) == text
+    assert as_written(shown_not_obeyed(text, lookalikes="ascii")) == "a" + E_ACUTE + "b"
 
 
 def test_the_default_mode_still_doubles_a_run_before_json_escape_text():

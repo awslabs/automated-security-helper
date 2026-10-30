@@ -76,3 +76,27 @@ def test_a_link_pointed_elsewhere_after_the_check_is_not_followed(
         assert list(elsewhere.iterdir()) == []
     finally:
         os.rmdir(made)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+def test_a_file_is_written_under_the_resolved_temporary_directory(
+    tmp_path, monkeypatch
+):
+    """The write half: the file lands in the directory made under the resolved
+    path, and a link in the temporary directory's own path is not in its path."""
+    real = tmp_path / "real"
+    real.mkdir(mode=0o700)
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(link))
+    monkeypatch.setattr(tool_config_dir, "_changeable_by_others", lambda path: None)
+    monkeypatch.setattr(tool_config_dir, "_unscoped", [])
+
+    written = tool_config_dir.write_tool_config("grype-empty.yaml", "ignore: []\n")
+
+    try:
+        assert written.parent.parent == real.resolve(), written
+        assert "link" not in written.parts
+        assert written.read_text(encoding="utf-8") == "ignore: []\n"
+    finally:
+        tool_config_dir._remove_unscoped()
