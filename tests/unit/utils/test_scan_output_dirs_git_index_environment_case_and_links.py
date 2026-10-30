@@ -104,10 +104,36 @@ def test_where_names_compare_without_case_the_pathspec_does_too(
     answer = git_index_below(repo / "out")
 
     ((args, _),) = git.calls
-    assert "--icase-pathspecs" in args
-    assert "--noglob-pathspecs" in args
+    # The case-insensitive and literal readings travel on the pathspec element
+    # itself: a global --icase-pathspecs needs --noglob-pathspecs beside it, and
+    # that pair leaves a leading ':' of the directory's name to be read as
+    # pathspec magic, where the element form takes the rest literally.
+    assert args[-1] == ":(literal,icase)out"
+    assert "--icase-pathspecs" not in args
+    assert "--noglob-pathspecs" not in args
     assert "--literal-pathspecs" not in args
     assert answer.names == ["reports/x.md", "README"]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_where_names_compare_without_case_a_leading_colon_is_still_a_name(
+    tmp_path, monkeypatch, platform
+):
+    """APFS allows ':' in a name. git reads a leading ':' of a pathspec as magic
+    unless the element is literal: ':out' matched 'out' and ':!x' excluded, so
+    the committed files under such a directory were listed as none and the
+    committed-output refusal never fired."""
+    repo = _repository(tmp_path)
+    (repo / ":out").mkdir()
+    git = _GitStandIn(b":out/README\0other/y.md\0")
+    monkeypatch.setattr(subprocess_utils, "spawn_run", git)
+    monkeypatch.setattr(sys, "platform", platform)
+
+    answer = git_index_below(repo / ":out")
+
+    ((args, _),) = git.calls
+    assert args[-1] == ":(literal,icase):out"
+    assert answer.names == ["README"]
 
 
 def test_control_on_linux_the_pathspec_is_literal_and_case_exact(tmp_path, monkeypatch):
