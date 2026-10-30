@@ -1047,32 +1047,44 @@ def _plan_spawn(
     writable: List[Path] = []
     try:
         writable.extend(register_writable_root(path) for path in policy.writable)
-
-        def sweep() -> None:
-            sweep_writable(
-                writable,
-                scope.environment_values,
-                values_unread=scope.environment_values_unread,
-            )
-
-        def release() -> None:
-            # This spawn's registrations; its scope's and the output directory's
-            # stay.
-            for root in writable:
-                release_writable_root(root)
-
-        # After the backend's own cleanup, which removes what ASH itself put under
-        # the results directory for the spawn (the private uv cache, whose
-        # entries uv links), so the sweep counts what the scanner left and not
-        # ASH's own links; nothing the backend removes follows a link
-        # (shutil.rmtree is link-safe). Still before every write ASH makes into
-        # the results directory afterwards.
-        plan.cleanup.append(sweep)
-        plan.cleanup.append(release)
-        _record_plan(scope, policy, plan)
     except BaseException:
+        # The roots registered before the one that raised, released here because
+        # the release step below is not in the plan yet.
         for root in writable:
             release_writable_root(root)
+        plan.run_cleanup()
+        raise
+
+    def sweep() -> None:
+        sweep_writable(
+            writable,
+            scope.environment_values,
+            values_unread=scope.environment_values_unread,
+            skip=plan.private_dirs,
+        )
+
+    def release() -> None:
+        # This spawn's registrations; its scope's and the output directory's
+        # stay.
+        for root in writable:
+            release_writable_root(root)
+
+    # The sweep is the cleanup's FIRST step: before the backend's own steps and
+    # before every write ASH makes into the results directory afterwards (the
+    # stream logs; subprocess_utils._write_stream_logs runs the cleanup for
+    # exactly this), so a link a scanner left at a log's name is gone before the
+    # write. It passes over the plan's private directories: the backend's own
+    # step removes each whole (shutil.rmtree follows no link), and what they
+    # hold, the cache entries uv links, is ASH's own and not something the
+    # scanner left to be counted and removed as a scanner's.
+    plan.cleanup.insert(0, sweep)
+    plan.cleanup.insert(1, release)
+    try:
+        _record_plan(scope, policy, plan)
+    except BaseException:
+        # The release step is in the plan now, so run_cleanup releases each
+        # root once; releasing here as well would take a registration the
+        # scope or the output directory still holds on the same root.
         plan.run_cleanup()
         raise
     return plan

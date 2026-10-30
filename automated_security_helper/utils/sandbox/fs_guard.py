@@ -56,6 +56,7 @@ from typing import (
     Iterator,
     List,
     Optional,
+    Set,
     Tuple,
     Union,
 )
@@ -475,11 +476,36 @@ def _walk_descriptor(
             os.close(child)
 
 
+def _relative_skips(root: Path, skip: Iterable[Union[str, Path]]) -> FrozenSet[str]:
+    """The paths in ``skip`` below ``root``, relative to it in the walks' form.
+
+    Compared by name and never resolved: the walk reaches a directory under the
+    name the backend made it with, and a link a scanner planted at that name is not
+    a directory, so the walk removes and counts it as it does any other link. A
+    path that is the root, above it, beside it or on another drive names nothing
+    here.
+    """
+    base = os.path.abspath(root)
+    below: Set[str] = set()
+    for path in skip:
+        candidate = os.path.abspath(path)
+        if candidate == base:
+            continue
+        try:
+            if os.path.commonpath([base, candidate]) != base:
+                continue
+        except ValueError:  # different drives, Windows
+            continue
+        below.add(os.path.relpath(candidate, base).replace(os.sep, "/"))
+    return frozenset(below)
+
+
 def _sweep_tree(
     root: Path,
     values: Iterable[str] = (),
     values_unread: bool = False,
     refusals: Optional[List[OSError]] = None,
+    skip: Iterable[Union[str, Path]] = (),
 ) -> int:
     """Remove non-regular, non-directory entries under ``root``; return how many.
 
@@ -506,11 +532,24 @@ def _sweep_tree(
     caller to raise once over every root (sweep_writable); without it, the first is
     raised when this tree is done, with the others counted.
 
+    The one thing passed over by design is a directory named in ``skip``: ASH's
+    own private directories for the spawn (``SpawnPlan.private_dirs``, the cache
+    ``backends._private_caches`` makes under the results directory before the
+    scanner runs). The backend's own cleanup step removes each of them whole in the
+    same run (shutil.rmtree follows no link), and what they hold is ASH's, not
+    something the scanner left: uv fills its cache with links, which a sweep that
+    walked the directory counted and removed as a scanner's. The match is by the
+    name the backend made the directory under, relative to the root
+    (``_relative_skips``); a link a scanner planted at that name is removed and
+    counted like any other, and nothing beside or above the named directory is
+    passed over.
+
     A missing root has nothing below it and sweeps as empty: a sandboxed scanner
     that wrote nothing never created its results directory.
     """
     values = tuple(values)
     collected: List[OSError] = [] if refusals is None else refusals
+    skipped = _relative_skips(root, skip)
 
     def refuse(what: str, relative: str, error: OSError) -> None:
         shown = _sweep_warning(
@@ -544,12 +583,19 @@ def _sweep_tree(
 
     removed = 0
     if not hasattr(os, "fwalk"):
-        removed = _sweep_by_name(root, refuse, remove)
+        removed = _sweep_by_name(root, refuse, remove, skipped)
     else:
-        for _relative, dir_fd, statuses, _dirnames in _walk_descriptors(root, refuse):
+        for relative, dir_fd, statuses, dirnames in _walk_descriptors(root, refuse):
             for name, status in statuses.items():
                 if _is_special(status.st_mode):
                     removed += remove(name, dir_fd, name)
+            if skipped:
+                # The walk descends into what is left in this list once it
+                # resumes; a named directory's entries are the backend's to
+                # remove. A link at the name was removed and counted above.
+                dirnames[:] = [
+                    name for name in dirnames if _below(relative, name) not in skipped
+                ]
     if refusals is None and collected:
         raise _sweep_refused(collected) from None
     return removed
@@ -559,13 +605,15 @@ def _sweep_by_name(
     root: Path,
     refuse: "Callable[[str, str, OSError], None]",
     remove: "Callable[[str, Optional[int], Union[str, Path]], int]",
+    skipped: FrozenSet[str] = frozenset(),
 ) -> int:
     """``_sweep_tree`` over os.walk, for a platform without directory descriptors.
 
     The same refusals as the descriptor walk, reported through ``refuse`` with the
     directory's path relative to ``root``: os.walk hands ``onerror`` the full path
     of the directory it could not list, the root included, and goes on with the
-    siblings when ``onerror`` returns.
+    siblings when ``onerror`` returns. ``skipped`` is the descriptor walk's: the
+    directories, relative to ``root``, that are not descended into.
     """
     removed = 0
 
@@ -598,6 +646,10 @@ def _sweep_by_name(
             removed += remove(name, None, path)
             if name in dirnames:
                 dirnames.remove(name)
+        if skipped:
+            dirnames[:] = [
+                name for name in dirnames if _below(relative, name) not in skipped
+            ]
         try:
             _too_deep(root, dirpath, dirnames)
         except OSError as error:
@@ -717,6 +769,7 @@ def sweep_writable(
     values: Iterable[str] = (),
     *,
     values_unread: bool = False,
+    skip: Iterable[Union[str, Path]] = (),
 ) -> int:
     """Remove symlinks and special files under ``roots``; return how many.
 
@@ -724,7 +777,11 @@ def sweep_writable(
     names the entry and the root, and either can hold one. ``values_unread``
     says the caller could not read them (the plugin's hook raised or gave no
     value set): ``values`` is then empty without meaning "none", and the
-    warning is value-free instead.
+    warning is value-free instead. ``skip`` names the directories the sweep
+    passes over, ASH's own private directories for the spawn
+    (``SpawnPlan.private_dirs``), which the backend removes whole in its own
+    cleanup step and whose contents are ASH's, not a scanner's; see
+    ``_sweep_tree`` for what is and is not passed over.
 
     Every root is swept whatever happened at the others, and the whole of each
     tree whatever a directory in it refused (``_sweep_tree``): a refusal is logged
@@ -769,7 +826,7 @@ def sweep_writable(
             )
             refusals.append(OSError(_errno_of(e), shown))
             continue
-        removed += _sweep_tree(root, values, values_unread, refusals)
+        removed += _sweep_tree(root, values, values_unread, refusals, skip)
     if removed:
         ASH_LOGGER.warning(
             f"Scanner sandbox: removed {removed} symlink(s) or special file(s) a "

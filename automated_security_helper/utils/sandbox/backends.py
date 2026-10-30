@@ -73,8 +73,8 @@ def _with_socket_filter(argv: Sequence[str]) -> List[str]:
 
 def _private_caches(
     policy: SandboxPolicy, child_env: Dict[str, str]
-) -> List[Callable[[], None]]:
-    """Give the tools that must write a cache a private one; returns the cleanup.
+) -> Tuple[List[Callable[[], None]], List[Path]]:
+    """Give the tools that must write a cache a private one.
 
     Only bwrap's throwaway overlay lets a scanner write a host cache without the
     write reaching the host. Every other backend mounts ``policy.cache`` read-only
@@ -85,9 +85,13 @@ def _private_caches(
     from an empty cache, so online it fetches what it needs and offline it has
     nothing cached. A cache that is only read, such as a scanner's database,
     is not redirected and stays read-only.
+
+    Returns the cleanup step that removes the directory and, for
+    ``SpawnPlan.private_dirs``, the directory itself, so the spawn's sweep of the
+    results directory passes it over (both empty when nothing is redirected).
     """
     if not policy.cache_env:
-        return []
+        return [], []
     root = Path(tempfile.mkdtemp(prefix=".sandbox-cache-", dir=policy.results_dir))
     for name in policy.cache_env:
         # npm reads npm_config_* without regard to case, so a NPM_CONFIG_CACHE
@@ -97,7 +101,7 @@ def _private_caches(
         private = root / name.lower()
         private.mkdir()
         child_env[name] = private.as_posix()
-    return [lambda: shutil.rmtree(root, ignore_errors=True)]
+    return [lambda: shutil.rmtree(root, ignore_errors=True)], [root]
 
 
 @dataclass
@@ -113,6 +117,13 @@ class SpawnPlan:
     #: so its plan sets it, and the stop paths' group signals then reach every
     #: process the tool starts rather than the wrapper alone.
     start_new_session: bool = False
+    #: The directories the backend made for this spawn under a root the scanner
+    #: may write (the private cache of ``_private_caches``, under the results
+    #: directory). The spawn's sweep (scope._plan_spawn, fs_guard.sweep_writable)
+    #: passes over them: a step in ``cleanup`` removes each whole, and what they
+    #: hold (uv links its cache entries) is ASH's own, not something the scanner
+    #: left to be counted and removed as a scanner's.
+    private_dirs: List[Path] = field(default_factory=list)
 
     def run_cleanup(self) -> None:
         """Run each cleanup once; later calls do nothing."""
@@ -734,9 +745,12 @@ class BwrapBackend(SandboxBackend):
         cmd.extend(_with_socket_filter(argv))
         child_env = policy.filter_env(env)
         cleanup: List[Callable[[], None]] = []
+        private_dirs: List[Path] = []
         if caches_read_only:
-            cleanup = _private_caches(policy, child_env)
-        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
+            cleanup, private_dirs = _private_caches(policy, child_env)
+        return SpawnPlan(
+            argv=cmd, env=child_env, cleanup=cleanup, private_dirs=private_dirs
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -989,12 +1003,16 @@ class FirejailBackend(SandboxBackend):
         cmd.append("--")
         cmd.extend(_with_socket_filter(argv))
         child_env = policy.filter_env(env)
-        cleanup = _private_caches(policy, child_env)
+        cleanup, private_dirs = _private_caches(policy, child_env)
         # firejail does not call setsid, so the spawner starts it as the leader
         # of a session of its own and the stop paths' group signals reach the
         # tool and what it starts, not firejail alone.
         return SpawnPlan(
-            argv=cmd, env=child_env, cleanup=cleanup, start_new_session=True
+            argv=cmd,
+            env=child_env,
+            cleanup=cleanup,
+            start_new_session=True,
+            private_dirs=private_dirs,
         )
 
 
@@ -1169,12 +1187,14 @@ class LandlockBackend(SandboxBackend):
         child_env = policy.filter_env(env)
         child_env["TMPDIR"] = private_tmp.as_posix()
         child_env["HOME"] = private_home.as_posix()
-        private_cleanup += _private_caches(policy, child_env)
+        caches, private_dirs = _private_caches(policy, child_env)
+        private_cleanup += caches
         return SpawnPlan(
             argv=cmd,
             env=child_env,
             cleanup=[lambda: shutil.rmtree(private_root, ignore_errors=True)]
             + private_cleanup,
+            private_dirs=private_dirs,
         )
 
 
@@ -1571,7 +1591,8 @@ class SandboxExecBackend(SandboxBackend):
         # Caches are read-only here; see _private_caches. uv's private cache is
         # also where `uv tool run` builds the environment of a tool it was not asked
         # to install and runs it from, so the profile lets that one run programs.
-        cleanup += _private_caches(policy, child_env)
+        caches, private_dirs = _private_caches(policy, child_env)
+        cleanup += caches
         private_uv_cache = (
             Path(child_env["UV_CACHE_DIR"])
             if "UV_CACHE_DIR" in policy.cache_env and child_env.get("UV_CACHE_DIR")
@@ -1620,7 +1641,9 @@ class SandboxExecBackend(SandboxBackend):
             ),
             *argv,
         ]
-        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
+        return SpawnPlan(
+            argv=cmd, env=child_env, cleanup=cleanup, private_dirs=private_dirs
+        )
 
 
 BACKENDS: Dict[str, type] = {
