@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
@@ -25,6 +26,23 @@ from automated_security_helper.utils.sarif_utils import (
 from automated_security_helper.utils.sbom_merge import merge_cyclonedx_reports
 
 
+def _attached_tool_invocation(sarif_report: Any) -> dict:
+    """The ``tool_invocation`` a scanner's own run attached to its SARIF, or ``{}``.
+
+    Read off the first run's driver properties, where
+    ``sarif_utils.attach_scanner_details`` writes it; only a mapping counts.
+    """
+    for run in getattr(sarif_report, "runs", None) or []:
+        driver = getattr(getattr(run, "tool", None), "driver", None)
+        details = getattr(getattr(driver, "properties", None), "scanner_details", None)
+        invocation = (
+            details.get("tool_invocation") if isinstance(details, dict) else None
+        )
+        if isinstance(invocation, dict):
+            return dict(invocation)
+    return {}
+
+
 def _declared_tool_version(sarif_report: Any) -> str | None:
     """The version a scanner's own SARIF run gives its driver, if any."""
     for run in getattr(sarif_report, "runs", None) or []:
@@ -35,6 +53,17 @@ def _declared_tool_version(sarif_report: Any) -> str | None:
         if isinstance(version, str) and version.strip():
             return version.strip()
     return None
+
+
+def _completed_scanner_names(aggregated_results: AshAggregatedResults) -> list[str]:
+    """The scanners whose results row says they completed: every row not ERROR."""
+    rows = getattr(aggregated_results, "scanner_results", None) or {}
+    names = []
+    for name, row in rows.items():
+        status = getattr(row, "status", None)
+        if getattr(status, "value", status) != ScannerStatus.ERROR.value:
+            names.append(name)
+    return names
 
 
 class ScanResultProcessor:
@@ -99,13 +128,20 @@ class ScanResultProcessor:
             )
         )
 
+        # The per-target file is written under the same key the report is filed
+        # under, so a scanner-level container (the failure container a run mode
+        # files when the scanner's run raised, with no target) goes under "None"
+        # beside the source tree's file. Written under "source" it replaced the
+        # source target's ASH.ScanResults.json, written moments earlier, and the
+        # real source result was lost from the output directory. The directory is
+        # made by the guarded open below, which refuses a link at any component
+        # (utils/sandbox/fs_guard.py); mkdir(parents=True) followed one.
         ash_target_result_path = self.plugin_context.output_dir.joinpath(
             "scanners",
             scanner_name,
-            (results.target_type or "source"),
+            target_key,
             "ASH.ScanResults.json",
         )
-        ash_target_result_path.parent.mkdir(parents=True, exist_ok=True)
 
         ASH_LOGGER.debug(
             f"Processing results for {scanner_name}: type={type(results.raw_results)}"
@@ -195,6 +231,25 @@ class ScanResultProcessor:
                     if hasattr(results.end_time, "isoformat")
                     else str(results.end_time)
                 )
+            # The container's own exit code and duration, whatever its metadata
+            # holds: the executor records both on every container whose tool
+            # ran, and no scanner writes metadata, so a fallback that sat inside
+            # the metadata branch above never ran and no SARIF carried them.
+            # The metadata's values, when there are any, come first.
+            if results.exit_code is not None:
+                invocation_details.setdefault("exit_code", results.exit_code)
+            if results.duration is not None and results.start_time is not None:
+                invocation_details.setdefault("duration", results.duration)
+            # Merged into what the scanner's own run attached, not written over
+            # it: ScannerPluginBase._inject_invocation puts the command line,
+            # arguments, working directory and exit code into
+            # scanner_details.tool_invocation, and attach_scanner_details
+            # replaces the whole scanner_details, so the second attach here
+            # left only the start and end times.
+            invocation_details = {
+                **_attached_tool_invocation(sanitized_sarif),
+                **invocation_details,
+            }
 
             sanitized_sarif.attach_scanner_details(
                 scanner_name=results.scanner_name,
@@ -204,6 +259,11 @@ class ScanResultProcessor:
 
             if aggregated_results.sarif is not None:
                 aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
+            else:
+                # No report to merge into: the scanner's findings become the
+                # report. Dropped here, they were in no output while the
+                # per-target entry below still said the scanner ran.
+                aggregated_results.sarif = sanitized_sarif
             target_report = aggregated_results.additional_reports[scanner_name][
                 target_key
             ]
@@ -254,7 +314,7 @@ class ScanResultProcessor:
 
         # Without following a symlink: this is the scanner's own results directory,
         # which a sandboxed scanner could write. See utils/sandbox/fs_guard.py.
-        with open_for_write(ash_target_result_path) as handle:
+        with open_for_write(ash_target_result_path, make_parents=True) as handle:
             handle.write(
                 json.dumps(
                     aggregated_results.additional_reports[scanner_name][target_key],
@@ -269,9 +329,18 @@ class ScanResultProcessor:
         aggregated_results: AshAggregatedResults,
         completed_scanner_names: list[str] | None = None,
     ) -> None:
-        """Run the validate_execution_completion check, logging warnings on discrepancy."""
+        """Run the validate_execution_completion check, logging warnings on discrepancy.
+
+        With no ``completed_scanner_names``, the completed scanners are read off
+        ``aggregated_results``: every scanner with a row whose status is not ERROR.
+        Defaulting to none marked every queued scanner as failed to complete.
+        """
         try:
-            names = completed_scanner_names or []
+            names = (
+                list(completed_scanner_names)
+                if completed_scanner_names is not None
+                else _completed_scanner_names(aggregated_results)
+            )
             checkpoint = self.validation_manager.validate_execution_completion(names)
             if checkpoint and checkpoint.has_issues():
                 for scanner_name in checkpoint.get_missing_scanners():
@@ -307,7 +376,12 @@ class ScanResultProcessor:
         """Log warnings if scanner_results totals don't match summary_stats."""
         try:
             scanner_results = aggregated_results.scanner_results or {}
-            summary = getattr(aggregated_results, "summary_stats", None)
+            # The summary lives on the report metadata (ReportMetadata.summary_stats);
+            # read off the results model itself it was always None and the check
+            # returned before comparing anything.
+            summary = getattr(
+                getattr(aggregated_results, "metadata", None), "summary_stats", None
+            )
             if not summary or not scanner_results:
                 return
 
