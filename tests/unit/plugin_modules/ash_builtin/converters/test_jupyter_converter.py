@@ -43,6 +43,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverterConfigOptions,
 )
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
@@ -2266,11 +2267,12 @@ class TestOutputNames:
     """Every notebook that converts keeps an output of its own.
 
     The converted file is named after the notebook's path folded into one
-    component, so two paths can fold to one name (``a b.ipynb`` and ``a-b.ipynb``),
-    and a long path folds to a name longer than a file name may be. The first
-    used to make the later conversion remove the earlier notebook's output, with
-    nothing recording that the earlier notebook was never scanned; the second
-    failed the conversion on the name alone.
+    component. Two paths used to fold to one name (``a b.ipynb`` and
+    ``a-b.ipynb``), and on a case-insensitive filesystem two names that differ
+    only in case still are one file; a long path folds to a name longer than a
+    file name may be. The first two used to make the later conversion remove the
+    earlier notebook's output, with nothing recording that the earlier notebook
+    was never scanned; the third failed the conversion on the name alone.
     """
 
     def _convert(self, converter, monkeypatch, notebooks):
@@ -2282,10 +2284,13 @@ class TestOutputNames:
         monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
         return converter.convert(), run
 
-    def test_two_notebooks_whose_folded_names_collide_both_keep_an_output(
+    def test_two_notebooks_whose_names_differ_only_in_punctuation_keep_their_own(
         self, converter, ash_log_records, monkeypatch
     ):
-        # Out of the way, so only the collision changes a name here.
+        """``a b.ipynb`` and ``a-b.ipynb`` folded to one name once. The folding
+        gives distinct paths distinct names now, so each notebook keeps its own
+        folded name: no digest is added and no notice is written."""
+        # Out of the way, so only the names decide here.
         monkeypatch.setattr(f"{MODULE}._OUTPUT_NAME_MAX_BYTES", 100_000, raising=False)
         spaced = write_notebook(converter.context.source_dir, "a b.ipynb")
         dashed = write_notebook(converter.context.source_dir, "a-b.ipynb")
@@ -2296,19 +2301,19 @@ class TestOutputNames:
         assert len(results) == 2, results
         assert len(set(results)) == 2, "the second notebook overwrote the first's"
         assert all(path.is_file() for path in results)
-        # The first keeps the plain folded name; the second is told apart from it.
-        assert results[0].name.endswith(expected_output_name(dashed))
-        assert results[1].name.endswith("-converted.py")
+        for notebook, result in zip((spaced, dashed), results):
+            tail = get_normalized_filename(notebook.name) + "-converted.py"
+            assert result.name.endswith(tail), (result.name, tail)
         assert converter.failed_inputs == []
         info = messages_at(ash_log_records, logging.INFO)
-        assert any("a-b.ipynb" in m and "a b.ipynb" in m for m in info), info
+        assert not any("a-b.ipynb" in m and "a b.ipynb" in m for m in info), info
 
     def test_two_notebooks_whose_folded_names_differ_only_in_case_both_keep_an_output(
-        self, converter, monkeypatch
+        self, converter, ash_log_records, monkeypatch
     ):
         """On a case-insensitive filesystem the two names are one file; the
         second is told apart everywhere, so the outputs are the same on every
-        host."""
+        host. The first keeps the plain folded name; the notice names both."""
         monkeypatch.setattr(f"{MODULE}._OUTPUT_NAME_MAX_BYTES", 100_000, raising=False)
         lower = write_notebook(converter.context.source_dir, "nb.ipynb")
         upper = write_notebook(converter.context.source_dir, "NB.ipynb")
@@ -2318,7 +2323,12 @@ class TestOutputNames:
         assert len(run.calls) == 2
         assert len(results) == 2, results
         assert len({path.name.casefold() for path in results}) == 2
+        assert all(path.is_file() for path in results)
+        assert results[0].name.endswith(expected_output_name(lower))
+        assert results[1].name.endswith("-converted.py")
         assert converter.failed_inputs == []
+        info = messages_at(ash_log_records, logging.INFO)
+        assert any("NB.ipynb" in m and "nb.ipynb" in m for m in info), info
 
     def test_a_notebook_whose_folded_name_is_too_long_for_a_file_still_converts(
         self, converter, monkeypatch

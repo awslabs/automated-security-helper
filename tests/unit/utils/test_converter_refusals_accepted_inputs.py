@@ -104,6 +104,7 @@ def test_an_acceptance_with_no_stored_reason_names_no_reason():
     refusal = ConverterRefusal(
         converter="archive",
         path="lib/b.zip",
+        member=None,
         reason="it is named as a zip but could not be read as one",
         failed=True,
         accepted=True,
