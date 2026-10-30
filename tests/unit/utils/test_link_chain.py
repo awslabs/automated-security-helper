@@ -317,3 +317,109 @@ class TestAHopsTargetIsJudgedThroughItsParents:
         assert found is not None
         assert found.reaches_a_share is None
         assert len(reads) == 3
+
+
+class TestAComponentThatCannotBeExaminedIsRefused:
+    """A component ``os.lstat`` refuses is not a local name. The first module
+    answered None for it (no unsafe link found), and the callers went on to
+    resolve the path, where the loader's own walk had refused an entry it could
+    not judge. The doubt is now the answer: the component is reported as
+    unexaminable, and both callers refuse it."""
+
+    def test_a_component_that_cannot_be_examined_is_the_answer(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the first module: the walk answered None and ``repo`` under the
+        unexaminable component was left for the resolver."""
+        granted = tmp_path / "granted"
+        (granted / "mid" / "repo").mkdir(parents=True)
+        examined = []
+        real_lstat = os.lstat
+
+        def refusing_lstat(path, *args, **kwargs):
+            examined.append(str(path))
+            if os.path.basename(os.fspath(path)) == "mid":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+        found = link_chain.first_unsafe_link(str(granted / "mid" / "repo"))
+
+        assert found is not None
+        assert found.component == str(granted / "mid")
+        assert found.is_last is False
+        assert found.reaches_a_share is None
+        assert found.unexaminable is True
+        # Nothing under the unexaminable component was asked about.
+        assert str(granted / "mid" / "repo") not in examined
+
+    def test_the_path_itself_unexaminable_is_last(self, tmp_path, monkeypatch):
+        target = tmp_path / "target"
+        target.mkdir()
+        real_lstat = os.lstat
+
+        def refusing_lstat(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "target":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+        found = link_chain.first_unsafe_link(str(target))
+
+        assert found is not None
+        assert found.is_last is True
+        assert found.unexaminable is True
+
+    def test_an_embedded_nul_in_a_component_is_the_answer(self, tmp_path):
+        """Red at the first module: ``os.lstat`` raises ValueError for a NUL,
+        which the walk's ``except OSError`` let escape to the caller."""
+        bad = tmp_path / "bad\x00name"
+
+        found = link_chain.first_unsafe_link(str(bad / "repo"))
+
+        assert found is not None
+        assert found.component == str(bad)
+        assert found.reaches_a_share is None
+        assert found.unexaminable is True
+
+    def test_a_component_that_is_not_there_still_ends_the_walk_unjudged(self, tmp_path):
+        """Controls: nothing is there to follow, so resolving opens nothing and
+        the caller's gates judge the path; a file in a directory's place is the
+        same."""
+        plain = tmp_path / "file.txt"
+        plain.write_text("x")
+
+        assert link_chain.first_unsafe_link(str(tmp_path / "missing" / "repo")) is None
+        assert link_chain.first_unsafe_link(str(plain / "repo")) is None
+
+    def test_an_unexaminable_parent_of_a_hops_target_leaves_the_chain_unjudged(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the first module: the parent walk answered None for ``vendor``,
+        the hop's target was then lstat'd, found missing, and the chain read
+        LOCAL."""
+        (tmp_path / "vendor").mkdir()
+        dot_ash = tmp_path / ".ash"
+        dot_ash.mkdir()
+        (dot_ash / "ash.yaml").symlink_to(os.path.join("..", "vendor", "cfg.yaml"))
+        real_lstat = os.lstat
+
+        def refusing_lstat(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "vendor":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(dot_ash / "ash.yaml"))
+            is None
+        )
+        found = link_chain.first_unsafe_link(str(dot_ash / "ash.yaml"))
+        assert found is not None
+        assert found.component == str(dot_ash / "ash.yaml")
+        assert found.reaches_a_share is None
+        # The link itself was examined; its chain is what cannot be told.
+        assert found.unexaminable is False

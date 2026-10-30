@@ -162,7 +162,8 @@ def link_chain_names_a_windows_share(
     target itself but DOES follow a link in any of the target's parent
     components; so before that lstat the target's parent components are judged
     by the component walk (:func:`first_unsafe_link`), and a parent that is a
-    link to a share, or whose target cannot be read, is the chain's answer. A
+    link to a share, or whose target cannot be read, or that cannot be examined
+    at all, is the chain's answer. A
     config file linked as ``.ash/ash.yaml -> ..\\vendor\\cfg.yaml`` with
     ``vendor`` a junction to a share is judged at ``vendor`` and the share is
     never opened.
@@ -250,12 +251,16 @@ class UnsafeLink:
     ``component`` is the collapsed spelling of the component that is the link
     (the path itself when ``is_last``); ``reaches_a_share`` is True when the
     chain from it names a share or a device, and None when its target cannot be
-    read, so what resolving would open cannot be told.
+    read, so what resolving would open cannot be told. ``unexaminable`` is True
+    when the component could not be read at all (``os.lstat`` refused it), so
+    whether it is a link, let alone where it leads, cannot be told; such a
+    component is reported with ``reaches_a_share`` None and refused the same way.
     """
 
     component: str
     is_last: bool
     reaches_a_share: Optional[bool]
+    unexaminable: bool = False
 
 
 def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLink]:
@@ -268,9 +273,13 @@ def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLin
     ``os.lstat``, which does not follow the component it is given; a link in a
     parent is therefore found before anything under it is touched. A local link
     is followed (the components under it are judged through it, as resolving
-    would read them). A component that is not there, or cannot be examined, ends
-    the walk with None: nothing below it is there either, and the caller's gates
-    judge the path as they do on every other platform.
+    would read them). A component that is not there ends the walk with None:
+    nothing below it is there either, and the caller's gates judge the path as
+    they do on every other platform. A component that IS there but cannot be
+    examined (its entry refuses the read, or the spelling cannot be given to the
+    filesystem) is the answer, marked ``unexaminable``: it may be a link that
+    resolving would follow, and the doubt is refused, as the chain reading
+    refuses a hop it cannot read, never passed on as a local name.
 
     The caller judges the TEXT of ``text`` with :func:`names_a_windows_share`
     first, with its own wording; this walk assumes a spelling that names a local
@@ -285,8 +294,21 @@ def _first_unsafe_link(text: str, budget: _Hops) -> Optional[UnsafeLink]:
     for index, component in enumerate(components):
         try:
             is_link = is_link_stat(os.lstat(component))
-        except OSError:
+        except (FileNotFoundError, NotADirectoryError):
+            # Not there: nothing below it is there either, so resolving opens
+            # nothing; the caller's gates judge the path.
             return None
+        except (OSError, ValueError):
+            # Cannot be examined: an entry the process may not read, or a
+            # spelling the filesystem refuses (an embedded NUL). It may be a
+            # link that resolving would follow, so the doubt is the answer and
+            # the caller refuses it, as it refuses a chain it cannot read.
+            return UnsafeLink(
+                component=component,
+                is_last=index == len(components) - 1,
+                reaches_a_share=None,
+                unexaminable=True,
+            )
         if not is_link:
             continue
         reaches_a_share = _chain_names_a_windows_share(component, budget)

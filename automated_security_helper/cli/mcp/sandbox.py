@@ -904,10 +904,27 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
     # one Win32 examines, component by component from the anchor down; a local
     # link is followed, a missing component ends it with nothing judged, and the
     # first link that leads to a share or whose target cannot be read is the
-    # answer. The hop bound is read here at call time, so a test can shorten it.
+    # answer; so is a component that cannot be examined at all (whether it is a
+    # link cannot be told, and the doubt is refused rather than resolved). The
+    # hop bound is read here at call time, so a test can shorten it.
     unsafe = first_unsafe_link(text, hops=_LINK_HOPS)
     if unsafe is None:
         return None
+    if unsafe.unexaminable:
+        entry = (
+            "The path"
+            if unsafe.is_last
+            else f"Its component {_shown_path(unsafe.component)}"
+        )
+        return _refusal(
+            what,
+            path,
+            Path(text),
+            f"{entry} cannot be examined by the MCP server, so it is not resolved "
+            "on Windows: an entry that cannot be read may be a link, and "
+            "resolving one can open a connection to the host it names. Name a "
+            "directory on a local volume the MCP server can read.",
+        )
     where = (
         "It is a link"
         if unsafe.is_last

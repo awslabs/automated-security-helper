@@ -121,6 +121,34 @@ class TestALinkInAParentComponentIsJudged:
             is None
         )
 
+    def test_a_component_that_cannot_be_examined_is_refused_unresolved(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the walk read an entry ``lstat`` refused as no link
+        and the path went on to the resolver; the doubt is refused instead, and
+        nothing under the entry is asked about."""
+        granted = tmp_path / "granted"
+        (granted / "mid" / "repo").mkdir(parents=True)
+        examined = []
+        real_lstat = sandbox.os.lstat
+
+        def refusing_lstat(path, *args, **kwargs):
+            examined.append(str(path))
+            if sandbox.os.path.basename(sandbox.os.fspath(path)) == "mid":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(sandbox.os, "lstat", refusing_lstat)
+
+        refusal = sandbox._refusal_before_resolving(
+            "Scan target", granted / "mid" / "repo"
+        )
+
+        assert refusal is not None
+        assert "component" in str(refusal)
+        assert "cannot be examined" in str(refusal)
+        assert str(granted / "mid" / "repo") not in examined
+
     def test_a_missing_component_stepped_back_over_does_not_hide_a_share_link(
         self, tmp_path
     ):
