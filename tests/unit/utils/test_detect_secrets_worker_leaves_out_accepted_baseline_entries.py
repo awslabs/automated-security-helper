@@ -62,11 +62,22 @@ def quiet_worker(monkeypatch):
     multiprocessing start method are not this test's subject."""
     monkeypatch.setattr(detect_secrets_worker, "refuse_http_requests", lambda: None)
     monkeypatch.setattr(multiprocessing, "set_start_method", lambda *a, **k: None)
+    # run() sets the refusal variable while it scans and puts it back. Set, then
+    # delete, so the teardown records the key as absent: a delenv of an absent key
+    # records no undo, and a restore that regressed would leave the variable set
+    # for every later worker in the session.
+    monkeypatch.setenv(detect_secrets_worker.REFUSE_HTTP_ENV, "")
+    monkeypatch.delenv(detect_secrets_worker.REFUSE_HTTP_ENV)
 
 
-def _request(tmp_path, baseline, trusted=None):
-    """A worker request; ``trusted`` None leaves the flag out, as a scanner that
-    loaded the repository's own in-tree baseline does."""
+#: ``_request``'s default: the flag is left out of the request. ``None`` is a
+#: value, sent as JSON null.
+_ABSENT = object()
+
+
+def _request(tmp_path, baseline, trusted=_ABSENT):
+    """A worker request; the default leaves the flag out, as a scanner that
+    loaded the repository's own in-tree baseline does, and ``None`` sends null."""
     target = tmp_path / "f.txt"
     target.write_text(
         'password = "' + ACCEPTED_VALUE + '"\n'  # pragma: allowlist secret
@@ -80,7 +91,7 @@ def _request(tmp_path, baseline, trusted=None):
         "paths": [str(target)],
         "verify": False,
     }
-    if trusted is not None:
+    if trusted is not _ABSENT:
         request[detect_secrets_worker.BASELINE_TRUSTED_KEY] = trusted
     return request
 
@@ -117,8 +128,10 @@ def test_an_accepted_entry_of_an_untrusted_baseline_is_still_reported(
     assert _hashes(result).count(_hashed(ACCEPTED_VALUE)) >= 1
 
 
-@pytest.mark.parametrize("value", [False, "true", 1, None])
+@pytest.mark.parametrize("value", [False, "true", 1, None], ids=repr)
 def test_only_the_json_true_marks_a_baseline_trusted(tmp_path, quiet_worker, value):
+    """``None`` is sent as JSON null: the case where the flag is left out is the
+    untrusted-baseline test above."""
     baseline = _baseline([(ACCEPTED_VALUE, 1, False)])
 
     result = detect_secrets_worker.run(_request(tmp_path, baseline, trusted=value))

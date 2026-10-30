@@ -261,8 +261,16 @@ def test_the_worker_sends_no_request_unless_the_scan_may_verify(
 ):
     """The scanner removes the filter when verification may not run; the worker
     also refuses the requests, so a filter that reaches it anyway sends nothing.
-    The secret is still reported, as unverified."""
+    The secret is still reported, as unverified.
+
+    The variable is stated as "0", the value a scan that may verify states, so
+    the verify gate is the only thing left that can refuse: with the variable
+    absent a run refuses on that alone and these cases would pass whatever
+    verify said."""
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
+
     scrub_cloud_credentials(monkeypatch)
+    monkeypatch.setenv(REFUSE_HTTP_ENV, "0")
     proxy = RecordingProxy()
     route_through(monkeypatch, proxy)
     try:
@@ -282,13 +290,8 @@ def test_the_worker_refuses_when_a_verifying_scans_variable_is_lost(
     worker started with verify true but no variable (an executor or an environment
     filter dropped it) refuses the requests all the same and reports the secret
     unverified: a lost variable fails safe, never open."""
-    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
-
     scrub_cloud_credentials(monkeypatch)
-    # Set, then delete, so the teardown records the key as absent (see
-    # _spawn_pool_run).
-    monkeypatch.setenv(REFUSE_HTTP_ENV, "")
-    monkeypatch.delenv(REFUSE_HTTP_ENV)
+    _without_refusal_variable(monkeypatch)
     proxy = RecordingProxy()
     route_through(monkeypatch, proxy)
     try:
@@ -356,11 +359,9 @@ def _spawn_pool_run(tmp_path, monkeypatch, refuse_env, verify=False):
     proxy = RecordingProxy()
     route_through(monkeypatch, proxy)
     if refuse_env is None:
-        # Set, then delete: the set records the key as absent before the test, so
-        # the teardown removes it even if run()'s own restore regresses and leaves
-        # it set; a bare delenv of an absent key records no undo.
-        monkeypatch.setenv(REFUSE_HTTP_ENV, "")
-        monkeypatch.delenv(REFUSE_HTTP_ENV)
+        # The worker runs in a child process, so it cannot change this one's
+        # environment; the helper is the one idiom for an absent variable.
+        _without_refusal_variable(monkeypatch)
     else:
         monkeypatch.setenv(REFUSE_HTTP_ENV, refuse_env)
     secret = "".join(_SECRET_KEY_PARTS)
@@ -426,6 +427,21 @@ def test_spawned_pool_processes_refuse_without_a_variable_from_the_caller(
     ASH_DETECT_SECRETS_REFUSE_HTTP in its environment, still gets a refusal in the
     spawned pool processes: the worker sets the variable itself before it scans."""
     proxy, scanned = _spawn_pool_run(tmp_path, monkeypatch, refuse_env=None)
+
+    assert proxy.external_requests() == [], proxy.requests
+    assert len(scanned) == 3, scanned
+
+
+@pytest.mark.integration
+def test_spawned_pool_processes_refuse_when_the_request_does_not_verify_whatever_the_variable_says(
+    tmp_path, monkeypatch
+):
+    """The variable stated as "0" (a scan that may verify) with a request that
+    does not verify: the verify gate alone must refuse, so a worker that read the
+    variable and ignored the request would send here."""
+    proxy, scanned = _spawn_pool_run(
+        tmp_path, monkeypatch, refuse_env="0", verify=False
+    )
 
     assert proxy.external_requests() == [], proxy.requests
     assert len(scanned) == 3, scanned

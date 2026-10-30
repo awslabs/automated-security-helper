@@ -165,8 +165,11 @@ def test_the_console_shows_a_control_sequence(console_logger, capsys, text, show
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("console_logger", ["native", "windows-ci"], indirect=True)
 @pytest.mark.parametrize("text", COMMANDS)
 def test_no_line_of_the_console_is_a_workflow_command(console_logger, capsys, text):
+    """On Windows CI too, where WindowsSafeFilter leaves an all-ASCII message as
+    it was logged: the console's own show breaks the command."""
     console_logger.warning(text)
 
     out = capsys.readouterr().out

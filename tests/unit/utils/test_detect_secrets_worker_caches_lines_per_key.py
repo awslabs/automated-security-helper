@@ -41,9 +41,15 @@ def test_the_cache_holds_one_file_and_starts_afresh_for_each_key(tmp_path, monke
     caches: list = []
     real = detect_secrets_worker._with_column
 
+    #: What each cache held right after the column was read, copied then: the
+    #: worker may release a cache sooner, and the dict is read after that.
+    held: list = []
+
     def observed(secret, lines_by_file):
+        result = real(secret, lines_by_file)
         caches.append(lines_by_file)
-        return real(secret, lines_by_file)
+        held.append(set(lines_by_file))
+        return result
 
     monkeypatch.setattr(detect_secrets_worker, "_with_column", observed)
 
@@ -66,6 +72,5 @@ def test_the_cache_holds_one_file_and_starts_afresh_for_each_key(tmp_path, monke
     # Two keys, two caches; the second key's cache never saw the first file.
     assert len(caches) == 3
     assert caches[0] is caches[1] and caches[2] is not caches[0]
-    assert set(caches[0]) == {str(first)}
-    assert set(caches[2]) == {str(second)}
-    assert all(len(cache) <= 1 for cache in caches)
+    assert held[0] == {str(first)}
+    assert held[2] == {str(second)}

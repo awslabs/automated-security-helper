@@ -9,15 +9,20 @@ Why this exists
 On a Windows console that cannot write Unicode, WindowsSafeFilter shows a
 message and puts it in ASCII: each character outside ASCII becomes its escape
 (``\\xe9`` for "é"), and a backslash run before text that reads as an escape is
-doubled, so the result reads back one to one. A warning that suggests a
-``--config-overrides`` command quotes a JSON document, and JSON writes the "é"
-of a path as ``\\u00e9``: the default (``"any"``) doubled that run, and the
-pasted command read the text "u00e9" in place of the letter. In ASCII the
-letter's form is ``\\xe9``, never ``\\u00e9``, so the run before JSON's text
-need not be doubled for the result to read back; the ``"ascii"`` mode doubles a
-run only before the text of an escape shown_in_ascii or shown_not_obeyed writes
-there: a character outside ASCII, or one shown as an escape, in escape_for's
-form.
+doubled, so the escapes the filter wrote are told from the message's own text.
+A warning that suggests a ``--config-overrides`` command quotes a JSON document,
+and JSON writes the "é" of a path as ``\\u00e9``: the default (``"any"``) doubled
+that run, and the pasted command read the text "u00e9" in place of the letter.
+In ASCII the letter's form is ``\\xe9``, never ``\\u00e9``, so the run before
+JSON's text is no escape the filter writes and need not be doubled; the
+``"ascii"`` mode doubles a run only before the text of an escape shown_in_ascii
+or shown_not_obeyed writes there: a character outside ASCII, or one shown as an
+escape, in escape_for's form.
+
+Where the run was doubled, the text reads back one to one through ``as_written``.
+Where it was kept single (JSON's text), ``as_written`` reads it as the escape: the
+convention for these modes, which are for the last sink and not for text read
+back later (see ``as_written``), pinned below.
 """
 
 from __future__ import annotations

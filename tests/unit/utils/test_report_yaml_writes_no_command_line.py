@@ -13,6 +13,7 @@ Each value must still read back as it was.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, List
 
 import pytest
@@ -61,6 +62,11 @@ CASES = [
 ]
 
 
+#: The ``##name[`` form a runner reads anywhere in a line, not only at its start
+#: (test_report_yaml_breaks_named_hash_commands_anywhere.py).
+NAMED_HASH = re.compile(r"##[A-Za-z]*\[")
+
+
 def _command_lines(text: str) -> List[str]:
     return [
         line for line in text.splitlines() if line.lstrip().startswith(("::", "##"))
@@ -86,6 +92,9 @@ def _assert_no_command_and_read_back(data: Any) -> None:
     for options in OPTIONS:
         text = report_yaml(data, **options)
         assert _command_lines(text) == [], text
+        # The rule for the forms read anywhere in a line, at every fold length,
+        # place and container this helper is run over.
+        assert NAMED_HASH.search(text) is None, text
         assert yaml.safe_load(text) == data, text
 
 

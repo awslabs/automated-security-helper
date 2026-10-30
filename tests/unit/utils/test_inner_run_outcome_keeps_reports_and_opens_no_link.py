@@ -65,6 +65,30 @@ def test_an_empty_second_phase_still_records_the_first_phases_files():
     assert report_file_written_as(results, "sarif") == "ash.sarif"
 
 
+def test_a_second_phase_rewriting_the_same_file_keeps_it_as_the_sarif_file():
+    results = SimpleNamespace(validation_checkpoints=[])
+    record_reports_written(results, [("ash.sarif", "sarif")])
+
+    record_reports_written(results, [("ash.sarif", "sarif")])
+
+    assert report_file_written_as(results, "sarif") == "ash.sarif"
+
+
+def test_a_second_phase_writing_sarif_under_another_name_leaves_no_file_to_read():
+    """Both files are kept in the record, and the format then names two, so
+    report_file_written_as answers None rather than choosing the first or the
+    last: the exit code is not read from a file that may not be this run's
+    SARIF reporter's."""
+    results = SimpleNamespace(validation_checkpoints=[])
+    record_reports_written(results, [("ash.sarif", "sarif")])
+
+    record_reports_written(results, [("other.sarif", "sarif")])
+
+    (record,) = results.validation_checkpoints
+    assert record["metadata"]["files"] == ["ash.sarif", "other.sarif"]
+    assert report_file_written_as(results, "sarif") is None
+
+
 def _earlier_run_record(**metadata):
     return {
         "type": "reports_written",

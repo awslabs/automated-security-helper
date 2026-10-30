@@ -89,13 +89,19 @@ def test_a_backslash_run_costs_time_linear_in_its_length():
 
     The least of three timings of each, so a busy host's noise lands on neither
     side; the bound sits well above a linear ratio and well below a quadratic one.
+
+    The run ends in "##x", a "#" that is no command: a check for "#" in the text
+    would let a text of backslashes alone skip the pattern, and the unanchored
+    pattern would pass unnoticed. With the "#" the pattern has to run, and fail
+    at the end of the run from every start it is tried at.
     """
-    short = BACKSLASH * 500
-    long = BACKSLASH * 8000
+    short = BACKSLASH * 500 + "##x"
+    long = BACKSLASH * 8000 + "##x"
 
     ratio = _least_time(long) / max(_least_time(short), 1e-6)
 
     assert ratio < 64, ratio
+    assert commands_broken(long) == long
 
 
 def test_a_run_before_a_named_hash_command_is_still_doubled():

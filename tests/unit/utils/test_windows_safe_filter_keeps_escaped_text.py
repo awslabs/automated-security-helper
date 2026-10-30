@@ -36,22 +36,20 @@ from automated_security_helper.utils.log import (
 pytestmark = pytest.mark.unit
 
 
-def _filtered(message: str) -> logging.LogRecord:
+def _filtered(message: str, args=(), markup: bool = True) -> logging.LogRecord:
+    """A record through the active filter; with *markup* it asks for Rich markup."""
     windows_filter = WindowsSafeFilter()
     windows_filter._active = True
-    record = logging.LogRecord("ash", logging.INFO, __file__, 1, message, (), None)
-    record.__dict__.update(MARKUP)
+    record = logging.LogRecord("ash", logging.INFO, __file__, 1, message, args, None)
+    if markup:
+        record.__dict__.update(MARKUP)
     assert windows_filter.filter(record)
     return record
 
 
 def _filtered_plain(message: str, args=()) -> logging.LogRecord:
     """A plain (no markup) record through the active filter."""
-    windows_filter = WindowsSafeFilter()
-    windows_filter._active = True
-    record = logging.LogRecord("ash", logging.INFO, __file__, 1, message, args, None)
-    assert windows_filter.filter(record)
-    return record
+    return _filtered(message, args, markup=False)
 
 
 def test_an_ascii_message_keeps_its_own_escape_text():
@@ -75,36 +73,76 @@ def test_an_ascii_message_keeps_its_own_escape_text():
 
 
 def test_an_ascii_message_with_ascii_arguments_is_left_as_logged():
+    """Left as logged on purpose: the filter rewrites only what the console cannot
+    write. ASH's own sinks show every message themselves, once, and break its CI
+    command forms, so this record's "::" and "##vso[" do not reach a console or
+    ash.log as commands; that is pinned through the console with the filter on, in
+    test_log_console_shows_controls.py
+    (test_no_line_of_the_console_is_a_workflow_command, "windows-ci"). A handler an
+    application put on the logger gets the record as written, which is
+    CommandSafeFormatter's to handle."""
     record = _filtered_plain("scan %s in %d ms", ("a::b ##vso[x]", 3))
 
     assert record.msg == "scan %s in %d ms"
     assert record.args == ("a::b ##vso[x]", 3)
 
 
-def test_a_message_the_console_cannot_write_is_folded_and_shown():
+@pytest.mark.parametrize("lead", ["", " ", "\t"], ids=["bare", "space", "tab"])
+def test_a_message_the_console_cannot_write_is_folded_and_shown(lead):
     """The folded text is shown once: the letter the console cannot write as its
     escape, and a CI command form broken. A "::" is a command only at the start
-    of a line (an ARN's "::" is mid-line and stays readable), so the argument
-    puts one there."""
-    record = _filtered_plain("%s", ("::add-mask::café",))
+    of a line, after whitespace the runner trims (an ARN's "::" is mid-line and
+    stays readable), so the argument puts one there."""
+    record = _filtered_plain("%s", (lead + "::add-mask::café",))
 
     assert record.args == ()
     assert record.getMessage().isascii()
     assert "caf\\xe9" in record.getMessage()
-    assert not record.getMessage().startswith("::")
+    assert not record.getMessage().lstrip().startswith("::")
     assert "add-mask::caf" in record.getMessage()
 
 
 def _suggested_ignore_paths(message: str) -> list:
-    """The ignore_paths entries the suggested command in *message* adds."""
-    import json
+    """The ignore_paths entries the suggested command in *message* adds, read the
+    way a POSIX shell and ASH's override parser read it."""
     import shlex
 
-    command = message.split("--config-overrides ", 1)[1].rstrip(".")
-    (override,) = shlex.split(command)
-    key, value = override.split("+=", 1)
-    assert key == "global_settings.ignore_paths"
-    return json.loads(value)
+    from automated_security_helper.config.resolve_config import (
+        _apply_config_override,
+    )
+
+    words = shlex.split(message.split("--config-overrides ", 1)[1].rstrip("."))
+    assert len(words) == 1, words
+    key, _, value = words[0].partition("=")
+    config: dict = {"global_settings": {"ignore_paths": []}}
+    _apply_config_override(config, key, value)
+    return config["global_settings"]["ignore_paths"]
+
+
+def test_the_real_warning_through_the_active_filter_keeps_its_command(caplog):
+    """The warning ASH writes, not a copy of its shape: captured from
+    warn_about_scanned_output_dir and passed through the active filter, so a change
+    to how the warning builds its command (its quoting, ``ensure_ascii``) is read
+    here as the Windows console would show it."""
+    from automated_security_helper.utils.scan_output_dirs import (
+        warn_about_scanned_output_dir,
+    )
+
+    relative = "café dir/.ash/ash_output"
+    with caplog.at_level(logging.WARNING):
+        warn_about_scanned_output_dir(relative, 2)
+    [captured] = caplog.records
+    windows_filter = WindowsSafeFilter()
+    windows_filter._active = True
+
+    assert windows_filter.filter(captured)
+
+    shown = captured.getMessage()
+    assert shown.isascii(), shown
+    assert shown.startswith("caf\\xe9 dir/.ash/ash_output is not"), shown
+    assert _suggested_ignore_paths(shown) == [
+        {"path": f"{relative}/", "reason": "earlier ASH output"}
+    ]
 
 
 def test_a_suggested_command_in_a_message_the_console_cannot_write_is_kept():

@@ -95,6 +95,11 @@ def test_the_bound_counts_each_document_of_a_stream_on_its_own(monkeypatch):
     )
 
     assert [len(found["use"]) for found in loaded] == [5, 5, 5]
+    # The patched bound is live, and only the per-document count lets the stream
+    # through: one document holding the three documents' aliases (90 nodes) is
+    # refused under the same patch.
+    with pytest.raises(AliasExpansionError):
+        yaml.load(_aliased_items(15), Loader=NoRecursiveAliasLoader)
 
 
 def test_only_what_the_aliases_add_is_counted(monkeypatch):

@@ -69,7 +69,8 @@ def test_an_unexpected_group_is_logged_without_its_members_inputs():
 
     # The control: both lines were logged, so the loop below has calls to read.
     assert logger.error.called and logger.debug.called
-    for call in [*logger.error.call_args_list, *logger.debug.call_args_list]:
+    # Every call on the logger, whatever method it used, not only error and debug.
+    for call in logger.mock_calls:
         assert REFUSED not in str(call), call
 
 
@@ -154,22 +155,30 @@ def test_an_unexpected_unrenderable_error_is_logged_as_text():
     assert logging.LogRecord("ash", 40, "f", 1, message, (), None).getMessage()
 
 
-#: An inner sequence whose removal joins its neighbors into "ESC [ m".
-NESTED = ESC + "[" + ESC + "[2K" + "m"
+def _nested(depth: int) -> str:
+    """An inner sequence whose removal joins its neighbors into "ESC [ m", ``depth``
+    levels deep: two needs two passes of a remover, three needs three."""
+    return (ESC + "[") * (depth - 1) + ESC + "[2K" + "m" * (depth - 1)
 
 
-def test_an_escape_code_joined_by_removing_an_inner_one_is_removed_too():
-    text = error_text(RuntimeError("a" + NESTED + "b"))
+DEPTHS = pytest.mark.parametrize("depth", [2, 3, 4])
+
+
+@DEPTHS
+def test_an_escape_code_joined_by_removing_an_inner_one_is_removed_too(depth):
+    text = error_text(RuntimeError("a" + _nested(depth) + "b"))
 
     assert ESCAPE_CODES.search(text) is None, repr(text)
     assert text == "ab"
 
 
-def test_every_remover_reaches_a_fixed_point():
-    assert shown_tool_stderr("x" + NESTED + "y", ()) == "xy"
-    assert redact_then_split("x" + NESTED + "y\nz", ()) == ["xy", "z"]
+@DEPTHS
+def test_every_remover_reaches_a_fixed_point(depth):
+    nested = _nested(depth)
+    assert shown_tool_stderr("x" + nested + "y", ()) == "xy"
+    assert redact_then_split("x" + nested + "y\nz", ()) == ["xy", "z"]
     try:
-        raise RuntimeError("t" + NESTED + "u")
+        raise RuntimeError("t" + nested + "u")
     except RuntimeError as caught:
         text = traceback_text(caught)
     assert ESCAPE_CODES.search(text) is None, repr(text)
