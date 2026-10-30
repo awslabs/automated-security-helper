@@ -1834,16 +1834,27 @@ class TestATierRunThatExecutedNoTestFails:
         assert written == [self.LINE, self.ANNOTATION]
 
     def test_a_leg_with_no_skip_at_all_is_not_admitted(self):
-        """Selected items that were all leg assertions: nothing was skipped, nothing ran."""
+        """Selected items that were all leg assertions: nothing was skipped, nothing ran.
+
+        The reports are the ones a real run sends: a leg assertion's setup, call and
+        teardown. It is counted once, on its setup report, so the line says so.
+        """
         written: list[str] = []
         session = self._session(written, collected=1)
         plugin = sharding._TierRunOutcome()
-        plugin.pytest_runtest_logreport(
-            self._report("call", "passed", keywords={sharding.LEG_ASSERTION_MARKER: 1})
-        )
+        marked = {sharding.LEG_ASSERTION_MARKER: 1}
+        for when in ("setup", "call", "teardown"):
+            plugin.pytest_runtest_logreport(
+                self._report(when, "passed", keywords=marked)
+            )
+        assert plugin.leg_assertions == 1, "one test has one setup report"
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
-        assert "1 collected, 0 skipped, 0 executed" in written[0], written
+        assert (
+            "1 collected, 0 skipped, 1 leg assertion not counted, 0 executed"
+            in written[0]
+        ), written
+        assert "admitted, because" not in written[0], written
 
     def test_warn_mode_prints_the_line_with_a_prefix_and_leaves_the_status(self):
         written: list[str] = []
@@ -2204,8 +2215,10 @@ class TestTheActionRunsATier:
 
         The value is read the way GitHub reads ``cond && a || b``: ``warn`` on the e2e
         legs, until a hosted run shows each of them executing a real test, and ``1``
-        everywhere else. When the e2e legs are flipped, this expectation is the one line
-        that changes with the expression.
+        everywhere else. When the e2e legs switch to ``1`` the expression becomes the
+        literal ``"1"``, which this ``re.fullmatch`` pattern does not match, so the
+        pattern and the expectation change together with the expression. The pin stays
+        on the current expression until then.
         """
         step = _action_step("Run PyTest")
         assert sharding.FLOOR_ENV_VAR == "ASH_TEST_TIER_FLOOR"
