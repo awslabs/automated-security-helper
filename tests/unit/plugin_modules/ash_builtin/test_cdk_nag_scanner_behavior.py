@@ -1048,6 +1048,30 @@ def test_a_wrapper_import_failure_with_every_distribution_installed_names_the_er
     assert "cfn_tools" in scanner.missing_dependency_reason()
 
 
+def test_a_wrapper_import_failure_points_at_a_reinstall_of_ash(
+    scanner, monkeypatch, caplog
+):
+    """With every CDK distribution present, the fault is in ASH's own modules, so the
+    remedy names a reinstall of ASH; the CDK install hint is withheld. Before this read
+    the remedy only said the import error was the fault to fix, which told the operator
+    nothing to do next."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", [])
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "_CDK_WRAPPER_IMPORT_ERROR",
+        "ModuleNotFoundError: No module named 'cfn_tools'",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner.validate_plugin_dependencies() is False
+
+    warned = " ".join(caplog.messages)
+    assert "reinstall ASH" in warned, warned
+    assert "ash dependencies install" not in warned, warned
+    assert cdk_nag_scanner._install_would_help() is False
+
+
 def test_a_missing_distribution_still_gets_the_install_hint(
     scanner, monkeypatch, caplog
 ):

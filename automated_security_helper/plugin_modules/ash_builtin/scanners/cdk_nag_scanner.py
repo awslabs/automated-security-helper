@@ -241,6 +241,19 @@ def _cdk_unusable_detail() -> str:
     return f"{', '.join(_CDK_REQUIRED_DISTRIBUTIONS)} unavailable"
 
 
+def _install_would_help() -> bool:
+    """Whether ``ash dependencies install`` is the remedy for cdk-nag being unusable.
+
+    It is when a CDK distribution is missing, and when the probe explains nothing
+    (every distribution present, no wrapper import error recorded). It is not when
+    every distribution is installed and the wrapper still did not import: the fault is
+    then in ASH's own modules, and installing the CDK packages again changes nothing.
+    One place for the rule, because the dependency check and
+    ``missing_dependency_reason`` each used to write it and the two drifted apart.
+    """
+    return bool(_CDK_MISSING_DISTRIBUTIONS) or not _CDK_WRAPPER_IMPORT_ERROR
+
+
 # Where cdk-nag documents its own rules, and where the CDK documents everything else that can
 # write into the same validation report.
 _CDK_NAG_RULES_URL = "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
@@ -982,14 +995,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             # the command installs with pip or uv, whichever owns ASH's
             # environment, so it works in a uv tool, uvx or `uv venv` install too.
             # The install hint is offered only when a distribution is missing: when
-            # all three are present and the wrapper itself did not import, the real
-            # error is named instead, and reinstalling would change nothing.
-            if _CDK_MISSING_DISTRIBUTIONS or not _CDK_WRAPPER_IMPORT_ERROR:
+            # all three are present and the wrapper itself did not import, the fault
+            # is in ASH's own modules (the wrapper's imports), so the remedy is a
+            # reinstall of ASH, and installing the CDK packages again changes nothing.
+            if _install_would_help():
                 remedy = "Install them with: ash dependencies install --tool cdk-nag"
             else:
                 remedy = (
-                    "The CDK packages are installed, so reinstalling them would "
-                    "change nothing; the import error is the fault to fix."
+                    "The CDK packages are installed; the import failed inside ASH's "
+                    "own modules, so reinstall ASH the way it was installed and run "
+                    "again. Installing the CDK packages again would change nothing."
                 )
             reason = (
                 f"CDK dependencies are not usable ({_cdk_unusable_detail()}). {remedy}"
@@ -1058,15 +1073,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         ):
             return self.dependency_unavailable_reason
         if not _CDK_AVAILABLE:
-            # The install hint only when a distribution is missing, as the dependency
-            # check words it: with every distribution present, reinstalling changes nothing.
-            if _CDK_MISSING_DISTRIBUTIONS or not _CDK_WRAPPER_IMPORT_ERROR:
+            # The same rule the dependency check applies (_install_would_help): the
+            # hint only when installing the CDK packages is the remedy.
+            if _install_would_help():
                 return (
                     f"the CDK packages it needs are not usable ({_cdk_unusable_detail()}); "
                     "install them with `ash dependencies install`"
                 )
             return (
-                f"the CDK packages it needs are not usable ({_cdk_unusable_detail()})"
+                f"the CDK packages it needs are not usable ({_cdk_unusable_detail()}); "
+                "reinstall ASH"
             )
         if find_executable("node") is None and _node_named_by_jsii_node() is None:
             return (
