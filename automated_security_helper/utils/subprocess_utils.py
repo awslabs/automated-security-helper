@@ -2183,7 +2183,9 @@ def resolve_command(
 
     For a caller that starts the process itself. When the program is a batch file on
     Windows the arguments have been checked for cmd.exe (see the module docstring),
-    and the copy goes to ``subprocess`` as it is.
+    and the copy goes to ``subprocess`` as it is. A string is the program's name,
+    as the spawn helpers read one (``_argv_list``); ``list()`` of it made it its
+    characters.
 
     Raises:
         FileNotFoundError: the program would come from the working directory (see
@@ -2192,7 +2194,7 @@ def resolve_command(
         OSError: an argument to a batch program is one cmd.exe would read
             differently (``errno.EINVAL``).
     """
-    resolved = list(args)
+    resolved = _argv_list(args)
     if resolved:
         refused = _resolve_for_spawn(resolved, cwd, env)
         if refused is not None:
@@ -4425,7 +4427,9 @@ def run_ended_with_the_server(
     raise_if_cancelled()
     cancel_event = current_cancel_event()
     if args and not kwargs.get("shell", False):
-        args = list(args)
+        # A copy, with a string read as the program's name (_argv_list): list()
+        # of a string made it its characters, the bug the other helpers fixed.
+        args = _argv_list(args)
         refused = _resolve_for_spawn(args, kwargs.get("cwd"), kwargs.get("env"))
         if refused is not None:
             raise refused
