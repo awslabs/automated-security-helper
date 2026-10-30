@@ -22,6 +22,10 @@ skip_on_windows = pytest.mark.skipif(
     os.name == "nt", reason="process groups are the POSIX arm of _stop_tree"
 )
 
+#: Outside any real pid range: _stop_tree probes the child's pid for reuse with
+#: a real kill(pid, 0), and a small number can name a process on the test host.
+_NO_SUCH_PID = 2**30 + 4242
+
 
 def _reaped_child(pid: int) -> MagicMock:
     process = MagicMock(spec=subprocess.Popen)
@@ -50,8 +54,8 @@ def test_as_init_the_zombie_orphans_of_the_group_are_reaped_by_pid():
         patch.object(subprocess_utils, "_group_exists", side_effect=exists),
         patch.object(subprocess_utils.os, "waitpid", side_effect=reap) as waitpid,
     ):
-        assert subprocess_utils._group_survives(4242) is False
-    orphans.assert_called_once_with(4242)
+        assert subprocess_utils._group_survives(_NO_SUCH_PID) is False
+    orphans.assert_called_once_with(_NO_SUCH_PID)
     assert waitpid.call_count == 2
     waitpid.assert_any_call(777, os.WNOHANG)
     waitpid.assert_any_call(778, os.WNOHANG)
@@ -65,7 +69,7 @@ def test_not_as_init_nothing_is_reaped_and_the_group_read_stands():
         patch.object(subprocess_utils, "_group_exists", return_value=True),
         patch.object(subprocess_utils.os, "waitpid") as waitpid,
     ):
-        assert subprocess_utils._group_survives(4242) is True
+        assert subprocess_utils._group_survives(_NO_SUCH_PID) is True
     orphans.assert_not_called()
     waitpid.assert_not_called()
 
@@ -73,7 +77,7 @@ def test_not_as_init_nothing_is_reaped_and_the_group_read_stands():
 @skip_on_windows
 def test_a_killed_group_of_zombies_is_not_recorded_as_a_refused_stop():
     """At the base the group of zombies kept existing and _note_stop_refused ran."""
-    process = _reaped_child(4242)
+    process = _reaped_child(_NO_SUCH_PID)
     zombies = {777}
 
     def group_signal(pgid, signum):
@@ -104,7 +108,7 @@ def test_a_killed_group_of_zombies_is_not_recorded_as_a_refused_stop():
 
 @skip_on_windows
 def test_a_live_member_after_the_kill_is_still_recorded_as_a_refused_stop():
-    process = _reaped_child(4242)
+    process = _reaped_child(_NO_SUCH_PID)
     with (
         patch.object(subprocess_utils, "_signal_group", return_value=True),
         patch.object(subprocess_utils, "_wait_after_kill"),
