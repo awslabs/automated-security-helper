@@ -168,16 +168,21 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.status == ScannerStatus.ERROR
         assert "could not be graded" in _reason(row)
 
-    def test_a_finding_whose_severity_is_not_text_counts_as_info(self, plugin_context):
-        row = _row(
-            plugin_context, {"findings": [{"severity": 5}, {"severity": "high"}]}
-        )
+    @pytest.mark.parametrize("value", [5, 9.8, None, ["high"]])
+    def test_a_finding_whose_severity_is_not_text_states_none(
+        self, plugin_context, value
+    ):
+        """A number, a null or a list under ``severity`` is no name the ladder can
+        read, so the finding states no severity and is read as one that omits the
+        key: MEDIUM, at the gate. Read as info it graded a CVSS 9.8 PASSED at a
+        MEDIUM threshold, the most lenient outcome for the shape ASH could read
+        least."""
+        row = _row(plugin_context, {"findings": [{"severity": value}]})
 
         assert row.status == ScannerStatus.FAILED
-        assert row.severity_counts.info == 1
-        assert row.severity_counts.medium == 0
-        assert row.severity_counts.high == 1
-        assert row.finding_count == 2
+        assert row.severity_counts.medium == 1
+        assert row.severity_counts.info == 0
+        assert row.finding_count == 1
 
     @pytest.mark.parametrize("name", ["blocker", "P1", ""])
     def test_a_finding_with_an_unknown_severity_name_counts_as_info(
