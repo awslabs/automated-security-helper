@@ -66,20 +66,31 @@ UV_TOOL_NAMES = ["bandit", "checkov", "semgrep"]
 
 
 @pytest.fixture
-def sandbox(tmp_path, monkeypatch) -> InstallSandbox:
-    yield from sandbox_env(tmp_path, monkeypatch)
+def sandbox(tmp_path) -> InstallSandbox:
+    """The containment, with its own MonkeyPatch rather than the shared fixture.
+
+    The shared ``monkeypatch`` is already live before this fixture runs: the unit
+    conftest's autouse tool guard requests it, so its undo is the last teardown
+    of every test here, after ``_the_sandbox_reaches_nothing_real`` has read the
+    environment. A context of this fixture's own is undone when this fixture is,
+    which is before that check, so the check reads the environment the test
+    leaves behind.
+    """
+    with pytest.MonkeyPatch.context() as sandbox_patch:
+        yield from sandbox_env(tmp_path, sandbox_patch)
 
 
 @pytest.fixture(autouse=True)
 def _the_sandbox_reaches_nothing_real():
     """The stand-ins' environment never leaked out of the test that just ran.
 
-    Function-scoped and autouse: it is set up before ``sandbox`` requests
-    ``monkeypatch`` and torn down after ``monkeypatch`` has restored the
-    environment, so a leak is reported against the test that caused it. It runs
-    with every test of the module on whatever worker or shard collected it and
-    in whatever order the tests ran; a module-scoped teardown would name only
-    whichever test happened to run last.
+    Function-scoped and autouse, so it is set up before ``sandbox`` and torn
+    down after it: ``sandbox`` has undone its own MonkeyPatch by then, and a
+    variable still present was set past the sandbox, by the test itself. The
+    leak is reported against the test that caused it, with every test of the
+    module on whatever worker or shard collected it and in whatever order the
+    tests ran; a module-scoped teardown would name only whichever test happened
+    to run last.
     """
     yield
     assert "ASH_TEST_STAND_IN_LOG" not in environ_names(), (
