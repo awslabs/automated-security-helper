@@ -346,18 +346,39 @@ def test_a_relative_excluded_paths_entry_draws_no_such_warning(tmp_path, caplog)
 # ---------------------------------------------------------------------------
 
 
-def test_an_entry_a_path_holds_as_text_is_left_out_with_a_warning(tmp_path, caplog):
-    """At the base the line was VERBOSE: an excluded_paths entry or a default
-    exclude left out that way is applied nowhere after the scan."""
+def test_a_best_effort_glob_a_path_holds_as_text_is_left_out_quietly(tmp_path, caplog):
+    """A global ignore path's glob left out is covered by the SARIF step, so
+    its drop is a VERBOSE line, not a warning; the whole-run promotion warned
+    here too, with text that spoke of excluded_paths."""
     source = _tree(tmp_path, ["app.py", "docs/*.md/evil.py"])
     scanner = _scanner(source, tmp_path)
     with caplog.at_level(logging.WARNING):
         argv, _, _ = scanner._execute_scan(source, "source", _ignore("docs/*.md"))
 
     assert f"{source.as_posix()}/docs/*.md" not in _entries(argv)
-    assert any("Not passing" in message for message in _warnings(caplog)), _warnings(
-        caplog
+    assert not any("Not passing" in message for message in _warnings(caplog)), (
+        _warnings(caplog)
     )
+
+
+def test_a_required_entry_a_path_holds_as_text_is_left_out_with_a_warning(
+    tmp_path, caplog
+):
+    """An excluded_paths entry left out is applied by nothing after the scan,
+    so its drop is a WARNING that says the findings are reported."""
+    source = _tree(tmp_path, ["app.py", "docs/*.md/evil.py"])
+    scanner = _scanner(
+        source,
+        tmp_path,
+        BanditScannerConfigOptions(excluded_paths=_ignore("docs/*.md")),
+    )
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert f"{source.as_posix()}/docs/*.md" not in _entries(argv)
+    dropped = [message for message in _warnings(caplog) if "Not passing" in message]
+    assert len(dropped) == 1, _warnings(caplog)
+    assert "findings are reported" in dropped[0]
 
 
 def test_a_dropped_entry_from_an_environment_value_is_redacted(

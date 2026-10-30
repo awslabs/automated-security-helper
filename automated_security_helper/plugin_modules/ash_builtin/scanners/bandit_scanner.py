@@ -179,14 +179,22 @@ def _entries_no_path_holds_as_text(
     output_entries: List[Tuple[str, Path]],
     holding: Optional[List[str]] = None,
     values: Iterable[str] = (),
+    level: int = logging.WARNING,
+    applied_after_scan: bool = False,
 ) -> List[str]:
     """The entries, less any that a file path under ``target`` holds as text.
 
-    ``values`` are the configured values to redact from the warning
+    ``values`` are the configured values to redact from the log line
     (``text_without_values``): an ``excluded_paths`` entry can be read from the
-    environment, and the warning names the dropped globs built from it. A value's
+    environment, and the line names the dropped globs built from it. A value's
     bracketed form (``_not_a_plain_substring``, ``vendo[r]`` for ``vendor``) is
     redacted with it, since that is how the top-level glob spells the value.
+    ``level`` is the line's level and ``applied_after_scan`` what the line says
+    of the dropped entries' findings: a required entry (an ``excluded_paths``
+    entry, a default exclude, an output directory) is applied by nothing after
+    the scan, so its drop is a WARNING and the findings are reported; a
+    best-effort glob for a global ignore path is covered by the SARIF step, so
+    its drop is VERBOSE and the findings are dropped after the scan.
 
     bandit skips a file whose path contains an --exclude entry as a plain
     substring, as well as one the entry matches as a glob (bandit 1.9.4,
@@ -233,24 +241,30 @@ def _entries_no_path_holds_as_text(
     kept = [e for e in kept if e not in named_directories]
     dropped += named_directories
     if dropped:
-        # A warning, not a verbose line: an excluded_paths entry or a default
-        # exclude left out here is applied nowhere after the scan, so bandit
-        # reads the files it names and their findings are reported. Redacted:
-        # the globs are built from configured entries, which can come from the
-        # environment, and ash.log keeps the line.
+        # Redacted: the globs are built from configured entries, which can come
+        # from the environment, and ash.log keeps the line.
         redacted = list(values)
         for value in list(redacted):
             bracketed = _not_a_plain_substring(value)
             if bracketed and bracketed != value:
                 redacted.append(bracketed)
-        ASH_LOGGER.warning(
+        if applied_after_scan:
+            consequence = (
+                "bandit reads the files these entries name; the SARIF step drops "
+                "the findings the global ignore paths cover after the scan."
+            )
+        else:
+            consequence = (
+                "bandit reads the files these entries name, and nothing applies "
+                "them after the scan, so their findings are reported."
+            )
+        ASH_LOGGER.log(
+            level,
             text_without_values(
                 f"Not passing {dropped} to bandit --exclude: a file path under "
                 f"'{target}' contains it as text, or it names an existing "
-                "directory, and bandit would skip files it does not cover. bandit "
-                "reads the files these entries name; the findings a global ignore "
-                "path covers are dropped after the scan, an excluded_paths entry's "
-                "or a default exclude's are reported.",
+                f"directory, and bandit would skip files it does not cover. "
+                f"{consequence}",
                 redacted,
             ),
             extra=NO_MARKUP,
@@ -1256,7 +1270,13 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         )
         best_effort = (
             _entries_no_path_holds_as_text(
-                target, ignore_globs, [], holding=holding, values=values
+                target,
+                ignore_globs,
+                [],
+                holding=holding,
+                values=values,
+                level=logging.VERBOSE,
+                applied_after_scan=True,
             )
             if ignore_globs
             else []
