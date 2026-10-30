@@ -231,6 +231,20 @@ def _row_name(row: str) -> str:
     return _TRAILING_PARENTHETICAL.sub("", row.strip())
 
 
+class _EnvReference(str):
+    """The text of an ``!ENV`` scalar, marked so value validation can skip it.
+
+    ASH substitutes the variable before it validates the config, so the
+    documented ``${VAR}`` text is not the value the field will hold: an
+    ``!ENV`` on an int, bool, enum or patterned string field is valid config
+    that would fail ``model_validate`` here. The key still has to be a field of
+    the model, so the text is kept (it compares equal to a plain str) and only
+    the value check leaves it out.
+    """
+
+    __slots__ = ()
+
+
 def _options_loader():
     """A SafeLoader that keeps an ``!ENV`` scalar as its own text."""
     import yaml
@@ -239,7 +253,7 @@ def _options_loader():
         pass
 
     _KeepsEnvTag.add_constructor(
-        "!ENV", lambda loader, node: loader.construct_scalar(node)
+        "!ENV", lambda loader, node: _EnvReference(loader.construct_scalar(node))
     )
     return _KeepsEnvTag
 
@@ -1181,8 +1195,19 @@ def _options_block_problems(
                         "config kind=ash-invalid"
                     )
 
+            # An !ENV value is substituted by ASH before it validates, so the
+            # documented text is not what the field will hold; its key was
+            # checked above, its value is left to the runtime. A required field
+            # documented through !ENV would read as missing here; none of the
+            # options models declares one, and such a block is marked
+            # kind=ash-invalid if it ever has to be documented.
+            concrete = {
+                key: value
+                for key, value in options.items()
+                if not isinstance(value, _EnvReference)
+            }
             try:
-                model.model_validate(options)
+                model.model_validate(concrete)
             except ValidationError as exc:
                 failures.append(
                     f"{where} {section}.{plugin_name}.options "

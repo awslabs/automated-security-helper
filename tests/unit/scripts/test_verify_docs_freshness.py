@@ -121,12 +121,51 @@ class TestOptionsYaml:
         parsed = freshness._load_options_yaml(
             "scanners:\n  bandit:\n    options:\n      config_file: !ENV ${BANDIT_CONFIG}\n"
         )
-        assert (
-            parsed["scanners"]["bandit"]["options"]["config_file"] == "${BANDIT_CONFIG}"
-        )
+        value = parsed["scanners"]["bandit"]["options"]["config_file"]
+        assert value == "${BANDIT_CONFIG}"
+        # Marked, so the value check can tell it from a documented literal.
+        assert isinstance(value, freshness._EnvReference)
+        assert isinstance(value, str)
 
     def test_invalid_yaml_still_returns_none(self, freshness):
         assert freshness._load_options_yaml("scanners: [unclosed") is None
+
+
+class _IntOptions(BaseModel):
+    depth: int = 1
+    config_file: str | None = None
+
+
+class TestOptionsBlockProblems:
+    """Value validation skips !ENV values; the key check still covers them."""
+
+    _KINDS = (("scanners", "ScannerConfig", None),)
+    _MODELS = {"scanners": {"demo": _IntOptions}}
+
+    def _problems(self, freshness, options):
+        parsed = {"scanners": {"demo": {"options": options}}}
+        return freshness._options_block_problems(
+            parsed, self._MODELS, self._KINDS, "page.md"
+        )
+
+    def test_an_env_value_on_a_non_string_field_is_not_a_failure(self, freshness):
+        """At the base the ${VAR} text was validated as the int and failed."""
+        options = freshness._load_options_yaml(
+            "depth: !ENV ${DEPTH}\nconfig_file: bandit.yaml\n"
+        )
+        assert self._problems(freshness, options) == []
+
+    def test_a_literal_that_does_not_validate_is_still_reported(self, freshness):
+        problems = self._problems(freshness, {"depth": "deep"})
+        assert len(problems) == 1
+        assert "does not validate against _IntOptions" in problems[0]
+        assert "depth" in problems[0]
+
+    def test_an_env_value_under_an_unknown_key_is_still_reported(self, freshness):
+        options = freshness._load_options_yaml("bogus: !ENV ${X}\n")
+        problems = self._problems(freshness, options)
+        assert len(problems) == 1
+        assert "options.bogus is not a field of _IntOptions" in problems[0]
 
 
 class TestModelLookup:
