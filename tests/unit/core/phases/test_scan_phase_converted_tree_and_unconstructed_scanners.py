@@ -199,6 +199,81 @@ class TestAnUnstatableEntryDoesNotAbortTheScan:
         assert str(mock_plugin_context.source_dir / "app.py") in cached
         assert str(denied) not in cached
 
+    def test_an_unlistable_directory_is_skipped_loudly_and_the_walk_goes_on(
+        self, scan_phase, mock_plugin_context, monkeypatch
+    ):
+        """One directory that cannot be listed loses its own subtree and nothing
+        else, with a WARNING that names it. Red at the base: the rglob walk raised
+        the error out of its iterator, so every file not yet listed was dropped
+        from the scan set and only a debug line said so."""
+        import os
+
+        source = mock_plugin_context.source_dir
+        locked = source / "locked"
+        locked.mkdir()
+        (locked / "secret.py").write_text("x")
+        open_dir = source / "open"
+        open_dir.mkdir()
+        (open_dir / "b.py").write_text("y")
+        original_scandir = os.scandir
+
+        def scandir_or_fail(path=".", *args, **kwargs):
+            if os.fspath(path) == str(locked):
+                raise OSError(5, "Input/output error", str(locked))
+            return original_scandir(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "scandir", scandir_or_fail)
+        warnings = []
+        monkeypatch.setattr(
+            "automated_security_helper.core.phases.scan_phase.ASH_LOGGER.warning",
+            lambda message, *a, **k: warnings.append(str(message)),
+        )
+
+        results = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert isinstance(results, AshAggregatedResults)
+        cached = mock_plugin_context.cached_source_files
+        assert str(source / "app.py") in cached
+        assert str(open_dir / "b.py") in cached
+        assert str(locked / "secret.py") not in cached
+        assert any(
+            "Could not list" in line and "locked" in line for line in warnings
+        ), warnings
+
+
+class TestARefusedNameIsSelectedByTheOneRule:
+    def test_a_refused_non_python_scanner_is_skipped_under_python_only(
+        self, scan_phase
+    ):
+        """The refused-name path used to copy three of the selection rule's four
+        answers and leave --python-only out, so in such a run a non-Python-only
+        scanner whose name the tracker refused was ERROR where the main loop
+        records the same scanner SKIPPED. Red at the base: ERROR."""
+
+        def refuse_class_shaped_names(scanner_name, **_state):
+            if scanner_name == "FooScanner":
+                raise ValueError("Scanner name looks like a class name: 'FooScanner'")
+
+        scan_phase.validation_manager.update_scanner_state.side_effect = (
+            refuse_class_shaped_names
+        )
+        refused = _make_scanner_class("FooScanner")
+        refused.return_value.is_python_only.return_value = False
+        scan_phase.plugins = [refused]
+
+        results = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            python_based_plugins_only=True,
+            parallel=False,
+        )
+
+        row = results.scanner_results["FooScanner"]
+        assert row.status == ScannerStatus.SKIPPED
+        assert row.excluded is True
+        assert "Python-only" in (row.skipped_reason or "")
+
 
 class TestAnUnconstructedScannerIsRecordedByItsSelection:
     def test_an_excluded_scanner_whose_constructor_raises_is_skipped(self, scan_phase):

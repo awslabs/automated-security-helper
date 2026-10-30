@@ -299,6 +299,115 @@ class TestTwoScannersWithOneName:
         queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
         assert sorted(queued) == ["one", "two"]
 
+    def test_a_later_carrier_the_operator_excluded_is_skipped_not_error(self, ctx):
+        """Selection before diagnosis, as for every scanner that does not run.
+        Red at the base: the duplicate was recorded ERROR before any selection
+        step, so `--exclude-scanners twin` failed the completeness gate on a run
+        that ran everything it selected."""
+        first = _scanner_class("twin")
+        second = _scanner_class("twin")
+        second.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second])
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase, excluded_scanners=["twin"])
+
+        queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
+        assert queued == []
+        # Both carriers are recorded SKIPPED, excluded: the first under its name,
+        # the later one under the same name (it is not a failure, so it needs no
+        # row of its own, and the rows say the same thing).
+        row = results.scanner_results["twin"]
+        assert row.status == ScannerStatus.SKIPPED
+        assert row.excluded is True
+        assert not [key for key in results.scanner_results if "OtherTwin" in key]
+
+    def test_a_later_carrier_of_a_refused_name_is_told_the_first_does_not_run(
+        self, ctx, logger
+    ):
+        """The first holder's name was refused by the tracker, so the later
+        holder's row must not say the first runs. Red at the base: the first
+        was entered as the name's holder before the tracker saw it, and the
+        text said "which runs"."""
+        first = _scanner_class("twin")
+        second = _scanner_class("twin")
+        second.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second])
+
+        def refuse_twin(scanner_name, **_state):
+            if scanner_name == "twin":
+                raise ValueError("refused by the test")
+
+        phase.validation_manager.update_scanner_state.side_effect = refuse_twin
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase)
+
+        queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
+        assert queued == []
+        assert results.scanner_results["twin"].status == ScannerStatus.ERROR
+        duplicate_rows = [key for key in results.scanner_results if "OtherTwin" in key]
+        assert len(duplicate_rows) == 1
+        assert results.scanner_results[duplicate_rows[0]].status == ScannerStatus.ERROR
+        errors = _lines(logger, "error")
+        assert any("so neither runs" in line for line in errors), errors
+        assert not any("which runs" in line for line in errors), errors
+
+
+class TestARecordedRowStandsWhenItsResultsFileCannotBeWritten:
+    def test_a_duplicate_rows_failed_write_does_not_end_the_phase(self, ctx, logger):
+        """The recorders for a scanner that does not run write a results container
+        for the row, and one failed write used to end the whole phase before any
+        scanner ran. Red at the base: the raise escaped `_execute_phase`."""
+        first = _scanner_class("twin")
+        second = _scanner_class("twin")
+        second.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second])
+        real_process = phase._process_results
+
+        def process_or_refuse(*, results, aggregated_results):
+            if "OtherTwin" in results.scanner_name:
+                raise OSError(13, "Permission denied", "scanners/twin (OtherTwin)")
+            return real_process(results=results, aggregated_results=aggregated_results)
+
+        phase._process_results = process_or_refuse
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase)
+
+        queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
+        assert queued == ["twin"]
+        duplicate_rows = [key for key in results.scanner_results if "OtherTwin" in key]
+        assert len(duplicate_rows) == 1
+        assert results.scanner_results[duplicate_rows[0]].status == ScannerStatus.ERROR
+        assert any(
+            "Could not write the results of scanner" in line
+            for line in _lines(logger, "error")
+        ), _lines(logger, "error")
+
+    def test_a_not_selected_rows_failed_write_does_not_end_the_phase(self, ctx, logger):
+        phase = _phase(ctx, [_scanner_class("one"), _scanner_class("two")])
+        real_process = phase._process_results
+
+        def process_or_refuse(*, results, aggregated_results):
+            if results.scanner_name == "two":
+                raise OSError(13, "Permission denied", "scanners/two")
+            return real_process(results=results, aggregated_results=aggregated_results)
+
+        phase._process_results = process_or_refuse
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase, excluded_scanners=["two"])
+
+        queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
+        assert queued == ["one"]
+        assert results.scanner_results["two"].status == ScannerStatus.SKIPPED
+        assert results.scanner_results["two"].excluded is True
+
 
 class TestSelectionRefusals:
     def test_a_self_cancelling_selection_is_refused_by_the_phase(self, ctx):
