@@ -148,6 +148,30 @@ class TestOverrideRefusal:
             apply_config_overrides(AshConfig(), ["qz secret value 5531"])
         assert "5531" not in str(refused.value), str(refused.value)
 
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            "ab12" * 10,  # a 40-hex digest is key-shaped but not a key
+            "QZEXAMPLEKEYIDQZ0000",  # an access-key-shaped id: bare, 20 long
+            "scanners.qz.token98765",  # a digit run of five inside a key path
+            "qz.key.path." * 3 + "name",  # a key-shaped entry past 32 chars
+        ],
+    )
+    def test_a_token_shaped_entry_with_no_separator_is_not_echoed(self, entry):
+        with pytest.raises(ASHConfigValidationError) as refused:
+            split_config_override(entry)
+        text = str(refused.value)
+        assert entry not in text, text
+        assert f"an entry of {len(entry)} characters with no '=' (not shown)" in text
+
+    @pytest.mark.parametrize(
+        "entry", ["no-equals", "scanners.bandit.enabled", "qz_option-2", "a1b2c3"]
+    )
+    def test_control_a_short_key_shaped_word_is_still_quoted(self, entry):
+        with pytest.raises(ASHConfigValidationError) as refused:
+            split_config_override(entry)
+        assert f"Invalid config override: '{entry}'" in str(refused.value)
+
 
 class TestValidateConfigDocument:
     def test_the_file_load_context_is_passed(self, monkeypatch, tmp_path):

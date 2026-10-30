@@ -5306,13 +5306,40 @@ def split_config_override(override: str) -> Tuple[str, str]:
 #: typed without its value, and is quoted; anything else may be a value.
 _KEY_SHAPED_OVERRIDE = re.compile(r"^[A-Za-z0-9_.+$-]{1,80}$")
 
+#: A digit run this long inside a key-shaped entry reads as an id or a token,
+#: not a key path.
+_DIGIT_RUN = re.compile(r"[0-9]{5,}")
+
+#: A key-shaped entry longer than this is hidden whatever else it holds.
+_LONGEST_QUOTED_KEY = 32
+
+#: A key-shaped entry with no ``.`` and no ``_`` is hidden past this length: a
+#: key path that long has a dot or an underscore in it, a token does not.
+_LONGEST_QUOTED_BARE_WORD = 16
+
+
+def _token_shaped(override: str) -> bool:
+    """Whether a key-shaped entry has the shape of a secret rather than a key:
+    too long for a key path, a digit run of five or more, or a bare word (no
+    ``.`` and no ``_``) past sixteen characters. Any one hides it."""
+    if len(override) > _LONGEST_QUOTED_KEY:
+        return True
+    if _DIGIT_RUN.search(override):
+        return True
+    return (
+        "." not in override
+        and "_" not in override
+        and len(override) > _LONGEST_QUOTED_BARE_WORD
+    )
+
 
 def _override_shown(override: str) -> str:
     """How a refusal names an override that has no ``=``: quoted when it is
-    key-shaped, else by its length alone. Override refusals name keys and
-    never values (apply_config_overrides), and an entry with no separator can
-    be a value whose key the operator forgot."""
-    if _KEY_SHAPED_OVERRIDE.match(override):
+    key-shaped and not token-shaped, else by its length alone. Override
+    refusals name keys and never values (apply_config_overrides), and an entry
+    with no separator can be a value whose key the operator forgot, a hex
+    digest or an access-key id among them."""
+    if _KEY_SHAPED_OVERRIDE.match(override) and not _token_shaped(override):
         return f"'{override}'"
     return f"an entry of {len(override)} characters with no '=' (not shown)"
 
