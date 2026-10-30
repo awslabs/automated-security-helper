@@ -6,23 +6,28 @@
 ``ReporterPluginBase`` validates ``config`` with a wrap validator that hands a value
 which is not the reporter's own model to that model. The validator used to call
 ``config_validated_by_declared_model`` without the ``ValidationInfo`` it was given,
-so a validation context the caller passed to ``model_validate`` never reached the
-declared model's own validators. The model sees it now.
+so a validation context the field was validated under never reached the declared
+model's own validators. The model sees it now.
+
+The tests call the validator with a stand-in ``ValidationInfo``. They do not go
+through ``model_validate``: ``PluginBase`` has its own ``__init__``, which pydantic
+routes ``model_validate`` through, and that ``__init__`` passes no context on, so a
+context given to ``model_validate`` does not reach any plugin's ``config`` field
+whatever this validator does.
 """
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Literal
 
 import pytest
 from pydantic import model_validator
 
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
-from automated_security_helper.config.ash_config import AshConfig
 
 pytestmark = pytest.mark.unit
 
@@ -47,27 +52,30 @@ class _Reporter(ReporterPluginBase[_Config]):
         return ""
 
 
-@pytest.fixture
-def context(tmp_path):
-    return PluginContext(
-        source_dir=tmp_path / "src", output_dir=tmp_path / "out", config=AshConfig()
+def _validated(context):
+    """The wrap validator on ``config``, given a section and a context.
+
+    The handler is never reached for a section that is not the declared model.
+    """
+
+    def handler(value):
+        raise AssertionError("a section is validated by the declared model")
+
+    return _Reporter._config_is_validated_by_the_declared_model(
+        {"enabled": False}, handler, SimpleNamespace(context=context)
     )
 
 
-def test_the_declared_model_sees_the_context_the_reporter_was_validated_under(
-    context,
-):
-    built = _Reporter.model_validate(
-        {"context": context, "config": {"enabled": False}}, context=PROBE
-    )
+def test_the_declared_model_sees_the_context_the_reporter_was_validated_under():
+    built = _validated(PROBE)
 
-    assert type(built.config) is _Config
-    assert built.config.enabled is False
-    assert built.config.saw_context is True
+    assert type(built) is _Config
+    assert built.enabled is False
+    assert built.saw_context is True
 
 
-def test_without_a_context_the_declared_model_sees_none(context):
-    built = _Reporter.model_validate({"context": context, "config": {"enabled": False}})
+def test_without_a_context_the_declared_model_sees_none():
+    built = _validated(None)
 
-    assert type(built.config) is _Config
-    assert built.config.saw_context is False
+    assert type(built) is _Config
+    assert built.saw_context is False
