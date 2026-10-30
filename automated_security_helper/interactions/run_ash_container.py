@@ -5495,12 +5495,15 @@ def run_ash_container(
             source_dir = Path.cwd()
             ASH_LOGGER.info(f"Using current directory as source: {source_dir}")
 
-        # The link rule once more, on the path as given, right before the
-        # directory is made: the check ahead of the build judged the path as it
-        # was then, and a link that appeared during the build would otherwise
-        # be created through and resolved past here.
+        # The link rule once more, on the paths as given, right before the
+        # directory is made: the check ahead of the build judged the paths as
+        # they were then, and a link that appeared during the build would
+        # otherwise be created through and resolved past here. The source
+        # under the name the operator gave (named_source), as the first check
+        # had it: the rule looks below the source under its given name and its
+        # real path, and source_dir is the resolved one by now.
         try:
-            _refuse_linked_output_dir(source_dir, output_dir)
+            _refuse_linked_output_dir(named_source, output_dir)
         except ContainerOutputLinkRefused as e:
             secho(shown_on_one_line(str(e)), fg=typer.colors.RED)
             return _not_started(

@@ -425,6 +425,31 @@ def test_a_link_that_appeared_after_the_check_is_refused_before_the_run(
     assert list(elsewhere.iterdir()) == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege")
+def test_the_link_re_read_judges_the_source_under_its_given_name(tmp_path, commands):
+    """The source is named through a link above it and the output through that
+    same name: only the given name shows that the ``.ash`` on the way is a link,
+    and the resolved source does not."""
+    work = tmp_path / "work"
+    (work / "project").mkdir(parents=True)
+    named = tmp_path / "work-link"
+    named.symlink_to(work, target_is_directory=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (work / "project" / ".ash").symlink_to(elsewhere, target_is_directory=True)
+
+    result = rac.run_ash_container(
+        source_dir=str(named / "project"),
+        output_dir=str(named / "project" / ".ash" / "ash_output"),
+        build=False,
+        run=True,
+    )
+
+    assert result.returncode == 3, result.stderr
+    assert commands == []
+    assert list(elsewhere.iterdir()) == []
+
+
 def test_a_default_output_directory_that_cannot_be_made_is_a_run_not_started(
     tmp_path, commands
 ):
