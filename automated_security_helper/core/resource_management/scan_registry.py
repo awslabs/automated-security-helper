@@ -21,7 +21,7 @@ from threading import Event, Lock
 
 from automated_security_helper.core.cancellation import CancelEvent
 from automated_security_helper.core.constants import ASH_EXIT_CODES
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
@@ -724,6 +724,54 @@ class ScanRegistry:
                 and entry.canonical_directory == requested
                 and entry.occupies_its_directory()
             ]
+
+    def remove_output_of_scan(
+        self, entry: ScanRegistryEntry, remover: Callable[[], bool]
+    ) -> Tuple[Optional[str], bool]:
+        """Run ``remover``, which deletes ``entry``'s output directory, unless
+        the directory is another scan's too.
+
+        Returns ``(reason, removed)``: the reason the remover was not run and
+        False, or None and what the remover returned.
+
+        Every scan of one source directory writes the same output tree under
+        it. The tree is another scan's while that scan occupies the directory
+        (:meth:`ScanRegistryEntry.occupies_its_directory`), and it holds a LATER
+        scan's results once one has been registered, whatever that scan's state:
+        ``cleanup_old_scans`` reaches here for an old scan while a newer,
+        completed scan's results sit in the shared tree, and removing them left
+        that scan reporting results_available over an empty directory.
+
+        The check and the delete run under the registry lock, so a scan of the
+        directory registered while the tree is being removed waits for the
+        delete instead of writing into a tree deleted from under it. The remover
+        runs on the caller's thread with the lock held; callers run this off the
+        event loop (``asyncio.to_thread``), since the delete blocks for as long
+        as the tree takes to remove.
+        """
+        with self._registry_lock:
+            for other in self._registry.values():
+                if other.scan_id == entry.scan_id:
+                    continue
+                if other.canonical_directory != entry.canonical_directory:
+                    continue
+                if other.occupies_its_directory():
+                    return (
+                        (
+                            "another scan of the same directory is running or "
+                            "stopping and shares this output directory"
+                        ),
+                        False,
+                    )
+                if other.registration_seq > entry.registration_seq:
+                    return (
+                        (
+                            "a later scan of the same directory holds its results "
+                            "in this output directory"
+                        ),
+                        False,
+                    )
+            return None, remover()
 
     def update_scan_status(
         self, scan_id: str, status: MCScanStatus, error_message: Optional[str] = None

@@ -49,7 +49,12 @@ def registry():
     registry = MagicMock(spec=ScanRegistry)
     registry.cleanup_scan.return_value = True
     registry.cancel_scan.return_value = True
-    registry.occupants_of_directory.return_value = []
+    # The real method runs the remover under the registry lock unless another
+    # scan holds the directory; the double admits by default and runs it.
+    registry.remove_output_of_scan.side_effect = lambda entry, remover: (
+        None,
+        remover(),
+    )
     return registry
 
 
@@ -139,7 +144,13 @@ class TestOutputSharedWithAnotherScanIsKept:
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         output = _output_of(entry)
         registry.get_scan.return_value = entry
-        registry.occupants_of_directory.return_value = ["scan-2"]
+        registry.remove_output_of_scan.side_effect = lambda entry, remover: (
+            (
+                "another scan of the same directory is running or stopping and "
+                "shares this output directory"
+            ),
+            False,
+        )
 
         with _use(registry):
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
@@ -149,9 +160,8 @@ class TestOutputSharedWithAnotherScanIsKept:
         assert result["removed_output"] is False
         assert "another scan of the same directory" in result["output_dir_error"]
         assert output.exists()
-        registry.occupants_of_directory.assert_called_once_with(
-            entry.directory_path, except_scan_id="scan-1"
-        )
+        registry.remove_output_of_scan.assert_called_once()
+        assert registry.remove_output_of_scan.call_args.args[0] is entry
 
     def test_the_output_is_removed_when_no_other_scan_holds_the_directory(
         self, registry, tmp_path
@@ -159,11 +169,35 @@ class TestOutputSharedWithAnotherScanIsKept:
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         output = _output_of(entry)
         registry.get_scan.return_value = entry
-        registry.occupants_of_directory.return_value = []
 
         with _use(registry):
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
+        assert result["removed_output"] is True
+        assert not output.exists()
+
+    def test_the_delete_runs_inside_the_registrys_decision(self, registry, tmp_path):
+        """The check and the delete are one call on the registry, so a scan
+        registered between them waits on the registry lock instead of losing
+        its output; the remover is what the registry runs, not the caller."""
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
+        output = _output_of(entry)
+        registry.get_scan.return_value = entry
+        order = []
+
+        def decide(entry, remover):
+            order.append("check")
+            assert output.exists()
+            removed = remover()
+            order.append("delete")
+            return None, removed
+
+        registry.remove_output_of_scan.side_effect = decide
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert order == ["check", "delete"]
         assert result["removed_output"] is True
         assert not output.exists()
 

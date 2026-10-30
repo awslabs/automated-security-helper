@@ -216,6 +216,64 @@ class TestCleanupKeepsAStoppingRunner:
         assert registry.occupants_of_directory(str(project) + os.sep) == [second]
 
 
+class TestRemovingAnOutputDirectoryAsksTheRegistry:
+    """occupants_of_directory counted only scans that were running or settling,
+    so cleanup of an old scan removed the shared output tree while a later,
+    completed scan's results sat in it, and the check ran long before the
+    delete with the lock released in between."""
+
+    @staticmethod
+    def _two_scans(registry, tmp_path, later_status):
+        project = tmp_path / "proj"
+        project.mkdir()
+        old = _register(registry, project)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        new = _register(registry, project)
+        registry.update_scan_status(new, later_status)
+        return old, new
+
+    def test_a_later_completed_scans_results_are_not_removed(self, tmp_path):
+        registry = ScanRegistry()
+        old, _new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+
+        assert "later scan" in reason
+        assert removed is False
+        assert ran == []
+
+    def test_an_occupying_scan_refuses(self, tmp_path):
+        registry = ScanRegistry()
+        old, _new = self._two_scans(registry, tmp_path, MCScanStatus.RUNNING)
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: True
+        )
+
+        assert "running or stopping" in reason
+        assert removed is False
+
+    def test_the_latest_scan_of_a_directory_removes_under_the_lock(self, tmp_path):
+        registry = ScanRegistry()
+        _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        held = []
+
+        def remover():
+            held.append(registry._registry_lock.locked())
+            return True
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(new), remover
+        )
+
+        assert reason is None
+        assert removed is True
+        assert held == [True]
+
+
 class TestProgressOfASupersededScanReadsNoFiles:
     def test_a_later_scans_files_are_not_reported_as_the_old_scans(self, tmp_path):
         registry = ScanRegistry()

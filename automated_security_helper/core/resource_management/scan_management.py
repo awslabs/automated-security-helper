@@ -416,32 +416,34 @@ async def cleanup_scan_resources(
         if remove_output and entry.output_directory:
             try:
                 output_dir = Path(entry.output_directory)
+
+                def remove() -> bool:
+                    # The path was recorded at registration; a link placed on
+                    # it since would redirect the delete outside the scanned
+                    # tree.
+                    if _link_in_output_path(output_dir, entry.directory_path):
+                        raise _OutputDirectoryInUse(
+                            "a component of the output path is now a symbolic link"
+                        )
+                    # The stats and the recursive delete, on the worker thread
+                    # this remover runs on; True when the tree is absent
+                    # afterwards, an already-absent one included.
+                    return _remove_output_tree(output_dir)
+
                 # Every scan of one source directory writes the same output
-                # tree under it, so this scan's output directory is also a
-                # newer scan's while that scan runs or settles. Removing it
-                # then deletes the newer scan's results from under it.
-                occupants = list(
-                    registry.occupants_of_directory(
-                        entry.directory_path, except_scan_id=scan_id
-                    )
+                # tree under it, so this scan's output directory is also every
+                # other scan of the directory's. The registry decides, under
+                # its lock, whether another scan holds the tree (running or
+                # stopping, or registered later with its results in it) and
+                # runs the delete under that same lock, so a scan registered
+                # while the tree comes down waits instead of writing into it.
+                # Off the event loop: the delete blocks for as long as the tree
+                # takes to remove.
+                reason, removed_output = await asyncio.to_thread(
+                    registry.remove_output_of_scan, entry, remove
                 )
-                if occupants:
-                    raise _OutputDirectoryInUse(
-                        "another scan of the same directory is running or "
-                        "stopping and shares this output directory"
-                    )
-                # The path was recorded at registration; a link placed on it
-                # since would redirect the delete outside the scanned tree.
-                if _link_in_output_path(output_dir, entry.directory_path):
-                    raise _OutputDirectoryInUse(
-                        "a component of the output path is now a symbolic link"
-                    )
-                # The stats and the recursive delete run on a worker thread:
-                # the delete of a whole scan output tree blocked the event
-                # loop for as long as it took.
-                removed_output = await asyncio.to_thread(
-                    _remove_output_tree, output_dir
-                )
+                if reason is not None:
+                    raise _OutputDirectoryInUse(reason)
             except _OutputDirectoryInUse as e:
                 output_dir_error = f"Output directory not removed: {e}"
                 _logger.warning(f"Output directory of scan {scan_id} not removed: {e}")
