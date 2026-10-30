@@ -348,6 +348,35 @@ class TestJsonReportRewrite:
         assert "Could not rewrite the paths" in caplog.text
         assert any(r.levelno == logging.WARNING for r in caplog.records)
 
+    def test_the_json_report_is_written_through_the_atomic_guard(self, tmp_path):
+        """The rewrite is staged and renamed by fs_guard's atomic form.
+
+        A staging file written by hand and renamed with ``os.replace`` was a write
+        below the output directory that the output-writers audit
+        (tests/unit/utils/test_output_writers_use_fs_guard.py) found unguarded; the
+        atomic form stages, renames and cleans up itself, and leaves no sibling.
+        """
+        source = tmp_path / "src"
+        source.mkdir()
+        scanner = _scanner(source, tmp_path / "out")
+        results_file = self._results(scanner)
+        json_report = results_file.parent / "results_json.json"
+        document = {"results": {"failed_checks": []}}
+        json_report.write_text(json.dumps(document), encoding="utf-8")
+        with patch.object(
+            checkov_scanner,
+            "open_for_atomic_write",
+            wraps=checkov_scanner.open_for_atomic_write,
+        ) as atomic:
+            scanner._read_results_file(results_file)
+        atomic.assert_called_once()
+        assert Path(atomic.call_args.args[0]) == json_report
+        assert json.loads(json_report.read_text(encoding="utf-8")) == document
+        assert sorted(p.name for p in results_file.parent.iterdir()) == [
+            "results_json.json",
+            "results_sarif.sarif",
+        ]
+
 
 class TestDependencyFallbacks:
     def _without_uv(self, tmp_path, checked):
