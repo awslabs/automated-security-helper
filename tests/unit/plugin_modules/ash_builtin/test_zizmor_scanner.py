@@ -1916,6 +1916,76 @@ def test_many_inputs_are_audited_in_several_runs_and_one_report(repo, monkeypatc
     assert len(report.runs[0].results) == len(EXPECTED_INPUTS) * len(EXPECTED_FINDINGS)
 
 
+def _fake_runs(scanner, stdouts: list) -> list:
+    """Like ``_fake_run``, with one stdout per run (the last one repeats);
+    returns the recorded calls."""
+    calls: list = []
+    remaining = list(stdouts)
+
+    def run(command, results_dir=None, env=None, timeout=None, **_):
+        calls.append({"command": list(command), "env": env, "timeout": timeout})
+        stdout = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+        name = scanner.__class__.__name__
+        Path(results_dir, f"{name}.stdout.log").write_text(stdout)
+        response = {"returncode": 0}
+        scanner._process_command_response(response)
+        return response
+
+    object.__setattr__(scanner, "_run_subprocess", run)
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: True)
+    return calls
+
+
+def _later_batch_sarif() -> str:
+    """The captured SARIF with one rule renamed, so it fires only in a later
+    batch, every result carrying its rule's index in THIS report's rules array,
+    and an invocation that names the batch."""
+    data = json.loads(CAPTURED_SARIF.read_text())
+    run = data["runs"][0]
+    renamed = "zizmor/only-in-a-later-batch"
+    for rule in run["tool"]["driver"]["rules"]:
+        if rule["id"] == "zizmor/artipacked":
+            rule["id"] = renamed
+    rule_ids = [rule["id"] for rule in run["tool"]["driver"]["rules"]]
+    for result in run["results"]:
+        if result["ruleId"] == "zizmor/artipacked":
+            result["ruleId"] = renamed
+        result["ruleIndex"] = rule_ids.index(result["ruleId"])
+    run["invocations"] = [{"executionSuccessful": True, "commandLine": "later"}]
+    return json.dumps(data)
+
+
+def test_a_joined_report_carries_every_batchs_rules_and_invocations(
+    repo, monkeypatch
+):
+    """A rule that fires only in a later batch keeps its descriptor (help URI,
+    description) in the joined report, each rule id appears once, the
+    invocations of every run are kept in order, and a result's ruleIndex
+    points at its rule in the merged list, not into the batch's own array."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40)
+    scanner = _scanner(repo)
+    calls = _fake_runs(scanner, [CAPTURED_SARIF.read_text(), _later_batch_sarif()])
+
+    report = scanner.scan(repo, "source", [])
+
+    run = report.runs[0]
+    assert len(calls) == len(EXPECTED_INPUTS) >= 2
+    rule_ids = [rule.id for rule in run.tool.driver.rules]
+    assert len(rule_ids) == len(set(rule_ids))
+    assert "zizmor/artipacked" in rule_ids
+    assert "zizmor/only-in-a-later-batch" in rule_ids
+    assert {result.ruleId for result in run.results} <= set(rule_ids)
+    indexed = [result for result in run.results if result.ruleIndex >= 0]
+    assert indexed, "the later batch's results carried a ruleIndex"
+    for result in indexed:
+        assert run.tool.driver.rules[result.ruleIndex].id == result.ruleId
+    assert len(run.invocations) == len(calls)
+    assert [invocation.commandLine for invocation in run.invocations[1:]] == [
+        "later"
+    ] * (len(calls) - 1)
+    assert len(run.results) == len(EXPECTED_INPUTS) * len(EXPECTED_FINDINGS)
+
+
 def test_a_run_declined_after_earlier_batches_keeps_their_counters(repo, monkeypatch):
     """When the template declines a later batch (its dependency check says no),
     the scan's answer is that refusal, and the counters still say how many

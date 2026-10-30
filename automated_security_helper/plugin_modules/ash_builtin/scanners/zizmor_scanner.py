@@ -148,6 +148,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Level,
     Location,
     PropertyBag,
+    ReportingDescriptor,
     Result,
     SarifReport,
 )
@@ -284,6 +285,45 @@ def _declares_a_github_action(path: Path) -> bool:
     except (OSError, ValueError, RecursionError, yaml.YAMLError):
         return False
     return isinstance(document, dict) and "runs" in document
+
+
+def _joined_report(reports: List[SarifReport]) -> SarifReport:
+    """One report from the per-batch reports of a target audited in several
+    zizmor runs: the first report's run, carrying every batch's results in run
+    order, the rules of every batch (each id once, the first descriptor kept),
+    the invocations of every batch in run order, and each result's ``ruleIndex``
+    pointing at its rule in the merged list.
+
+    zizmor builds ``tool.driver.rules`` from the findings of each run, so a rule
+    that fired only in a later batch has its descriptor (help URI, description)
+    only in that batch's report; keeping the first report's driver left such
+    results without one, dropped the later invocations, and would have left a
+    producer's ``ruleIndex`` pointing into the wrong array. A result whose rule
+    is in no batch's list keeps no index (the model's -1, "absent").
+    """
+    joined = reports[0]
+    run = joined.runs[0]
+    rules: Dict[str, ReportingDescriptor] = {}
+    results: List[Result] = []
+    invocations = []
+    for part in reports:
+        part_run = part.runs[0]
+        results.extend(part_run.results or [])
+        invocations.extend(part_run.invocations or [])
+        for rule in part_run.tool.driver.rules or []:
+            rules.setdefault(rule.id, rule)
+    merged = list(rules.values())
+    position = {rule.id: index for index, rule in enumerate(merged)}
+    for result in results:
+        if result.ruleIndex is None or result.ruleIndex < 0:
+            continue
+        result.ruleIndex = position.get(result.ruleId or "", -1)
+    run.results = results
+    if merged or run.tool.driver.rules is not None:
+        run.tool.driver.rules = merged
+    if invocations or run.invocations is not None:
+        run.invocations = invocations
+    return joined
 
 
 #: How uv's executable is named, in any directory: the resolver returns uv by
@@ -1262,12 +1302,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         self.targets_failed = failed
         self.exit_code = worst_exit_code
         self._last_inputs = list(inputs)
-        joined = reports[0]
-        for part in reports[1:]:
-            joined.runs[0].results = list(joined.runs[0].results or []) + list(
-                part.runs[0].results or []
-            )
-        return joined
+        return _joined_report(reports)
 
     def _input_batches(self, inputs: List[Path]) -> List[List[Path]]:
         """*inputs* in order, split so that each batch's arguments (with a
