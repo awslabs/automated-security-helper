@@ -800,6 +800,14 @@ def _jsii_node_value() -> str:
     return os.environ.get("JSII_NODE") or ""
 
 
+def _names_a_location(value: str) -> bool:
+    """Whether *value* spells a filesystem location (holds a path separator) rather
+    than a bare command name that PATH resolves. ``/`` is a separator on every
+    platform node runs on; ``os.sep`` and ``os.altsep`` cover the host's own."""
+    separators = {"/", os.sep, os.altsep} - {None}
+    return bool(value) and any(separator in value for separator in separators)
+
+
 def _node_named_by_jsii_node() -> Optional[str]:
     """The node ``JSII_NODE`` names, when it names a file that exists, else None.
 
@@ -974,9 +982,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         lines are redacted with the values this gives, so the path has to be one of
         them. Whether the path names a file is the dependency check's question, not
         the redaction's: a value that names nothing is still a value a line could echo.
+
+        Only a value that holds a path separator is carried. ``JSII_NODE`` may also name
+        a bare command looked up on PATH (``node``, ``nodejs``), which is an ordinary
+        word and not the operator's filesystem layout; the redaction matches a value of
+        four to seven word characters as a whole word wherever it stands
+        (config_validator.redact_values), so carrying ``node`` would blank that word in
+        this scanner's own remedy ("put `node` on PATH") and in every child line that
+        says it, and hide nothing that is private.
         """
         named = _jsii_node_value()
-        return (*super()._environment_values(), *((named,) if named else ()))
+        carried = named if _names_a_location(named) else ""
+        return (*super()._environment_values(), *((carried,) if carried else ()))
 
     def model_post_init(self, context):
         if self.config is None:

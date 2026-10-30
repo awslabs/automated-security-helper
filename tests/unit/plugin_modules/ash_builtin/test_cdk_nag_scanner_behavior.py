@@ -1452,3 +1452,29 @@ def test_an_unset_jsii_node_adds_nothing_to_the_values_to_redact(scanner, monkey
         scanner.context.config
     )
     assert "" not in scanner._environment_values()
+
+
+@pytest.mark.parametrize("bare_name", ["node", "nodejs", "node22"])
+def test_a_bare_command_name_in_jsii_node_is_not_a_value_to_redact(
+    scanner, monkeypatch, bare_name
+):
+    """A JSII_NODE that names a command looked up on PATH, not a location, is left out.
+
+    The redaction matches a value of four to seven word characters as a whole word
+    wherever it stands, so carrying ``node`` would blank the ordinary word in this
+    scanner's own remedy ("put `node` on PATH") and in every child line that says it.
+    A bare command name is not the operator's filesystem layout; only a value that
+    holds a path separator is.
+    """
+    monkeypatch.setenv("JSII_NODE", bare_name)
+
+    assert bare_name not in scanner._environment_values()
+    assert scanner._environment_values() == config_environment_values(
+        scanner.context.config
+    )
+
+
+def test_a_relative_jsii_node_path_is_still_a_value_to_redact(scanner, monkeypatch):
+    monkeypatch.setenv("JSII_NODE", "tools/bin/node")
+
+    assert "tools/bin/node" in scanner._environment_values()
