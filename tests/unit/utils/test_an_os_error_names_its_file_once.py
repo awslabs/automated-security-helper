@@ -131,6 +131,7 @@ def test_an_unexpected_os_error_is_logged_naming_its_file_as_given():
     from unittest.mock import MagicMock
 
     from automated_security_helper.utils.error_text import log_unexpected_error
+    from automated_security_helper.utils.log import NO_MARKUP
 
     name = "/out/a" + ESC + "b"
     error = PermissionError(13, "Permission denied", name)
@@ -138,9 +139,15 @@ def test_an_unexpected_os_error_is_logged_naming_its_file_as_given():
 
     log_unexpected_error(logger, error)
 
+    # An OSError that names a file by repr is logged pre-rendered, its traceback
+    # text on the lines after the message, never with exc_info: the handler's
+    # formatter would render the name by repr again and double its backslash.
     (message,), kwargs = logger.error.call_args
-    assert message == f"[Errno 13] Permission denied: '{name}'"
-    assert kwargs["exc_info"] is error
+    first, traceback_line = message.split("\n", 1)
+    assert first == f"[Errno 13] Permission denied: '{name}'"
+    assert traceback_line == f"PermissionError: [Errno 13] Permission denied: '{name}'"
+    assert "exc_info" not in kwargs
+    assert kwargs["extra"] == NO_MARKUP
 
 
 def test_a_traceback_names_its_file_as_given():
