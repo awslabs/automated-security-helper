@@ -730,7 +730,11 @@ def _run_module_app(app: Callable[..., Any]) -> None:
     click's Abort (an interrupted prompt) exits 1 with its one word, as click
     does. Imports are inside: this runs after the streams are known good.
     """
-    from typer._click.exceptions import Abort, UsageError
+    # Abort is typer's own (typer.exceptions, exported at the top level); the
+    # vendored click package has no Abort, so importing it from there raised an
+    # ImportError that the failure path turned into exit 1 for every module app.
+    from typer import Abort
+    from typer._click.exceptions import UsageError
 
     from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 
