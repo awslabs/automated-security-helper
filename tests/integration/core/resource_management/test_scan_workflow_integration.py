@@ -949,9 +949,14 @@ class TestScanWorkflowIntegration:
             assert "Permission denied" in cleanup_result["output_dir_error"]
             assert registry.get_scan(scan_id) is not None
 
-        # The retry the kept entry is for: without the refused delete the
-        # registry part completes.
-        retry = await cleanup_scan_resources(scan_id)
+        # The retry the kept entry is for: the same request, once the permission
+        # problem is gone, removes the output and the entry. Made without
+        # remove_output=True it never retried the delete it was kept for, so
+        # the directory the first call could not remove was left on disk and
+        # the test read "retry works" from the registry part alone.
+        retry = await cleanup_scan_resources(scan_id, remove_output=True)
         assert retry["success"] is True
+        assert retry["removed_output"] is True
         assert retry["removed_from_registry"] is True
+        assert not output_directory.exists()
         assert registry.get_scan(scan_id) is None
