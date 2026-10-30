@@ -280,6 +280,32 @@ class TestWhereYarnsCopyGoes:
 
         assert chosen == home / ".cache" / "ash", (chosen, passed_over)
 
+    @pytest.mark.parametrize("home_through_the_link", [True, False])
+    def test_a_home_spelled_through_a_link_is_still_the_home(
+        self, tmp_path, monkeypatch, home_through_the_link
+    ):
+        """``/home`` linking to ``/local/home`` is a common layout: ``HOME``
+        carries one spelling and the cache path under it may carry the other.
+        A string compare of the two spellings missed the home, so the
+        operator's own ~/.npmrc disqualified the cache directory below it. The
+        home is matched by real path, whichever side carries the link."""
+        real_home = tmp_path / "local" / "home" / "me"
+        real_home.mkdir(parents=True)
+        (tmp_path / "home").symlink_to(tmp_path / "local" / "home")
+        link_home = tmp_path / "home" / "me"
+        (real_home / ".npmrc").write_text(
+            "registry=https://mine.example/\n", encoding="utf-8"
+        )
+        home, cache = (
+            (link_home, real_home) if home_through_the_link else (real_home, link_home)
+        )
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+        assert (
+            child_module._settings_file_ancestor(cache / ".cache" / "ash" / "copies")
+            is None
+        )
+
     def test_the_settings_file_check_names_the_nearest_holder(self, tmp_path):
         """Read with the real check: the nearest directory above the candidate
         that holds one of the three files is named, with the file."""

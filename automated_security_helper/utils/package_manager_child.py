@@ -255,15 +255,18 @@ def _settings_file_ancestor(path: Path) -> Optional[Tuple[Path, str]]:
     --output-dir ./ash-out``) has ancestors the operator owns, and the
     checkout's root holds the repository's own ``.npmrc``. The operator's home
     directory is left out: the files there are the operator's, and yarn reads
-    them wherever it runs.
+    them wherever it runs. The home is matched by its real path, so a home
+    spelled through a link (``HOME=/home/me`` where ``/home`` links to
+    ``/local/home``, or the cache path spelled one way and ``HOME`` the other)
+    is still the home and its files do not disqualify the cache below it.
     """
     try:
-        home: Optional[Path] = Path.home()
-    except (KeyError, RuntimeError):
+        home: Optional[str] = os.path.realpath(Path.home())
+    except (KeyError, RuntimeError, OSError):
         home = None
     current = Path(os.path.abspath(path))
     for directory in (current, *current.parents):
-        if home is not None and directory == home:
+        if home is not None and os.path.realpath(directory) == home:
             continue
         for name in _YARN_SETTINGS_FILES:
             try:
