@@ -306,6 +306,41 @@ class TestAPackagePathNamingNoProjectIsRefusedAcrossTheProjects:
         assert "'api'" in message
         assert "skips" in message
 
+    def test_a_copy_in_a_project_this_run_scanned_excuses_nothing(self, caplog):
+        """``web`` was scanned and read the entry's ``path`` as about ``api``,
+        so the copy it holds never meets the entry: the entry applies nowhere.
+        The base read every project of the plan for the copy and told the
+        operator the run skipped ``web``, which it did not."""
+        policy = WorkspacePolicyConfig(
+            suppressions=[
+                AshSuppression(
+                    path="api/**/*.js",
+                    reason="vendored copy",
+                    package_path="web/node_modules/left-pad",
+                )
+            ]
+        )
+        resolved = self._resolved(policy, "api", "web")
+
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(WorkspaceDefinitionError) as excinfo:
+                refuse_package_paths_naming_no_project(
+                    policy, resolved, every_project_prefix=["api", "web"]
+                )
+
+        message = str(excinfo.value)
+        assert "suppression entry 1" in message
+        assert "'web/node_modules/left-pad'" in message
+        assert "that its path reaches" in message
+        assert not [
+            record for record in caplog.records if "skips" in record.getMessage()
+        ]
+
+    def test_the_project_policy_carries_the_prefix_it_was_pushed_down_into(self):
+        (api,) = self._resolved(self._policy("node_modules/left-pad"), "apps\\api")
+
+        assert api.project_prefix == "apps/api"
+
     def test_an_entry_whose_path_reaches_no_project_is_left_alone(self):
         """A dropped ``path`` is about other projects and is silent by design;
         the package_path of such an entry is not judged either."""

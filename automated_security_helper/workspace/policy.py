@@ -208,6 +208,10 @@ class ProjectPolicy:
             named no copy inside this project, so the entry was dropped here.
             The resolver reads both across every project
             (:func:`refuse_package_paths_naming_no_project`).
+        project_prefix: The project's workspace-relative path, as the policy was
+            pushed down into it, forward-slash separated. Carried so the
+            cross-project read can tell the projects this run scanned from the
+            plan's skipped ones without a second argument naming them.
     """
 
     effective_threshold: str | None
@@ -218,6 +222,7 @@ class ProjectPolicy:
     policy_scanners_gate: bool
     package_paths_applied: tuple[int, ...] = ()
     package_paths_dropped: tuple[int, ...] = ()
+    project_prefix: str = ""
 
 
 def _refuse(message: str) -> WorkspaceDefinitionError:
@@ -994,8 +999,12 @@ def refuse_package_paths_naming_no_project(
     An entry whose ``path`` reached some scanned project, whose ``package_path``
     matched none of them, and which names a copy in a project of the plan this
     run does not scan (a skipped project) is right and merely inert this run:
-    logged once, not refused. An entry whose ``path`` reached no scanned project
-    is about other projects, as a dropped ``path`` is, and is left alone.
+    logged once, not refused. Only the skipped projects are read for that copy:
+    a copy in a project this run scanned excuses nothing, because that project
+    read the entry's ``path`` and found it about another project, so the entry
+    applies nowhere and is refused with the rest. An entry whose ``path``
+    reached no scanned project is about other projects, as a dropped ``path``
+    is, and is left alone.
 
     Args:
         policy: The workspace policy block the projects were resolved from.
@@ -1017,12 +1026,17 @@ def refuse_package_paths_naming_no_project(
     if not nowhere:
         return
 
-    prefixes = [Path(prefix).as_posix() for prefix in every_project_prefix]
+    scanned = {project_policy.project_prefix for project_policy in resolved}
+    skipped = [
+        prefix
+        for prefix in (Path(prefix).as_posix() for prefix in every_project_prefix)
+        if prefix not in scanned
+    ]
     problems: list[str] = []
     for position in nowhere:
         package_path = policy.suppressions[position - 1].package_path or ""
         elsewhere = [
-            prefix for prefix in prefixes if _names_a_copy_in(package_path, prefix)
+            prefix for prefix in skipped if _names_a_copy_in(package_path, prefix)
         ]
         shown = f" '{package_path}'" if quote_values else ""
         if elsewhere:
@@ -1035,7 +1049,8 @@ def refuse_package_paths_naming_no_project(
             continue
         problems.append(
             f"suppression entry {position}: its package_path{shown} names no "
-            f"project's package copy, so the entry would apply nowhere"
+            f"project's package copy that its path reaches, so the entry would "
+            f"apply nowhere"
         )
     if not problems:
         return
@@ -1107,6 +1122,7 @@ def policy_for_project(
             ignore_paths=(),
             policy_scanners=(),
             policy_scanners_gate=False,
+            project_prefix=Path(project_prefix).as_posix(),
         )
 
     ceiling = policy.max_severity_threshold
@@ -1153,4 +1169,5 @@ def policy_for_project(
         policy_scanners_gate=policy.policy_scanners_gate,
         package_paths_applied=suppressions.package_path_applied,
         package_paths_dropped=suppressions.package_path_dropped,
+        project_prefix=Path(project_prefix).as_posix(),
     )
