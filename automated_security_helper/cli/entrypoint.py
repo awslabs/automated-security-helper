@@ -406,14 +406,16 @@ def _report_failure(exc: BaseException, repaired: tuple[str, ...] = ()) -> None:
     # was color codes written as text. ASH's renders the same traceback through
     # ASH's console instead of each. Any other hook is the installer's, so it
     # runs, writing through streams that show what it writes (_installed_hook).
-    # With no stderr as well: the hook may write to stdout, or to nothing a
-    # stream carries (a crash report sent elsewhere), and its call is the
-    # module's promise; _call_shown shows only the streams that exist.
+    # With no stderr as well: its call is the module's promise, and _call_shown
+    # gives it a shown stream onto stdout as its stderr, so a hook that reports
+    # only there is still read. With no stream at all the hook's report reached
+    # nothing a reader has, so the floor below writes ASH's own after the hook.
     hook = _installed_hook(exc)
     if hook is not None:
         try:
             _call_shown(hook, exc)
-            return
+            if stderr is not None or getattr(sys, "stdout", None) is not None:
+                return
         except SystemExit:
             # A hook's sys.exit ends the process with its code, as CPython lets
             # it when it reports an uncaught exception: not a failed report.
@@ -519,7 +521,9 @@ def _call_shown(hook: Callable[..., Any], exc: BaseException) -> None:
     The streams are put back after the call, whatever it did, and a line the hook
     left unended is ended. The shown streams are made before the call: when ASH's
     text rule cannot be imported, nothing could be shown, and the hook is not
-    called.
+    called. With no ``sys.stderr`` the hook's stderr is the shown stdout, so a
+    report written only to stderr is read; with neither stream the hook is
+    called and nothing it writes is carried, which the caller reads as no report.
 
     For the call, the environment says no color (``PYTHON_COLORS=0``,
     ``NO_COLOR``, no ``FORCE_COLOR``): the shown streams are not terminals, but
@@ -535,7 +539,13 @@ def _call_shown(hook: Callable[..., Any], exc: BaseException) -> None:
     from automated_security_helper.utils.process_env import environ_overrides
 
     stdout, stderr = sys.stdout, sys.stderr
-    shown = [_ShownLines(s) if s is not None else None for s in (stdout, stderr)]
+    shown_stdout = _ShownLines(stdout) if stdout is not None else None
+    # With no stderr, the hook's stderr is a shown stream onto stdout: a hook
+    # that writes its report only there (the interpreter's own printer, which a
+    # crash reporter chains to, drops its output when sys.stderr is None) would
+    # otherwise report to nothing, and the run would fail saying nothing.
+    shown_stderr = _ShownLines(stderr) if stderr is not None else shown_stdout
+    shown = [shown_stdout, shown_stderr]
     sys.stdout, sys.stderr = shown
     try:
         # Set and put back through process_env, under its lock, so a scanner
@@ -546,7 +556,9 @@ def _call_shown(hook: Callable[..., Any], exc: BaseException) -> None:
             hook(type(exc), exc, exc.__traceback__)
     finally:
         sys.stdout, sys.stderr = stdout, stderr
-        for stream in shown:
+        # Each shown stream ended once: the two names hold one stream when
+        # stderr was None.
+        for stream in dict.fromkeys(shown):
             if stream is not None:
                 try:
                     stream.end()

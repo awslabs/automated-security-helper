@@ -176,16 +176,45 @@ def _raised() -> RuntimeError:
 
 def test_an_installed_hook_is_called_when_there_is_no_stderr(monkeypatch):
     """The call was gated on a stderr object, so a crash reporter was never
-    called on a console-less host, where it is needed most."""
+    called on a console-less host, where it is needed most. Called there, a hook
+    that reports to stderr alone (the interpreter's printer, which a reporter
+    chains to, writes nothing when sys.stderr is None) reported to nothing, so
+    the hook's stderr is a shown stream onto stdout."""
     calls: list = []
-    monkeypatch.setattr(sys, "excepthook", lambda *args: calls.append(args))
+
+    def hook(exc_type, exc, tb):
+        calls.append(exc)
+        print("::reporter:: saw", exc_type.__name__, file=sys.stderr)
+
+    monkeypatch.setattr(sys, "excepthook", hook)
     monkeypatch.setattr(sys, "stderr", None)
-    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
     error = _raised()
 
     entrypoint._report_failure(error)
 
-    assert [call[1] for call in calls] == [error]
+    assert calls == [error]
+    assert "saw RuntimeError" in out.getvalue()
+    # Once: the hook's report is the report, and ASH's floor adds none.
+    assert entrypoint._BANNER not in out.getvalue()
+
+
+def test_the_floor_reports_after_a_hook_when_no_stream_exists(monkeypatch):
+    """With neither stream the hook is still called, and its report reached
+    nothing a reader has; ASH's own report then goes to the raw descriptors."""
+    raw: list[str] = []
+    monkeypatch.setattr(entrypoint, "_write_raw", lambda text: raw.append(text) or True)
+    calls: list = []
+    monkeypatch.setattr(sys, "excepthook", lambda *args: calls.append(args[1]))
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(sys, "stdout", None)
+    error = _raised()
+
+    entrypoint._report_failure(error)
+
+    assert calls == [error]
+    assert len(raw) == 1 and "RuntimeError: boom" in raw[0]
 
 
 def test_typers_chained_hook_is_called_on_the_standard_traceback_path(monkeypatch):
