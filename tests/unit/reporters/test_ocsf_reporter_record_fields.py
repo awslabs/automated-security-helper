@@ -14,6 +14,7 @@
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -23,6 +24,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
     _FINDING_UID_NAMESPACE,
     ACTIVITY_NAME,
+    CONVERSION_SHORTFALL_LABEL,
     OcsfReporter,
 )
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
@@ -321,3 +323,45 @@ class TestTheFallbackRecordKeepsWhatItCanRead:
         assert finding.severity_id == SeverityId.integer_5
         assert finding.vulnerabilities[0].severity == "CRITICAL"
         assert "workspace_project:api" in (finding.metadata.labels or [])
+
+
+class TestTheShortfallRecordCannotCostTheFindings:
+    def test_a_shortfall_record_that_cannot_be_built_leaves_the_findings(
+        self, reporter, monkeypatch, caplog
+    ):
+        """The shortfall record was built inside the findings array's guard,
+        whose answer to an exception is the error envelope, so one rejected
+        record discarded every finding it stood beside. The findings are now
+        written as they are and the loss of the note is an error that names the
+        counts it would have carried."""
+        model = AshAggregatedResults()
+        model.sarif.runs[0].results = [
+            Result(ruleId="R1", level=Level.error, message=Message(text="a")),
+            Result(ruleId="R2", level=Level.error, message=Message(text="b")),
+        ]
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("status failed")
+
+        # Every finding takes the fallback path, so the array is degraded and
+        # the shortfall record is called for.
+        monkeypatch.setattr(reporter, "_determine_status_from_suppressions", explode)
+
+        def rejected(*args, **kwargs):
+            raise ValueError("the shortfall record was rejected")
+
+        monkeypatch.setattr(reporter, "_create_shortfall_finding", rejected)
+
+        with caplog.at_level(logging.ERROR):
+            records = json.loads(reporter.report(model))
+
+        assert [r["vulnerabilities"][0]["title"] for r in records] == ["R1", "R2"]
+        assert all("error" not in r for r in records)
+        assert all(
+            CONVERSION_SHORTFALL_LABEL not in (r["metadata"].get("labels") or [])
+            for r in records
+        )
+        assert any(
+            "shortfall record could not be built" in m and "2 degraded" in m
+            for m in caplog.messages
+        )

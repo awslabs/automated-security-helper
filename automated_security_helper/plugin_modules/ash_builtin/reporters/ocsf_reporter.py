@@ -1023,6 +1023,34 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             vulnerabilities=[],
         )
 
+    def _shortfall_record(
+        self,
+        missing: int,
+        degraded: int,
+        metadata: Metadata,
+        current_time_ms: int,
+    ) -> Optional[Dict[str, Any]]:
+        """The shortfall record as the array carries it, or None when it could
+        not be built or dumped.
+
+        Guarded alone, apart from the findings array's guard: a record the model
+        rejected used to raise into that guard, whose answer is the error
+        envelope, so one bad note about missing findings cost every finding
+        that was present. The findings are kept; the loss of the note is logged
+        with the counts it would have carried.
+        """
+        try:
+            return self._create_shortfall_finding(
+                missing, degraded, metadata, current_time_ms
+            ).model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
+        except Exception as e:  # noqa: BLE001 -- the findings outrank the note
+            ASH_LOGGER.error(
+                f"The OCSF shortfall record could not be built ({e}); {missing} "
+                f"absent and {degraded} degraded finding(s) go unrecorded in the "
+                "array, which is written with the findings it holds"
+            )
+            return None
+
     def _create_shortfall_finding(
         self,
         missing: int,
@@ -1361,20 +1389,24 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             findings_data.extend(skipped_project_data)
 
             # One record for what this array does not carry whole, so the file
-            # says it is incomplete; see _create_shortfall_finding.
+            # says it is incomplete; see _create_shortfall_finding. Built under
+            # its own guard: this try's except returns the error envelope, so a
+            # shortfall record the model rejected discarded every finding it
+            # stood beside.
             missing = failed_results_count + serialization_failures
+            shortfall = None
             if missing or degraded_findings_count:
-                findings_data.append(
-                    self._create_shortfall_finding(
-                        missing, degraded_findings_count, metadata, current_time_ms
-                    ).model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
+                shortfall = self._shortfall_record(
+                    missing, degraded_findings_count, metadata, current_time_ms
                 )
+                if shortfall is not None:
+                    findings_data.append(shortfall)
 
             final_json = json.dumps(findings_data, indent=2, default=str)
             # Counted apart from the findings rather than folded in, for the same
             # reason the records are marked in the output: a log line that called
             # them findings would be the first place the conflation appeared.
-            shortfall_records = 1 if (missing or degraded_findings_count) else 0
+            shortfall_records = 1 if shortfall is not None else 0
             ASH_LOGGER.info(
                 f"Successfully generated OCSF report with "
                 f"{len(findings_data) - len(skipped_project_data) - shortfall_records} "
