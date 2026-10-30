@@ -226,7 +226,10 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.path_probe import probe_path
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.fs_guard import (
+    open_for_write,
+    read_bytes_at_most,
+)
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import (
@@ -640,6 +643,14 @@ def config_ignore_patterns(config_path: Path) -> List[str]:
     return sorted(patterns)
 
 
+#: The most of a scanned tree's own actionlint config ``tree_config_problem`` reads
+#: and parses in ASH's process. An actionlint config is a few lines (runner labels,
+#: config variables, ignore patterns); one past this is treated as a file that does
+#: not parse, so a large file in a scanned tree costs ASH one bounded read, never
+#: an unbounded parse (actionlint, in its own bounded subprocess, still reads it).
+TREE_CONFIG_READ_BOUND = 1 << 20
+
+
 def tree_config_problem(target: Path) -> Optional[Tuple[str, str]]:
     """``(name, problem)`` when the scanned tree's own actionlint config cannot be
     read as YAML, or None.
@@ -649,23 +660,45 @@ def tree_config_problem(target: Path) -> Optional[Tuple[str, str]]:
     whatever ``-config-file`` names, and a file it cannot read or parse ends the
     run with exit 3 before any workflow is linted. The first candidate that
     exists is the one it reads, so only that one is checked here. Read as
-    actionlint's YAML reader reads it, by its byte-order mark, and parsed with
-    PyYAML's safe loader, which accepts the aliases actionlint accepts. A file
+    actionlint's YAML reader reads it, following a link as its ``os.ReadFile``
+    does and by its byte-order mark, through the bounded guarded read (at most
+    ``TREE_CONFIG_READ_BOUND`` bytes; a longer file is reported as a problem
+    without being parsed, and anything but a regular file is refused by the
+    read), and parsed with PyYAML's safe loader, which accepts the aliases
+    actionlint accepts and constructs an alias by reference, not by copy. A file
     PyYAML cannot parse and actionlint can (a date in a shape PyYAML rejects,
     deeper nesting than its recursion allows) is reported here too, which costs
     that run its local-reference resolution and nothing else; the reverse (a
     ``paths`` glob doublestar refuses, a duplicate key) is not seen here and is
-    reported by actionlint as before.
+    reported by actionlint as before. Every failure of the read or the parse is
+    an answer, never an exception out of here: the escape outside Unicode that
+    PyYAML's scanner hands to ``chr()`` (a ValueError, or an OverflowError past
+    the C int), a MemoryError from the parse, an unreadable file.
     """
     for name in _DEFAULT_CONFIG_CANDIDATES:
         path = target / name
         if not path.is_file():
             continue
         try:
-            yaml.safe_load(decode_workflow(path.read_bytes()))
+            data = read_bytes_at_most(
+                Path(os.path.realpath(path)), TREE_CONFIG_READ_BOUND + 1
+            )
+            if len(data) > TREE_CONFIG_READ_BOUND:
+                problem = (
+                    f"longer than {TREE_CONFIG_READ_BOUND} bytes, more than an "
+                    "actionlint config holds; not parsed"
+                )
+                return name, problem
+            yaml.safe_load(decode_workflow(data))
         except yaml.YAMLError as exc:
             return name, _yaml_problem(exc)
-        except (OSError, ValueError, RecursionError) as exc:
+        except (
+            OSError,
+            ValueError,
+            OverflowError,
+            RecursionError,
+            MemoryError,
+        ) as exc:
             return name, str(exc) or exc.__class__.__name__
         return None
     return None
@@ -1504,7 +1537,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         ).absolute()
 
     def _stage_workflows(self, target: Path, workflows: List[str]) -> Path:
-        """A copy of *workflows* (paths relative to *target*) outside the tree.
+        """A copy of *workflows* (every selected path, relative to *target*) outside
+        the tree, made once before the batches run.
 
         For a tree whose own actionlint config does not parse (see
         ``tree_config_problem``): made new for this run in the scanner run's
@@ -1513,14 +1547,17 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         so actionlint finds no project root there, reads no config of the tree's
         and reports the same relative paths it would have reported in the tree.
         Each file is read from the tree (the selection already refused links that
-        leave it) and written through the output guard, so a link planted at a
-        copy's name is never followed.
+        leave it) and written through the output guard with the copy's directory
+        as its root, so a link planted at a copy's name, or at any directory
+        between, is refused rather than followed.
         """
         root = empty_tool_directory("actionlint-workflows", context=self.context)
         source = Path(target).absolute()
         for rel in workflows:
             data = (source / rel).read_bytes()
-            with open_for_write(root / rel, binary=True, make_parents=True) as copy:
+            with open_for_write(
+                root / rel, binary=True, make_parents=True, root=root
+            ) as copy:
                 copy.write(data)
         return root
 
@@ -1868,10 +1905,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             self.output[output_before:] = [json.dumps(redacted)]
             redacted_recorded = True
 
-            # actionlint ran in the target, so its paths are relative to it. A
-            # source finding stays relative (the scan reads it from the source
-            # directory); a converted finding is made absolute under the work
-            # directory, which is how the scan recognizes a converted file.
+            # actionlint ran in the target, or in a copy laid out like it (the
+            # run_root above), so its paths are relative to the target either
+            # way. A source finding stays relative (the scan reads it from the
+            # source directory); a converted finding is made absolute under the
+            # work directory, which is how the scan recognizes a converted file.
             sarif_dict = _joined_sarif(sarif_dicts)
             self.tool_version = sarif_dict["runs"][0]["tool"]["driver"]["version"]
             if self.tool_version.lstrip("v") != PINNED_VERSION.lstrip("v"):

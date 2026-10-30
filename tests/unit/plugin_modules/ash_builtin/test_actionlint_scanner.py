@@ -1061,6 +1061,71 @@ def test_tree_config_problem_is_none_without_a_config_or_with_a_parseable_one(
     assert module.tree_config_problem(tmp_path) is None
 
 
+@pytest.mark.unit
+def test_tree_config_problem_reads_at_most_its_bound_and_never_parses_past_it(
+    tmp_path, monkeypatch
+):
+    """A large file in a scanned tree costs ASH one bounded read, not a parse:
+    the bound is monkeypatched small so the test writes a few bytes, and the
+    loader is replaced by one that fails the test if it is ever called."""
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "actionlint.yaml").write_text("paths: {}\n" * 4)
+    monkeypatch.setattr(module, "TREE_CONFIG_READ_BOUND", 16)
+
+    def never(_text):
+        raise AssertionError("a file past the bound must not be parsed")
+
+    monkeypatch.setattr(module.yaml, "safe_load", never)
+
+    problem = module.tree_config_problem(tmp_path)
+
+    assert problem is not None
+    assert problem[0] == ".github/actionlint.yaml"
+    assert "longer than 16 bytes" in problem[1]
+
+
+@pytest.mark.parametrize(
+    ("body", "fragment"),
+    [
+        (b"\xef\xbb\xbfpaths: [\n", "line"),
+        ('key: "\\UFFFFFFFF"\n'.encode(), ""),
+    ],
+)
+@pytest.mark.unit
+def test_tree_config_problem_answers_a_bom_prefixed_or_escape_broken_file(
+    tmp_path, body, fragment
+):
+    """Read by its byte-order mark as actionlint reads it, and an escape outside
+    Unicode (which PyYAML's scanner lets chr() raise on) is an answer, never an
+    exception out of the check."""
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "actionlint.yaml").write_bytes(body)
+
+    problem = module.tree_config_problem(tmp_path)
+
+    assert problem is not None
+    assert problem[0] == ".github/actionlint.yaml"
+    assert fragment in problem[1]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_tree_config_problem_follows_a_link_as_actionlint_does(tmp_path):
+    """actionlint's os.ReadFile follows a linked config, so a link to a malformed
+    file is a problem and a link to a parseable one is not."""
+    (tmp_path / ".github").mkdir()
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("paths: [\n")
+    good = tmp_path / "good.yaml"
+    good.write_text("paths: {}\n")
+    link = tmp_path / ".github" / "actionlint.yaml"
+    link.symlink_to(bad)
+    assert module.tree_config_problem(tmp_path) is not None
+    link.unlink()
+    link.symlink_to(good)
+    assert module.tree_config_problem(tmp_path) is None
+
+
 @pytest.mark.parametrize("operator", [True, False])
 @pytest.mark.unit
 def test_config_file_is_passed_only_when_the_operator_set_it(
