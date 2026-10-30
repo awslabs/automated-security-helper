@@ -172,24 +172,47 @@ BOM = {
 
 
 def _as_the_reporter_emits(report: CycloneDXReport) -> dict:
-    """The document ``cyclonedx_reporter`` writes.
+    """The document ``cyclonedx_reporter`` writes, through the reporter's own
+    serialization (``serialize_bom``), not a copy of it.
 
     The reporter dumps the fields that were set, and before dumping it marks the
-    envelope fields set (``CycloneDXReporter.report`` assigns ``bom.bomFormat``,
-    ``bom.specVersion`` and ``bom.version`` to themselves), so a BOM whose scanner
-    wrote no ``version`` is emitted with the spec default, 1, before and after a
-    results-file round trip alike. A bare exclude_unset dump reads ``version`` as
-    unset before the round trip and as set after it (the stored results file is a
-    full dump, which writes the default, and re-validation marks it set), and that
-    difference is the reporter's own envelope, not something the round trip added.
+    envelope fields set, so a BOM whose scanner wrote no ``version`` is emitted
+    with the spec default, 1, before and after a results-file round trip alike.
+    A bare exclude_unset dump reads ``version`` as unset before the round trip
+    and as set after it (the stored results file is a full dump, which writes the
+    default, and re-validation marks it set), and that difference is the
+    reporter's own envelope, not something the round trip added. Calling the
+    reporter's function means a change to its dump flags or its envelope marks
+    changes what these tests compare, as it changes ``ash report``.
     """
-    bom = report.model_copy()
-    bom.bomFormat = bom.bomFormat
-    bom.specVersion = bom.specVersion
-    bom.version = bom.version
-    return json.loads(
-        bom.model_dump_json(by_alias=True, exclude_unset=True, exclude_none=True)
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
+        serialize_bom,
     )
+
+    return json.loads(serialize_bom(report))
+
+
+def test_the_reporter_itself_emits_what_the_round_trip_tests_compare(tmp_path):
+    """The must-flag control for using the reporter's function: the reporter's
+    ``report`` output for a results model carrying BOM is byte for byte what
+    ``serialize_bom`` returns for that BOM, and the BOM given in is left as it
+    was (no envelope field marked set on the caller's model)."""
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
+        CycloneDXReporter,
+        CycloneDXReporterConfig,
+        serialize_bom,
+    )
+
+    report = CycloneDXReport.model_validate(BOM)
+    fields_set_before = set(report.model_fields_set)
+    model = AshAggregatedResults(cyclonedx=report)
+    context = PluginContext(source_dir=tmp_path, output_dir=tmp_path / "out")
+    reporter = CycloneDXReporter(context=context, config=CycloneDXReporterConfig())
+    assert reporter.report(model) == serialize_bom(report)
+    assert json.loads(serialize_bom(report))["version"] == 1
+    assert set(report.model_fields_set) == fields_set_before
 
 
 def test_a_results_file_round_trip_adds_no_field_the_scanner_did_not_write():
