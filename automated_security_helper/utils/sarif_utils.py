@@ -1070,29 +1070,56 @@ def _only_the_spelling_as_written_names_a_file(
     if decoded == written or not source_dir_prefix:
         return False
 
-    def present(text: str) -> bool:
-        import posixpath
+    return _spelling_names_a_file(
+        written, source_dir_prefix
+    ) and not _spelling_names_a_file(decoded, source_dir_prefix)
 
-        # A written relative URI carries no literal backslash (``%5C`` is its
-        # form); one that does is not folded by posixpath and would be read as
-        # a separator by a Windows stat, so it is not probed either. A drive
-        # letter in any form (``C:/x``, and the drive-relative ``C:x``, which
-        # a Windows join places at the drive's current directory, outside the
-        # root) and a ``//host/share`` are read the way Windows does.
-        if (
-            not text
-            or "\\" in text
-            or os.path.isabs(text)
-            or PureWindowsPath(text).drive
-            or text.startswith("/")
-        ):
-            return False
-        folded = posixpath.normpath(text)
-        if folded == ".." or folded.startswith(("../", "/")):
-            return False
-        return os.path.exists(os.path.join(source_dir_prefix, folded))
 
-    return present(written) and not present(decoded)
+def _spelling_names_a_file(text: str, source_dir_prefix: str) -> bool:
+    """Whether the relative spelling *text* names a file or directory under the
+    scan root, probed only where it lies lexically under ``source_dir_prefix``
+    (the confinement :func:`_only_the_spelling_as_written_names_a_file` states).
+    """
+    import posixpath
+
+    # A written relative URI carries no literal backslash (``%5C`` is its
+    # form); one that does is not folded by posixpath and would be read as
+    # a separator by a Windows stat, so it is not probed either. A drive
+    # letter in any form (``C:/x``, and the drive-relative ``C:x``, which
+    # a Windows join places at the drive's current directory, outside the
+    # root) and a ``//host/share`` are read the way Windows does.
+    if (
+        not text
+        or not source_dir_prefix
+        or "\\" in text
+        or os.path.isabs(text)
+        or PureWindowsPath(text).drive
+        or text.startswith("/")
+    ):
+        return False
+    folded = posixpath.normpath(text)
+    if folded == ".." or folded.startswith(("../", "/")):
+        return False
+    return os.path.exists(os.path.join(source_dir_prefix, folded))
+
+
+def _second_match_spelling(
+    raw_uri: str, decoded: str, as_written: str, source_dir_prefix: str
+) -> str | None:
+    """The recorded spelling a suppression or ignore path is matched against
+    second, or None when there is no second match.
+
+    None when *raw_uri* holds no escape, when the recorded spelling equals the
+    decoded one, and when the recorded spelling itself names a file under the
+    scan root: then a sibling literally named ``my%20app/a.py`` exists beside
+    ``my app/a.py``, an entry written ``my%20app/a.py`` is for that sibling,
+    and matching it against the decoded finding would suppress the wrong file.
+    """
+    if "%" not in raw_uri or as_written == decoded:
+        return None
+    if _spelling_names_a_file(as_written, source_dir_prefix):
+        return None
+    return as_written
 
 
 def _normalize_sarif_uri(
@@ -1709,8 +1736,13 @@ class _OutputDirExclusion:
         decoded = self.normalize(raw_uri)
         matched = _matching_ignore_path(decoded, ignore_paths)
         if matched is None and "%" in raw_uri:
-            as_written = self.normalize(raw_uri, decode=False)
-            if as_written != decoded:
+            as_written = _second_match_spelling(
+                raw_uri,
+                decoded,
+                self.normalize(raw_uri, decode=False),
+                self.source_dir_prefix,
+            )
+            if as_written is not None:
                 matched = _matching_ignore_path(as_written, ignore_paths)
         return matched
 
@@ -2122,18 +2154,22 @@ def _apply_suppressions_within_budget(
                     # copies ``a%20b.py`` from the report (or saves the dialog's
                     # entry, written from it) into a suppression named a file the
                     # decoded match never met. Matched second, when the decoded
-                    # spelling differs and misses.
+                    # spelling differs and misses, and never when a sibling file
+                    # literally so named exists (_second_match_spelling).
                     if raw_uri and "%" in raw_uri:
-                        uri_as_written = _normalize_sarif_uri(
+                        uri_as_written = _second_match_spelling(
                             raw_uri,
+                            uri,
+                            _normalize_sarif_uri(
+                                raw_uri,
+                                _source_dir_prefix,
+                                _source_dir_prefix_with_slash,
+                                _source_dir_prefix_no_drive,
+                                _source_dir_basename,
+                                decode=False,
+                            ),
                             _source_dir_prefix,
-                            _source_dir_prefix_with_slash,
-                            _source_dir_prefix_no_drive,
-                            _source_dir_basename,
-                            decode=False,
                         )
-                        if uri_as_written == uri:
-                            uri_as_written = None
                     line_start = None
                     line_end = None
                     if (

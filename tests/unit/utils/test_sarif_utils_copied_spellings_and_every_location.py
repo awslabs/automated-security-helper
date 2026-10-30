@@ -182,6 +182,49 @@ class TestAnIgnorePathMeetsBothSpellings:
         assert len(report.runs[0].results) == 1
 
 
+class TestASiblingLiterallyNamedKeepsTheSecondMatchOff:
+    """When a file literally named ``my%20app/a.py`` exists beside ``my app/a.py``,
+    an entry written ``my%20app/a.py`` is for that sibling: the finding on the
+    decoded file is not suppressed or dropped by it. With only the decoded file
+    on disk the second match still applies."""
+
+    @staticmethod
+    def _both_on_disk(tmp_path: Path) -> None:
+        source = tmp_path / "src"
+        (source / "my app").mkdir(parents=True)
+        (source / "my app" / "a.py").write_text("x = 1\n", encoding="utf-8")
+        (source / "my%20app").mkdir()
+        (source / "my%20app" / "a.py").write_text("y = 2\n", encoding="utf-8")
+
+    def test_a_suppression_in_the_escaped_spelling_is_for_the_sibling(self, tmp_path):
+        self._both_on_disk(tmp_path)
+        report = apply_suppressions_to_sarif(
+            _report(_result("my%20app/a.py")),
+            _context(tmp_path, _suppressing("my%20app/a.py")),
+        )
+        assert not report.runs[0].results[0].suppressions
+
+    def test_an_ignore_path_in_the_escaped_spelling_is_for_the_sibling(self, tmp_path):
+        self._both_on_disk(tmp_path)
+        report = apply_suppressions_to_sarif(
+            _report(_result("my%20app/a.py")),
+            _context(tmp_path, _ignoring("my%20app/")),
+        )
+        assert len(report.runs[0].results) == 1
+
+    def test_with_only_the_decoded_file_on_disk_the_second_match_applies(
+        self, tmp_path
+    ):
+        source = tmp_path / "src"
+        (source / "my app").mkdir(parents=True)
+        (source / "my app" / "a.py").write_text("x = 1\n", encoding="utf-8")
+        report = apply_suppressions_to_sarif(
+            _report(_result("my%20app/a.py")),
+            _context(tmp_path, _suppressing("my%20app/a.py")),
+        )
+        assert report.runs[0].results[0].suppressions
+
+
 class TestAClientExclusionNeedsEveryLocation:
     @pytest.fixture
     def excluding_vendor(self, monkeypatch):
