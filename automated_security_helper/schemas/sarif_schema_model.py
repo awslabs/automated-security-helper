@@ -3194,9 +3194,14 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
     ``ruleId`` is what correlates a result to its rule afterwards. A result that
     named its rule by index, or by a ``rule`` reference, and not by ``ruleId``
     is given the id of the rule those name (``_rule_id_of_reference``). The
-    reference's own ``index`` and ``toolComponent`` point into the incoming
-    run's arrays, which the merged run does not have, so they are dropped from
-    the copy; a reference left with neither id nor guid is dropped whole.
+    reference's own ``index`` and its ``toolComponent.index`` point into the
+    incoming run's arrays, which the merged run does not have, so they are
+    dropped from the copy; the component's ``name`` and ``guid`` name it by
+    content, and the component itself is folded into the aggregate's
+    extensions under that name, so they stay (a reference with no component
+    reads as the driver's, SARIF 3.52.7, and after the merge the driver is the
+    aggregate's own). A component reference left with neither is dropped, and
+    a reference left with neither id nor guid is dropped whole.
     """
     reference = dumped.get("rule")
     if dumped.get("ruleId") is None:
@@ -3215,6 +3220,15 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
             for key, value in reference.items()
             if key not in ("index", "toolComponent") and value is not None
         }
+        component_reference = reference.get("toolComponent")
+        if isinstance(component_reference, dict):
+            component = {
+                key: value
+                for key, value in component_reference.items()
+                if key != "index" and value is not None
+            }
+            if component.get("name") is not None or component.get("guid") is not None:
+                kept["toolComponent"] = component
         if kept.get("id") is None and kept.get("guid") is None:
             dumped.pop("rule", None)
         else:

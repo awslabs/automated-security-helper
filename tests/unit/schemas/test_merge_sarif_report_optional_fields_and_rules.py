@@ -343,10 +343,41 @@ class TestResultsKeepTheirRuleById:
         reference = merged.rule.root.model_dump(exclude_unset=True)
         assert reference["id"] == "T-0"
         assert "index" not in reference
-        assert "toolComponent" not in reference
+        # The component reference loses its index, which counted a position in
+        # the incoming run's extensions, and keeps its name: a reference with no
+        # component reads as the driver's (SARIF 3.52.7), which after the merge is
+        # the aggregate's own, so dropping it whole re-attributed the rule.
+        assert reference["toolComponent"] == {"name": "pack"}
         # The copy is a full dump, so None-valued keys (guid, properties) may
         # ride along in the kept reference; whether they are dropped is pinned
         # by the test of the kept reference's value filter, not here.
+
+    def test_a_component_reference_naming_only_an_index_is_dropped(self):
+        """The control: with no name and no guid the component reference says
+        nothing the aggregate can read, so it goes with its index."""
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [
+                        _finding(
+                            "T-0", rule={"id": "T-0", "toolComponent": {"index": 1}}
+                        )
+                    ],
+                    [],
+                    rules=[{"id": "T-0"}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        reference = (
+            aggregated.runs[0].results[0].rule.root.model_dump(exclude_unset=True)
+        )
+        assert reference["id"] == "T-0"
+        assert "toolComponent" not in reference
 
     def test_a_rule_index_with_a_tool_component_reads_that_components_rules(self):
         """SARIF 3.27.6: ruleIndex indexes the component rule.toolComponent names.
