@@ -97,6 +97,38 @@ class TestARedirectLeavingHttpsIsRefused:
         assert "SECRET-TOKEN" not in printed
         assert len(printed.strip().splitlines()) == 1
 
+    def test_the_refusal_prints_the_answering_url_without_its_credentials(self, capsys):
+        # Red before: the message began with ``req.full_url`` as it was, so on a chain
+        # (a release host's 302 to a signed object URL, which then answers 302 to
+        # http) the signed URL's query string and any user name or password in it
+        # were printed to standard error.
+        signed = (
+            "https://user:PASSWORD-IN-URL@objects.example.invalid/asset.tar.gz"
+            "?sig=FIRST-HOP-SECRET&X-Amz-Credential=ALSO-SECRET#fragment-secret"
+        )
+        handler = installer._HttpsOnlyRedirects()
+        with pytest.raises(SystemExit) as raised:
+            handler.redirect_request(
+                urllib.request.Request(signed),
+                io.BytesIO(b""),
+                302,
+                "Found",
+                {},
+                "http://example.invalid/asset.tar.gz?sig=SECOND-HOP-SECRET",
+            )
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        printed = capsys.readouterr().err
+        assert "https://objects.example.invalid/asset.tar.gz answered 302" in printed
+        assert "http://example.invalid/asset.tar.gz" in printed
+        for secret in (
+            "PASSWORD-IN-URL",
+            "FIRST-HOP-SECRET",
+            "ALSO-SECRET",
+            "fragment-secret",
+            "SECOND-HOP-SECRET",
+        ):
+            assert secret not in printed
+
     def test_the_refusal_leaves_download_with_the_integrity_status(
         self, monkeypatch, tmp_path
     ):

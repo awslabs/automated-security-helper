@@ -282,6 +282,16 @@ def resolve_arch(machine: str) -> str:
         )
 
 
+def _plain_url(url: str) -> str:
+    """``url`` as scheme://host/path, for a message.
+
+    The query string, the fragment and any user name or password are left out: on a
+    signed download URL they carry the credential.
+    """
+    parts = urllib.parse.urlsplit(url)
+    return f"{parts.scheme}://{parts.hostname or ''}{parts.path}"
+
+
 class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
     """Follow a redirect only to an https URL.
 
@@ -291,16 +301,17 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
 
     A refused redirect leaves with ``_EXIT_INTEGRITY``. It used to escape as an
     ``HTTPError``, a traceback with status 1, which with-retry answers by fetching
-    the same URL, and being sent to plain http, again. The target is printed without
-    its query string, which for a signed download URL is a credential.
+    the same URL, and being sent to plain http, again. Both URLs in the message, the
+    one that answered and the one it named, are printed through ``_plain_url``: a
+    signed download URL carries its credential in the query string, and on a chain
+    of redirects the request that answered is itself a signed URL.
     """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        target = urllib.parse.urlsplit(newurl)
-        if target.scheme.lower() != "https":
+        if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
             raise _refuse(
-                f"{req.full_url} answered {code} {msg}: refusing a redirect to the "
-                f"non-https URL {target.scheme}://{target.hostname or ''}{target.path}",
+                f"{_plain_url(req.full_url)} answered {code} {msg}: refusing a "
+                f"redirect to the non-https URL {_plain_url(newurl)}",
                 _EXIT_INTEGRITY,
             )
         return super().redirect_request(req, fp, code, msg, headers, newurl)
