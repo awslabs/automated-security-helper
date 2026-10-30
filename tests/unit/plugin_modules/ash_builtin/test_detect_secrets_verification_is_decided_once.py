@@ -15,6 +15,9 @@ helper every site calls, and it reads both shapes.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
@@ -22,7 +25,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScanSettingsFiltersUsed,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
 MODULE_SPELLING = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
@@ -66,7 +69,13 @@ def test_entries_of_no_known_shape_enable_nothing():
     assert DetectSecretsScanner._verifies([MODULE_SPELLING]) is False
 
 
-def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path):
+def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path, monkeypatch):
+    """The real ``scan`` writes the worker's request; its ``verify`` flag and
+    the filters it dumps agree with ``sandbox_requirements.network``. The
+    request is read from the file the scanner hands the process runner, so the
+    test cannot drift from how ``scan`` builds it. Offline mode is pinned off:
+    it drops the verification filter whatever its source, and the test is about
+    the three readings of one filter, not about offline mode."""
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
@@ -74,7 +83,10 @@ def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path):
         DetectSecretsScannerConfigOptions,
         DetectSecretsScanSettings,
     )
+    from automated_security_helper.utils import subprocess_utils
 
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(DetectSecretsScanner, "_scanner_offline", lambda self: False)
     context = PluginContext(
         source_dir=tmp_path / "src",
         output_dir=tmp_path / "out",
@@ -82,6 +94,8 @@ def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path):
         config=get_default_config(),
     )
     context.source_dir.mkdir(parents=True)
+    context.output_dir.mkdir(parents=True)
+    (context.source_dir / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
     scanner = DetectSecretsScanner(
         context=context,
         config=DetectSecretsScannerConfig(
@@ -93,17 +107,24 @@ def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path):
             )
         ),
     )
-    settings = scanner.config.options.scan_settings
-    # The dictionary ``scan`` hands the worker, built the way ``scan`` builds it.
-    dumped = settings.model_dump(
-        exclude_defaults=True, exclude_none=True, exclude_unset=True
+    assert scanner._verification_permitted is True, (
+        "precondition: the operator's own filter turns verification on"
     )
-    dumped.setdefault(
-        "filters_used", [f.model_dump(exclude_none=True) for f in settings.filters_used]
-    )
+    requests: list[dict] = []
 
+    def record(*, command, **_kwargs):
+        requests.append(json.loads(Path(command[-2]).read_text(encoding="utf-8")))
+        Path(command[-1]).write_text("[]", encoding="utf-8")
+        return {"returncode": 0, "timed_out": False, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", record)
+
+    scanner.scan(target=context.source_dir, target_type="source")
+
+    assert len(requests) == 1, requests
+    request = requests[0]
+    filters = request["settings"].get("filters_used", [])
     assert scanner.sandbox_requirements.network is True
-    assert DetectSecretsScanner._verifies(dumped.get("filters_used", [])) is True
-    assert scanner.sandbox_requirements.network is DetectSecretsScanner._verifies(
-        dumped.get("filters_used", [])
-    )
+    assert request["verify"] is True
+    assert DetectSecretsScanner._verifies(filters) is True
+    assert scanner.sandbox_requirements.network is request["verify"]
