@@ -206,11 +206,33 @@ def _refuse_a_config_a_scan_refuses(
     except PluginModuleImportError as e:
         if not unfindable:
             return
-        secho(shown_on_one_line(f"{frame}: {e}"), fg=typer.colors.RED)
-        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
+        _refuse_in_the_editors_words(e, frame)
     except ASHConfigValidationError as e:
-        secho(shown_on_one_line(f"{frame}: {e}"), fg=typer.colors.RED)
-        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
+        _refuse_in_the_editors_words(e, frame)
+
+
+def _refuse_in_the_editors_words(error: ASHConfigValidationError, frame: str) -> None:
+    """Print ``error`` under ``frame`` as ``get`` and ``validate`` print it, exit 3.
+
+    A plugin-module refusal is printed through plugin_module_refusal_message, as
+    the check commands print theirs: ``str(error)`` carries the scan's closing,
+    which names a run the editors do not make and option spellings they do not
+    take. When every refused entry came from ASH_PLUGIN_MODULES the file is not
+    what is wrong, so the line is headed as the check commands head theirs,
+    "Invalid configuration from ASH_PLUGIN_MODULES", in place of ``frame``,
+    instead of sending the operator to edit a file that holds no such entry.
+    Any other configuration refusal is printed as raised.
+    """
+    from automated_security_helper.plugins.loader import PluginModuleError
+
+    if isinstance(error, PluginModuleError):
+        message = plugin_module_refusal_message(error)
+        if _refused_only_from_environment(error):
+            frame = "Invalid configuration from ASH_PLUGIN_MODULES"
+    else:
+        message = str(error)
+    secho(shown_on_one_line(f"{frame}: {message}"), fg=typer.colors.RED)
+    raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
 
 
 def _config_path_or_discovered(config: str | None, source_dir: Path) -> Path | None:
