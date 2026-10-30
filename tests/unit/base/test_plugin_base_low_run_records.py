@@ -311,7 +311,9 @@ def test_an_inputs_accessor_that_fails_leaves_the_carry_intact(
     plugin_context, tmp_path, plugin_class
 ):
     log = tmp_path / "Probe.stderr.log"
-    log.write_text("tool said no\n", encoding="utf-8")
+    # Bytes, not write_text: on Windows write_text turns the newline into "\r\n",
+    # and the carried text is what the file holds.
+    log.write_bytes(b"tool said no\n")
     plugin = _named(plugin_class, plugin_context, use_uv_tool=True)
     post_run = {"error": "the response could not be read"}
 
