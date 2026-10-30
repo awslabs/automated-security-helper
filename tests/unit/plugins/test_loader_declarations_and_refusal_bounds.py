@@ -235,6 +235,17 @@ def test_the_namespace_refusal_splits_a_comma_joined_entry():
         refuse_plugin_modules_outside_namespace([f"{_PREFIX}a_ash_plugins,evil_pkg"])
 
 
+def test_a_name_repeated_across_entries_is_refused_once():
+    """Red before the fix: the comma split dropped the deduplication the loop
+    had over whole entries, so a repeated name was named twice in the refusal."""
+    with pytest.raises(Exception) as caught:
+        refuse_plugin_modules_outside_namespace(
+            ["evil_pkg", f"evil_pkg,{_PREFIX}a_ash_plugins", "evil_pkg"]
+        )
+
+    assert str(caught.value).count("'evil_pkg'") == 1
+
+
 # ---------------------------------------------------------------------------
 # A finder that raises
 # ---------------------------------------------------------------------------

@@ -1055,7 +1055,8 @@ def refuse_plugin_modules_outside_namespace(
     either. Entries are split on commas as every loader splits them
     (``split_plugin_modules``), so a raw config entry naming two modules is two
     names here too and not one misnamed path; empty entries (a trailing comma)
-    name nothing and are ignored.
+    name nothing and are ignored, and a name repeated across entries is named
+    once.
 
     ``shown`` maps a name to how the message names it, for a name a config read
     from the environment; any other name is named as it is. Callers build it
@@ -1086,7 +1087,10 @@ def refuse_plugin_modules_outside_namespace(
         for entry in entries
         for piece in (entry.split(",") if isinstance(entry, str) else (entry,))
     ]
-    for name in pieces:
+    # Deduplicated after the split, in first-seen order, so a name repeated
+    # across entries is named once in the refusal (the dict.fromkeys the loop
+    # ran over before the split did this for whole entries).
+    for name in dict.fromkeys(pieces):
         if not name:
             continue
         label = labels.get(name, name)
