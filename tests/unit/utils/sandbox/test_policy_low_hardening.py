@@ -300,12 +300,19 @@ def test_uv_is_pointed_at_the_mounted_directories(layout, monkeypatch):
 
 
 def test_a_uv_variable_the_environment_sets_is_left_alone(layout, monkeypatch):
+    """A set UV_TOOL_DIR is kept as given while the unset sibling is still hinted."""
+    data = layout.home.parent / "data"
+    (data / "uv" / "python").mkdir(parents=True)
+    (data / "uv" / "tools").mkdir()
+    monkeypatch.setenv("XDG_DATA_HOME", str(data))
     tools = layout.home.parent / "my-tools"
     tools.mkdir()
     monkeypatch.setenv("UV_TOOL_DIR", str(tools))
+
     env = _policy(layout).filter_env({"UV_TOOL_DIR": str(tools)})
+
     assert env["UV_TOOL_DIR"] == str(tools)
-    assert "UV_PYTHON_INSTALL_DIR" not in env
+    assert Path(env["UV_PYTHON_INSTALL_DIR"]) == data / "uv" / "python"
 
 
 def test_an_unusable_home_is_the_passwd_home_or_the_root(layout, monkeypatch):
@@ -325,6 +332,32 @@ def test_an_unusable_home_is_the_passwd_home_or_the_root(layout, monkeypatch):
         monkeypatch.setattr(module, "_passwd_home", lambda: None, raising=False)
     monkeypatch.setenv("HOME", "")
     assert policy_module._policy_home() == Path("/")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows reads USERPROFILE, not HOME")
+def test_an_empty_home_falls_to_the_passwd_home(layout, monkeypatch):
+    """HOME="" is unset to the policy, as to usable_home: Path.home() alone reads it as the root."""
+    passwd = layout.home.parent / "passwd-home"
+    passwd.mkdir()
+    for module in (policy_module, backends_module):
+        monkeypatch.setattr(module, "_passwd_home", lambda: passwd, raising=False)
+    monkeypatch.setenv("HOME", "")
+
+    assert policy_module._policy_home() == passwd
+    assert _policy(layout).home == passwd
+    assert policy_module._homes() == [Path(os.path.realpath(passwd))]
+
+
+def test_a_faked_home_is_the_policys_home(layout, monkeypatch):
+    """A test that fakes the home by patching Path.home is honored, as the system-read tests do."""
+    faked = layout.home.parent / "faked-home"
+    faked.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: faked))
+    for module in (policy_module, backends_module):
+        monkeypatch.setattr(module, "_passwd_home", lambda: None, raising=False)
+
+    assert policy_module._policy_home() == faked
+    assert policy_module._homes() == [Path(os.path.realpath(faked))]
 
 
 def test_an_anchored_bin_path_inside_the_tree_is_data(layout, monkeypatch):
