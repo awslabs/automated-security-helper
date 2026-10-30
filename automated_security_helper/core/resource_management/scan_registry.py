@@ -912,6 +912,32 @@ class ScanRegistry:
                     return entry
             return None
 
+    def scan_writing_output(self, output_directory: str) -> Optional[str]:
+        """The id of a scan that still occupies ``output_directory`` as its output, or None.
+
+        The same question :meth:`register_scan` asks before it admits a scan whose
+        output directory another scan writes, asked under the same lock and with
+        the same canonical form (:func:`_canonical_directory`), so a caller that
+        checks several output directories before registering any of them
+        (the workspace scan, one per project) gets the registry's own idea of
+        occupancy (:meth:`ScanRegistryEntry.occupies_its_directory`): a closed
+        entry occupies its directory while its runner has not finished, and a
+        cancelled or failed entry that never had a runner, or whose runner is
+        done, occupies nothing. A status list read off ``list_scans`` got both
+        halves wrong: it refused the rollback entries a workspace registration
+        marks CANCELLED without ever running, and admitted a timed-out scan whose
+        entries are FAILED while its thread still writes.
+        """
+        requested = _canonical_directory(output_directory)
+        with self._registry_lock:
+            for entry in self._registry.values():
+                if (
+                    entry.canonical_output_directory == requested
+                    and entry.occupies_its_directory()
+                ):
+                    return entry.scan_id
+            return None
+
     def occupants_of_directory(
         self, directory_path: str, except_scan_id: Optional[str] = None
     ) -> List[str]:

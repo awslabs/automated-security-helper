@@ -22,15 +22,20 @@ from __future__ import annotations
 import asyncio
 import threading
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 from unittest.mock import patch
 
 import pytest
 
 from automated_security_helper.cli.mcp import workspace as workspace_module
 from automated_security_helper.core.exceptions import ASHConfigSourceError
+from automated_security_helper.core.previous_results import SettleHandoff
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
+)
+from automated_security_helper.core.resource_management.scan_registry import (
+    MCScanStatus,
+    ScanRegistry,
 )
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
@@ -150,24 +155,29 @@ class TestTheGitignoreIsWrittenOnceTheOutputDirectoryExists:
         assert wrote is False or (output_dir / ".gitignore").exists()
 
 
-class _Registry:
-    def __init__(self, entries: List[Dict[str, Any]]) -> None:
-        self.entries = entries
-
-    def list_scans(self):
-        return list(self.entries)
+def _registered(registry: ScanRegistry, tmp_path: Path, output: Path, name: str) -> str:
+    """Register a single scan of its own source directory writing into ``output``."""
+    source = tmp_path / "sources" / name
+    source.mkdir(parents=True, exist_ok=True)
+    return registry.register_scan(str(source), str(output))
 
 
 class TestAnOutputDirectoryAnotherScanWritesIsRefused:
+    """Against the real ``ScanRegistry``: occupancy is the registry's own.
+
+    The earlier form fed a stand-in whose entries were lowercase status strings
+    under an ``output_directory`` key and never met the real shape; these tests
+    register real scans and move them through the registry's own statuses.
+    """
+
     def test_a_live_scan_on_the_same_output_directory_refuses_the_workspace(
         self, tmp_path
     ):
         """Red at the base: only the DIRECTORY scanned was compared, never the output."""
         plan = _plan(tmp_path)
         outputs = workspace_module._project_outputs(plan, _settings(tmp_path))
-        registry = _Registry(
-            [{"status": "running", "output_directory": str(outputs["api"])}]
-        )
+        registry = ScanRegistry()
+        _registered(registry, tmp_path, outputs["api"], "other")
 
         with pytest.raises(MCPResourceError, match="being written by another scan"):
             workspace_module._refuse_outputs_another_scan_writes(
@@ -175,17 +185,55 @@ class TestAnOutputDirectoryAnotherScanWritesIsRefused:
             )
 
     def test_a_finished_scan_on_it_does_not(self, tmp_path):
-        """Control: a completed or failed scan holds its directory no more."""
+        """Control: a completed or failed scan with no runner holds its directory no more."""
         plan = _plan(tmp_path)
         outputs = workspace_module._project_outputs(plan, _settings(tmp_path))
-        registry = _Registry(
-            [
-                {"status": "completed", "output_directory": str(outputs["api"])},
-                {"status": "failed", "output_directory": str(outputs["api"])},
-                {"status": "running", "output_directory": str(tmp_path / "elsewhere")},
-            ]
-        )
+        registry = ScanRegistry()
+        completed = _registered(registry, tmp_path, outputs["api"], "done")
+        registry.update_scan_status(completed, MCScanStatus.COMPLETED)
+        _registered(registry, tmp_path, tmp_path / "elsewhere", "elsewhere")
 
+        workspace_module._refuse_outputs_another_scan_writes(registry, plan, outputs)
+
+    def test_a_cancelled_entry_that_never_ran_does_not_refuse(self, tmp_path):
+        """Red at the base: every CANCELLED entry blocked until the registry pruned it.
+
+        ``_register_projects`` rolls a refused workspace registration back by
+        marking its entries CANCELLED without a runner, and a user's cancel of a
+        pending scan leaves the same shape; a retry was then told its own output
+        directory was being written, when nothing was writing there.
+        """
+        plan = _plan(tmp_path)
+        outputs = workspace_module._project_outputs(plan, _settings(tmp_path))
+        registry = ScanRegistry()
+        rolled_back = _registered(registry, tmp_path, outputs["api"], "rolled-back")
+        registry.update_scan_status(rolled_back, MCScanStatus.CANCELLED)
+        assert registry.get_scan(rolled_back).has_runner is False
+
+        workspace_module._refuse_outputs_another_scan_writes(registry, plan, outputs)
+
+    def test_a_failed_entry_whose_runner_still_writes_refuses(self, tmp_path):
+        """Red at the base: a FAILED entry was skipped whatever its runner state.
+
+        A timed-out workspace scan's entries are FAILED at once while its thread
+        runs on for seconds, stopping scanners and putting previous results back;
+        a second scan admitted into that window writes beside it.
+        """
+        plan = _plan(tmp_path)
+        outputs = workspace_module._project_outputs(plan, _settings(tmp_path))
+        registry = ScanRegistry()
+        timed_out = _registered(registry, tmp_path, outputs["api"], "timed-out")
+        entry = registry.get_scan(timed_out)
+        entry.has_runner = True
+        registry.update_scan_status(timed_out, MCScanStatus.FAILED, "timed out")
+
+        with pytest.raises(MCPResourceError, match="being written by another scan"):
+            workspace_module._refuse_outputs_another_scan_writes(
+                registry, plan, outputs
+            )
+
+        # Once the runner has settled the directory, the same entry occupies nothing.
+        entry.runner_done.set()
         workspace_module._refuse_outputs_another_scan_writes(registry, plan, outputs)
 
 
@@ -352,6 +400,153 @@ class TestTheWorkerSettlesBeforeItGivesTheClaimBack:
             )
 
         assert order == ["worker_starts", "settle", "worker_returns"]
+
+
+class _Abandoned(SettleHandoff):
+    """A handoff whose task gave up, and settled, before the thread started."""
+
+    def thread_starts(self) -> bool:
+        return False
+
+
+class _Counted:
+    """The per-session limit's view of a claim: how often its place was returned."""
+
+    def __init__(self) -> None:
+        self.returned = 0
+
+    def scan_returned(self) -> None:
+        self.returned += 1
+
+
+class TestAThreadTheTaskAbandonedSettlesNothing:
+    def test_a_thread_that_lost_the_handoff_runs_no_settle(self, tmp_path):
+        """Red at the base: the early return sat inside the try whose finally settled.
+
+        ``thread_starts`` answers False only after ``task_abandons`` answered
+        True, and the task settles in that case. A second settle from the late
+        thread restored previous results into directories ``_release_projects``
+        had freed, which another scan may hold by then.
+        """
+        order: List[str] = []
+
+        with patch.object(workspace_module, "ScanPresence") as presence:
+            presence.return_value.__enter__.return_value = None
+            presence.return_value.__exit__.return_value = False
+            result = asyncio.run(
+                workspace_module._execute(
+                    plan=_plan(tmp_path),
+                    settings=_settings(tmp_path),
+                    project_outputs={},
+                    progress_reporter=None,
+                    session_id=None,
+                    claim=_Claim(order),
+                    settle=lambda: order.append("settle"),
+                    handoff=_Abandoned(),
+                )
+            )
+
+        assert result is None
+        assert order == [], order
+
+
+class TestAWorkerThatMissedTheClaimReleasesNothing:
+    def test_worker_returns_after_a_lost_claim_releases_once(self):
+        """Red at the base: worker_returns released whatever the holder was.
+
+        The call left first (call_returns released the place); the worker then
+        finds worker_starts False, and its finally still calls worker_returns.
+        The place in the per-session limit is returned exactly once.
+        """
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+
+        claim.call_returns()
+        assert claim.worker_starts() is False
+        claim.worker_returns()
+
+        assert counted.returned == 1
+
+    def test_a_worker_that_started_holds_the_claim_until_it_returns(self):
+        """Control: the ordinary order releases exactly once, from the worker."""
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+
+        assert claim.worker_starts() is True
+        claim.call_returns()
+        assert counted.returned == 0
+        claim.worker_returns()
+
+        assert counted.returned == 1
+
+    def test_the_run_itself_releases_once_when_the_call_left_first(self, tmp_path):
+        """Through ``_run``: the raise for a lost claim does not release twice."""
+        order: List[str] = []
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+        claim.call_returns()
+
+        with (
+            patch.object(workspace_module, "ScanPresence") as presence,
+            pytest.raises(RuntimeError, match="cancelled before it started"),
+        ):
+            presence.return_value.__enter__.return_value = None
+            presence.return_value.__exit__.return_value = False
+            asyncio.run(
+                workspace_module._execute(
+                    plan=_plan(tmp_path),
+                    settings=_settings(tmp_path),
+                    project_outputs={},
+                    progress_reporter=None,
+                    session_id=None,
+                    claim=claim,
+                    settle=lambda: order.append("settle"),
+                )
+            )
+
+        assert counted.returned == 1
+        # The thread had started, so the task did not settle: the thread must.
+        assert order == ["settle"]
+
+
+class TestTheSettleRunsUnderTheSessionsPresence:
+    def test_settle_runs_before_the_presence_is_given_up(self, tmp_path):
+        """Red at the base: the settle ran after the ScanPresence block had closed.
+
+        The settle writes previous results back under the session's tree, and the
+        presence is what keeps another server's TTL sweep off that tree.
+        """
+        order: List[str] = []
+
+        def _exit(*_args):
+            order.append("presence_exit")
+            return False
+
+        with (
+            patch.object(
+                workspace_module,
+                "execute_workspace",
+                side_effect=lambda p, s, **k: _result(p, s),
+            ),
+            patch.object(workspace_module, "ScanPresence") as presence,
+        ):
+            presence.return_value.__enter__.return_value = None
+            presence.return_value.__exit__.side_effect = _exit
+            asyncio.run(
+                workspace_module._execute(
+                    plan=_plan(tmp_path),
+                    settings=_settings(tmp_path),
+                    project_outputs={},
+                    progress_reporter=None,
+                    session_id=None,
+                    claim=_Claim(order),
+                    settle=lambda: order.append("settle"),
+                )
+            )
+
+        assert order.count("settle") == 1
+        assert order.index("settle") < order.index("presence_exit"), order
+        assert order.index("presence_exit") < order.index("worker_returns"), order
 
 
 class TestAnUnreadableServerConfigIsARefusal:

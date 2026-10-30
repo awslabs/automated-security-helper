@@ -1378,34 +1378,27 @@ def _refuse_outputs_another_scan_writes(
     directories resolve to one place: both then wrote their spool and unified
     results into it, each run's cleanup removing the other's. The same question
     is asked of each project's output directory here, before anything is
-    registered, against every scan that still occupies its directory.
+    registered, and it is asked of the registry itself
+    (``ScanRegistry.scan_writing_output``): occupancy is the registry's own
+    (``ScanRegistryEntry.occupies_its_directory``, under its lock, in its
+    canonical form), not a status list. A status list refused the rollback
+    entries ``_register_projects`` marks CANCELLED without ever running them, so
+    a retry right after a refused or cancelled workspace scan was told its own
+    output was being written; and it admitted a timed-out scan whose entries
+    are FAILED at once (``_stop_at_timeout``) while its thread still writes for
+    seconds, so a second scan was let into exactly that window.
     """
-    requested = {}
     for project in plan.active_projects:
         output = project_outputs[project.key]
-        try:
-            requested[output.resolve()] = project.key
-        except OSError:
-            requested[output] = project.key
-    for entry in registry.list_scans():
-        if entry.get("status") not in ("pending", "running", "cancelled"):
+        if registry.scan_writing_output(str(output)) is None:
             continue
-        other = entry.get("output_directory")
-        if not other:
-            continue
-        try:
-            other_path = Path(other).resolve()
-        except OSError:
-            other_path = Path(other)
-        key = requested.get(other_path)
-        if key is None:
-            continue
+        key = project.key
         raise MCPResourceError(
             f"Output directory for project {key!r} is being written by another "
-            f"scan: {other}",
+            f"scan: {output}",
             context={
                 "project_key": key,
-                "output_directory": str(other),
+                "output_directory": str(output),
                 "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
                 "suggestions": [
                     "Wait for the other scan to complete",
@@ -1775,7 +1768,17 @@ class _WorkspaceScanClaim:
             return True
 
     def worker_returns(self) -> None:
+        """Release the claim the worker took; nothing when the call released it.
+
+        ``_run``'s ``finally`` reaches here on every exit, including the one where
+        ``worker_starts`` answered False because the call had already left and
+        released (``call_returns``). Releasing again there gave away a place in
+        the per-session limit, or the session's tree, that another scan of the
+        session held by then.
+        """
         with self._lock:
+            if self._holder != "worker":
+                return
             self._holder = "released"
         self._release()
 
@@ -1908,44 +1911,52 @@ async def _execute(
             settle()
 
     def _run() -> Optional[WorkspaceRunResult]:
+        # Before any try/finally: a thread the task abandoned first finds the
+        # task has settled the scan already (task_abandons answered True, and the
+        # task's own settle followed). Settling again here would restore previous
+        # results into directories _release_projects has freed, which another
+        # scan may have registered and set aside by now.
+        if not starts.thread_starts():
+            return None
         try:
-            if not starts.thread_starts():
-                return None
-            try:
-                if claim is not None and not claim.worker_starts():
-                    raise RuntimeError(
-                        "the workspace scan was cancelled before it started"
-                    )
+            if claim is not None and not claim.worker_starts():
+                raise RuntimeError("the workspace scan was cancelled before it started")
+            claimed = claim is not None and bool(claim.claimed)
+            with ScanPresence(session_id if claimed else None):
+                # A session that delivered nothing has no tree of its own for the
+                # scan to hold, so the scan takes neither its claim nor its lock,
+                # and the session may deliver one meanwhile.
+                #
+                # The settle runs INSIDE the presence: it writes previous results
+                # back under the session's tree, and the presence is what keeps
+                # another server's TTL sweep off that tree while it does.
                 try:
-                    claimed = claim is not None and bool(claim.claimed)
-                    with ScanPresence(session_id if claimed else None):
-                        # A session that delivered nothing has no tree of its own
-                        # for the scan to hold, so the scan takes neither its
-                        # claim nor its lock, and the session may deliver one
-                        # meanwhile.
-                        with cancel_scope(stop) if stop is not None else nullcontext():
-                            if claimed:
-                                # The clock starts once the session's lock is
-                                # held (_under_session_lock), not while waiting
-                                # for it.
-                                return _under_session_lock(
-                                    session_id,
-                                    plan,
-                                    settings,
-                                    cancel_events=cancel_events,
-                                    on_locked=on_thread_start,
-                                )
-                            if on_thread_start is not None:
-                                on_thread_start()
-                            return _offline_aware(
-                                plan, settings, cancel_events=cancel_events
+                    with cancel_scope(stop) if stop is not None else nullcontext():
+                        if claimed:
+                            # The clock starts once the session's lock is held
+                            # (_under_session_lock), not while waiting for it.
+                            return _under_session_lock(
+                                session_id,
+                                plan,
+                                settings,
+                                cancel_events=cancel_events,
+                                on_locked=on_thread_start,
                             )
+                        if on_thread_start is not None:
+                            on_thread_start()
+                        return _offline_aware(
+                            plan, settings, cancel_events=cancel_events
+                        )
                 finally:
                     _settle_once()
-            finally:
-                if claim is not None:
-                    claim.worker_returns()
         finally:
+            # The claim goes back after the settle (above); worker_returns
+            # releases nothing when the call released first. A thread that
+            # started but found the call gone (worker_starts False) is the one
+            # path that reaches here unsettled: the task did not settle, because
+            # the thread had started, so this settle is its only one.
+            if claim is not None:
+                claim.worker_returns()
             _settle_once()
 
     monitor: Optional["asyncio.Task[None]"] = None
