@@ -23,6 +23,14 @@ render now refuses it.
 the twin of the generate case above: the list names a file that was renamed or deleted,
 and nothing reported it. A missing page now fails the run. A template kept, or a page with
 no version reference, is still a skip.
+
+The "unknown" version check sat in the per-template step, so a root with no version
+printed the same error once per target (fifteen times for the real list) and the summary
+listed every target for one cause. ``generate_all_from_templates`` now reads the version
+once, before the first template, reports it once and lists every target as not generated.
+``failures`` is the list of the last ``*_all`` run: a ``convert_to_template`` or
+``generate_from_template`` called on its own only returns False and leaves it alone, so
+entries from earlier calls no longer pile up in it.
 """
 
 from __future__ import annotations
@@ -156,6 +164,78 @@ class TestAnUnknownVersionIsNotRendered:
         monkeypatch.setattr(f"{VERSION_MODULE}._installed_version", lambda: None)
         assert _run(monkeypatch, root, "generate", ["README.md"]) == 1
         assert root.joinpath("README.md").read_text(encoding="utf-8") == PIN_STALE
+
+
+def _with_extra_pages(root: Path, names: list[str]) -> None:
+    """Give root more targets, each with a template and a stale page."""
+    for name in names:
+        root.joinpath(name + ".template").write_text(PIN_TEMPLATE, encoding="utf-8")
+        root.joinpath(name).write_text(PIN_STALE, encoding="utf-8")
+
+
+class TestTheVersionIsReadOncePerRun:
+    def test_an_unknown_version_is_one_error_not_one_per_template(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Red before: the check sat in the per-template step, so three templates
+        printed three identical errors."""
+        root = _project(tmp_path / "project", with_version=False)
+        _with_extra_pages(root, ["a.md", "b.md"])
+        monkeypatch.setattr(f"{VERSION_MODULE}._installed_version", lambda: None)
+        manager = module.VersionTemplateManager(root)
+        manager.target_files = ["README.md", "a.md", "b.md"]
+        assert manager.generate_all_from_templates() == 0
+        assert capsys.readouterr().out.count("no version could be determined") == 1
+        assert manager.failures == [
+            root / "README.md.template",
+            root / "a.md.template",
+            root / "b.md.template",
+        ]
+        for name in manager.target_files:
+            assert root.joinpath(name).read_text(encoding="utf-8") == PIN_STALE
+
+    def test_a_run_asks_for_the_version_once(self, tmp_path, monkeypatch):
+        """Red before: every template asked again, three times for three targets."""
+        root = _project(tmp_path / "project")
+        _with_extra_pages(root, ["a.md", "b.md"])
+        real_get_version = importlib.import_module(VERSION_MODULE).get_version
+        calls = []
+
+        def counting(project_root=None):
+            calls.append(project_root)
+            return real_get_version(project_root)
+
+        monkeypatch.setattr(f"{VERSION_MODULE}.get_version", counting)
+        manager = module.VersionTemplateManager(root)
+        manager.target_files = ["README.md", "a.md", "b.md"]
+        assert manager.generate_all_from_templates() == 3
+        assert calls == [root]
+        assert manager.failures == []
+
+
+class TestFailuresDescribeOneRun:
+    def test_failed_calls_made_directly_do_not_pile_up(self, tmp_path):
+        """Red before: every failed per-file call added to the list that the
+        class describes as the last run's, so a caller looping over files saw the
+        entries of every earlier call."""
+        root = _project(tmp_path / "project")
+        manager = module.VersionTemplateManager(root)
+        missing = root / "docs/missing.md.template"
+        assert manager.generate_from_template(missing) is False
+        assert manager.generate_from_template(missing) is False
+        unreadable = root / "unreadable.md"
+        unreadable.mkdir()  # open(..., "r") on a directory raises
+        assert manager.convert_to_template(unreadable) is False
+        assert manager.failures == []
+
+    def test_a_run_lists_only_its_own_failures(self, tmp_path):
+        """The control: a direct failure before the run does not reach its list."""
+        root = _project(tmp_path / "project")
+        manager = module.VersionTemplateManager(root)
+        manager.target_files = ["README.md", "docs/missing.md"]
+        manager.generate_from_template(root / "other.md.template")
+        assert manager.generate_all_from_templates() == 1
+        assert manager.failures == [root / "docs/missing.md.template"]
 
 
 class TestConvertExitStatus:

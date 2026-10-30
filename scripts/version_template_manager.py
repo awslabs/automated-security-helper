@@ -9,7 +9,7 @@ are replaced with placeholders and then dynamically generated.
 import re
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 import argparse
 
 # Add the project root to the path so we can import our version management
@@ -131,8 +131,12 @@ class VersionTemplateManager:
         # could not process: a read or write that failed, a version that could not be
         # determined, a listed target with no template (generate) or no page
         # (convert). Both return only a count, so without this a caller cannot tell a
-        # skipped file from a failed one.
+        # skipped file from a failed one. Each run replaces the list; a convert or
+        # generate of one file called directly does not touch it.
         self.failures: List[Path] = []
+        # The version generate_all_from_templates read for the run in progress, so
+        # each template does not read it again; None outside such a run.
+        self._run_version: Optional[str] = None
         # The ref an install command uses. A release's docs render it as the release,
         # the docs site's main version as `main` (see render_for_branch).
         self.version_placeholder = "{{VERSION}}"
@@ -350,15 +354,25 @@ class VersionTemplateManager:
             overwrite: Replace an existing template instead of keeping it.
 
         Returns:
-            True if conversion was successful and changes were made.
+            True if conversion was successful and changes were made. A call made
+            directly returns False for a failure as for a skip and does not touch
+            ``failures``, which describes one convert_all_to_templates run.
+        """
+        return self._convert(file_path, overwrite) is True
+
+    def _convert(self, file_path: Path, overwrite: bool) -> Optional[bool]:
+        """convert_to_template, telling a failure from a skip.
+
+        Returns True when a template was written, False for a skip that is not an
+        error (a template kept, no version reference, no change), and None for a
+        failure, which it has already reported.
         """
         if not file_path.exists():
             # A listed target with no page is the convert-side twin of a target with no
             # template, which generate reports as a failure: the list names a file that
             # was renamed or deleted, and a run that exits 0 over it hides that.
             print(f"Error: File {file_path} does not exist.")
-            self.failures.append(file_path)
-            return False
+            return None
 
         template_path = file_path.with_suffix(file_path.suffix + self.template_suffix)
         if template_path.exists() and not overwrite:
@@ -396,8 +410,27 @@ class VersionTemplateManager:
 
         except Exception as e:
             print(f"Error converting {file_path} to template: {e}")
-            self.failures.append(file_path)
-            return False
+            return None
+
+    def _version_to_render(self) -> str:
+        """The version of the checkout the templates belong to, never "unknown"."""
+        # Imported here rather than at the top, so loading this module (as the
+        # mkdocs hook docs/hooks/install_refs.py does) does not import ASH.
+        from automated_security_helper.utils.version_management import get_version
+
+        # Read from the checkout's pyproject.toml: the installed distribution's
+        # metadata lags a `version_bump.py set` until the next install, and rendered
+        # the old version into every doc.
+        version = get_version(self.project_root)
+        if version == "unknown":
+            # get_version's last resort when neither the checkout's pyproject.toml
+            # nor installed metadata names a version. Rendered, it would replace
+            # every pin in every doc with the word "unknown".
+            raise ValueError(
+                f"no version could be determined for {self.project_root}; "
+                "not rendering the docs with a placeholder version"
+            )
+        return version
 
     def generate_from_template(self, template_path: Path) -> bool:
         """
@@ -407,34 +440,20 @@ class VersionTemplateManager:
             template_path: Path to the template file.
 
         Returns:
-            True if generation was successful.
+            True if generation was successful. A call made directly returns False
+            for a failure and does not touch ``failures``, which describes one
+            generate_all_from_templates run.
         """
         if not template_path.exists():
             print(f"Warning: Template {template_path} does not exist, skipping.")
-            self.failures.append(template_path)
             return False
 
         try:
             with open(template_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # Imported here rather than at the top, so loading this module (as the
-            # mkdocs hook docs/hooks/install_refs.py does) does not import ASH.
-            from automated_security_helper.utils.version_management import get_version
-
-            # Replace version placeholder with the version of the checkout the
-            # templates belong to, read from its pyproject.toml: the installed
-            # distribution's metadata lags a `version_bump.py set` until the
-            # next install, and rendered the old version into every doc.
-            version = get_version(self.project_root)
-            if version == "unknown":
-                # get_version's last resort when neither the checkout's pyproject.toml
-                # nor installed metadata names a version. Rendered, it would replace
-                # every pin in every doc with the word "unknown".
-                raise ValueError(
-                    f"no version could be determined for {self.project_root}; "
-                    "not rendering the docs with a placeholder version"
-                )
+            # generate_all_from_templates reads the version once for its whole run.
+            version = self._run_version or self._version_to_render()
             content = self.render(content, version)
 
             # Generate output file (remove .template suffix)
@@ -452,7 +471,6 @@ class VersionTemplateManager:
 
         except Exception as e:
             print(f"Error generating from template {template_path}: {e}")
-            self.failures.append(template_path)
             return False
 
     def convert_all_to_templates(self, overwrite: bool = False) -> int:
@@ -473,7 +491,10 @@ class VersionTemplateManager:
 
         for file_path_str in self.target_files:
             file_path = self.project_root / file_path_str
-            if self.convert_to_template(file_path, overwrite=overwrite):
+            converted = self._convert(file_path, overwrite)
+            if converted is None:
+                self.failures.append(file_path)
+            elif converted:
                 converted_count += 1
 
         return converted_count
@@ -482,17 +503,36 @@ class VersionTemplateManager:
         """
         Generate all files from their templates.
 
+        The version is read once, before the first template: when it cannot be
+        determined that is one error for the run, with every target listed in
+        ``failures``, not one error per template.
+
         Returns:
             Number of files successfully generated. Every target that is not
             generated is listed in ``failures``.
         """
         self.failures = []
         generated_count = 0
+        templates = [
+            self.project_root / (file_path_str + self.template_suffix)
+            for file_path_str in self.target_files
+        ]
 
-        for file_path_str in self.target_files:
-            template_path = self.project_root / (file_path_str + self.template_suffix)
-            if self.generate_from_template(template_path):
-                generated_count += 1
+        try:
+            self._run_version = self._version_to_render()
+        except Exception as e:
+            print(f"Error generating from templates: {e}")
+            self.failures.extend(templates)
+            return 0
+
+        try:
+            for template_path in templates:
+                if self.generate_from_template(template_path):
+                    generated_count += 1
+                else:
+                    self.failures.append(template_path)
+        finally:
+            self._run_version = None
 
         return generated_count
 
