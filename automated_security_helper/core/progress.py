@@ -8,6 +8,7 @@ from automated_security_helper.utils.console import ash_console
 from automated_security_helper.utils.log import (
     ASH_LOGGER,
     ShownHandlerErrors,
+    TextFileFormatter,
     run_handler,
 )
 from automated_security_helper.utils.rich_log_handler import (
@@ -224,10 +225,18 @@ class LiveProgressDisplay:
 
     @staticmethod
     def _console_sink(level: int) -> logging.Handler:
-        """A standard-error log sink at *level*, marked as the run's handler."""
+        """A standard-error log sink at *level*, marked as the run's handler.
+
+        The console's formatter (the one the last-resort handler uses): each
+        message and traceback shown, not obeyed. The lines this sink takes are
+        the ones the panel would have shown, the error that ended the live
+        display among them, and that error quotes the exception's text, which can
+        carry a terminal control or a line that starts a CI command. A plain
+        ``%(message)s`` formatter wrote them to the console as given.
+        """
         sink = _ConsoleSink(sys.stderr)
         sink.setLevel(level)
-        sink.setFormatter(logging.Formatter("%(message)s"))
+        sink.setFormatter(TextFileFormatter("%(message)s", unfiltered=False))
         return run_handler(sink)
 
     def _replace_panel_handler_with_console(self) -> None:
