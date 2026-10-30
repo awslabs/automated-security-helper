@@ -303,7 +303,7 @@ def test_a_worker_stopped_by_its_abandons_cancel_discards_what_the_scan_left(tmp
     """``ScanCancelled`` is a BaseException: the ``except Exception`` arm never
     sees it, and the worker records the project cancelled. The abandon's cancel
     is the ordinary way an abandoned scan stops, so the output it saved before
-    the cancel reached it has to go the same way as a raise's."""
+    the cancel reached it is discarded as a raise's is."""
     _, plan = _make_workspace(tmp_path, ("stopped", "MEDIUM"))
     _SavesThenRaises.error = ScanCancelled("the scan was cancelled")
     project_output = tmp_path / "out" / "projects" / "stopped"
