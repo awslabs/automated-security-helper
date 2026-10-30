@@ -146,14 +146,17 @@ def test_the_response_is_summarized_redacted_at_debug(context, messages):
 
 
 def test_the_summary_unit():
+    """The error text is not part of the summary at all: a token in it (the
+    runner quotes the failing command, credentials included) is never on the
+    line, and the second stderr line is not either."""
     summary = NpmAuditScanner._response_summary(
         "pnpm",
         {
             "stdout": "",
-            "stderr": f"ERR_PNPM_AUDIT_BAD_RESPONSE {TOKEN}\nmore",
+            "stderr": f"ERR_PNPM_AUDIT_BAD_RESPONSE {TOKEN}\nsecond-line-marker-9b2e",
             "returncode": 1,
             "timed_out": True,
-            "error": "the command was stopped",
+            "error": f"the command was stopped: pnpm --token {TOKEN}",
         },
         (TOKEN,),
     )
@@ -163,7 +166,8 @@ def test_the_summary_unit():
     assert "post_run_error" not in summary
     assert "stderr starts: ERR_PNPM_AUDIT_BAD_RESPONSE" in summary
     assert TOKEN not in summary
-    assert "more" not in summary
+    assert "the command was stopped" not in summary
+    assert "second-line-marker-9b2e" not in summary
 
 
 def test_the_summary_drops_the_excerpt_when_the_values_hook_raised():
