@@ -106,13 +106,15 @@ def test_without_a_timeout_the_child_keeps_the_session_and_is_killed_alone():
     process.kill.assert_called_once()
 
 
-def test_a_child_a_caller_put_in_its_own_group_is_still_stopped_as_a_group():
-    """A caller's own start_new_session: the stop reaches the group it leads."""
+@pytest.mark.skipif(os.name == "nt", reason="the session flag is POSIX")
+def test_a_child_a_caller_put_in_its_own_group_is_registered_and_stopped_as_one():
+    """A caller's own start_new_session, no timeout: the group is this runner's
+    to register and to stop, as one it made itself would be."""
     process = _child_that_outlives_its_timeout(KeyboardInterrupt())
     with (
         patch.object(subprocess_utils.subprocess, "Popen", return_value=process),
         patch.object(subprocess_utils, "_note_start", return_value=None),
-        patch.object(subprocess_utils, "_leads_its_own_group", return_value=True),
+        patch.object(subprocess_utils, "_register_group") as register,
         patch.object(subprocess_utils, "_claim_started", return_value=None),
         patch.object(subprocess_utils, "_note_failed_wait"),
         patch.object(subprocess_utils, "_stop_tree") as stop_tree,
@@ -120,24 +122,33 @@ def test_a_child_a_caller_put_in_its_own_group_is_still_stopped_as_a_group():
     ):
         with pytest.raises(KeyboardInterrupt):
             subprocess_utils._run_plain(["tool"], start_new_session=True)
+    register.assert_called_once_with(process)
     stop_tree.assert_called_once_with(process, 0.0, None)
     process.kill.assert_not_called()
 
 
-def test_a_caller_that_names_the_session_flag_keeps_its_value():
-    process = _child_that_outlives_its_timeout(KeyboardInterrupt())
+@pytest.mark.skipif(os.name == "nt", reason="the session flag is POSIX")
+def test_a_caller_that_refuses_the_session_flag_with_a_timeout_is_killed_alone():
+    """The caller's explicit False stands, so the child shares ASH's group: its pid
+    names no group of ours, nothing is registered under it, and the timeout's
+    stop kills the child alone rather than signalling whatever group holds that
+    id."""
+    expired = subprocess.TimeoutExpired(["tool"], 1)
+    process = _child_that_outlives_its_timeout(expired)
     with (
         patch.object(
             subprocess_utils.subprocess, "Popen", return_value=process
         ) as popen,
         patch.object(subprocess_utils, "_note_start", return_value=None),
-        patch.object(subprocess_utils, "_register_group"),
-        patch.object(subprocess_utils, "_claim_started", return_value=None),
-        patch.object(subprocess_utils, "_note_failed_wait"),
-        patch.object(subprocess_utils, "_stop_tree"),
+        patch.object(subprocess_utils, "_register_group") as register,
+        patch.object(subprocess_utils, "_leads_its_own_group", return_value=False),
+        patch.object(subprocess_utils, "_stop_tree") as stop_tree,
+        patch.object(subprocess_utils, "_output_after_stop", return_value=(b"", b"")),
         patch.object(subprocess_utils, "_reap"),
     ):
-        with pytest.raises(KeyboardInterrupt):
+        with pytest.raises(subprocess.TimeoutExpired):
             subprocess_utils._run_plain(["tool"], timeout=1, start_new_session=False)
-    if os.name != "nt":
-        assert popen.call_args.kwargs["start_new_session"] is False
+    assert popen.call_args.kwargs["start_new_session"] is False
+    register.assert_not_called()
+    stop_tree.assert_not_called()
+    process.kill.assert_called_once()

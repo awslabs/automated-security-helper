@@ -2727,9 +2727,20 @@ def _run_plain(
     # registered as a cancellable spawn's is, so the server's last stop and the
     # SIGTERM handler's die-now kill reach it when ASH ends without unwinding;
     # _reap forgets it.
-    own_group = timeout is not None
-    if own_group:
+    if timeout is not None:
         _start_in_own_group(kwargs)
+    # Whether the child leads a group this runner can treat as its own: read
+    # from the flag as it goes to Popen, not from the timeout. On POSIX
+    # _start_in_own_group only sets a default, so a caller's explicit
+    # start_new_session=False stands and the child then shares ASH's group,
+    # timeout or not; registering its pid as a group, or signalling the group
+    # its pid names, would reach a stranger's group that reused the id. A
+    # caller's own True counts the same as this runner's. On Windows the flag
+    # is a creation flag that is always ORed in, so the timeout is the answer.
+    if os.name == "nt":
+        own_group = timeout is not None
+    else:
+        own_group = bool(kwargs.get("start_new_session"))
     # A Ctrl-C while the child is being started is held until the process is in
     # hand (HeldInterrupt), as _run_stoppable and _run_cancellable hold theirs:
     # a KeyboardInterrupt raised inside Popen, after the child exists and
@@ -2755,13 +2766,17 @@ def _run_plain(
                 held.release()
                 stdout, stderr = process.communicate(input_data, timeout=timeout)
             except subprocess.TimeoutExpired as expired:
-                # SIGKILL at once to the whole group (a timeout always has one),
-                # as subprocess.run kills its child at once; a refused stop is
+                # SIGKILL at once, as subprocess.run kills its child at once: to
+                # the whole group where the child leads one, to the child alone
+                # where a caller kept it in ASH's group; a refused stop is
                 # logged and recorded (_stop_child). The record says ASH stopped
                 # it, so its signal is never read as the tool's exit code.
                 if started is not None:
                     started.stopped = True
-                _stop_child(_argv_of(process), process, _stop_tree, 0.0, None)
+                stop = (
+                    _stop_tree if own_group or _leads_its_own_group(process) else _kill
+                )
+                _stop_child(_argv_of(process), process, stop, 0.0, None)
                 # On POSIX communicate already put what it read in the
                 # exception; Windows reads the pipes in threads joined at the
                 # timeout, so what they read is collected after the kill.
