@@ -30,7 +30,8 @@ Properties of ``utils/download_utils.py`` that nothing else pins:
 - archive members are matched on either separator and a zip symlink entry is not
   an executable;
 - a relative tool download cache is not used; a directory at an asset's name is
-  discarded; a staging-side failure keeps the cache entry;
+  discarded; a staging-side failure, the one a close raises included, keeps the
+  cache entry;
 - the install command carries an absent rename as an empty argument, keeps a
   POSIX backslash, and refuses a digest that is not plain hex;
 - opengrep has no Windows arm64 build.
@@ -683,6 +684,52 @@ def test_a_staging_side_failure_keeps_the_cache_entry(monkeypatch, tmp_path, cap
         )
     assert restored is None
     assert (cache / "asset.tar.gz").read_bytes() == payload
+    assert "cache entry is kept" in caplog.text
+
+
+def test_a_staging_copy_that_fails_at_its_close_keeps_the_cache_entry(
+    monkeypatch, tmp_path, caplog
+):
+    """The error a buffered write defers to the close (ENOSPC on the last chunk,
+    EDQUOT or EIO on a quota or network TMPDIR) is a staging-side failure: the entry
+    is kept and the caller downloads. It used to escape the function uncaught."""
+    import hashlib
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    payload = b"the asset"
+    (cache / "asset.tar.gz").write_bytes(payload)
+    monkeypatch.setenv(du._TOOL_DOWNLOAD_CACHE_ENV, str(cache))
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    real_open = open
+
+    class _FailsAtClose:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def write(self, data):
+            return self._inner.write(data)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._inner.close()
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    def opened(path, mode="r", *args, **kwargs):
+        handle = real_open(path, mode, *args, **kwargs)
+        return _FailsAtClose(handle) if mode == "wb" else handle
+
+    monkeypatch.setattr(du, "open", opened, raising=False)
+    with caplog.at_level(logging.WARNING):
+        restored = du._restore_cached_asset(
+            "asset.tar.gz", hashlib.sha256(payload).hexdigest(), staging
+        )
+    assert restored is None
+    assert (cache / "asset.tar.gz").read_bytes() == payload
+    assert "No space left on device" in caplog.text
     assert "cache entry is kept" in caplog.text
 
 

@@ -1610,58 +1610,51 @@ def _restore_cached_asset(
     except OSError as e:
         _discard_cache_entry(cached, str(e))
         return None
+    # The copy tells a failure on the cache side (the entry cannot be read) from
+    # one on the staging side (the private directory cannot be written, a full
+    # TMPDIR): only the first says anything about the entry. The entry used to be
+    # discarded for either, destroying the only offline install source over a
+    # local condition. Either outcome is only recorded inside the two ``with``
+    # blocks and acted on once both files are closed: the discard removed the
+    # entry while ``source`` still held it open, and a failed copy unlinked the
+    # staging file while ``target`` held it open, which Windows refuses
+    # (PermissionError, the file is in use) and so turned a kept-entry fallback
+    # into an install failure. The ``with target`` block is what the staging-side
+    # handler wraps, so the error a close raises when it flushes the last
+    # buffered bytes (ENOSPC, EDQUOT, EIO on a quota or network TMPDIR) is a
+    # staging-side failure too, where it used to escape the function. A partial
+    # staging file is not removed here: ``staging_dir`` is the caller's
+    # TemporaryDirectory, removed whole.
+    cache_failure: Optional[str] = None
+    staging_failure: Optional[str] = None
     source = os.fdopen(fd, "rb")
     with source:
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
-                _discard_cache_entry(cached, "not a regular file")
-                return None
+                cache_failure = "not a regular file"
         except OSError as e:
-            _discard_cache_entry(cached, str(e))
-            return None
-        # The copy tells a failure on the cache side (the entry cannot be read)
-        # from one on the staging side (the private directory cannot be written,
-        # a full TMPDIR): only the first says anything about the entry. The entry
-        # used to be discarded for either, destroying the only offline install
-        # source over a local condition.
-        try:
-            target = open(staged, "wb")
-        except OSError as e:
-            ASH_LOGGER.warning(
-                f"Could not stage cached {asset_name} in {staging_dir}: {e}. The "
-                "cache entry is kept; downloading it again."
-            )
-            return None
-        # A failure inside the copy is recorded here and acted on once both
-        # files are closed: on Windows an open file cannot be unlinked, so the
-        # staged copy's removal (and the cache entry's) used to raise
-        # PermissionError out of this function instead of falling back to the
-        # download.
-        read_failure: Optional[str] = None
-        write_failure: Optional[str] = None
-        with target:
-            while True:
-                try:
-                    chunk = source.read(_HASH_CHUNK_BYTES)
-                except OSError as e:
-                    read_failure = str(e)
-                    break
-                if not chunk:
-                    break
-                try:
-                    target.write(chunk)
-                except OSError as e:
-                    write_failure = str(e)
-                    break
-    if read_failure is not None:
-        staged.unlink(missing_ok=True)
-        _discard_cache_entry(cached, read_failure)
+            cache_failure = str(e)
+        if cache_failure is None:
+            try:
+                with open(staged, "wb") as target:
+                    while True:
+                        try:
+                            chunk = source.read(_HASH_CHUNK_BYTES)
+                        except OSError as e:
+                            cache_failure = str(e)
+                            break
+                        if not chunk:
+                            break
+                        target.write(chunk)
+            except OSError as e:
+                staging_failure = str(e)
+    if cache_failure is not None:
+        _discard_cache_entry(cached, cache_failure)
         return None
-    if write_failure is not None:
-        staged.unlink(missing_ok=True)
+    if staging_failure is not None:
         ASH_LOGGER.warning(
-            f"Could not stage cached {asset_name} in {staging_dir}: {write_failure}. "
-            "The cache entry is kept; downloading it again."
+            f"Could not stage cached {asset_name} in {staging_dir}: "
+            f"{staging_failure}. The cache entry is kept; downloading it again."
         )
         return None
     try:
