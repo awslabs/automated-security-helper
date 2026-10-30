@@ -166,8 +166,17 @@ def on_path(tmp_path, monkeypatch):
     def find_executable(command, *args, **kwargs):
         return str(resolved.grype) if command == "grype" and resolved.grype else None
 
+    def find_executable_for_scan(command, root, *args, **kwargs):
+        # The install command looks a tool up as a scan of the source tree
+        # does (find_executable_for_scan, bound by name on its module); the
+        # scope is ignored here, so the command resolves the same copy the
+        # rest of the test sees.
+        return find_executable(command)
+
     monkeypatch.setattr(subprocess_utils, "find_executable", find_executable)
-    monkeypatch.setattr(dependencies_module, "find_executable", find_executable)
+    monkeypatch.setattr(
+        dependencies_module, "find_executable_for_scan", find_executable_for_scan
+    )
     monkeypatch.setattr(
         subprocess_utils,
         "path_independent_dirs",
