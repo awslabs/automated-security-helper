@@ -222,9 +222,11 @@ def _canonical_tool_name(resolved_name: str, available: Iterable[str]) -> str:
     either: two scanners whose names differ only in case share one selection
     key, and it runs the first and refuses the second as a name already carried
     (core.phases.scan_phase, ``_record_duplicate_scanner_name``), so which plugin
-    an installer picked would be an accident of registry order.
+    an installer picked would be an accident of registry order. One name declared
+    by two plugin classes is one name here: the caller passes a list, and a name
+    listed twice matched itself twice and was refused as ambiguous with itself.
     """
-    names = list(available)
+    names = list(dict.fromkeys(available))
     if resolved_name in names:
         return resolved_name
     key = _selection_key(resolved_name)

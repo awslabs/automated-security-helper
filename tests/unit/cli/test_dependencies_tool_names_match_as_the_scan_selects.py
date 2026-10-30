@@ -179,6 +179,17 @@ class TestCanonicalToolName:
         assert raised.value.name == "SEMGREP"
         assert raised.value.matches == ["Semgrep", "semgrep"]
 
+    def test_one_name_two_plugins_declare_is_matched_once(self):
+        """Two plugin classes can declare one name, and the declared names reach
+        this as a list, so `semgrep` appeared twice, matched itself twice and
+        `--tool Semgrep` was refused as ambiguous with itself."""
+        assert (
+            dependencies_module._canonical_tool_name(
+                "Semgrep", ["semgrep", "bandit", "semgrep"]
+            )
+            == "semgrep"
+        )
+
 
 class TestAmbiguousNamesAreRefused:
     """The scan runs the first of two scanners whose names differ only in case
