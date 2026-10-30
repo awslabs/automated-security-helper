@@ -44,6 +44,7 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.ash_workspace_config import WorkspacePolicyConfig
 from automated_security_helper.config.resolve_config import operator_config_digest
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
@@ -51,6 +52,7 @@ from automated_security_helper.core.exceptions import (
 )
 from automated_security_helper.workspace import resolver
 from automated_security_helper.workspace.plan import ProjectPlan
+from automated_security_helper.workspace.policy import policy_for_project
 from automated_security_helper.workspace.resolver import (
     _apply_workspace_policy,
     _assign_display_labels,
@@ -459,6 +461,51 @@ class TestScannerSections:
         plan = resolve_workspace(workspace)
 
         assert "acme" not in plan.projects[0].scanners
+
+    @pytest.mark.parametrize(
+        "body",
+        [False, "off", [], 0],
+        ids=["bare-false", "string", "list", "zero"],
+    )
+    def test_a_section_that_is_no_mapping_is_off_and_left_to_the_policy(self, body):
+        """The plan reads a bare scalar or a list as an off section, so a policy
+        that requires the scanner lists it as one it adds. Execution switches it
+        on there, and must be handed a section it can switch on (a mapping or a
+        model): the resolver half of that contract is that such a name is a
+        policy scanner, never silently enabled and never dropped."""
+        config = AshConfig.model_validate({"scanners": {"acme": body}})
+
+        enabled, pins, _twins = _scanner_state(config)
+        resolved = policy_for_project(
+            WorkspacePolicyConfig(additional_scanners=["acme"]),
+            project_prefix="api",
+            project_threshold="MEDIUM",
+            project_scanners=enabled,
+        )
+
+        assert "acme" not in enabled
+        assert "acme" not in pins
+        assert list(resolved.policy_scanners) == ["acme"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [True, {"enabled": True}, {}],
+        ids=["bare-true", "mapping-on", "mapping-default"],
+    )
+    def test_a_section_that_is_on_is_not_added_by_the_policy(self, body):
+        """Control for the rows above: an on section is the project's own."""
+        config = AshConfig.model_validate({"scanners": {"acme": body}})
+
+        enabled, _pins, _twins = _scanner_state(config)
+        resolved = policy_for_project(
+            WorkspacePolicyConfig(additional_scanners=["acme"]),
+            project_prefix="api",
+            project_threshold="MEDIUM",
+            project_scanners=enabled,
+        )
+
+        assert "acme" in enabled
+        assert list(resolved.policy_scanners) == []
 
     def test_a_disabled_scanners_pin_is_not_recorded(self):
         config = AshConfig.model_validate(
