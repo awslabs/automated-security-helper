@@ -45,7 +45,9 @@ VALID = json.dumps({"read_only": ["/usr"], "writable": [], "network": False})
 #: sibling (``execv`` for ``execve``, ``killpg`` or ``raise_signal`` for ``kill``)
 #: would otherwise replace the test runner with the scanner's program, which exits
 #: 0 and ends a run looking green with its tests unrun, or kill it with the
-#: scanner's signal and dump its core.
+#: scanner's signal and dump its core. ``getpgid`` acts on nothing, but unstubbed
+#: it reads whatever process happens to carry the made-up pid on the host, so the
+#: stop's group lookup is stubbed by every test that reaches it too.
 _PROCESS_CONTROL = (
     (os, "execv"),
     (os, "execve"),
@@ -58,6 +60,7 @@ _PROCESS_CONTROL = (
     (os, "fork"),
     (os, "kill"),
     (os, "killpg"),
+    (os, "getpgid"),
     (os, "abort"),
     (signal, "raise_signal"),
 )
@@ -229,9 +232,10 @@ def test_a_stop_is_passed_on_to_the_scanners_group_and_a_lingering_one_is_killed
 ):
     """The stop goes to the scanner's process group, as ASH's own stop reaches an
     unwrapped scanner's group, so what the scanner started in it gets the signal
-    too, and to the scanner's pid, so a scanner that left the group is reached as
-    before; the SIGKILL for a scanner that lingers goes the same way, armed
-    halfway through the stop budget so the reap keeps the other half."""
+    too; a scanner still leading that group got the signal with it and is not
+    signalled a second time by pid; the SIGKILL for a scanner that lingers goes
+    the same way, armed halfway through the stop budget so the reap keeps the
+    other half."""
     sent = []
     handlers = {}
     timers = []
@@ -239,6 +243,7 @@ def test_a_stop_is_passed_on_to_the_scanners_group_and_a_lingering_one_is_killed
         os, "killpg", lambda pgid, sig: sent.append(("group", pgid, sig))
     )
     monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append(("pid", pid, sig)))
+    monkeypatch.setattr(os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(
         signal, "signal", lambda signum, handler: handlers.__setitem__(signum, handler)
     )
@@ -251,28 +256,46 @@ def test_a_stop_is_passed_on_to_the_scanners_group_and_a_lingering_one_is_killed
     landlock_exec._forward_stop(4242, signal.SIGTERM, lambda: running[0], stopped_at)
 
     assert len(stopped_at) == 1
-    assert sent == [("group", 4242, signal.SIGTERM), ("pid", 4242, signal.SIGTERM)]
+    assert sent == [("group", 4242, signal.SIGTERM)]
     assert timers == [(signal.ITIMER_REAL, landlock_exec.STOP_KILL_DELAY_SECONDS)]
     assert landlock_exec.STOP_KILL_DELAY_SECONDS == (
         landlock_exec.STOP_REAP_DEADLINE_SECONDS / 2
     )
     handlers[signal.SIGALRM](signal.SIGALRM, None)
-    assert sent[2:] == [("group", 4242, signal.SIGKILL), ("pid", 4242, signal.SIGKILL)]
+    assert sent[1:] == [("group", 4242, signal.SIGKILL)]
     running[0] = False
     handlers[signal.SIGALRM](signal.SIGALRM, None)
-    assert len(sent) == 4
+    assert len(sent) == 2
+
+
+def test_a_scanner_that_leads_its_group_is_signalled_once(monkeypatch):
+    """A scanner still leading group ``pid`` received the group signal as every
+    member did; signalling its pid as well would deliver a handled SIGTERM twice
+    (a handler that counts them, or escalates on the second, would see a sequence
+    the unwrapped scanner never sees), so the pid is left alone."""
+    sent = []
+    monkeypatch.setattr(
+        os, "killpg", lambda pgid, sig: sent.append(("group", pgid, sig))
+    )
+    monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append(("pid", pid, sig)))
+    monkeypatch.setattr(os, "getpgid", lambda pid: 4242)
+
+    landlock_exec._signal_scanner(4242, signal.SIGTERM)
+
+    assert sent == [("group", 4242, signal.SIGTERM)]
 
 
 def test_a_scanner_that_left_its_group_is_still_signalled_by_pid(monkeypatch):
     """A scanner that moved itself to another group while its children stayed in
     group ``pid``: the group signal reaches the children (no ESRCH, the group is
     not empty) and would not reach the scanner, which the base always reached by
-    pid; the pid is signalled as well."""
+    pid; its group reads as another, so the pid is signalled as well."""
     sent = []
     monkeypatch.setattr(
         os, "killpg", lambda pgid, sig: sent.append(("group", pgid, sig))
     )
     monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append(("pid", pid, sig)))
+    monkeypatch.setattr(os, "getpgid", lambda pid: 4300)
 
     landlock_exec._signal_scanner(4242, signal.SIGTERM)
 
@@ -281,28 +304,36 @@ def test_a_scanner_that_left_its_group_is_still_signalled_by_pid(monkeypatch):
 
 def test_a_group_or_a_scanner_that_is_gone_is_passed_over(monkeypatch):
     """Until the child's setsid no process group carries its pid, and a scanner
-    reaped between the check and the signal is gone too: ESRCH from either call is
-    passed over and the other call is still made. Any other refusal is the
-    caller's to read, as before."""
+    reaped between the check and the signal, or between the group signal and the
+    group lookup, is gone too: ESRCH from any of the three calls is passed over
+    and what can still be sent is sent. Any other refusal is the caller's to read,
+    as before."""
     kills = []
 
     def no_such_group(pgid, sig):
         raise ProcessLookupError(errno.ESRCH, "No such process")
 
     monkeypatch.setattr(os, "killpg", no_such_group)
+    monkeypatch.setattr(os, "getpgid", lambda pid: 4300)
     monkeypatch.setattr(os, "kill", lambda pid, sig: kills.append((pid, sig)))
     landlock_exec._signal_scanner(4242, signal.SIGTERM)
     assert kills == [(4242, signal.SIGTERM)]
 
     group_kills = []
 
-    def no_such_process(pid, sig):
+    def no_such_process(*args):
         raise ProcessLookupError(errno.ESRCH, "No such process")
 
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: group_kills.append((pgid, sig)))
     monkeypatch.setattr(os, "kill", no_such_process)
     landlock_exec._signal_scanner(4242, signal.SIGTERM)
     assert group_kills == [(4242, signal.SIGTERM)]
+
+    # Reaped between the group signal and the group lookup: nothing more is sent.
+    monkeypatch.setattr(os, "getpgid", no_such_process)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: pytest.fail("kill after ESRCH"))
+    landlock_exec._signal_scanner(4242, signal.SIGTERM)
+    assert group_kills == [(4242, signal.SIGTERM)] * 2
 
     def refused(pgid, sig):
         raise PermissionError(errno.EPERM, "Operation not permitted")

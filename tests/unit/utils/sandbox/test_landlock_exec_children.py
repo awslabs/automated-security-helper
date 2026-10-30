@@ -753,13 +753,15 @@ def test_a_refused_parent_death_signal_is_noted_and_the_child_goes_on(
 
 @pytest.fixture
 def stop_calls(monkeypatch):
-    """Run ``_forward_stop`` with the kill, the handler, the timer and the clock
-    stood in for; return the calls and the list that records the first stop."""
+    """Run ``_forward_stop`` with the kill, the group lookup, the handler, the timer
+    and the clock stood in for; return the calls and the list that records the
+    first stop. The stand-in's ``getpgid`` answers 0, another group than the
+    scanner's pid, the shape in which the pid is signalled as well as the group."""
 
     def run(signals: List[Tuple[int, bool]]) -> Tuple[List[Tuple[str, tuple]], List]:
         calls: List[Tuple[str, tuple]] = []
         monkeypatch.setattr(
-            landlock_exec, "os", _Recording(os, {"kill", "killpg"}, calls)
+            landlock_exec, "os", _Recording(os, {"kill", "killpg", "getpgid"}, calls)
         )
         monkeypatch.setattr(
             landlock_exec, "signal", _Recording(signal, {"signal", "setitimer"}, calls)
@@ -776,7 +778,8 @@ def stop_calls(monkeypatch):
 
 
 def test_repeated_stop_signals_arm_the_kill_timer_once(stop_calls):
-    """Every stop signal is passed on to the scanner's group and to its pid, but
+    """Every stop signal is passed on to the scanner's group and, the scanner
+    having left that group here, to its pid, but
     the SIGKILL timer counts from the first one, as the reap deadline does: a
     second signal inside the budget does not push the kill past that deadline.
     The timer is armed at half the budget, so the reap keeps the other half."""
