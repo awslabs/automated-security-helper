@@ -1006,19 +1006,44 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         ``status`` naming it, severity Informational, an empty
         ``vulnerabilities`` array so no consumer counts it as a finding, and a
         label that makes it filterable.
+
+        The title, the detail and the ``status`` name only the counts that are
+        not zero. One sentence for both read "0 finding(s) could not be
+        converted ... The array is incomplete" for an array that held every
+        finding and had only degraded records, so a SIEM rule keyed on it
+        alarmed on a complete array, and the title named the wrong problem.
+        ``status`` is "Incomplete" only when findings are absent; an array
+        that is whole but carries fallback records is "Degraded".
         """
-        detail = (
+        missing_text = (
             f"{missing} finding(s) of this scan could not be converted to OCSF and "
-            f"are absent from this array; {degraded} record(s) were built by the "
-            "fallback path and carry less than the scan knows. The ASH log names "
-            "each one. The array is incomplete."
+            "are absent from this array"
         )
+        degraded_text = (
+            f"{degraded} record(s) were built by the fallback path and carry less "
+            "than the scan knows"
+        )
+        if missing and degraded:
+            title = (
+                f"{missing} finding(s) could not be converted to OCSF; "
+                f"{degraded} record(s) built by the fallback path"
+            )
+            detail = f"{missing_text}; {degraded_text}."
+        elif missing:
+            title = f"{missing} finding(s) could not be converted to OCSF"
+            detail = f"{missing_text}."
+        else:
+            title = f"{degraded} record(s) built by the fallback path"
+            detail = f"{degraded_text}."
+        detail += " The ASH log names each one."
+        if missing:
+            detail += " The array is incomplete."
         return VulnerabilityFinding(
             activity_id=ActivityId.integer_1,
             activity_name=ACTIVITY_NAME,
             severity_id=SeverityId.integer_1,
             status_id=StatusId.integer_99,
-            status="Incomplete",
+            status="Incomplete" if missing else "Degraded",
             status_detail=detail,
             type_uid=200201,
             class_uid=2002,
@@ -1028,7 +1053,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             metadata=_metadata_with_labels(metadata, CONVERSION_SHORTFALL_LABEL),
             finding_info=FindingInfo(
                 uid=CONVERSION_SHORTFALL_UID,
-                title=f"{missing} finding(s) could not be converted to OCSF",
+                title=title,
                 desc=detail,
             ),
             vulnerabilities=[],

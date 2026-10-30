@@ -17,6 +17,9 @@
   processed, doubling the total and stating 50% success.
 * A file name holding a lone surrogate reached ``json.dumps`` and was written as
   a lone ``\\udcXX`` escape, which strict JSON parsers reject.
+* The shortfall record said "0 finding(s) could not be converted" and "The
+  array is incomplete" for an array that held every finding and only carried
+  degraded records; it names the counts that are not zero.
 """
 
 import json
@@ -260,8 +263,31 @@ class TestShortfalls:
         )
 
         assert DEGRADED_FINDING_LABEL in payload[0]["metadata"]["labels"]
-        assert CONVERSION_SHORTFALL_LABEL in payload[1]["metadata"]["labels"]
-        assert "1 record(s) were built by the fallback" in payload[1]["status_detail"]
+        shortfall = payload[1]
+        assert CONVERSION_SHORTFALL_LABEL in shortfall["metadata"]["labels"]
+        assert "1 record(s) were built by the fallback" in shortfall["status_detail"]
+        # Nothing is missing, so the record names the degraded count alone and
+        # does not call a complete array incomplete.
+        assert shortfall["finding_info"]["title"] == (
+            "1 record(s) built by the fallback path"
+        )
+        assert "could not be converted" not in shortfall["finding_info"]["title"]
+        assert "incomplete" not in shortfall["status_detail"].lower()
+        assert shortfall["status"] == "Degraded"
+
+    def test_a_shortfall_with_both_counts_names_both(self, reporter, metadata):
+        record = reporter._create_shortfall_finding(2, 1, metadata, _now_ms())
+
+        assert record.finding_info.title == (
+            "2 finding(s) could not be converted to OCSF; "
+            "1 record(s) built by the fallback path"
+        )
+        assert (
+            "2 finding(s) of this scan could not be converted" in record.status_detail
+        )
+        assert "1 record(s) were built by the fallback path" in record.status_detail
+        assert record.status_detail.endswith("The array is incomplete.")
+        assert record.status == "Incomplete"
 
     def test_an_all_failed_to_serialize_response_counts_nothing_as_processed(
         self, reporter, monkeypatch
