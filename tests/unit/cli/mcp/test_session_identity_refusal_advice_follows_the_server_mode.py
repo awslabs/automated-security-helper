@@ -88,7 +88,15 @@ def test_a_stateless_caller_keeps_the_operator_advice() -> None:
 def test_a_stand_in_that_is_not_an_sdk_context_carries_no_stamp() -> None:
     """The resolution would read this object's headers, never its request, so the
     refusal must not read a mode from the request either."""
-    stamped = HttpCaller(STREAMABLE_HTTP, None, server_mode=MODE_STATEFUL)
+    # Stamped as a protocol-version refusal, so the text asserted absent below
+    # would be present if the stamp were read; with the default stamp the check
+    # could never fail.
+    stamped = HttpCaller(
+        STREAMABLE_HTTP,
+        None,
+        protocol_version_is_cause=True,
+        server_mode=MODE_STATEFUL,
+    )
     stand_in = SimpleNamespace(
         request_context=SimpleNamespace(
             request=SimpleNamespace(scope={CALLER_SCOPE_KEY: stamped})
@@ -104,6 +112,10 @@ def test_a_stand_in_that_is_not_an_sdk_context_carries_no_stamp() -> None:
 def test_the_context_is_a_required_keyword() -> None:
     with pytest.raises(TypeError):
         session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")  # type: ignore[call-arg]
+    # Keyword-only: a context handed positionally is refused too, so a caller
+    # cannot pass one by place and have it read as something else.
+    with pytest.raises(TypeError):
+        session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", None)  # type: ignore[misc]
 
 
 def test_no_context_gives_the_mode_less_advice() -> None:

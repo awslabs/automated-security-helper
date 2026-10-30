@@ -174,9 +174,18 @@ def test_a_deferred_end_forgets_the_session_in_memory_under_a_live_server(
         handle.close()
 
 
-def test_a_deferred_end_of_another_session_does_not_ask_the_registry(root) -> None:
+def test_a_deferred_end_of_another_session_does_not_ask_the_registry(
+    root, monkeypatch
+) -> None:
     sandbox = mark_session_workspace(root / "remote-session")
     handle = _a_live_servers_entry(root)
+
+    def asked(**kwargs: Any) -> bool:
+        raise AssertionError("the stdio registry was asked about another session")
+
+    monkeypatch.setattr(
+        sessions.StdioServerPresence, "a_server_is_live", staticmethod(asked)
+    )
     try:
         sessions._ended_while_scanning.add("remote-session")
 
