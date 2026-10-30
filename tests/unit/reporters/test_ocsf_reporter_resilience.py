@@ -642,9 +642,15 @@ class TestReportDegradation:
 
         (error,) = payload
         assert error["error"] == "All findings failed to serialize"
+        # The one input counts once: the call site used to pass the built count
+        # as the processed count too, so this response claimed 1 processed, a
+        # total of 2 against 1 real input, and a 50% success rate when nothing
+        # reached the output.
         stats = error["processing_statistics"]
-        assert stats["processed_results_count"] == 1
+        assert stats["processed_results_count"] == 0
         assert stats["failed_results_count"] == 1
+        assert stats["total_results_count"] == 1
+        assert stats["success_rate_percent"] == 0
 
     def test_suppressed_findings_are_reported_with_suppressed_status(self, reporter):
         result = good_result()
