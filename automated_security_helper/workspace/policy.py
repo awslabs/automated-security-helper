@@ -147,6 +147,7 @@ from automated_security_helper.models.core import (
     AshSuppression,
     IgnorePathWithReason,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     sarif_level_fails_threshold,
@@ -890,10 +891,13 @@ def _push_down(
             continue
         update: dict[str, Any] = {"path": rewritten}
         # A suppression's package_path is matched against the project-relative
-        # install path of a finding's package (AshSuppression._package_matches),
-        # so it is in workspace coordinates here and has to be rewritten like the
+        # install path of a finding's package with the path matcher
+        # (AshSuppression._package_matches, path_matching._path_pattern_matches,
+        # the same reading as the entry's path), and the policy writes it
+        # relative to the workspace like the path, so it is rewritten like the
         # path. One that names a copy in another project drops the entry for
-        # this project; one with no sound rewrite is refused like a path.
+        # this project, said in the log; one with no sound rewrite is refused
+        # like a path.
         package_path = getattr(entry, "package_path", None)
         if package_path is not None:
             try:
@@ -914,12 +918,59 @@ def _push_down(
                     f"applied to project '{Path(project_prefix).as_posix()}': {exc}"
                 ) from exc
             if rewritten_package is None:
+                # The path reaches this project and the package copy named does
+                # not, so the entry does not apply here. Said rather than
+                # silent: a package_path written relative to a project
+                # ("node_modules/left-pad", the form that matched before the
+                # value was pushed down) names no project's copy, so the entry
+                # would disappear from every project with nothing in the output
+                # to say so, against this module's own rule for a suppression.
+                ASH_LOGGER.warning(
+                    _package_path_outside_project(
+                        kind,
+                        position,
+                        package_path,
+                        Path(project_prefix).as_posix(),
+                        quote_values,
+                    )
+                )
                 continue
             update["package_path"] = rewritten_package
         # model_copy rather than reconstruction, so every field the model gains
         # later is carried over without this call site needing to learn about it.
         pushed.append(entry.model_copy(update=update))
     return tuple(pushed)
+
+
+def _package_path_outside_project(
+    kind: PatternKind,
+    position: int,
+    package_path: str,
+    project: str,
+    quote_values: bool,
+) -> str:
+    """The warning for an entry whose ``package_path`` names no copy in *project*.
+
+    Names the entry by kind and position, and the value when the file is the
+    operator's own (``quote_values``); a client's file has its value withheld as
+    the refusals do. Says how the value is read, because the one shape this
+    warning is most likely to meet is a ``package_path`` written relative to a
+    project, which reads as a top-level directory of the workspace that is no
+    project and so applies to none.
+    """
+    shown = f" '{package_path}'" if quote_values else ""
+    return (
+        f"workspace policy {kind} entry {position} does not apply to project "
+        f"'{project}': its package_path{shown} names no package copy inside that "
+        f"project. A package_path is read relative to the workspace, like the "
+        f"entry's path; one written relative to a project (such as "
+        f"'node_modules/x') names no project's copy and applies nowhere."
+        + (
+            ""
+            if quote_values
+            else " The value is not shown because an MCP client supplied the file."
+        )
+    )
 
 
 def policy_for_project(

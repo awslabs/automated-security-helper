@@ -15,6 +15,7 @@ filesystem and another once the ``..`` is collapsed as text; the loader used to
 collapse it and so read a file other than the one it had checked for.
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -171,6 +172,52 @@ class TestAPackagePathIsPushedDownWithThePath:
 
     def test_a_package_copy_in_another_project_drops_the_entry(self):
         assert self._pushed("web") == ()
+
+    def test_the_drop_is_said_not_silent(self, caplog):
+        """A package_path written relative to a project ("node_modules/left-pad")
+        names no project's copy once it is read relative to the workspace, so
+        the entry would vanish from every project. The drop names the entry,
+        the value and the project, and says how the value is read."""
+        with caplog.at_level(logging.WARNING):
+            assert self._pushed("web") == ()
+
+        (record,) = [
+            record for record in caplog.records if "package_path" in record.getMessage()
+        ]
+        message = record.getMessage()
+        assert record.levelno == logging.WARNING
+        assert "suppression entry 1" in message
+        assert "'api/node_modules/left-pad'" in message
+        assert "project 'web'" in message
+        assert "relative to the workspace" in message
+
+    def test_a_delivered_files_value_is_not_shown_in_the_warning(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            pushed = policy_for_project(
+                self.POLICY,
+                project_prefix="web",
+                project_threshold="MEDIUM",
+                project_scanners=(),
+                quote_values=False,
+            ).suppressions
+
+        assert pushed == ()
+        (record,) = [
+            record for record in caplog.records if "package_path" in record.getMessage()
+        ]
+        message = record.getMessage()
+        assert "left-pad" not in message
+        assert "suppression entry 1" in message
+        assert "an MCP client supplied the file" in message
+
+    def test_a_copy_inside_the_project_is_no_warning(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            (pushed,) = self._pushed("api")
+
+        assert pushed.package_path == "node_modules/left-pad"
+        assert not [
+            record for record in caplog.records if "package_path" in record.getMessage()
+        ]
 
     def test_the_policy_object_is_not_mutated(self):
         self._pushed("api")
