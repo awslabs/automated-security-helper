@@ -216,7 +216,11 @@ def test_a_transitive_suppressed_through_a_client_root_carries_the_client_mark()
     assert transitive.suppressions
     assert transitive.suppressions[0].properties.clientSupplied is True
     assert plain_transitive.suppressions
-    assert plain_transitive.suppressions[0].properties is None
+    # Every suppression ASH attaches carries ashApplied; only the one hidden
+    # through a client-supplied root carries clientSupplied as well.
+    plain_properties = plain_transitive.suppressions[0].properties
+    assert plain_properties.ashApplied is True
+    assert "clientSupplied" not in (plain_properties.model_extra or {})
 
 
 def test_the_first_location_naming_a_file_is_the_one_the_suppression_reads(tmp_path):
