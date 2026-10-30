@@ -5,7 +5,8 @@
 
 Each test failed at the base: the region pattern refused mx-central-1; an
 empty AWS_REGION hid AWS_DEFAULT_REGION and an empty log group passed the
-``is None`` check into CreateLogStream; a failed dependency check was logged
+``is None`` check into CreateLogStream; a blank region or group name from a
+config file was refused by the pattern or kept as ""; a failed dependency check was logged
 at WARNING, which --quiet hides; a workspace's unified results were published
 as one more event; an event over the PutLogEvents size was sent to fail there;
 and an event the service listed in rejectedLogEventsInfo was returned as a
@@ -109,6 +110,21 @@ def test_an_empty_aws_region_does_not_hide_aws_default_region(monkeypatch):
     assert options.aws_region == "us-west-2"
     # An empty group name is no group name.
     assert options.log_group_name is None
+
+
+@pytest.mark.parametrize("field", ["aws_region", "log_group_name"])
+@pytest.mark.parametrize("value", ["", "  "])
+def test_a_blank_value_from_the_config_is_unset(field, value):
+    """``aws_region: "${AWS_REGION}"`` with the variable empty, or an empty
+    --config-overrides value, arrives through the field, not the environment
+    default: a blank region was refused by the pattern as a configuration
+    error and a blank group name reached CreateLogStream."""
+    settings = {"aws_region": "us-west-2", "log_group_name": "a-log-group"}
+    settings[field] = value
+
+    options = CloudWatchLogsReporterConfigOptions(**settings)
+
+    assert getattr(options, field) is None
 
 
 @patch(f"{CW}.boto3")

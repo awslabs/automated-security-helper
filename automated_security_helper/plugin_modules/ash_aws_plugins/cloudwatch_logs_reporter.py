@@ -4,11 +4,11 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import boto3
 import botocore.exceptions
 
-from typing import Annotated, Literal, TYPE_CHECKING
+from typing import Annotated, Any, Literal, TYPE_CHECKING
 
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -104,6 +104,21 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
             description="Maximum delay in seconds between retry attempts",
         ),
     ] = 60.0
+
+    @field_validator("aws_region", "log_group_name", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: Any) -> Any:
+        """An empty or blank value is no value, whichever way it arrives.
+
+        The default factories read the environment that way; a config file
+        (``aws_region: "${AWS_REGION}"`` with the variable empty) or
+        ``--config-overrides`` reaches the field here instead. Mapped to None, a
+        blank region or group name is named as the missing setting rather than
+        refused by the region pattern or sent to AWS as an empty name.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def _retry_delays_are_bounded(self):
@@ -225,8 +240,9 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     def _settings_missing(self) -> bool:
         """Name each required setting that is unset or empty; True when one is.
 
-        ``not`` rather than ``is None``: an environment variable set to the empty
-        string reaches the options as "", which is not a region or a log group.
+        The options model maps a blank value to None (``_blank_is_unset``), from
+        the environment or a config file alike; ``not`` rather than ``is None``
+        keeps an empty name out of CreateLogStream should one ever get through.
         """
         missing = False
         if not self.config.options.aws_region:

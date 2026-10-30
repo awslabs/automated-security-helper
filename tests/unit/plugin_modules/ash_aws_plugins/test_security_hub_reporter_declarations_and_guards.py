@@ -3,7 +3,8 @@
 
 """What the Security Hub reporter declares, reads, retries, logs and refuses.
 
-Each test failed at the base: an empty AWS_REGION hid AWS_DEFAULT_REGION; the
+Each test failed at the base: an empty AWS_REGION hid AWS_DEFAULT_REGION and a
+blank profile from a config file reached boto3.Session as a profile named ""; the
 reporter declared three destination options while the trust table lists five;
 a ClientError without an Error record left the dependency check as a KeyError
 and a throttled DescribeHub dropped the reporter with no retry; results with no
@@ -87,6 +88,17 @@ def test_an_empty_aws_region_does_not_hide_aws_default_region(monkeypatch):
 
     assert options.aws_region == "eu-west-1"
     assert options.aws_profile is None
+
+
+@pytest.mark.parametrize("field", ["aws_region", "aws_profile"])
+@pytest.mark.parametrize("value", ["", "  "])
+def test_a_blank_value_from_the_config_is_unset(field, value):
+    """``aws_profile: "${AWS_PROFILE}"`` with the variable empty, or an empty
+    --config-overrides value, arrives through the field, not the environment
+    default, and reached boto3.Session as a profile or region named ""."""
+    options = SecurityHubReporterConfigOptions(**{field: value})
+
+    assert getattr(options, field) is None
 
 
 def test_an_all_digit_scope_or_profile_written_as_text_is_kept_as_written():

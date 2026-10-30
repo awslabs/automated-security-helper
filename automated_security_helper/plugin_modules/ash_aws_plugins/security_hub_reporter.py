@@ -293,6 +293,22 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
             return f"{value:012d}"
         return value
 
+    @field_validator("aws_region", "aws_profile", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: Any) -> Any:
+        """An empty or blank value is no value, whichever way it arrives.
+
+        The default factories read the environment that way; a config file
+        (``aws_profile: "${AWS_PROFILE}"`` with the variable empty) or
+        ``--config-overrides`` reaches the field here instead. Mapped to None, a
+        blank profile is no profile (botocore reads "" as a profile named "" and
+        raises ProfileNotFound) and a blank region is named as the missing
+        setting rather than sent to AWS.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     # findings_scope and aws_profile take text only. An all-digit value YAML or
     # --config-overrides hands over as an int is refused rather than converted:
     # the text the operator wrote is not recoverable from the int (YAML reads

@@ -4,7 +4,8 @@
 """What the S3 reporter reads from the environment, refuses, and names its key.
 
 Each test failed at the base: an empty AWS_REGION hid AWS_DEFAULT_REGION and an
-empty bucket or profile passed the ``is None`` checks into boto3; a failed
+empty bucket or profile passed the ``is None`` checks into boto3; a blank
+profile from a config file reached boto3.Session as a profile named ""; a failed
 dependency check was logged at WARNING, which --quiet hides; a workspace's
 unified results were uploaded as one more object; and a key_prefix written
 without its trailing slash fused with the file name.
@@ -87,6 +88,32 @@ def test_empty_environment_values_are_unset(monkeypatch):
     assert options.aws_region == "us-west-2"
     assert options.aws_profile is None
     assert options.bucket_name is None
+
+
+@pytest.mark.parametrize("field", ["aws_region", "aws_profile", "bucket_name"])
+@pytest.mark.parametrize("value", ["", "  "])
+def test_a_blank_value_from_the_config_is_unset(field, value):
+    """``aws_profile: "${AWS_PROFILE}"`` with the variable empty, or an empty
+    --config-overrides value, arrives through the field, not the environment
+    default: a blank region was refused by the pattern, and a blank profile or
+    bucket reached boto3 as a name."""
+    settings = {"aws_region": "us-west-2", "bucket_name": "a-bucket"}
+    settings[field] = value
+
+    options = S3ReporterConfigOptions(**settings)
+
+    assert getattr(options, field) is None
+
+
+@patch(f"{S3}.boto3")
+def test_an_empty_profile_from_the_config_is_no_profile(mock_boto3, context):
+    """botocore reads profile_name="" as a profile named "" and raises
+    ProfileNotFound; the session is made with no profile instead."""
+    reporter = _reporter(context, aws_profile="")
+
+    reporter.report(_model())
+
+    assert mock_boto3.Session.call_args.kwargs["profile_name"] is None
 
 
 @patch(f"{S3}.boto3")
