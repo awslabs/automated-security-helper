@@ -138,15 +138,65 @@ def test_a_json_document_is_known_by_its_first_character(content, expected):
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0, reason="root searches any directory"
 )
-def test_a_path_the_user_cannot_search_reads_as_absent(tmp_path):
+def test_a_path_the_user_cannot_search_reads_as_present(tmp_path):
+    """Read as absent, the open that would have named the real cause never ran:
+    a --config there was "not found" and a results file there was skipped."""
     locked = tmp_path / "locked"
     locked.mkdir()
     probe = locked / "ash.yaml"
     locked.chmod(0o000)
     try:
-        assert _exists(probe) is False
+        assert _exists(probe) is True
     finally:
         locked.chmod(0o700)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory modes are POSIX")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root searches any directory"
+)
+def test_a_config_the_user_cannot_reach_is_refused_with_the_real_cause(tmp_path):
+    """It was refused as "Configuration file not found"; the file is there."""
+    results = _write_results(tmp_path / "out")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "ash.yaml").write_text("project_name: fixture\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        result = _report(
+            "--format",
+            "text",
+            "--config",
+            str(locked / "ash.yaml"),
+            "--output-dir",
+            str(results.parent),
+        )
+    finally:
+        locked.chmod(0o700)
+
+    assert result.exit_code == 3, result.output
+    assert "could not read" in result.output, result.output
+    assert "not found" not in result.output, result.output
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory modes are POSIX")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root searches any directory"
+)
+def test_a_results_file_the_user_cannot_reach_is_refused_not_skipped(tmp_path):
+    """The search skipped it as absent and said none of the places exists; the
+    file is there and the refusal names why it cannot be read."""
+    results = _write_results(tmp_path / "out" / ".ash" / "ash_output")
+    locked = results.parent
+    locked.chmod(0o000)
+    try:
+        result = _report("--format", "text", "--output-dir", str(tmp_path / "out"))
+    finally:
+        locked.chmod(0o700)
+
+    assert result.exit_code == 1, result.output
+    assert "Could not read the scan results" in result.output, result.output
+    assert "No scan results found" not in result.output, result.output
 
 
 def test_the_refused_name_is_never_none(monkeypatch):

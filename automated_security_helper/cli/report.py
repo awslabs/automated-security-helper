@@ -261,14 +261,24 @@ def _print_error(template: str, *values: object) -> None:
 
 
 def _exists(path: Path) -> bool:
-    """Whether *path* exists, with a path the user may not reach read as absent.
+    """Whether *path* exists, with a path the user may not reach read as present.
 
     ``Path.exists`` raises PermissionError below Python 3.14 for a path under a
     directory the user cannot search; the command then ended in a traceback
-    where it refuses a missing file with its own words.
+    where it refuses a missing file with its own words. Read as absent, such a
+    path gave the wrong answer twice: a ``--config`` under a directory the user
+    cannot search was refused as "not found", and a results file there was
+    skipped for a stale one in a later place, which was then reported on with no
+    warning. Read as present, the open that follows refuses it with the real
+    cause, through the paths that already handle an OSError (exit 3 for the
+    configuration, exit 1 for the results). Any other OSError (a name too long, a
+    component that is a file) reads as absent: the open would say the same, and
+    the refusal for a missing file names the path.
     """
     try:
         return path.exists()
+    except PermissionError:
+        return True
     except OSError:
         return False
 
