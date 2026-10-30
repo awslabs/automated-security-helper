@@ -98,6 +98,10 @@ _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
+#: Open a directory only to name it, which needs the right to search its parent and
+#: none to read it. Linux has it; where it is 0 a directory that may be searched
+#: but not read (mode 0711) is still refused with EACCES.
+_O_PATH = getattr(os, "O_PATH", 0)
 
 #: Whether components can be opened one at a time without following links. Both
 #: ``O_NOFOLLOW`` and ``dir_fd`` support for ``os.open`` and ``os.stat`` are needed.
@@ -300,16 +304,34 @@ def _check_opened(fd: int, display: str, allow_hardlinks: bool = False) -> None:
         raise TreeInputRefused(display, REASON_HARDLINK)
 
 
+def _open_directory(
+    name: Union[str, "os.PathLike[str]"], dir_fd: Optional[int], extra: int = 0
+) -> int:
+    """A descriptor for the directory *name*, opened for reading when it may be.
+
+    The walk only needs a descriptor to open the next component relative to. A
+    directory the user may search but not read (mode 0711) refuses ``O_RDONLY``
+    with EACCES, though a plain open of a file below it succeeds, so there the
+    descriptor is opened with ``O_PATH``, which asks for no read right, when the
+    platform has it.
+    """
+    flags = os.O_RDONLY | _DIRECTORY | _CLOEXEC | extra
+    try:
+        return os.open(name, flags, dir_fd=dir_fd)
+    except PermissionError:
+        if not _O_PATH:
+            raise
+        return os.open(name, flags | _O_PATH, dir_fd=dir_fd)
+
+
 def _open_by_descriptor_walk(
     anchor: Path, parts: Tuple[str, ...], display: str, allow_hardlinks: bool
 ) -> int:
-    dir_fd = os.open(anchor, os.O_RDONLY | _DIRECTORY | _CLOEXEC)
+    dir_fd = _open_directory(anchor, None)
     try:
         for index, part in enumerate(parts[:-1]):
             try:
-                child = os.open(
-                    part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _CLOEXEC, dir_fd=dir_fd
-                )
+                child = _open_directory(part, dir_fd, _NOFOLLOW)
             except OSError:
                 if _is_link_at(part, dir_fd):
                     component = "/".join(parts[: index + 1])
@@ -319,6 +341,18 @@ def _open_by_descriptor_walk(
             os.close(previous)
 
         name = parts[-1]
+        # What the name is, asked before it is opened: opening a device node can
+        # act on the device, and a socket cannot be opened for reading at all
+        # (ENXIO, a plain OSError that read as "readable" to refusal_reason). A
+        # link goes on to the open below, which refuses it with its own reason;
+        # anything else that is not a regular file is refused here. The check on
+        # the opened descriptor stays: the name can change between the two.
+        try:
+            kind = os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
+        except OSError:
+            kind = None  # missing or unreadable: the open below reports it
+        if kind is not None and not stat.S_ISLNK(kind) and not stat.S_ISREG(kind):
+            raise TreeInputRefused(display, REASON_NOT_REGULAR)
         try:
             # O_NONBLOCK so a FIFO at the name cannot block the open; it is refused by
             # the regular-file check right after.
@@ -405,9 +439,13 @@ def resolves_inside(path: PathLike, root: PathLike) -> bool:
     """
     real_root = Path(os.path.realpath(root))
     resolved = Path(os.path.realpath(_absolute(path)))
-    return len(resolved.parts) > len(real_root.parts) and _starts_with(
-        resolved, real_root
-    )
+    if len(resolved.parts) > len(real_root.parts) and _starts_with(resolved, real_root):
+        return True
+    # A spelling by name can miss what is inside: on a case-insensitive volume a
+    # link whose target names the root in another case resolves to a path that does
+    # not start with the root's components, though it is the same directory. The
+    # root as a parent of the target's directory, by device and inode, says so.
+    return _has_ancestor_file(resolved.parent, root)
 
 
 def _resolved_inside(
@@ -468,8 +506,12 @@ def open_in_scanned_tree(
 
     Raises:
         TreeInputRefused: The file breaks the rule. Nothing has been read from it.
-        OSError: The file could not be opened for some other reason.
+        OSError: The file could not be opened for some other reason. A path holding
+            a NUL character names no file and raises ``FileNotFoundError``, as a
+            missing file does, not the ``ValueError`` ``os.open`` raises for it.
     """
+    if "\0" in os.fspath(path):
+        raise FileNotFoundError(errno.ENOENT, "a path holding a NUL character")
     anchor, parts = _split_below_root(path, root)
     display = "/".join(parts)
     if follow_links_inside:
