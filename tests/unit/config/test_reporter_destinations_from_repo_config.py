@@ -235,7 +235,7 @@ def test_a_repository_config_repeating_the_operators_bedrock_content_applies(
 
 
 #: The AWS reporters whose options model has retry options, and those options.
-_RETRYING = ("bedrock-summary-reporter", "cloudwatch-logs", "s3")
+_RETRYING = ("aws-security-hub", "bedrock-summary-reporter", "cloudwatch-logs", "s3")
 _RETRY_OPTIONS = ("max_retries", "base_delay", "max_delay")
 _RETRY_CASES = [(r, n) for r in _RETRYING for n in _RETRY_OPTIONS]
 

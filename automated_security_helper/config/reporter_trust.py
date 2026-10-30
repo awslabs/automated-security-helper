@@ -157,6 +157,7 @@ REPORTER_DESTINATION_OPTIONS: Dict[str, Tuple[str, ...]] = {
         "account_id",
         "archive_resolved_findings",
         "findings_scope",
+        *_RETRY_OPTIONS,
     ),
     "bedrock-summary-reporter": (
         "aws_region",

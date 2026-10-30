@@ -475,6 +475,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         "account_id",
         "archive_resolved_findings",
         "findings_scope",
+        "max_retries",
+        "base_delay",
+        "max_delay",
     )
 
     #: Why the configuration given to this reporter was refused, when it was.
