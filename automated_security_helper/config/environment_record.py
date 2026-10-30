@@ -297,10 +297,14 @@ def _resolved_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
     the lookup of the value paired the literal key with that other entry and
     recorded a key read from the environment that the loader never read. A
     reference the resolver leaves as written comes back stripped of blanks
-    around it, so that spelling is looked up last.
+    around it, so that spelling is looked up last. A resolved key never keeps
+    its ``${`` text, so a key found by its own text (tagged or not) was never
+    resolved, and the value's match is not tried for it.
     """
-    if written_key in resolved:
-        return written_key
+    untagged = _without_tag(written_key)
+    for own_text in (written_key, untagged):
+        if own_text in resolved:
+            return own_text
     name = referenced_name(written_key)
     if name is not None and config_env_var_is_interpolatable(name):
         try:
@@ -317,10 +321,8 @@ def _resolved_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
                     and reduced_plugin_name(candidate) == folded
                 ):
                     return candidate
-    untagged = _without_tag(written_key)
-    for key in (untagged, untagged.strip()):
-        if key in resolved:
-            return key
+    if untagged.strip() in resolved:
+        return untagged.strip()
     return _UNRESOLVED
 
 
