@@ -32,6 +32,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclo
     GitLabCycloneDXReporterConfigOptions,
     _normalize_input_file_path,
     _resolve_package_manager_and_language,
+    _walk_components,
 )
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
     CycloneDXReport,
@@ -237,6 +238,43 @@ class TestTheReportLevelSourceIsOneEcosystem:
         props = _metadata_props(doc)
         assert props["gitlab:dependency_scanning:package_manager:name"] == "poetry"
         assert props["gitlab:dependency_scanning:input_file:path"] == "poetry.lock"
+
+
+class TestTheWalkVisitsEveryComponentOnceInDocumentOrder:
+    """Control for the linear walk: the order and the set are what the list-copying
+    walk returned, so the dominant-type tie-break is unchanged."""
+
+    def test_nested_components_follow_their_parent_depth_first(self):
+        c = {"name": "c"}
+        b = {"name": "b", "components": [c]}
+        d = {"name": "d"}
+        a = {"name": "a", "components": [b, d]}
+        e = {"name": "e"}
+
+        walked = _walk_components([a, e])
+
+        assert [x["name"] for x in walked] == ["a", "b", "c", "d", "e"]
+
+    def test_entries_that_are_not_components_are_skipped(self):
+        child = {"name": "child"}
+        parent = {"name": "parent", "components": ["text", child, 3, None]}
+
+        walked = _walk_components([parent, "text", None])
+
+        assert [x["name"] for x in walked] == ["parent", "child"]
+
+    def test_a_deep_chain_is_walked_whole(self):
+        depth = 3000
+        root: dict = {"name": "0"}
+        tip = root
+        for level in range(1, depth):
+            nested = {"name": str(level)}
+            tip["components"] = [nested]
+            tip = nested
+
+        walked = _walk_components([root])
+
+        assert [x["name"] for x in walked] == [str(n) for n in range(depth)]
 
 
 class TestVendoredPathsNameManifestsOnly:

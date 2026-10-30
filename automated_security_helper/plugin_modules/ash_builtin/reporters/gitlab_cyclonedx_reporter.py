@@ -372,15 +372,19 @@ def _walk_components(components: list[dict]) -> list[dict]:
     A CycloneDX component can carry its own ``components`` (an assembly, a
     bundled dependency's dependencies); they are part of the inventory and vote
     for the report-level source with the rest.
+
+    The walk is linear: *pending* is a stack whose top is the next component,
+    so a component's children are pushed in reverse and popped in document
+    order, with no list copied per step.
     """
     out: list[dict] = []
-    pending = [c for c in components if isinstance(c, dict)]
+    pending = [c for c in reversed(components) if isinstance(c, dict)]
     while pending:
-        component = pending.pop(0)
+        component = pending.pop()
         out.append(component)
         nested = component.get("components")
         if isinstance(nested, list):
-            pending = [c for c in nested if isinstance(c, dict)] + pending
+            pending.extend(c for c in reversed(nested) if isinstance(c, dict))
     return out
 
 
@@ -537,6 +541,10 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         counted apart, so one ecosystem's components split across two keys and
         a smaller ecosystem could win. The winning pair is returned as one of
         the table keys, which is what the callers look up.
+
+        *components* is the flat list :func:`_walk_components` returns, nested
+        components included; ``report`` walks the document once and passes the
+        same list here and to :meth:`_dominant_input_file`.
         """
         if options.package_manager_override:
             override_type = _type_key_for_manager(options.package_manager_override)
@@ -546,7 +554,7 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         from collections import Counter
 
         pairs: Counter[tuple[str, str]] = Counter()
-        for component in _declared_components(_walk_components(components)):
+        for component in _declared_components(components):
             pm, lang = _ecosystem_of(component)
             if pm is not None:
                 pairs[(pm, lang or "")] += 1
@@ -571,6 +579,8 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         falls back to that ecosystem's default lockfile; another ecosystem's
         file is never returned. Every declared component votes only when no
         ecosystem was found at all.
+
+        *components* is the flat list :func:`_walk_components` returns.
         """
         from collections import Counter
 
@@ -580,7 +590,7 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         elif dominant_type in SYFT_TYPE_TO_GITLAB:
             dominant_pm = SYFT_TYPE_TO_GITLAB[dominant_type][0]
 
-        declared = _declared_components(_walk_components(components))
+        declared = _declared_components(components)
         if dominant_pm is not None:
             voters = [c for c in declared if _ecosystem_of(c)[0] == dominant_pm]
         else:
@@ -724,7 +734,8 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         # type dropped every one of these and left the report with no source
         # properties at all, the case the overrides exist to cure.
         options = self.config.options
-        dominant_type = self._resolve_dominant_type(components, options)
+        every_component = _walk_components(components)
+        dominant_type = self._resolve_dominant_type(every_component, options)
         pm, lang = (None, None)
         if dominant_type in PURL_TYPE_TO_GITLAB:
             pm, lang = PURL_TYPE_TO_GITLAB[dominant_type]
@@ -733,7 +744,7 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
 
         input_file = (
             options.input_file_path_override
-            or self._dominant_input_file(components, dominant_type)
+            or self._dominant_input_file(every_component, dominant_type)
             or (_DEFAULT_LOCKFILES.get(dominant_type) if dominant_type else None)
         )
         # The lockfile the report names says which manager declared it: a
