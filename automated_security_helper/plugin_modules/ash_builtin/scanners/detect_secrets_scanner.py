@@ -617,14 +617,17 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def _check_baseline_shape(document: Any) -> None:
         """Refuse a baseline that parses as JSON but is not a baseline.
 
-        ``SecretsCollection.load_from_baseline`` reads ``document["results"]``
-        as a mapping of filename to a list of entries, each an object with a
+        The shape ``detect-secrets`` writes and reads: ``document["results"]``
+        is a mapping of filename to a list of entries, each an object with a
         string ``type`` and ``hashed_secret`` (``PotentialSecret.load_secret_from_dict``
-        reads both by key), and raises KeyError or TypeError on anything else,
-        which would fail every scan with the baseline in use. The scanner's own
-        reading of the entries (``_baseline_known``) needs the same two fields.
-        The message names the shape, never the content: a baseline's entries
-        can hold a secret.
+        reads both by key). The scanner's own reading of the entries
+        (``_baseline_known``) needs the same two fields to match a candidate,
+        and the worker, when a request hands it a baseline, loads it with
+        ``SecretsCollection.load_from_baseline``, which raises KeyError or
+        TypeError on anything else. A document of another shape is not a
+        baseline, so the scan runs without one, as for a missing file. The
+        message names the shape, never the content: a baseline's entries can
+        hold a secret.
 
         Raises:
             ValueError: the document is not an object, its ``results`` is not a
@@ -720,8 +723,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # would otherwise let a committed link reach any file under that
         # home. The settings-trust rule (_untrusted_baseline_reason) still
         # judges by every enclosing checkout, which only widens what reads as
-        # the repository's.
-        admitted_link_root = checkout_containing(source_dir) or source_dir
+        # the repository's. Resolved, as every other root is_within is given
+        # here: is_within compares by samefile, so the resolution changes no
+        # answer, but a root spelled through a link reads the same as the
+        # other callers' and is not a question for the next reader.
+        admitted_link_root = Path(
+            os.path.realpath(checkout_containing(source_dir) or source_dir)
+        )
 
         # Look through each baseline file path to see if it exists and configure
         # the scan settings according to the first baseline file found. Each
@@ -979,7 +987,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
                 )
 
-        self._drop_in_tree_settings_paths(loaded_from_baseline)
+        self._drop_in_tree_settings_paths(loaded_from_baseline, config_filter_ids)
         self._check_wordlist_filter(loaded_from_baseline, config_filter_ids)
         self._apply_settings_trust(
             settings_from_baseline=bool(loaded_from_baseline),
@@ -1042,7 +1050,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         return super()._process_config_options()
 
     def _drop_in_tree_settings_paths(
-        self, loaded_from_baseline: Collection[str] = ()
+        self,
+        loaded_from_baseline: Collection[str] = (),
+        config_filter_ids: Collection[int] = (),
     ) -> None:
         """Keep plugins_used and filters_used file entries only from outside the tree.
 
@@ -1055,17 +1065,30 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         A path that is not ``file://`` is a module the worker imports, and is kept
         only when it is one of detect-secrets' own (``detect_secrets.``). This
         covers entries from the config and from the baseline file.
+
+        ``loaded_from_baseline`` names the options the baseline filled;
+        ``config_filter_ids`` is the ``id()`` of each ``filters_used`` entry the
+        operator's own configuration holds. The baseline's filters are added
+        beside the operator's, so authorship is per ENTRY for that option: an
+        operator entry keeps its own writer's judgment whether or not the
+        baseline also had filters. Judged per option, every retained operator
+        ``file://`` filter read as the baseline's once the baseline had any,
+        and one under a derived output or work directory, which the operator's
+        own configuration may name, was refused with a warning.
         """
         settings = self.config.options.scan_settings
         source_dir = Path(self.context.source_dir)
         derived_dirs = derived_roots(self.context)
+        config_filters = set(config_filter_ids)
 
-        def _operator_wrote(value: Any, option: str) -> bool:
+        def _operator_wrote(value: Any, option: str, entry: Any) -> bool:
             from automated_security_helper.config.operator_only_options import (
                 operator_wrote_value,
             )
 
-            if option in loaded_from_baseline:
+            if option in loaded_from_baseline and not (
+                option == "filters_used" and id(entry) in config_filters
+            ):
                 # The entry is the baseline file's content, not a write of the
                 # operator's own configuration.
                 return False
@@ -1078,7 +1101,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 config_from_context=self._config_from_context,
             )
 
-        def _checked(value: Any, key: str, option: str) -> tuple[bool, Any]:
+        def _checked(value: Any, key: str, option: str, entry: Any) -> tuple[bool, Any]:
             """(keep, value to use) for one entry's path."""
             if value is None:
                 return True, value
@@ -1109,7 +1132,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 key=key,
                 config=getattr(self.context, "config", None),
                 derived_dirs=derived_dirs,
-                operator_written=_operator_wrote(value, option),
+                operator_written=_operator_wrote(value, option, entry),
             )
             if honored is None:
                 return False, value
@@ -1121,7 +1144,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         plugins = []
         for plugin in settings.plugins_used:
             keep, value = _checked(
-                getattr(plugin, "path", None), plugins_key, "plugins_used"
+                getattr(plugin, "path", None), plugins_key, "plugins_used", plugin
             )
             if keep:
                 if value is not None:
@@ -1134,7 +1157,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         )
         filters = []
         for item in settings.filters_used:
-            keep, value = _checked(item.path, filters_key, "filters_used")
+            keep, value = _checked(item.path, filters_key, "filters_used", item)
             if keep:
                 item.path = value
                 filters.append(item)
@@ -1360,37 +1383,36 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         A baseline's ``results`` are a suppression surface: every candidate it
         lists by file, hash and type is one the report will not show as an
         ordinary finding. Removing a candidate is the operator's call to make,
-        so the entries are honored as removals only when the operator named the
-        file (``baseline_file`` written by the operator's own settings,
-        ``--config-overrides`` included) or when the file lies outside the
-        scanned tree and the settings-trust rule (``_untrusted_baseline_reason``)
-        finds it the operator's. A baseline the scanned repository controls, its
-        own in-tree ``.secrets.baseline`` or a ``baseline_file`` that a config
-        the operator did not write names, may only mark: its known candidates
-        stay in the report as suppressed findings, so the count is visible and
-        each can be audited, and a repository cannot hide a secret still in its
-        files by listing the hash in a file it commits. Under either baseline an
-        entry audited as a real secret is reported as an ordinary finding (see
+        so the entries are honored as removals only when the OPERATOR NAMED the
+        file: ``baseline_file`` written by the operator's own settings
+        (``--config-overrides`` included), or named by a config the operator did
+        not write while the operator's own settings name that same file
+        (``same_baseline``). A baseline the scan found in the tree
+        (``.secrets.baseline``, ``.ash/.secrets.baseline``) is never the
+        operator's record, whatever the settings-trust rule says of the
+        checkout layout: the structure says so here, where an earlier shape fell
+        through to ``_untrusted_baseline_reason`` and read such a baseline as
+        trusted whenever the configured scan root did not hold the source
+        directory. Such a file may only mark: its known candidates stay in the
+        report as suppressed findings, so the count is visible and each can be
+        audited, and a repository cannot hide a secret still in its files by
+        listing the hash in a file it commits. Under either baseline an entry
+        audited as a real secret is reported as an ordinary finding (see
         ``scan``): a confirmed secret is not cleared by the record of it. The
         worker is told the answer as ``baseline_trusted`` (``_scan_in_worker``).
         """
-        if not self._baseline_in_use():
+        if not self._baseline_in_use() or not self._baseline_from_option:
             return False
         record = getattr(
             getattr(self.context, "config", None),
             "_untrusted_detect_secrets_settings",
             None,
         )
-        if self._baseline_from_option and (
-            record is None
-            or same_baseline(
-                record.operator_baseline,
-                self._baseline_file_path(),
-                self.context.source_dir,
-            )
-        ):
-            return True
-        return self._untrusted_baseline_reason(record) is None
+        return record is None or same_baseline(
+            record.operator_baseline,
+            self._baseline_file_path(),
+            self.context.source_dir,
+        )
 
     def _apply_settings_trust(
         self, *, settings_from_baseline: bool, config_entries: Set[int]
@@ -1712,14 +1734,21 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         tries, so a filter or plugin that verifies under another name cannot
         either (see ``utils/detect_secrets_worker.py``).
 
-        ``baseline_trusted`` is whether the baseline handed over, if any, is the
-        operator's (``_baseline_entries_trusted``). The worker drops an entry the
-        baseline's audit accepted as not a secret only when the request says
-        ``"baseline_trusted": true``; absent or false means no drop, so a
-        repository-written baseline can only mark, never remove. The scanner
-        hands over no baseline today (``scan`` applies it to the scan's own
-        findings itself), so the flag records whose baseline the scan runs under
-        and keeps the two halves composed for a request that does carry one.
+        ``baseline_trusted`` is whether the baseline in use is the operator's
+        (``_baseline_entries_trusted``), written into the request beside
+        ``baseline``. It is the scanner's half of the request contract the
+        worker reads (``utils/detect_secrets_worker.py``, its
+        ``baseline_trusted`` key): the worker drops an entry a baseline it is
+        handed accepted as not a secret only when the request says
+        ``"baseline_trusted": true``, and absent or false means no drop. This
+        scanner passes ``baseline`` as None (``scan`` applies the baseline to
+        the scan's own findings itself, so the worker never loads one and a
+        stale entry cannot come back as a finding), so on ASH's own requests the
+        flag changes nothing in the worker; it is kept stated so a request that
+        does carry a baseline, another caller's or a later shape of this one,
+        cannot reach the worker with a repository's baseline read as trusted by
+        default. The two halves are tested apart: the request's keys here, the
+        worker's reading beside the worker.
 
         A worker killed at ``scan_timeout`` fails the scan: the timeout is recorded
         on the scanner (``scan_timed_out_after``) and ScannerError is raised, as the
@@ -2035,6 +2064,39 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             return path.relative_to(source).as_posix()
         return path.as_posix()
 
+    def _baseline_anchor(self, scan_root: Path, target_type: str) -> Path:
+        """The directory the baseline's paths are relative to.
+
+        ``detect-secrets scan`` writes a baseline from the directory it runs in,
+        the repository's root, so its result keys and its ``should_exclude_file``
+        patterns name files relative to that directory: ``service/app.py``,
+        ``^service/tests/``. A baseline whose file sits in a strict ancestor of
+        the scanned directory, read through an admitted in-tree link into the
+        enclosing checkout (a monorepo's ``service/.secrets.baseline`` pointing
+        at the checkout's own ``.secrets.baseline``) or named there by the
+        operator, was written from that ancestor. Matched relative to the
+        scanned subdirectory, no key met a finding and no pattern met a file, so
+        the admitted link read a baseline whose entries never applied. Such a
+        baseline's paths are read relative to its own directory; a baseline
+        inside the scanned directory, or anywhere else, keeps the scan root.
+        The anchor is spelled with the scan root's own prefix (the directory
+        walked up, not the resolved path), so a scan root reached through a
+        link keys the same way the scan set does. A converted-files scan keeps
+        the work directory: the baseline's paths name source files, and the
+        converted copies are keyed under the work directory as before.
+        """
+        if target_type != "source" or self._baseline_real is None:
+            return scan_root
+        root = Path(os.path.abspath(scan_root))
+        real_root = Path(os.path.realpath(root))
+        baseline_dir = Path(os.path.realpath(self._baseline_real)).parent
+        if baseline_dir == real_root or not real_root.is_relative_to(baseline_dir):
+            return scan_root
+        depth = len(real_root.parts) - len(baseline_dir.parts)
+        if depth < 1 or depth > len(root.parents):
+            return scan_root
+        return root.parents[depth - 1]
+
     def _baseline_known(
         self, baseline: Optional[Dict[str, Any]], scan_root: Path
     ) -> Dict[Tuple[str, Any, Any], bool]:
@@ -2048,8 +2110,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         positive or not audited. A baseline is the record of the findings its
         author has seen, so what "known" does to a reported candidate depends on
         that audit and on whose baseline it is (see ``scan``). Each key is the
-        URI ``_finding_uri`` gives the file, so the baseline's spelling of a
-        path and the scan's meet.
+        URI ``_finding_uri`` gives the file, anchored at ``scan_root``, which
+        the caller passes as the directory the baseline's paths are relative to
+        (``_baseline_anchor``), so the baseline's spelling of a path and the
+        scan's meet.
         """
         known: Dict[Tuple[str, Any, Any], bool] = {}
         results = (baseline or {}).get("results")
@@ -2269,6 +2333,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 else self.context.source_dir
             )
             self._secrets_collection.root = Path(scan_root).absolute()
+            # The directory the baseline's keys and exclude patterns are
+            # relative to: the scan root, or the baseline's own directory when
+            # that is an ancestor of it (a monorepo's root-level baseline read
+            # through an in-tree link; see _baseline_anchor).
+            baseline_anchor = self._baseline_anchor(scan_root, target_type)
 
             # Find all files to scan from the scan set.
             #
@@ -2407,7 +2476,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 scannable = self._apply_file_exclusions(
                     scannable,
                     exclude_patterns,
-                    scan_root,
+                    baseline_anchor,
                     timeout=scan_timeout,
                     source=pattern_source,
                 )
@@ -2558,7 +2627,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             #   counted, as the gitleaks scanner says of the tree's own ignore
             #   file. The worker applies the same rule to a baseline it is
             #   handed (``baseline_trusted``).
-            known = self._baseline_known(baseline_document, scan_root)
+            known = self._baseline_known(baseline_document, baseline_anchor)
             baseline_suppression: Optional[Suppression] = None
             if known and not known_entries_trusted:
                 listed_in = (
