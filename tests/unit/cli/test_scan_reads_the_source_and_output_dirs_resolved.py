@@ -151,8 +151,21 @@ class TestAnOutputDirectoryThatWouldClearTheScannedTreeIsRefused:
     @pytest.mark.parametrize(
         "marker, text",
         [
-            ("ash_aggregated_results.json", "{}\n"),
-            ("ash.log", "a previous run\n"),
+            (
+                "ash_aggregated_results.json",
+                '{"name": "ASH Scan Report", "description": "", "metadata": {}}\n',
+            ),
+            (
+                "ash.log",
+                "2026-10-30 00:12:34,567\tINFO\tscan.py:12\tLogging to tabular file \n",
+            ),
+            (
+                "ash.log.jsonl",
+                (
+                    '{"timestamp": "2026-10-30 00:12:34,567", "level": "INFO", '
+                    '"filename": "scan.py", "lineno": 12, "message": "started"}\n'
+                ),
+            ),
             (
                 ".gitignore",
                 "# ASH's output directory, not part of the scanned tree.\n*\n",
@@ -170,6 +183,61 @@ class TestAnOutputDirectoryThatWouldClearTheScannedTreeIsRefused:
         run = _scan(source_dir="src", output_dir="src/out")
 
         assert run.call_args.kwargs["output_dir"] == "src/out"
+
+    @pytest.mark.parametrize(
+        "marker, text",
+        [
+            ("ash.log", "notes about the ash tree\n"),
+            ("ash_aggregated_results.json", "[]\n"),
+            ("ash-scan-set-files-list.txt", "a.py\n"),
+        ],
+    )
+    def test_a_tree_file_at_a_marker_name_does_not_make_it_ashs(
+        self, tmp_path, marker, text, capsys
+    ):
+        """The marker is read by its content: a user file named ash.log beside a
+        real reports/ read as ASH's by name alone, and the scan cleared it."""
+        docs = tmp_path / "src" / "docs"
+        (docs / "reports").mkdir(parents=True)
+        (docs / "reports" / "index.md").write_text("# docs\n")
+        (docs / marker).write_text(text)
+
+        code = _refused(source_dir="src", output_dir="src/docs")
+
+        assert code == ASH_EXIT_USAGE_ERROR
+        assert "already holds files that are not ASH's" in capsys.readouterr().err
+
+    @_NEEDS_SYMLINKS
+    def test_a_link_at_a_marker_name_counts_for_nothing(self, tmp_path):
+        docs = tmp_path / "src" / "docs"
+        (docs / "reports").mkdir(parents=True)
+        (docs / "reports" / "index.md").write_text("# docs\n")
+        real_log = tmp_path / "elsewhere.log"
+        real_log.write_text("2026-10-30 00:12:34,567\tINFO\tscan.py:12\tx \n")
+        (docs / "ash.log").symlink_to(real_log)
+
+        assert _refused(source_dir="src", output_dir="src/docs") == ASH_EXIT_USAGE_ERROR
+
+    @pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="a mode-0 directory is still readable by root and on Windows",
+    )
+    def test_an_unreadable_cleared_directory_is_refused_not_skipped(
+        self, tmp_path, capsys
+    ):
+        """An unreadable reports/ read as empty, so no refusal was given; the clear
+        then failed on the same permission with a traceback."""
+        docs = tmp_path / "src" / "docs"
+        (docs / "reports").mkdir(parents=True)
+        (docs / "reports").chmod(0o000)
+        try:
+            code = _refused(source_dir="src", output_dir="src/docs")
+        finally:
+            (docs / "reports").chmod(0o755)
+
+        assert code == ASH_EXIT_USAGE_ERROR
+        err = capsys.readouterr().err
+        assert "cannot be read (PermissionError)" in err, err
 
     def test_the_default_output_directory_with_old_results_is_not_refused(
         self, tmp_path

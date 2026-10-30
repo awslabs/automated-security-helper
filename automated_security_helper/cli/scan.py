@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import contextlib
+import json
 import os
+import re
+import stat
 
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
@@ -278,38 +281,93 @@ def _resolved(path: str | Path) -> Path:
         return Path(path).absolute()
 
 
+#: The most bytes read from a marker file to decide whether ASH wrote it.
+_MARKER_HEAD_BYTES = 64 * 1024
+
+#: The first line of ash.log as utils/log.py writes it: the record's time, level
+#: and source, tab-separated (the TABULAR formatter's fmt).
+_ASH_LOG_FIRST_LINE = re.compile(
+    rb"\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}\t[A-Z]+\t[^\t\n]+:\d+\t"
+)
+
+#: The keys every line of ash.log.jsonl carries (utils/log.py's JsonFormatter).
+_ASH_JSONL_KEYS = frozenset({"timestamp", "level", "message"})
+
+
+def _marker_head(path: Path) -> Optional[bytes]:
+    """The first _MARKER_HEAD_BYTES of *path* when it is a regular file reached
+    without following a link, else None (a link, a directory, nothing there, or
+    an unreadable file is no marker)."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        with open(path, "rb") as handle:
+            return handle.read(_MARKER_HEAD_BYTES)
+    except OSError:
+        return None
+
+
+def _written_by_ash(name: str, head: bytes) -> bool:
+    """Whether the first bytes of the output-directory file *name* are what ASH
+    writes there: the aggregated results, a JSON object with the report's
+    ``metadata`` key in its head; ``ash.log``, whose first line is the tabular
+    record format; ``ash.log.jsonl``, whose first line is a JSON object with the
+    formatter's keys. The two text listings have no shape of ASH's own to read, so
+    they are no marker. A file with the right name and other content is the tree's."""
+    if name == "ash_aggregated_results.json":
+        return head.lstrip().startswith(b"{") and b'"metadata"' in head
+    if name == "ash.log":
+        return _ASH_LOG_FIRST_LINE.match(head) is not None
+    if name == "ash.log.jsonl":
+        first_line = head.split(b"\n", 1)[0]
+        try:
+            record = json.loads(first_line)
+        except ValueError:
+            return False
+        return isinstance(record, dict) and _ASH_JSONL_KEYS <= record.keys()
+    return False
+
+
 def _ash_output_dir(source_dir: str, output_resolved: Path) -> bool:
     """Whether *output_resolved*, inside the scanned tree, is ASH's own output
     directory and not a directory of the tree's: the default
     ``<source_dir>/.ash/ash_output``, or one holding a result, log or ignore file a
-    run of ASH wrote (the ``.gitignore`` is written before any scanner starts, so a
-    run that got no further still left it)."""
+    run of ASH wrote, read by its content and not its name alone (the
+    ``.gitignore`` is written before any scanner starts, so a run that got no
+    further still left it). A tree directory that happens to hold a file named
+    ``ash.log`` is not ASH's; a link at a marker's name counts for nothing."""
     if output_resolved == _resolved(Path(source_dir).joinpath(".ash", "ash_output")):
         return True
     for name in (*OUTPUT_RESULT_FILES, *OUTPUT_LOG_FILES):
-        if output_resolved.joinpath(name).is_file():
+        head = _marker_head(output_resolved.joinpath(name))
+        if head is not None and _written_by_ash(name, head):
             return True
-    ignore_file = output_resolved.joinpath(OUTPUT_GITIGNORE)
+    head = _marker_head(output_resolved.joinpath(OUTPUT_GITIGNORE))
+    return head is not None and head == OUTPUT_GITIGNORE_TEXT.encode("utf-8")
+
+
+def _not_clearable(directory: Path) -> Optional[str]:
+    """Why the scan must not clear *directory*, or None when it may: a directory
+    (not a link) that holds an entry, or one that cannot be read, so whether it
+    holds the tree's files cannot be told. An unreadable one read as empty before,
+    and the refusal was not given; the clear itself then failed on the same
+    permission, deleting nothing, with a traceback instead of the reason."""
     try:
-        if ignore_file.is_symlink() or not ignore_file.is_file():
-            return False
-        if ignore_file.stat().st_size > 4 * len(OUTPUT_GITIGNORE_TEXT):
-            return False
-        text = ignore_file.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return False
-    return text == OUTPUT_GITIGNORE_TEXT
-
-
-def _holds_anything(directory: Path) -> bool:
-    """Whether *directory* is a directory, not a link, with an entry in it."""
-    if directory.is_symlink() or not directory.is_dir():
-        return False
+        if stat.S_ISLNK(os.lstat(directory).st_mode):
+            return None
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return f"cannot be read ({type(exc).__name__})"
+    if not directory.is_dir():
+        return None
     try:
         with os.scandir(directory) as entries:
-            return next(entries, None) is not None
-    except OSError:
-        return False
+            if next(entries, None) is None:
+                return None
+    except OSError as exc:
+        return f"cannot be read ({type(exc).__name__})"
+    return "already holds files that are not ASH's"
 
 
 def _settle_output_dir(
@@ -385,17 +443,18 @@ def _settle_output_dir(
     ):
         for working_dir in OUTPUT_WORKING_DIRS:
             cleared = output_resolved.joinpath(working_dir)
-            if _holds_anything(cleared):
+            reason = _not_clearable(cleared)
+            if reason is not None:
                 _fail_usage(
                     shown_on_one_line(
                         f"Output directory {os.fspath(output_dir)} is inside the "
                         f"source directory {os.fspath(source_dir)}, and "
-                        f"{cleared.as_posix()} already holds files that are not "
-                        f"ASH's: the scan removes {working_dir}/ from the output "
-                        "directory before it starts, so it would delete part of the "
-                        "tree it was asked to scan. Point --output-dir at a "
-                        "directory of its own (the default, .ash/ash_output, is "
-                        "one), or move those files out of it."
+                        f"{cleared.as_posix()} {reason}: the scan removes "
+                        f"{working_dir}/ from the output directory before it "
+                        "starts, so it would delete part of the tree it was asked "
+                        "to scan. Point --output-dir at a directory of its own "
+                        "(the default, .ash/ash_output, is one), or move those "
+                        "files out of it."
                     )
                 )
     # A file where the output directory goes ended the run in a FileExistsError
