@@ -316,17 +316,25 @@ def install_path(lockfile_rel: str, key: str) -> str:
     forward slashes.
 
     The result is normalized whatever directory the lockfile is in, and it is
-    always inside the scan root: a key that climbs out of it (``../shared-lib``,
-    which npm writes for a linked package outside the project) or that is
-    absolute gives ``""``, which :func:`identity_properties` writes as no
-    ``package_path``. The module's contract is a scan-root-relative POSIX path
-    with no prefix; a path carrying ``..`` or a root would match no suppression
-    written that way, and a normalized ``..`` named another directory of the
-    scan root as the package's.
+    always inside the scan root: a key that climbs out of the lockfile's own
+    directory (``../shared-lib``, which npm writes for a linked package outside
+    the project) or that is absolute gives ``""``, which
+    :func:`identity_properties` writes as no ``package_path``. The module's
+    contract is a scan-root-relative POSIX path with no prefix; a path carrying
+    ``..`` or a root would match no suppression written that way, and a
+    normalized ``..`` named another directory of the scan root as the package's.
     """
     if posixpath.isabs(key):
         return ""
     directory = posixpath.dirname(lockfile_rel)
+    # The key is judged on its own before the join: a key that climbs out of
+    # the lockfile's directory names nothing the lockfile describes, whatever
+    # the join normalizes to. Judged only after the join, a nested lockfile's
+    # ``deploy/..`` cancelled against the climb and ``../shared-lib`` claimed
+    # ``shared-lib``, a directory at the scan root.
+    climb = posixpath.normpath(key) if key else ""
+    if climb == ".." or climb.startswith("../"):
+        return ""
     joined = posixpath.normpath(posixpath.join(directory, key)) if key else ""
     if not joined or joined == "." or joined == ".." or joined.startswith("../"):
         return ""
