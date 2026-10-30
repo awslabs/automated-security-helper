@@ -1368,27 +1368,28 @@ _ARCHIVE_UNREADABLE_ERRORS: Tuple[type, ...] = (
     NotImplementedError,
 )
 
-#: The OSError numbers that say the RUN could not write: the work directory is
-#: full, over quota, read-only, or not this user's to write, the process or the
-#: host is out of file descriptors or memory, the device failed, or a path is
-#: busy. Every other OSError raised while an archive is extracted comes from the
-#: archive: a member name a filesystem refuses (too long, not valid in its
-#: encoding), a member that names a file where an earlier member made a directory
-#: or the reverse, a decompressor's "Invalid data stream" (BZ2File raises OSError
-#: for a damaged bz2 stream). A run's failure is never accepted by a suppression,
-#: so an errno left out of this set would let the host's own fault be waived.
-_RUN_ERRNOS = frozenset(
+#: The OSError numbers that say the ARCHIVE is at fault when one is raised while
+#: it is extracted: a member name a filesystem refuses (too long, or not valid in
+#: its encoding), a member that names a file where an earlier member made a
+#: directory or the reverse, a member written where a directory stands, a
+#: decompressor's "Invalid data stream" (BZ2File raises OSError with EINVAL, or
+#: with no number at all, for a damaged bz2 stream). Every OTHER OSError is the
+#: run's: the work directory full, over quota, read-only or not this user's to
+#: write, gone from under the run (ENOENT), a link a guard refused (ELOOP), a
+#: network filesystem that stopped answering (ESTALE, ETIMEDOUT), a file too big
+#: for the filesystem (EFBIG), the process or the host out of descriptors or
+#: memory, a device failure, a busy path. A run's failure is never accepted by a
+#: suppression. The list used to name the run's numbers and read every other one
+#: as the archive's, so an errno nobody had listed let the host's own fault be
+#: waived by a suppression written for a reviewed archive.
+_ARCHIVE_ERRNOS = frozenset(
     {
-        errno.ENOSPC,
-        errno.EDQUOT,
-        errno.EACCES,
-        errno.EPERM,
-        errno.EROFS,
-        errno.EMFILE,
-        errno.ENFILE,
-        errno.EIO,
-        errno.ENOMEM,
-        errno.EBUSY,
+        errno.ENAMETOOLONG,
+        errno.EILSEQ,
+        errno.EISDIR,
+        errno.ENOTDIR,
+        errno.EEXIST,
+        errno.EINVAL,
     }
 )
 
@@ -1408,7 +1409,8 @@ def _failure_kind(error: Exception) -> Literal["input", "tool"]:
     a guard refusing a path, memory exhausted, a defect): accepting that would
     hide a loss of coverage no review of the archive explains, and the record
     would say the archive was at fault. An OSError is read by its number: the
-    run's when it names the work directory's state (_RUN_ERRNOS), the archive's
+    archive's when it names a fault of the archive's own layout or encoding
+    (_ARCHIVE_ERRNOS) or carries no number (a damaged bz2 stream), the run's
     otherwise.
     """
     if isinstance(error, _ARCHIVE_UNREADABLE_ERRORS):
@@ -1416,7 +1418,9 @@ def _failure_kind(error: Exception) -> Literal["input", "tool"]:
     if type(error).__name__ in _DECOMPRESSOR_ERROR_NAMES:
         return "input"
     if isinstance(error, OSError):
-        return "tool" if error.errno in _RUN_ERRNOS else "input"
+        if error.errno is None or error.errno in _ARCHIVE_ERRNOS:
+            return "input"
+        return "tool"
     return "tool"
 
 

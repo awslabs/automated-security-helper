@@ -209,11 +209,29 @@ def test_a_failure_of_the_run_is_a_tool_error_that_no_suppression_accepts(
         ),
         pytest.param(lzma.LZMAError("Corrupt input data"), "input", id="lzma"),
         pytest.param(OSError("Invalid data stream"), "input", id="bz2-stream-no-errno"),
+        pytest.param(OSError(errno.EISDIR, "Is a directory"), "input", id="over-a-dir"),
+        pytest.param(OSError(errno.EEXIST, "File exists"), "input", id="exists"),
+        # The run's: the work directory gone from under it, a link a guard refused,
+        # a network filesystem that stopped answering, a file the filesystem
+        # cannot hold. None of these is the archive's doing, and the old list,
+        # which named the run's numbers and read every other one as the
+        # archive's, let each of them be waived by a suppression.
         pytest.param(
             FileNotFoundError(errno.ENOENT, "No such file or directory"),
-            "input",
-            id="member-gone",
+            "tool",
+            id="work-dir-gone",
         ),
+        pytest.param(
+            OSError(errno.ELOOP, "Too many levels of symbolic links"),
+            "tool",
+            id="link-refused",
+        ),
+        pytest.param(OSError(errno.ESTALE, "Stale file handle"), "tool", id="stale"),
+        pytest.param(
+            OSError(errno.ETIMEDOUT, "Connection timed out"), "tool", id="nfs"
+        ),
+        pytest.param(OSError(errno.EFBIG, "File too large"), "tool", id="too-big"),
+        pytest.param(OSError(errno.EXDEV, "Cross-device link"), "tool", id="xdev"),
         pytest.param(
             NotImplementedError("That compression method is not supported"),
             "input",
