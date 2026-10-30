@@ -1432,6 +1432,26 @@ class ScanRegistry:
 
                 if owned_by_a_runner:
                     scan_progress.mark_in_progress()
+                elif (
+                    scan_progress.results_pending
+                    and entry.status in FINISHED_WITH_RESULTS
+                ):
+                    # A JSON object with neither scanner_results nor sarif is not a
+                    # results document. Before anything has closed the entry that
+                    # is "not finished"; once it was closed with results, the final
+                    # document never arrived. The same rule as the unreadable
+                    # file below: the runner's status stands, the poll reports
+                    # the file, and results_available below says there is
+                    # nothing to read. This used to re-close a COMPLETED entry
+                    # as FAILED while the unreadable file kept it, so the two
+                    # unusable-file shapes answered differently; and it sat
+                    # below the terminal-status arm, which kept an INCOMPLETE
+                    # entry's keyless file as "results available, 0 findings".
+                    scan_progress.mark_failed(
+                        f"Aggregated results file {results_path} has neither "
+                        "scanner_results nor sarif, and the scan has ended, so it "
+                        "never wrote its final results"
+                    )
                 elif entry.status in (
                     MCScanStatus.FAILED,
                     MCScanStatus.CANCELLED,
@@ -1478,21 +1498,10 @@ class ScanRegistry:
                         )
                         entry.closed_from_file = True
                 elif scan_progress.results_pending:
-                    # A JSON object with neither scanner_results nor sarif is not a
-                    # results document. Before anything has closed the entry that
-                    # is "not finished"; once it was closed with results, the final
-                    # document never arrived. The same rule as the unreadable
-                    # file above: the runner's status stands, the poll reports
-                    # the file, and results_available below says there is
-                    # nothing to read. This branch used to re-close a COMPLETED
-                    # entry as FAILED while the one above kept it, so the two
-                    # unusable-file shapes answered differently.
-                    if entry.status in FINISHED_WITH_RESULTS:
-                        scan_progress.mark_failed(
-                            f"Aggregated results file {results_path} has neither "
-                            "scanner_results nor sarif, and the scan has ended, so it "
-                            "never wrote its final results"
-                        )
+                    # A keyless results document under a PENDING entry no runner
+                    # owns: not finished yet, nothing to decide (the finished
+                    # case is the arm above the terminal statuses).
+                    pass
                 elif entry.status == MCScanStatus.COMPLETED:
                     # No results file, and whoever ran the scan closed the entry as
                     # completed. The entry owns the lifecycle here: a workspace

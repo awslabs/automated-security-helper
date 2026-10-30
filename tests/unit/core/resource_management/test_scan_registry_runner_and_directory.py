@@ -674,6 +674,48 @@ class TestAReadOnlyPollDoesNotRecloseACompletedScan:
         assert progress["total_findings"] == 1
         assert progress["error_message"] is None
 
+    def test_a_keyless_document_under_an_incomplete_entry_has_no_results(
+        self, tmp_path
+    ):
+        """The keyless-document rule sat below the terminal-status arm, which
+        kept an INCOMPLETE entry's progress as the file view left it (status
+        in_progress, results_pending), so results_available read True with 0
+        findings for a scan whose final document never arrived."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        scan_id = _register(registry, project, output)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+        registry.finish_scan(
+            scan_id,
+            MCScanStatus.INCOMPLETE,
+            coverage={
+                "incomplete_scanners": [{"name": "semgrep", "reason": "missing"}],
+                "no_scanner_ran": False,
+                "incomplete_converters": [],
+                "unevaluated_rules": [],
+                "stale_content_databases": [],
+                "could_not_stop": [],
+            },
+        )
+        results_file = output / "ash_aggregated_results.json"
+        results_file.write_text(
+            json.dumps({"metadata": {"generated_at": "2024-01-01T00:00:00"}}),
+            encoding="utf-8",
+        )
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "incomplete"
+        assert progress["is_complete"] is True
+        assert progress["results_available"] is False
+        assert progress["coverage_complete"] is None
+        assert progress["total_findings"] == 0
+        assert "neither scanner_results nor sarif" in progress["error_message"]
+        assert registry.get_scan(scan_id).status is MCScanStatus.INCOMPLETE
+
     def test_a_document_with_neither_results_nor_sarif_keeps_a_completed_entry(
         self, tmp_path
     ):
