@@ -8,8 +8,9 @@ Two behaviors of ``config/tool_config_trust.py``:
 * ferret-scan's ``respect_gitignore`` has the tool skip the files the scanned
   tree's own ``.gitignore`` names, so a repository's config could choose which
   of its files the scan reads. It is an operator's choice like ``profile``: a
-  repository config's ``true`` is replaced by the trusted value (off) and named
-  in the warning.
+  repository config's ``true`` gives way to the trusted value (off: the
+  scanner's own default, since the trusted base pins nothing for a plugin
+  section) and is named in the warning.
 * The scanner overrides are replayed onto the trusted base folded onto its own
   section spellings (``resolve_config._folded_onto_trusted``): when the
   repository's in-tree config spells an undeclared plugin section one way and
@@ -138,6 +139,13 @@ def _checkout(tmp_path: Path, repo_text: str) -> Path:
 def test_a_repository_configs_respect_gitignore_is_the_operators_choice(
     tmp_path, ash_log
 ):
+    """The repository's ``true`` is dropped and named in the warning.
+
+    ferret-scan is a plugin section, a plain dict holding only what a file
+    wrote, and the trusted base (the defaults, no operator config) pins
+    nothing for it, so the confinement removes the written key and the
+    scanner reads its own default, off (``SCANNER_CONFIG_CHOICE_OPTIONS``).
+    """
     checkout = _checkout(
         tmp_path,
         "project_name: repo\nscanners:\n  ferret-scan:\n    options:\n"
@@ -147,7 +155,8 @@ def test_a_repository_configs_respect_gitignore_is_the_operators_choice(
     config = resolve_config(source_dir=checkout)
 
     section = config.get_plugin_config("scanner", "ferret-scan") or {}
-    assert section.get("options", {}).get("respect_gitignore") is False
+    options = section.get("options", {})
+    assert options.get("respect_gitignore", False) is False, options
     warnings = [
         r.getMessage()
         for r in ash_log
