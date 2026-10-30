@@ -456,6 +456,15 @@ def test_control_a_child_that_keeps_sys_path_0_imports_from_the_scanned_director
     The child changes into ASH's working directory, and under ``-c`` the ``''``
     entry follows it, so the planted ``cdk_nag.py`` is what it imports. Shows the
     test below can fail.
+
+    The planted module leaves its mark and then raises an ImportError, which the
+    wrapper answers itself, before it imports aws_cdk: this control runs no jsii
+    and starts no node. It used to let the planted module import quietly and wait
+    for ``_build_nag_pack`` to refuse it, but that refusal sits after the aws_cdk
+    import, so the control needed a working node in the child. Under the unit tool
+    guard the child resolves node to the guard's stand-in, first on its PATH, jsii
+    read the stand-in's empty output as its handshake, and the control failed for
+    that reason on every POSIX run, with the stand-in's start counted at teardown.
     """
     first_statement = "sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; "
     assert first_statement in cdk_nag_worker._CHILD_BOOTSTRAP
@@ -464,8 +473,16 @@ def test_control_a_child_that_keeps_sys_path_0_imports_from_the_scanned_director
         "_CHILD_BOOTSTRAP",
         cdk_nag_worker._CHILD_BOOTSTRAP.replace(first_statement, ""),
     )
-    marker = _run_from_a_planted_repository(tmp_path, monkeypatch)
+    marker, response = _run_from_a_planted_repository(tmp_path, monkeypatch)
     assert "cdk_nag" in marker.read_text()
+    assert response is not None and response.failure is not None
+    assert PLANTED_IMPORT_MESSAGE in response.failure
+
+
+#: What the planted ``cdk_nag.py`` raises once it has left its mark. The wrapper
+#: answers an ImportError from ``import cdk_nag`` with a response that carries the
+#: exception's text, so the control reads this back without any jsii.
+PLANTED_IMPORT_MESSAGE = "planted cdk_nag imported from the scanned directory"
 
 
 def _run_from_a_planted_repository(tmp_path, monkeypatch):
@@ -476,6 +493,14 @@ def _run_from_a_planted_repository(tmp_path, monkeypatch):
         (repo / f"{name}.py").write_text(
             f"open({str(marker)!r}, 'a').write({name!r})\n", encoding="utf-8"
         )
+    # The planted cdk_nag leaves its mark and then refuses to import, so the child
+    # never gets as far as aws_cdk, jsii or node; the wrapper's own handling of an
+    # import failure answers with a response naming it.
+    (repo / "cdk_nag.py").write_text(
+        f"open({str(marker)!r}, 'a').write('cdk_nag')\n"
+        f"raise ImportError({PLANTED_IMPORT_MESSAGE!r})\n",
+        encoding="utf-8",
+    )
     monkeypatch.chdir(repo)
     monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
     template = tmp_path / "t.yaml"
@@ -484,10 +509,8 @@ def _run_from_a_planted_repository(tmp_path, monkeypatch):
     )
     outdir = tmp_path / "out"
     with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
-        # The planted cdk_nag has no packs, so the child's answer is re-raised here.
-        with pytest.raises(Exception, match="Unknown cdk-nag pack"):
-            _call(template, outdir)
-    return marker
+        response = _call(template, outdir)
+    return marker, response
 
 
 @pytest.mark.integration
