@@ -47,6 +47,15 @@ def recorded_os(monkeypatch):
     """
     calls: list[tuple] = []
     real_open, real_dup2, real_close = os.open, os.dup2, os.close
+    real_set_inheritable = os.set_inheritable
+
+    def fake_set_inheritable(fd, inheritable):
+        # The entry point's own hold on 0, 1 or 2 is recorded and NOT applied
+        # (the real descriptor is pytest's); any other call passes through.
+        if fd in (0, 1, 2):
+            calls.append(("inheritable", fd, inheritable))
+            return None
+        return real_set_inheritable(fd, inheritable)
 
     def fake_open(path, flags, *args, **kwargs):
         if path == os.devnull and flags == os.O_WRONLY:
@@ -69,6 +78,7 @@ def recorded_os(monkeypatch):
     monkeypatch.setattr(os, "open", fake_open)
     monkeypatch.setattr(os, "dup2", fake_dup2)
     monkeypatch.setattr(os, "close", fake_close)
+    monkeypatch.setattr(os, "set_inheritable", fake_set_inheritable)
     return calls
 
 
@@ -86,6 +96,7 @@ def test_a_closed_stderr_is_held_with_the_null_device(
         ("open", os.devnull, os.O_WRONLY),
         ("dup2", NULL_FD, 2),
         ("close", NULL_FD),
+        ("inheritable", 2, True),
     ], recorded_os
     assert no_reservations == {2}
 
@@ -118,7 +129,9 @@ def test_the_null_device_handed_the_descriptor_itself_stays_open(
     )
 
     assert entrypoint._reserve_descriptor(2) is True
-    assert recorded_os == [], recorded_os
+    # No dup2, no close; the descriptor the null device took is made inheritable,
+    # as os.open hands out a non-inheritable one (PEP 446).
+    assert recorded_os == [("inheritable", 2, True)], recorded_os
     assert no_reservations == {2}
 
 

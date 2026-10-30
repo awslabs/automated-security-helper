@@ -120,6 +120,13 @@ def _reserve_descriptor(fd: int) -> bool:
 
     Returns whether it is held. Opening the null device may itself be handed
     *fd*, the lowest free number; then it is already in place and stays open.
+
+    Held inheritable on both paths. ``os.open`` gives a descriptor children do
+    not inherit (PEP 446), so on the path where it was handed *fd* itself a
+    child that inherits stderr would start with that number closed again, and
+    its first ``open()`` would land there: the hazard this hold exists for.
+    ``os.dup2`` gives an inheritable one by default; it is set the same way so
+    the two paths cannot drift apart.
     """
     try:
         null = os.open(os.devnull, os.O_WRONLY)
@@ -132,6 +139,10 @@ def _reserve_descriptor(fd: int) -> bool:
             return False
         finally:
             os.close(null)
+    try:
+        os.set_inheritable(fd, True)
+    except OSError:
+        return False
     _RESERVED_DESCRIPTORS.add(fd)
     return True
 
