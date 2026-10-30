@@ -1664,12 +1664,20 @@ def _reduce_project_scan(
     # did tighten this project: a disclosure printed on every scan is noise, and
     # noise gets skipped. ceiling_unreachable_counts returns {} when the two
     # thresholds are equal, so this is belt and braces rather than the only guard.
+    # The same policy_scanners_gate exclusion as the verdict's: a non-gating policy
+    # scanner's findings are judged at no threshold, so the ceiling never claimed
+    # them, and counting their level-only findings here told the operator the
+    # ceiling could not reach findings the gate never judged.
     unreachable: Dict[str, int] = {}
     if project.threshold_tightened_by_policy:
+        non_gating: Set[str] = set()
+        if project.policy_scanners and not project.policy_scanners_gate:
+            non_gating = _policy_scanner_names(project)
         unreachable = ceiling_unreachable_counts(
             results_list,
             declared_threshold=project.severity_threshold,
             effective_threshold=threshold,
+            non_gating_scanners=non_gating,
         )
 
     statuses = _scanner_statuses(results)

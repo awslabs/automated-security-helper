@@ -584,6 +584,58 @@ class TestPerProjectThresholds:
         assert entry.actionable_finding_count == 1
         assert entry.ceiling_unreachable_findings == {}
 
+    def test_a_non_gating_policy_scanners_level_only_finding_is_not_disclosed(
+        self, tmp_path
+    ):
+        """The verdict's policy_scanners_gate exclusion, applied to the disclosure.
+
+        semgrep is a scanner only the workspace policy asked for, with the gate
+        off: its findings are judged at no threshold, so the ceiling never
+        claimed them. Red at the base: the executor called the counter without
+        the project's non-gating scanners, so the helper's own exclusion never
+        ran in production and semgrep's level-only finding was disclosed as one
+        the ceiling could not reach. bandit's is the control: the project's own
+        scanner, still disclosed.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0].model_copy(
+            update={"policy_scanners": ["semgrep"], "policy_scanners_gate": False}
+        )
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        plan.projects[0] = project
+        sarif = _sarif(level="error", count=2)
+        sarif["runs"][0]["results"][1]["properties"]["scanner_name"] = "semgrep"
+        FakeOrchestrator.behaviour["api"] = {"sarif": sarif}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        # Controls: semgrep's finding is present and policy-origin, and bandit's
+        # is actionable, so the missing semgrep key is the exclusion's doing.
+        assert entry.finding_count == 2
+        assert entry.policy_origin_finding_count == 1
+        assert entry.actionable_finding_count == 1
+        assert entry.ceiling_unreachable_findings == {"bandit": 1}
+
+    def test_a_gating_policy_scanners_level_only_finding_is_disclosed(self, tmp_path):
+        """The other arm: with the gate on, semgrep's finding decides the verdict,
+        so the ceiling's claim covers it and the disclosure names both scanners."""
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0].model_copy(
+            update={"policy_scanners": ["semgrep"], "policy_scanners_gate": True}
+        )
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        plan.projects[0] = project
+        sarif = _sarif(level="error", count=2)
+        sarif["runs"][0]["results"][1]["properties"]["scanner_name"] = "semgrep"
+        FakeOrchestrator.behaviour["api"] = {"sarif": sarif}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        assert entry.actionable_finding_count == 2
+        assert entry.ceiling_unreachable_findings == {"bandit": 1, "semgrep": 1}
+
     def test_the_aggregate_exit_code_reflects_the_strictest_failing_project(
         self, tmp_path
     ):
