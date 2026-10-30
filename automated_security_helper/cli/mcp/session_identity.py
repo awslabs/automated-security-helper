@@ -41,11 +41,19 @@ image change.
 stdio carries no headers and serves a single client, so it resolves to
 ``DEFAULT_SESSION_ID``, the sentinel the profile registry already uses for
 callers that name no session. Only a caller known to be that local client gets
-it (:func:`serving_local_client`): a tool call with no HTTP request behind it is
-not enough on its own. A request that carries headers but names no session is
-never that client: it resolves to :data:`UNIDENTIFIED_SESSION_ID`. Naming the
-default session in the header is refused (:func:`is_reserved_session_id`), and
-leaving the header out must not reach it either.
+it (:func:`serving_local_client`): a Context the SDK built with no HTTP request
+behind it is not enough on its own. A request that carries headers but names no
+session is never that client: it resolves to :data:`UNIDENTIFIED_SESSION_ID`.
+Naming the default session in the header is refused
+(:func:`is_reserved_session_id`), and leaving the header out must not reach it
+either.
+
+The one caller the mark does not decide is an in-process caller's stand-in
+context (a plain object with a ``headers`` attribute, which no transport ever
+builds: the SDK builds a Context for every call it dispatches). A stand-in with
+no headers at all is that caller by construction and resolves to the default
+session without the mark; see :func:`resolve_session_id`. Gating it on the mark
+too would be a change of contract for every in-process caller, not a guard.
 
 Which session a network call belongs to is decided by the transport, never by
 the header alone: see :func:`resolve_caller_session_id` and
@@ -116,11 +124,14 @@ def serving_local_client() -> Iterator[None]:
     """Serve tool calls made inside this block as the local client's.
 
     ``run_mcp_server`` serves stdio inside it, and so should a process that
-    drives the server through the MCP SDK's in-memory client. A tool call with
-    no HTTP request behind it is stdio's ``DEFAULT_SESSION_ID``, with local
-    trust, only inside it; anywhere else it is :data:`UNIDENTIFIED_SESSION_ID`.
-    So a transport that ever hands a tool no request gets remote trust rather
-    than stdio's. Tasks the server starts inside the block inherit the mark.
+    drives the server through the MCP SDK's in-memory client. A Context the SDK
+    built with no HTTP request behind it is stdio's ``DEFAULT_SESSION_ID``, with
+    local trust, only inside it; anywhere else it is
+    :data:`UNIDENTIFIED_SESSION_ID`. So a transport that ever hands a tool no
+    request gets remote trust rather than stdio's. Tasks the server starts
+    inside the block inherit the mark. The mark does not decide an in-process
+    caller's stand-in context, which no transport builds: see the module
+    docstring and :func:`resolve_session_id`.
     """
 
     token = _LOCAL_CLIENT.set(True)
@@ -273,20 +284,26 @@ def is_reserved_session_id(value: str) -> bool:
     """True if ``value`` names a directory under the workspace root ASH owns.
 
     Those are stdio's workspace (``DEFAULT_SESSION_ID``), the unidentified
-    sentinel, the stdio servers' presence registry, and the running scans'
-    presence registry. Compared casefolded: on a case-insensitive filesystem (the
-    macOS and Windows defaults) ``__DEFAULT__`` opens the same directory as
-    ``__default__``. Trailing periods and spaces are dropped before the
-    comparison, because Windows drops them when it opens the name
-    (``__default__.`` is ``__default__``), and a generated 8.3 short name of a
-    reserved name (``__DEFAU~1``) is reserved too, since it opens the same
-    directory.
+    sentinel, the stdio servers' presence registry, the running scans' presence
+    registry, and the guard file each registry locks (``.lock``,
+    ``sessions.PRESENCE_LOCK_NAME``): under the scans' registry a session's
+    holder directory and that file would share one name, so a session called
+    ``.lock`` could register no scan and would never be swept. Compared
+    casefolded: on a case-insensitive filesystem (the macOS and Windows
+    defaults) ``__DEFAULT__`` opens the same directory as ``__default__``.
+    Trailing periods and spaces are dropped before the comparison, because
+    Windows drops them when it opens the name (``__default__.`` is
+    ``__default__``), and a generated 8.3 short name of a reserved name
+    (``__DEFAU~1``) is reserved too, since it opens the same directory. The
+    guard file's name is shorter than eight characters, so no short name
+    aliases it and none is reserved for it.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
         DEFAULT_SESSION_ID,
     )
     from automated_security_helper.cli.mcp.sessions import (
+        PRESENCE_LOCK_NAME,
         SCAN_PRESENCE_DIR,
         STDIO_SERVERS_DIR,
     )
@@ -298,7 +315,7 @@ def is_reserved_session_id(value: str) -> bool:
         SCAN_PRESENCE_DIR,
     )
     folded = value.casefold().rstrip(". ")
-    if folded in {name.casefold() for name in reserved}:
+    if folded in {name.casefold() for name in (*reserved, PRESENCE_LOCK_NAME)}:
         return True
     return any(_short_name_pattern(name).fullmatch(folded) for name in reserved)
 
