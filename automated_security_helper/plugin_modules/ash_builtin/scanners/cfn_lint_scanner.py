@@ -90,6 +90,8 @@ from typing import (
     Tuple,
 )
 
+from urllib.parse import unquote
+
 import yaml
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator
 
@@ -141,6 +143,11 @@ from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    WAS_KILLED_ENDING,
+    response_could_not_stop,
+)
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 #: cfn-lint's rule-id letter, mapped to an ASH severity and the SARIF level that
@@ -183,14 +190,20 @@ DEFAULT_REGION = "us-east-1"
 _ARGV_CHAR_BUDGET = 24000
 
 # What cfn-lint accepts for these options, checked here so a config value can never
-# be read as another option.
-_REGION_PATTERN = re.compile(r"^(ALL_REGIONS|[a-z]{2}(-[a-z]+)+-\d+)$")
-_CHECK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+# be read as another option. ``\Z``, not ``$``: ``$`` also matches before a
+# trailing newline, so ``"us-east-1\n"`` passed as a region and was handed to
+# cfn-lint with the newline.
+_REGION_PATTERN = re.compile(r"^(ALL_REGIONS|[a-z]{2}(-[a-z]+)+-\d+)\Z")
+_CHECK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]*\Z")
 
 #: The characters a rule id prefix is built from in ``mandatory_prefixes``: the ones
 #: ``_CHECK_PATTERN`` allows, which cover every built-in id (a letter and four
-#: digits) and the usual custom ones.
-_RULE_ID_ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowercase
+#: digits), plus ``_`` and ``-``, which a custom rule's id (``append_rules``) may
+#: hold: without them such a rule was outside every mandatory prefix, so a
+#: template's own ``ignore_checks`` could turn it off.
+_RULE_ID_ALPHABET = (
+    string.digits + string.ascii_uppercase + string.ascii_lowercase + "_-"
+)
 
 #: The most option text cfn-lint may be given; the rest of ``_ARGV_CHAR_BUDGET`` is
 #: left for templates. A ``cfn-lint --mandatory-checks`` list longer than this comes from an
@@ -294,6 +307,62 @@ _NOT_STARTED_AFTER_TIMEOUT = (
     "not started: an earlier cfn-lint invocation of this scan timed out, and the "
     "scan is discarded after a timeout"
 )
+
+
+def _invocation_failure(response: Dict[str, Any]) -> Optional[str]:
+    """Why a run that did not complete failed, worded by the response's flags, or None.
+
+    The flags (``subprocess_utils.RESPONSE_FLAGS``) say what happened; the ``error``
+    key alone does not. Before this every response with an error key read as
+    "could not be started", a tool that ran and died on a signal, or whose output
+    ASH failed to record, included; and every timeout read as "was killed", one
+    ASH could not end, which may still be running, included.
+    """
+    if response.get("timed_out"):
+        ending = (
+            COULD_NOT_STOP_ENDING
+            if response_could_not_stop(response)
+            else WAS_KILLED_ENDING
+        )
+        return f"cfn-lint timed out{ending}"
+    if response.get("signaled"):
+        return f"cfn-lint did not finish: {response.get('error')}"
+    if response.get("post_run_error"):
+        return f"cfn-lint ran, but ASH could not record its output: {response.get('error')}"
+    if response.get("cancelled"):
+        return f"cfn-lint was cancelled: {response.get('error')}"
+    if response.get("result_rejected"):
+        return f"cfn-lint's result was rejected: {response.get('error')}"
+    if "error" in response:
+        # spawn_failed, or a response with no flag at all: the command never ran.
+        return f"cfn-lint could not be started: {response['error']}"
+    return None
+
+
+def _combined_exit_code(codes: List[Any]) -> Optional[int]:
+    """One exit code for a scan made of several cfn-lint invocations, or None for none.
+
+    cfn-lint's code is a bitmask of the levels it reported (2 error, 4 warning,
+    8 informational), so the codes of two completed invocations combine by OR:
+    the base class kept the LARGER, which read a scan that reported an error (2)
+    and a warning (4) as warnings only. An invocation that failed (a code that is
+    not a completed run, or none) outranks every completed one, and the first
+    such code is the scan's.
+    """
+    seen: List[int] = []
+    for code in codes:
+        if not _successful_exit(code):
+            try:
+                return int(code)  # type: ignore[call-overload]
+            except (TypeError, ValueError):
+                return 1
+        seen.append(int(code))  # type: ignore[call-overload]
+    if not seen:
+        return None
+    combined = 0
+    for code in seen:
+        combined |= code
+    return combined
 
 
 def _one_template_can_fail_the_run(response: Dict[str, Any]) -> bool:
@@ -597,11 +666,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             resolved = get_uv_tool_command(
                 _COMMAND, from_spec=self._uv_probe_from_spec()
             )
-            if resolved is not None:
-                self.use_uv_tool = False
-                self.dependencies_satisfied = True
-                return True
-            return False
+            if resolved is None:
+                return False
+            return self._accept_binary_on_path(resolved)
         if self.use_uv_tool:
             installation_info = self._get_tool_installation_info()
             if installation_info.get("available"):
@@ -626,6 +693,57 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # use_uv_tool left True, every scan then went through uv, whose install
         # had just failed, and refused to start.
         self.use_uv_tool = resolved[:1] == ["uv"]
+        self.dependencies_satisfied = True
+        return True
+
+    def _accept_binary_on_path(self, resolved: List[str]) -> bool:
+        """Whether the cfn-lint the resolver found with no uv may run the scan.
+
+        Without uv there is no install to fall back on, so the binary on PATH
+        is the scan's cfn-lint: it is verified against the scan's requirement
+        (``sarif`` extra, the version constraint) as ``_select_tool_execution``
+        verifies one. Before this it was declared satisfied unverified, and a
+        cfn-lint without the ``sarif`` extra then failed every invocation with
+        an unknown-format error. One that falls short is MISSING with the
+        reason; one that cannot be verified runs, with a warning, since nothing
+        better is at hand.
+        """
+        from automated_security_helper.utils.pre_installed_tool import (
+            verify_pre_installed_tool,
+        )
+
+        if resolved[:1] == ["uv"]:
+            # Reachable only if the resolver found a uv the availability check did
+            # not; run through it as the final fallback does.
+            self.use_uv_tool = True
+            self.dependencies_satisfied = True
+            return True
+        executable = resolved[0]
+        checked = verify_pre_installed_tool(
+            executable,
+            _COMMAND,
+            self._get_tool_package_extras(),
+            self._get_tool_version_constraint(),
+            uv_executable=None,
+            values=self._values_to_redact(),
+        )
+        if checked.status == "unsatisfied":
+            reason = (
+                f"uv is not installed and the cfn-lint on PATH ({executable}) "
+                f"cannot be used: {checked.detail}"
+            )
+            self.dependency_unavailable_reason = reason
+            self._plugin_log(reason, level=logging.ERROR)
+            self.dependencies_satisfied = False
+            return False
+        if checked.status != "satisfied":
+            self._plugin_log(
+                f"uv is not installed and the cfn-lint on PATH ({executable}) "
+                f"could not be verified against the scan's requirement "
+                f"({checked.detail}); running it anyway.",
+                level=logging.WARNING,
+            )
+        self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True
 
@@ -701,6 +819,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             # apply: the template's lists are added to the operator's.
             args.append("--merge-configs")
         settings: Dict[str, Any] = {}
+        include_checks = list(options.include_checks)
+        mandatory_checks: List[str] = []
         if not honor_inline_ignores and config_file is not None:
             settings = self._config_file_settings(config_file)
             if settings.get("merge_configs"):
@@ -715,17 +835,36 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             for check in self._config_file_ignores(settings, config_file):
                 if check not in ignore_checks:
                     ignore_checks.append(check)
+            # The file's include_checks and mandatory_checks apply the same way:
+            # a command-line value replaces the file's whole, so the file's were
+            # silently dropped once ASH passed its own.
+            for check in self._config_file_checks(
+                settings, "include_checks", config_file
+            ):
+                if check not in include_checks:
+                    include_checks.append(check)
+            mandatory_checks = self._config_file_checks(
+                settings, "mandatory_checks", config_file
+            )
         if ignore_checks:
             args.extend(["--ignore-checks", *ignore_checks])
         elif not honor_inline_ignores:
             args.extend(["--ignore-checks", _NO_OP_IGNORE_CHECK])
-        if options.include_checks:
-            args.extend(["--include-checks", *options.include_checks])
+        if include_checks:
+            args.extend(["--include-checks", *include_checks])
         if not honor_inline_ignores:
             # See _honor_inline_ignores. One token each, so no value is read as a flag.
-            args.append(
-                "--mandatory-checks=" + ",".join(mandatory_prefixes(ignore_checks))
-            )
+            prefixes = mandatory_prefixes(ignore_checks)
+            for check in mandatory_checks:
+                if check not in prefixes:
+                    prefixes.append(check)
+            # E0003 names a template cfn-lint could not open or process, which
+            # ASH reads as a failed invocation (_lint_once); under an operator's
+            # ``ignore_checks: [E]`` it was dropped and the templates read as
+            # linted and clean. Mandatory outranks ignored, so it is always kept.
+            if not any(_CONFIG_ERROR_RULE.startswith(prefix) for prefix in prefixes):
+                prefixes.append(_CONFIG_ERROR_RULE)
+            args.append("--mandatory-checks=" + ",".join(prefixes))
             args.extend(
                 f"--configure-rule={entry}"
                 for entry in self._configure_rule_args(
@@ -910,7 +1049,19 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         is not a rule id or prefix is left out with a warning, so it can never be
         read as an option, and that check then runs.
         """
-        raw = settings.get("ignore_checks")
+        return self._config_file_checks(settings, "ignore_checks", config_file)
+
+    def _config_file_checks(
+        self, settings: Dict[str, Any], key: str, config_file: Path
+    ) -> List[str]:
+        """The rule ids or prefixes the operator's ``.cfnlintrc`` lists under ``key``.
+
+        ``ignore_checks``, ``include_checks`` and ``mandatory_checks`` share one
+        shape: a list, or a comma-separated string. An entry that is not a rule
+        id or prefix is left out with a warning, so it can never be read as an
+        option.
+        """
+        raw = settings.get(key)
         if isinstance(raw, str):
             raw = raw.split(",")
         checks: List[str] = []
@@ -919,7 +1070,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 checks.append(item)
             else:
                 self._plugin_log(
-                    f"Ignoring ignore_checks entry {item!r} in "
+                    f"Ignoring {key} entry {item!r} in "
                     f"{Path(config_file).as_posix()}: not a cfn-lint rule id or "
                     "prefix (letters and digits).",
                     level=logging.WARNING,
@@ -978,16 +1129,20 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             return chosen.path
         reason = chosen.refusal
         # A .cfnlintrc can make cfn-lint import Python files (append_rules), so one
-        # the scanned repository chose is never handed to it.
-        self._plugin_log(
-            refusal_warning(
-                "Ignoring scanners.cfn-lint.options.config_file "
-                f"({str(configured)!r}): {reason}. A .cfnlintrc can load Python "
-                "rules, so cfn-lint runs with ASH's empty configuration instead.",
-                reason,
-            ),
-            level=logging.WARNING,
-        )
+        # the scanned repository chose is never handed to it. Warned once per
+        # scanner, as the other refused options are: this is read on every
+        # invocation, and the line repeated per batch and per target.
+        if "config_file" not in self._refused_options:
+            self._refused_options.add("config_file")
+            self._plugin_log(
+                refusal_warning(
+                    "Ignoring scanners.cfn-lint.options.config_file "
+                    f"({str(configured)!r}): {reason}. A .cfnlintrc can load Python "
+                    "rules, so cfn-lint runs with ASH's empty configuration instead.",
+                    reason,
+                ),
+                level=logging.WARNING,
+            )
         return None
 
     @staticmethod
@@ -1015,14 +1170,17 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def batches(paths: List[str], budget: int = _ARGV_CHAR_BUDGET) -> List[List[str]]:
         """Split ``paths`` into consecutive batches whose joined length fits ``budget``.
 
-        A single path longer than the budget gets a batch of its own rather than
-        being dropped.
+        Each path costs what it takes on the command line: its ``glob.escape``-d
+        form (``_lint_once`` passes that) and a separator. A path holding
+        ``[``, ``]``, ``*`` or ``?`` grows under the escape, so costing the raw
+        path let a batch overrun the budget. A single path longer than the budget
+        gets a batch of its own rather than being dropped.
         """
         out: List[List[str]] = []
         current: List[str] = []
         size = 0
         for path in paths:
-            cost = len(path) + 1
+            cost = len(glob.escape(path)) + 1
             if current and size + cost > budget:
                 out.append(current)
                 current, size = [], 0
@@ -1062,9 +1220,19 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                         continue
                     artifact.uriBaseId = None
                     if artifact.uri:
-                        artifact.uri = shown_by_argument.get(
-                            artifact.uri.replace("\\", "/"), artifact.uri
+                        # As written first: a path that holds a backslash on
+                        # POSIX is a name, and replacing it matched nothing. Then
+                        # with Windows separators made ``/``, then percent-decoded,
+                        # since cfn-lint writes a URI and a path holding a space
+                        # or ``#`` came back encoded and matched nothing.
+                        written = artifact.uri
+                        slashed = written.replace("\\", "/")
+                        shown = (
+                            shown_by_argument.get(written)
+                            or shown_by_argument.get(slashed)
+                            or shown_by_argument.get(unquote(slashed))
                         )
+                        artifact.uri = shown or written
                 severity, level = severity_for_rule(result.ruleId)
                 result.level = Level(level)
                 if result.properties is None:
@@ -1150,13 +1318,26 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # so the converted target's invocation recorded the source's exit code.
         self.targets_attempted = 0
         self.targets_failed = 0
-        self.exit_code = 0
+        # None, not 0: no cfn-lint has run for this target yet, and a target with
+        # no template never starts one, so the executor read a 0 for a tool that
+        # never ran. A run's code is folded in by _combined_exit_code below.
+        self.exit_code = None
         # self.errors too, as cdk_nag_scanner resets it: the converted target's
         # invocation record carried the source target's error lines.
         self.errors = []
 
         report = self._empty_report(target)
-        if not target.exists() or not any(target.iterdir()):
+        try:
+            empty = not target.exists() or not any(target.iterdir())
+        except OSError as exc:
+            # A target that exists but cannot be listed (its mode, a mount that
+            # went away) raised out of scan() as a bare OSError the executor
+            # reported with no scanner name; named here instead.
+            raise ScannerError(
+                f"cfn-lint cannot list the {target_type} target {target}: "
+                f"{exc.strerror or exc}"
+            ) from exc
+        if empty:
             self._plugin_log(
                 f"Target directory {target} is empty or doesn't exist. Skipping scan.",
                 target_type=target_type,
@@ -1182,9 +1363,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             discovery = discover_templates(
                 self.context, target_type, global_ignore_paths
             )
-            for shown, reason in discovery.refused:
-                # Not read, so not known to be CloudFormation: skipped and named, as
-                # cfn-nag skips it.
+            source_dir = self._source_dir()
+            for shown, reason in [*discovery.refused, *discovery.unparseable]:
+                # Not read, or read by neither parser, so not known to be
+                # CloudFormation: skipped and named, as cfn-nag skips it.
                 self._plugin_log(
                     f"Skipped {shown}: {reason}",
                     target_type=target_type,
@@ -1208,9 +1390,12 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
                 self.targets_failed += 1
-                self.errors.append(f"{path.as_posix()}: {reason}")
+                # The ERROR log puts the line in self.errors (PluginBase._plugin_log);
+                # appended here as well, every failure was recorded twice, and with
+                # the host's absolute path where the other lines carry the shown one.
                 self._plugin_log(
-                    f"cfn-lint did not evaluate {path.as_posix()}: {reason}",
+                    f"cfn-lint did not evaluate {display_path(path, source_dir)}: "
+                    f"{reason}",
                     target_type=target_type,
                     level=logging.ERROR,
                 )
@@ -1225,11 +1410,18 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 self._post_scan(target=target, target_type=target_type)
                 return report
 
-            source_dir = self._source_dir()
             if self.results_dir is None:
                 raise ScannerError("cfn-lint has no results directory")
             results_dir = Path(os.path.abspath(self.results_dir.joinpath(target_type)))
             results_dir.mkdir(parents=True, exist_ok=True)
+            # A previous run of this scanner into the same output directory left
+            # its per-invocation files behind; with fewer batches this run, the
+            # stale ones sat beside the new report as if they were its own.
+            for stale in results_dir.glob("cfn-lint.*.sarif"):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
             option_args = self._option_args()
             # Absolute, because cfn-lint does not run in the source directory (see
             # _private_cwd). Each maps back to the path ASH reports.
@@ -1243,8 +1435,19 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             child_env = self._child_env()
             cwd = cleanup.enter_context(self._private_cwd(results_dir))
 
-            # _option_args keeps this under _OPTION_CHAR_BUDGET.
-            budget = _ARGV_CHAR_BUDGET - sum(len(arg) + 1 for arg in option_args)
+            # _option_args keeps the options under _OPTION_CHAR_BUDGET. The fixed
+            # arguments of every invocation (_lint_once) count too: the command,
+            # the format, the output file at its longest name, and ``--``; left
+            # out, a full batch overran the budget by their length.
+            fixed = [
+                _COMMAND,
+                "--format",
+                "sarif",
+                f"--output-file={results_dir.joinpath('cfn-lint.999-999.sarif').as_posix()}",
+                *option_args,
+                "--",
+            ]
+            budget = _ARGV_CHAR_BUDGET - sum(len(arg) + 1 for arg in fixed)
             # With template ignores honored, each template runs alone, so its
             # ignores reach no other template (see _honor_inline_ignores).
             groups = (
@@ -1260,9 +1463,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 if failure is not None or found is None:
                     failure = failure or "cfn-lint output could not be read"
                     self.targets_failed += len(names)
-                    self.errors.append(f"{', '.join(names)}: {failure}")
+                    # One line, naming the templates: the ERROR log puts it in
+                    # self.errors, so the separate append recorded each failure
+                    # twice, once with the names and once with only their count.
                     self._plugin_log(
-                        f"cfn-lint did not evaluate {len(names)} template(s): {failure}",
+                        f"cfn-lint did not evaluate {', '.join(names)}: {failure}",
                         target_type=target_type,
                         level=logging.ERROR,
                     )
@@ -1277,6 +1482,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                             rules.setdefault(rule.id or "", rule)
 
             timed_out = False
+            # Every invocation's exit code, combined below (_combined_exit_code):
+            # the base class keeps the largest, which loses the error bit.
+            exit_codes: List[Any] = []
             for index, arguments in enumerate(groups):
                 batch = [shown_by_argument[argument] for argument in arguments]
                 self.targets_attempted += len(batch)
@@ -1291,6 +1499,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 failure, batch_report, response = self._lint_once(
                     arguments, batch_file, option_args, results_dir, cwd, child_env
                 )
+                exit_codes.append(response.get("returncode"))
                 timed_out = timed_out or bool(response.get("timed_out"))
                 if (
                     failure is not None
@@ -1339,6 +1548,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     failure, batch_report, response = lint_alone(
                         first_position, first_argument
                     )
+                    exit_codes.append(response.get("returncode"))
                     timed_out = timed_out or bool(response.get("timed_out"))
                     fold([shown_by_argument[first_argument]], failure, batch_report)
                     if (
@@ -1354,6 +1564,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                         failure, batch_report, response = lint_alone(
                             last_position, last_argument
                         )
+                        exit_codes.append(response.get("returncode"))
                         timed_out = timed_out or bool(response.get("timed_out"))
                         fold([shown_by_argument[last_argument]], failure, batch_report)
                         if failure == batch_failure:
@@ -1376,6 +1587,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                             )
                             continue
                         failure, batch_report, response = lint_alone(position, argument)
+                        exit_codes.append(response.get("returncode"))
                         timed_out = timed_out or bool(response.get("timed_out"))
                         fold([shown_by_argument[argument]], failure, batch_report)
                     continue
@@ -1384,6 +1596,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             report.runs[0].results = merged
             driver.rules = list(rules.values()) or None
             self.normalize_report(report, shown_by_argument)
+            if exit_codes:
+                self.exit_code = _combined_exit_code(exit_codes)
             self._post_scan(target=target, target_type=target_type)
             report.runs[0].invocations = [
                 Invocation(
@@ -1456,6 +1670,15 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 )
             except Exception as exc:  # unreadable output is a failed batch
                 failure = f"cfn-lint output was not valid SARIF ({exc})"
+            else:
+                # Read into the merged report, so the file has served its purpose;
+                # kept, it sat beside cfn-lint.sarif as a second copy of the
+                # findings, and a later run with fewer batches left stale ones.
+                # One that could not be read stays for a look.
+                try:
+                    batch_file.unlink()
+                except OSError:
+                    pass
         if failure is None and batch_report is not None:
             config_errors = [
                 r
@@ -1483,10 +1706,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         """
         if not isinstance(response, dict):
             return "cfn-lint did not run"
-        if response.get("timed_out"):
-            return "cfn-lint timed out and was killed"
-        if "error" in response:
-            return f"cfn-lint could not be started: {response['error']}"
+        failure = _invocation_failure(response)
+        if failure is not None:
+            return failure
         code = response.get("returncode")
         if not _successful_exit(code):
             stderr = _stderr_for_message(response, values)
