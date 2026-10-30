@@ -84,7 +84,7 @@ Failure modes and known limitations
   there: it resolves as far as it can and appends the rest unchecked, so the
   loop stayed in the answer, ``is_relative_to`` read the text as inside, and
   the path was accepted. The resolved path is therefore asked about once more
-  with ``os.lstat`` (``_is_a_loop``), which the kernel answers with ``ELOOP``
+  with ``os.stat`` (``_is_a_loop``), which the kernel answers with ``ELOOP``
   for a loop on any version, and that is the same ``SYMLINK`` rejection. A path
   that does not exist answers ``ENOENT`` there, not ``ELOOP``, so
   ``must_exist=False`` is unchanged. It also includes a candidate or
@@ -224,13 +224,16 @@ def _is_a_loop(resolved: Path) -> bool:
 
     CPython 3.13's non-strict ``resolve()`` raises nothing on a loop: it keeps
     the looping component and appends what follows unchecked, so the text of
-    the answer looks like a path below the root. ``os.lstat`` follows every
-    component but the last, and the kernel answers ``ELOOP`` for a loop among
-    them on every version; a path that merely does not exist answers ``ENOENT``
-    and is not a loop. Any other error is left to the checks that follow.
+    the answer looks like a path below the root. ``os.stat`` follows every
+    component, the last included, and the kernel answers ``ELOOP`` for a loop
+    among them on every version; a path that merely does not exist answers
+    ``ENOENT`` and is not a loop. The last component counts too: a root that is
+    itself the looping link, with the candidate ``.``, was accepted when only
+    the components before the last were followed. Any other error is left to
+    the checks that follow.
     """
     try:
-        os.lstat(resolved)
+        os.stat(resolved)
     except OSError as error:
         return error.errno == errno.ELOOP
     return False
