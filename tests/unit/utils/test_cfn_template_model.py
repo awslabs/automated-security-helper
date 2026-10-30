@@ -251,10 +251,10 @@ class TestHowDeepATemplateIsRead:
         "kind,levels,expected",
         [
             pytest.param("mapping", 50, "model", id="mappings-50"),
+            pytest.param("mapping", 350, "model", id="mappings-350-past-yaml"),
             pytest.param(
-                "mapping", 350, "TemplateDocumentError", id="mappings-350-past-yaml"
+                "sequence", 410, "TemplateDocumentError", id="sequences-410-past-400"
             ),
-            pytest.param("sequence", 410, "model", id="sequences-410-past-400"),
         ],
     )
     def test_a_tab_indented_json_template_is_decided_as_with_spaces(
@@ -262,10 +262,14 @@ class TestHowDeepATemplateIsRead:
     ):
         """The same template, the same answer, whichever it is indented with.
 
-        YAML refuses a tab before it reaches the depth, and JSON decided: mappings
-        nested from about 330 levels (the YAML loader's limit for them) to 400 were
-        scanned with tabs and a failed target with spaces, and sequences from 401 to
-        about 490 the other way round.
+        At the base YAML read every JSON template first and refused a tab before it
+        reached the depth, so JSON decided the tab-indented form and YAML the
+        space-indented one: mappings nested from about 330 levels (the YAML loader's
+        limit for them) to 400 were scanned with tabs and a failed target with
+        spaces, and sequences from 401 to about 490 the other way round. A text that
+        opens with ``{`` is now read by the JSON parser first, so JSON_NESTING_LIMIT
+        (400) decides both spellings alike: a 350-level mapping is a template and a
+        410-level sequence is nested too deep, with tabs and with spaces.
         """
         document = _template_holding(_nested(kind, levels))
         tabs = json.dumps(document, indent="\t")
