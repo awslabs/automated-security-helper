@@ -54,19 +54,19 @@ def test_a_key_written_as_a_reference_to_an_empty_variable_refuses_the_chain(
     was never named, so a container scan could run on a file whose key the host
     and the scan inside read differently.
     """
-    monkeypatch.setenv("ASH_U35_EMPTY_KEY", "")
+    monkeypatch.setenv("ASH_U35_BLANK_FIELD", "")
     monkeypatch.setenv("ASH_U35_BASE", "base.yaml")
     (tmp_path / "base.yaml").write_text("project_name: base\n", encoding="utf-8")
     top = tmp_path / "top.yaml"
     top.write_text(
-        "${ASH_U35_EMPTY_KEY}: other\nextends: ${ASH_U35_BASE}\n", encoding="utf-8"
+        "${ASH_U35_BLANK_FIELD}: other\nextends: ${ASH_U35_BASE}\n", encoding="utf-8"
     )
 
     with pytest.raises(ASHConfigSourceError) as refused:
         resolve_config_document(top)
 
     message = str(refused.value)
-    assert "ASH_U35_EMPTY_KEY" in message, message
+    assert "ASH_U35_BLANK_FIELD" in message, message
     assert "does not resolve with the values its environment references hold" in (
         message
     ), message
