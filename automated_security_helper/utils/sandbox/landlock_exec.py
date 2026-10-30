@@ -830,10 +830,10 @@ def _forward_stop(
     same scanner run unwrapped would, so one that handles it ends the way it
     chooses and its exit is reported as that signal, not as a SIGKILL the wrapper
     made up. Unwrapped, ASH signals the scanner's whole process group, so the
-    signal goes to the group here too (``_signal_scanner``): the child leads a
-    session of its own, and what it started in that group (npm's children, a
-    JVM's helpers) gets the stop as the scanner does, rather than first learning
-    of it from the reap's SIGKILL. A scanner still running STOP_KILL_DELAY_SECONDS
+    signal goes to the group here too, and to the scanner's pid (``_signal_scanner``):
+    the child leads a session of its own, and what it started in that group
+    (npm's children, a JVM's helpers) gets the stop as the scanner does, rather
+    than first learning of it from the reap's SIGKILL. A scanner still running STOP_KILL_DELAY_SECONDS
     later is SIGKILLed, group and all, by an interval timer's SIGALRM: half the
     stop budget, so the reap, whose deadline counts from the same signal, keeps
     the other half for passes over what the scanner left. ``stopped_at`` records
@@ -869,20 +869,28 @@ def _forward_stop(
 
 
 def _signal_scanner(pid: int, signum: int) -> None:
-    """Send ``signum`` to the scanner's process group, or to the scanner alone.
+    """Send ``signum`` to the scanner's process group and to the scanner itself.
 
     The child calls setsid in ``_child_setup``, so from then on its process group
     has its own pid as id and ``killpg`` reaches it and everything it started in
-    that group, the way ASH's own stop reaches an unwrapped scanner's group. Until
-    that call (the instructions right after the fork) no group carries the pid, the
-    kernel answers ESRCH, and the signal goes to the pid alone; the child's own
-    group is still the wrapper's then, which is never signalled from here. Any
+    that group, the way ASH's own stop reaches an unwrapped scanner's group. The
+    pid is signalled as well, always: a scanner that moves itself to another group
+    (its own setsid or setpgid) while children stay in group ``pid`` is not reached
+    by the group signal alone, and the wrapper's stop reached the scanner's pid
+    before groups were signalled at all. A group or a process that is gone (ESRCH:
+    no group carries the pid before the child's setsid, the scanner reaped between
+    the check and the signal) is passed over, each on its own; the child's own
+    group before setsid is the wrapper's, which is never signalled from here. Any
     other error is the caller's to read, as before.
     """
     try:
         os.killpg(pid, signum)
     except ProcessLookupError:
+        pass
+    try:
         os.kill(pid, signum)
+    except ProcessLookupError:
+        pass
 
 
 def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:

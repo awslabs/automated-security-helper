@@ -776,17 +776,17 @@ def stop_calls(monkeypatch):
 
 
 def test_repeated_stop_signals_arm_the_kill_timer_once(stop_calls):
-    """Every stop signal is passed on to the scanner's group, but the SIGKILL timer
-    counts from the first one, as the reap deadline does: a second signal inside
-    the budget does not push the kill past that deadline. The timer is armed at
-    half the budget, so the reap keeps the other half."""
+    """Every stop signal is passed on to the scanner's group and to its pid, but
+    the SIGKILL timer counts from the first one, as the reap deadline does: a
+    second signal inside the budget does not push the kill past that deadline.
+    The timer is armed at half the budget, so the reap keeps the other half."""
     calls, stopped_at = stop_calls(
         [(signal.SIGINT, True), (signal.SIGTERM, True), (signal.SIGTERM, True)]
     )
 
-    kills = [args for name, args in calls if name == "killpg"]
-    assert kills == [(42, signal.SIGINT), (42, signal.SIGTERM), (42, signal.SIGTERM)]
-    assert [args for name, args in calls if name == "kill"] == []
+    passed_on = [(42, signal.SIGINT), (42, signal.SIGTERM), (42, signal.SIGTERM)]
+    assert [args for name, args in calls if name == "killpg"] == passed_on
+    assert [args for name, args in calls if name == "kill"] == passed_on
     timers = [args for name, args in calls if name == "setitimer"]
     assert timers == [(signal.ITIMER_REAL, landlock_exec.STOP_KILL_DELAY_SECONDS)]
     assert (
