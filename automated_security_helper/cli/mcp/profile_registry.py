@@ -28,6 +28,7 @@ import copy
 import hashlib
 import os
 import re
+import sys
 import contextlib
 import threading
 import time
@@ -797,16 +798,28 @@ _REPLACE_ATTEMPTS = 10
 _REPLACE_RETRY_SECONDS = 0.05
 
 
+def _rename_waits_on_readers() -> bool:
+    """Whether this platform refuses a rename while a reader holds the target.
+
+    Windows does (``PermissionError`` for the length of one load of the file);
+    a POSIX rename does not wait on readers, so a ``PermissionError`` there is
+    the directory's and no retry changes it. Its own function so a test can
+    stand in for the platform without changing ``sys.platform`` for the process.
+    """
+    return sys.platform == "win32"
+
+
 def _replace_staged(partial: Path, target: Path) -> None:
     """Move a staged ``partial`` over ``target``, and remove what is left of it.
 
     One rename, so a scan reading ``target`` while it is written reads the old
     content or the new, never part of one. On Windows the rename is refused with
     ``PermissionError`` while a reader holds the target open (a scan loading the
-    previous copy), and such a hold lasts one load, so the rename is tried again
-    a bounded number of times before the error is raised. A POSIX rename does
-    not wait on readers; a ``PermissionError`` there is the directory's, and the
-    retries only delay it. Whatever the outcome, the partial is removed afterward.
+    previous copy), and such a hold lasts one load, so there the rename is tried
+    again a bounded number of times before the error is raised. On every other
+    platform the error is the directory's and is raised at once: the retries
+    would only delay it (half a second, with a scan waiting on the answer).
+    Whatever the outcome, the partial is removed afterward.
     """
     try:
         for attempt in range(_REPLACE_ATTEMPTS):
@@ -814,7 +827,7 @@ def _replace_staged(partial: Path, target: Path) -> None:
                 os.replace(partial, target)
                 return
             except PermissionError:
-                if attempt == _REPLACE_ATTEMPTS - 1:
+                if not _rename_waits_on_readers() or attempt == _REPLACE_ATTEMPTS - 1:
                     raise
                 time.sleep(_REPLACE_RETRY_SECONDS)
     finally:

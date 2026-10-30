@@ -12,7 +12,9 @@ copy and another profile's operator copy, or over no client copy at all. Now
 every copy is written to a temporary file first, and only then moved into place.
 
 The rename itself is tried again when Windows refuses it while a reader holds
-the file open; the stand-ins here refuse it the way Windows does.
+the file open; the stand-ins here refuse it the way Windows does, and stand in
+for the platform too, because on every other platform the refusal is the
+directory's and is raised at once (a retry there only delayed it).
 """
 
 from __future__ import annotations
@@ -124,11 +126,40 @@ def test_a_rename_refused_once_is_tried_again(monkeypatch) -> None:
 
     monkeypatch.setattr(os, "replace", replace)
     monkeypatch.setattr(profile_registry.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(profile_registry, "_rename_waits_on_readers", lambda: True)
 
     path = materialize_session_config(SESSION, AshConfig(project_name="retried"))
 
     assert refused, "the stand-in never saw the rename"
     assert "retried" in Path(path).read_text(encoding="utf-8")
+    _no_partial_left(*_session_directories())
+
+
+def test_a_refusal_where_the_rename_never_waits_is_raised_at_once(
+    monkeypatch,
+) -> None:
+    """Red at the base: a POSIX PermissionError (the directory's) was tried ten
+    times over half a second before it was raised; nothing changes between tries
+    there, so the retries only held the scan that waited on the answer."""
+    real_replace = os.replace
+    attempts: list = []
+    slept: list = []
+
+    def replace(src, dst, *args, **kwargs):
+        if Path(dst).name == SESSION_CONFIG_FILENAME:
+            attempts.append(str(dst))
+            raise PermissionError(errno.EACCES, "the directory refuses it", str(dst))
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr(profile_registry.time, "sleep", slept.append)
+    monkeypatch.setattr(profile_registry, "_rename_waits_on_readers", lambda: False)
+
+    with pytest.raises(PermissionError):
+        materialize_session_config(SESSION, AshConfig(project_name="at-once"))
+
+    assert len(attempts) == 1, attempts
+    assert slept == [], slept
     _no_partial_left(*_session_directories())
 
 
