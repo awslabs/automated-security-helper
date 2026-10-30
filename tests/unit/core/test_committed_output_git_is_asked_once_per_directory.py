@@ -133,5 +133,8 @@ def test_a_kept_listing_whose_superproject_question_fails_is_unanswered(
 
     assert found.committed == []
     assert found.answer is failed
-    assert failures.known_for(output) is not None
-    assert failures.known_for(output).names is None
+    # The failure is remembered under the enclosing repository, the key every
+    # later directory in that repository is answered from; known_for(output)
+    # itself still returns the kept listing, which is read before the failures.
+    assert failures._answers[output.parent] is failed
+    assert failures.known_for(output).names == ["reports/x.sarif"]
