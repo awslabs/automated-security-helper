@@ -7,7 +7,10 @@
   alone, so a long rule id and file name pushed the title past it and the
   ellipsis was added after a full-width slice.
 * A location uri with backslash separators gave the whole path as the file name.
-* A message given by ``id`` alone was described as "No description".
+* A message given by ``id`` alone was described as "No description", then by
+  the id itself ("R1 - default"); it is resolved against the rule's
+  ``messageStrings``, else its ``shortDescription``, and the id is the last
+  fallback.
 * A result whose kind says no problem (pass, notApplicable, informational) was
   emitted as a New vulnerability finding.
 * One location value the schema refuses discarded every location, the CVE and
@@ -58,8 +61,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Level,
     Location,
     Message,
+    MultiformatMessageString,
     PhysicalLocation,
     Region,
+    ReportingDescriptor,
     Result,
     Run,
     SarifReport,
@@ -186,6 +191,54 @@ class TestFileNamesAndMessages:
         assert finding.finding_info.desc == "No description"
         assert finding.finding_info.title == "R1 - No description"
 
+    @staticmethod
+    def _report_with_rule(reporter, rule: ReportingDescriptor) -> dict:
+        result = Result(ruleId="R1", level=Level.error)
+        result.message = Message.model_validate({"id": "default"})
+        model = AshAggregatedResults()
+        model.sarif = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="t", rules=[rule])),
+                    results=[result],
+                )
+            ],
+        )
+        (record,) = json.loads(reporter.report(model))
+        return record
+
+    def test_a_message_given_by_id_is_resolved_against_the_rule(self, reporter):
+        """Described by the id alone, the title read "R1 - default": the key of
+        the message string, not the string the rule names by it."""
+        record = self._report_with_rule(
+            reporter,
+            ReportingDescriptor(
+                id="R1",
+                messageStrings={
+                    "default": MultiformatMessageString(text="Hardcoded password")
+                },
+            ),
+        )
+
+        assert record["finding_info"]["desc"] == "Hardcoded password"
+        assert record["finding_info"]["title"] == "R1 - Hardcoded password"
+        assert record["vulnerabilities"][0]["desc"] == "Hardcoded password"
+
+    def test_an_id_the_rule_does_not_name_falls_back_to_its_short_description(
+        self, reporter
+    ):
+        record = self._report_with_rule(
+            reporter,
+            ReportingDescriptor(
+                id="R1",
+                shortDescription=MultiformatMessageString(text="Password in source"),
+            ),
+        )
+
+        assert record["finding_info"]["desc"] == "Password in source"
+        assert record["finding_info"]["title"] == "R1 - Password in source"
+
 
 class TestNonFindingKinds:
     @pytest.mark.parametrize(
@@ -230,10 +283,10 @@ class TestShortfalls:
         original = OcsfReporter._create_vulnerability_finding
 
         # The stub forwards whatever the report passes (shared_id, identity,
-        # anything added later), so only the BROKEN result fails; a stub with a
-        # fixed parameter list failed on every result once the report passed a
-        # keyword it did not name, and the test then read the all-failed
-        # response instead of the shortfall record it is about.
+        # rules, anything added later), so only the BROKEN result fails; a stub
+        # with a fixed parameter list failed on every result once the report
+        # passed a keyword it did not name, and the test then read the
+        # all-failed response instead of the shortfall record it is about.
         def flaky(self, result, *args, **kwargs):
             if result.ruleId == "BROKEN":
                 raise RuntimeError("cannot build")
@@ -261,7 +314,7 @@ class TestShortfalls:
         )
 
     def test_a_degraded_record_is_marked_and_counted(self, reporter, monkeypatch):
-        def broken_vulnerability(self, result):
+        def broken_vulnerability(self, result, rules=None):
             raise RuntimeError("no vulnerability")
 
         monkeypatch.setattr(OcsfReporter, "_build_vulnerability", broken_vulnerability)
@@ -343,10 +396,10 @@ class TestShortfalls:
     def _shortfall_uid_for(reporter, monkeypatch, project_name: str) -> str:
         original = OcsfReporter._create_vulnerability_finding
 
-        def flaky(self, result, metadata, current_time_ms, shared_id=None):
+        def flaky(self, result, metadata, current_time_ms, shared_id=None, **kw):
             if result.ruleId == "BROKEN":
                 raise RuntimeError("cannot build")
-            return original(self, result, metadata, current_time_ms, shared_id)
+            return original(self, result, metadata, current_time_ms, shared_id, **kw)
 
         monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
         model = _model(
@@ -413,10 +466,10 @@ class TestShortfalls:
         The response said total 2, failed 2; every input is counted once."""
         original = OcsfReporter._create_vulnerability_finding
 
-        def flaky(self, result, metadata, current_time_ms, shared_id=None):
+        def flaky(self, result, metadata, current_time_ms, shared_id=None, **kw):
             if result.ruleId == "BROKEN":
                 raise RuntimeError("cannot build")
-            return original(self, result, metadata, current_time_ms, shared_id)
+            return original(self, result, metadata, current_time_ms, shared_id, **kw)
 
         def boom(self, *args, **kwargs):
             raise RuntimeError("cannot dump")
@@ -449,10 +502,10 @@ class TestShortfalls:
         file, so none is processed; the response said one of two was."""
         original = OcsfReporter._create_vulnerability_finding
 
-        def flaky(self, result, metadata, current_time_ms, shared_id=None):
+        def flaky(self, result, metadata, current_time_ms, shared_id=None, **kw):
             if result.ruleId == "BROKEN":
                 raise RuntimeError("cannot build")
-            return original(self, result, metadata, current_time_ms, shared_id)
+            return original(self, result, metadata, current_time_ms, shared_id, **kw)
 
         def no_shortfall(self, *args, **kwargs):
             raise RuntimeError("cannot build the shortfall record")

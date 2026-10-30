@@ -99,6 +99,34 @@ def _file_name(path: str) -> str:
     return parts[-1] if parts else path
 
 
+def _rule_descriptor(result: Any, rules: Optional[Dict[str, Any]] = None) -> Any:
+    """The descriptor of the rule *result* names, from *rules* (rule ids to their
+    descriptors, :func:`_rule_descriptors`), or None.
+
+    A message given by ``id`` alone is resolved against it: SARIF reads such a
+    message through the rule's ``messageStrings`` (3.11.10). Without the rule
+    the result was titled "R1 - default", the key of the string rather than the
+    string.
+    """
+    return (rules or {}).get(result_rule_id(result) or "")
+
+
+def _rule_descriptors(sarif: Any) -> Dict[str, Any]:
+    """Each rule id to the first descriptor declaring it, over every run's
+    driver and extensions: what a message given by ``id`` is resolved against."""
+    rules: Dict[str, Any] = {}
+    for run in getattr(sarif, "runs", None) or []:
+        tool = getattr(run, "tool", None)
+        components = [getattr(tool, "driver", None)]
+        components.extend(getattr(tool, "extensions", None) or [])
+        for component in components:
+            for rule in getattr(component, "rules", None) or []:
+                rule_id = getattr(rule, "id", None)
+                if isinstance(rule_id, str) and rule_id and rule_id not in rules:
+                    rules[rule_id] = rule
+    return rules
+
+
 def _finding_title(rule_part: str, location_info: str, message_text: str) -> str:
     """The title ``<rule><location> - <message>`` at most :data:`TITLE_MAX_LENGTH`
     characters, the ellipsis counted, the prefix cut too when it alone is past
@@ -371,16 +399,22 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             self.config = OCSFReporterConfig()
         return super().model_post_init(context)
 
-    def _create_vulnerability_from_result(self, result: Result) -> Vulnerability:
+    def _create_vulnerability_from_result(
+        self, result: Result, rules: Optional[Dict[str, Any]] = None
+    ) -> Vulnerability:
         """The ``Vulnerability`` for a SARIF result, whole or built by the
         fallback; :meth:`_build_vulnerability` says which."""
-        return self._build_vulnerability(result)[0]
+        return self._build_vulnerability(result, rules)[0]
 
-    def _build_vulnerability(self, result: Result) -> Tuple[Vulnerability, bool]:
+    def _build_vulnerability(
+        self, result: Result, rules: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Vulnerability, bool]:
         """Extract vulnerability data from SARIF result.
 
         Args:
             result: SARIF result object
+            rules: rule ids to descriptors (:func:`_rule_descriptors`), for a
+                message given by ``id``
 
         Returns:
             The Vulnerability object with data extracted from the SARIF result,
@@ -404,7 +438,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # Safely extract message text
             desc = ""
             try:
-                desc = result_message_text(result, default="")
+                desc = result_message_text(
+                    result, _rule_descriptor(result, rules), default=""
+                )
                 ASH_LOGGER.debug(
                     f"Extracted message text for {rule_id}: {len(desc)} characters"
                 )
@@ -711,6 +747,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         current_time_ms: int,
         shared_id: Optional[str] = None,
         identity: Optional[str] = None,
+        rules: Optional[Dict[str, Any]] = None,
     ) -> VulnerabilityFinding:
         """Build individual VulnerabilityFinding object.
 
@@ -724,6 +761,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 report (:func:`_fallback_identities`), else from the result's
                 own identity alone (:func:`_identity_key`)
             identity: see *shared_id*
+            rules: rule ids to descriptors (:func:`_rule_descriptors`), for a
+                message given by ``id``
 
         Returns:
             VulnerabilityFinding object for the individual result
@@ -743,7 +782,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # degraded: the label below marks it so report() counts it apart
             # from the findings read whole.
             ASH_LOGGER.debug(f"Creating vulnerability object for {rule_id}")
-            vulnerability, degraded = self._build_vulnerability(result)
+            vulnerability, degraded = self._build_vulnerability(result, rules)
 
             # Determine status from suppressions (this method has its own error handling)
             ASH_LOGGER.debug(f"Determining suppression status for {rule_id}")
@@ -762,7 +801,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
             try:
                 # Safely extract message text
-                message_text = result_message_text(result, default=message_text)
+                message_text = result_message_text(
+                    result, _rule_descriptor(result, rules), default=message_text
+                )
                 ASH_LOGGER.debug(
                     f"Extracted message text for finding info {rule_id}: {len(message_text)} characters"
                 )
@@ -1231,7 +1272,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         # exception text goes through error_text, because a pydantic error
         # quotes the input it refused, which can be a scanned file's text.
         try:
-            all_results = recorded(model.sarif).get_all_results()
+            recorded_sarif = recorded(model.sarif)
+            all_results = recorded_sarif.get_all_results()
         except Exception as e:  # noqa: BLE001 -- see the comment above
             ASH_LOGGER.error(f"Failed to read SARIF results: {error_text(e)}")
             return self._create_error_response(
@@ -1250,6 +1292,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         )
         shared_ids = shared_finding_ids(model, all_results)
         identities = _fallback_identities(all_results, shared_ids)
+        # The rules every run declares, read once, so a message given by id
+        # is described by the string the rule names rather than by the key.
+        rules = _rule_descriptors(recorded_sarif)
 
         for i, result in enumerate(all_results):
             rule_id = result_rule_id(result) or f"result_{i}"
@@ -1278,6 +1323,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     current_time_ms,
                     shared_id=shared_ids[i],
                     identity=identities[i],
+                    rules=rules,
                 )
                 vulnerability_findings.append(finding)
 

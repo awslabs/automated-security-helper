@@ -483,7 +483,7 @@ class TestSuppressionStatusFaults:
 
 
 class TestVulnerabilityFindingFaults:
-    def test_non_string_message_text_falls_back_to_a_truncated_title(
+    def test_non_string_message_text_is_read_as_no_description(
         self, reporter, metadata
     ):
         """A non-string message is read as no message, and the title says so.
