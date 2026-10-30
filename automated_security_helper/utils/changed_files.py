@@ -61,7 +61,14 @@ def _file_uri_path(uri: str) -> str:
     host as a directory of the path and the slash on the drive, so such a URI
     never matched the changed file it names. A query or fragment is not part of the
     path either; :func:`_location_readings` also keeps the path with them in, for a
-    name that holds a ``#`` or a ``?``. A test compares the two readers.
+    name that holds a ``#`` or a ``?``.
+
+    Both readers cut the URI on its own slash by hand and neither parses it (a URL
+    parser raises on ``file://[locale]/page.tsx``), so they agree on every URI the
+    parity test lists, bracket forms included. They differ on one thing, on purpose:
+    the sarif reader keeps a ``#`` or ``?`` in the name, and this one cuts there and
+    reads the whole path as well, so the sarif reader's text is always among the
+    readings. A test pins each of the two.
     """
     _host, path = _split_file_uri(uri)
     return _without_drive_slash(re.split(r"[?#]", path, maxsplit=1)[0])

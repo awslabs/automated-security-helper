@@ -866,10 +866,14 @@ class TestFileUriForms:
             "file:///srv/my%20proj/src/a.py",
             "file://hostname/project/app.py",
             "file:///C:/My%20Proj/src/a.py",
+            "file://[locale]/page.tsx",
+            "file://a]b/x.py",
         ],
     )
     def test_the_reduction_agrees_with_the_sarif_readers(self, uri):
-        """One reduction in two places drifts; this keeps them together."""
+        """One reduction in two places drifts; this keeps them together. Both split
+        the URI on its own slash and neither parses it, so a bracket in the first
+        segment is a host to both and raises in neither."""
         from urllib.parse import unquote
 
         from automated_security_helper.utils.changed_files import _file_uri_path
@@ -878,6 +882,18 @@ class TestFileUriForms:
         assert unquote(_file_uri_path(uri), errors="surrogateescape") == (
             _file_uri_to_path_text(uri)
         )
+
+    @pytest.mark.parametrize(
+        "uri", ["file:///repo/My#Proj/a.cs", "file:///repo/My?Proj/a.cs"]
+    )
+    def test_a_name_with_a_mark_is_read_whole_by_both(self, uri):
+        """The one place the two differ on purpose: the sarif reader keeps a ``#`` or
+        ``?`` in the name, and this one cuts there for the reduction and reads the
+        whole path as well, so the reading the sarif reader gives is among them."""
+        from automated_security_helper.utils.changed_files import _location_readings
+        from automated_security_helper.utils.sarif_utils import _file_uri_to_path_text
+
+        assert _file_uri_to_path_text(uri) in _location_readings(uri)
 
     @pytest.mark.parametrize("uri", ["", "file://"])
     def test_a_uri_naming_no_file_keeps_the_finding(self, tmp_path, uri):
