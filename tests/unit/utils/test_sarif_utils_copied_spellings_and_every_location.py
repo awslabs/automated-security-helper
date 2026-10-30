@@ -24,7 +24,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Location,
@@ -139,6 +139,47 @@ class TestACopiedSpellingMatches:
         assert _normalize_sarif_uri("/work/src/a%20b.py", *args, decode=False) == (
             "src/a%20b.py"
         )
+
+
+def _ignoring(path: str) -> AshConfig:
+    return AshConfig(
+        project_name="u28",
+        global_settings={
+            "ignore_paths": [IgnorePathWithReason(path=path, reason="vendored")]
+        },
+    )
+
+
+class TestAnIgnorePathMeetsBothSpellings:
+    """The same second match for the ignore paths: an entry copied from the report
+    (``my%20app/``) names the directory a person reads there; the inline read
+    needs none, because it opens the file under whichever spelling names one on
+    disk (``_only_the_spelling_as_written_names_a_file``)."""
+
+    def test_an_ignore_path_in_the_report_spelling_drops_the_result(self, tmp_path):
+        report = apply_suppressions_to_sarif(
+            _report(_result("my%20app/a.py"), _result("src/keep.py")),
+            _context(tmp_path, _ignoring("my%20app/")),
+        )
+        remaining = [
+            r.locations[0].physicalLocation.root.artifactLocation.uri
+            for r in report.runs[0].results
+        ]
+        assert remaining == ["src/keep.py"]
+
+    def test_the_decoded_spelling_still_drops_it(self, tmp_path):
+        report = apply_suppressions_to_sarif(
+            _report(_result("my%20app/a.py"), _result("src/keep.py")),
+            _context(tmp_path, _ignoring("my app/")),
+        )
+        assert len(report.runs[0].results) == 1
+
+    def test_another_encoded_directory_keeps_it(self, tmp_path):
+        report = apply_suppressions_to_sarif(
+            _report(_result("my%20app/a.py")),
+            _context(tmp_path, _ignoring("other%20app/")),
+        )
+        assert len(report.runs[0].results) == 1
 
 
 class TestAClientExclusionNeedsEveryLocation:

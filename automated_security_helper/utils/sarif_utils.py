@@ -1678,14 +1678,19 @@ class _OutputDirExclusion:
                 f"scanned tree to restore it."
             )
 
-    def normalize(self, raw_uri: str) -> str:
-        """``raw_uri`` relative to the source directory where it is inside it."""
+    def normalize(self, raw_uri: str, decode: bool = True) -> str:
+        """``raw_uri`` relative to the source directory where it is inside it.
+
+        *decode* False keeps a relative URI's percent escapes, the spelling the
+        report records (:func:`_normalize_sarif_uri`).
+        """
         return _normalize_sarif_uri(
             raw_uri,
             self.source_dir_prefix,
             self.source_dir_prefix_with_slash,
             self.source_dir_prefix_no_drive,
             self.source_dir_basename,
+            decode,
         )
 
     def ignore_path_for(
@@ -1693,11 +1698,21 @@ class _OutputDirExclusion:
     ) -> IgnorePathWithReason | None:
         """The first of ``ignore_paths`` that a result located at ``raw_uri`` is under.
 
-        ``raw_uri`` as the scanner reported it, read as ``normalize`` reads it. The
-        one match the findings step and snyk-code's refusal both make
+        ``raw_uri`` as the scanner reported it, read as ``normalize`` reads it,
+        then, when that decoded spelling matches nothing and the URI holds an
+        escape, as the report records it (escapes kept): an entry copied from the
+        report (``my%20app/``) names the directory a person reads there, and the
+        decoded match alone never met it, as the config suppressions' did not.
+        The one match the findings step and snyk-code's refusal both make
         (``ignore_paths_for_locations``), so the two cannot disagree.
         """
-        return _matching_ignore_path(self.normalize(raw_uri), ignore_paths)
+        decoded = self.normalize(raw_uri)
+        matched = _matching_ignore_path(decoded, ignore_paths)
+        if matched is None and "%" in raw_uri:
+            as_written = self.normalize(raw_uri, decode=False)
+            if as_written != decoded:
+                matched = _matching_ignore_path(as_written, ignore_paths)
+        return matched
 
     def holds(self, uri: str) -> bool:
         """Whether the normalized ``uri`` is ASH's output, outside the work directory."""
