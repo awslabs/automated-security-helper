@@ -1066,17 +1066,27 @@ def refuse_plugin_modules_outside_namespace(
         PluginModuleNamespaceError: Naming every refused entry. A scan maps it to
             exit code 3, invalid configuration.
     """
-    # Imported here: plugin_module_trust imports config modules that import the
-    # plugin packages, which import this module.
-    from automated_security_helper.config.plugin_module_trust import (
-        split_plugin_modules,
-    )
-
     labels = shown or {}
     misnamed: List[str] = []
     namespace_packages: List[str] = []
     refused_entries: List[str] = []
-    for name in split_plugin_modules(plugin_modules):
+    # Split on commas as the loaders do (split_plugin_modules), but NOT
+    # stripped: a name padded with whitespace is a misspelling this check
+    # exists to refuse, and the loaders' strip would have cleaned it into a
+    # valid one. A value that is not a list is read as one entry, as there.
+    entries: Iterable[object]
+    if plugin_modules is None:
+        entries = ()
+    elif isinstance(plugin_modules, (list, tuple, set, frozenset)):
+        entries = plugin_modules
+    else:
+        entries = (plugin_modules,)
+    pieces = [
+        piece
+        for entry in entries
+        for piece in (entry.split(",") if isinstance(entry, str) else (entry,))
+    ]
+    for name in pieces:
         if not name:
             continue
         label = labels.get(name, name)

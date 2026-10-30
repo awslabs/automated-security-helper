@@ -120,6 +120,11 @@ def test_a_non_import_error_in_the_internal_load_is_recorded(monkeypatch):
     load_internal_plugins unrecorded."""
 
     class _Broken:
+        # The loader reads keys() for its debug line before items(); both
+        # raise the same TypeError so the recorded kind is the declaration's.
+        def keys(self):
+            raise TypeError("the handlers mapping is broken")
+
         def items(self):
             raise TypeError("the handlers mapping is broken")
 
