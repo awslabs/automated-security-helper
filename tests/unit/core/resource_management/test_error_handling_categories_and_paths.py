@@ -1,0 +1,282 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The error-handling helpers name what went wrong, and look at nothing but the path.
+
+Each test here is pinned against the behavior it replaced:
+
+* ``safe_read_json_file`` reported a file that is not UTF-8, one nested past the
+  decoder's limit, and one removed between its existence check and its read all
+  as ``unexpected_error``; it also read through a symlink at the file name.
+* Every error context in the module carried the server's working directory, read
+  with ``Path.cwd()`` inside the error handlers, so a removed working directory
+  made the "safe" helpers raise, and the directory reached the MCP client.
+* ``safe_write_json_file`` made missing parent directories with ``mkdir`` before
+  the guarded open, so under a writable root the directories were made through a
+  link and the open then refused that link.
+* ``validate_directory_path`` reported an existing regular file as not found, and
+  a path below an unsearchable directory as unexpected.
+* ``source_directory_error`` let a NUL in the path escape as ValueError and read
+  a too-long name as a directory that cannot be entered.
+* ``validate_output_directory_path`` labelled every refusal ``invalid_parameter``.
+* ``validate_scan_parameters`` skipped an empty config path as "no config".
+* ``_strings_shown`` escaped string values but not dict keys or set members.
+"""
+
+import errno
+import json
+import os
+
+import pytest
+
+from automated_security_helper.core.resource_management import error_handling
+from automated_security_helper.core.resource_management.error_handling import (
+    ErrorCategory,
+    create_error_response,
+    safe_read_json_file,
+    safe_write_json_file,
+    source_directory_error,
+    validate_config_path,
+    validate_directory_path,
+    validate_output_directory_path,
+    validate_scan_parameters,
+)
+from automated_security_helper.core.resource_management.exceptions import (
+    MCPResourceError,
+)
+from automated_security_helper.utils.sandbox.fs_guard import writable_root
+from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
+
+pytestmark = pytest.mark.unit
+
+
+def _symlink_or_skip(target, link):
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"symlinks cannot be made here: {error}")
+
+
+class TestSafeReadJsonFileNamesEachFailure:
+    def test_a_file_that_is_not_utf8_is_a_format_error(self, tmp_path):
+        path = tmp_path / "results.json"
+        path.write_bytes(b"\xff\xfe{}")
+
+        data, error = safe_read_json_file(path)
+
+        assert data is None
+        assert error.context["error_category"] == ErrorCategory.INVALID_FORMAT.value
+        assert "UTF-8" in str(error)
+
+    def test_a_document_nested_past_the_decoder_is_a_format_error(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "results.json"
+        path.write_text("{}", encoding="utf-8")
+
+        def too_deep(text):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(error_handling.json, "loads", too_deep)
+
+        data, error = safe_read_json_file(path)
+
+        assert data is None
+        assert error.context["error_category"] == ErrorCategory.INVALID_FORMAT.value
+
+    def test_a_file_removed_before_the_read_is_not_found(self, tmp_path, monkeypatch):
+        path = tmp_path / "results.json"
+        path.write_text("{}", encoding="utf-8")
+
+        def gone(path_obj, encoding="utf-8"):
+            raise FileNotFoundError(errno.ENOENT, "No such file", str(path_obj))
+
+        monkeypatch.setattr(error_handling, "read_text_of_replaced_file", gone)
+
+        data, error = safe_read_json_file(path, required=True)
+        assert data is None
+        assert error.context["error_category"] == ErrorCategory.FILE_NOT_FOUND.value
+
+        assert safe_read_json_file(path, required=False) == (None, None)
+
+    def test_a_link_at_the_file_name_is_not_followed(self, tmp_path):
+        outside = tmp_path / "outside.json"
+        outside.write_text('{"secret": "elsewhere"}', encoding="utf-8")
+        link = tmp_path / "ASH.ScanResults.json"
+        _symlink_or_skip(outside, link)
+
+        data, error = safe_read_json_file(link)
+
+        assert data is None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+        assert "symbolic link" in str(error)
+
+    def test_a_missing_file_error_names_the_file_and_not_the_process(self, tmp_path):
+        data, error = safe_read_json_file(tmp_path / "absent.json")
+
+        assert data is None
+        assert error.context["error_category"] == ErrorCategory.FILE_NOT_FOUND.value
+        assert "cwd" not in error.context
+
+
+class TestSafeWriteJsonFileMakesParentsUnderTheGuard:
+    def test_parents_are_not_made_through_a_link_below_a_writable_root(self, tmp_path):
+        root = tmp_path / "out"
+        root.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        _symlink_or_skip(elsewhere, root / "link")
+
+        with writable_root(root):
+            error = safe_write_json_file(root / "link" / "sub" / "state.json", {"a": 1})
+
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+        assert not (elsewhere / "sub").exists()
+        assert "cwd" not in error.context
+
+    def test_missing_parents_are_made_for_a_plain_path(self, tmp_path):
+        path = tmp_path / "a" / "b" / "state.json"
+
+        assert safe_write_json_file(path, {"a": [1, 2]}) is None
+        assert json.loads(path.read_text(encoding="utf-8")) == {"a": [1, 2]}
+
+
+class TestValidateDirectoryPathCategories:
+    def test_a_regular_file_is_an_invalid_path_not_a_missing_one(self, tmp_path):
+        file_path = tmp_path / "a-file"
+        file_path.write_text("x", encoding="utf-8")
+
+        error = validate_directory_path(file_path)
+
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+        assert "not a directory" in str(error)
+
+    def test_a_missing_directory_is_not_found_and_names_no_cwd(self, tmp_path):
+        error = validate_directory_path(tmp_path / "absent")
+
+        assert error.context["error_category"] == ErrorCategory.FILE_NOT_FOUND.value
+        assert "Directory not found or not a directory" in str(error)
+        assert "cwd" not in error.context
+
+    def test_a_path_below_an_unsearchable_directory_is_permission_denied(
+        self, tmp_path, monkeypatch
+    ):
+        target = tmp_path / "closed" / "inner"
+        real_stat = os.stat
+
+        def refused(path, *args, **kwargs):
+            if str(path).startswith(str(tmp_path / "closed")):
+                raise PermissionError(errno.EACCES, "Permission denied", str(path))
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(error_handling.os, "stat", refused)
+
+        error = validate_directory_path(target)
+
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.PERMISSION_DENIED.value
+
+    def test_a_directory_is_valid(self, tmp_path):
+        assert validate_directory_path(tmp_path) is None
+
+
+class TestSourceDirectoryErrorOnPathsTheSystemRefuses:
+    def test_an_embedded_nul_is_an_invalid_path(self):
+        error = source_directory_error("proj\x00ect")
+
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+        assert "is not a valid path" in str(error)
+
+    def test_a_name_too_long_is_an_invalid_path(self, monkeypatch):
+        def too_long(path, *args, **kwargs):
+            raise OSError(errno.ENAMETOOLONG, "File name too long", str(path))
+
+        monkeypatch.setattr(error_handling.os, "stat", too_long)
+
+        error = source_directory_error("x" * 5000)
+
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+        assert "is not a valid path" in str(error)
+
+
+class TestValidateOutputDirectoryPathCategories:
+    def test_a_regular_file_is_an_invalid_path(self, tmp_path):
+        file_path = tmp_path / "a-file"
+        file_path.write_text("x", encoding="utf-8")
+
+        error = validate_output_directory_path(file_path)
+
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+
+    def test_a_directory_that_cannot_be_entered_is_permission_denied(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            error_handling,
+            "output_dir_refusal",
+            lambda path: f"Output directory cannot be entered: {path}",
+        )
+
+        error = validate_output_directory_path(tmp_path)
+
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.PERMISSION_DENIED.value
+
+    def test_a_usable_directory_is_valid(self, tmp_path):
+        assert validate_output_directory_path(tmp_path) is None
+
+
+class TestAnEmptyConfigPathIsRefused:
+    def test_validate_config_path_refuses_an_empty_string(self):
+        error = validate_config_path("")
+
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PARAMETER.value
+
+    def test_validate_scan_parameters_does_not_skip_an_empty_config_path(
+        self, tmp_path
+    ):
+        is_valid, errors = validate_scan_parameters(tmp_path, "MEDIUM", config_path="")
+
+        assert is_valid is False
+        assert [e.context["error_category"] for e in errors] == [
+            ErrorCategory.INVALID_PARAMETER.value
+        ]
+
+    def test_no_config_path_is_still_no_config(self, tmp_path):
+        is_valid, errors = validate_scan_parameters(
+            tmp_path, "MEDIUM", config_path=None
+        )
+
+        assert (is_valid, errors) == (True, [])
+
+
+class TestStringsShownCoversKeysAndSets:
+    def test_a_dict_key_with_a_control_character_is_escaped(self):
+        key = "scan\x1b[0mner"
+        error = MCPResourceError("x", context={key: "value"})
+
+        response = create_error_response(error, "op")
+
+        assert raw_controls_on_one_line(key) in response["context"]
+        assert key not in response["context"]
+        assert all("\x1b" not in k for k in response["context"])
+
+    def test_set_and_frozenset_members_are_escaped_and_the_type_kept(self):
+        error = MCPResourceError(
+            "x",
+            context={"names": {"a\nb"}, "frozen": frozenset({"c\rd"})},
+        )
+
+        response = create_error_response(error, "op")
+
+        assert response["context"]["names"] == {raw_controls_on_one_line("a\nb")}
+        assert isinstance(response["context"]["names"], set)
+        assert response["context"]["frozen"] == frozenset(
+            {raw_controls_on_one_line("c\rd")}
+        )
+        assert isinstance(response["context"]["frozen"], frozenset)
