@@ -463,7 +463,9 @@ def test_an_error_at_line_zero_is_kept_without_a_region(line):
             },
             {
                 "kind": "expression",
-                "message": '"github.event.issue.title" is potentially untrusted',
+                # actionlint's wording, which severity_for matches by its shape.
+                "message": '"github.event.issue.title" is potentially untrusted. '
+                "avoid using it directly in inline scripts",
                 "filepath": ".github/workflows/vulnerable.yml",
                 "line": 20,
                 "column": 24,
