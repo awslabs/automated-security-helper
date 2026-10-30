@@ -593,7 +593,9 @@ def _finalize_staged(
     # A target that cannot be read back is removed too: the rule is to leave
     # nothing unverified at the install path, and an unreadable file is that.
     try:
-        landed_fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+        # O_NONBLOCK: a FIFO swapped in at the install path would block this
+        # open before the digest check could refuse it.
+        landed_fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
     except OSError as error:
         target.unlink(missing_ok=True)
         raise ToolDownloadIntegrityError(
@@ -1080,13 +1082,19 @@ def _already_installed(
     # to the same inode: the file could be swapped between them, and the mode
     # set on bytes nobody hashed.
     try:
-        fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+        # O_NONBLOCK: a FIFO planted at the install path would block the open
+        # itself, before the regular-file check below could refuse it. A
+        # regular file reads the same with or without it.
+        fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
     except OSError as e:
         ASH_LOGGER.debug(f"Could not open {target} ({e}); treating as not installed")
         return False
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
+            ASH_LOGGER.warning(
+                f"{target} is not a regular file; treating it as not installed"
+            )
             return False
         try:
             matches = _sha256_of_open_file(fd) == installed_digest
