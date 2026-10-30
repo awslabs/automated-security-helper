@@ -53,13 +53,19 @@ _AUTO_REFERENCE = re.compile(
 )
 
 
-def _markdown_escaped(text: str) -> str:
+def _markdown_escaped(text: str, *, braces: bool = True) -> str:
     """*text* with ``<``, ``>`` and ``&`` as entities and each Markdown syntax
-    character backslash-escaped."""
-    return re.sub(r"([\\`*_\[\]{}#|~])", r"\\\1", html.escape(text, quote=False))
+    character backslash-escaped.
+
+    ``braces`` says whether ``{`` and ``}`` are escaped too. They are
+    Markdown-neutral, so only a line that must show a written ``${NAME}``
+    reference exactly as written leaves them alone.
+    """
+    pattern = r"([\\`*_\[\]{}#|~])" if braces else r"([\\`*_\[\]#|~])"
+    return re.sub(pattern, r"\\\1", html.escape(text, quote=False))
 
 
-def _text(value) -> str:
+def _text(value, *, braces: bool = True) -> str:
     """Keep project and scanner-controlled text literal in GitHub Markdown.
 
     Escaped once, for Markdown: ``<``, ``>`` and ``&`` become entities, then
@@ -73,16 +79,30 @@ def _text(value) -> str:
     acts on where a summary is posted as a comment (it notifies the user and
     links the URL), so each is put in a code span, as the converter refusals
     already are.
+
+    ``braces=False`` leaves ``{`` and ``}`` as written; see
+    ``_reference_text``.
     """
     text = str(value or "")
     parts = []
     end = 0
     for match in _AUTO_REFERENCE.finditer(text):
-        parts.append(_markdown_escaped(text[end : match.start()]))
+        parts.append(_markdown_escaped(text[end : match.start()], braces=braces))
         parts.append(markdown_code_span(match.group()))
         end = match.end()
-    parts.append(_markdown_escaped(text[end:]))
+    parts.append(_markdown_escaped(text[end:], braces=braces))
     return "".join(parts)
+
+
+def _reference_text(value) -> str:
+    """The project line: ``_text`` that keeps a written ``${NAME}`` reference.
+
+    The configuration records a project name read from the environment as the
+    reference it was written as, not the value. Escaping the braces would show
+    ``$\\{NAME\\}``, which is not what the file says. Every other character is
+    escaped as in ``_text``, and braces stay escaped on every other line.
+    """
+    return _text(value, braces=False)
 
 
 def _html_literal(value) -> str:
@@ -353,7 +373,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 # The project name comes from the results file, which a
                 # repository can commit: one shown line. The timestamp is
                 # validated as one when the file is read.
-                f"Project: {_text(shown_on_one_line(str(metadata['project'])))} · "
+                f"Project: {_reference_text(shown_on_one_line(str(metadata['project'])))} · "
                 f"Scan executed: {_text(metadata['scan_time'])}\n"
             ),
         ]
@@ -568,7 +588,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     "## Scan metadata\n",
                     # The project name and tool version come from the results
                     # file: each is one shown line.
-                    f"- Project: {_text(shown_on_one_line(str(metadata['project'])))}",
+                    f"- Project: {_reference_text(shown_on_one_line(str(metadata['project'])))}",
                     f"- Scan executed: {_text(metadata['scan_time'])}",
                     f"- Report generated: {_text(metadata['report_time'])}",
                     f"- ASH version: {_text(shown_on_one_line(str(metadata['tool_version'])))}\n",
