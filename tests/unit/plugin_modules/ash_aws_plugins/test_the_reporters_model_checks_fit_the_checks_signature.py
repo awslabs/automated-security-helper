@@ -286,8 +286,9 @@ def test_an_available_fallback_satisfies_the_dependency_check(
     text = "\n".join(reporter.errors)
     assert f"Configured model '{CONFIGURED}' is not valid" in text, text
     assert f"Fallback model '{FALLBACK}' is available" in text, text
-    # The configured model was checked against a listing, then the fallback.
-    assert control.list_inference_profiles.call_count == 2
+    # The configured model and then the fallback were checked against ONE
+    # listing: the walk reuses the dependency check's listings.
+    assert control.list_inference_profiles.call_count == 1
 
 
 @patch("boto3.Session")
@@ -304,8 +305,10 @@ def test_an_unavailable_fallback_leaves_the_dependency_unsatisfied(
     assert f"Configured model '{CONFIGURED}' is not valid" in text, text
     assert "Fallback model" not in text, text
     assert "TypeError" not in text, text
-    # The fallback was checked against a listing and refused, not skipped.
-    assert control.list_inference_profiles.call_count == 2
+    # The fallback was checked against the one kept listing and refused, not
+    # skipped: the configured model's refusal names it, and the walk lists no
+    # second time.
+    assert control.list_inference_profiles.call_count == 1
 
 
 # ---------------------------------------------------------------------------

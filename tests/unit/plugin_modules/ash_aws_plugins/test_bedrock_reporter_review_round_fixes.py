@@ -413,8 +413,11 @@ def test_a_failed_profile_listing_is_warned_once_across_the_chain(
     caplog,
 ):
     """The listing fails; the configured model and both fallbacks are checked
-    against the kept failure, and the WARNING naming it is logged once. Before,
-    the walk's fresh wrapper raised the original error again and warned twice."""
+    against the kept failure, and the listing's own WARNING is logged once, the
+    two later checks logging the kept failure at DEBUG. Before, the walk's fresh
+    wrapper raised the original error again and warned twice. The reporter's
+    "Configured model ... is not valid" WARNING quotes the reason and is a
+    different line, so the count is of the listing's line, not of the phrase."""
     control = _control_plane(FALLBACK_TWO)
     control.list_inference_profiles.side_effect = botocore.exceptions.ClientError(
         {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}},
@@ -434,7 +437,17 @@ def test_a_failed_profile_listing_is_warned_once_across_the_chain(
         record
         for record in caplog.records
         if record.levelno == logging.WARNING
-        and "inference profile listing failed" in record.getMessage()
+        and record.getMessage().startswith(
+            "Bedrock API error when getting available models"
+        )
     ]
     assert len(warned) == 1, [record.getMessage() for record in warned]
+    assert "inference profile listing failed" in warned[0].getMessage()
+    replayed = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "the listing failed earlier in this walk" in record.getMessage()
+    ]
+    assert len(replayed) == 2, [record.getMessage() for record in replayed]
     assert control.list_inference_profiles.call_count == 1
