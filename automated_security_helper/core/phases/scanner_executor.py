@@ -148,10 +148,19 @@ def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:
     count a tool writes under ``HIGH`` or ``High`` reaches the severity gate.
     Validated as before, such a key was kept as a pydantic extra and the field
     stayed 0, and a result with high findings graded PASSED. A key that names no
-    field is left out. A value that is not a count (not a whole number, so a
-    fractional, infinite or not-a-number float too; or negative) raises
-    ValueError: the caller refuses to grade the row rather than inventing a
-    count. A whole-number float (``2.0``) is the count it spells.
+    field counts as info, as a findings-list entry whose severity ASH cannot
+    place does (the contract test_scanner_executor_lifecycle pins, "unknown
+    severities fall back to info"): a tool's own vocabulary (grype's
+    ``unknown`` and ``negligible``, npm audit's ``moderate``) is a claim the gate
+    cannot rank, kept at the lowest level and still counted, so the row's
+    finding_count holds every finding the tool counted. Left out, as before,
+    those findings were in no count at all, and the two dict paths disagreed on
+    one idea. ``total`` is the model's own sum, never a count of its own, and is
+    left out; so is a key that is not text. A value that is not a count (not a
+    whole number, so a fractional, infinite or not-a-number float too; or
+    negative) raises ValueError, under any key: the caller refuses to grade the
+    row rather than inventing a count. A whole-number float (``2.0``) is the
+    count it spells.
     """
     if isinstance(raw_counts, ScannerSeverityCount):
         return raw_counts
@@ -162,8 +171,10 @@ def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:
     counts: Dict[str, int] = {}
     for key, value in raw_counts.items():
         name = key.strip().lower() if isinstance(key, str) else ""
-        if name not in _SEVERITY_COUNT_FIELDS:
+        if name == "total" or not name:
             continue
+        if name not in _SEVERITY_COUNT_FIELDS:
+            name = "info"
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):
             raise ValueError(f"severity_counts[{key!r}] is not a count: {value!r}")
         # int() would truncate 0.9 to 0 (a finding gone) and raise OverflowError,

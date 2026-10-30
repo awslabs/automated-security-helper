@@ -129,11 +129,23 @@ class TestSeverityCountKeysAreMatchedByName:
         assert row.severity_counts.low == 2
         assert row.finding_count == 3
 
-    def test_a_key_that_names_no_severity_is_left_out(self):
-        counts = _severity_counts_from_dict({"high": 1, "total": 1})
+    def test_a_key_that_names_no_severity_counts_as_info(self):
+        """A tool's own vocabulary (grype's ``negligible``, npm audit's ``moderate``)
+        is counted at the lowest level, as a findings-list entry with an unknown
+        severity is, so finding_count holds every finding the tool counted; left
+        out, those findings were in no count at all. ``total`` is the model's own
+        sum and is dropped, whatever the tool wrote under it."""
+        counts = _severity_counts_from_dict(
+            {"high": 1, "total": 7, "negligible": 3, "moderate": 2}
+        )
 
         assert counts.high == 1
-        assert counts.total == 1
+        assert counts.info == 5
+        assert counts.total == 6
+
+    def test_a_value_under_an_unknown_key_is_still_a_count(self):
+        with pytest.raises(ValueError):
+            _severity_counts_from_dict({"high": 1, "negligible": "many"})
 
     @pytest.mark.parametrize(
         "value", ["many", -1, True, None, [1], 0.9, float("inf"), float("nan")]
