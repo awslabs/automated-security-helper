@@ -108,15 +108,26 @@ def _entries(argv: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("entry", ["vendor\nx", "ven\rdor", "a\n"])
+@pytest.mark.parametrize("entry", ["vendor\nx", "a\n"])
 def test_an_excluded_paths_entry_with_a_line_break_has_no_bandit_form(entry):
     """At the base the entry's globs carried the line break into the argument."""
     assert bandit_excluded_path_globs("/scan", entry) == []
 
 
-@pytest.mark.parametrize("pattern", ["vendor\n/**", "src/*.p\ny", "app\r.py"])
+@pytest.mark.parametrize("pattern", ["vendor\n/**", "src/*.p\ny"])
 def test_a_global_ignore_path_with_a_line_break_is_not_passed(pattern):
     assert bandit_exclude_globs("/scan", pattern) == []
+
+
+def test_a_carriage_return_is_passed_as_written():
+    """Only a line feed fails the base class's flag-key check (its ``.`` matches
+    every other character), so an entry holding a carriage return reaches exec
+    and bandit as written; refusing it said bandit "would run with no exclusion
+    at all", which was not so."""
+    entries = bandit_excluded_path_globs("/scan", "ven\rdor")
+    assert entries, "a carriage return is not a line feed"
+    assert all("\r" in entry and "\n" not in entry for entry in entries), entries
+    assert bandit_exclude_globs("/scan", "app\r.py") != []
 
 
 def test_an_anchor_with_a_line_break_gets_no_entries():

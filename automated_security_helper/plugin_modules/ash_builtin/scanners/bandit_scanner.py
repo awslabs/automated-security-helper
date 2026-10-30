@@ -16,6 +16,7 @@ from typing import (
     Literal,
     Optional,
     Sequence,
+    Set,
     Tuple,
 )
 
@@ -61,12 +62,15 @@ from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 _GLOB_CHARACTERS = set("*?[]")
 
 #: What a link's ``--exclude`` entry cannot hold: bandit splits the value on
-#: commas, a line break cannot be passed at all (``_execute_scan`` refuses the
+#: commas, a line feed cannot be passed at all (``_execute_scan`` refuses the
 #: scan rather than let the base class drop the whole ``--exclude`` argument),
 #: and a NUL ends a C string, so exec refuses the whole command line with it
 #: (Python raises ``ValueError: embedded null byte`` before anything starts).
-#: Glob characters are escaped (``glob.escape``), not refused.
-_BANDIT_EXCLUDE_UNSAFE = frozenset(",\n\r\0")
+#: A carriage return is none of these: the flag-key check admits it (its ``.``
+#: matches everything but a line feed), so an entry carrying one reaches exec
+#: and bandit as written. Glob characters are escaped (``glob.escape``), not
+#: refused.
+_BANDIT_EXCLUDE_UNSAFE = frozenset(",\n\0")
 
 #: bandit's own default ``--exclude`` value (``bandit.core.constants.EXCLUDE`` in
 #: bandit 1.9.4). Any ``--exclude`` passed on the command line replaces it, and ASH
@@ -149,15 +153,18 @@ def _command_line_bound_text(platform: str = os.name) -> str:
 
 
 def _holds_a_line_break(text: str) -> bool:
-    """Whether ``text`` holds a line feed or carriage return.
+    """Whether ``text`` holds a line feed.
 
     An ``--exclude=`` key holding one fails the base class's flag-key check
-    (``_VALID_FLAG_KEY_PATTERN``), which then drops the WHOLE argument with a
-    warning and runs bandit with no exclusion at all: the links that leave the
-    tree included. So no entry with one is emitted, and ``_execute_scan`` refuses
-    the scan when the target path itself holds one.
+    (``_VALID_FLAG_KEY_PATTERN``, whose ``.`` matches every character but a
+    line feed), which then drops the WHOLE argument with a warning and runs
+    bandit with no exclusion at all: the links that leave the tree included. So
+    no entry with one is emitted, and ``_execute_scan`` refuses the scan when the
+    target path itself holds one. A carriage return passes that check and
+    reaches exec and bandit unchanged, so it is not refused: refusing it said
+    bandit "would run with no exclusion at all", which was not so.
     """
-    return "\n" in text or "\r" in text
+    return "\n" in text
 
 
 def _cannot_be_passed(text: str) -> bool:
@@ -728,6 +735,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     # The operator's .bandit file, when config_file names one; see
     # _process_config_options.
     _ini_file: Optional[Path] = PrivateAttr(default=None)
+    #: The ``.bandit`` exclude warnings already given, by (entry, subject):
+    #: ``_ini_excludes`` runs once per scanned target, and each warning is about
+    #: the operator's file, not the target, so it is given once per build.
+    _ini_warnings_given: Set[Tuple[str, str]] = PrivateAttr(default_factory=set)
 
     # The uv --from spec the install command and the version probe were built
     # for; _apply_config rebuilds both only when a new configuration changes it.
@@ -1101,6 +1112,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # every call appended another --ini or --configfile, --confidence-level,
         # --severity-level and --exclude token beside the ones already there.
         self._ini_file = None
+        self._ini_warnings_given = set()
         self.args.extra_args = self._base_extra_args()
         from automated_security_helper.config.operator_only_options import (
             operator_wrote_value,
@@ -1403,11 +1415,26 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         counted in one warning. An entry that is text of
         the target's own path gets a warning that bandit alone would have skipped
         the whole tree. An entry with surrounding whitespace is passed as written,
-        as bandit reads it, with a warning. Only the operator's configured
-        ``.bandit`` is read (``_process_config_options``); a file from the scanned
-        tree never is. An ini that does not parse adds nothing, with a warning.
+        as bandit reads it, with a warning. An entry written as an absolute path
+        is read relative to the target, as an ``excluded_paths`` entry is, with
+        the same warning (``_spelled_absolute``). A plain name (no ``/``, no glob
+        character), which bandit alone read as a substring of every walked path
+        (``exclude = test`` skipped ``tests/``, ``test_x.py`` and ``testing/``
+        too), is anchored as the exact name and the operator is told what it no
+        longer covers. Each warning is about the operator's file, so it is given
+        once per build, not once per scanned target, and the entry is written as
+        its repr with the console markup off (``NO_MARKUP``: ``tests/[a-z]*`` is
+        not a Rich tag). Only the operator's configured ``.bandit`` is read
+        (``_process_config_options``); a file from the scanned tree never is. An
+        ini that does not parse adds nothing, with a warning. Under a target whose
+        own path holds a comma or a line feed no entry anchored at it can be
+        passed at all, which ``_execute_scan`` says once for the target, so the
+        entries are not blamed one by one here.
         """
         if self._ini_file is None:
+            return []
+        anchor = Path(target).as_posix()
+        if "," in anchor or _holds_a_line_break(anchor):
             return []
         parser = configparser.ConfigParser()
         try:
@@ -1415,12 +1442,13 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 parser.read_file(handle)
             raw = parser.get("bandit", "exclude", fallback="")
         except (OSError, UnicodeDecodeError, configparser.Error) as exc:
-            ASH_LOGGER.warning(
+            self._warn_about_ini_once(
+                "",
+                "unreadable",
                 f"Could not read the exclude setting of the configured .bandit "
-                f"file, so bandit gets no entries from it: {type(exc).__name__}."
+                f"file, so bandit gets no entries from it: {type(exc).__name__}.",
             )
             return []
-        anchor = Path(target).as_posix()
         entries: List[str] = []
         unpassable = 0
         for entry in raw.split(","):
@@ -1433,33 +1461,82 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 continue
             globs = bandit_excluded_path_globs(anchor, entry)
             if not globs:
-                ASH_LOGGER.warning(
-                    f"The .bandit exclude entry {entry!r} has no --exclude form "
-                    "bandit can be given (a line break, or a '.' or empty path "
-                    "component), so it excludes nothing."
+                cause = (
+                    "holds a line break"
+                    if _holds_a_line_break(entry)
+                    else "has a '.' or an empty path component, or names nothing"
+                )
+                self._warn_about_ini_once(
+                    entry,
+                    "no form",
+                    f"The .bandit exclude entry {entry!r} {cause}, so it has no "
+                    "--exclude form bandit can be given and excludes nothing.",
                 )
                 continue
             if entry != entry.strip():
-                ASH_LOGGER.warning(
+                self._warn_about_ini_once(
+                    entry,
+                    "whitespace",
                     f"The .bandit exclude entry {entry!r} has surrounding "
                     "whitespace, which bandit reads as part of the entry; it is "
-                    "passed as written."
+                    "passed as written.",
+                )
+            spelled = entry.replace("\\", "/")
+            if _spelled_absolute(entry):
+                self._warn_about_ini_once(
+                    entry,
+                    "absolute",
+                    f"The .bandit exclude entry {entry!r} is written as an absolute "
+                    "path, but every entry is read relative to the scanned target, "
+                    f"so it is read as {spelled.lstrip('/')!r} below the target. "
+                    "Write the path relative to the target.",
+                )
+            elif "/" not in spelled and not _GLOB_CHARACTERS & set(entry):
+                self._warn_about_ini_once(
+                    entry,
+                    "plain name",
+                    f"The .bandit exclude entry {entry!r} is a plain name, which "
+                    "bandit alone reads as a substring of every walked path, so it "
+                    f"also skipped names that merely contain it ({entry}s/, "
+                    f"{entry}_x.py). ASH passes it as the exact name {entry!r} at "
+                    f"any depth below the target; write a glob ({entry}*) to keep "
+                    "the wider reading.",
                 )
             if entry in anchor:
-                ASH_LOGGER.warning(
+                self._warn_about_ini_once(
+                    entry,
+                    "own path",
                     f"The .bandit exclude entry {entry!r} is part of the scanned "
                     f"target's own path {anchor}: bandit alone reads an entry as a "
                     "substring of every walked path and would have skipped the "
-                    "whole tree. ASH applies it below the target only."
+                    "whole tree. ASH applies it below the target only.",
                 )
             entries.extend(globs)
         if unpassable:
-            ASH_LOGGER.warning(
+            self._warn_about_ini_once(
+                "",
+                "nul",
                 f"{unpassable} exclude entries of the configured .bandit file hold "
                 "a NUL character, which no command-line argument can carry; "
-                "bandit gets no entry for them."
+                "bandit gets no entry for them.",
             )
         return entries
+
+    def _warn_about_ini_once(self, entry: str, subject: str, message: str) -> None:
+        """Warn about a ``.bandit`` exclude ``entry`` once per build.
+
+        ``_ini_excludes`` runs for every scanned target (the source and the
+        converted one), and its warnings describe the operator's file, so a
+        warning given for one target is not given again for the next; the key
+        is the entry and what the warning is about. The entry is written in the
+        message as its repr, and the console markup is off (``NO_MARKUP``), so
+        an entry such as ``tests/[a-z]*`` is not read as a Rich tag.
+        """
+        key = (entry, subject)
+        if key in self._ini_warnings_given:
+            return
+        self._ini_warnings_given.add(key)
+        ASH_LOGGER.warning(message, extra=NO_MARKUP)
 
     # Bandit emits exit code 1 when findings are present; treat that as success
     # alongside 0. (Same as base default, but spelled out for clarity.)
