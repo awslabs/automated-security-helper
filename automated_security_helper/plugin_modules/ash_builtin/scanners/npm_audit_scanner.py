@@ -387,7 +387,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     #: Lockfiles the ignore paths dropped from the last package selection
     #: (``_package_manifests``), so ``_lockfile_beside`` never picks one of them
     #: for a package whose manifest stayed in the scan set.
-    _ignored_lockfiles: Set[Path] = PrivateAttr(default_factory=set)
+    # Per scanned tree (its root), the lockfiles the last selection of that
+    # tree kept and the ones an ignore path dropped: ``_lockfile_beside`` reads
+    # them for a manifest under that root (``_package_manifests``).
+    _lockfile_selection: Dict[Path, tuple[Set[Path], Set[Path]]] = PrivateAttr(
+        default_factory=dict
+    )
 
     #: The ignore list the last ``scan()`` call was handed (None when it was
     #: handed none), so ``nothing_to_scan_reason`` answers from the selection
@@ -614,11 +619,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         The lockfile re-add is for the LINK case only: a regular package.json the
         scan set left out was left out on purpose (an ignore path named it), and
         re-adding it from its lockfile audited a package the ignore entry had
-        dropped. The lockfiles the ignore paths dropped are remembered
-        (``_ignored_lockfiles``) so ``_lockfile_beside`` never chooses one of
-        them for a package whose manifest stayed in the set: it probes the
-        filesystem, where an ignored yarn.lock otherwise won over the
-        package-lock.json beside it that the set kept.
+        dropped. The lockfiles this selection kept, and the ones an ignore path
+        dropped, are remembered per tree (``_lockfile_selection``) so
+        ``_lockfile_beside`` chooses among the kept ones for a package whose
+        manifest stayed in the set: it probes the filesystem, where a yarn.lock
+        the ignore paths dropped, or one an ignore file (``.gitignore``) left
+        out of the walk altogether, otherwise won over the package-lock.json
+        beside it that the set kept. A link is still probed on the filesystem
+        (the LINK case above: it is listed so that its refusal is recorded).
         """
         ignore_paths = (
             self._scan_ignore_paths()
@@ -630,8 +638,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         workspace_output = getattr(self.context, "workspace_output_dir", None)
         ignored_lockfiles: Set[Path] = set()
         if target_type == "converted":
+            tree_root = Path(self.context.work_dir)
             orig_scannable = list(self.context.work_dir.glob("**/*.*"))
         else:
+            tree_root = Path(self.context.source_dir)
             walked = scan_set(
                 source=self.context.source_dir,
                 output=self.context.output_dir,
@@ -650,7 +660,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 for f in walked
                 if Path(f).name in self.LOCKFILE_NAMES and Path(f) not in kept
             }
-        self._ignored_lockfiles = ignored_lockfiles
+        kept_lockfiles = {
+            Path(f) for f in orig_scannable if Path(f).name in self.LOCKFILE_NAMES
+        }
+        self._lockfile_selection[tree_root] = (kept_lockfiles, ignored_lockfiles)
         manifests = [Path(f) for f in orig_scannable if Path(f).name == "package.json"]
         listed = {manifest.parent for manifest in manifests}
         for f in orig_scannable:
@@ -668,19 +681,35 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _lockfile_beside(self, package_file: str | Path) -> Path | None:
         """The lockfile npm-audit audits for *package_file*, or None.
 
-        A lockfile the ignore paths dropped from the last selection is passed
-        over, so the next name in order (or none) is the answer. A link of a
-        lockfile's name that resolves to nothing counts as the lockfile: the
+        Among the lockfiles beside the manifest, the first in order that the
+        last selection of the manifest's tree kept (``_lockfile_selection``):
+        one an ignore path dropped, or one an ignore file left out of the walk,
+        is passed over, so the next name in order (or none) is the answer. With
+        no selection recorded for the tree the filesystem decides. A link of a
+        lockfile's name is taken as it is found (unless an ignore path named
+        it): one that resolves to nothing counts as the lockfile, and the
         package is then refused in ``scan()`` with the link named and its
         reason, where reading it as "no lockfile" passed the package over with
         nothing recorded.
         """
+        parent = Path(package_file).parent
+        kept: Set[Path] | None = None
+        ignored: Set[Path] = set()
+        for tree_root, (kept_here, ignored_here) in self._lockfile_selection.items():
+            if parent == tree_root or tree_root in parent.parents:
+                kept, ignored = kept_here, ignored_here
+                break
         for name in self.LOCKFILE_NAMES:
-            candidate = Path(package_file).parent.joinpath(name)
-            if candidate in self._ignored_lockfiles:
+            candidate = parent.joinpath(name)
+            if candidate in ignored:
                 continue
-            if candidate.is_symlink() or candidate.exists():
+            if candidate.is_symlink():
                 return candidate
+            if not candidate.exists():
+                continue
+            if kept is not None and candidate not in kept:
+                continue
+            return candidate
         return None
 
     def nothing_to_scan_reason(self) -> str | None:

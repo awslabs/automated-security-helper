@@ -382,6 +382,45 @@ class TestTheSelection:
 
         assert started == ["npm"], started
 
+    def test_a_lockfile_an_ignore_file_leaves_out_is_not_the_one_audited(
+        self, context, online
+    ):
+        """yarn.lock is gitignored and package-lock.json kept: the walk never
+        listed the yarn.lock, so the dropped-lockfile set never held it, and
+        the filesystem probe still chose it. The lookup now chooses among the
+        lockfiles the selection kept; npm audits the package."""
+        package = _package(context.source_dir / "app", "yarn.lock")
+        (package / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        (context.source_dir / ".gitignore").write_text("yarn.lock\n", encoding="utf-8")
+        started = _audited(online)
+
+        _scanner(context).scan(target=context.source_dir, target_type="source")
+
+        assert started == ["npm"], started
+
+    def test_the_lookup_reads_the_selection_of_the_manifests_own_tree(
+        self, context, online
+    ):
+        """Two trees selected in turn, as nothing_to_scan_reason does: the
+        source tree's kept set is read for a source manifest after the
+        converted tree's selection ran, where one set for the whole scanner
+        belonged to whichever selection ran last."""
+        package = _package(context.source_dir / "app", "yarn.lock")
+        (package / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        (context.source_dir / ".gitignore").write_text("yarn.lock\n", encoding="utf-8")
+        converted = _package(context.work_dir / "gen", "package-lock.json")
+        scanner = _scanner(context)
+
+        scanner._package_manifests("source")
+        scanner._package_manifests("converted")
+
+        assert scanner._lockfile_beside(package / "package.json") == (
+            package / "package-lock.json"
+        )
+        assert scanner._lockfile_beside(converted / "package.json") == (
+            converted / "package-lock.json"
+        )
+
     @pytest.mark.skipif(os.name == "nt", reason="symlinks")
     def test_a_lockfile_that_is_a_link_to_nothing_is_recorded(self, context, online):
         package = context.source_dir / "app"
