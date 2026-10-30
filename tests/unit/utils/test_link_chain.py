@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import stat
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -98,8 +99,16 @@ class TestTheShareSpelling:
 
 
 def test_the_components_run_from_the_anchor_down():
-    assert link_chain.components_down_to("/a/b/c") == ["/a", "/a/b", "/a/b/c"]
-    assert link_chain.components_down_to("rel/x") == ["rel", "rel/x"]
+    """Spelled through ``Path``: the components carry the OS's own separator, so
+    on Windows ``/a/b/c`` walks as ``\\a``, ``\\a\\b``, ``\\a\\b\\c``. The anchor
+    alone is given back as the caller spelled it."""
+    assert link_chain.components_down_to("/a/b/c") == [
+        str(Path(p)) for p in ("/a", "/a/b", "/a/b/c")
+    ]
+    assert link_chain.components_down_to("rel/x") == [
+        str(Path("rel")),
+        str(Path("rel/x")),
+    ]
     assert link_chain.components_down_to("/") == ["/"]
 
 
