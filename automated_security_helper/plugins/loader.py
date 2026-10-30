@@ -492,7 +492,10 @@ def scan_handler_filter(
     subscribed with ``ash_plugin_manager.subscribe``. That handler belongs to the
     program rather than to a plugin module, so it is notified in each scan the
     program runs. A handler defined in a plugin module (one inside the namespace)
-    that the scan does not name is not notified.
+    that the scan does not name is not notified, whoever subscribed it: a
+    subscribe with no declarer outside the loader's import window (a plugin
+    submodule subscribing when something other than the loader imports it) does
+    not make a namespace-defined handler the program's.
 
     Where a handler was defined is read by ``callable_module``: a
     ``functools.partial`` by the function it wraps (the partial's own module is
@@ -533,10 +536,20 @@ def scan_handler_filter(
         ):
             return True
         declarers, program = registry.handler_owners(callback)
-        if program:
+        if module is None:
+            # Where it was defined cannot be read: left out whoever subscribed
+            # it, as before the owners record existed.
+            return False
+        inside_namespace = _is_allowed_module_path(module)
+        if program and not inside_namespace:
             # The program running the scan subscribed it itself (a subscribe
-            # with no declarer outside any loader import window): notified in
-            # every scan the program runs, whatever plugin modules also list it.
+            # with no declarer outside any loader import window) and defined it
+            # in its own code: notified in every scan the program runs, whatever
+            # plugin modules also list it. A callable defined INSIDE the plugin
+            # namespace is that package's whoever subscribed it: a plugin's
+            # submodule subscribing at import, outside the loader's window,
+            # must not make its handler the program's, so the namespace rule
+            # below decides for it.
             return True
         if declarers:
             # Owned by plugin modules only: by the module that listed it or
@@ -548,9 +561,7 @@ def scan_handler_filter(
                 owner in names or _is_builtin_plugin_module(owner)
                 for owner in declarers
             )
-        if module is None:
-            return False
-        return not _is_allowed_module_path(module)
+        return not inside_namespace
 
     return admits
 

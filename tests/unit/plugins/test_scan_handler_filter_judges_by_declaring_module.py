@@ -26,6 +26,12 @@ the program's and ran in every scan; a program handler a plugin module had
 listed first was silenced. The manager now records every owner (the modules, and
 whether the program subscribed outside any loader import window), and the filter
 admits the program's handlers always and a module's in scans naming the module.
+
+A fifth, measured on that cut: the program flag admitted a handler DEFINED inside
+the plugin namespace that nothing declared (a plugin submodule subscribing when
+something other than the loader imported it), so an unnamed package's handler ran
+in every scan. The flag admits only a handler defined outside the namespace; for
+one defined inside it the namespace rule decides, as it did before the record.
 """
 
 from __future__ import annotations
@@ -136,7 +142,9 @@ def test_a_handler_the_program_subscribed_itself_is_still_notified():
 
 def test_a_handler_a_named_package_subscribed_from_a_submodule_is_admitted():
     """Red before the fix: in the namespace, below the named module, declared
-    by nothing, so neither the plugin filter nor the program rule admitted it."""
+    by nothing, so neither the plugin filter nor the program rule admitted it.
+    Red again on the owners-record cut: the subscribe, made outside any loader
+    window, flagged it the program's and every scan notified it (the control)."""
     below = _handler_in("zz_deep_ash_plugins.events")
     manager = _manager()
     manager.subscribe(AshEventType.SCAN_COMPLETE, below)
