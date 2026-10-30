@@ -2945,6 +2945,26 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
             "x: [1]\nsteps:\n  - uses:\n      ./my dir/act\n  bad: [\n",
             {"./my", "./my dir/act"},
         ),
+        # A quoted value runs across lines, so a stray `uses: "` in a comment (or
+        # a name: string, a run: script) opens one that reaches the next quote.
+        # The keys inside it are still read, each on its own with its value at
+        # its end; one combined match swallowed them, and with the walk gone
+        # (the document does not compose) the reference out of the tree was
+        # lost and the workflow linted.
+        (
+            (
+                '# uses: "\njobs:\n  a:\n    steps:\n      - uses: ./../../outside\n'
+                '# "\nbad: [\n'
+            ),
+            {"./../../outside"},
+        ),
+        (
+            (
+                "# uses: '\njobs:\n  a:\n    steps:\n      - uses: ./../../outside\n"
+                "# '\nbad: [\n"
+            ),
+            {"./../../outside"},
+        ),
     ],
     ids=[
         "block",
@@ -2974,6 +2994,8 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "tagged-value-without-the-walk",
         "flow-two-keys-without-the-walk",
         "next-line-value-after-a-flow-line",
+        "double-quote-decoy-before-the-reference",
+        "single-quote-decoy-before-the-reference",
     ],
 )
 @pytest.mark.unit
@@ -3113,6 +3135,48 @@ def test_an_integration_path_holding_a_quote_or_a_backslash_is_escaped(
     assert f'-shellcheck="{escaped}"' in argv
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/home/o'neil/.local/bin/shellcheck",
+        "/opt/R&D/bin/shellcheck",
+        "/opt/tools;bin/shellcheck",
+        "/opt/a|b/shellcheck",
+        "/opt/(stable)/shellcheck",
+        "/opt/$HOME/shellcheck",
+        "/opt/tools/shellcheck*",
+        "/opt/tools/shellcheck#1",
+    ],
+    ids=[
+        "apostrophe",
+        "ampersand",
+        "semicolon",
+        "pipe",
+        "parentheses",
+        "dollar",
+        "asterisk",
+        "hash",
+    ],
+)
+@pytest.mark.unit
+def test_a_path_with_a_shell_special_character_is_quoted(path):
+    """actionlint splits the value shell-style: an unbalanced quote fails the
+    parse, `;` `&` `|` end the word early, `(` is an error. Each would drop the
+    integration silently (the MISSING check passes, since the path resolves), so
+    such a path is double-quoted, as a path with a space already was."""
+    assert module._command_word(path) == f'"{path}"'
+
+
+@pytest.mark.unit
+def test_a_plain_path_and_the_empty_value_are_passed_as_they_are():
+    """A path of letters, digits and `_./:@%+=,-` is one word to the split, so
+    it is passed unquoted (the shape every argv assertion in this file reads);
+    the empty value is how an integration is turned off, and stays empty."""
+    plain = "/usr/local/bin/shellcheck-0.10.0"
+    assert module._command_word(plain) == plain
+    assert module._command_word("") == ""
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 @pytest.mark.unit
 def test_workflows_left_out_of_the_lint_are_named_not_called_absent(
@@ -3143,6 +3207,37 @@ def test_workflows_left_out_of_the_lint_are_named_not_called_absent(
             "reason": "it resolves outside the scan root",
         }
     ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_an_ignored_workflow_is_not_named_in_the_nothing_to_scan_reason(
+    repo, tmp_path, monkeypatch, on_path
+):
+    """The operator ignored the one workflow the selection would refuse. scan()
+    applies the config's ignore paths (the orchestrator hands it the list) and
+    passes the file over in silence; the reason reads the same list, so it says
+    the tree holds no workflow file instead of naming a file the operator
+    ignored and pointing at a scan log that never mentioned it."""
+    workflows = repo / ".github" / "workflows"
+    for name in ("clean.yml", "vulnerable.yml"):
+        (workflows / name).unlink()
+    outside = tmp_path / "outside.yml"
+    outside.write_text("on: push\n")
+    (workflows / "leak.yml").symlink_to(outside)
+    scanner = _scanner(repo)
+    ignore = IgnorePathWithReason(path=".github/workflows/leak.yml", reason="t")
+    scanner.context.config.global_settings.ignore_paths.append(ignore)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    assert scanner.nothing_to_scan_reason() == module.NO_WORKFLOW_FILE
+
+    assert (
+        scanner.scan(target=repo, target_type="source", global_ignore_paths=[ignore])
+        is True
+    )
+    assert fake.calls == []
+    assert scanner.inputs_not_scanned == []
 
 
 @pytest.mark.unit

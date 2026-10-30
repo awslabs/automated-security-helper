@@ -237,7 +237,10 @@ from automated_security_helper.utils.subprocess_utils import (
     WAS_KILLED_ENDING,
     find_executable,
 )
-from automated_security_helper.utils.suppression_matcher import ignore_path_matches
+from automated_security_helper.utils.suppression_matcher import (
+    active_ignore_paths,
+    ignore_path_matches,
+)
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
 #: The version the severity mapping below was written against.
@@ -378,21 +381,31 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
     )
 
 
-#: A ``uses:`` value, in block or flow style: double-quoted (group 1, with its
+#: A ``uses`` key, in block or flow style, up to where its value starts: the key
+#: may be quoted and is matched whatever its case, as actionlint reads workflow
+#: keys; the value may start on the line after the key, and may carry a tag or
+#: an anchor (``!!str ./x``, ``&a ./x``). The value itself is ``_USES_VALUE``,
+#: matched at the key's end. The two are read apart because a quoted value may
+#: run across lines and ``finditer`` never overlaps: as one pattern, a ``uses: "``
+#: in a comment, a ``name:`` string or a ``run:`` script opened a quoted value
+#: that ran to the next ``"`` and hid every ``uses`` key in between, a real
+#: ``./../..`` reference included. Backs up the YAML walk in
+#: ``local_uses_references``, which is why the value reads more than one line:
+#: the walk is gone for a document PyYAML cannot compose, and that document can
+#: still spell a reference actionlint's parser reads.
+_USES_KEY = re.compile(
+    r"""(?:^|[\s{,])["']?uses["']?[ \t]*:[ \t]*(?:\r?\n[ \t]+)?(?:[!&]\S*[ \t]+)*""",
+    re.MULTILINE | re.IGNORECASE,
+)
+#: The value at a ``_USES_KEY`` match's end: double-quoted (group 1, with its
 #: escapes still encoded; an escaped line break is part of it), single-quoted
 #: (group 2, with ``''`` for a quote; it may span lines) or plain (group 3, cut
 #: at the first space, quote, comma, closing bracket or ``#``, which is where a
 #: plain value ends inside ``{...}``/``[...]``; ``_uses_values_of`` reads the rest
-#: of the line for block style). The value may start on the line after the key,
-#: and may carry a tag or an anchor (``!!str ./x``, ``&a ./x``). The key is
-#: matched whatever its case, as actionlint reads workflow keys. Backs up the
-#: YAML walk in ``local_uses_references``, which is why it reads more than one
-#: line: the walk is gone for a document PyYAML cannot compose, and that document
-#: can still spell a reference actionlint's parser reads.
-_LOCAL_USES_LINE = re.compile(
-    r"""(?:^|[\s{,])["']?uses["']?[ \t]*:[ \t]*(?:\r?\n[ \t]+)?(?:[!&]\S*[ \t]+)*"""
-    r"""(?:"((?:[^"\\]|\\[\s\S])*)"|'((?:[^']|'')*)'|(\./[^\s"',}\]#]*))""",
-    re.MULTILINE | re.IGNORECASE,
+#: of the line for block style). No match for a value of another shape (a
+#: remote action, an expression), which the key is then not a reference to.
+_USES_VALUE = re.compile(
+    r"""(?:"((?:[^"\\]|\\[\s\S])*)"|'((?:[^']|'')*)'|(\./[^\s"',}\]#]*))"""
 )
 #: Where a plain value ends in block context: a comment, which needs a blank in
 #: front of its ``#``, or the end of the line. Spaces, commas and brackets are
@@ -445,7 +458,7 @@ def _decoded_scalar(quoted: str, fallback: str) -> Optional[str]:
 
 
 def _uses_values_of(match: "re.Match[str]", text: str) -> Set[str]:
-    """The values a ``_LOCAL_USES_LINE`` match could name, YAML quoting decoded.
+    """The values a ``_USES_VALUE`` match could name, YAML quoting decoded.
 
     A plain value is read two ways, because the line scan does not know whether
     it sits in a flow collection: the match itself, cut at the first space,
@@ -492,8 +505,12 @@ def local_uses_references(text: str) -> Set[str]:
     does not resolve it.
     """
     found: Set[str] = set()
-    for match in _LOCAL_USES_LINE.finditer(text):
-        found.update(_uses_values_of(match, text))
+    # Each key on its own, its value matched at the key's end: a quoted value
+    # that runs across lines then hides no later key (see _USES_KEY).
+    for key in _USES_KEY.finditer(text):
+        value = _USES_VALUE.match(text, key.end())
+        if value is not None:
+            found.update(_uses_values_of(value, text))
     stack: List[Any] = []
     try:
         # compose_all is a generator: the documents it composed before failing
@@ -790,16 +807,31 @@ def _joined_sarif(sarif_dicts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     return joined
 
 
+#: What a shell-style split reads as one plain word, whole: letters, digits and
+#: ``_ . / : @ % + = , -``. A path of anything else (whitespace, a quote, a
+#: backslash, ``; & | < > ( ) $ * ? [ ] ~ #``, a backtick) is quoted by
+#: ``_command_word``, since each of those either ends the word early, opens a
+#: quote or a group, or fails the parse.
+_PLAIN_WORD = re.compile(r"[A-Za-z0-9_./:@%+=,-]+\Z")
+
+
 def _command_word(path: str) -> str:
     """*path* as the one word of an ``-shellcheck=``/``-pyflakes=`` value.
 
     actionlint reads the value as a command line, the program and its
-    arguments split on whitespace with shell-style quoting, so a path holding
-    a space would be split into a program that does not exist and an argument,
-    and the integration dropped. Such a path is double-quoted, with the quote
-    and the backslash escaped; a path with neither is passed as it is.
+    arguments split on whitespace with shell-style quoting. A path holding a
+    space would be split into a program that does not exist and an argument;
+    one holding a quote, a semicolon, an ampersand or a parenthesis would end
+    the word early or fail the parse. Either way the integration is dropped with
+    nothing in the findings to show for it (actionlint says so only in verbose
+    mode), which is what decision 2 and this function exist to prevent. So a
+    path made of anything but the characters of ``_PLAIN_WORD`` is
+    double-quoted, with the quote and the backslash escaped; a path of only
+    those, or the empty value that turns an integration off, is passed as it
+    is. A double-quoted plain path reads back as itself, so the quoting never
+    changes which program runs.
     """
-    if not any(ch.isspace() or ch in '"\\' for ch in path):
+    if not path or _PLAIN_WORD.match(path):
         return path
     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -1247,19 +1279,27 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         finds no workflow in any tree a scan hands this scanner
         (``utils/scan_targets.py``), so a workflow that selection leaves out (a
         link out of the tree, a reference outside it, a vendored copy) is not
-        input here either. ``global_settings.ignore_paths`` is not applied:
-        scan() is handed its list by the scan, and without it this can find more
-        workflows than scan() does, never fewer. Logs nothing; scan() logs the
+        input here either. ``global_settings.ignore_paths`` is applied as
+        scan() applies it: the orchestrator hands scan() the config's list
+        through ``active_ignore_paths``, and the same list is read from the
+        config here, so a workflow the operator ignored is neither found nor
+        named. Without it this method found, refused and named a file scan()
+        had passed over in silence, and the reason then said the scan log
+        explained a file the log never mentioned. Logs nothing; scan() logs the
         warnings for the workflows it skips. When every workflow file was left
         out of the lint, the reason names them rather than saying there is no
         workflow file: there is, and the warnings say why each was not linted.
         """
         if self.context is None:
             return None
+        settings = getattr(
+            getattr(self.context, "config", None), "global_settings", None
+        )
+        ignore_paths = active_ignore_paths(getattr(settings, "ignore_paths", None))
         left_out: List[Dict[str, str]] = []
         for target_type, target in scan_targets(self.context):
             if self._workflow_files(
-                target, target_type, [], report=False, left_out=left_out
+                target, target_type, ignore_paths, report=False, left_out=left_out
             ):
                 return None
         if left_out:
