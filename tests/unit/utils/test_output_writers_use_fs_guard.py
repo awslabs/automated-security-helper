@@ -458,7 +458,9 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "a TemporaryDirectory the nix check creates",
     ),
-    (f"{_ASH}/utils/sandbox/backends.py", "SandboxExecBackend.plan", "write_text"): (
+    # The sandbox-exec plan is built in _plan; plan only makes the private TMPDIR
+    # and removes everything on a failure part way through.
+    (f"{_ASH}/utils/sandbox/backends.py", "SandboxExecBackend._plan", "write_text"): (
         1,
         "the trust-roots file in a mkdtemp directory of the sandbox's own",
     ),
