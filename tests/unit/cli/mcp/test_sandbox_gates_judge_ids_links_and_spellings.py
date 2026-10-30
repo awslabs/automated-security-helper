@@ -294,6 +294,52 @@ class TestWindowsRefusesBeforeResolving:
         assert refusal is not None
         assert "is a link whose target the MCP server cannot read" in str(refusal)
 
+    def test_a_reparse_point_readlink_refuses_as_no_symlink_is_refused(
+        self, monkeypatch, tmp_path
+    ):
+        """CPython raises ValueError, not OSError, for a name-surrogate reparse
+        point that is no symbolic link or junction; the gate reads that as a
+        name it cannot read, not as an exception escaping the tool."""
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+
+        def not_a_symlink(path, *args, **kwargs):
+            raise ValueError("not a symbolic link")
+
+        monkeypatch.setattr(os, "readlink", not_a_symlink)
+
+        refusal = validate_scan_target_in_sandbox(link, session_id=OWN)
+
+        assert refusal is not None
+        assert "is a link whose target the MCP server cannot read" in str(refusal)
+
+    def test_a_hop_that_cannot_be_examined_is_refused(self, monkeypatch, tmp_path):
+        """A hop under a directory the process cannot search may be a link to a
+        share nobody here can see, so the chain is refused as unjudged rather
+        than admitted as local: a link -> an unexaminable entry -> a share would
+        otherwise pass the gate and be resolved."""
+        real = tmp_path / "real"
+        real.mkdir()
+        second = tmp_path / "second"
+        second.symlink_to(real)
+        first = tmp_path / "first"
+        first.symlink_to(second)
+        real_lstat = os.lstat
+
+        def unsearchable(path, *args, **kwargs):
+            if os.fspath(path) == os.path.normpath(str(second)):
+                raise PermissionError(13, "permission denied")
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", unsearchable)
+
+        refusal = validate_scan_target_in_sandbox(first, session_id=OWN)
+
+        assert refusal is not None
+        assert "is a link whose target the MCP server cannot read" in str(refusal)
+
     def test_a_chain_past_the_hop_bound_is_refused(self, monkeypatch, tmp_path):
         monkeypatch.setattr(sandbox, "_LINK_HOPS", 2)
         third = tmp_path / "third"

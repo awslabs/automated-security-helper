@@ -875,9 +875,13 @@ def _link_chain_names_a_windows_share(text: str) -> Optional[bool]:
     then all that resolving would open, and the answer is False.
 
     None when the chain cannot be judged: a reparse point whose name cannot be
-    read (one that is no symbolic link or junction), or a chain longer than
-    ``_LINK_HOPS``. The caller refuses then, as it refused every link before,
-    since what resolving would open cannot be told.
+    read (one that is no symbolic link or junction), a hop that cannot be
+    examined (its directory cannot be searched: it may be a link to a share that
+    nobody here can see), or a chain longer than ``_LINK_HOPS``. The caller
+    refuses then, as it refused every link before, since what resolving would
+    open cannot be told. Only a hop that is not there (no such file, or a path
+    component that is not a directory) ends the walk as a local name: nothing
+    is there to follow, so resolving opens nothing.
     """
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
@@ -885,7 +889,11 @@ def _link_chain_names_a_windows_share(text: str) -> Optional[bool]:
     for _ in range(_LINK_HOPS):
         try:
             target = os.readlink(current)
-        except OSError:
+        except (OSError, ValueError):
+            # OSError: the entry went away or cannot be opened. ValueError: on
+            # Windows CPython raises "not a symbolic link" for a reparse point
+            # that names a path but is neither a symbolic link nor a junction
+            # (a WSL link), which ``_is_link_stat`` reads as a link.
             return None
         if _names_a_windows_share(target):
             return True
@@ -894,10 +902,13 @@ def _link_chain_names_a_windows_share(text: str) -> Optional[bool]:
         target = os.path.normpath(target)
         try:
             is_link = _is_link_stat(os.lstat(target))
-        except OSError:
-            # Absent, or under a directory that cannot be searched: a local
-            # name either way, which is all that resolving would open.
+        except (FileNotFoundError, NotADirectoryError):
+            # Not there: a local name that resolving would open nothing for.
             return False
+        except OSError:
+            # Cannot be examined (a directory the process cannot search): the
+            # entry may itself be a link to a share, so the chain is unjudged.
+            return None
         if not is_link:
             return False
         current = target
