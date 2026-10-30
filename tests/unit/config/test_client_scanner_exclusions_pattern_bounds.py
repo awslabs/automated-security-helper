@@ -469,6 +469,34 @@ def test_a_budget_used_as_a_context_manager_closes_on_exit():
     assert budget.worker_pid is None
 
 
+def test_a_pass_starts_one_process_on_the_spawn_path(monkeypatch):
+    """Where the start method is ``spawn`` (Windows, macOS) every process start is a
+    fresh interpreter importing this module, so a pass must start ONE worker and
+    reuse it; a start per evaluation is what spent a pass's scan_timeout on
+    interpreter starts alone. Counted with the real spawn context."""
+    spawn = multiprocessing.get_context("spawn")
+    started: list = []
+
+    class _CountingContext:
+        Pipe = staticmethod(spawn.Pipe)
+
+        @staticmethod
+        def Process(*args, **kwargs):
+            process = spawn.Process(*args, **kwargs)
+            started.append(process)
+            return process
+
+    monkeypatch.setattr(exclusions_module, "_process_context", lambda: _CountingContext)
+    budget = EvaluationBudget()
+
+    pids = {budget.evaluate(FAST_TIMEOUT, "s", f"k{n}", os.getpid) for n in range(3)}
+    budget.close()
+
+    assert len(started) == 1
+    assert pids == {started[0].pid}
+    assert os.getpid() not in pids
+
+
 def test_the_skip_path_search_is_charged_to_the_budget_by_its_pattern():
     budget = _RecordingBudget()
 
