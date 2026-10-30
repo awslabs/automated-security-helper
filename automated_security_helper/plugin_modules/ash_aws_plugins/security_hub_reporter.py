@@ -1026,7 +1026,10 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         ignore_paths entry or a ruleset change can still make a finding look
         fixed; that is why archiving is opt-in.
 
-        Two more things the results record narrow it. A scanner that reported
+        Two more things the results record narrow it, and both are read off the
+        scanner's own per-target reports, so a scanner whose reports the metrics
+        cannot read as its own (none names the scanner) is left out as well:
+        its coverage cannot be checked. A scanner that reported
         inputs it found and did not scan (``inputs_not_scanned`` on its target
         reports) did not look at everything either, so it is left out; inputs
         ASH itself left out of the scan set (``metadata.inputs_not_scanned``) were
@@ -1041,6 +1044,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         from automated_security_helper.core.unified_metrics import (
             SCAN_SET_OWNER,
             inputs_not_scanned,
+            own_target_reports,
             target_counts,
         )
 
@@ -1107,12 +1111,19 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 "the scan left inputs out of its scan set (metadata."
                 "inputs_not_scanned), so no scanner looked at everything"
             )
+        reports = model.additional_reports or {}
         completed = frozenset(
             name
             for name, info in (model.scanner_results or {}).items()
             if str(getattr(info.status, "value", info.status)) in _COMPLETED_STATUSES
             and not getattr(info, "excluded", False)
             and getattr(info, "dependencies_satisfied", True)
+            # A scanner whose per-target reports the metrics cannot read as its
+            # own (none names the scanner: a results file from before the field
+            # existed, or put together by hand) has coverage that cannot be
+            # checked: the two reads below would see no lost target and no
+            # unscanned input in them. Left out rather than trusted.
+            and (name not in reports or own_target_reports(model, name))
             and target_counts(model, name)[1] == 0
             # A scanner that found inputs it did not scan did not look at
             # everything, whatever its status says.
