@@ -427,15 +427,18 @@ ENV_FILE_WITH_A_FIX = (
 
 
 def test_lint_does_not_advise_fix_for_a_file_fix_refuses(tmp_path):
-    """The hint said "Run with --fix" for a file --fix then refused."""
+    """The hint said "Run with --fix" for a file --fix then refused. The linter
+    now clears the fixable mark on every issue the fixer would refuse the file
+    for (ConfigLinter._clear_fixable_a_fixer_refuses), so the issue is reported
+    as a plain warning and no fix is advised either way."""
     config = tmp_path / ".ashrc.yaml"
     config.write_text(ENV_FILE_WITH_A_FIX, encoding="utf-8")
 
     result = _invoke(["lint", "--config", str(config)], env={"PROJ": "demo"})
 
-    assert "[auto-fixable]" in result.output, result.output
+    assert "missing 'line_end'" in result.output, result.output
     assert "Run with --fix" not in result.output, result.output
-    assert "by hand" in result.output, result.output
+    assert "[auto-fixable]" not in result.output, result.output
 
 
 def test_a_refused_fix_does_not_hide_the_scans_refusal(tmp_path):

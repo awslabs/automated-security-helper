@@ -102,9 +102,22 @@ def test_a_file_uri_with_a_host_is_refused(tmp_path):
     assert "share.example" in _flat(result.output)
 
 
-def test_a_document_nested_too_deeply_is_refused_not_a_traceback(tmp_path):
+def test_a_document_nested_too_deeply_is_refused_not_a_traceback(tmp_path, monkeypatch):
+    """A document the parser cannot follow is refused like one that does not
+    parse. Whether a given depth raises RecursionError depends on the interpreter
+    (3.14's decoder followed 100,000 levels and then refused the unknown key), so
+    the parser's refusal is forced rather than provoked."""
     path = tmp_path / "deep.json"
-    path.write_text('{"x": ' + "[" * 100000 + "]" * 100000 + "}", encoding="utf-8")
+    document = '{"source_dir": ' + "[" * 100000 + "]" * 100000 + "}"
+    path.write_text(document, encoding="utf-8")
+    real_loads = json.loads
+
+    def loads(text, *args, **kwargs):
+        if text == document:
+            raise RecursionError("maximum recursion depth exceeded")
+        return real_loads(text, *args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", loads)
 
     result, mock_run = _scan(["--cli-json-input", str(path)])
 
@@ -119,7 +132,8 @@ def test_a_document_nested_too_deeply_is_refused_not_a_traceback(tmp_path):
 
 def test_an_infinite_number_for_an_integer_is_refused(tmp_path):
     """1e400 parses as infinity; click's integer conversion raised
-    OverflowError past its own check."""
+    OverflowError past its own check. The shape check reads it first: a number
+    with an exponent is not a JSON integer, and that is the refusal shown."""
     path = tmp_path / "params.json"
     path.write_text('{"shard_index": 1e400, "shard_count": 2}', encoding="utf-8")
 
@@ -128,7 +142,8 @@ def test_an_infinite_number_for_an_integer_is_refused(tmp_path):
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert not mock_run.called
     assert "'shard_index'" in _flat(result.output)
-    assert "toolarge" in _flat(result.output)
+    assert "expectedajsoninteger" in _flat(result.output)
+    assert "Traceback" not in result.output
 
 
 def test_a_number_for_a_true_false_parameter_is_refused(tmp_path):
