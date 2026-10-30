@@ -219,9 +219,9 @@ _monotonic = time.monotonic
 TREE_CONFIG_NAMES = (".gitleaks.toml", ".ash/.gitleaks.toml")
 
 #: Environment variables gitleaks reads a config from. When either is set, outside
-#: the scanner sandbox, ASH passes no ``--config`` and gitleaks reads the variable;
-#: a non-absolute ``GITLEAKS_CONFIG`` is anchored to the directory ASH runs in and
-#: passed as ``--config``, so the scanned tree cannot supply it.
+#: the scanner sandbox, ASH passes no ``gitleaks --config`` and gitleaks reads the
+#: variable; a non-absolute ``GITLEAKS_CONFIG`` is anchored to the directory ASH
+#: runs in and passed as ``gitleaks --config``, so the scanned tree cannot supply it.
 CONFIG_ENV_VARS = ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML")
 
 #: The ignore file gitleaks always reads at the root of its scan path.
