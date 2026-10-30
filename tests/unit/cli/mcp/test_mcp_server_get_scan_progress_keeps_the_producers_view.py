@@ -74,7 +74,15 @@ def _producer(scan_id: str) -> Dict[str, Any]:
     }
 
 
-def _call(tmp_path: Path, monkeypatch) -> Dict[str, Any]:
+def _producer_without_counts(scan_id: str) -> Dict[str, Any]:
+    """A producer's view that gives no ``severity_counts`` at all: the one case
+    where the tool sums the counts from the results files it walks."""
+    view = _producer(scan_id)
+    del view["severity_counts"]
+    return view
+
+
+def _call(tmp_path: Path, monkeypatch, producer=_producer) -> Dict[str, Any]:
     from automated_security_helper.cli import mcp_server
 
     output = tmp_path / "project" / ".ash" / "ash_output"
@@ -94,7 +102,7 @@ def _call(tmp_path: Path, monkeypatch) -> Dict[str, Any]:
     monkeypatch.setattr(
         mcp_server,
         "mcp_get_scan_progress",
-        AsyncMock(return_value=_producer(scan_id)),
+        AsyncMock(return_value=producer(scan_id)),
     )
     monkeypatch.setattr(
         mcp_server,
@@ -127,3 +135,23 @@ def test_a_scanner_directory_linked_elsewhere_is_not_read(tmp_path, monkeypatch)
 
     assert "linked" not in result["scanners"], "a linked directory was read"
     assert result["severity_counts"]["critical"] == 0
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="directory links need a privilege on Windows"
+)
+def test_the_files_counts_are_summed_only_when_the_producer_gives_none(
+    tmp_path, monkeypatch
+):
+    """With a producer that gives no counts, the tool sums the results files it
+    walks: bandit's ``high`` lands on its own bucket, its ``off-ladder`` key goes
+    to the catch-all bucket (a finding under another key is a finding too, never
+    nowhere), and the linked directory's ``critical`` is never read. The two
+    tests above run with a producer that gives counts, so their ``critical ==
+    0`` could not fail on a walk that read the link; this one can."""
+    result = _call(tmp_path, monkeypatch, producer=_producer_without_counts)
+
+    counts = result["severity_counts"]
+    assert counts["unknown"] == 3, counts
+    assert counts["high"] == 1, counts
+    assert counts["critical"] == 0, counts
