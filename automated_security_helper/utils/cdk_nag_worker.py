@@ -50,16 +50,27 @@ What crosses the process boundary, and why each piece does:
   paths. The child cannot rely on its own working directory, which a sandbox may not
   even let it enter, so it names templates against the parent's.
 
-Failure and time limits. Each child is bounded by the scanner's ``scan_timeout``. A
-child that dies keeps the answers it gave, fails the template it was working on, and a
-new child takes the rest, whether it died on the first template or a later one. A child
-killed at the timeout fails every template still pending, and so does a second child in
-a row that answers nothing with the same reason as the first (a failure every child
-shares, such as cdk-nag not importing), each with the child's exit status (or the
-timeout) and the tail of its stderr, redacted whole with the
-scan's environment values before it is cut into lines. ``SystemExit`` and
-``KeyboardInterrupt`` raised inside the child are not exceptions the wrapper could
-raise to the scanner before; they now end the child and fail its pending templates.
+Failure and time limits. The scanner's ``scan_timeout`` bounds the BATCH: the first
+child gets the whole limit, and a child started after one died gets what is left of it,
+so one ``scan()`` call never runs past the limit however many children it took. (Each
+child used to get the full limit afresh, so a batch whose children kept dying ran for
+many multiples of the configured time.) A child that dies keeps the answers it gave,
+fails the template it was working on, and a new child takes the rest, whether it died on
+the first template or a later one. A child killed at the timeout fails every template
+still pending, and so does a second child in a row that answers nothing with the same
+reason as the first (a failure every child shares, such as cdk-nag not importing), each
+with the child's exit status (or the timeout) and the tail of its stderr, redacted whole
+with the scan's environment values before it is cut into lines. A child the spawn helper
+could not wait for and could not stop fails every pending template too, and no new child
+is started beside it: it may still be evaluating the same templates into the same output
+directory. ``SystemExit`` and ``KeyboardInterrupt`` raised inside the child are not
+exceptions the wrapper could raise to the scanner before; they now end the child and fail
+its pending templates.
+
+Paths cross to the child absolute: the templates, the output directory, the scan root and
+the parent's working directory. The child runs in its own scratch directory and may not
+be able to enter the parent's (a sandbox), so a relative path would resolve against the
+wrong place there.
 """
 
 from __future__ import annotations
@@ -71,6 +82,8 @@ import os
 import shutil
 import stat
 import sys
+import tempfile
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -174,7 +187,41 @@ def _exception_kind(exc: BaseException) -> str:
         return "unicode"
     if isinstance(exc, TreeInputRefused):
         return "refused"
+    if isinstance(exc, OSError):
+        return "os"
     return "other"
+
+
+def _raised_answer(exc: BaseException) -> Dict[str, Any]:
+    """The wire form of an exception the wrapper raised for one template.
+
+    Its class name and text, and what the parent needs to rebuild it with the same base
+    class: a refusal's path and reason, and an OSError's errno, strerror and file names.
+    An OSError used to cross as a plain ``Exception`` carrying ``str(exc)``, so
+    ``error_text`` in the parent, which names an OSError's files as given instead of by
+    repr, no longer saw an OSError; its repr-quoted file names reached ash.log and the
+    SARIF with their backslashes and control escapes doubled.
+    """
+    answer: Dict[str, Any] = {
+        "status": "raised",
+        "kind": _exception_kind(exc),
+        "type": type(exc).__name__,
+        "message": str(exc),
+    }
+    if answer["kind"] == "refused":
+        answer["path"] = getattr(exc, "path", None)
+        answer["reason"] = getattr(exc, "reason", None)
+    elif answer["kind"] == "os":
+        answer["errno"] = exc.errno if isinstance(exc.errno, int) else None  # type: ignore[attr-defined]
+        answer["strerror"] = (
+            exc.strerror if isinstance(exc.strerror, str) else None  # type: ignore[attr-defined]
+        )
+        for attribute in ("filename", "filename2"):
+            value = getattr(exc, attribute, None)
+            answer[attribute] = (
+                os.fsdecode(value) if isinstance(value, (str, bytes)) else None
+            )
+    return answer
 
 
 def _answer_for_response(
@@ -246,17 +293,10 @@ def _evaluate(request: Dict[str, Any], out: IO[str]) -> None:
             )
             answer = _answer_for_response(response)
         except Exception as exc:
-            answer = {
-                "status": "raised",
-                "kind": _exception_kind(exc),
-                "type": type(exc).__name__,
-                "message": str(exc),
-            }
             # A refusal is re-raised in the parent as the class itself, with its
-            # path and reason, so the scanner treats it as the skip it is.
-            if answer["kind"] == "refused":
-                answer["path"] = getattr(exc, "path", None)
-                answer["reason"] = getattr(exc, "reason", None)
+            # path and reason, so the scanner treats it as the skip it is; an
+            # OSError as an OSError, with its files (_raised_answer).
+            answer = _raised_answer(exc)
         answer["logs"] = collector.take()
         out.write(json.dumps(answer) + "\n")
         out.flush()
@@ -329,6 +369,23 @@ def _raise_as_reported(answer: Dict[str, Any]) -> None:
             name, (UnicodeDecodeError,), {"__str__": lambda self: message}
         )
         raise unicode_cls("utf-8", b"", 0, 1, message)
+    if kind == "os":
+        # An OSError with the child's errno, strerror and file names, so error_text
+        # in this process names its files as given, as it does for an OSError raised
+        # here. OSError's own __str__ is kept: that is what error_text rewrites. With
+        # no errno there is nothing for that text to be built from, so the message
+        # crosses as the class's text instead.
+        os_cls = type(name, (OSError,), {})
+        errno = answer.get("errno")
+        if isinstance(errno, int) and not isinstance(errno, bool):
+            raise os_cls(
+                errno,
+                str(answer.get("strerror") or message),
+                answer.get("filename"),
+                None,
+                answer.get("filename2"),
+            )
+        raise os_cls(message)
     raise type(name, (Exception,), {})(message)
 
 
@@ -396,19 +453,15 @@ _CHILD_BOOTSTRAP = (
 #: A response larger than this is not one the child wrote for a scan's templates.
 _MAX_RESPONSE_BYTES = 512 * 1024 * 1024
 
+#: How much of the response is read per call. One ``read(_MAX_RESPONSE_BYTES + 1)``
+#: asked the buffered reader for a 512 MiB buffer up front, for a response of a few
+#: kilobytes; the cap is enforced on the running total instead.
+_READ_CHUNK_BYTES = 1024 * 1024
+
 
 def _key(template: "str | Path") -> str:
     """One spelling per template, whatever separator or type the caller used."""
     return Path(template).as_posix()
-
-
-def _strip_ansi(text: str) -> str:
-    """Every escape the package strips (error_text.ESCAPE_CODES), not only
-    colors: a narrower set left a non-color code inside a value in place,
-    which split the redaction's match, and both halves printed."""
-    from automated_security_helper.utils.error_text import ESCAPE_CODES
-
-    return ESCAPE_CODES.sub("", text)
 
 
 def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
@@ -450,7 +503,17 @@ def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
     with os.fdopen(fd, "rb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
             return []
-        data = handle.read(_MAX_RESPONSE_BYTES + 1)
+        # In bounded pieces up to one byte past the cap, so the cap check below
+        # still sees a response that crossed it without a cap-sized allocation.
+        chunks: List[bytes] = []
+        total = 0
+        while total <= _MAX_RESPONSE_BYTES:
+            chunk = handle.read(min(_READ_CHUNK_BYTES, _MAX_RESPONSE_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        data = b"".join(chunks)
     if len(data) > _MAX_RESPONSE_BYTES:
         # Only what fits, cut back to the last complete line; the fragment after it
         # is dropped below as a line cut short.
@@ -480,11 +543,25 @@ def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
 
 
 def _lowest_kept_log_level() -> int:
-    """The lowest level any of ASH's log handlers would keep, for the child."""
-    from automated_security_helper.utils.log import ASH_LOGGER
+    """The lowest level a record of the wrapper's would reach a handler at, for the child.
 
-    levels = [h.level for h in ASH_LOGGER.handlers]
-    lowest = min(levels) if levels else logging.WARNING
+    Asked of :func:`~automated_security_helper.utils.log.delivers`, which walks what
+    ``ASHLogger.callHandlers`` walks: the "ash" logger's handlers, its parents' while it
+    propagates, and, when no handler takes the record, the last resort ASH's loggers
+    use, at that handler's own configured level. Reading only ``ASH_LOGGER.handlers``
+    and falling back to WARNING when the list was empty dropped the debug and verbose
+    records the last resort would have shown in-process: the MCP server runs scans
+    with no handler of its own on "ash", and ``--debug`` there showed the wrapper's
+    debug lines in-process and none from the child. Above CRITICAL when nothing
+    delivers at any level, so the child then carries no record across.
+    """
+    from automated_security_helper.utils.log import ASH_LOGGER, delivers
+
+    lowest = logging.CRITICAL + 1
+    for level in range(1, logging.CRITICAL + 1):
+        if delivers(ASH_LOGGER, level):
+            lowest = level
+            break
     return max(lowest, ASH_LOGGER.getEffectiveLevel(), 1)
 
 
@@ -495,18 +572,25 @@ def _run_child(
     cwd: Path,
     timeout: Optional[float],
     values: Sequence[str],
+    *,
+    declared_timeout: Optional[float] = None,
 ) -> "tuple[List[Dict[str, Any]], Optional[str], bool, Dict[str, Any]]":
     """Evaluate ``templates`` in one child.
 
     Returns the answers it gave, in template order and possibly fewer than asked for;
-    the reason it stopped early, or None; whether that reason was the timeout; and
-    the runner's response for the child as recorded (its exit code, and the
-    ``could_not_stop`` state of a timeout whose stop failed), so the scanner can
-    record a child that died or could not be stopped the way it records any other
-    tool's run. ``values`` are the scan config's environment values: the reason quotes the
-    child's stderr, which can echo one, and it is redacted HERE, before the
-    tail is cut from it, because the cut rewrites a value's line breaks as the
-    joiner and no later whole-spelling redaction can match that.
+    the reason it stopped early, or None; whether every template still pending has to
+    fail with that reason now (the child ran out of time, or it could not be stopped
+    and may still be running, so no new child may be started beside it); and the
+    runner's response for the child as recorded (its exit code, and the
+    ``could_not_stop`` state of a stop that failed), so the scanner can record a child
+    that died or could not be stopped the way it records any other tool's run.
+    ``values`` are the scan config's environment values: the reason quotes the child's
+    stderr, which can echo one, and it is redacted HERE, before the tail is cut from
+    it, because the cut rewrites a value's line breaks as the joiner and no later
+    whole-spelling redaction can match that. ``timeout`` is what this child may take,
+    which for a child started after another died is what is left of the batch's limit;
+    ``declared_timeout`` is the configured limit the timeout reason names, so the
+    reason tells the operator which setting to raise.
     """
     from automated_security_helper.utils.subprocess_utils import (
         COULD_NOT_STOP_ENDING,
@@ -530,16 +614,30 @@ def _run_child(
     try:
         from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
+        # Absolute, every path of it: the child runs in work_dir and chdirs to the
+        # parent's cwd only when the sandbox lets it, so a relative template, output
+        # directory, scan root or cwd would resolve against the wrong place there.
+        # The caller's spellings are kept on this side as the batch's keys; the
+        # answers come back by position, so the keys never cross.
+        absolute_options = dict(options)
+        for key in ("outdir", "scan_root"):
+            if absolute_options.get(key):
+                absolute_options[key] = (
+                    Path(absolute_options[key]).absolute().as_posix()
+                )
         # Guarded: under a sandbox this directory is one the scanner can write.
         with open_for_write(request_path) as handle:
             handle.write(
                 json.dumps(
                     {
                         "protocol": PROTOCOL_VERSION,
-                        "cwd": cwd.as_posix(),
+                        "cwd": Path(cwd).absolute().as_posix(),
                         "log_level": _lowest_kept_log_level(),
-                        "options": options,
-                        "templates": templates,
+                        "options": absolute_options,
+                        "templates": [
+                            Path(template).absolute().as_posix()
+                            for template in templates
+                        ],
                     }
                 )
             )
@@ -575,7 +673,12 @@ def _run_child(
             # refuses a reference there), so no environment value is this limit.
             from automated_security_helper.utils.error_text import timeout_limit_token
 
-            limit = timeout_limit_token(timeout, ())
+            # The configured limit, not the remainder this child was given: the
+            # operator raises the setting, and a child started after another died
+            # was bounded by what was left of it.
+            limit = timeout_limit_token(
+                declared_timeout if declared_timeout is not None else timeout, ()
+            )
             # "Was killed" only when the stop worked, from the response's
             # recorded state (the flag, or a timeout with no exit code): a
             # stop that failed left the child running, and the one thing this
@@ -591,25 +694,44 @@ def _run_child(
                 "legitimately need longer."
             )
             return answers, reason, True, recorded
+        if response_could_not_stop(outcome):
+            # Not a timeout, and the runner could neither wait for the child nor
+            # stop it (its wait failed, then its stop failed). The child may still be
+            # evaluating the pending templates into this output directory, so the
+            # pending templates fail NOW and no new child is started beside it: a
+            # second child writing the same synth directories while the first still
+            # runs would grade one template from the other's report. "Exited None"
+            # was what this case used to read, which is the one thing a reason about
+            # a process that may be running must not say.
+            reason = (
+                f"the cdk-nag worker did not finish{COULD_NOT_STOP_ENDING}. The "
+                "templates it had not answered were not evaluated, and no new worker "
+                "was started for them while it may still be running."
+            )
+            return answers, reason, True, recorded
         # Redacted whole BEFORE the split (redact_then_split): the " | " join
         # below rewrites a value's line break, so a redaction after it could
-        # not match the value's spelling and both halves would print. Escape
-        # codes are stripped from the whole text first for the same reason: a
-        # code inside a value splits the match.
+        # not match the value's spelling and both halves would print. The text
+        # goes in with its escape codes: redact_then_split reads the value as
+        # written first and then the stripped text, so a value that itself
+        # holds a code is matched, and a code inside the text that split a
+        # value is matched too. Stripping here first left only the stripped
+        # spelling to match, the order error_text documents as the weaker one.
         from automated_security_helper.utils.error_text import redact_then_split
 
         stderr = [
             line
-            for line in redact_then_split(
-                _strip_ansi(outcome.get("stderr") or ""), values
-            )
+            for line in redact_then_split(outcome.get("stderr") or "", values)
             if line.strip()
         ]
         tail = " | ".join(stderr[-5:]) if stderr else "no stderr"
-        reason = (
-            f"the cdk-nag worker process exited {outcome.get('returncode')} "
-            f"before answering: {tail}"
+        code = outcome.get("returncode")
+        ended = (
+            f"exited {code}"
+            if isinstance(code, int) and not isinstance(code, bool)
+            else "ended without an exit status"
         )
+        reason = f"the cdk-nag worker process {ended} before answering: {tail}"
         return answers, reason, False, recorded
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -634,6 +756,10 @@ class _Batch:
         # caller is not a scanner and has no scan config to take them from;
         # the scanner seam (cdk_nag_worker_batch) requires them.
         self.templates = [_key(t) for t in templates]
+        # Membership is asked once per template the scanner evaluates; against the
+        # list that was one scan of every candidate per call, quadratic in the
+        # number of JSON and YAML files of the tree.
+        self._template_keys = frozenset(self.templates)
         self.work_root = work_root
         self.cwd = cwd
         self.timeout = timeout
@@ -675,22 +801,54 @@ class _Batch:
         reasons, so the second is not taken as shared and the next template still gets
         its own child; three answerless children in a row fail the rest whatever their
         reasons, so a run of crashing templates stays bounded. A child that ran out of
-        time fails everything still pending at once, as before.
+        time fails everything still pending at once, as before, and so does a child
+        the runner could not stop.
+
+        The timeout bounds the whole of this call, not each child. The first child
+        gets the configured limit; a child started after one died gets what is left
+        of it, and when nothing is left the pending templates fail with the timeout
+        reason without a child being started. Each child used to get the full limit
+        afresh, so a batch whose children kept dying ran for about half as many
+        limits as it had templates.
         """
         answerless_in_a_row = 0
         last_answerless_error: Optional[str] = None
+        deadline = None if self.timeout is None else time.monotonic() + self.timeout
+        first_child = True
         while pending:
+            if first_child or deadline is None:
+                child_timeout = self.timeout
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    from automated_security_helper.utils.error_text import (
+                        timeout_limit_token,
+                    )
+
+                    limit = timeout_limit_token(self.timeout, ())
+                    error = (
+                        f"the cdk-nag worker's time ran out after {limit}: earlier "
+                        "worker children spent the scan's limit, so these templates "
+                        "were not evaluated. Raise scanners.cdk-nag.options.scan_timeout "
+                        "if these templates legitimately need longer."
+                    )
+                    for template in pending:
+                        self.errors[template] = error
+                    return
+                child_timeout = remaining
+            first_child = False
             try:
-                answers, error, timed_out, response = _run_child(
+                answers, error, fail_rest, response = _run_child(
                     pending,
                     options,
                     self.work_root,
                     self.cwd,
-                    self.timeout,
+                    child_timeout,
                     self.values,
+                    declared_timeout=self.timeout,
                 )
             except Exception as exc:
-                answers, error, timed_out = [], f"{type(exc).__name__}: {exc}", False
+                answers, error, fail_rest = [], f"{type(exc).__name__}: {exc}", False
                 response = {}
             for template, answer in zip(pending, answers):
                 self.answers[template] = answer
@@ -706,7 +864,7 @@ class _Batch:
                 and answerless_in_a_row > 0
                 and (error == last_answerless_error or answerless_in_a_row >= 2)
             )
-            if timed_out or shared:
+            if fail_rest or shared:
                 for template in rest:
                     self.errors[template] = error
                 return
@@ -725,7 +883,7 @@ class _Batch:
         key = _key(template)
         if self.options is None:
             self.options = options
-        if options != self.options or key not in self.templates:
+        if options != self.options or key not in self._template_keys:
             # Not something the scanner does: it lists every template up front and
             # computes one set of options. Answered correctly, by a child of its own,
             # and said out loud, because paying jsii startup per template is exactly
@@ -806,8 +964,14 @@ def run_cdk_nag_against_cfn_template(
 ) -> "Optional[CdkNagWrapperResponse]":
     """``cdk_nag_wrapper.run_cdk_nag_against_cfn_template``, evaluated in a child.
 
-    Same arguments, same return values, same exceptions (by name and text). Outside a
-    :func:`cdk_nag_worker_batch` block each call starts its own child.
+    Same arguments, same return values, same exceptions (by name and text), with one
+    stated difference: the response's ``template`` is None here. The wrapper sets it to
+    the template's model, which is the template's whole content; the scanner never
+    reads it, so it does not cross the process boundary. Outside a
+    :func:`cdk_nag_worker_batch` block each call starts its own child, in a scratch
+    directory of its own when no ``outdir`` is given: the working directory used to
+    serve, and one the process could not write turned the wrapper's "not a
+    CloudFormation template" answer into an error about the scratch files.
     """
     options = {
         "nag_packs": list(nag_packs) if nag_packs is not None else None,
@@ -818,10 +982,19 @@ def run_cdk_nag_against_cfn_template(
         "scan_root": Path(scan_root).as_posix() if scan_root is not None else None,
     }
     batch = _ACTIVE_BATCH.get()
+    scratch_root: Optional[str] = None
     if batch is None:
-        work_root = Path(outdir) if outdir is not None else Path.cwd()
+        if outdir is not None:
+            work_root = Path(outdir)
+        else:
+            scratch_root = tempfile.mkdtemp(prefix="ash-cdk-nag-worker-")
+            work_root = Path(scratch_root)
         batch = _Batch([str(template_path)], work_root, Path.cwd())
-    answer = batch.answer_for(str(template_path), options)
+    try:
+        answer = batch.answer_for(str(template_path), options)
+    finally:
+        if scratch_root is not None:
+            shutil.rmtree(scratch_root, ignore_errors=True)
 
     _replay_logs(answer)
     status = answer.get("status")
