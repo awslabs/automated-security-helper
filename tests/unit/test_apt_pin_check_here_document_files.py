@@ -1,23 +1,24 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A here-document written to a file is not read as the apt pin check's commands.
+"""A here-document written to a file is read for installs, minus shell expansions.
 
 Why this file exists
 --------------------
 ``scripts/check_pinned_tool_versions.py`` reads the body of every ``RUN <<EOF``
-here-document as shell commands. That is right for ``RUN <<EOF`` and ``bash <<EOF``,
-and wrong for ``RUN cat > /usr/local/bin/setup.sh <<'EOF'``, whose body is the
-content of a file the image gets and runs later. A helper script that holds
-``apt-get install -y "$@"`` was read as an install of ``$@``, refused as an unpinned
-package, and the weekly run exited 2 although the Dockerfile installs nothing
+here-document as shell commands. For ``RUN cat > /usr/local/bin/setup.sh <<'EOF'`` the
+body is the content of a file the image gets and runs later. A helper script that
+holds ``apt-get install -y "$@"`` was read as an install of ``$@``, refused as an
+unpinned package, and the weekly run exited 2 although the Dockerfile installs nothing
 unpinned.
 
-The body of a here-document is now skipped when the command that takes it writes its
-output to a file and is not a shell. A body given to a shell, to a command that writes
-nothing, or to a redirection that keeps nothing (``/dev/null``, ``2>&1``) is read as
-before. The multi-line install in a here-document (the usual way to write one) is
-covered too.
+The first cure dropped such a body whole. That hid the install it exists to catch:
+``RUN cat > /tmp/install.sh <<'EOF' && sh /tmp/install.sh`` with an unpinned ``jq`` and
+a pinned ``curl=...`` inside was neither refused nor looked up. The body is now read
+like any other, and only a shell expansion in it (``"$@"``, ``$1``, ``${PKGS}``,
+``$(cat list)``) is not taken for a package. A body given to a shell, to a command
+that writes nothing, or to a redirection that keeps nothing (``/dev/null``, ``2>&1``)
+is commands run now, and an expansion in it is refused as before.
 
 No network and no child process: the Dockerfiles are written under ``tmp_path``.
 """
@@ -95,25 +96,73 @@ class TestAFileBodyIsNotCommands:
         # The instruction after the here-document is read: its install is on line 7.
         assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (7,))}
 
+    @pytest.mark.parametrize(
+        "expansion", ['"$@"', "$1", "${PKGS}", "$PKGS", "$(cat /pkgs.txt)", "`cat x`"]
+    )
+    def test_any_shell_expansion_is_skipped_and_a_pin_beside_it_is_read(
+        self, tmp_path, expansion
+    ):
+        # Red before: the expansion was refused as an unpinned package named by it.
+        body = (
+            "RUN cat > /usr/local/bin/setup.sh <<'EOF'\n"
+            f"apt-get install -y {expansion} {CURL}\n"
+            "EOF\n"
+        )
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (4,))}
+
     def test_a_file_body_does_not_hide_the_next_instruction(self, tmp_path):
-        """Control: only the body is skipped, not the rest of the Dockerfile."""
+        """Control: the rest of the Dockerfile is read after the body."""
         body = "RUN cat > /x.sh <<EOF\necho hi\nEOF\nRUN apt-get install -y git\n"
         with pytest.raises(checker.PinEnumerationError, match="Dockerfile:6.*'git'"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
-    def test_a_shell_marker_after_a_file_marker_is_still_read(self, tmp_path):
+    def test_a_shell_marker_after_a_file_marker_is_told_apart(self, tmp_path):
         """Control: the bodies are told apart in the order the shell reads them."""
         body = (
             "RUN cat > /a <<A; bash <<B\n"
-            "apt-get install -y whatever\n"
+            'apt-get install -y "$@"\n'
             "A\n"
-            "apt-get install -y git\n"
+            'apt-get install -y "$@"\n'
             "B\n"
         )
-        with pytest.raises(checker.PinEnumerationError) as raised:
+        # The file body's "$@" (line 4) is skipped. The shell body's (line 6) is part of
+        # the instruction that starts on line 3, and is refused there.
+        with pytest.raises(checker.PinEnumerationError, match=r"Dockerfile:3 installs"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
-        assert "'git'" in str(raised.value)
-        assert "whatever" not in str(raised.value)
+
+
+class TestAFileBodyIsStillRead:
+    def test_an_unpinned_package_in_a_script_that_is_run_is_refused(self, tmp_path):
+        # Red before: the whole body was dropped, so neither package was read, and the
+        # check could not fail on the install it exists to catch.
+        body = (
+            "RUN cat > /tmp/install.sh <<'EOF' && sh /tmp/install.sh\n"
+            f"apt-get install -y --no-install-recommends {CURL} jq\n"
+            "EOF\n"
+        )
+        with pytest.raises(checker.PinEnumerationError, match="Dockerfile:4.*'jq'"):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_pinned_package_in_a_written_script_is_looked_up(self, tmp_path):
+        # Red before: the pin was never enumerated, so it was never looked up.
+        body = (
+            "RUN cat > /tmp/install.sh <<'EOF' && sh /tmp/install.sh\n"
+            f"apt-get install -y --no-install-recommends {CURL}\n"
+            "EOF\n"
+        )
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (4,))}
+
+    def test_a_package_pinned_two_ways_across_a_script_and_a_run_is_refused(
+        self, tmp_path
+    ):
+        body = (
+            "RUN cat > /tmp/install.sh <<'EOF'\n"
+            f"apt-get install -y {CURL}\n"
+            "EOF\n"
+            "RUN apt-get install -y curl=7.88.1-10+deb12u5\n"
+        )
+        with pytest.raises(checker.PinEnumerationError, match="every stage"):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
 
 class TestAShellBodyIsStillCommands:
@@ -129,9 +178,16 @@ class TestAShellBodyIsStillCommands:
             "RUN cat <<EOF | sh",
         ],
     )
-    def test_an_unpinned_install_is_still_refused(self, tmp_path, first_line):
-        """Control: a shell runs its body, wherever the shell's output goes."""
-        body = f"{first_line}\napt-get install -y git\nEOF\n"
+    def test_an_expansion_in_an_install_is_still_refused(self, tmp_path, first_line):
+        """Control: a shell runs its body, so an install of "$@" there is a fault."""
+        body = f'{first_line}\napt-get install -y "$@"\nEOF\n'
+        with pytest.raises(
+            checker.PinEnumerationError, match=r"Dockerfile:3 installs '\$@'"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_an_unpinned_package_is_refused_whatever_the_body_is(self, tmp_path):
+        body = "RUN bash <<EOF\napt-get install -y git\nEOF\n"
         with pytest.raises(checker.PinEnumerationError, match="Dockerfile:3.*'git'"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 

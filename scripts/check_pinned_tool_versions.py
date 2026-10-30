@@ -61,10 +61,12 @@ An ``apt-get install`` of a package with no ``=version`` is refused (exit 2) rat
 than skipped, and so is one package pinned to two versions in different stages. The
 install is found in a ``RUN`` of any case, whether written in shell form, as an exec
 form array or as a here-document, and whether spelled ``apt-get`` or ``apt``. The body
-of a here-document that a command writes to a file (``cat > setup.sh <<'EOF'``) is
-that file's content and is not read. An option that takes its value as a separate
-word (``-t suite``, ``-o Name=value``) and a redirection are not packages. A
-Dockerfile that configures NodeSource without a major this script can read, or with
+of a here-document that a command writes to a file (``cat > setup.sh <<'EOF'``) is read
+too, because the file may be run later in the build: an unpinned package in it is
+refused and a pinned one is looked up. Only a shell expansion in it (``"$@"``,
+``${PKGS}``), which is whatever the script's caller passes, is not a package. An
+option that takes its value as a separate word (``-t suite``, ``-o Name=value``) and a
+redirection are not packages. A Dockerfile that configures NodeSource without a major this script can read, or with
 two different majors, is refused too, because the nodejs pin would be looked up in
 Debian's own nodejs or in the wrong NodeSource index.
 
@@ -1317,6 +1319,8 @@ _COMMAND_END = re.compile(r"[;|]|&&|(?<![<>&])&(?![>&])")
 _FILE_REDIRECT = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?!/dev/null(?![\w/.-]))[^\s<>|;&]")
 # A redirection or a here-document marker among the words of a command.
 _REDIRECT_WORD = re.compile(r"(?:&|\d*)>>?\s*\S*|<<-?\s*[\"']?\w+[\"']?")
+# A command substitution, $(...) or `...`, in the arguments of an install in a script.
+_SUBSTITUTION = re.compile(r"\$\([^()]*\)|`[^`]*`")
 # Shells, which run the body of a here-document they are given.
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ash", "ksh"})
 # A shell redirection among the arguments of the install: "> /dev/null", "2>".
@@ -1354,10 +1358,11 @@ class AptResult:
 def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     """The here-documents opened on one line, as (name, body is a file's content).
 
-    A body is a file's content, and not commands, when the command it is given to
-    writes its output to a file (``cat > setup.sh <<'EOF'``, ``cat <<EOF >> conf``) and
-    is not a shell. A body given to a shell (``bash <<EOF > log``), or to a command
-    that does not write a file, is read as shell.
+    A body is a file's content, and not commands run now, when the command it is given
+    to writes its output to a file (``cat > setup.sh <<'EOF'``, ``cat <<EOF >> conf``)
+    and is not a shell. A body given to a shell (``bash <<EOF > log``), or to a command
+    that does not write a file, is commands. Both are read for installs; the flag only
+    decides whether a shell expansion in an install is a package to refuse.
     """
     cleaned = _ARITHMETIC.sub(" ", line)
     ends = [match.span() for match in _COMMAND_END.finditer(cleaned)]
@@ -1376,7 +1381,18 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     return markers
 
 
-def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
+@dataclass(frozen=True)
+class _RunBlock:
+    """The (line number, text) lines of one RUN instruction, or of a file body in it."""
+
+    lines: list[tuple[int, str]]
+    # The lines are the content of a file the instruction writes (``cat > x <<'EOF'``),
+    # a script that may be run later. They are read as commands all the same, but the
+    # shell expansions in them (``"$@"``) are not packages this check can look up.
+    file_content: bool = False
+
+
+def _run_blocks(text: str) -> list[_RunBlock]:
     """Each RUN instruction as its (line number, text) lines, comments dropped.
 
     The instruction name is read without regard to case. Inside a continued
@@ -1384,32 +1400,36 @@ def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
     The body of a here-document belongs to the instruction, each of its lines ended
     with ``;`` as the shell ends a command at a newline, except a line that ends with
     a backslash, which continues on the next. The body of a here-document written to
-    a file (``cat > setup.sh <<'EOF'``) is that file's content: it is not part of the
-    instruction. An instruction still open at the end of the file is kept.
+    a file (``cat > setup.sh <<'EOF'``) is a block of its own, flagged
+    ``file_content``: the file may be run later in the build, so its installs are
+    read, not skipped. An instruction still open at the end of the file is kept.
     """
-    blocks: list[list[tuple[int, str]]] = []
+    blocks: list[_RunBlock] = []
     current: list[tuple[int, str]] | None = None
     # here-document (name, body is a file's content) found on the instruction's lines
     markers: list[tuple[str, bool]] = []
     # here-documents whose body is being read, in the order the shell reads them
     terminators: list[tuple[str, bool]] = []
+    file_body: list[tuple[int, str]] = []  # the body being read, if it is a file's
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if current is not None and terminators:
             if line == terminators[0][0]:
+                if terminators[0][1] and file_body:
+                    blocks.append(_RunBlock(file_body, file_content=True))
+                file_body = []
                 terminators.pop(0)
                 if not terminators:
-                    blocks.append(current)
+                    blocks.append(_RunBlock(current))
                     current = None
-            elif terminators[0][1]:
-                continue  # the content of a file the command writes, not commands
             elif line and not line.startswith("#"):
                 # A command ends at a newline, unless the line ends with a backslash:
                 # then the next line continues it, as in the body of a here-document.
+                target = file_body if terminators[0][1] else current
                 if line.endswith("\\"):
-                    current.append((number, line[:-1]))
+                    target.append((number, line[:-1]))
                 else:
-                    current.append((number, f"{line} ;"))
+                    target.append((number, f"{line} ;"))
             continue
         if current is None:
             if not _RUN_INSTRUCTION.match(line):
@@ -1427,10 +1447,12 @@ def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
         if markers:
             terminators, markers = markers, []
             continue
-        blocks.append(current)
+        blocks.append(_RunBlock(current))
         current = None
+    if file_body:
+        blocks.append(_RunBlock(file_body, file_content=True))
     if current:
-        blocks.append(current)
+        blocks.append(_RunBlock(current))
     return blocks
 
 
@@ -1501,9 +1523,17 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
     """
     versions: dict[str, str] = {}
     lines: dict[str, list[int]] = {}
-    for block in _run_blocks(dockerfile.read_text(encoding="utf-8")):
+    for run in _run_blocks(dockerfile.read_text(encoding="utf-8")):
+        block = run.lines
         for match in _APT_INSTALL.finditer(_block_text(block)):
-            for word in _install_words(match.group("args")):
+            args = match.group("args")
+            if run.file_content:
+                # A script the image gets: "$@" or ${PKGS} is whatever its caller
+                # passes, which no pin lookup can see. A real package is still checked.
+                args = _SUBSTITUTION.sub(" ", args)
+            for word in _install_words(args):
+                if run.file_content and "$" in word:
+                    continue
                 pin = _APT_PIN.match(word)
                 if pin is None:
                     raise PinEnumerationError(
