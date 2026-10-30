@@ -292,11 +292,6 @@ def path_pattern_advice(
     if form.startswith("./"):
         if not shown_form.startswith("./"):
             return f"Path '{shown}' {DOT_PREFIX_PROBLEM}. Remove the leading './'."
-        names_directory = (
-            not any(character in rest for character in _GLOB_CHARACTERS)
-            and not (ignore_path and rest.endswith("/"))
-            and _names_a_directory(project_root / rest)
-        )
         if read_from_environment:
             shown_rest = _without_dot_prefix(shown_form).lstrip("/")
         else:
@@ -305,6 +300,13 @@ def path_pattern_advice(
             # matches nothing either.
             rest = _with_tree_spelling(rest, project_root)
             shown_rest = rest
+        # Asked of the tree's spelling: './Tests' names the directory 'tests'
+        # on a case-sensitive filesystem only once respelled.
+        names_directory = (
+            not any(character in rest for character in _GLOB_CHARACTERS)
+            and not (ignore_path and rest.endswith("/"))
+            and _names_a_directory(project_root / rest)
+        )
         if names_directory:
             spelling = directory_spelling(shown_rest, ignore_path=ignore_path)
             action = (
@@ -3168,8 +3170,16 @@ def record_of_config(
             else:
                 replaced = current.replace(part, rewrite.reference, 1)
             if mark is None:
+                # A record never holds the value: where it occurs again, the
+                # other occurrences are hidden too, as the whole-string
+                # replace hid them, since a value shown is the worse side.
+                if part in replaced:
+                    replaced = replaced.replace(part, rewrite.reference)
                 container[key] = replaced
-            elif _resolves_back_to(replaced, current):
+            elif part not in replaced and _resolves_back_to(replaced, current):
+                # One reference, and nothing of the value left as text: a
+                # string that holds the value again is left as the
+                # configuration holds it, which the writer refuses to write.
                 # Tagged: the loader reads a tagged string from the environment
                 # however the emitter quotes it, and an untagged one only when
                 # it is written plain.

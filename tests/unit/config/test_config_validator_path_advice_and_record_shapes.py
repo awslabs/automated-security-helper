@@ -192,11 +192,36 @@ class TestPlacedRewrites:
 
 
 class TestRecordOfConfig:
-    def test_only_the_values_own_occurrence_is_replaced(self):
+    def test_a_value_inside_other_text_is_replaced_where_it_stands(self):
         config = SimpleNamespace(
             _written_references=[_value_rewrite(("a",), "${V}", "xy", "xy", "${V}")]
         )
-        assert record_of_config(config, {"a": "xyxy"}) == {"a": "${V}xy"}
+        assert record_of_config(config, {"a": "xy-tail"}) == {"a": "${V}-tail"}
+        assert record_of_config(config, {"a": "head-xy"}) == {"a": "head-${V}"}
+
+    def test_a_record_hides_a_repeated_value_at_every_occurrence(self):
+        """A record never holds the value: where the string holds it again, the
+        other occurrences are hidden too."""
+        config = SimpleNamespace(
+            _written_references=[_value_rewrite(("a",), "${V}", "xy", "xy", "${V}")]
+        )
+        assert record_of_config(config, {"a": "xyxy"}) == {"a": "${V}${V}"}
+
+    def test_a_file_to_be_loaded_again_keeps_a_repeated_value_unwritten(self):
+        """With ``mark`` (a file written to be loaded again) a string that holds
+        the value twice is left as the configuration holds it, for the writer to
+        refuse: one reference beside the value as text would write the value."""
+        config = SimpleNamespace(
+            _written_references=[_value_rewrite(("a",), "${V}", "xy", "xy", "${V}")]
+        )
+        marks: list = []
+
+        def mark(text):
+            marks.append(text)
+            return text
+
+        assert record_of_config(config, {"a": "xyxy"}, mark=mark) == {"a": "xyxy"}
+        assert marks == []
 
     def test_a_key_rename_onto_an_existing_key_keeps_both_entries(self):
         rewrite = EnvironmentRewrite("key", ("m",), "k", "${K}", "k", "${K}")
