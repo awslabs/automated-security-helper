@@ -1111,18 +1111,22 @@ class ReportPhase(EnginePhase):
                             f"{error_text(event_error, environment_values)}"
                         )
 
-                    # Update reporter task to show error. Skipped when add_task
-                    # itself is what raised, because there is no task id to update.
-                    if reporter_task is not None:
-                        self.progress_display.update_task(
-                            phase=ExecutionPhase.REPORT,
-                            task_id=reporter_task,
-                            completed=100,
-                            description=(
-                                f"[red]({escape_markup(display_name)}) Failed: "
-                                f"{escape_markup(described)}"
-                            ),
-                        )
+                    # Update reporter task to show error. Unconditional, as the
+                    # three sibling arms are: update_task tolerates a None task
+                    # id (add_task returns None when the display is off, and
+                    # None is what reporter_task holds when add_task itself
+                    # raised), and a caller that records descriptions through
+                    # update_task (a test, a wrapped display) must see the
+                    # failure whether or not a display is showing.
+                    self.progress_display.update_task(
+                        phase=ExecutionPhase.REPORT,
+                        task_id=reporter_task,
+                        completed=100,
+                        description=(
+                            f"[red]({escape_markup(display_name)}) Failed: "
+                            f"{escape_markup(described)}"
+                        ),
+                    )
         else:
             ASH_LOGGER.warning("No enabled reporters found matching requested formats")
 
