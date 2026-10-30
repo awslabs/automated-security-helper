@@ -29,11 +29,16 @@ from . import spdx
 OpenCreIdentifier = Annotated[str, StringConstraints(pattern=r"^CRE:[0-9]+-[0-9]+$")]
 
 # Not from the codegen: every model below that declares an aliased field
-# (`bom-ref`, `mime-type`) carries serialize_by_alias=True. pydantic resolves a
-# dump's by_alias per model, from each model's own config, when the caller
-# passes none, so the flag on CycloneDXReport alone left a nested `bom_ref` under
-# its Python name in a default dump, and the dumped document then failed
-# re-validation under extra="forbid".
+# (`bom-ref`, `mime-type`) carries serialize_by_alias=True and
+# validate_by_name=True. pydantic resolves a dump's by_alias per model, from
+# each model's own config, when the caller passes none, so the flag on
+# CycloneDXReport alone left a nested `bom_ref` under its Python name in a
+# default dump, and the dumped document then failed re-validation under
+# extra="forbid". Results files written before that fix hold the nested Python
+# name, so the models also load a field by its Python name; the alias stays
+# what a dump writes. tests/unit/schemas/test_cyclonedx_aliased_models_round_trip.py
+# walks every model for the pair, so a regeneration that drops them fails
+# there; after regenerating, re-apply the edits this header lists.
 #
 # Not from the codegen: a BOM is a scanner's document that ASH stores and
 # re-emits, so the model keeps its values as written.
@@ -155,6 +160,7 @@ class OrganizationalContact(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -300,6 +306,7 @@ class LicenseExpression(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     expression: str = Field(
@@ -515,6 +522,7 @@ class Occurrence(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1100,6 +1108,7 @@ class PostalAddress(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1373,6 +1382,7 @@ class Level(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1844,6 +1854,7 @@ class OrganizationalEntity(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2070,6 +2081,7 @@ class License1(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
         # A recognized SPDX id is stored as its plain string, as an unknown one is.
         use_enum_values=True,
     )
@@ -2269,6 +2281,7 @@ class License2(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
         # A recognized SPDX id is stored as its plain string, as an unknown one is.
         use_enum_values=True,
     )
@@ -2644,6 +2657,7 @@ class EnergyProvider(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2742,6 +2756,7 @@ class Requirement(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2991,6 +3006,7 @@ class Assessor(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3111,6 +3127,7 @@ class Workspace(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: RefType = Field(
@@ -3629,6 +3646,7 @@ class ComponentData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3686,6 +3704,7 @@ class Trigger(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: RefType = Field(
@@ -3782,6 +3801,7 @@ class Claim(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3836,6 +3856,7 @@ class EvidenceItem(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3957,6 +3978,7 @@ class Service(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4048,6 +4070,7 @@ class Compositions(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4165,6 +4188,7 @@ class ModelCard(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4199,6 +4223,7 @@ class Task(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: RefType = Field(
@@ -4281,6 +4306,7 @@ class Standard(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4343,6 +4369,7 @@ class Workflow(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: RefType = Field(
@@ -4604,6 +4631,7 @@ class Component(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     type: Type = Field(
@@ -4779,6 +4807,7 @@ class Vulnerability(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4969,6 +4998,7 @@ class Annotations(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -5006,6 +5036,7 @@ class Formula(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -5041,6 +5072,7 @@ class CycloneDXReport(BaseModel):
         extra="forbid",
         use_enum_values=True,
         serialize_by_alias=True,
+        validate_by_name=True,
         # Not from the codegen: a refused value can be scanned content, which an
         # error does not quote.
         hide_input_in_errors=True,
