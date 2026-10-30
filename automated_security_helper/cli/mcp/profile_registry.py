@@ -923,6 +923,13 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
             be written); failing closed, as ``select_profile`` does when it
             cannot write it. A ``ProfileRegistryError`` and a ``RuntimeError``
             both, so every caller's existing handling of either catches it.
+        SessionWorkspaceBusyError: the file is gone and another request holds
+            the session's workspace (the TTL sweep removing it, a
+            ``clear_source``, the end of the session), so it is not written
+            again under that removal; the caller answers the hold's refusal
+            (``error_type`` ``session_workspace_busy``) and the request is sent
+            again once the hold ends. A ``RuntimeError``, never a
+            ``ProfileRegistryError``.
     """
 
     return _bound_config_paths(session_id)[0]
@@ -953,7 +960,20 @@ def _bound_config_paths(
 
 
 def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
-    """Write a bound session's profile files again and record the new paths."""
+    """Write a bound session's profile files again and record the new paths.
+
+    The write runs under the session's write hold (``writing_session_state``),
+    the hold ``select_profile`` takes for the same files: the TTL sweep, a
+    ``clear_source`` and the end of the session remove the workspace under a
+    change that excludes writes, so this rewrite cannot recreate a workspace
+    one of them is removing (an orphan the sweep would keep for a whole TTL),
+    and is refused with ``SessionWorkspaceBusyError`` while one holds the
+    session. The new paths are recorded on the binding that was read, by
+    identity: a rebind meanwhile, to the same profile with another patch
+    included, keeps its own paths.
+    """
+    from automated_security_helper.cli.mcp.sessions import writing_session_state
+
     with _session_lock:
         state = _session_state.get(sid)
         if state is None or state.profile_name is None or state.bound_config is None:
@@ -967,19 +987,23 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
             "registered, and its materialized config is gone, so the scan cannot "
             "run under it. Bind a registered profile with select_profile."
         )
-    try:
-        config_path, trusted = materialize_session_binding(sid, entry.config, patched)
-    except (OSError, RuntimeError) as exc:
-        raise BoundProfileUnavailableError(
-            f"this session's bound profile {profile_name!r} could not be written "
-            f"to the session's workspace again, so the scan cannot run under it: "
-            f"{error_text(exc)}"
-        ) from exc
-    with _session_lock:
-        current = _session_state.get(sid)
-        if current is not None and current.profile_name == profile_name:
-            current.config_path = config_path
-            current.trusted_config_path = trusted
+    # The hold is taken outside the try: its own refusal is a RuntimeError too,
+    # and inside it would be reported as a profile that cannot be written.
+    with writing_session_state(sid):
+        try:
+            config_path, trusted = materialize_session_binding(
+                sid, entry.config, patched
+            )
+        except (OSError, RuntimeError) as exc:
+            raise BoundProfileUnavailableError(
+                f"this session's bound profile {profile_name!r} could not be "
+                "written to the session's workspace again, so the scan cannot "
+                f"run under it: {error_text(exc)}"
+            ) from exc
+        with _session_lock:
+            if _session_state.get(sid) is state:
+                state.config_path = config_path
+                state.trusted_config_path = trusted
     return config_path, trusted
 
 

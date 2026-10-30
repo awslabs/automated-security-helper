@@ -2660,6 +2660,7 @@ async def _run_scan(
         resolve_session_config_path,
         resolve_session_trusted_config_path,
     )
+    from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
         config_base_gate,
@@ -2965,16 +2966,18 @@ async def _run_scan(
         return
     # The session's bound profile is written again here when its file is gone;
     # a profile that cannot be written again (unregistered, or an unwritable
-    # workspace) refuses the scan. Caught here, not left to propagate: the
-    # runner's own try begins further down, and an exception out of this
-    # coroutine would leave the entry PENDING, which reads as running.
+    # workspace), or one whose workspace another request holds (its removal by
+    # the sweep, a clear, the end of the session: the write hold's refusal),
+    # refuses the scan. Caught here, not left to propagate: the runner's own
+    # try begins further down, and an exception out of this coroutine would
+    # leave the entry PENDING, which reads as running.
     try:
         trusted_config_path = (
             resolve_session_trusted_config_path(session_id)
             if untrusted_config
             else None
         )
-    except ProfileRegistryError as exc:
+    except (ProfileRegistryError, SessionWorkspaceBusyError) as exc:
         _refuse_before_running(exc)
         return
     # For a remote caller, every config file the operator did not set aside
@@ -3001,9 +3004,10 @@ async def _run_scan(
     # profile is known here.
     try:
         session_profile = resolve_session_config_path(session_id)
-    except ProfileRegistryError as exc:
-        # As above: a bound profile that cannot be read as registered refuses
-        # the scan, recorded on the entry rather than raised out of the runner.
+    except (ProfileRegistryError, SessionWorkspaceBusyError) as exc:
+        # As above: a bound profile that cannot be read as registered, or whose
+        # workspace another request holds, refuses the scan, recorded on the
+        # entry rather than raised out of the runner.
         _refuse_before_running(exc)
         return
     config_may_be_the_profile = (
@@ -5360,11 +5364,25 @@ def _answer_get_config(
         from automated_security_helper.cli.mcp.profile_registry import (
             ProfileRegistryError,
         )
+        from automated_security_helper.cli.mcp.sessions import (
+            SESSION_WORKSPACE_BUSY,
+            SessionWorkspaceBusyError,
+        )
 
         try:
             trusted_config_path = resolve_session_trusted_config_path(session_id)
         except ProfileRegistryError as exc:
             return _bound_profile_unavailable(exc, "get_config")
+        except SessionWorkspaceBusyError as exc:
+            # The file is gone and another request holds the session's
+            # workspace (its removal), so it is not written again under that
+            # removal: the hold's own refusal, as select_profile answers it.
+            return {
+                "success": False,
+                "error": raw_controls_on_one_line(str(exc)),
+                "error_type": SESSION_WORKSPACE_BUSY,
+                "operation": "get_config",
+            }
     # The selected config's chain, handed out by the load itself (chain_out),
     # so this tool never reverse-engineers how the load's file lists were put
     # together: a subtraction over files_read dropped the first copy of a

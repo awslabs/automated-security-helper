@@ -141,3 +141,25 @@ def test_a_bound_profile_that_cannot_be_written_again_is_the_sessions_refusal(
     assert "select_profile" in result["error"], result
     assert "cannot be loaded" not in result["error"], result
     assert delivered.as_posix() not in result["error"], result
+
+
+def test_a_bound_profile_gone_while_the_workspace_is_being_removed_is_busy(bound):
+    """The copy is gone and another request holds the session's workspace (its
+    removal), so the trusted base is not written again under that removal: the
+    answer is the hold's own refusal, as select_profile gives it, never a load
+    failure of the delivered file and never an internal error."""
+    from automated_security_helper.cli.mcp.sessions import get_default_registry
+
+    _, session_copy, delivered = bound
+    session_copy.unlink()
+    session = get_default_registry().session_for(SESSION)
+    assert session.try_begin_change() is None
+    try:
+        result = _get_config(delivered)
+    finally:
+        session.end_change()
+
+    assert result["success"] is False, result
+    assert result["error_type"] == "session_workspace_busy", result
+    assert "exit_code" not in result, result
+    assert not session_copy.exists(), "the profile was written under the removal"
