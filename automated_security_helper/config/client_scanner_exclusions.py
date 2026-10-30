@@ -547,8 +547,11 @@ def glob_excludes(pattern: str, relative: str) -> bool:
     any run of components. A pattern with no ``/`` matches a file or directory
     of that name at any depth. A ``/`` inside the pattern, a leading ``/`` or a
     leading ``./`` anchors it at the scan root; a leading ``**/`` leaves it
-    unanchored. A trailing ``/`` names a directory. A match on a directory
-    excludes every file under it.
+    unanchored. A trailing ``/`` names a directory: it is matched against the
+    directories above the file, never the file itself, so ``build/`` leaves a
+    file named ``build`` to its tool (the slash was stripped before matching,
+    and the entry then hid findings in such a file, which the tool had scanned
+    and reported). A match on a directory excludes every file under it.
 
     Before, ``fnmatch`` matched the pattern against every run of components, so
     ``*`` crossed ``/`` (``src/*.py`` took ``src/a/b.py``) and a ``/`` inside the
@@ -560,6 +563,7 @@ def glob_excludes(pattern: str, relative: str) -> bool:
     while candidate.startswith("./"):
         anchored = True
         candidate = candidate[2:]
+    directory_only = candidate.endswith("/")
     candidate = candidate.strip("/")
     if candidate.startswith("**/"):
         anchored = False
@@ -572,8 +576,11 @@ def glob_excludes(pattern: str, relative: str) -> bool:
     pattern_parts = [part for part in candidate.split("/") if part]
     parts = [part for part in _slashed(relative).split("/") if part not in ("", ".")]
     starts = range(1) if anchored else range(len(parts))
+    # The runs tried end at the file itself, or, for a directory pattern, at
+    # the last directory above it.
+    longest = len(parts) - 1 if directory_only else len(parts)
     for start in starts:
-        for end in range(start + 1, len(parts) + 1):
+        for end in range(start + 1, longest + 1):
             if _components_match(pattern_parts, parts[start:end]):
                 return True
     return False

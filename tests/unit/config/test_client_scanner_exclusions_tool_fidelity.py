@@ -207,6 +207,25 @@ def test_a_posix_backslash_is_a_character_of_the_name():
     assert glob_excludes("b.py", "a/b.py")
 
 
+@pytest.mark.parametrize(
+    ("pattern", "relative", "excluded"),
+    [
+        ("build/", "build/x.py", True),
+        ("build/", "src/build/x.py", True),
+        ("build/", "tools/build", False),
+        ("build/", "build", False),
+        ("build", "tools/build", True),
+        ("./build/", "build/x.py", True),
+        ("./build/", "build", False),
+        ("**/", "x.py", False),
+    ],
+)
+def test_a_trailing_slash_names_a_directory_not_a_file(pattern, relative, excluded):
+    """The tools read ``build/`` as the directory build; the slash was stripped
+    before matching, so the entry also hid findings in a file named build."""
+    assert glob_excludes(pattern, relative) is excluded
+
+
 def test_a_pattern_of_repeated_doublestars_answers_at_once():
     """A delivered ``*/**/**/.../zz`` against a deep path. Matched by trying
     every split at every ``**``, it took billions of calls (about C(35, 16) for
