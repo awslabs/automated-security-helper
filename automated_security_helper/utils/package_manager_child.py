@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import stat
@@ -79,7 +80,7 @@ import string
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -402,14 +403,18 @@ def _pnpm_workspace_copy(data: bytes, *, ignore_suppressions: bool) -> Optional[
     manifest, and a repository that keeps them there lost its suppressions when
     the file was left out of the copy. ``packages`` crosses with it, when it is
     a list of strings: it is the workspace's member globs, which name no
-    registry, proxy or path outside the package, and a workspace file without
-    it is one some pnpm releases refuse as an invalid workspace configuration,
-    so a copy cut down to ``auditConfig`` alone failed an audit that ran with
-    no file at all. Every other key (the registry among them) is a setting the
-    module does not let the repository set, and stays out. Under
-    ``--ignore-suppressions`` nothing crosses, as the manifest's key is dropped.
-    A file that is not YAML, or not a mapping, gives no file: pnpm then runs as
-    it did without one.
+    registry or proxy, and a workspace file without it is one some pnpm
+    releases refuse as an invalid workspace configuration, so a copy cut down
+    to ``auditConfig`` alone failed an audit that ran with no file at all. A
+    glob only crosses when it stays inside the package: a relative pattern with
+    no ``..`` component (a leading ``!`` negation is admitted). An absolute
+    pattern or one that climbs out names a path outside the package the copy
+    holds, and is left out; when none remains the key is left out with them.
+    Every other key (the registry among them) is a setting the module does not
+    let the repository set, and stays out. Under ``--ignore-suppressions``
+    nothing crosses, as the manifest's key is dropped. A file that is not
+    YAML, or not a mapping, gives no file: pnpm then runs as it did without
+    one.
     """
     if ignore_suppressions:
         return None
@@ -424,8 +429,28 @@ def _pnpm_workspace_copy(data: bytes, *, ignore_suppressions: bool) -> Optional[
     copied: Dict[str, object] = {"auditConfig": document["auditConfig"]}
     packages = document.get("packages")
     if isinstance(packages, list) and all(isinstance(p, str) for p in packages):
-        copied["packages"] = packages
+        inside = [glob for glob in packages if _member_glob_stays_inside(glob)]
+        if inside:
+            copied["packages"] = inside
     return yaml.safe_dump(copied).encode("utf-8")
+
+
+def _member_glob_stays_inside(glob: str) -> bool:
+    """Whether a ``pnpm-workspace.yaml`` member glob names paths inside the package.
+
+    pnpm resolves the globs against the workspace root with forward or
+    backward slashes, so a pattern is read on both separators: it stays inside
+    when it is relative on both path flavors, holds no ``..`` component and is
+    not empty. A leading ``!`` marks a pattern pnpm excludes and is read past.
+    """
+    body = glob.removeprefix("!")
+    if not body:
+        return False
+    if PurePosixPath(body).is_absolute() or PureWindowsPath(body).is_absolute():
+        return False
+    if PureWindowsPath(body).drive:
+        return False
+    return ".." not in re.split(r"[\\/]+", body)
 
 
 def _links_into_skipped_dir(linked: Path, package_dir: Path) -> bool:

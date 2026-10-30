@@ -114,6 +114,52 @@ class TestPnpmWorkspaceSettings:
         }
         assert b"registry.example" not in copied["pnpm-workspace.yaml"]
 
+    def test_member_globs_that_leave_the_package_stay_out(self, tmp_path):
+        """The docstring's reason for letting ``packages`` cross is that the
+        globs name no path outside the package; a pattern that climbs out
+        with ``..`` or starts at a root does. Those are left out, the ones
+        that stay inside cross, a ``!`` exclusion among them."""
+        package = self._workspace(
+            tmp_path,
+            yaml.safe_dump(
+                {
+                    "packages": [
+                        "packages/*",
+                        "../sibling/*",
+                        "/srv/shared/*",
+                        "C:\\shared\\*",
+                        "apps/../../escape",
+                        "!**/fixtures/**",
+                        "",
+                    ],
+                    "auditConfig": AUDIT_CONFIG,
+                }
+            ),
+        )
+
+        copied = _copy("pnpm", package, tmp_path)
+
+        assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {
+            "packages": ["packages/*", "!**/fixtures/**"],
+            "auditConfig": AUDIT_CONFIG,
+        }
+
+    def test_member_globs_that_all_leave_the_package_drop_the_key(self, tmp_path):
+        """Control: with no glob left the key goes too, as for a value that is
+        not the list-of-strings shape."""
+        package = self._workspace(
+            tmp_path,
+            yaml.safe_dump(
+                {"packages": ["../*", "/elsewhere/*"], "auditConfig": AUDIT_CONFIG}
+            ),
+        )
+
+        copied = _copy("pnpm", package, tmp_path)
+
+        assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {
+            "auditConfig": AUDIT_CONFIG
+        }
+
     def test_a_packages_value_that_is_not_a_list_of_globs_stays_out(self, tmp_path):
         """Control: only the list-of-strings shape pnpm defines crosses; a
         mapping or a list with other members is not the member globs."""
