@@ -8,7 +8,10 @@ take at all (an embedded NUL, which Python refuses before the stat; a name the
 OS refuses with EINVAL, as Windows does for one holding ``<`` or ``?``; a path
 longer than the OS allows, ENAMETOOLONG). A symbolic link loop or a denied stat is not a
 missing file, and falling back to the default configuration for one would run a
-scan with settings the operator did not choose. ``Path.exists()`` and
+scan with settings the operator did not choose. Windows reports a link it cannot
+resolve as EINVAL, the same errno as an invalid name, so an EINVAL whose path is
+itself a symbolic link (``os.lstat``, which does not follow it) is the loop, not
+a missing path. ``Path.exists()`` and
 ``Path.is_file()`` cannot tell these apart, and before Python 3.14 they raise
 the stat's PermissionError for a path under an unsearchable directory instead
 of answering, so the same path got a different answer on each interpreter.
@@ -37,7 +40,8 @@ _CANNOT_TAKE = frozenset(
     for code in (getattr(errno, "EINVAL", None), getattr(errno, "ENAMETOOLONG", None))
     if code is not None
 )
-#: ELOOP: a symbolic link loop.
+#: ELOOP, or Windows's EINVAL on a path that is itself a symbolic link: a
+#: symbolic link loop.
 LOOP = "loop"
 #: Any other errno (EACCES among them): the path may be there, and cannot be read.
 UNREADABLE = "unreadable"
@@ -52,8 +56,9 @@ class StatProblem:
     """Why the stat of a named path failed.
 
     ``kind`` is MISSING, LOOP or UNREADABLE. ``code`` is the errno's name
-    (``"EACCES"``), the errno as text when it has no name, NO_ERROR_CODE when
-    the error carried none, and empty for a path the OS cannot take.
+    (``"EACCES"``; ``"EINVAL"`` for a LOOP Windows reported that way), the
+    errno as text when it has no name, NO_ERROR_CODE when the error carried
+    none, and empty for a path the OS cannot take.
     ``strerror`` is the error's own strerror, kept for an error with no errno,
     whose message cannot come from ``os.strerror``.
     """
@@ -83,7 +88,10 @@ def stat_named_path(
 
     One stat: a second could answer differently (a permission or mount change
     in between) and send a path whose first stat was denied to the "not found"
-    fallback, which is the outcome the classification exists to rule out.
+    fallback, which is the outcome the classification exists to rule out. The
+    one exception reads the other way: an EINVAL is followed by an ``os.lstat``
+    of the path itself, which can only move the answer from MISSING to LOOP (a
+    refusal), never toward the fallback.
     """
     try:
         return os.stat(path)
@@ -92,6 +100,8 @@ def stat_named_path(
         strerror = error.strerror if isinstance(error.strerror, str) else ""
     except ValueError:
         return StatProblem(MISSING, "", None)
+    if number == errno.EINVAL and _names_a_symbolic_link(path):
+        return StatProblem(LOOP, errno.errorcode[number], number)
     if number in (errno.ENOENT, errno.ENOTDIR) or number in _CANNOT_TAKE:
         return StatProblem(MISSING, errno.errorcode[number], number)
     if number == errno.ELOOP:
@@ -100,6 +110,16 @@ def stat_named_path(
         return StatProblem(UNREADABLE, errno.errorcode.get(number, str(number)), number)
     code = NO_ERROR_CODE if number is None else str(number)
     return StatProblem(UNREADABLE, code, None, strerror)
+
+
+def _names_a_symbolic_link(path: Union[str, "os.PathLike[str]"]) -> bool:
+    """Whether ``path`` is itself a symbolic link, read with ``os.lstat`` (the
+    link, not what it points at). A path that cannot be lstat'ed is not one:
+    a name the OS refuses is refused by lstat too, and stays MISSING."""
+    try:
+        return stat.S_ISLNK(os.lstat(path).st_mode)
+    except (OSError, ValueError):
+        return False
 
 
 def is_regular_file(result: Union[os.stat_result, StatProblem]) -> bool:
