@@ -12,7 +12,7 @@ import os
 # its console checks each line it writes off a terminal, so none reads as a CI command.
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.console import print  # noqa: A004
-from typing import Annotated, Callable, List, NoReturn, Optional
+from typing import Annotated, List, NoReturn, Optional
 import typer
 from pathlib import Path
 
@@ -541,33 +541,26 @@ def _handle_workspace_mode(
     workspace: str,
     source_dir: str | None,
     allow_missing_projects: bool,
-    dry_run: bool,
     workspace_config: str | None = None,
     config_overrides: tuple[str, ...] = (),
     config: str | None = None,
-    scanners: tuple[str, ...] = (),
-    exclude_scanners: tuple[str, ...] = (),
-    ash_plugin_modules: tuple[str, ...] = (),
-    before_dry_run_exit: Callable[[str], object] | None = None,
 ) -> "WorkspacePlan":
     """Resolve a workspace and return the plan, or exit.
-
-    ``before_dry_run_exit`` is called with the workspace root right before a dry
-    run prints its plan and exits 0: the caller puts there the checks the real run
-    makes after workspace resolution (the output directory, ``--use-existing``), so
-    a dry run refuses what the run refuses instead of exiting 0 for a command line
-    the run then rejects.
 
     Every failure path is an exit, because a workspace that will not resolve has
     nothing to scan: 4 for a workspace definition or policy problem, 3 for a
     project whose own config is invalid. Never 2 -- that code means a scan ran and
     found actionable findings, which is the opposite of what any exit from here
-    reports. ``--dry-run`` also exits, at 0, after printing the plan.
+    reports.
 
     The success path returns rather than exiting, and the caller runs the scans
     from the same plan object the operator would have inspected. Re-resolving for
     execution would let the two drift, which is exactly what ``--dry-run`` exists
-    to rule out.
+    to rule out. The dry run itself is the caller's (``_exit_with_workspace_dry_run``),
+    after the preflight the real run makes on the plan's root: the source and
+    output directory refusals, ``--use-existing``. Done here, before those, a dry
+    run exited 0 for a command line the run then refused, and the two made their
+    checks in different orders.
 
     Argument validation happens before any filesystem work, so an operator who
     passed a contradictory pair of flags is told that rather than being sent to
@@ -632,80 +625,93 @@ def _handle_workspace_mode(
         # line of the path's choosing inside the refusal.
         _fail_workspace_config(exc)
 
-    if dry_run:
-        # The same selection pre-check the real run makes, with the same code and
-        # text, so the dry run answers for the scan it describes: a dry run that
-        # exits 0 for a selection the real run refuses tells the operator the
-        # command line is good, and the real run then refuses it.
-        from automated_security_helper.core.exceptions import ScannerSelectionError
-        from automated_security_helper.workspace.execution import (
-            ProjectScanSettings,
-            prewarm_plugin_registry,
-            refuse_unresolvable_scanner_selection,
-        )
-
-        selection = ProjectScanSettings(
-            # The pre-check and the prewarm read only the selection and the
-            # plugin modules; nothing is written anywhere. The prewarm imports
-            # the workspace's plugin modules, as the real run does, because the
-            # pre-check judges the selection by the scanners they provide.
-            output_dir=Path(plan.workspace_root),
-            enabled_scanners=tuple(scanners),
-            excluded_scanners=tuple(exclude_scanners),
-            ash_plugin_modules=tuple(ash_plugin_modules),
-        )
-        try:
-            prewarm_plugin_registry(plan, selection)
-            refuse_unresolvable_scanner_selection(plan, selection)
-        except ScannerSelectionError as exc:
-            _fail_workspace(
-                shown_on_one_line(str(exc)), code=WorkspaceExitCode.USAGE_ERROR
-            )
-        except WorkspaceDefinitionError as exc:
-            # The workspace's own refusal, with its code, as the real run
-            # answers one raised while it executes: the generic arm below would
-            # read it as an error nothing expected, exit 1.
-            _fail_workspace_definition(exc)
-        except ASHConfigValidationError as exc:
-            # The prewarm's refusal of a plugin module outside ASH's namespace,
-            # made before anything is imported: an invalid configuration, exit 3,
-            # in the real run, and reported here as the plan's own config
-            # refusal above is. Uncaught, it ended the dry run with exit 1 and
-            # nothing printed.
-            _fail_workspace_config(exc)
-        except Exception as exc:  # noqa: BLE001 -- answered as the real run answers it
-            # A plugin module in the namespace whose top-level code raises
-            # something other than ImportError when the prewarm imports it. The
-            # real run answers that as an unexpected failure, exit 1, naming the
-            # exception; uncaught here, the dry run exited 1 with no reason
-            # printed. The same sentence, so the operator reads one failure.
-            # Redacted as the real run's handler is, with the values the prewarm
-            # recorded on the error, which error_text reads off it; and logged
-            # with its traceback first, as the real run logs it, so the one
-            # printed sentence is not all there is to debug a crashing plugin.
-            from automated_security_helper.utils.error_text import (
-                error_text,
-                log_unexpected_error,
-            )
-            from automated_security_helper.utils.log import ASH_LOGGER
-
-            log_unexpected_error(ASH_LOGGER, exc)
-            _fail_workspace(
-                shown_on_one_line(
-                    "Exiting due to exception during ASH workspace scan: "
-                    f"{error_text(exc)}"
-                ),
-                code=WorkspaceExitCode.INTERNAL_ERROR,
-            )
-        if before_dry_run_exit is not None:
-            before_dry_run_exit(plan.workspace_root)
-        # Line by line: a line can quote a path, whose newline is shown as
-        # \x0a so the path stays on its line of the plan.
-        for line in plan.render_lines():
-            echo(shown_on_one_line(line))
-        raise typer.Exit(WorkspaceExitCode.SUCCESS)
-
     return plan
+
+
+def _exit_with_workspace_dry_run(
+    plan: "WorkspacePlan",
+    scanners: tuple[str, ...],
+    exclude_scanners: tuple[str, ...],
+    ash_plugin_modules: tuple[str, ...],
+) -> None:
+    """Print *plan* and exit 0, the ``--dry-run`` answer, after the real run's own
+    pre-checks.
+
+    Called where the real run would start executing: after ``_handle_workspace_mode``
+    resolved the plan and the shared preflight (the source directory refusal,
+    ``_settle_output_dir``) ran on its root, in that order. So a dry run refuses
+    what the run refuses, with the run's code and text, and refuses it in the
+    run's order: made inside the resolution, before the preflight, a dry run
+    exited 0 for a command line the run then rejected, and with two problems
+    present the two named different first errors.
+
+    The selection pre-check is the one the real run makes, with the same code and
+    text, so the dry run answers for the scan it describes: a dry run that exits 0
+    for a selection the real run refuses tells the operator the command line is
+    good, and the real run then refuses it.
+    """
+    from automated_security_helper.core.exceptions import ScannerSelectionError
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        prewarm_plugin_registry,
+        refuse_unresolvable_scanner_selection,
+    )
+
+    selection = ProjectScanSettings(
+        # The pre-check and the prewarm read only the selection and the
+        # plugin modules; nothing is written anywhere. The prewarm imports
+        # the workspace's plugin modules, as the real run does, because the
+        # pre-check judges the selection by the scanners they provide.
+        output_dir=Path(plan.workspace_root),
+        enabled_scanners=tuple(scanners),
+        excluded_scanners=tuple(exclude_scanners),
+        ash_plugin_modules=tuple(ash_plugin_modules),
+    )
+    try:
+        prewarm_plugin_registry(plan, selection)
+        refuse_unresolvable_scanner_selection(plan, selection)
+    except ScannerSelectionError as exc:
+        _fail_workspace(shown_on_one_line(str(exc)), code=WorkspaceExitCode.USAGE_ERROR)
+    except WorkspaceDefinitionError as exc:
+        # The workspace's own refusal, with its code, as the real run
+        # answers one raised while it executes: the generic arm below would
+        # read it as an error nothing expected, exit 1.
+        _fail_workspace_definition(exc)
+    except ASHConfigValidationError as exc:
+        # The prewarm's refusal of a plugin module outside ASH's namespace,
+        # made before anything is imported: an invalid configuration, exit 3,
+        # in the real run, and reported here as the plan's own config
+        # refusal is. Uncaught, it ended the dry run with exit 1 and
+        # nothing printed.
+        _fail_workspace_config(exc)
+    except Exception as exc:  # noqa: BLE001 -- answered as the real run answers it
+        # A plugin module in the namespace whose top-level code raises
+        # something other than ImportError when the prewarm imports it. The
+        # real run answers that as an unexpected failure, exit 1, naming the
+        # exception; uncaught here, the dry run exited 1 with no reason
+        # printed. The same sentence, so the operator reads one failure.
+        # Redacted as the real run's handler is, with the values the prewarm
+        # recorded on the error, which error_text reads off it; and logged
+        # with its traceback first, as the real run logs it, so the one
+        # printed sentence is not all there is to debug a crashing plugin.
+        from automated_security_helper.utils.error_text import (
+            error_text,
+            log_unexpected_error,
+        )
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        log_unexpected_error(ASH_LOGGER, exc)
+        _fail_workspace(
+            shown_on_one_line(
+                f"Exiting due to exception during ASH workspace scan: {error_text(exc)}"
+            ),
+            code=WorkspaceExitCode.INTERNAL_ERROR,
+        )
+    # Line by line: a line can quote a path, whose newline is shown as
+    # \x0a so the path stays on its line of the plan.
+    for line in plan.render_lines():
+        echo(shown_on_one_line(line))
+    raise typer.Exit(WorkspaceExitCode.SUCCESS)
 
 
 def run_ash_scan_cli_command(
@@ -1512,19 +1518,9 @@ def run_ash_scan_cli_command(
             workspace=workspace,
             source_dir=source_dir,
             allow_missing_projects=allow_missing_projects,
-            dry_run=dry_run,
             workspace_config=workspace_config,
             config_overrides=tuple(config_overrides),
             config=config,
-            scanners=tuple(scanners or ()),
-            exclude_scanners=tuple(exclude_scanners or ()),
-            ash_plugin_modules=tuple(ash_plugin_modules or ()),
-            # The output directory and --use-existing are settled below for the
-            # real run, after this block; the dry run makes the same checks
-            # before it prints its plan.
-            before_dry_run_exit=lambda root: _settle_output_dir(
-                root, output_dir, use_existing, ignore_suppressions
-            ),
         )
         # The workspace root is the scan root: it is what container mode mounts at
         # /src, and what every workspace-relative finding path is relative to.
@@ -1567,10 +1563,19 @@ def run_ash_scan_cli_command(
     if source_refusal is not None:
         _fail_usage(shown_on_one_line(source_refusal))
     # The output directory's default, the collision adjustment, its refusals and
-    # --use-existing, in one place with the workspace dry run's preflight.
+    # --use-existing, in one place for the real run and the workspace dry run.
     output_dir, existing_results = _settle_output_dir(
         source_dir, output_dir, use_existing, ignore_suppressions
     )
+    if workspace_plan is not None and dry_run:
+        # After the preflight above, in the real run's order, so the dry run
+        # refuses what the run refuses and names the same first problem.
+        _exit_with_workspace_dry_run(
+            workspace_plan,
+            scanners=tuple(scanners),
+            exclude_scanners=tuple(exclude_scanners),
+            ash_plugin_modules=tuple(ash_plugin_modules),
+        )
 
     # Apply mode presets if specified (precommit_mode is folded into simple
     # above, before the last-resort gate is set)

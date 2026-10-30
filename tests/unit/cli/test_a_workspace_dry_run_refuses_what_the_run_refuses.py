@@ -84,6 +84,24 @@ def test_an_output_dir_that_is_a_file_is_refused_as_the_run_refuses_it(tmp_path)
     )
 
 
+def test_an_output_dir_the_scan_would_clear_is_refused_as_the_run_refuses_it(tmp_path):
+    """The preflight runs before the plan is printed, in the run's order: the output
+    directory inside the workspace root whose reports/ holds the tree's own files."""
+    workspace = _workspace(tmp_path / "ws")
+    docs = tmp_path / "ws" / "docs"
+    (docs / "reports").mkdir(parents=True)
+    (docs / "reports" / "index.md").write_text("# docs\n", encoding="utf-8")
+
+    result = _dry_run(workspace, "--output-dir", str(docs))
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "already holds files that are not ASH's" in result.output, result.output
+    assert (
+        _real_run_code(workspace, "--output-dir", str(docs)).exit_code
+        == result.exit_code
+    )
+
+
 def test_use_existing_with_no_results_is_refused_as_the_run_refuses_it(tmp_path):
     workspace = _workspace(tmp_path / "ws")
 
