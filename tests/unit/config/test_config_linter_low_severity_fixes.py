@@ -443,6 +443,48 @@ class TestWhichSuppressionsTheReportLists:
         assert not any("No unused suppressions report found" in m for m in messages), (
             messages
         )
+
+    @pytest.mark.parametrize(
+        "merged, found",
+        [
+            pytest.param(
+                {"reporters": {"unused-suppressions": {"extension": "merged.json"}}},
+                True,
+                id="the-merged-data-names-the-report",
+            ),
+            pytest.param(None, False, id="no-merged-data-the-file-alone-names-it"),
+        ],
+    )
+    def test_the_unused_check_names_the_report_by_the_merged_data(
+        self, tmp_path, merged, found
+    ):
+        """The check reads ``result.resolved_data`` (the merged chain, as lint
+        fills it) for the report's name and the checked file's own data only
+        when there is none. Pinned at the check itself: a result carrying merged
+        data that sets the extension finds ``reports/ash.merged.json``; the same
+        file with no merged data looks under its own (default) name and finds no
+        report."""
+        config_path = tmp_path / ".ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+        out = tmp_path / "out"
+        (out / "reports").mkdir(parents=True)
+        (out / "reports" / "ash.merged.json").write_text(
+            json.dumps({"unused_suppressions": []}), encoding="utf-8"
+        )
+        result = LintResult(config_path=config_path)
+        result.resolved_data = merged
+
+        ConfigLinter._check_unused_suppressions(
+            config_path, {"project_name": "demo"}, out, result
+        )
+
+        messages = [
+            issue.message
+            for issue in result.issues
+            if issue.category == LintCategory.SUPPRESSION_UNUSED
+        ]
+        not_found = any("No unused suppressions report found" in m for m in messages)
+        assert not_found is (not found), messages
         assert any(m.startswith("Unused suppression:") for m in messages), messages
 
     def test_only_the_files_own_entries_are_fixable(self, tmp_path, monkeypatch):
