@@ -82,15 +82,15 @@ _UTC_OFFSET = re.compile(r"([+-])(\d{2}):(\d{2})$")
 def _count_severity(counts: Dict[str, int], severity: Any) -> None:
     """Count one finding under its severity's bucket.
 
-    The buckets are ASH's five levels. A finding rated outside them (a plugin's
-    own list can carry any text) is counted under ``unknown``, a bucket that
-    exists only while such a finding does: the gate fails closed on it, so it
-    is actionable, and a count that dropped it read more actionable findings
-    than active ones and clamped the below-threshold figure to zero.
+    The buckets are ASH's five levels, and every flattened finding carries one
+    of them: a SARIF result's level is read by the gate's ladder, and an
+    additional report's own text (``moderate``, ``UNRATED``) is read the same
+    way by ``FlatVulnerability.from_additional_report`` and lands on MEDIUM, as
+    a result with no level does. So the count never meets a sixth name from the
+    model; a stand-in row that carries one gets a bucket of its own rather than
+    being dropped, which once read more actionable findings than active ones.
     """
     level = str(severity or "").lower()
-    if level not in counts and level != "unknown":
-        level = "unknown"
     counts[level] = counts.get(level, 0) + 1
 
 

@@ -306,13 +306,15 @@ class TestFindingsAnAdditionalReportListsAreCounted:
         assert summary["counts"]["high"] == 1, summary
         assert summary["title"] == "Review required", summary
 
-    def test_a_finding_of_an_unrecognised_severity_is_counted_in_its_own_bucket(self):
-        """A listed finding whose severity is none of the five levels.
+    def test_a_listed_finding_rated_outside_the_ladder_is_counted_as_medium(self):
+        """A listed finding whose severity text is none of the five levels.
 
-        The gate fails closed on it, so it is actionable; it went into no
-        severity bucket, so the actionable count exceeded the active count and
-        the below-threshold figure was clamped to zero. It is counted under
-        "unknown", and the figures add up again.
+        The flattening reads a plugin's own rating as the gate reads a SARIF
+        result with an unknown level, so the finding reaches the summary as
+        MEDIUM: it is actionable under the default threshold and counted in the
+        medium bucket, and the counts have the five names and no sixth. An
+        earlier shape of this test expected an ``unknown`` bucket, which the
+        model never produces.
         """
         model = _model(
             {
@@ -342,15 +344,17 @@ class TestFindingsAnAdditionalReportListsAreCounted:
             }
         )
         emitter = ReportContentEmitter(model)
+        assert [vuln.severity for vuln in emitter.flat_vulns] == ["HIGH", "MEDIUM"]
         assert all(
             emitter.is_finding_actionable(vuln) for vuln in emitter.flat_vulns
-        ), "the gate fails closed on the unrecognised severity"
+        ), "both listed findings are at or above the default threshold"
 
         summary = emitter.get_scan_summary()
 
         assert summary["actionable"] == 2, summary
         assert summary["counts"]["high"] == 1, summary
-        assert summary["counts"]["unknown"] == 1, summary
+        assert summary["counts"]["medium"] == 1, summary
+        assert "unknown" not in summary["counts"], summary
         assert summary["active"] == 2, summary
         assert summary["below_threshold"] == 0, summary
 
