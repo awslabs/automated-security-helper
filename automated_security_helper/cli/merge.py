@@ -1692,10 +1692,9 @@ def merge_shard_results(
                 else _merge_converter_rows(base, converter_result)
             )
 
-        for name, report in shard.additional_reports.items():
-            # A copy: the merged set is masked in place below, and the shard's own
-            # report must stay as it was loaded.
-            merged.additional_reports.setdefault(name, _copied(report))
+        # additional_reports is not gathered here: _adopt_owning_shard_results below
+        # rebuilds the merged set from every shard, as copies, so a copy made here
+        # was made again there (twice per report, three times for the base shard's).
 
         # The shards' SBOMs are united in shard order by the rule a single scan
         # uses for its own (utils/sbom_merge.py). A shard whose SBOM is None adds
