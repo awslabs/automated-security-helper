@@ -378,15 +378,16 @@ def _is_skipped(name: str) -> bool:
     return name in _SKIPPED_FIELDS or name in _METADATA_FIELDS
 
 
-def _is_enum_annotated(model_type: type, name: str) -> bool:
-    """Whether ``name`` is a field of ``model_type`` declared as an enum or literal.
+def _is_enum_annotated(model: Any, name: str) -> bool:
+    """Whether ``name`` is a field of ``model``'s class declared as an enum or literal.
 
     The SARIF models are configured with ``use_enum_values``, so such a field
     holds the plain string of its member at runtime and ``_mask_tree``'s
     ``Enum`` type check never sees it; its declaration is what tells it from a
-    free-text field of the same name.
+    free-text field of the same name. The model instance is given, not its
+    class: the class is read here, by name, from the value.
     """
-    field = getattr(model_type, "model_fields", {}).get(name)
+    field = getattr(type(model), "model_fields", {}).get(name)
     if field is None:
         return False
     pending = [field.annotation]
@@ -403,15 +404,16 @@ def _is_enum_annotated(model_type: type, name: str) -> bool:
     return False
 
 
-def _is_skipped_field(model_type: type, name: str) -> bool:
+def _is_skipped_field(model: Any, name: str) -> bool:
     """Whether nothing under this field of a model is masked by value.
 
     An enum-valued field (``_ENUM_FIELDS``) counts only when the model declares
     it so, which keeps a free-text field that shares a name with one
     (``Address.kind``, ``LogicalLocation.kind``, ``Exception.kind``) masked.
+    ``model`` is the instance; its class is read by :func:`_is_enum_annotated`.
     """
     return _is_skipped(name) or (
-        name in _ENUM_FIELDS and _is_enum_annotated(model_type, name)
+        name in _ENUM_FIELDS and _is_enum_annotated(model, name)
     )
 
 
@@ -456,9 +458,9 @@ _GUID_KEYS = frozenset(
 )
 
 
-def _field_pattern(model_type: type, name: str) -> Optional[str]:
-    """The pattern a model declares on its string field ``name``, or None."""
-    field = getattr(model_type, "model_fields", {}).get(name)
+def _field_pattern(model: Any, name: str) -> Optional[str]:
+    """The pattern ``model``'s class declares on its string field ``name``, or None."""
+    field = getattr(type(model), "model_fields", {}).get(name)
     for item in getattr(field, "metadata", None) or ():
         pattern = getattr(item, "pattern", None)
         if isinstance(pattern, str):
@@ -1875,7 +1877,7 @@ def _mask_source_whole(node: Any, seen: Set[int]) -> Any:
         names = list(type(node).model_fields)
         names.extend((node.__pydantic_extra__ or {}).keys())
         for name in names:
-            if _is_enum_annotated(type(node), name):
+            if _is_enum_annotated(node, name):
                 continue
             value = getattr(node, name, None)
             if value is None:
@@ -2210,7 +2212,7 @@ def _mask_tree(
         names = list(fields)
         names.extend((node.__pydantic_extra__ or {}).keys())
         for name in names:
-            if _is_skipped_field(type(node), name):
+            if _is_skipped_field(node, name):
                 continue
             value = getattr(node, name, None)
             if value is None:
@@ -2220,7 +2222,7 @@ def _mask_tree(
                 if isinstance(value, str):
                     # A string field that declares a pattern (every GUID field)
                     # has to match it after masking too.
-                    pattern = _field_pattern(type(node), name)
+                    pattern = _field_pattern(node, name)
                     if pattern is not None:
                         masked = _keep_the_pattern(pattern, value, masked)
                 setattr(node, name, masked)
@@ -2229,7 +2231,7 @@ def _mask_tree(
         extra = getattr(node, "__pydantic_extra__", None)
         if isinstance(extra, dict):
             for key in list(extra):
-                if isinstance(key, str) and not _is_skipped_field(type(node), key):
+                if isinstance(key, str) and not _is_skipped_field(node, key):
                     _rename_masked_key(extra, key, index)
         return node
     if isinstance(node, list):
@@ -2332,7 +2334,7 @@ def _mask_report(
             for name in list(type(result).model_fields) + list(
                 (result.__pydantic_extra__ or {}).keys()
             ):
-                if name == "message" or _is_skipped_field(type(result), name):
+                if name == "message" or _is_skipped_field(result, name):
                     continue
                 value = getattr(result, name, None)
                 if value is None:
