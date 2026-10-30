@@ -115,7 +115,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     ASHRespelledOverrideError,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -901,7 +902,11 @@ def confine_tool_versions(
                             continue
                         if _covered(landings, (segment, key, "options", name)):
                             continue
-                        section.setdefault("options", {})
+                        if section.get("options") is None:
+                            # No options key, or ``options:`` left empty, which
+                            # reads as None: neither holds a mapping for the
+                            # pin to land in, so one is made.
+                            section["options"] = {}
                         if isinstance(section["options"], dict):
                             section["options"][name] = wanted
                         else:
@@ -909,12 +914,14 @@ def confine_tool_versions(
                             # pin; the plugin will refuse it when it reads its
                             # options, and the operator's pin is not in force
                             # until then, so say so rather than drop it
-                            # silently.
+                            # silently. The key is the file's text, shown on
+                            # one line with its controls escaped.
                             ASH_LOGGER.warning(
-                                f"{segment}.{key}.options is not a mapping, so "
-                                f"the operator's {name} pin cannot be restored "
-                                "into it; the plugin reads its options from "
-                                "this value as written."
+                                f"{segment}.{shown_on_one_line(key)}.options is "
+                                f"not a mapping, so the operator's {name} pin "
+                                "cannot be restored into it; the plugin reads "
+                                "its options from this value as written.",
+                                extra=NO_MARKUP,
                             )
                 continue
             for name in OPERATOR_ONLY_PLUGIN_OPTIONS:

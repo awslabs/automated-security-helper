@@ -68,6 +68,17 @@ def test_the_operators_pin_is_restored_when_the_section_has_no_options(tmp_path)
     assert _pin_of(config) == "==1.2.3"
 
 
+def test_the_operators_pin_is_restored_when_options_is_left_empty(tmp_path):
+    """``options:`` with nothing under it reads as None: no mapping for the pin
+    to land in, and no warning either, since nothing was written there. A
+    mapping is made for it, as for a section with no options key."""
+    config = AshConfig.model_validate({"scanners": {PLUGIN: {"options": None}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    assert _pin_of(config) == "==1.2.3"
+
+
 def test_a_non_mapping_options_value_is_named_in_a_warning_and_left(tmp_path):
     """A plugin section whose ``options`` is not a mapping cannot hold the pin.
     The value is left as written for the plugin to refuse, and a warning names
