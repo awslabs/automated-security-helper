@@ -264,6 +264,27 @@ class TestAScannersFilterRecountsTheSummary:
         assert stats["actionable"] == 1
 
 
+class TestScannersAndSeveritiesTogetherRecountOnce:
+    """A severities recount that worked from the whole scan's stats would
+    overwrite the scanners recount. semgrep alone holds one critical and one
+    medium finding while the whole scan holds two critical-or-high, so this
+    pair of filters tells the two behaviors apart (bandit with high would not:
+    the whole scan's high is 1 too)."""
+
+    def test_the_total_is_the_selected_buckets_of_the_kept_scanners(self):
+        filtered = apply_content_filters(
+            _results(), scanners="semgrep", severities="critical,high"
+        )
+
+        stats = filtered["summary_stats"]
+        assert stats["severity_counts"]["critical"] == 1
+        assert stats["severity_counts"]["high"] == 0
+        assert stats["severity_counts"]["medium"] == 0
+        assert stats["total"] == 1
+        assert filtered["total_scanners"] == 1
+        assert set(filtered["raw_results"]["scanner_results"]) == {"semgrep"}
+
+
 class TestASeveritiesFilterRecountsTheTotal:
     def test_the_total_is_the_selected_buckets(self):
         filtered = apply_content_filters(_results(), severities="critical,high")
