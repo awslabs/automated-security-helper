@@ -32,6 +32,25 @@ from automated_security_helper.core.constants import (
 pytestmark = pytest.mark.unit
 
 
+def test_a_dotfile_member_named_by_its_extension_is_scannable():
+    """``"npmrc"`` in KNOWN_SCANNABLE_EXTENSIONS reaches a ``.npmrc`` member: the
+    archive matcher reads a member's extension as the text after the last dot
+    (``_archive_suffix``), not as ``Path.suffix``, which is empty for a dotfile.
+    Pinned because a matcher that switched to ``Path.suffix`` would leave the
+    entry dead with no test red."""
+    from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+        _archive_suffix,
+        _member_is_scannable,
+    )
+
+    assert "npmrc" in KNOWN_SCANNABLE_EXTENSIONS
+    assert _archive_suffix(".npmrc") == "npmrc"
+    assert _member_is_scannable(".npmrc") is True
+    assert _member_is_scannable("pkg/.npmrc") is True
+    # The control: a dotfile named by no entry or stem is not admitted.
+    assert _member_is_scannable(".zz-planted-unknown") is False
+
+
 @pytest.mark.parametrize(
     "name",
     [
