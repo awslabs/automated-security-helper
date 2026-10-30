@@ -70,7 +70,14 @@ def test_a_refusal_for_access_is_asked_again_too(monkeypatch):
 
 
 def test_an_error_that_is_not_the_locks_refusal_is_raised(monkeypatch):
+    calls: list = []
+
     def locking(fd: int, mode: int, nbytes: int) -> None:
+        calls.append(mode)
+        if len(calls) > 1:
+            # A lock that retried EBADF would spin here forever with no sleep;
+            # the second call fails the test instead of hanging the suite.
+            raise AssertionError("EBADF was retried")
         raise OSError(errno.EBADF, "Bad file descriptor")
 
     _windows_with(locking, monkeypatch)
