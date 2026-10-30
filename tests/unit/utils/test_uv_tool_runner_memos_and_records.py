@@ -7,7 +7,8 @@ Each test pins one change in ``utils/uv_tool_runner.py``:
 
 * ``UVToolRetryConfig`` normalizes a None, non-numeric, NaN or infinite knob to
   its default and bounds every delay, and ``_install_retry_delay`` is finite for
-  any base and attempt; the wait between attempts stops at a cancel;
+  any base and attempt; the wait between attempts stops at a cancel and hands
+  the sleep chunks counted from the delay, never from a clock read back;
 * a failure after the install's child started drops the memos, as a timeout
   does, and says the result is unknown; the broken-symlink removal runs only
   when an install may happen;
@@ -123,6 +124,32 @@ def test_the_wait_between_attempts_stops_at_a_cancel(monkeypatch):
     with pytest.raises(RuntimeError, match="cancelled"):
         _sleep_between_attempts(60.0)
     assert time.monotonic() - started < 5.0
+
+
+def test_the_wait_hands_the_sleep_chunks_that_add_up_to_the_delay(monkeypatch):
+    """A sleep that returns early (a stub, a coarse clock) gets no extra chunk.
+
+    The wait used to re-read the clock after each sleep, so a stubbed sleep made
+    it spin for the whole delay in real time, handing the stub one chunk per
+    spin: millions of them for a one-second backoff.
+    """
+    handed: list = []
+    monkeypatch.setattr(uv_tool_runner.time, "sleep", handed.append)
+    started = time.monotonic()
+    _sleep_between_attempts(1.0)
+    assert time.monotonic() - started < 0.5
+    poll = uv_tool_runner._UV_PROBE_CANCEL_POLL_SECONDS
+    assert len(handed) == math.ceil(1.0 / poll)
+    assert all(0.0 < chunk <= poll for chunk in handed), handed
+    assert sum(handed) == pytest.approx(1.0)
+
+
+def test_a_wait_of_nothing_sleeps_nothing(monkeypatch):
+    handed: list = []
+    monkeypatch.setattr(uv_tool_runner.time, "sleep", handed.append)
+    _sleep_between_attempts(0.0)
+    _sleep_between_attempts(-3.0)
+    assert handed == []
 
 
 class TestTheInstallArms:

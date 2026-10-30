@@ -284,16 +284,21 @@ def _sleep_between_attempts(seconds: float) -> None:
     A plain ``time.sleep`` could not be interrupted: a scan cancelled between two
     attempts went on waiting out the backoff before the cancel reached it. The
     wait polls the scan's cancel at the same interval the probe locks use.
+
+    The chunks are counted from ``seconds``, never from a clock read back after
+    each sleep: a wait that re-read the clock spun for the whole delay when the
+    sleep returned early (a stubbed or coarse ``time.sleep``), handing it one
+    chunk per spin. So ``time.sleep`` is handed exactly ``ceil(seconds / poll)``
+    chunks that add up to ``seconds``, whatever the sleep does with them.
     """
     from automated_security_helper.core.cancellation import raise_if_cancelled
 
-    deadline = time.monotonic() + max(0.0, seconds)
-    while True:
+    total = max(0.0, seconds) if math.isfinite(seconds) else 0.0
+    poll = _UV_PROBE_CANCEL_POLL_SECONDS
+    for index in range(math.ceil(total / poll)):
         raise_if_cancelled()
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return
-        time.sleep(min(remaining, _UV_PROBE_CANCEL_POLL_SECONDS))
+        time.sleep(min(total - index * poll, poll))
+    raise_if_cancelled()
 
 
 def _exit_description(result: Any) -> str:

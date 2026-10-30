@@ -624,10 +624,9 @@ def _install_harness(runner, outcome_for_attempt):
             "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=_run,
         ),
-        # The wait between attempts is the module's own seam, not time.sleep: it
-        # polls the scan's cancel in short slices of time.sleep, so recording
-        # time.sleep would list the slices (hundreds of thousands of 0.2s)
-        # instead of the backoff the install asked for.
+        # The backoff is handed whole to the wait helper, which splits it into
+        # cancel-polling chunks; recording the helper's argument reads the
+        # schedule the retry chose, not the chunking.
         patch(
             "automated_security_helper.utils.uv_tool_runner._sleep_between_attempts",
             side_effect=sleeps.append,
@@ -656,7 +655,7 @@ class TestInstallRetriesActuallyHappen:
     defect does not move.
 
     So these assert the two things it does move: how many installs are attempted,
-    and what ``time.sleep`` is handed between them. Jitter is off wherever an
+    and what the backoff wait is handed between them. Jitter is off wherever an
     exact interval is asserted, so the schedule is arithmetic rather than a
     range. Nothing here measures wall clock, which would flake low on a fast
     machine and high on a loaded one.
