@@ -423,6 +423,12 @@ def _an_enclosing_repository_tracks_the_root(answer: GitIndexAnswer) -> bool:
     itself as tracked. So when the answer's repository is the directory itself,
     the repository above it is asked once whether it lists the directory's path
     exactly. A scan would clear and write inside the submodule's checkout.
+
+    Raises :class:`GitIndexUnavailable` when the repository above gives no
+    list: git not answering is not "it does not track the directory", and read
+    as that it let the scan clear and write inside a submodule whose
+    superproject tracks it. The caller then counts what is on disk instead, as
+    it does when the directory's own repository gives no list.
     """
     if answer.repository is None or answer.repository != _resolved(answer.base):
         return False
@@ -431,8 +437,14 @@ def _an_enclosing_repository_tracks_the_root(answer: GitIndexAnswer) -> bool:
         return False
     relative = answer.repository.relative_to(outer).as_posix()
     # An entry at the listed path itself (the gitlink) comes back as "".
-    listed, _, _ = _index_listing(outer, relative)
-    return listed is not None and "" in listed
+    listed, error, could_not_run = _index_listing(outer, relative)
+    if listed is None:
+        raise GitIndexUnavailable(
+            GitIndexAnswer(
+                answer.base, repository=outer, error=error, could_not_run=could_not_run
+            )
+        )
+    return "" in listed
 
 
 @dataclass(frozen=True)
@@ -1213,8 +1225,28 @@ def _classified_output_dirs(
             named.add(spelled)
         else:
             scanned.add(spelled)
-    scanned -= named
+    # One entry per directory: where names compare without case, this run's
+    # output directory spelled in one case and the earlier run's on disk in
+    # another are one directory, and two spellings of it each read as below
+    # the other, so the reduction to the outermost directories dropped both and
+    # named nothing.
+    named = _one_spelling_each(named)
+    named_keys = {_name_keys(path) for path in named}
+    scanned = {
+        path
+        for path in _one_spelling_each(scanned)
+        if _name_keys(path) not in named_keys
+    }
     return named, scanned
+
+
+def _one_spelling_each(paths: Set[Path]) -> Set[Path]:
+    """*paths* with one entry for each directory, where two spellings name one
+    (:func:`_name_keys`): the first in sorted order is kept."""
+    kept: Dict[Tuple[str, ...], Path] = {}
+    for path in sorted(paths):
+        kept.setdefault(_name_keys(path), path)
+    return set(kept.values())
 
 
 def _an_enclosing_repository_lists(directory: Path) -> bool:
