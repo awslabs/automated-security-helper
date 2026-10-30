@@ -382,13 +382,31 @@ class TestZeroFindings:
         violations = gate.evaluate_results(results).violations
         assert any("zero findings" in v for v in violations), violations
 
-    def test_findings_from_a_single_scanner_are_enough(self):
+    def test_a_selected_scanner_at_zero_beside_a_finder_is_a_violation(self):
+        """The sum used to hide it: bandit at zero while checkov found seven.
+
+        The fixture gives each selected scanner a file of its own to trip, so a
+        selected scanner at zero is that scanner broken, whatever the other found.
+        """
         results = _results(
             scanners={
                 "bandit": _scanner("PASSED", findings=0),
                 "checkov": _scanner("FAILED", findings=7, actionable=7),
             },
             rule_ids=["CKV_AWS_18"],
+        )
+        violations = gate.check_findings_present(gate.parse_scanner_states(results))
+        assert len(violations) == 1, violations
+        assert "scanner 'bandit'" in violations[0]
+        assert "while the other selected scanner found some" in violations[0]
+
+    def test_both_selected_scanners_finding_something_is_clean(self):
+        results = _results(
+            scanners={
+                "bandit": _scanner("FAILED", findings=3, actionable=3),
+                "checkov": _scanner("FAILED", findings=7, actionable=7),
+            },
+            rule_ids=["B307", "CKV_AWS_18"],
         )
         assert gate.check_findings_present(gate.parse_scanner_states(results)) == []
 
@@ -498,8 +516,14 @@ class TestRuleAttribution:
         assert sorted(evidence.rules_for("bandit")) == ["B307", "B324", "B602"]
         assert "B307" not in evidence.rules_for("checkov")
 
-    def test_no_attribution_anywhere_falls_back_to_the_union(self):
-        """An older or future results file without the property must still work."""
+    def test_no_attribution_anywhere_is_reported_not_pooled(self):
+        """The union stays in rules_for for diagnostics; the check refuses to read it.
+
+        A results file in which no result carries properties.scanner_name is a
+        complete attribution regression. Matching every producer's pattern against
+        the pooled rules let exactly that pass, so the per-scanner check reports
+        it, naming every rule id present, instead of running on the pool.
+        """
         results = _results(rule_ids=[])
         results["sarif"] = _sarif(
             [
@@ -511,7 +535,10 @@ class TestRuleAttribution:
         assert evidence.has_attribution is False
         assert sorted(evidence.rules_for("bandit")) == ["B307", "CKV_AWS_18"]
         states = gate.parse_scanner_states(results)
-        assert gate.check_expected_rules_present(states, evidence) == []
+        violations = gate.check_expected_rules_present(states, evidence)
+        assert len(violations) == 1, violations
+        assert "no SARIF result carries properties.scanner_name" in violations[0]
+        assert "B307" in violations[0] and "CKV_AWS_18" in violations[0]
 
     def test_partial_attribution_does_not_fall_back(self):
         """One named result means the buckets are authoritative for everyone."""
@@ -653,15 +680,23 @@ class TestFindingsComeFromTheFixture:
         violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
         assert any("/elsewhere/other_module.py" in v for v in violations), violations
 
-    def test_a_result_without_a_location_neither_passes_nor_fails(self):
-        """It cannot confirm or deny the target, so it must not decide either way."""
+    def test_a_located_finding_beside_an_unlocated_one_is_reported(self):
+        """A mix used to pass under a summary that said every finding was located.
+
+        Every fixture finding has a file, so a finding with no location URI is
+        either a moved location shape or a dropped location, and the gate says how
+        many of the findings it could not place rather than passing on the rest.
+        """
         results = _results(rule_ids=[])
         results["sarif"] = _sarif(
             [("B307", "bandit", None), ("B324", "bandit", BANDIT_FIXTURE)]
         )
         evidence = gate.collect_sarif_evidence(results)
         assert evidence.results_without_location == 1
-        assert gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT) == []
+        violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
+        assert any(
+            "1 of 2 finding(s) carry no location URI" in v for v in violations
+        ), violations
 
     def test_no_uris_at_all_is_reported(self):
         """Silence here means the location shape moved; do not pass quietly."""
