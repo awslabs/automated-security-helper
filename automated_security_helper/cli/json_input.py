@@ -48,7 +48,7 @@ import warnings
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 from urllib.request import url2pathname
 
 import typer
@@ -302,33 +302,33 @@ def _refused(message: str, ctx: Context) -> DocumentRefused:
     return DocumentRefused(shown_on_one_line(message), ctx=ctx)
 
 
-def _document_path(source: str, ctx: Context) -> str:
-    """The file *source* names: a path as given, or a ``file://`` URI's path.
+def _document_path(source: str) -> str:
+    """The file *source* names: a path as given, or the file a ``file://`` names.
 
-    The URI's path is percent-decoded and, on Windows, its ``/C:/...`` form made
-    a drive path (``url2pathname``), so a URI a tool wrote is read as the file it
-    names, not as the literal text after the prefix. A drive letter in the host
-    field (``file://C:\\dir\\params.json``, the two-slash spelling) is the start
-    of the path. A host other than the local one is refused: this command reads
-    local files only.
+    Read as the AWS CLI reads ``file://``: the text after the prefix is a path,
+    relative (``file://params.json``, ``file://./params.json``) or absolute,
+    percent-decoded. A ``file:///...`` or ``file://localhost/...`` URI's path is
+    made a local one with ``url2pathname``, so on Windows ``/C:/dir/params.json``
+    is a drive path and a URI a tool wrote is read as the file it names. A drive
+    letter right after the two slashes (``file://C:\\dir\\params.json``, the
+    spelling a Windows path is pasted into) is a path too.
+
+    Nothing after the prefix is parsed as a URI's host, query or fragment:
+    ``file://share.example/params.json`` names the relative path
+    ``share.example/params.json``, which is refused when it cannot be read, and a
+    ``#`` or a tab in a file's name stays in it. Parsing the text as a URI refused
+    every relative form as a remote host, cut the name at a ``#``, and dropped a
+    tab or a newline from it, so a file was looked up under a name it does not
+    have.
     """
     if not source.startswith(_FILE_URI_PREFIX):
         return source
-    parts = urlsplit(source)
-    if re.match(r"[A-Za-z]:(?:[\\/]|$)", parts.netloc):
-        # `file://C:\dir\params.json` or `file://C:/dir/params.json`, the two-slash
-        # spelling a Windows path is pasted into: the host field holds the drive
-        # letter and, with backslashes (no "/" ends the authority), the whole
-        # path. No host is spelled that way, so it is the path, percent-decoded
-        # and otherwise as written; url2pathname is for the `/C:/...` form.
-        return unquote(parts.netloc + parts.path)
-    if parts.netloc not in ("", "localhost"):
-        raise _refused(
-            f"{CLI_JSON_INPUT_FLAG}: {source} names the host {parts.netloc}; a "
-            "file:// URI here names a local file only",
-            ctx,
-        )
-    return url2pathname(parts.path)
+    rest = source[len(_FILE_URI_PREFIX) :]
+    if rest.startswith("localhost/"):
+        rest = rest[len("localhost") :]
+    if rest.startswith("/"):
+        return url2pathname(rest)
+    return unquote(rest)
 
 
 def _read_stdin(ctx: Context) -> str:
@@ -357,7 +357,7 @@ def _read_document(source: str, ctx: Context) -> dict[str, Any]:
         label = "stdin"
         text = _read_stdin(ctx)
     else:
-        path = _document_path(source, ctx)
+        path = _document_path(source)
         label = path
         try:
             # utf-8-sig: a document a Windows editor or PowerShell 5 saved starts

@@ -4,8 +4,9 @@
 """``--cli-json-input`` reads every document shape a tool writes, and refuses as argv does.
 
 A byte order mark on a file or on stdin is dropped; stdin is read as UTF-8 and
-a read that fails is the usage refusal the file branch gives; a file:// URI is
-decoded and a host in it refused; a document nested too deeply, an infinite
+a read that fails is the usage refusal the file branch gives; the text after
+file:// is a path, relative or absolute, percent-decoded, never a host, a query
+or a fragment; a document nested too deeply, an infinite
 number for an integer, a number for a true/false parameter and a fraction for
 an integer are refusals, not tracebacks or silent truncation; the skeleton
 leaves a parameter with an environment variable null; --help and
@@ -94,12 +95,54 @@ def test_a_file_uri_is_decoded_before_the_file_is_read(tmp_path):
     assert mock_run.call_args.kwargs["offline"] is True
 
 
-def test_a_file_uri_with_a_host_is_refused(tmp_path):
+def test_a_file_uri_with_a_host_names_a_relative_path(tmp_path, monkeypatch):
+    """Nothing after ``file://`` is a host: as the AWS CLI reads the prefix, the
+    text is a path, so ``share.example/params.json`` is looked for below the
+    working directory and refused as a file that cannot be read, by that name."""
+    monkeypatch.chdir(tmp_path)
+
     result, mock_run = _scan(["--cli-json-input", "file://share.example/params.json"])
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert not mock_run.called
-    assert "share.example" in _flat(result.output)
+    assert "cannotreadshare.example/params.json" in _flat(result.output)
+
+
+@pytest.mark.parametrize("prefix", ["", "./"], ids=["bare", "dot-slash"])
+def test_a_relative_path_after_the_file_prefix_names_the_file(
+    tmp_path, monkeypatch, prefix
+):
+    """``file://params.json``, the relative form the AWS CLI documents, was parsed
+    as a URI whose host is ``params.json`` and refused as a remote host."""
+    _document(tmp_path, {"offline": True})
+    monkeypatch.chdir(tmp_path)
+
+    result, mock_run = _scan(["--cli-json-input", f"file://{prefix}params.json"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_run.call_args.kwargs["offline"] is True
+
+
+def test_a_file_uri_with_the_local_host_names_the_file(tmp_path):
+    path = _document(tmp_path, {"offline": True})
+
+    # `file://localhost/tmp/x` on POSIX, `file://localhost/C:/dir/x` on Windows.
+    uri = "file://localhost/" + quote(path.as_posix().lstrip("/"))
+    result, mock_run = _scan(["--cli-json-input", uri])
+
+    assert result.exit_code == 0, result.output
+    assert mock_run.call_args.kwargs["offline"] is True
+
+
+def test_a_hash_in_the_file_name_stays_in_it(tmp_path):
+    """Parsed as a URI, the name was cut at the ``#`` (a fragment), so a file named
+    ``a#1.json`` was looked for as ``a``."""
+    path = _document(tmp_path, {"offline": True}, name="a#1.json")
+
+    result, mock_run = _scan(["--cli-json-input", "file://" + str(path)])
+
+    assert result.exit_code == 0, result.output
+    assert mock_run.call_args.kwargs["offline"] is True
 
 
 @pytest.mark.parametrize(
@@ -118,7 +161,7 @@ def test_a_file_uri_with_a_drive_letter_names_the_drive_not_a_host(uri, path):
     drive letter starts the path, which is read as written, percent-decoded."""
     from automated_security_helper.cli.json_input import _document_path
 
-    assert _document_path(uri, None) == path
+    assert _document_path(uri) == path
 
 
 def test_a_document_nested_too_deeply_is_refused_not_a_traceback(tmp_path, monkeypatch):
