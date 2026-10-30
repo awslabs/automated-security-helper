@@ -20,8 +20,12 @@ only, and GIT_DIR, GIT_WORK_TREE and GIT_COMMON_DIR are left out, by the
 repository-root lookup and the diff as well as by the four nesting lookups. A
 git hook exports GIT_DIR without GIT_WORK_TREE, and git then takes its working
 directory for the top of the work tree, so the root lookup in a subdirectory
-named that subdirectory while the diff kept naming files from the real root;
-``test_scan_source`` pins the end-to-end shape with a real repository. Nothing
+named that subdirectory while the diff kept naming files from the real root.
+One exception: when the caller names an existing work tree (``GIT_DIR=<bare>
+GIT_WORK_TREE=<tree>``, a post-receive hook deploying a checkout), the root
+lookup and the diff pass the variables through, since the tree has no ``.git``
+entry to discover; the four nesting lookups still drop them.
+``test_scan_source`` pins the end-to-end shapes with real repositories. Nothing
 is started here: ``subprocess.run`` is replaced by a recorder.
 """
 
@@ -57,6 +61,13 @@ HELPERS = [
     pytest.param(lambda d: gss.get_changed_files("main", cwd=d), id="diff"),
 ]
 
+#: The two helpers that answer for the layout the caller names: the root lookup
+#: and the diff, whose names are joined onto that root.
+LAYOUT_HELPERS = [HELPERS[0], HELPERS[-1]]
+
+#: The lookups the nesting check makes, which always discover from the directory.
+NESTING_HELPERS = HELPERS[1:-1]
+
 
 @pytest.fixture
 def recorded(monkeypatch):
@@ -86,7 +97,8 @@ def test_each_helper_leaves_the_repository_location_variables_out(
 ):
     """GIT_DIR and its siblings would make git answer about another repository, or,
     set by a hook without GIT_WORK_TREE, take the working directory for the top of
-    the work tree."""
+    the work tree. GIT_WORK_TREE names no directory here (a stale export), which
+    no helper honors."""
     elsewhere = tmp_path / "elsewhere"
     monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
     monkeypatch.setenv("GIT_WORK_TREE", str(elsewhere))
@@ -99,6 +111,51 @@ def test_each_helper_leaves_the_repository_location_variables_out(
         env = kwargs["env"]
         assert env is not os.environ
         assert not set(env) & set(LOCATION_VARIABLES), sorted(env)
+
+
+def _name_a_deployed_tree(tmp_path, monkeypatch) -> "tuple[str, str]":
+    """GIT_DIR and GIT_WORK_TREE as a post-receive deployment exports them: a
+    bare repository and an existing tree with no ``.git`` entry."""
+    tree = tmp_path / "deployed"
+    tree.mkdir()
+    bare = str(tmp_path / "deploy.git")
+    monkeypatch.setenv("GIT_DIR", bare)
+    monkeypatch.setenv("GIT_WORK_TREE", str(tree))
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+    return bare, str(tree)
+
+
+@pytest.mark.parametrize("ask", LAYOUT_HELPERS)
+def test_the_root_lookup_and_the_diff_keep_a_work_tree_the_caller_names(
+    tmp_path, monkeypatch, recorded, ask
+):
+    """The tree a bare repository is deployed to holds no ``.git`` entry, so git
+    discovers nothing there; the variables the caller set are what name the
+    repository and its top, and they are passed through as they are."""
+    bare, tree = _name_a_deployed_tree(tmp_path, monkeypatch)
+
+    ask(tmp_path)
+
+    assert recorded, "git was not started"
+    for _argv, kwargs in recorded:
+        env = kwargs["env"]
+        assert env is not os.environ
+        assert (env.get("GIT_DIR"), env.get("GIT_WORK_TREE")) == (bare, tree)
+
+
+@pytest.mark.parametrize("ask", NESTING_HELPERS)
+def test_the_nesting_lookups_discover_even_when_the_caller_names_a_work_tree(
+    tmp_path, monkeypatch, recorded, ask
+):
+    """A nesting lookup asks about the directory it is started in, never about the
+    repository the environment names, so the variables are dropped there still."""
+    _name_a_deployed_tree(tmp_path, monkeypatch)
+
+    ask(tmp_path)
+
+    assert recorded, "git was not started"
+    for _argv, kwargs in recorded:
+        assert not set(kwargs["env"]) & set(LOCATION_VARIABLES)
 
 
 @pytest.mark.parametrize("ask", HELPERS)

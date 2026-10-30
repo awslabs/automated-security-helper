@@ -952,6 +952,66 @@ def test_a_hook_scanning_a_subdirectory_joins_the_diff_onto_the_real_root(
     assert all(p.is_file() for p in joined), joined
 
 
+def _bare_repository_with_a_deployed_tree(parent: Path) -> "tuple[Path, Path]":
+    """A bare clone and a checkout-less tree of its tip: (bare, tree).
+
+    The tip's second commit changes ``src/app.py``; the tree holds that file and no
+    ``.git`` entry, as a post-receive hook's deployment target does.
+    """
+    source = _repo_with_a_commit(parent / "source")
+    (source / "src").mkdir()
+    (source / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git("add", "src/app.py", cwd=source)
+    _git("commit", "-qm", "add app", cwd=source)
+    bare = parent / "deploy.git"
+    _git("clone", "-q", "--bare", source.as_posix(), bare.as_posix(), cwd=parent)
+    tree = parent / "deployed"
+    (tree / "src").mkdir(parents=True)
+    shutil.copyfile(source / "src" / "app.py", tree / "src" / "app.py")
+    return bare, tree
+
+
+@pytest.mark.integration
+def test_a_bare_repository_named_with_its_work_tree_keeps_its_root_and_diff(
+    isolated_tmp, monkeypatch
+):
+    """A post-receive hook deploys a checkout by running git as ``GIT_DIR=<bare>
+    GIT_WORK_TREE=<tree>``; the tree has no ``.git`` entry for discovery to find.
+    Dropping both variables for the root lookup made such a scan read "not a
+    repository" and lose its changed-file filter. When the caller names an
+    existing work tree, the pair is passed through as it was, and the root and the
+    diff describe the repository the operator named."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    monkeypatch.setenv("GIT_DIR", bare.as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", tree.as_posix())
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+    assert all((found_root / p).is_file() for p in changed), changed
+
+
+@pytest.mark.integration
+def test_a_git_work_tree_naming_no_directory_is_not_honored(isolated_tmp, monkeypatch):
+    """git answers ``rev-parse --show-toplevel`` with GIT_WORK_TREE as given, even
+    when nothing exists there, so a stale export in a hook's environment would have
+    joined the diff's paths onto a path that is not there. Only an existing
+    directory is honored; otherwise the variables are dropped and the root is the
+    one git discovers, as for a hook that exports GIT_DIR alone."""
+    root = _repo_with_a_commit(isolated_tmp / "super")
+    _git("worktree", "add", "-q", "-b", "side", "wt/x", cwd=root)
+    api = root / "services" / "api"
+    api.mkdir(parents=True)
+    monkeypatch.setenv("GIT_DIR", (root / ".git" / "worktrees" / "x").as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", (isolated_tmp / "nowhere").as_posix())
+
+    assert git_repository_root(api) == root.resolve()
+    assert recorded_scan_source(api, git_repository_root, {}) == "services/api"
+
+
 @pytest.mark.integration
 def test_the_list_check_holds_against_a_git_that_cannot_list_worktrees(
     isolated_tmp, monkeypatch
