@@ -26,7 +26,10 @@ from pathlib import Path
 
 import pytest
 
-from automated_security_helper.config.ash_config import resolve_env_references
+from automated_security_helper.config.ash_config import (
+    AshConfig,
+    resolve_env_references,
+)
 from automated_security_helper.config.config_validator import (
     ConfigValidator,
     _environment_part,
@@ -264,15 +267,41 @@ def test_a_rewrite_into_a_mapping_keyed_by_digits_finds_its_place():
 
 
 def test_a_rewrite_under_a_bases_plugin_spelling_finds_the_merged_section():
-    """The extends merge joins ``s3`` and ``S3Reporter`` under the child's
-    spelling; a base's rewrite path keeps the base's spelling and still finds
-    the merged section."""
-    document = {"reporters": {"S3Reporter": {"options": {"bucket": "v"}}}}
+    """The extends merge joins ``zzcustom`` and ``ZzCustomReporter`` under the
+    child's spelling; a base's rewrite path keeps the base's spelling and still
+    finds the merged section, read under the reporters segment's own model as
+    the record is."""
+    config = AshConfig.model_validate(
+        {
+            "project_name": "demo",
+            "reporters": {"ZzCustomReporter": {"options": {"bucket": "v"}}},
+        }
+    )
+    dumped = config.model_dump(mode="json", by_alias=True)
 
     assert (
-        recorded_value_at(document, document, ("reporters", "s3", "options", "bucket"))
+        recorded_value_at(
+            config, dumped, ("reporters", "zzcustom", "options", "bucket")
+        )
         == "v"
     )
+
+
+def test_a_plain_mapping_key_is_not_matched_as_a_plugin_name():
+    """The plugin-name lookup mirrors the merge, which joins plugin spellings
+    directly under the scanners, reporters and converters segments only: a
+    tag mapping's ``Owner`` is not another spelling of a path's ``owner``, so
+    the rewrite finds no place there instead of another entry's."""
+    config = AshConfig.model_validate(
+        {
+            "project_name": "demo",
+            "reporters": {"ZzCustomReporter": {"options": {"tags": {"Owner": "v"}}}},
+        }
+    )
+    dumped = config.model_dump(mode="json", by_alias=True)
+    path = ("reporters", "ZzCustomReporter", "options", "tags", "owner")
+
+    assert recorded_value_at(config, dumped, path) is None
 
 
 def test_path_pattern_advice_survives_a_stat_that_raises(tmp_path, monkeypatch):

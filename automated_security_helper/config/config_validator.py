@@ -37,6 +37,7 @@ from pydantic_core import core_schema as _core_schema
 
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
+    _PluginConfigSegment,
     config_env_var_is_interpolatable,
     config_env_var_is_secret_shaped,
     plugin_key_lookup_names,
@@ -2864,7 +2865,9 @@ def _value_folded_into(written: Any, merged: Any) -> bool:
 _MISSING_IN_RECORD = object()
 
 
-def _record_key(record: Dict[Any, Any], segment: Any) -> Any:
+def _record_key(
+    record: Dict[Any, Any], segment: Any, plugin_sections: bool = False
+) -> Any:
     """The key of the mapping ``record`` that a rewrite's path segment names: a
     string by the merge's spelling rule (_resolve_dict_key); an index by itself,
     or, where the mapping keys the digits as text ("123"), by that text.
@@ -2875,15 +2878,22 @@ def _record_key(record: Dict[Any, Any], segment: Any) -> Any:
     keyed by a numeric string found no place, and the record kept the value
     read from the environment.
 
-    A string segment the merge's spelling rule does not find is looked up
-    as a plugin section too (ash_config.plugin_key_lookup_names): the extends
+    With ``plugin_sections``, ``record`` is the dump of a plugin section
+    container (the ``scanners``, ``reporters`` or ``converters`` segment), and
+    a string segment the merge's spelling rule does not find is looked up as a
+    plugin section too, by the rule the merge joins plugin sections with
+    (``deep_merge`` under a ``_PluginConfigSegment`` model: the first key whose
+    ``ash_config.plugin_key_lookup_names`` overlap the segment's): the extends
     merge joins two spellings of an undeclared plugin section (``s3`` and
     ``S3Reporter``) under the child's spelling, while a base's reference keeps
     the base's spelling in its path, so the record found no place for the
-    rewrite and kept the value read from the environment."""
+    rewrite and kept the value read from the environment. Applied at every
+    depth, the lookup matched a plain mapping's ``Owner`` to a path's ``owner``
+    and could pair a referenced key with another entry; the merge folds plugin
+    names only directly under a plugin segment, so this does too."""
     if isinstance(segment, str):
         key = _resolve_dict_key(record, segment)
-        if key in record:
+        if key in record or not plugin_sections:
             return key
         names = plugin_key_lookup_names(segment)
         for other in record:
@@ -2916,7 +2926,9 @@ def _record_child(model: Any, record: Any, segment: Any) -> Tuple[Any, Any]:
                         if key is not None and key in record:
                             return key, getattr(model, name, None)
             extra = model.model_extra or {}
-            key = _record_key(record, segment)
+            key = _record_key(
+                record, segment, plugin_sections=isinstance(model, _PluginConfigSegment)
+            )
             if key in record:
                 return key, extra.get(key)
         else:
