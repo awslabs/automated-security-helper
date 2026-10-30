@@ -438,6 +438,9 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             project_paths = self._workspace_project_paths(model, runs)
             if project_paths is None:
                 return None
+            uri_bases = self._merged_uri_base_ids(runs, project_paths)
+            if uri_bases is None:
+                return None
 
             # 1. Collect all rules from every run's driver and extensions,
             #    flattened. Two scanners can declare one rule id (grype and
@@ -580,14 +583,13 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 "results": slim_results,
             }
 
-            # The base ids the run's locations may refer to, for a document
-            # whose URIs were not rebased (one run outside a workspace
-            # document, a project's own upload among them). A workspace
-            # document's URIs are workspace-relative and refer to none.
-            if len(runs) == 1 and not project_paths.get(0):
-                bases = self._original_uri_base_ids(runs[0])
-                if bases:
-                    out_run["originalUriBaseIds"] = bases
+            # The base ids the locations may refer to: those of every run whose
+            # URIs were not rebased (one run outside a workspace document, a
+            # project's own upload among them, or a run of a multi-run document
+            # that names no project). The URIs of a rebased run are
+            # workspace-relative and refer to none.
+            if uri_bases:
+                out_run["originalUriBaseIds"] = uri_bases
 
             # automationDetails.id is the category GitHub files an upload
             # under. The N per-project documents a workspace scan writes are
@@ -734,6 +736,36 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 entry["uriBaseId"] = str(base_id)
             out[str(key)] = entry
         return out
+
+    @staticmethod
+    def _merged_uri_base_ids(
+        runs: list, project_paths: Dict[int, Optional[str]]
+    ) -> Optional[Dict[str, Dict[str, str]]]:
+        """The ``originalUriBaseIds`` of every run whose URIs are not rebased,
+        merged into the one table the emitted run declares.
+
+        A location keeps its ``uriBaseId`` when its run is not rebased below a
+        workspace root, so the table must declare every base such a run uses; it
+        used to be written for a one-run document only, and a multi-run
+        document's unrebased runs referred to bases it never declared. Two runs
+        declaring one key differently cannot share a table: None refuses the
+        document, naming the key (the same refusal as an unplaceable project
+        path).
+        """
+        merged: Dict[str, Dict[str, str]] = {}
+        for index, run in enumerate(runs):
+            if project_paths.get(index):
+                continue
+            for key, entry in GHASReporter._original_uri_base_ids(run).items():
+                if merged.setdefault(key, entry) != entry:
+                    ASH_LOGGER.error(
+                        f"The GHAS report is not written: two runs declare the "
+                        f"base id '{key}' differently, and one document has one "
+                        "table of base ids. Upload each project's own report "
+                        "instead."
+                    )
+                    return None
+        return merged
 
     def _emits_automation_details(self) -> bool:
         """Whether the operator asked for ``automationDetails`` (off by default)."""
