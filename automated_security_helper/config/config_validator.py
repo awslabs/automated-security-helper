@@ -2851,9 +2851,13 @@ def _value_folded_into(written: Any, merged: Any) -> bool:
     that holds a base's keys too never matched the file's, and a respelled
     mapping-valued field (``global-settings``) the chain did fold was said to be
     ignored. Any other value (a scalar, a list) the merge replaces whole, so it
-    is held only when equal.
+    is held only when equal. An empty mapping sets nothing, so nothing of it is
+    applied: it is not held, and the warning for it says to write the declared
+    spelling, not that the chain applies its value.
     """
     if isinstance(written, dict) and isinstance(merged, dict):
+        if not written:
+            return False
         for key, value in written.items():
             target = _resolve_dict_key(merged, key) if isinstance(key, str) else key
             if target not in merged or not _value_folded_into(value, merged[target]):

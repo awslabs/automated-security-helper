@@ -406,6 +406,28 @@ def test_a_respelled_mapping_field_a_chain_merges_is_named_as_folded(tmp_path):
     assert "folds it onto 'global_settings' and applies its value" in folded[0], folded
 
 
+def test_an_empty_respelled_mapping_field_is_not_named_as_applied(tmp_path):
+    """``global-settings: {}`` sets nothing, so the chain applies none of its
+    value; the warning says to write the declared spelling, as for a file
+    alone, not that the chain folds and applies it."""
+    base = tmp_path / "base.yaml"
+    base.write_text(
+        "project_name: demo\nglobal_settings:\n  severity_threshold: LOW\n",
+        encoding="utf-8",
+    )
+    child = tmp_path / ".ash.yaml"
+    child.write_text("extends: base.yaml\nglobal-settings: {}\n", encoding="utf-8")
+
+    check = ConfigValidator.check_config_file(child)
+
+    respelled = [
+        w for w in check.warnings if w.startswith("Unknown top-level field 'global-")
+    ]
+    assert respelled, check.warnings
+    assert "folds it onto" not in respelled[0], respelled
+    assert "write 'global_settings'" in respelled[0], respelled
+
+
 def test_an_unknown_top_level_field_is_still_unknown(tmp_path):
     cfg = tmp_path / ".ash.yaml"
     cfg.write_text("project_name: demo\nfoo_unknown: 1\n", encoding="utf-8")
