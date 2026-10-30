@@ -1253,12 +1253,17 @@ _MEMBER_SPARSE_BEYOND_SIZE = (
     "writes the same bytes twice"
 )
 #: How a later member bound for the path an earlier member took is told apart: it
-#: is written beside the earlier one under a numbered name, so both are scanned.
-#: One unpacker keeps the first of two members with one name and another keeps
-#: the last, so scanning only one would leave out the bytes a consumer may get.
+#: is written in a numbered directory beside the earlier one, its file name kept
+#: (``vendor/m~2/m.js`` for a second ``vendor/m.js``), so both are scanned. One
+#: unpacker keeps the first of two members with one name and another keeps the
+#: last, so scanning only one would leave out the bytes a consumer may get. The
+#: file name is kept because scanners find a manifest, a lockfile or a Dockerfile
+#: by its name: renamed to ``package~2.json``, the later copy, the one tar and
+#: unzip keep, was scanned as a file no dependency scanner reads.
 _MEMBER_RENAMED = (
     "an earlier member of the archive is extracted to the same path, so this one "
-    "is written as '{renamed}' and both are scanned"
+    "is written as '{renamed}', in a numbered directory beside the earlier member "
+    "with its file name kept, and both are scanned"
 )
 #: The same case for a member given as a bare name: there is no member object to
 #: rename, so the later name is refused instead of being written over the earlier.
@@ -1286,8 +1291,8 @@ _MEMBER_OVER_A_DIRECTORY = (
 #: so an archive of thousands of repeated names does not log a line apiece.
 _MEMBERS_RENAMED_UNLISTED = (
     "{count} more members are each extracted to the same path as an earlier "
-    "member of the archive, so each is written under a numbered name beside it "
-    "and all are scanned"
+    "member of the archive, so each is written in a numbered directory beside it "
+    "with its file name kept, and all are scanned"
 )
 _NOT_EXTRACTED = (
     "it is an archive or compressed file of a format that is not extracted (the "
@@ -1671,34 +1676,44 @@ def _renamed_member_name(
     written: Dict[str, str],
     counters: Dict[str, int],
 ) -> str:
-    """``member_name`` with a counter before its extension (``vendor/m~2.js``,
-    ``Dockerfile~2``): the first such name that no member of the archive is named
-    by (``taken``, every member's _written_key, read before any is renamed) and no
-    earlier member is written to (``written``). A name only ``written`` was checked
-    against could be a later member's own, which then lost its name to the rename.
+    """``member_name`` placed in a numbered directory beside the file it would have
+    overwritten, its file name kept: ``vendor/m~2/m.js`` for ``vendor/m.js``,
+    ``Dockerfile~2/Dockerfile`` for ``Dockerfile``. The directory is the file's
+    stem (its name before the last dot, or the whole name without one) and a
+    counter; the first such placement whose file and directory no member of the
+    archive is named by (``taken``, every member's _written_key, read before any
+    is renamed) and no earlier member is written to (``written``). A placement
+    only ``written`` was checked against could be a later member's own, which then
+    lost its name to the rename. The name is kept whole because scanners find a
+    manifest, a lockfile or a Dockerfile by it: written as ``package~2.json``, the
+    later copy was scanned as a file the dependency scanners skip.
 
-    The directory part is kept, split where the extractor splits it
-    (_written_separators), so the member lands beside the one it would have
-    overwritten: on POSIX ``a\\b.js`` is one file at the archive's top and is
-    renamed ``a\\b~2.js``, not moved under a directory ``a``.
+    The directory part of the member's name is kept, split where the extractor
+    splits it (_written_separators), so the member lands beside the one it would
+    have overwritten: on POSIX ``a\\b.js`` is one file at the archive's top and is
+    placed at ``a\\b~2/a\\b.js``, not moved under a directory ``a``.
 
     ``counters`` holds, per written key, the counter the next rename of that key
     starts from, so N members bound for one path cost N names, not N squared.
     """
     cut = max(member_name.rfind(separator) for separator in _written_separators())
     head, base = member_name[: cut + 1], member_name[cut + 1 :]
-    stem, dot, extension = base.rpartition(".")
+    stem, dot, _extension = base.rpartition(".")
+    directory_stem = stem if stem and dot else base
     key = _written_key(member_name, kind)
     counter = counters.get(key, 2)
     while True:
-        if stem and dot:
-            renamed_base = f"{stem}~{counter}.{extension}"
-        else:
-            renamed_base = f"{base}~{counter}"
-        renamed = f"{head}{renamed_base}"
+        directory = f"{head}{directory_stem}~{counter}"
+        renamed = f"{directory}/{base}"
         counter += 1
         renamed_key = _written_key(renamed, kind)
-        if renamed_key not in taken and renamed_key not in written:
+        directory_key = _written_key(directory, kind)
+        if (
+            renamed_key not in taken
+            and renamed_key not in written
+            and directory_key not in taken
+            and directory_key not in written
+        ):
             counters[key] = counter
             return renamed
 
@@ -2103,11 +2118,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         extracted, so no scanner reads it, snyk-code included, which would upload
         it. A member written to the same path as an earlier member of the archive
         (``vendor//m.js`` after ``vendor/m.js``, a tar's repeated name, or two
-        spellings of one name on a case-insensitive filesystem) is written beside
-        the earlier one under a numbered name (``vendor/m~2.js``,
-        _renamed_member_name) that no member of the archive is named by, with a
-        warning naming both, so neither silently overwrites the other and both are
-        scanned; past MEMBER_REFUSALS_LISTED such members one line counts the rest.
+        spellings of one name on a case-insensitive filesystem) is written in a
+        numbered directory beside the earlier one with its file name kept
+        (``vendor/m~2/m.js``, _renamed_member_name), a placement no member of the
+        archive is named by, with a warning naming both, so neither silently
+        overwrites the other and both are scanned, the later one still under the
+        name a scanner finds a manifest or a Dockerfile by; past
+        MEMBER_REFUSALS_LISTED such members one line counts the rest.
 
         Args:
             members: The archive's members.
@@ -2127,8 +2144,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         unlisted: Dict[str, int] = {}
         # The path each admitted member is written to (_written_key: as the host
         # compares names, case-folded), so a later member bound for the same
-        # file is written beside the earlier one under a numbered name, and both
-        # are scanned, rather than one written over the other.
+        # file is written in a numbered directory beside the earlier one, its
+        # file name kept, and both are scanned, rather than one written over
+        # the other.
         written: Dict[str, str] = {}
         # The directories the admitted members are written below (every prefix
         # of their written paths, _written_prefix_keys), so a later member bound
@@ -2240,10 +2258,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 elif destination in written:
                     # Renamed on the member object itself: zipfile and tarfile
                     # write each member to the path its name holds, so the
-                    # renamed member lands beside the earlier one and the scan
-                    # reads both, whichever of the two a consumer's unpacker
-                    # keeps. The notice names the archive when inspect_members
-                    # knows it.
+                    # renamed member lands in a numbered directory beside the
+                    # earlier one, under its own file name, and the scan reads
+                    # both, whichever of the two a consumer's unpacker keeps.
+                    # The notice names the archive when inspect_members knows it.
                     renamed = _renamed_member_name(
                         member_name, kind, taken, written, rename_counters
                     )
@@ -2263,10 +2281,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         member.filename = renamed
                     member_name = renamed
                     destination = _written_key(renamed, kind)
+                    # The placement adds a directory the name as read did not
+                    # have, so the renamed member's own prefixes are recorded.
+                    prefixes = _written_prefix_keys(renamed, kind)
                 if problem is None:
                     written[destination] = member_name
-                    # A rename changes the base name alone, so the prefixes of
-                    # the name as read are the renamed member's too.
                     directories.update(prefixes)
             if problem is not None:
                 if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:

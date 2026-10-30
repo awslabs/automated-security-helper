@@ -16,11 +16,14 @@ output, so the notebook's code reaches no scanner as code: its archive is not
 recorded whole. And two members written to one path (``vendor//m.js`` after
 ``vendor/m.js``, a tar's repeated name, or two spellings of one name on a
 case-insensitive filesystem) no longer overwrite each other silently: the later
-one is written beside the earlier under a numbered name (``vendor/m~2.js``), so
-both are scanned. Refusing the later one and scanning the first, the shape before
-this, scanned the bytes an unpacker that keeps the first member would produce and
-never the bytes one that keeps the last produces, which is what a deploy that
-unpacks the archive with ``tar`` or ``unzip`` gets.
+one is written in a numbered directory beside the earlier with its file name kept
+(``vendor/m~2/m.js``), so both are scanned. Refusing the later one and scanning the
+first, the shape before this, scanned the bytes an unpacker that keeps the first
+member would produce and never the bytes one that keeps the last produces, which
+is what a deploy that unpacks the archive with ``tar`` or ``unzip`` gets. The file
+name is kept because scanners find a manifest, a lockfile or a Dockerfile by it:
+renamed to ``package~2.json``, the later copy, the one tar and unzip keep, was
+scanned as a file the dependency scanners skip.
 """
 
 from __future__ import annotations
@@ -229,23 +232,35 @@ def test_a_notebook_member_is_extracted_but_its_archive_is_not_recorded_whole(
     ("kind", "first", "second", "renamed"),
     [
         pytest.param(
-            "zip", "vendor//m.js", "vendor/m.js", "vendor/m~2.js", id="zip-spellings"
+            "zip", "vendor//m.js", "vendor/m.js", "vendor/m~2/m.js", id="zip-spellings"
         ),
         pytest.param(
-            "tar", "./vendor/m.js", "vendor/m.js", "vendor/m~2.js", id="tar-spellings"
+            "tar", "./vendor/m.js", "vendor/m.js", "vendor/m~2/m.js", id="tar-spellings"
         ),
         pytest.param(
-            "tar", "vendor/m.js", "vendor/m.js", "vendor/m~2.js", id="tar-repeated"
+            "tar", "vendor/m.js", "vendor/m.js", "vendor/m~2/m.js", id="tar-repeated"
         ),
-        pytest.param("zip", "Dockerfile", "Dockerfile", "Dockerfile~2", id="no-ext"),
-        pytest.param("zip", "lib/M.js", "lib/m.js", "lib/m~2.js", id="case-fold"),
+        pytest.param(
+            "zip", "Dockerfile", "Dockerfile", "Dockerfile~2/Dockerfile", id="no-ext"
+        ),
+        pytest.param(
+            "zip",
+            "package-lock.json",
+            "package-lock.json",
+            "package-lock~2/package-lock.json",
+            id="lockfile",
+        ),
+        pytest.param("zip", "lib/M.js", "lib/m.js", "lib/m~2/m.js", id="case-fold"),
     ],
 )
 def test_two_members_written_to_one_path_are_both_extracted(
     test_plugin_context, monkeypatch, kind, first, second, renamed, ash_log_records
 ):
     """The later member holds the finding here: it is the one a deploy that unpacks
-    the archive with tar or unzip gets, and it used to be refused unscanned."""
+    the archive with tar or unzip gets, and it used to be refused unscanned. It
+    keeps its file name, in a numbered directory beside the first: written as
+    ``package-lock~2.json`` or ``Dockerfile~2``, it was a file the scanners that
+    find a lockfile or a Dockerfile by name never read."""
     maker = _zip if kind == "zip" else _tar
     archive = maker(
         Path(test_plugin_context.source_dir) / f"a.{kind}",
@@ -260,6 +275,8 @@ def test_two_members_written_to_one_path_are_both_extracted(
         renamed: b"m = 2\n",
         "ok.js": b"ok = 1\n",
     }
+    # The duplicate's file name is the name as read; only its directory is new.
+    assert renamed.rsplit("/", 1)[-1] == second.rsplit("/", 1)[-1]
     assert converter.refused_inputs == []
     notices = [
         r.getMessage()
@@ -267,6 +284,7 @@ def test_two_members_written_to_one_path_are_both_extracted(
         if r.levelno >= logging.WARNING and renamed in r.getMessage()
     ]
     assert len(notices) == 1 and f"a.{kind}" in notices[0], notices
+    assert "numbered directory" in notices[0] and "file name kept" in notices[0]
 
 
 def test_three_members_written_to_one_path_count_up(test_plugin_context, monkeypatch):
@@ -277,24 +295,41 @@ def test_three_members_written_to_one_path_count_up(test_plugin_context, monkeyp
 
     _, _, files = _convert(test_plugin_context, monkeypatch, archive)
 
-    assert files == {"m.js": b"1\n", "m~2.js": b"2\n", "m~3.js": b"3\n"}
+    assert files == {"m.js": b"1\n", "m~2/m.js": b"2\n", "m~3/m.js": b"3\n"}
 
 
 def test_a_renamed_member_never_takes_a_later_members_own_name(
     test_plugin_context, monkeypatch
 ):
-    """``m~2.js`` is the archive's own third member. Picking the rename against the
-    members written so far gave the second ``m.js`` that name, and the real
-    ``m~2.js`` was then renamed in its turn, so the scan's paths named the wrong
-    bytes. Every member's name is read before any is renamed."""
+    """``m~2/m.js`` is the archive's own third member. Picking the placement
+    against the members written so far gave the second ``m.js`` that place, and
+    the real ``m~2/m.js`` was then moved in its turn, so the scan's paths named
+    the wrong bytes. Every member's name is read before any is renamed."""
     archive = _zip(
         Path(test_plugin_context.source_dir) / "a.zip",
-        [("m.js", b"1\n"), ("m.js", b"2\n"), ("m~2.js", b"3\n")],
+        [("m.js", b"1\n"), ("m.js", b"2\n"), ("m~2/m.js", b"3\n")],
     )
 
     _, _, files = _convert(test_plugin_context, monkeypatch, archive)
 
-    assert files == {"m.js": b"1\n", "m~3.js": b"2\n", "m~2.js": b"3\n"}
+    assert files == {"m.js": b"1\n", "m~3/m.js": b"2\n", "m~2/m.js": b"3\n"}
+
+
+def test_a_renamed_member_never_takes_a_directory_a_member_is_named_as(
+    test_plugin_context, monkeypatch
+):
+    """``m~2`` is the archive's own file: the duplicate cannot be placed in a
+    directory of that name, so it takes the next counter. Every member's name
+    counts, whether or not a scanner reads it."""
+    monkeypatch.setattr(archive_converter, "_member_is_scannable", lambda name: True)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo("m.js"), zipfile.ZipInfo("m.js"), zipfile.ZipInfo("m~2")]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert [member.filename for member in admitted] == ["m.js", "m~3/m.js", "m~2"]
 
 
 @pytest.mark.skipif(os.sep != "/", reason="a backslash separates on this host")
@@ -302,8 +337,10 @@ def test_a_backslash_stays_part_of_a_name_where_the_extractor_keeps_it(
     test_plugin_context, monkeypatch
 ):
     """On POSIX zipfile writes ``a\\b.js`` as one file at the archive's top; the
-    rename used to read the backslash as a separator and put the second member at
-    ``a/b~2.js``, a different place from the member it stood beside."""
+    rename used to read the backslash as a separator and put the second member
+    under a directory ``a``, a different place from the member it stood beside.
+    The numbered directory is beside the file, at the top, and the name keeps
+    its backslash."""
     archive = _zip(
         Path(test_plugin_context.source_dir) / "a.zip",
         [("a\\b.js", b"1\n"), ("a\\b.js", b"2\n")],
@@ -311,7 +348,7 @@ def test_a_backslash_stays_part_of_a_name_where_the_extractor_keeps_it(
 
     _, _, files = _convert(test_plugin_context, monkeypatch, archive)
 
-    assert files == {"a\\b.js": b"1\n", "a\\b~2.js": b"2\n"}
+    assert files == {"a\\b.js": b"1\n", "a\\b~2/a\\b.js": b"2\n"}
 
 
 def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
@@ -341,9 +378,11 @@ def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
 
     names = [member.filename for member in admitted]
     assert len(names) == count and len(set(names)) == count
-    assert names[:3] == ["m.js", "m~2.js", "m~3.js"]
-    # Linear: one key per member before the loop, one for its destination, one
-    # or two per rename; never a walk over every earlier counter.
+    assert names[:3] == ["m.js", "m~2/m.js", "m~3/m.js"]
+    # Linear: one key per member before the loop, one for its destination, two
+    # per rename (the placement and its directory), one for the renamed
+    # destination and one per directory of the renamed path; never a walk over
+    # every earlier counter.
     assert calls["n"] <= 6 * count, calls["n"]
     assert elapsed < 10, elapsed
     notices = [r.getMessage() for r in ash_log_records if r.levelno >= logging.WARNING]

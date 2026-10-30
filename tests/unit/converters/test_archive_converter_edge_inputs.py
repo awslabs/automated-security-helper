@@ -487,7 +487,9 @@ def test_a_later_name_bound_for_a_taken_path_is_refused_when_members_are_names(
 def test_a_later_member_object_bound_for_a_taken_path_is_still_renamed(
     test_plugin_context, tmp_path
 ):
-    """The control: member objects keep the renaming shape, with no refusal."""
+    """The control: member objects keep the renaming shape, with no refusal. The
+    later member is placed in a numbered directory beside the first, its file
+    name kept, so a scanner that finds a file by its name still reads it."""
     converter = _converter(test_plugin_context)
     first = tarfile.TarInfo("pkg/a.py")
     second = tarfile.TarInfo("pkg/a.py")
@@ -499,7 +501,7 @@ def test_a_later_member_object_bound_for_a_taken_path_is_still_renamed(
     assert kept == [first, second]
     assert converter.refused_inputs == []
     assert first.name == "pkg/a.py"
-    assert second.name != "pkg/a.py"
+    assert second.name == "pkg/a~2/a.py"
 
 
 # ---------------------------------------------------------------- windows names
