@@ -81,8 +81,9 @@ def test_process_config_options_with_config_files(
             )
         ),
     )
-    # Construction has already processed the options (ScannerPluginBase); a
-    # second call would append the flags again and count two --ini.
+    # Construction has already processed the options (ScannerPluginBase). A
+    # second call rebuilds the option flags from the base arguments, so it
+    # would count one --ini too (the behavior tests pin that); none is needed.
 
     config_args_keys = [arg.key for arg in scanner.args.extra_args]
     if config_arg == "--ini":

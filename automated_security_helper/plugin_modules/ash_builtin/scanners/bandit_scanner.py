@@ -789,8 +789,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         the ``--from`` spec, so a configuration that differs elsewhere does not
         run the version probe a second time.
         """
-        self._ini_file = None
-        self.args.extra_args = self._base_extra_args()
         self._process_config_options()
         spec = self._uv_from_spec()
         if spec != self._applied_from_spec:
@@ -1014,6 +1012,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # bandit unless the operator's own configuration names it; see
         # config/path_trust.py. A configured value that is refused or missing
         # takes no discovered replacement: bandit gets the empty ini.
+        #
+        # The option arguments start again from the base ones on every call, so
+        # a second call (configure() after the configuration changed, or a
+        # caller that processes the options again) builds each flag once. Before,
+        # every call appended another --ini or --configfile, --confidence-level,
+        # --severity-level and --exclude token beside the ones already there.
+        self._ini_file = None
+        self.args.extra_args = self._base_extra_args()
         from automated_security_helper.config.operator_only_options import (
             operator_wrote_value,
         )

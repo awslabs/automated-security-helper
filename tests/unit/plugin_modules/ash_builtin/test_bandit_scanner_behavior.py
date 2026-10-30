@@ -421,6 +421,33 @@ def test_dot_bandit_config_file_is_passed_as_ini(plugin_context, tmp_path):
     assert extra_arg_values(scanner, "--configfile") == []
 
 
+def test_processing_the_options_again_builds_each_flag_once(plugin_context, tmp_path):
+    """Construction processes the options once; a second call (configure(),
+    or a caller that processes them again) appended another --ini,
+    --confidence-level, --severity-level and --exclude token beside the first.
+    The option arguments now start again from the base ones on every call."""
+    config_file = tmp_path / ".bandit"
+    config_file.write_text("[bandit]\nexclude = /test\n", encoding="utf-8")
+    scanner = BanditScanner(
+        context=plugin_context,
+        config=BanditScannerConfig(
+            options=BanditScannerConfigOptions(config_file=config_file)
+        ),
+    )
+    once = [(arg.key, arg.value) for arg in scanner.args.extra_args]
+
+    scanner._process_config_options()
+
+    assert [(arg.key, arg.value) for arg in scanner.args.extra_args] == once
+    keys = [arg.key for arg in scanner.args.extra_args]
+    assert keys.count("--ini") == 1
+    assert keys.count("--confidence-level") == 1
+    assert keys.count("--severity-level") == 1
+    assert sum(key.startswith("--exclude=") for key in keys) == 1
+    argv = _scan_argv(scanner, plugin_context)
+    assert _value_after(argv, "--ini") == [config_file.as_posix()]
+
+
 @pytest.mark.parametrize("filename", ["bandit.yaml", "bandit.toml", "custom.yaml"])
 def test_other_config_filenames_are_passed_as_configfile(
     plugin_context, tmp_path, filename
