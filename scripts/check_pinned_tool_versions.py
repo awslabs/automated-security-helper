@@ -2009,19 +2009,32 @@ def main(argv: list[str] | None = None) -> int:
 
     results = check(pin_list, ruby=ruby)
     apt_results = check_apt(apt_pins, indexes, APT_INDEX_FETCHER)
+    # The two reports are rendered apart: a fault in one must not take the other with
+    # it. The lookups are done, so what can be written is written, and a report that
+    # could not be built is a script fault (exit 2).
+    render_failed = False
     try:
         report = render_report(pins, results, markdown=args.markdown)
-        apt_report = render_apt_report(apt_results, markdown=args.markdown)
     except Exception as exc:  # bump steps that cannot be built for an outdated pin
         print(
             f"error: could not render the report: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-        # The lookups are done: give the table, and the exit status of a script fault.
-        sys.stdout.write(render_table(results, markdown=args.markdown) + "\n")
-        return EXIT_ERROR
+        report = render_table(results, markdown=args.markdown) + "\n"
+        render_failed = True
+    try:
+        apt_report = render_apt_report(apt_results, markdown=args.markdown)
+    except Exception as exc:  # a result the apt table cannot be built from
+        print(
+            f"error: could not render the apt report: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        apt_report = ""
+        render_failed = True
     sys.stdout.write(report)
     sys.stdout.write(apt_report)
+    if render_failed:
+        return EXIT_ERROR
     # The worse of the two, where an error (2) outranks a failing pin (1).
     return max(
         exit_code(results, args.fail_on_outdated),
