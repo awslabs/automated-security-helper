@@ -51,7 +51,7 @@ from automated_security_helper.utils.link_exclusions import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
@@ -1205,21 +1205,15 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     source_dir=source_dir,
                     scanned_dirs=scanned_dirs,
                 )
-                # Written beside it (under the same write guard) and moved into
-                # place: a failure while writing (disk full) left a truncated
-                # report under the name, where the reporters read it as damaged
-                # output.
-                temporary = json_report.with_name(json_report.name + ".rewriting")
-                try:
-                    with open_for_write(temporary) as handle:
-                        json.dump(document, handle, indent=4)
-                    os.replace(temporary, json_report)
-                except BaseException:
-                    try:
-                        os.unlink(temporary)
-                    except OSError:
-                        pass
-                    raise
+                # Staged beside it under the write guard and renamed into place
+                # when the block ends: a failure while writing (disk full) left a
+                # truncated report under the name, where the reporters read it as
+                # damaged output. The guard's atomic form does the staging, the
+                # rename and the cleanup on a raise, so no rename of its own is
+                # made here (every write below an output directory goes through
+                # fs_guard, which the output-writers audit checks).
+                with open_for_atomic_write(json_report) as handle:
+                    json.dump(document, handle, indent=4)
             except (OSError, ValueError) as error:
                 # A WARNING, not DEBUG: the report is left with checkov's
                 # root-relative paths, which no suppression matches.
