@@ -1655,6 +1655,21 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     "target contains its --exclude entry as text, so bandit would "
                     "skip that file too or read the file the link points at."
                 )
+            if os.path.isdir(spelled):
+                # bandit rewrites an entry that names an existing directory to
+                # "<entry>/*" (manager.discover_files), so a directory literally
+                # named like the glob ("lin[k].py" beside "link.py") would turn
+                # the entry into one that covers that directory and no longer
+                # matches the link, and bandit would read the file it points at.
+                # The ignore entries are checked the same way
+                # (_entries_no_path_holds_as_text, named_directories).
+                raise ScannerError(
+                    f"Not running bandit on {root}: {relative!r}: "
+                    f"{REASON_LINK_LEAVES_TREE}, and a directory under the target "
+                    "is named like its --exclude entry, which bandit would rewrite "
+                    "to cover that directory instead, so bandit would read the "
+                    "file the link points at."
+                )
             entries.append(spelled)
         return entries
 

@@ -207,6 +207,23 @@ def test_a_link_entry_with_glob_characters_is_escaped(tmp_path):
     assert not fnmatch.fnmatchcase(f"{source.as_posix()}/lixnk.py", entries[0])
 
 
+def test_a_directory_named_like_a_links_entry_refuses_the_scan(tmp_path):
+    """bandit rewrites an ``--exclude`` entry that names an existing directory to
+    ``<entry>/*``. The link ``link.py`` gets the entry ``link.p[y]``; an empty
+    directory literally named ``link.p[y]`` beside it made bandit cover that
+    directory instead of the link, and read the file the link points at."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "target.py").write_text("x = 1\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py"])
+    os.symlink(outside / "target.py", source / "link.py")
+    (source / "link.p[y]").mkdir()
+    scanner = _scanner(source, tmp_path)
+
+    with pytest.raises(ScannerError, match="named like its --exclude entry"):
+        scanner._link_excludes(source)
+
+
 def test_a_link_whose_path_holds_a_comma_is_still_refused(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
