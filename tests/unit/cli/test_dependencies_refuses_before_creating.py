@@ -181,6 +181,29 @@ def test_a_tilde_bin_path_with_no_usable_home_is_refused(
     assert not Path("/ash-bin").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX reads the backslash")
+@pytest.mark.parametrize("bin_path", ["~\\tools", "~ash-no-such-user-xq9/tools"])
+def test_a_tilde_user_bin_path_posix_cannot_expand_is_refused(
+    quiet_machine, tmp_path, bin_path
+):
+    """On POSIX `~\\tools` is one path component, not `~` (PurePosixPath reads no
+    backslash as a separator, the rule _is_under_tilde follows), so expanduser
+    reads `\\tools` as a user name, as it reads `ash-no-such-user-xq9`; neither
+    user exists and pathlib raises RuntimeError. Uncaught, that was a traceback,
+    exit 1; it is a refusal, exit 3, that creates nothing. The old check accepted
+    `~\\` as home on every platform; `~\\x` means home on Windows only now, where
+    the backslash is a separator."""
+    result = runner.invoke(
+        dependencies_app, ["--bin-path", bin_path, "--tool", "sarif"]
+    )
+
+    assert result.exit_code == EXIT_INVALID_CONFIG, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "cannot be expanded" in result.output, result.output
+    assert not (tmp_path / bin_path).exists()
+    assert not (tmp_path / "tools").exists()
+
+
 def test_a_deleted_working_directory_is_the_usage_refusal(quiet_machine, tmp_path):
     gone = tmp_path / "gone"
     gone.mkdir()

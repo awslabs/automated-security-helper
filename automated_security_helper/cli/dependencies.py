@@ -279,7 +279,9 @@ def _is_under_tilde(bin_path: str, pure: type = PurePath) -> bool:
     """Whether ``bin_path`` is ``~`` or starts with the component ``~``.
 
     The rule pathlib's own ``expanduser`` applies: the first path component, read
-    with the platform's separators (``pure``), is exactly ``~``.
+    with the platform's separators (``pure``), is exactly ``~``. So on POSIX
+    ``~\\x`` is one component, not home: it goes to ``expanduser``, which reads
+    ``\\x`` as a user name and refuses it, and the caller refuses the option.
     """
     return pure(bin_path).parts[:1] == ("~",)
 
