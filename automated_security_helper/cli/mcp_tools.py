@@ -2166,25 +2166,48 @@ async def mcp_scan_directory(
             # loop's thread, froze every other request for as long as the
             # delete took.
             registry = get_scan_registry()
-            scan_id = await asyncio.to_thread(
-                registry.register_scan,
-                directory_path=str(directory_path_obj),
-                output_directory=str(output_dir),
-                # Not known yet: the scan runs at the stricter of the request
-                # and its config's threshold, and the runner records the one it
-                # used (_judged_threshold). The request is kept beside it.
-                severity_threshold=None,
-                requested_severity_threshold=severity_threshold,
-                config_path=config_path,
-                scan_id=scan_id,
-                # 0 or None is no limit.
-                max_active=limits.max_concurrent_scans or None,
-                session_id=_scan_owner(session_id),
-                # The registry redacts every error message it applies with
-                # these, so a failure arm that closes the entry with a bare
-                # exception's text is backstopped at the sink.
-                environment_values=environment_values,
+            registration = asyncio.ensure_future(
+                asyncio.to_thread(
+                    registry.register_scan,
+                    directory_path=str(directory_path_obj),
+                    output_directory=str(output_dir),
+                    # Not known yet: the scan runs at the stricter of the
+                    # request and its config's threshold, and the runner
+                    # records the one it used (_judged_threshold). The request
+                    # is kept beside it.
+                    severity_threshold=None,
+                    requested_severity_threshold=severity_threshold,
+                    config_path=config_path,
+                    scan_id=scan_id,
+                    # 0 or None is no limit.
+                    max_active=limits.max_concurrent_scans or None,
+                    session_id=_scan_owner(session_id),
+                    # The registry redacts every error message it applies with
+                    # these, so a failure arm that closes the entry with a bare
+                    # exception's text is backstopped at the sink.
+                    environment_values=environment_values,
+                )
             )
+            try:
+                # Shielded: a cancel here cannot interrupt the worker thread, which
+                # goes on to register the scan, so the registration is left to
+                # finish and is closed below instead of being abandoned half
+                # done.
+                scan_id = await asyncio.shield(registration)
+            except asyncio.CancelledError:
+                # `registered` is still False, so the arm below gives nothing
+                # back, and the entry the thread writes would stay PENDING,
+                # holding its directory and a max_concurrent_scans slot for the
+                # server's life. It is closed as a scan that did not start the
+                # moment the thread returns (at once when it already has). The
+                # session's claim and count are given back by the finally of
+                # this function, as for every other way out before the task.
+                registration.add_done_callback(
+                    lambda done: _close_a_registration_nobody_awaited(
+                        done, registry, scan_id, output_dir, environment_values
+                    )
+                )
+                raise
             registered = True
             # The runner's claim on the entry, recorded here rather than by the
             # runner's first step: between the set-aside below and that step a
@@ -2571,6 +2594,36 @@ def _give_back_a_scan_that_did_not_start(
             f"Scan {scan_id}: could not put the previous results back in "
             f"{output_dir}: {error_text(restore_error, environment_values)}"
         )
+
+
+def _close_a_registration_nobody_awaited(
+    registration: "asyncio.Future[str]",
+    registry: Any,
+    scan_id: str,
+    output_dir: Path,
+    environment_values: Tuple[str, ...] = (),
+) -> None:
+    """Close the entry of a registration whose start was cancelled while it ran.
+
+    ``mcp_scan_directory`` awaits ``registry.register_scan`` in a worker thread,
+    and a cancel cannot interrupt that thread: it goes on to write the PENDING entry
+    after the caller has gone. This done callback of the registration's future
+    closes that entry as a scan that did not start, through
+    ``_give_back_a_scan_that_did_not_start``, so it no longer occupies its
+    directory or a max_concurrent_scans slot. A registration that was refused or
+    cancelled wrote no entry, and its error is read here so it is not reported
+    as never retrieved. Never raises: asyncio would only log it.
+    """
+    if registration.cancelled() or registration.exception() is not None:
+        return
+    _give_back_a_scan_that_did_not_start(
+        registry,
+        scan_id,
+        output_dir,
+        asyncio.CancelledError("the scan's start was cancelled while it registered"),
+        previous_results_moved=False,
+        environment_values=environment_values,
+    )
 
 
 def _judged_threshold(results: Any) -> Optional[str]:
