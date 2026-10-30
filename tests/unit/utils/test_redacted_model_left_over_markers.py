@@ -230,3 +230,29 @@ def test_a_counter_keeps_its_counts_and_its_class():
     assert all(type(key) is str for key in out)
     assert out is not given
     assert any(key is marker for key in given)
+
+
+class _Clinging(dict):
+    """A dict subclass whose copy protocol answers with the object itself."""
+
+    def __copy__(self):
+        return self
+
+
+def test_a_container_whose_copy_is_itself_is_rebuilt_as_its_base_and_left_as_given():
+    """The rebuild copies a container before it writes, and a copy protocol
+    that hands back the very object would turn that write into a write on the
+    caller's payload (cleared and refilled with plain text); such a container
+    is rebuilt as its base class and the one given is left as given."""
+
+    class Section(RedactedSection):
+        value: Optional[Dict[str, Union[_Closed, Any]]] = None
+
+    marker = env_resolved_scalar("loose-text", VARIABLE)
+    clinging = _Clinging({"deep": marker})
+    section = Section.model_validate({"value": {"free": clinging}})
+    assert clinging["deep"] is marker
+    rebuilt = section.value["free"]
+    assert type(rebuilt) is dict
+    assert type(rebuilt["deep"]) is str
+    assert rebuilt["deep"] == "loose-text"

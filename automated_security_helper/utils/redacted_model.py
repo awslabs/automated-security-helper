@@ -1712,13 +1712,19 @@ def _arm_validates(arm: Any, value: Any) -> bool:
 
     A value that holds no marker has nothing for the arm to vouch for, and an
     arm pydantic cannot build, or whose validation raises anything but a
-    ValidationError, cannot be read: both answer True, as before this read."""
+    ValidationError, cannot be read: both answer True, as before this read. An
+    arm that cannot be built under the holder's config is read under the
+    default config first, so a config the wrapper cannot carry costs the read
+    its config, not the read itself."""
     if not isinstance(value, (list, tuple, set, frozenset, dict)):
         return True
     if not _holds_env_scalar(value):
         return True
     config = _WALK_CONFIG.get()
     adapter = _arm_adapter(arm, config)
+    if adapter is None and config is not None:
+        config = None
+        adapter = _arm_adapter(arm)
     if adapter is None:
         return True
     try:
@@ -2627,11 +2633,16 @@ def _shallow_copy_of(node: Any, base: type) -> Any:
     """A shallow copy of the container *node* as its own class (``copy.copy``
     keeps a defaultdict's factory, a Counter's or an OrderedDict's class, a
     deque's maxlen); a container of the plain *base* class when the class
-    cannot be copied."""
+    cannot be copied, or when its copy protocol answers with *node* itself,
+    since the caller then writes into the copy and must never write into
+    what it was given."""
     try:
-        return copy.copy(node)
+        fresh = copy.copy(node)
     except Exception:  # a subclass whose copy protocol fails
         return base(node)
+    if fresh is node:
+        return base(node)
+    return fresh
 
 
 #: The value annotation a model's declared ``__pydantic_extra__`` gives its

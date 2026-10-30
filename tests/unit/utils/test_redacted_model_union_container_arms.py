@@ -249,3 +249,30 @@ def test_a_section_arm_is_validated_with_the_loads_context():
         context={"strict_file_load": True},
     )
     _assert_named_not_echoed(text, "value")
+
+
+def test_an_arm_whose_configured_adapter_cannot_be_built_is_read_under_the_default(
+    monkeypatch,
+):
+    """An arm read under the holder's config whose configured adapter pydantic
+    cannot build was taken to vouch for the value unread; it is read under the
+    default config instead, and an arm that then refuses the value does not
+    vouch. The configured build's failure is stood in for by an adapter
+    builder that answers None whenever a config is given, since no config of
+    the project's models makes the wrapped build fail."""
+    from automated_security_helper.utils import redacted_model as module
+
+    real = module._arm_adapter
+
+    def without_a_configured_build(annotation, config=None):
+        return None if config is not None else real(annotation)
+
+    monkeypatch.setattr(module, "_arm_adapter", without_a_configured_build)
+    token = module._WALK_CONFIG.set(ConfigDict(extra="forbid"))
+    try:
+        vouched = module._arm_validates(
+            List[int], [env_resolved_scalar("not-a-number", VARIABLE)]
+        )
+    finally:
+        module._WALK_CONFIG.reset(token)
+    assert vouched is False
