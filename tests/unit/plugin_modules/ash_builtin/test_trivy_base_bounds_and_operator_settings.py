@@ -13,7 +13,9 @@ Each test here pins one reading that went wrong before:
 - the misconfiguration-scanner list read from ``trivy --help`` was cached by
   path alone, so a trivy upgraded in place kept the old release's names.
 - the ``--skip-files`` / ``--skip-dirs`` tokens for ignored paths had no bound,
-  so a large tree could keep trivy from starting (ARG_MAX).
+  so a large tree could keep trivy from starting (ARG_MAX); then one bound sized
+  for Linux, past Windows' command-line limit, with the file tokens ahead of the
+  directory tokens that prune whole subtrees.
 - ASH's own skip flags replaced the operator's ``TRIVY_SKIP_DIRS`` /
   ``TRIVY_SKIP_FILES`` and config-file lists instead of adding to them.
 - a ``--skip-dirs`` path holding a line break was passed as written, which
@@ -38,6 +40,7 @@ Each test here pins one reading that went wrong before:
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -53,10 +56,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners import (
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
     _MAX_GO_DURATION_SECONDS,
     _SKIP_ARGS_BUDGET,
+    _SKIP_ARGS_FLOOR,
     _TRIVY_DEFAULT_SCANNERS,
     OUTPUT_RESTRICTING_TRIVY_ENV,
     UNBOUNDED_TRIVY_TIMEOUT,
     TrivyScannerBase,
+    skip_args_budget,
     skip_dirs_value,
     trivy_default_misconfig_scanners,
     trivy_severity,
@@ -341,7 +346,11 @@ def test_ignored_paths_past_the_argument_budget_are_left_out_with_a_warning(
     assert str(len(many) - len(tokens)) in warning
 
 
-def test_control_a_few_ignored_paths_are_all_passed(tmp_path, monkeypatch):
+def test_control_a_few_ignored_paths_are_all_passed_directories_first(
+    tmp_path, monkeypatch
+):
+    """A ``--skip-dirs`` token prunes a whole subtree where a ``--skip-files``
+    token covers one file, so the directories go first and are the last dropped."""
     scanner = _repo_scanner(tmp_path)
     monkeypatch.setattr(
         trivy_base, "trivy_skip_files", lambda *a, **k: ["a.txt", "b/c.txt"]
@@ -353,11 +362,54 @@ def test_control_a_few_ignored_paths_are_all_passed(tmp_path, monkeypatch):
         tokens = scanner._link_skip_args(Path(scanner.context.source_dir), [])
 
     assert tokens == [
+        "--skip-dirs=vendor/",
         "--skip-files=a.txt",
         "--skip-files=b/c.txt",
-        "--skip-dirs=vendor/",
     ]
     assert messages == []
+
+
+def test_under_a_small_budget_the_directory_tokens_survive_the_file_tokens(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path)
+    monkeypatch.setattr(trivy_base, "trivy_skip_files", lambda *a, **k: ["a.txt"])
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: ["vendor/"])
+    monkeypatch.setattr(trivy_base, "skip_args_budget", lambda environment: 25)
+
+    with patch.object(scanner, "_plugin_log"):
+        tokens = scanner._link_skip_args(Path(scanner.context.source_dir), [])
+
+    assert tokens == ["--skip-dirs=vendor/"]
+
+
+def test_the_budget_on_windows_fits_the_command_line_limit(monkeypatch):
+    """CreateProcess holds the whole command line to 32,767 characters; a budget
+    near 1 MB kept trivy from starting there."""
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    assert 0 < skip_args_budget({}) <= 32_767
+
+
+def test_the_budget_elsewhere_reads_the_hosts_arg_max_less_the_environment(
+    monkeypatch,
+):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(trivy_base.os, "sysconf", lambda name: 2_000_000)
+
+    assert skip_args_budget({}) == _SKIP_ARGS_BUDGET
+    assert skip_args_budget({"A": "x" * 100_000}) == 1_000_000 - (1 + 100_000 + 2)
+    assert skip_args_budget({"A": "x" * 2_000_000}) == _SKIP_ARGS_FLOOR
+
+
+def test_control_a_host_that_does_not_answer_gets_the_ceiling(monkeypatch):
+    def unknown(name):
+        raise ValueError(name)
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(trivy_base.os, "sysconf", unknown)
+
+    assert skip_args_budget({"A": "x" * 100_000}) == _SKIP_ARGS_BUDGET
 
 
 # --- the operator's own skip lists --------------------------------------------------

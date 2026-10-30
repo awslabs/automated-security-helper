@@ -32,6 +32,7 @@ import logging
 import math
 import os
 import re
+import sys
 import threading
 from pathlib import Path
 from typing import (
@@ -41,6 +42,7 @@ from typing import (
     Dict,
     Generic,
     List,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -204,10 +206,48 @@ _SEVERITY_ORDER = (*TRIVY_SEVERITIES, "UNKNOWN")
 _GLOB_SPECIAL = frozenset("*?[]{}\\")
 
 #: The most bytes the ``--skip-files`` and ``--skip-dirs`` tokens for the ignored
-#: paths may take together. Linux starts a program with about 2 MiB of arguments
-#: and environment (ARG_MAX), so the ignore paths of a large tree, one token each,
-#: could otherwise keep trivy from starting at all.
+#: paths may take together, and the whole budget where the host's own bound is not
+#: read. Linux starts a program with about 2 MiB of arguments and environment
+#: (ARG_MAX), so the ignore paths of a large tree, one token each, could otherwise
+#: keep trivy from starting at all. ``skip_args_budget`` reads the host's bound
+#: where it can and never answers more than this.
 _SKIP_ARGS_BUDGET = 1_000_000
+
+#: The budget on Windows, where CreateProcess holds the whole command line to
+#: 32,767 characters and the rest of the argv needs its share.
+_WINDOWS_SKIP_ARGS_BUDGET = 30_000
+
+#: The least the budget is cut to, so a host with a very large environment still
+#: gets the first ignored paths as skip flags.
+_SKIP_ARGS_FLOOR = 16_384
+
+
+def skip_args_budget(environment: Mapping[str, str]) -> int:
+    """How many bytes the skip tokens for the ignored paths may take on this host.
+
+    Windows: ``_WINDOWS_SKIP_ARGS_BUDGET``. Elsewhere half of the host's ARG_MAX
+    (``os.sysconf``; about 2 MiB on Linux, about 1 MiB on macOS, where it covers
+    the arguments, the environment and their pointers together) less the bytes
+    ``environment`` takes, floored at ``_SKIP_ARGS_FLOOR`` and never above
+    ``_SKIP_ARGS_BUDGET``; the ceiling alone where the host does not answer. One
+    figure sized for Linux still kept trivy from starting on the other two.
+    """
+    if sys.platform == "win32":
+        return _WINDOWS_SKIP_ARGS_BUDGET
+    try:
+        arg_max = int(os.sysconf("SC_ARG_MAX"))
+    except (AttributeError, OSError, ValueError):
+        return _SKIP_ARGS_BUDGET
+    if arg_max <= 0:
+        return _SKIP_ARGS_BUDGET
+    environment_size = sum(
+        len(os.fsencode(key)) + len(os.fsencode(value)) + 2
+        for key, value in environment.items()
+    )
+    return max(
+        _SKIP_ARGS_FLOOR, min(_SKIP_ARGS_BUDGET, arg_max // 2 - environment_size)
+    )
+
 
 #: Settings in trivy's environment that remove results from its report with
 #: nothing in the run saying so, each the TRIVY_ form of a trivy flag: --severity,
@@ -895,31 +935,34 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         ``global_ignore_paths`` ignores, picked as ASH matches them below the source
         directory. In the joined form, since a path can start with "-".
 
-        Bounded: the tokens together take at most ``_SKIP_ARGS_BUDGET`` bytes, so a
-        tree with thousands of ignored files cannot push trivy's argument list past
-        the size the OS starts a program with (Linux: about 2 MiB for arguments and
-        environment together). The links come first, since trivy skips them on its
-        own in any case; an ignored path left out is read by trivy and ASH drops its
-        findings after the scan, as for a path the option cannot carry.
+        Bounded: the tokens together take at most ``skip_args_budget`` bytes for
+        this host and the scan's environment, so a tree with thousands of ignored
+        files cannot push trivy's argument list past the size the OS starts a
+        program with. The ``--skip-dirs`` tokens come first: each prunes a whole
+        subtree, where a ``--skip-files`` token covers one file, and the links among
+        those trivy skips on its own in any case. An ignored path left out is read
+        by trivy and ASH drops its findings after the scan, as for a path the
+        option cannot carry.
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         source_dir = self.context.source_dir
         wanted = [
             *(
-                f"--skip-files={path}"
-                for path in trivy_skip_files(target, source_dir, global_ignore_paths)
-            ),
-            *(
                 f"--skip-dirs={path}"
                 for path in trivy_skip_dirs(target, source_dir, global_ignore_paths)
             ),
+            *(
+                f"--skip-files={path}"
+                for path in trivy_skip_files(target, source_dir, global_ignore_paths)
+            ),
         ]
+        budget = skip_args_budget(self._scan_environment())
         kept: List[str] = []
         size = 0
         for token in wanted:
             size += len(os.fsencode(token)) + 1
-            if size > _SKIP_ARGS_BUDGET:
+            if size > budget:
                 break
             kept.append(token)
         if len(kept) < len(wanted):
