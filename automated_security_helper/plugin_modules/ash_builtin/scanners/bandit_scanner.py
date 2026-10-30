@@ -1873,11 +1873,13 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             ScannerError: When bandit scanned no file of the Python files there.
         """
         scanned = None
+        skipped_all: Set[str] = set()
         for run in sarif_report.runs or []:
             properties = run.properties.model_dump() if run.properties else {}
             metrics = properties.get("metrics")
             if isinstance(metrics, dict):
                 skipped = _skipped_file_paths(run)
+                skipped_all.update(skipped)
                 scanned = (scanned or 0) + sum(
                     1
                     for key in metrics
@@ -1936,9 +1938,21 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             if not any(fnmatch.fnmatch(path, e) or e in path for e in entries)
         ]
         if unexcluded:
+            # A file bandit named as unparseable (a syntax error, Python 2 code)
+            # is not an exclusion problem, and the error said only that the
+            # files were "not excluded", so the operator went looking for one.
+            # The cause is named with an example.
+            failed = [path for path in unexcluded if path in skipped_all]
+            cause = (
+                f"; bandit could not parse {len(failed)} of them (for example "
+                f"{failed[0]!r})"
+                if failed
+                else ""
+            )
             raise ScannerError(
                 f"bandit scanned no file below {root}, though {len(unexcluded)} Python "
-                "files there are not excluded, so its result says nothing about them."
+                f"files there are not excluded{cause}, so its result says nothing "
+                "about them."
             )
         self.targets_attempted = 0
 

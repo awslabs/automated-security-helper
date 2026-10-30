@@ -463,11 +463,17 @@ def test_a_file_bandit_could_not_parse_is_not_counted_as_scanned(tmp_path):
 
 
 def test_a_target_whose_every_file_failed_to_parse_is_not_passed(tmp_path):
+    """The error names the cause: the files bandit could not parse, with an
+    example. It said only that they were "not excluded", which sent the
+    operator looking for an exclusion problem."""
     source = _tree(tmp_path, ["a.py"])
     scanner = _scanner(source, tmp_path)
 
-    with pytest.raises(ScannerError, match="scanned no file"):
+    with pytest.raises(ScannerError, match="scanned no file") as raised:
         scanner._record_scanned_files(_report(source, [], ["a.py"]), [], source)
+
+    assert "could not parse 1 of them" in str(raised.value)
+    assert f"{source.as_posix()}/a.py" in str(raised.value)
 
 
 def test_the_skipped_files_are_still_read_after_the_invocation_record(tmp_path):
