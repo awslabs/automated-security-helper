@@ -1832,14 +1832,21 @@ def _check_the_plans_operator_config(
             f"{expected.as_posix() if expected else 'none'}. Resolve the workspace "
             "again with the same --config as the scan."
         )
+    # The digest is read from the operator's file itself, the one the resolver
+    # took it from (its `_operator_config`, the same value `operator` holds
+    # here), for every project the file governs: layered over the project's own
+    # config, or the project's config itself because it declares none. Reading
+    # `project.operator_config` instead left the second kind unchecked, since
+    # that field is None for it, and a rewrite of the operator's file between
+    # plan and scan went undetected for every project without a config of its
+    # own. The layering check above has already settled which file this is.
     if (
-        project.operator_config is not None
+        operator is not None
         and project.operator_config_digest is not None
-        and operator_config_digest(project.operator_config)
-        != project.operator_config_digest
+        and operator_config_digest(operator) != project.operator_config_digest
     ):
         raise ASHConfigValidationError(
-            f"The operator config {project.operator_config} changed after "
+            f"The operator config {operator.as_posix()} changed after "
             f"project '{project.key}' was planned, so the scan would not run the "
             "plan. Resolve the workspace again."
         )
