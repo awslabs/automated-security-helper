@@ -1654,8 +1654,15 @@ def apply_suppressions_to_sarif(
                         output_exclusion.record(uri)
                         is_in_ignorable_path = True
                         continue
-                    matched_ignore = output_exclusion.ignore_path_for(
-                        raw_uri, ignore_paths
+                    # An ignore path is a suppression, so --ignore-suppressions
+                    # lifts it like the rest (docs: concepts/suppressions.md). The
+                    # scan skips this function under the flag; a direct caller
+                    # with the flag set gets the same answer here. The output
+                    # directory exclusion above is not a suppression and stays.
+                    matched_ignore = (
+                        None
+                        if ignore_suppressions
+                        else output_exclusion.ignore_path_for(raw_uri, ignore_paths)
                     )
                     if matched_ignore is not None:
                         ASH_LOGGER.verbose(
