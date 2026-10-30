@@ -611,14 +611,23 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             refused_derived_product,
             resolved_path,
         )
+        from automated_security_helper.config.sandbox_grants import (
+            checkout_containing,
+            is_within,
+        )
 
         context_config = getattr(self.context, "config", None)
         source_dir = Path(getattr(self.context, "source_dir", None) or ".")
-        # The checkout the scanned directory sits in (the workspace root in
-        # workspace mode), the root the settings-trust rule judges by
-        # (_untrusted_baseline_reason); the scanned directory itself when the
-        # config records none.
-        checkout_root = getattr(context_config, "_scanned_root", None) or source_dir
+        # Where an in-tree baseline that is a link may point: the NEAREST git
+        # checkout holding the scanned directory (the repository whose file
+        # the link is; a monorepo's ``service/`` is inside it), or the scanned
+        # directory itself when no checkout holds it. Not every ancestor
+        # checkout: a scan under a home directory that is itself a checkout
+        # would otherwise let a committed link reach any file under that
+        # home. The settings-trust rule (_untrusted_baseline_reason) still
+        # judges by every enclosing checkout, which only widens what reads as
+        # the repository's.
+        admitted_link_root = checkout_containing(source_dir) or source_dir
 
         # Look through each baseline file path to see if it exists and configure
         # the scan settings according to the first baseline file found. Each
@@ -654,10 +663,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
             )
             if resolved_baseline.exists():
-                if (
-                    not from_option
-                    and scanned_checkout_reason(resolved_baseline, checkout_root)
-                    is None
+                if not from_option and not is_within(
+                    resolved_baseline, admitted_link_root
                 ):
                     # A baseline found in the tree is the repository's file,
                     # and the repository cannot need it to point outside its
@@ -665,18 +672,20 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     # repository chose anywhere on the scanning host, under
                     # the repository's own settings. The operator names such
                     # a file with baseline_file. A target elsewhere in the
-                    # checkout that holds the scanned directory (a monorepo's
-                    # ``service/.secrets.baseline -> ../.secrets.baseline``) is
-                    # read: it is the repository's own file, and the trust rule
-                    # judges it as such, so reading it grants nothing.
+                    # nearest checkout that holds the scanned directory (a
+                    # monorepo's ``service/.secrets.baseline ->
+                    # ../.secrets.baseline``) is read: it is the repository's
+                    # own file, and the trust rule judges it as such, so
+                    # reading it grants nothing. A target in an outer
+                    # checkout above that one is not the repository's.
                     ASH_LOGGER.warning(
                         text_without_values(
                             f"Not reading the detect-secrets baseline "
                             f"{named.as_posix()} found in the scanned tree: it is "
                             "a link to a file outside the scanned directory and "
-                            "the git checkout that holds it. Name the file with "
-                            "scanners.detect-secrets.options.baseline_file to "
-                            "use it.",
+                            "the nearest git checkout that holds it. Name the "
+                            "file with scanners.detect-secrets.options.baseline_file "
+                            "to use it.",
                             values,
                         )
                     )
