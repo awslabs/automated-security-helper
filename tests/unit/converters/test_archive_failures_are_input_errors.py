@@ -181,6 +181,17 @@ def test_a_failure_of_the_run_is_a_tool_error_that_no_suppression_accepts(
         ),
         pytest.param(OSError(errno.EDQUOT, "Disk quota exceeded"), "tool", id="quota"),
         pytest.param(OSError(errno.EROFS, "Read-only file system"), "tool", id="rofs"),
+        pytest.param(OSError(errno.EMFILE, "Too many open files"), "tool", id="emfile"),
+        pytest.param(
+            OSError(errno.ENFILE, "Too many open files in system"), "tool", id="enfile"
+        ),
+        pytest.param(OSError(errno.EIO, "Input/output error"), "tool", id="eio"),
+        pytest.param(
+            OSError(errno.ENOMEM, "Cannot allocate memory"), "tool", id="enomem"
+        ),
+        pytest.param(
+            OSError(errno.EBUSY, "Device or resource busy"), "tool", id="ebusy"
+        ),
         pytest.param(MemoryError(), "tool", id="memory"),
         pytest.param(AttributeError("defect"), "tool", id="defect"),
         pytest.param(RuntimeError("defect"), "tool", id="runtime-defect"),

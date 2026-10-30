@@ -1343,13 +1343,27 @@ _ARCHIVE_UNREADABLE_ERRORS: Tuple[type, ...] = (
 )
 
 #: The OSError numbers that say the RUN could not write: the work directory is
-#: full, over quota, read-only, or not this user's to write. Every other OSError
-#: raised while an archive is extracted comes from the archive: a member name a
-#: filesystem refuses (too long, not valid in its encoding), a member that names a
-#: file where an earlier member made a directory or the reverse, a decompressor's
-#: "Invalid data stream" (BZ2File raises OSError for a damaged bz2 stream).
+#: full, over quota, read-only, or not this user's to write, the process or the
+#: host is out of file descriptors or memory, the device failed, or a path is
+#: busy. Every other OSError raised while an archive is extracted comes from the
+#: archive: a member name a filesystem refuses (too long, not valid in its
+#: encoding), a member that names a file where an earlier member made a directory
+#: or the reverse, a decompressor's "Invalid data stream" (BZ2File raises OSError
+#: for a damaged bz2 stream). A run's failure is never accepted by a suppression,
+#: so an errno left out of this set would let the host's own fault be waived.
 _RUN_ERRNOS = frozenset(
-    {errno.ENOSPC, errno.EDQUOT, errno.EACCES, errno.EPERM, errno.EROFS}
+    {
+        errno.ENOSPC,
+        errno.EDQUOT,
+        errno.EACCES,
+        errno.EPERM,
+        errno.EROFS,
+        errno.EMFILE,
+        errno.ENFILE,
+        errno.EIO,
+        errno.ENOMEM,
+        errno.EBUSY,
+    }
 )
 
 #: Decompressor error classes read by name: the zstd module is optional and its
