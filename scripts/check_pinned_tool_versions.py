@@ -49,7 +49,8 @@ script reads those pins from the Dockerfile and looks each one up in the package
 indexes apt reads in the image, for amd64 and arm64: the base image's Debian suite
 with its ``-updates`` and ``-security`` suites (the codename comes from the
 ``BASE_IMAGE`` tag), and the NodeSource repository for the major the Dockerfile
-configures, in ``NODE_MAJOR`` or in the ``node_<major>.x`` URL. Each pin is reported as
+configures, in ``NODE_MAJOR`` or in a ``node_<major>.x`` or ``setup_<major>.x`` URL.
+Each pin is reported as
 
 * ``current``: the version apt would choose today;
 * ``outdated``: still installable, but a newer version is published, typically a
@@ -63,12 +64,20 @@ install is found in a ``RUN`` of any case, whether written in shell form, as an 
 form array or as a here-document, and whether spelled ``apt-get`` or ``apt``. The body
 of a here-document that a command writes to a file (``cat > setup.sh <<'EOF'``) is read
 too, because the file may be run later in the build: an unpinned package in it is
-refused and a pinned one is looked up. Only a shell expansion in it (``"$@"``,
-``${PKGS}``), which is whatever the script's caller passes, is not a package. An
-option that takes its value as a separate word (``-t suite``, ``-o Name=value``) and a
-redirection are not packages. A Dockerfile that configures NodeSource without a major this script can read, or with
-two different majors, is refused too, because the nodejs pin would be looked up in
-Debian's own nodejs or in the wrong NodeSource index.
+refused and a pinned one is looked up. Only a positional parameter in it (``"$@"``,
+``$1``, ``${2}``), which is whatever the script's caller passes, is not a package; a
+named variable (``$PKGS``, ``jq=${JQ_VERSION}``) or a command substitution
+(``$(cat list)``) is refused as it is in a plain ``RUN``, because the packages it names
+cannot be looked up. Such a body is read only when its marker is quoted (``<<'EOF'``);
+an unquoted marker has the build shell expand the body first, so it is read as the
+``RUN`` text it becomes. Every file body is read as shell, whatever the file is. A body
+that is not a script, a motd or a README that mentions ``apt-get install``, is skipped
+by putting ``# apt-pin-check: skip`` on a line of its own directly above its ``RUN``
+(blank lines and other comments between them are allowed). An option that takes its
+value as a separate word (``-t suite``, ``-o Name=value``) and a redirection are not
+packages. A Dockerfile that configures NodeSource without a major this script can
+read, or with two different majors, is refused too, because the nodejs pin would be
+looked up in Debian's own nodejs or in the wrong NodeSource index.
 
 What was rejected
 -----------------
@@ -1320,8 +1329,15 @@ _COMMAND_END = re.compile(r"\|\||&&|[;|]|(?<![<>&])&(?![>&])")
 _FILE_REDIRECT = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?!/dev/null(?![\w/.-]))[^\s<>|;&]")
 # A redirection or a here-document marker among the words of a command.
 _REDIRECT_WORD = re.compile(r"(?:&|\d*)>>?\s*\S*|<<-?\s*[\"']?\w+[\"']?")
-# A command substitution, $(...) or `...`, in the arguments of an install in a script.
-_SUBSTITUTION = re.compile(r"\$\([^()]*\)|`[^`]*`")
+# What _split_substitutions leaves in place of a command substitution, $(...) or
+# `...`: one word, with no shell metacharacter in it, that no package spelling matches.
+_SUBSTITUTION_WORD = "$(...)"
+# A positional or special parameter given as a whole word: $@, $*, $1, ${2}. In a script
+# written to a file it is whatever the script's caller passes, which is checked where
+# the caller is. Any other expansion names packages no lookup can see.
+_POSITIONAL_PARAMETER = re.compile(r"\$(?:[@*]|\d+|\{(?:[@*]|\d+)\})")
+# A comment line above a RUN that says the bodies of its here-documents are not scripts.
+_SKIP_FILE_BODIES = re.compile(r"#\s*apt-pin-check:\s*skip\s*")
 # Shells, which run the body of a here-document they are given, and the commands that
 # start the user's shell and give it their input: ``su - user <<EOF``.
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ash", "ksh", "su", "runuser"})
@@ -1367,8 +1383,11 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     ``cat <<EOF >> conf``, ``tee setup.sh <<EOF``, ``cat <<EOF | tee setup.sh``,
     ``install -D /dev/stdin x <<EOF``) and none of them is a shell. A body given to a
     shell (``bash <<EOF > log``), or to commands that write no file, is commands. Both
-    are read for installs; the flag only decides whether a shell expansion in an
-    install is a package to refuse.
+    are read for installs; the flag only decides whether a positional parameter in an
+    install (``"$@"``) is skipped as the caller's. A marker that is not quoted
+    (``<<EOF``, not ``<<'EOF'``) has the build shell expand the body as it is written,
+    so what lands in the file is whatever the RUN's variables were; that body is read
+    as commands too.
     """
     cleaned = _ARITHMETIC.sub(" ", line)
     segments: list[tuple[int, int, str]] = []  # (start, stop, what ended the command)
@@ -1395,7 +1414,8 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
             writes = writes or bool(_FILE_REDIRECT.search(command))
             writes = writes or _writes_a_file(words)
             shell = shell or _runs_a_shell(words)
-        markers.append((match.group(2), writes and not shell))
+        quoted = bool(match.group(1))
+        markers.append((match.group(2), writes and not shell and quoted))
     return markers
 
 
@@ -1425,9 +1445,10 @@ class _RunBlock:
     """The (line number, text) lines of one RUN instruction, or of a file body in it."""
 
     lines: list[tuple[int, str]]
-    # The lines are the content of a file the instruction writes (``cat > x <<'EOF'``),
-    # a script that may be run later. They are read as commands all the same, but the
-    # shell expansions in them (``"$@"``) are not packages this check can look up.
+    # The lines are the content of a file the instruction writes with a quoted marker
+    # (``cat > x <<'EOF'``), a script that may be run later. They are read as commands
+    # all the same, but a positional parameter in them (``"$@"``) is whatever the
+    # script's caller passes, not a package this check can look up.
     file_content: bool = False
 
 
@@ -1439,9 +1460,12 @@ def _run_blocks(text: str) -> list[_RunBlock]:
     The body of a here-document belongs to the instruction, each of its lines ended
     with ``;`` as the shell ends a command at a newline, except a line that ends with
     a backslash, which continues on the next. The body of a here-document written to
-    a file (``cat > setup.sh <<'EOF'``) is a block of its own, flagged
-    ``file_content``: the file may be run later in the build, so its installs are
-    read, not skipped. An instruction still open at the end of the file is kept.
+    a file with a quoted marker (``cat > setup.sh <<'EOF'``) is a block of its own,
+    flagged ``file_content``: the file may be run later in the build, so its installs
+    are read, not skipped. Those bodies are dropped instead when a comment line
+    ``# apt-pin-check: skip`` stands directly above the RUN (blank lines and other
+    comments may come between), for a file that is not a script. An instruction still
+    open at the end of the file is kept.
     """
     blocks: list[_RunBlock] = []
     current: list[tuple[int, str]] | None = None
@@ -1449,11 +1473,13 @@ def _run_blocks(text: str) -> list[_RunBlock]:
     # order the shell reads them
     terminators: list[tuple[str, bool]] = []
     file_body: list[tuple[int, str]] = []  # the body being read, if it is a file's
+    skip_bodies = False  # a skip comment stands above the next RUN
+    run_skips_bodies = False  # the RUN being read has one
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if current is not None and terminators:
             if line == terminators[0][0]:
-                if terminators[0][1] and file_body:
+                if terminators[0][1] and file_body and not run_skips_bodies:
                     blocks.append(_RunBlock(file_body, file_content=True))
                 file_body = []
                 terminators.pop(0)
@@ -1470,9 +1496,16 @@ def _run_blocks(text: str) -> list[_RunBlock]:
                     target.append((number, f"{line} ;"))
             continue
         if current is None:
+            if not line:
+                continue
+            if line.startswith("#"):
+                skip_bodies = skip_bodies or bool(_SKIP_FILE_BODIES.fullmatch(line))
+                continue
             if not _RUN_INSTRUCTION.match(line):
+                skip_bodies = False
                 continue
             current = []
+            run_skips_bodies, skip_bodies = skip_bodies, False
             line = line[3:].strip()
         elif not line or line.startswith("#"):
             continue
@@ -1483,12 +1516,12 @@ def _run_blocks(text: str) -> list[_RunBlock]:
             continue
         # The command is the whole logical line, as Docker joins it: a shell named on
         # one physical line takes the here-document marker on the next.
-        terminators = _heredoc_markers(" ".join(text for _, text in current))
+        terminators = _heredoc_markers(" ".join(part for _, part in current))
         if terminators:
             continue
         blocks.append(_RunBlock(current))
         current = None
-    if file_body:
+    if file_body and not run_skips_bodies:
         blocks.append(_RunBlock(file_body, file_content=True))
     if current:
         blocks.append(_RunBlock(current))
@@ -1552,6 +1585,49 @@ def _install_words(args: str) -> list[str]:
     return words
 
 
+def _split_substitutions(text: str) -> list[str]:
+    """``text`` with each command substitution cut out, then each one's own text.
+
+    ``$(...)``, backticks and arithmetic ``$((...))`` become one word,
+    ``_SUBSTITUTION_WORD``, so a ``|``, ``;`` or ``&`` inside one does not end the
+    install it belongs to part way (``apt-get install -y $(grep x list | xargs)``),
+    and so the word is named in the refusal instead of the half of it that was left.
+    What is inside is read after the text around it, because it can hold an install
+    of its own. A substitution that is not closed is left as written.
+    """
+    outer: list[str] = []
+    inner: list[str] = []
+    position = 0
+    while position < len(text):
+        char = text[position]
+        end = -1
+        if text.startswith("$(", position):
+            depth = 0
+            for index in range(position + 1, len(text)):
+                if text[index] == "(":
+                    depth += 1
+                elif text[index] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        end = index
+                        break
+            start = position + 2
+        elif char == "`":
+            end = text.find("`", position + 1)
+            start = position + 1
+        if end == -1:
+            outer.append(char)
+            position += 1
+            continue
+        outer.append(_SUBSTITUTION_WORD)
+        inner.append(text[start:end])
+        position = end + 1
+    found = ["".join(outer)]
+    for part in inner:
+        found.extend(_split_substitutions(part))
+    return found
+
+
 def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
     """Every ``package=version`` an ``apt-get install`` in ``dockerfile`` names.
 
@@ -1564,32 +1640,38 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
     lines: dict[str, list[int]] = {}
     for run in _run_blocks(dockerfile.read_text(encoding="utf-8")):
         block = run.lines
-        for match in _APT_INSTALL.finditer(_block_text(block)):
-            args = match.group("args")
-            if run.file_content:
-                # A script the image gets: "$@" or ${PKGS} is whatever its caller
-                # passes, which no pin lookup can see. A real package is still checked.
-                args = _SUBSTITUTION.sub(" ", args)
-            for word in _install_words(args):
-                if run.file_content and "$" in word:
-                    continue
-                pin = _APT_PIN.match(word)
-                if pin is None:
-                    raise PinEnumerationError(
-                        f"{dockerfile.name}:{block[0][0]} installs {word!r} with apt-get "
-                        "and no version. Pin it as package=version; see the comment "
-                        "above the first apt-get install for where versions come from."
+        for shell in _split_substitutions(_block_text(block)):
+            for match in _APT_INSTALL.finditer(shell):
+                for word in _install_words(match.group("args")):
+                    if run.file_content and _POSITIONAL_PARAMETER.fullmatch(word):
+                        # A script the image gets: "$@" is whatever its caller
+                        # passes, and the caller's install is checked where it is.
+                        continue
+                    where = f"{dockerfile.name}:{block[0][0]}"
+                    if _SUBSTITUTION_WORD in word:
+                        raise PinEnumerationError(
+                            f"{where} installs {word!r} with apt-get, naming a "
+                            "package through a command substitution that this check "
+                            "cannot read. Spell each package as package=version."
+                        )
+                    pin = _APT_PIN.match(word)
+                    if pin is None:
+                        raise PinEnumerationError(
+                            f"{where} installs {word!r} with apt-get and no version. "
+                            "Pin it as package=version; see the comment above the "
+                            "first apt-get install for where versions come from."
+                        )
+                    package, version = pin.group("package"), pin.group("version")
+                    if versions.setdefault(package, version) != version:
+                        raise PinEnumerationError(
+                            f"{package} is pinned to {versions[package]} and to "
+                            f"{version} in {dockerfile.name}; every stage has to "
+                            "install the same one."
+                        )
+                    lines.setdefault(package, []).extend(
+                        [number for number, part in block if word in _line_words(part)]
+                        or [block[0][0]]
                     )
-                package, version = pin.group("package"), pin.group("version")
-                if versions.setdefault(package, version) != version:
-                    raise PinEnumerationError(
-                        f"{package} is pinned to {versions[package]} and to {version} "
-                        f"in {dockerfile.name}; every stage has to install the same one."
-                    )
-                lines.setdefault(package, []).extend(
-                    [number for number, text in block if word in _line_words(text)]
-                    or [block[0][0]]
-                )
     return [
         AptPin(package, versions[package], tuple(sorted(set(lines[package]))))
         for package in sorted(versions)
@@ -1663,8 +1745,8 @@ def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
     default's tag that is not an image variant (``python:3.12-slim-bookworm``,
     ``debian:bookworm-slim``, ``debian:bookworm-20241016-slim``), with any
     ``@sha256:...`` digest left out. The NodeSource repository is the major that
-    ``NODE_MAJOR`` or a ``node_<major>.x`` repository URL names, so a base-image or
-    Node bump moves the lookup with it.
+    ``NODE_MAJOR``, a ``node_<major>.x`` repository URL or a ``setup_<major>.x`` setup
+    script URL names, so a base-image or Node bump moves the lookup with it.
 
     Raises:
         PinEnumerationError: when the tag holds no codename, when the Dockerfile
