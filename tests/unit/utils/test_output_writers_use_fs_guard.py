@@ -374,6 +374,10 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "JupyterConverter._stage_notebook",
         "write_bytes",
     ): (1, "the converter's own TemporaryDirectory for nbconvert"),
+    (f"{_ASH}/schemas/generate_schemas.py", "_write_if_changed", "os.open"): (
+        1,
+        "the JSON schemas in the source checkout, a development step",
+    ),
     (f"{_ASH}/schemas/generate_schemas.py", "_write_if_changed", "os.fdopen"): (
         1,
         "the JSON schemas in the source checkout, a development step",
