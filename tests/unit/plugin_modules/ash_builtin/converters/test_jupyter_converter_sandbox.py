@@ -902,20 +902,24 @@ class TestTheConverterConfinesItselfOutsideThePhase:
     """The converter's own guards, used where no convert phase sets a scope.
 
     A library caller can build a JupyterConverter and call it directly. Its
-    construction probe, its dependency check and its refusal to install must hold
-    without the phase's scopes, and each is tested on its own here: the install
-    guard with the probe scope removed, so the runner's in-scope refusal cannot
-    stand in for it.
+    construction (which records the nbconvert version probe and starts nothing),
+    its dependency check (which runs that probe, sandboxed) and its refusal to
+    install must hold without the phase's scopes, and each is tested on its own
+    here: the install guard with the probe scope removed, so the runner's in-scope
+    refusal cannot stand in for it.
     """
 
     def test_construction_and_the_dependency_check_are_planned(
         self, tmp_path, tree, backend, monkeypatch
     ):
-        """Every process each step runs was planned by the backend, counted.
+        """Construction starts nothing; what the dependency check runs was planned.
 
-        Construction and the dependency check are counted apart, so the check's own
-        scope is what plans its calls, and by count rather than by argv alone: a
-        second, unplanned run of a planned command shows up too.
+        Construction only records the version probe (the converter builds itself
+        inside ``deferred_tool_version_probes``), so a process started there is a
+        probe that escaped the deferral and ran outside any scope. The check runs
+        the recorded probe inside its own scope, so the check's scope is what
+        plans its calls, counted rather than matched by argv alone: a second,
+        unplanned run of a planned command shows up too.
         """
         from collections import Counter
 
@@ -939,10 +943,16 @@ class TestTheConverterConfinesItselfOutsideThePhase:
         converter.validate_plugin_dependencies()
         check_ran = ran_since(calls_after_construction)
 
-        assert construction_ran, "construction ran nothing to check"
+        assert construction_ran == Counter(), (
+            f"construction started a process: {sorted(construction_ran)}"
+        )
+        assert spawns_after_construction == 0, (
+            "construction asked the sandbox backend to plan "
+            f"{spawns_after_construction} process(es)"
+        )
         assert check_ran, f"the dependency check ran nothing; calls: {tools.calls()}"
-        assert construction_ran - planned_since(0) == Counter(), (
-            "construction ran a process the sandbox backend did not plan"
+        assert any("--version" in call for call in check_ran), (
+            f"the dependency check did not run the version probe: {sorted(check_ran)}"
         )
         assert check_ran - planned_since(spawns_after_construction) == Counter(), (
             "the dependency check ran a process the sandbox backend did not plan: "
