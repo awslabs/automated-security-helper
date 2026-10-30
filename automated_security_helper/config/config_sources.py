@@ -1534,22 +1534,30 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
 _LINK_HOPS = 40
 
 
-def _names_a_windows_share(target: str) -> bool:
-    """Whether `target` is a UNC path, ``\\\\server\\share`` or ``//server/share``.
+_DRIVE_LETTER_ROOT = re.compile(r"[A-Za-z]:(?:\\|$)")
 
-    A path in the extended form, ``\\\\?\\...`` or ``\\\\.\\...``, names a share
-    only through its ``UNC`` device: ``\\\\?\\UNC\\server\\share`` does,
-    ``\\\\?\\C:\\repo`` is a local volume. ``os.readlink`` returns a junction's
-    target in that form, so the form is read here rather than taken for a
-    share by its two leading separators.
+
+def _may_reach_the_network(target: str) -> bool:
+    """Whether the text of a link `target` can name something other than a local path.
+
+    True for a UNC path, ``\\\\server\\share`` or ``//server/share``, and for a
+    path in the extended or device form (``\\\\?\\...``, ``\\\\.\\...`` or the
+    native ``\\??\\...``) unless its next part is a drive letter. The form is
+    what ``os.readlink`` returns for a junction, so ``\\\\?\\C:\\repo`` is a
+    local volume; ``\\\\?\\UNC\\server\\share``, ``\\\\?\\GLOBALROOT\\Device\\Mup\\...``,
+    ``\\\\?\\GLOBALROOT\\??\\UNC\\...`` and ``\\\\.\\pipe\\...`` can reach a host or
+    a device, and so does any device name not listed here. Only the drive-letter
+    form is admitted: a spelling the list does not know is refused. Both
+    separators are read as one, as Windows reads them.
     """
-    if target[:4] in ("\\\\?\\", "\\\\.\\", "//?/", "//./"):
-        return target[4:8].upper() in ("UNC\\", "UNC/")
-    return target.startswith(("\\\\", "//"))
+    text = target.replace("/", "\\")
+    if text[:4] in ("\\\\?\\", "\\\\.\\", "\\??\\"):
+        return _DRIVE_LETTER_ROOT.match(text[4:]) is None
+    return text.startswith("\\\\")
 
 
 def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
-    """Whether the link at `path`, or a link it leads to, names a network share.
+    """Whether the link at `path`, or a link it leads to, may reach the network.
 
     Read with ``os.readlink`` one hop at a time: reading a link's target opens
     the link's own entry, never what it names, so a chain is judged without a
@@ -1558,10 +1566,12 @@ def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
     name that is not a link, or that is not there: a local name is then all
     that resolving would open, and the answer is False.
 
-    None when the chain cannot be judged: a link whose target cannot be read, a
-    hop that cannot be examined, or a chain longer than ``_LINK_HOPS``. The caller refuses then, as it refused
-    every link before, since what resolving would open cannot be told. A link
-    in a parent directory of `path` is not read, as it was not before.
+    True when a hop's target spells a share or a device (see
+    ``_may_reach_the_network``). None when the chain cannot be judged: a link
+    whose target cannot be read, a hop that cannot be examined, or a chain
+    longer than ``_LINK_HOPS``. The caller refuses then, as it refused every
+    link before, since what resolving would open cannot be told. A link in a
+    parent directory of `path` is not read, as it was not before.
     """
     current = os.fspath(path)
     for _ in range(_LINK_HOPS):
@@ -1572,7 +1582,7 @@ def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
             # junction (a WSL link, say) is read as a link by the lstat test but
             # has no target os.readlink can return.
             return None
-        if _names_a_windows_share(target):
+        if _may_reach_the_network(target):
             return True
         if not os.path.isabs(target):
             target = os.path.join(os.path.dirname(current), target)

@@ -144,9 +144,19 @@ def test_a_relative_link_is_followed_from_its_own_directory(
         "\\\\?\\UNC\\server\\share\\config.yaml",
         "\\\\.\\UNC\\server\\share\\config.yaml",
         "//?/UNC/server/share/config.yaml",
+        "\\\\?\\unc\\server\\share\\config.yaml",
+        "\\\\?\\GLOBALROOT\\Device\\LanmanRedirector\\server\\share\\config.yaml",
+        "\\\\?\\GLOBALROOT\\??\\UNC\\server\\share\\config.yaml",
+        "\\\\?\\GLOBALROOT\\Device\\Mup\\server\\share\\config.yaml",
+        "//?/GLOBALROOT/Device/Mup/server/share/config.yaml",
+        "/\\?\\GLOBALROOT\\Device\\Mup\\server\\share\\config.yaml",
+        "\\\\.\\pipe\\config",
+        "\\\\?\\Volume{volume-guid}\\config.yaml",
+        "\\??\\UNC\\server\\share\\config.yaml",
+        "\\\\server",
     ],
 )
-def test_a_link_to_a_share_is_refused_without_resolving_it(
+def test_a_link_to_a_share_or_a_device_is_refused_without_resolving_it(
     tmp_path: Path,
     on_windows: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -169,7 +179,12 @@ def test_a_link_to_a_share_is_refused_without_resolving_it(
     [
         "\\\\?\\C:\\repo\\config.yaml",
         "\\\\.\\C:\\repo\\config.yaml",
+        "\\\\?\\c:\\repo\\config.yaml",
+        "\\\\?\\C:",
+        "//?/C:/repo/config.yaml",
+        "\\??\\C:\\repo\\config.yaml",
         "C:\\repo\\a.yaml",
+        "\\repo\\a.yaml",
     ],
 )
 def test_the_extended_form_a_junction_takes_is_a_local_name_not_a_share(
