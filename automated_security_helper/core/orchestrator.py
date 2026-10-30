@@ -39,6 +39,7 @@ from automated_security_helper.core.progress import (
 from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
 )
+from automated_security_helper.core.phases.scan_phase import scan_phase_completed
 from automated_security_helper.core.execution_engine import (
     ScanExecutionEngine as ScanExecutionEngine,
 )
@@ -1069,22 +1070,32 @@ class ASHScanOrchestrator(BaseModel):
         )
 
     def _write_results_after_failure(self, phases: List[str]) -> None:
-        """Write the results the engine holds when a later phase raised.
+        """Write the results the engine holds when a phase AFTER the scan raised.
 
         The scan phase used to write ash_aggregated_results.json at its own
         end, so a report phase that raised still left the scan's results on
         disk for a later --use-existing. The one write now sits after every
         phase; this keeps that file on a failure after the scan phase, from
-        the model the engine built. Nothing is written when the engine holds
-        no model (the failure came before the scan phase) or when this run
-        does not own the file. A write that fails is logged, never raised: the
-        original failure is what the caller sees.
+        the model the engine built. Whether the scan phase ran to its end is
+        read from the phase's own record (``scan_phase_completed``: the
+        completeness checkpoint it appends as its last step), not from the
+        model's existence: the engine holds its model from construction, so a
+        failure in the convert phase or anywhere before the scan phase, or a
+        scan phase that raised midway, writes nothing, as the base did. Also
+        nothing when this run does not own the file. A write that fails is
+        logged, never raised: the original failure is what the caller sees.
         """
         if not self._writes_results_file(phases):
             return
         engine = self.execution_engine
         results = getattr(engine, "_asharp_model", None) if engine else None
         if not isinstance(results, AshAggregatedResults):
+            return
+        if not scan_phase_completed(results):
+            ASH_LOGGER.debug(
+                "No results file written after the failure: the scan phase did "
+                "not run to its end"
+            )
             return
         try:
             results.save_model(self.output_dir)

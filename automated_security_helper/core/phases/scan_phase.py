@@ -310,6 +310,31 @@ def _is_one_path_component(name: str) -> bool:
     return "/" not in name and "\\" not in name and ":" not in name
 
 
+#: The checkpoint the scan phase appends as its last validation step
+#: (``_validate_result_completeness``, ``ScannerValidationManager
+#: .ensure_complete_results``). Its presence in a model's validation_checkpoints
+#: is the record that the scan phase ran to its end on that model.
+SCAN_PHASE_COMPLETION_CHECKPOINT = "result_completeness"
+
+
+def scan_phase_completed(aggregated_results: Any) -> bool:
+    """Whether the scan phase ran to its end on *aggregated_results*.
+
+    Read from the phase's own record, the completeness checkpoint it appends as
+    its last validation step, not from the model's existence: the engine holds
+    its model from construction, so a model exists before any phase ran, and a
+    scan phase that raised midway leaves a partial one. The orchestrator asks
+    this before writing a results file for a run that failed after the scan
+    phase, so that a failure before or inside the scan phase writes nothing.
+    """
+    checkpoints = getattr(aggregated_results, "validation_checkpoints", None) or []
+    return any(
+        isinstance(checkpoint, dict)
+        and checkpoint.get("checkpoint_name") == SCAN_PHASE_COMPLETION_CHECKPOINT
+        for checkpoint in checkpoints
+    )
+
+
 class ScanPhase(EnginePhase):
     """Implementation of the Scan phase."""
 

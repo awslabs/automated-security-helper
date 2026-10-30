@@ -420,14 +420,16 @@ ASH_CONFIG_ENV_VAR_ALLOWLIST = [
 # config could read it. A reference to one of these names is left as written,
 # as a reference to an unlisted name is.
 #
-# The suffixes are the plain ends-with reading only. The one rule a config
-# loader applies is :func:`is_refused_config_environment_name`, which reads
+# The suffixes are the plain ends-with reading only. The one rule meant for a
+# config loader is :func:`is_refused_config_environment_name`, which reads
 # these, the names below, and the module's own secret-shaped reading
-# (:func:`is_secret_shaped_environment_name`): the loader's exclusion used to be
-# the suffixes alone, narrower than the rule this module masks stream output
-# with, so a config file inside the scanned tree could interpolate ASH_DB_PASS,
-# ASH_GITHUB_PAT, ASH_API_KEY_PROD, ASH_API_KEY2, ASH_APIKEY or ASH_X_PASSPHRASE,
-# every one of them a name the masking rule classes as holding a secret.
+# (:func:`is_secret_shaped_environment_name`). The loader (config/ash_config.py)
+# still reads this tuple alone today; the tuple was widened so that it covers
+# the words the masking rule names (before that, a config file inside the
+# scanned tree could interpolate ASH_DB_PASS, ASH_GITHUB_PAT, ASH_API_KEY_PROD,
+# ASH_API_KEY2, ASH_APIKEY or ASH_X_PASSPHRASE, every one of them a name the
+# masking rule classes as holding a secret), and the one rule waits for the
+# loader to call it.
 ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES = (
     "_KEY",
     "_KEYS",
