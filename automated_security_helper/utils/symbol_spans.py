@@ -105,8 +105,12 @@ SYMBOL_PATTERN = re.compile(rf"^{_SEGMENT}(?:\.{_SEGMENT})*$")
 
 
 def is_valid_symbol(symbol: str) -> bool:
-    """Return True if ``symbol`` is a well-formed dotted qualified name."""
-    return bool(SYMBOL_PATTERN.match(symbol))
+    """Return True if ``symbol`` is a well-formed dotted qualified name.
+
+    Matched whole: the pattern's ``$`` also matches before a trailing newline,
+    so ``match`` accepted a symbol ending in one, which then matched no span.
+    """
+    return bool(SYMBOL_PATTERN.fullmatch(symbol))
 
 
 @dataclass(frozen=True)
@@ -179,6 +183,9 @@ _TYPESCRIPT = SymbolGrammar(
             "interface_declaration",
             "internal_module",
             "module",
+            # A type alias contributes a segment, so a member of its type
+            # literal is ``T.member``, not the enclosing scope's ``member``.
+            "type_alias_declaration",
         }
     ),
     member_definitions={
@@ -262,7 +269,9 @@ def _load_language(grammar: SymbolGrammar) -> Any:
     """Return the tree-sitter ``Language`` for ``grammar``.
 
     Raises SymbolsUnavailableError when tree-sitter or the grammar module is not
-    installed, which is the missing-extra case.
+    installed, which is the missing-extra case, or when the installed binding's
+    API is not the one this module calls (a TypeError from ``Language``), which
+    is as much "no usable grammar" as a missing one and fails closed the same way.
     """
     key = (grammar.module, grammar.loader)
     with _language_lock:
@@ -272,7 +281,7 @@ def _load_language(grammar: SymbolGrammar) -> Any:
             tree_sitter = importlib.import_module("tree_sitter")
             module = importlib.import_module(grammar.module)
             language = tree_sitter.Language(getattr(module, grammar.loader)())
-        except (ImportError, AttributeError, ValueError) as exc:
+        except (ImportError, AttributeError, TypeError, ValueError) as exc:
             raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
         _language_cache[key] = language
         return language
@@ -283,14 +292,15 @@ def _new_parser(grammar: SymbolGrammar) -> Any:
 
     Every import of tree-sitter goes through here or ``_load_language``, so a
     missing extra is always SymbolsUnavailableError and never an ImportError
-    escaping into the suppression pass.
+    escaping into the suppression pass; a binding whose ``Parser`` takes other
+    arguments (TypeError) is refused the same way.
     """
     language = _load_language(grammar)
     try:
         tree_sitter = importlib.import_module("tree_sitter")
-    except ImportError as exc:
+        return tree_sitter.Parser(language)
+    except (ImportError, AttributeError, TypeError) as exc:
         raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
-    return tree_sitter.Parser(language)
 
 
 def _normalize_source(source: bytes) -> bytes:
@@ -344,7 +354,7 @@ def _definition_name(node: Any, grammar: SymbolGrammar) -> Optional[str]:
     # Bytes that are not UTF-8 decode to U+FFFD, which is not an identifier
     # character, so such a name never matches rather than matching by accident.
     name = name_node.text.decode("utf-8", errors="replace")
-    if SYMBOL_PATTERN.match(name):
+    if SYMBOL_PATTERN.fullmatch(name):
         return name
     return _UNSPELLABLE + name
 
@@ -426,6 +436,16 @@ _INDEX_LOCK = threading.Lock()
 
 
 def _index_file(path: Path) -> Any:
+    """The spans of ``path``, from the cache or a parse.
+
+    A result is cached under the file's stat only when it is the file's own: a
+    parse, clean or not, of bytes whose stat read the same before and after the
+    read. A grammar that is not available and a file that cannot be read are
+    answered but not cached, since both can change without the file changing
+    (the extra installed, a permission fixed), and a file whose stat moved
+    during the read is answered from the bytes read but not cached under the
+    stat read first, which may be another content's.
+    """
     try:
         stat = path.stat()
     except OSError as exc:
@@ -437,6 +457,7 @@ def _index_file(path: Path) -> Any:
             return cached
         grammar = grammar_for_path(path.name)
         result: Any
+        cacheable = True
         if grammar is None:
             result = _Unresolvable(_unsupported_reason(path.name))
         else:
@@ -445,6 +466,7 @@ def _index_file(path: Path) -> Any:
                 spans = index_symbols(source, grammar)
                 result = _Indexed({k: tuple(v) for k, v in spans.items()})
             except SymbolsUnavailableError as exc:
+                cacheable = False
                 result = _Unresolvable(
                     f"the {grammar.language} grammar is not available ({exc}). "
                     f"Symbol suppressions need the optional '{SYMBOLS_EXTRA}' extra: "
@@ -453,12 +475,21 @@ def _index_file(path: Path) -> Any:
             except SymbolParseError as exc:
                 result = _Unresolvable(f"the file does not parse cleanly: {exc}")
             except OSError as exc:
+                cacheable = False
                 result = _Unresolvable(
                     f"the file cannot be read ({type(exc).__name__}: {exc})"
                 )
-        if len(_INDEX_CACHE) >= _INDEX_CACHE_MAX:
-            _INDEX_CACHE.clear()
-        _INDEX_CACHE[key] = result
+            if cacheable:
+                try:
+                    after = path.stat()
+                except OSError:
+                    cacheable = False
+                else:
+                    cacheable = (after.st_mtime_ns, after.st_size) == key[1:]
+        if cacheable:
+            if len(_INDEX_CACHE) >= _INDEX_CACHE_MAX:
+                _INDEX_CACHE.clear()
+            _INDEX_CACHE[key] = result
         return result
 
 
@@ -505,6 +536,10 @@ class SymbolResolver:
         if not file_path or line_start is None:
             return False
         end = line_end if line_end is not None else line_start
+        if end < line_start:
+            # A region that ends before it starts is no region: fail closed
+            # rather than let its end alone put it inside a span.
+            return False
 
         resolved = self._resolve(file_path)
         if resolved is None:
@@ -536,7 +571,10 @@ class SymbolResolver:
             candidate = self._source_dir / candidate
         try:
             resolved = candidate.resolve()
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, ValueError):
+            # ValueError: an embedded NUL, or a lone surrogate the file system's
+            # encoding cannot hold (UnicodeEncodeError). Such a path names no
+            # file, and contains() promises never to raise.
             return None
         if not resolved.is_relative_to(self._source_dir):
             return None
