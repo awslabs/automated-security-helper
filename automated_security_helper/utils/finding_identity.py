@@ -26,8 +26,8 @@ The key of a result is:
   as sorted ``[key, value]`` pairs under the kind's name, so that an edit above the
   finding does not re-key it. A value counts as absent when it is the placeholder
   ``"requires login"``, in any case (semgrep writes ``"matchBasedId/v1": "requires
-  login"`` on every result), or when results of the run with the same scanner,
-  rule, file, package, project and tree carry it at more than one location, a
+  login"`` on every result), when it is empty, or when results of the run with the
+  same scanner, rule, file, package, project and tree carry it at more than one location, a
   location being the lines and the start column, since then it does not tell
   those findings apart. The same value in another file or from another scanner
   does not count: the rest of the key tells those findings apart, and fixing one
@@ -94,8 +94,10 @@ FINDING_ID_DIGEST_LENGTH = 12
 OCCURRENCE_DIGEST_LENGTH = 8
 
 #: Fingerprint values that do not identify anything, compared stripped and in
-#: lower case.
-PLACEHOLDER_FINGERPRINT_VALUES = frozenset({"requires login"})
+#: lower case. An empty value is one too (:func:`result_fingerprints`): a lone
+#: result whose only fingerprint is "" was keyed by scanner, rule and file alone,
+#: and a later, different finding of that rule in that file took its id.
+PLACEHOLDER_FINGERPRINT_VALUES = frozenset({"requires login", ""})
 
 #: The fingerprint kinds, in the order they are preferred.
 FINGERPRINT_KINDS = ("fingerprints", "partialFingerprints")
@@ -174,7 +176,12 @@ def relative_path(
 
 
 def result_fingerprints(result: Any) -> Fingerprints:
-    """The result's SARIF fingerprints of each kind, sorted, placeholders removed."""
+    """The result's SARIF fingerprints of each kind, sorted, placeholders removed.
+
+    A value that is empty, or only whitespace, identifies nothing and is left
+    out like the ``"requires login"`` placeholder; a kind whose every value is
+    one is absent, so the result is keyed by its lines instead.
+    """
     found = []
     for kind in FINGERPRINT_KINDS:
         values = getattr(result, kind, None)
@@ -184,7 +191,8 @@ def result_fingerprints(result: Any) -> Fingerprints:
             sorted(
                 (str(k), str(v))
                 for k, v in values.items()
-                if str(v).strip().lower() not in PLACEHOLDER_FINGERPRINT_VALUES
+                if v is not None
+                and str(v).strip().lower() not in PLACEHOLDER_FINGERPRINT_VALUES
             )
         )
         if pairs:
