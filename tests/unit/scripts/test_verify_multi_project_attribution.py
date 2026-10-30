@@ -520,6 +520,52 @@ class TestSarifRunIndex:
         violations = gate.check_one_run_per_project(projects, runs)
         assert not [v for v in violations if "sarif_run_index" in v]
 
+    def test_the_root_is_the_projectroot_entry_whatever_its_position(self, gate):
+        """Red at the base: the FIRST base entry was taken as the run's root.
+
+        The rebase keeps a scanner's own declared bases in the table and adds
+        PROJECTROOT after them, so a run whose scanner declared ``%SRCROOT%`` led
+        with ``file:///`` and every root check tested the wrong root.
+        """
+        results = {
+            "workspace": {"projects": []},
+            "sarif": {
+                "runs": [
+                    {
+                        "properties": {"workspace_project": "project-a"},
+                        "originalUriBaseIds": {
+                            "%SRCROOT%": {"uri": "file:///"},
+                            "PROJECTROOT": {"uri": "file:///ws/a/"},
+                        },
+                        "results": [],
+                    }
+                ]
+            },
+        }
+        runs = gate.collect_runs(results)
+        assert runs[0].uri_base == "file:///ws/a/"
+        assert runs[0].uri_bases == {
+            "%SRCROOT%": "file:///",
+            "PROJECTROOT": "file:///ws/a/",
+        }
+
+    def test_a_run_without_a_projectroot_entry_falls_back_to_its_first_base(self, gate):
+        """Control: the fallback for a run that declares no PROJECTROOT."""
+        results = {
+            "workspace": {"projects": []},
+            "sarif": {
+                "runs": [
+                    {
+                        "properties": {"workspace_project": "project-a"},
+                        "originalUriBaseIds": {"ROOT": {"uri": "file:///ws/a/"}},
+                        "results": [],
+                    }
+                ]
+            },
+        }
+        runs = gate.collect_runs(results)
+        assert runs[0].uri_base == "file:///ws/a/"
+
     def test_two_runs_without_a_project_are_not_the_same_project(self, gate):
         """At the base the message read 'claim the same project: [None, None]'."""
         runs = [_run(gate, 0, None), _run(gate, 1, None)]

@@ -724,7 +724,11 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
             for base_id, value in bases.items():
                 if isinstance(value, Mapping) and value.get("uri"):
                     uri_bases[str(base_id)] = str(value["uri"])
-        uri_base = next(iter(uri_bases.values()), None)
+        # The project's own root is the PROJECTROOT entry, by key. The rebase
+        # keeps a scanner's declared bases (%SRCROOT%, say) in the table ahead
+        # of it, so the first entry is not always the project's; the first entry
+        # is the fallback for a run that declares no PROJECTROOT.
+        uri_base = uri_bases.get("PROJECTROOT") or next(iter(uri_bases.values()), None)
 
         rules: Dict[str, Tuple[int, int]] = {}
         workspace_uris: List[str] = []
