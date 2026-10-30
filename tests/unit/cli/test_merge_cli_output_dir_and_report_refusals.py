@@ -31,7 +31,12 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_USAGE_ERROR,
     ASH_WORK_DIR_NAME,
 )
-from tests.unit.cli.test_merge import TestMergeCli, build_shards, write_shards
+
+# Bound to a name pytest does not collect: imported as ``TestMergeCli`` the class
+# is collected a second time in this module, where its ``capture`` fixture is not
+# defined, and its four fixture-using ids error at setup.
+from tests.unit.cli.test_merge import TestMergeCli as _MergeCli
+from tests.unit.cli.test_merge import build_shards, write_shards
 
 pytestmark = pytest.mark.unit
 
@@ -45,11 +50,14 @@ def _args(shard_paths, output_dir):
 
 class TestAnOutputDirHoldingAShardIsRefused:
     def test_the_shards_results_file_is_left_as_written(self, tmp_path):
-        shard_paths = write_shards(tmp_path / "artifacts", build_shards(2))
+        # ``as_dirs=False``: the shards are given as their results files.
+        shard_paths = write_shards(
+            tmp_path / "artifacts", build_shards(2), as_dirs=False
+        )
         shard_file = Path(shard_paths[0])
         before = shard_file.read_bytes()
 
-        result = TestMergeCli()._invoke(_args(shard_paths, shard_file.parent))
+        result = _MergeCli()._invoke(_args(shard_paths, shard_file.parent))
 
         assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
         assert shard_file.read_bytes() == before
@@ -57,23 +65,25 @@ class TestAnOutputDirHoldingAShardIsRefused:
         assert "holds the shard results file" in console, result.output
 
     def test_a_shard_given_as_a_directory_is_compared_by_its_file(self, tmp_path):
+        # The default ``write_shards`` gives each shard as its directory.
         shard_paths = write_shards(tmp_path / "artifacts", build_shards(2))
-        shard_dir = Path(shard_paths[1]).parent
-        before = Path(shard_paths[1]).read_bytes()
+        shard_dir = Path(shard_paths[1])
+        shard_file = shard_dir / RESULTS_FILE_NAME
+        before = shard_file.read_bytes()
         args = ["--results", shard_paths[0], "--results", str(shard_dir)]
         args += ["--output-dir", str(shard_dir), "--output-formats", "sarif"]
 
-        result = TestMergeCli()._invoke(args)
+        result = _MergeCli()._invoke(args)
 
         assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
-        assert Path(shard_paths[1]).read_bytes() == before
+        assert shard_file.read_bytes() == before
 
     def test_an_output_dir_beside_the_shards_merges(self, tmp_path):
         """The control: a sibling directory is not the shard's."""
         shard_paths = write_shards(tmp_path / "artifacts", build_shards(2))
         output_dir = tmp_path / "artifacts" / "merged"
 
-        result = TestMergeCli()._invoke(_args(shard_paths, output_dir))
+        result = _MergeCli()._invoke(_args(shard_paths, output_dir))
 
         assert result.exit_code == 2, result.output
         assert (output_dir / RESULTS_FILE_NAME).is_file()
@@ -91,7 +101,7 @@ class TestARefusedReportLeavesNoMergedFile:
         outside.write_text("unchanged", encoding="utf-8")
         (output_dir / "reports" / "ash.sarif").symlink_to(outside)
 
-        result = TestMergeCli()._invoke(_args(shard_paths, output_dir))
+        result = _MergeCli()._invoke(_args(shard_paths, output_dir))
 
         assert result.exit_code == 1, result.output
         assert not (output_dir / RESULTS_FILE_NAME).exists(), result.output
@@ -142,7 +152,7 @@ class TestTheWorkDirIsNamedAsEveryOtherComponentNamesIt:
         shard_paths = write_shards(tmp_path / "artifacts", build_shards(2))
         output_dir = tmp_path / "merged"
 
-        result = TestMergeCli()._invoke(_args(shard_paths, output_dir))
+        result = _MergeCli()._invoke(_args(shard_paths, output_dir))
 
         assert result.exit_code == 2, result.output
         assert contexts, "the merge built no plugin context"
