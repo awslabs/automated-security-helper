@@ -18,8 +18,10 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -113,22 +115,50 @@ def test_a_src_layout_project_is_still_found(monkeypatch, tmp_path):
     ) == ["ash"]
 
 
+# The hint is a shell command line, and the interpreter path in it is
+# shell-quoted (a space in it, as under a "Program Files" prefix, would
+# otherwise split the word): the tests read it back the way a shell would,
+# so the positions below hold whatever the path contains.
+def _hint_words() -> list:
+    return shlex.split(ash_install._uv_pip_install())
+
+
 def test_the_hint_reads_no_repository_uv_configuration():
-    words = ash_install._uv_pip_install().split()
+    words = _hint_words()
     assert "--no-config" in words
     assert words.index("--no-config") > words.index("install")
 
 
+def test_the_hint_names_the_running_interpreter_as_one_word():
+    words = _hint_words()
+    assert words[0] == sys.executable
+    assert words.count(sys.executable) == 2, words
+
+
 @pytest.mark.skipif(sys.version_info < (3, 11), reason="-P exists from Python 3.11")
 def test_the_hint_keeps_the_working_directory_off_the_import_path():
-    words = ash_install._uv_pip_install().split()
+    words = _hint_words()
     assert words[1:3] == ["-P", "-m"], words
 
 
 @pytest.mark.skipif(sys.version_info >= (3, 11), reason="-P exists from Python 3.11")
 def test_the_hint_omits_a_flag_this_interpreter_does_not_accept():
-    words = ash_install._uv_pip_install().split()
+    words = _hint_words()
     assert words[1:3] == ["-m", "uv"], words
+
+
+def test_a_quoted_interpreter_path_reads_back_as_one_word(monkeypatch):
+    """A path with a space is quoted into the hint and splits back whole."""
+    spaced = "/opt/Program Files/python3"
+    # The module's own name for sys, so the interpreter's sys stays untouched.
+    monkeypatch.setattr(
+        ash_install,
+        "sys",
+        SimpleNamespace(executable=spaced, version_info=sys.version_info),
+    )
+    words = shlex.split(ash_install._uv_pip_install())
+    assert words[0] == spaced and words.count(spaced) == 2, words
+    assert "install" in words and "--no-config" in words
 
 
 class TestARecordedDirectoryOfTheProject:
