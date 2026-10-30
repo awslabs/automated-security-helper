@@ -332,6 +332,38 @@ def test_a_renamed_member_never_takes_a_directory_a_member_is_named_as(
     assert [member.filename for member in admitted] == ["m.js", "m~3/m.js", "m~2"]
 
 
+@pytest.mark.parametrize(
+    ("kind", "order"),
+    [
+        pytest.param("zip", "directory-first", id="zip-directory-first"),
+        pytest.param("zip", "directory-last", id="zip-directory-last"),
+        pytest.param("tar", "directory-first", id="tar-directory-first"),
+        pytest.param("tar", "directory-last", id="tar-directory-last"),
+    ],
+)
+def test_a_renamed_member_never_lands_on_a_directory_of_another_member(
+    test_plugin_context, monkeypatch, kind, order
+):
+    """``m~2/m.js`` is a directory the archive's own ``x.py`` is written below, so
+    the duplicate ``m.js`` cannot be placed there as a file; it takes the next
+    counter whichever way round the members come. Checked against the members
+    written so far alone, the placement landed on that directory: with the
+    directory's member first the extractor failed the whole archive on it
+    (IsADirectoryError, an input error a suppression could waive), and with it
+    last the archive's own ``x.py`` was refused as under a file."""
+    maker = _zip if kind == "zip" else _tar
+    below = ("m~2/m.js/x.py", b"x = 1\n")
+    duplicates = [("m.js", b"1\n"), ("m.js", b"2\n")]
+    members = [below, *duplicates] if order == "directory-first" else [*duplicates, below]
+    archive = maker(Path(test_plugin_context.source_dir) / f"a.{kind}", members)
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"m~2/m.js/x.py": b"x = 1\n", "m.js": b"1\n", "m~3/m.js": b"2\n"}
+    assert converter.failed_inputs == []
+    assert converter.refused_inputs == []
+
+
 @pytest.mark.skipif(os.sep != "/", reason="a backslash separates on this host")
 def test_a_backslash_stays_part_of_a_name_where_the_extractor_keeps_it(
     test_plugin_context, monkeypatch

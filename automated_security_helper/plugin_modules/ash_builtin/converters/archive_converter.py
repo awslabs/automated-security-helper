@@ -1676,7 +1676,9 @@ def _renamed_member_name(
     member_name: str,
     kind: Optional[Literal["zip", "tar"]],
     taken: Set[str],
+    taken_directories: Set[str],
     written: Dict[str, str],
+    directories: Set[str],
     counters: Dict[str, int],
 ) -> str:
     """``member_name`` placed in a numbered directory beside the file it would have
@@ -1685,11 +1687,19 @@ def _renamed_member_name(
     stem (its name before the last dot, or the whole name without one) and a
     counter; the first such placement whose file and directory no member of the
     archive is named by (``taken``, every member's _written_key, read before any
-    is renamed) and no earlier member is written to (``written``). A placement
-    only ``written`` was checked against could be a later member's own, which then
-    lost its name to the rename. The name is kept whole because scanners find a
-    manifest, a lockfile or a Dockerfile by it: written as ``package~2.json``, the
-    later copy was scanned as a file the dependency scanners skip.
+    is renamed), whose file is not a directory any member's path runs through
+    (``taken_directories``, every member's _written_prefix_keys, read with
+    ``taken``; and ``directories``, the admitted members' own), and whose file
+    and directory no earlier member is written to (``written``). A placement only
+    ``written`` was checked against could be a later member's own, which then
+    lost its name to the rename; a placement checked against no directory set
+    could be written as a file where a member's directory stands (an archive
+    naming ``m~2/m.js/x.py`` and two ``m.js``), which fails the whole archive at
+    extraction (IsADirectoryError) when the directory comes first and refused the
+    archive's own ``x.py`` as under a file when it comes later. The name is kept
+    whole because scanners find a manifest, a lockfile or a Dockerfile by it:
+    written as ``package~2.json``, the later copy was scanned as a file the
+    dependency scanners skip.
 
     The directory part of the member's name is kept, split where the extractor
     splits it (_written_separators), so the member lands beside the one it would
@@ -1714,6 +1724,8 @@ def _renamed_member_name(
         if (
             renamed_key not in taken
             and renamed_key not in written
+            and renamed_key not in taken_directories
+            and renamed_key not in directories
             and directory_key not in taken
             and directory_key not in written
         ):
@@ -2158,12 +2170,17 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # at extraction (NotADirectoryError, IsADirectoryError).
         directories: Set[str] = set()
         # Every member's key before any is renamed, so a renamed member never
-        # takes the name of a member that comes later in the archive.
+        # takes the name of a member that comes later in the archive; and every
+        # directory any member's path runs through, so a renamed member is never
+        # written as a file where a later member's directory stands (the
+        # earlier members' directories are ``directories``, read at the rename).
         taken: Set[str] = set()
+        taken_directories: Set[str] = set()
         for member in members:
             named = _named_member(member)
             if named is not None:
                 taken.add(_written_key(*named))
+                taken_directories.update(_written_prefix_keys(*named))
         # Per written key, where the next rename of it starts counting.
         rename_counters: Dict[str, int] = {}
         renamed_count = 0
@@ -2266,7 +2283,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     # both, whichever of the two a consumer's unpacker keeps.
                     # The notice names the archive when inspect_members knows it.
                     renamed = _renamed_member_name(
-                        member_name, kind, taken, written, rename_counters
+                        member_name,
+                        kind,
+                        taken,
+                        taken_directories,
+                        written,
+                        directories,
+                        rename_counters,
                     )
                     renamed_count += 1
                     if renamed_count <= MEMBER_REFUSALS_LISTED:
