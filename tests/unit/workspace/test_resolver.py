@@ -198,15 +198,20 @@ def test_incompatible_project_pins_are_ignored_rather_than_refused(tmp_path):
 
 
 def test_the_operators_override_pins_every_project(tmp_path):
+    """The pin is recorded only for a scanner that is on, and semgrep's own default
+    is off on Windows (it publishes no Windows build), so each project enables it
+    in so many words: the override's pin is the subject, not the platform."""
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=1.130.0"\n',
+        "project_name: api\nscanners:\n  semgrep:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=1.130.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        'project_name: web\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=2.0.0"\n',
+        "project_name: web\nscanners:\n  semgrep:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=2.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 

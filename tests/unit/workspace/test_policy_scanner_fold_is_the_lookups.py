@@ -602,7 +602,7 @@ def test_a_workspace_refuses_a_version_a_pair_may_apply_that_clashes_with_a_pin(
     calls = iter([{"semgrep": _may_apply("<1.0.0")}, {}])
     monkeypatch.setattr(resolver, "_unresolved_pins", lambda config: next(calls))
     workspace = _workspace(
-        tmp_path, {"api": _ONE_SECTION, "web": _ONE_SECTION}, policy_scanners=None
+        tmp_path, {"api": _SEMGREP_ON, "web": _SEMGREP_ON}, policy_scanners=None
     )
 
     with pytest.raises(WorkspaceDefinitionError) as refused:
@@ -626,7 +626,7 @@ def test_control_a_workspace_of_one_project_plans_a_pair_whose_versions_differ(
     monkeypatch.setattr(
         resolver, "_unresolved_pins", lambda config: {"semgrep": _may_apply("<1.0.0")}
     )
-    workspace = _workspace(tmp_path, {"api": _ONE_SECTION}, policy_scanners=None)
+    workspace = _workspace(tmp_path, {"api": _SEMGREP_ON}, policy_scanners=None)
 
     plan = resolve_workspace(
         workspace,
@@ -740,6 +740,11 @@ TWIN_FILES = [
 ]
 
 _ONE_SECTION = _THRESHOLD + "scanners:\n  Snyk_Code:\n    enabled: true\n"
+# The pin tests pin semgrep through an override. A pin is recorded only for a
+# scanner that is on, and semgrep's own default is off on Windows (it publishes
+# no Windows build), so the project turns it on in so many words: the override's
+# pin is what the test is about, not the platform.
+_SEMGREP_ON = _ONE_SECTION + "  semgrep:\n    enabled: true\n"
 
 
 class _FindingOrchestrator:
