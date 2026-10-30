@@ -1268,8 +1268,15 @@ _IMAGE_VARIANTS = frozenset({"slim", "alpine"})
 _NODE_MAJOR = re.compile(r"\bNODE_MAJOR(?:=|\s+)[\"']?(?P<major>\d+)\b")
 # Docker reads instruction names without regard to case.
 _RUN_INSTRUCTION = re.compile(r"^RUN\s", re.IGNORECASE)
-# A here-document marker on a RUN line: <<EOF, <<-EOF, <<"EOF". Not a here-string (<<<).
-_HEREDOC_MARKER = re.compile(r"(?<!<)<<-?\s*([\"']?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# A here-document marker on a RUN line: <<EOF, <<-EOF, <<"EOF". Not a here-string (<<<),
+# and not a name that goes on into a call.
+_HEREDOC_MARKER = re.compile(
+    r"(?<!<)<<-?\s*([\"']?)([A-Za-z_][A-Za-z0-9_]*)\1(?![\w(])"
+)
+# Shell arithmetic, $((1 << shift)) or ((x = 1 << n)), with one level of inner
+# parentheses. Its shift operator is not a here-document, so it is cut out before the
+# markers are looked for.
+_ARITHMETIC = re.compile(r"\$?\(\((?:[^()]|\([^()]*\))*\)\)")
 # A shell redirection among the arguments of the install: "> /dev/null", "2>".
 _REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
 # The options of apt-get that take their value as the next word. A short option takes
@@ -1342,7 +1349,10 @@ def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
         continued = line.endswith("\\")
         body = line[:-1] if continued else line
         current.append((number, body))
-        markers += [match.group(2) for match in _HEREDOC_MARKER.finditer(body)]
+        markers += [
+            match.group(2)
+            for match in _HEREDOC_MARKER.finditer(_ARITHMETIC.sub(" ", body))
+        ]
         if continued:
             continue
         if markers:
