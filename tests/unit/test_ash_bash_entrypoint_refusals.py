@@ -207,6 +207,23 @@ def test_an_option_without_its_value(run_ash, bare_path, option):
     assert calls == []
 
 
+def test_an_attached_empty_value_is_refused(run_ash, bare_path):
+    """`--build-target=` is the attached spelling with nothing after the "=": refused
+    like `--build-target ""`, naming the option without the "=", before the stage is
+    read, so an empty stage never reaches the name check or the image tag."""
+    result, calls = run_ash(
+        "--no-build",
+        "--source-dir",
+        "src",
+        "--build-target=",
+        OCI_RUNNER=str(bare_path / "recording-runner"),
+    )
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "--build-target needs a value" in result.stderr, result.stderr
+    assert calls == []
+
+
 #: Every ./ash option that takes a value, as typed.
 _VALUE_OPTIONS = [
     "--source-dir",
