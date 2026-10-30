@@ -479,8 +479,9 @@ def scans_started(monkeypatch) -> list:
         if claim is not None:
             claim.release_scan()
 
-    def record(scan_id, coroutine) -> None:
-        # The stand-in never awaits, so one step runs it to the end.
+    def record(scan_id, coroutine, **start_options) -> None:
+        # The stand-in never awaits, so one step runs it to the end. The
+        # start's keywords (ran, if_never_run) are accepted and left alone.
         with pytest.raises(StopIteration):
             coroutine.send(None)
         started.append(scan_id)

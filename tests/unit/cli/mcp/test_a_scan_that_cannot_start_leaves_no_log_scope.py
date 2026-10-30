@@ -89,9 +89,12 @@ def test_a_set_aside_failure_that_is_not_an_oserror_ends_the_scope(
 def test_a_start_task_failure_ends_the_scope(target, scopes_before, monkeypatch):
     from automated_security_helper.cli import mcp_tools
 
-    def boom(scan_id, runner):
+    def boom(scan_id, runner, **start_options):
         # The coroutine handed in is closed so the test ends with no
         # never-awaited warning; the real failure mode leaves it unawaited.
+        # The start's keywords (ran, if_never_run) are accepted and left
+        # alone, so the failure the test reads is this one and not a
+        # TypeError raised before the runner is closed.
         runner.close()
         raise RuntimeError("no event loop for the runner")
 
