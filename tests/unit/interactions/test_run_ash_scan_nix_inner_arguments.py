@@ -281,6 +281,61 @@ def test_a_whole_shard_pair_is_forwarded_as_before(launched, tmp_path):
     assert _after_flag(argv, "--shard-count") == ["4"]
 
 
+def test_a_results_file_that_is_not_the_output_directorys_own_is_refused(
+    launched, tmp_path
+):
+    """The inner command line can only say --use-existing, which reads the
+    output directory's own file; a caller naming another file was handed that
+    flag and had an earlier run's file read in place of its own. Refused with
+    exit 3 before the previous run's output is cleared."""
+    src = tmp_path / "src"
+    src.mkdir()
+    out = tmp_path / "out"
+    prior = out / "reports" / "ash.sarif"
+    prior.parent.mkdir(parents=True)
+    prior.write_text('{"runs": []}\n', encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere" / "results.json"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text("{}\n", encoding="utf-8")
+    opts = ras.ScanOptions(
+        source_dir=src,
+        output_dir=out,
+        mode=RunMode.nix,
+        existing_results=str(elsewhere),
+        progress=False,
+        show_summary=False,
+    )
+
+    with pytest.raises(SystemExit) as refused:
+        ras._run_nix_mode(opts, MagicMock())
+
+    assert refused.value.code == 3
+    assert "argv" not in launched, "the shell was entered for a file it cannot read"
+    assert prior.exists(), "the previous run's report was cleared before the refusal"
+
+
+def test_the_output_directorys_own_results_file_is_forwarded_as_use_existing(
+    launched, tmp_path
+):
+    """Control: the file --use-existing resolves to, named by the caller (here
+    through a spelling with a `.` component), is not refused and reaches the
+    inner scan as the flag."""
+    out = tmp_path / "out"
+    out.mkdir()
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src",
+        output_dir=out,
+        mode=RunMode.nix,
+        existing_results=str(out / "." / "ash_aggregated_results.json"),
+        progress=False,
+        show_summary=False,
+    )
+
+    ras._refuse_a_results_file_the_shell_cannot_be_handed(opts, MagicMock())
+
+    assert "--use-existing" in ras._nix_inner_argv(opts)
+
+
 def test_a_stand_in_runner_is_asked_nothing_about_nix(launched, tmp_path, monkeypatch):
     """The refusals travel with the runner: a recorder in run_ash_nix's place
     starts no shell, so a host without `nix` is no reason to refuse before it.

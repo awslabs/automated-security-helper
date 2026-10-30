@@ -5437,6 +5437,40 @@ def _run_container_mode(
 # ---------------------------------------------------------------------------
 
 
+def _refuse_a_results_file_the_shell_cannot_be_handed(
+    opts: ScanOptions, logger
+) -> None:
+    """Refuse a Nix run whose ``existing_results`` is not the output directory's own.
+
+    The scan CLI has no option that names a results file: ``--use-existing``
+    reads ``<output-dir>/ash_aggregated_results.json``, and that is all the
+    inner command line can say. A library caller naming another file
+    (``existing_results="/elsewhere/results.json"``) was handed that flag, so the
+    scan inside the shell read the output directory's file from an earlier run,
+    or refused for want of one, and the caller's file was never read. Exit 3,
+    before the preflight and before the previous run's output is cleared
+    (``_discard_prior_run_artifacts`` keeps that file when ``existing_results``
+    is set, so nothing of the caller's is lost). The two paths are compared
+    resolved, so the output directory's own file spelled through a link or a
+    relative path is accepted.
+    """
+    if not opts.existing_results:
+        return
+    named = Path(opts.existing_results).resolve()
+    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    if named == own:
+        return
+    _logged_refusal(
+        logger,
+        3,
+        "Scan refused: --mode nix reads existing results from the output "
+        f"directory's own file, {shown_on_one_line(str(own))}, which is all the "
+        "scan inside the shell can be told; the results file named, "
+        f"{shown_on_one_line(str(named))}, is another file. Pass the output "
+        "directory that holds the file, or run the report phase with --mode local.",
+    )
+
+
 def _nix_inner_argv(opts: ScanOptions) -> List[str]:
     """The command line of the scan inside the Nix shell, built from this call.
 
@@ -5526,8 +5560,9 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
         argv.extend(["--changed-files-only", "--base-ref", opts.base_ref])
     if opts.existing_results:
         # The CLI resolves --use-existing to the output directory's own results
-        # file, which is the file this process's option names: the shell shares
-        # this filesystem, so the inner scan resolves the same file.
+        # file. _refuse_a_results_file_the_shell_cannot_be_handed, run before
+        # this, has checked that the file this option names IS that file; the
+        # shell shares this filesystem, so the inner scan resolves the same one.
         argv.append("--use-existing")
     # Each value on its own: ScanPhase is the one place that refuses an unusable
     # pair (see the ScanOptions comment on shard_index), and it can refuse only
@@ -5570,6 +5605,9 @@ def _run_nix_mode(
     # not imported beside it: a stand-in runner that starts no shell carries no
     # preflight and is asked nothing about a `nix` it will not use.
     preflight = getattr(run_ash_nix, "preflight", None)
+
+    # Before the preflight and the clear: a refused run deletes nothing.
+    _refuse_a_results_file_the_shell_cannot_be_handed(opts, logger)
 
     try:
         if callable(preflight):
