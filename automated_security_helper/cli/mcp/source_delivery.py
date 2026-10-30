@@ -979,11 +979,11 @@ _GIT_CONFIG = (
     "protocol.ssh.allow=always",
     "-c",
     "http.followRedirects=false",
-    # Links in the repository are checked out as plain files holding the
-    # target path, as the zip delivery refuses every link entry: a delivered
-    # link is read by a scan of the tree, and it reads outside the tree.
-    "-c",
-    "core.symlinks=false",
+    # No core.symlinks setting: a delivered tree keeps its links, and a config
+    # reached through one is judged by every name it has when it is read
+    # (config_sources and validate_config_input), as tests/unit/cli/mcp/
+    # test_delivered_config_links.py pins. Checking links out as files would
+    # turn each into a plain file holding its target path.
     "-c",
     "gc.auto=0",
     "-c",

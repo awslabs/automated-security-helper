@@ -2,10 +2,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Six source-delivery gaps, each pinned by the input or the order that passed it.
+"""Five source-delivery gaps, each pinned by the input or the order that passed it.
 
-* The git delivery checked out symbolic links, which a scan of the tree follows
-  outside it, while the zip delivery refuses every link entry.
+The git delivery keeps a tree's symbolic links: a config reached through one is
+judged by every name it has when it is read (``test_delivered_config_links``),
+so no ``core.symlinks`` setting is pinned here.
+
 * A clone, fetch or checkout ran as a bare ``Popen`` nobody recorded, so a server
   that stopped meanwhile left it running.
 * A clone with no ref of a repository whose HEAD names no commit exits 0 with an
@@ -82,14 +84,6 @@ def _forget_sessions():
     yield
     sd._SESSION_SOURCE_DIRS.clear()
     clear_all_session_state()
-
-
-def test_every_git_command_checks_links_out_as_files():
-    """Red at the base: ``_GIT_CONFIG`` carried no ``core.symlinks`` setting."""
-    options = list(sd._GIT_CONFIG)
-
-    assert "core.symlinks=false" in options
-    assert options[options.index("core.symlinks=false") - 1] == "-c"
 
 
 class _FakeProcess:
