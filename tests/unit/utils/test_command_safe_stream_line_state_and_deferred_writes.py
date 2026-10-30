@@ -155,6 +155,52 @@ def test_an_attribute_read_on_an_uninitialized_instance_is_an_attribute_error(cl
         half_made.anything
 
 
+@pytest.mark.parametrize("at_line_start", [True, False])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "plain",
+        "plain\n",
+        "\n",
+        "\r\n  ",
+        "  \x1b[31m",
+        "  \x1b[31mx",
+        "::set-output name=x::y",
+        "##vso[task.setvariable]x",
+        "a\r##[group]b",
+        "\n::x\n",
+        "\udc80\udcff",
+        "tail\rhead",
+    ],
+    ids=[
+        "empty",
+        "word",
+        "word-break",
+        "break",
+        "crlf-spaces",
+        "lead-only",
+        "lead-then-text",
+        "colon-command",
+        "hash-command",
+        "break-then-hash",
+        "break-colon-break",
+        "escaped-bytes",
+        "cr-head",
+    ],
+)
+def test_the_line_state_read_alone_is_the_checked_models(text, at_line_start):
+    """The pass-as-is write reads the line state without building the checked
+    text; its answer is the second value ``_safe`` returns, for every shape of
+    break, lead and command the check knows."""
+    target = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    assert (
+        wrap._line_state_after(text, at_line_start)
+        == wrap._safe(text, at_line_start)[1]
+    )
+
+
 def test_the_checked_view_hands_out_no_raw_writer():
     raw = io.BufferedWriter(io.BytesIO())
     target = io.TextIOWrapper(raw, encoding="utf-8")
