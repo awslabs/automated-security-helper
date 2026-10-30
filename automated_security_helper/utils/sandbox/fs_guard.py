@@ -841,7 +841,20 @@ def sweep_writable(
             if not stat.S_ISDIR(mode):
                 # A regular or special file given as a root (the policy builds
                 # only directories; a caller may not) has nothing below it, and
-                # opening it as a directory would read as a refusal.
+                # opening it as a directory would read as a refusal. It is said,
+                # not refused: a sandboxed scanner cannot put a file at its own
+                # root (that needs write on the root's parent, which the policies
+                # grant only on the results directory itself), so this is an
+                # operator-side oddity that should not fail the scan.
+                _sweep_warning(
+                    f"The results directory root {root} is not a directory; "
+                    "nothing is swept below it",
+                    "A scanner's results directory root is not a directory and "
+                    "nothing is swept below it; it is not named because the "
+                    "plugin's redaction values could not be read",
+                    values,
+                    values_unread,
+                )
                 continue
         except FileNotFoundError:
             # A sandboxed scanner that wrote nothing created no results

@@ -10,6 +10,7 @@ open, which the executor's handler graded as the scanner's failure. There is
 nothing below a missing directory to remove.
 """
 
+import logging
 import os
 import sys
 
@@ -54,6 +55,33 @@ def test_a_root_that_is_a_regular_file_sweeps_as_empty(tmp_path):
     assert fs_guard.sweep_writable([file_root]) == 0
 
     assert file_root.read_text() == "kept\n"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_root_that_is_not_a_directory_is_said_not_refused(tmp_path, caplog):
+    """A sandboxed scanner cannot put a file at its own root (that needs write
+    on the root's parent, which the policies grant only on the results directory
+    itself), so a non-directory root is an operator-side oddity: the sweep says
+    so in one WARNING naming the root and goes on, with no refusal, nothing
+    removed and no raise, where a silent pass would have hidden it."""
+    file_root = tmp_path / "root.txt"
+    file_root.write_text("kept\n")
+    other = tmp_path / "results"
+    other.mkdir()
+    (other / "escape").symlink_to(tmp_path)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        removed = fs_guard.sweep_writable([file_root, other])
+
+    assert removed == 1, "the next root is still swept"
+    assert file_root.read_text() == "kept\n"
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("The results directory root")
+    ]
+    assert len(lines) == 1, [record.getMessage() for record in caplog.records]
+    assert str(file_root) in lines[0] and "is not a directory" in lines[0], lines
 
 
 def test_the_tree_sweep_itself_reads_a_missing_root_as_empty(tmp_path):
