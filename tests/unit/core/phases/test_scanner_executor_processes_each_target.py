@@ -11,9 +11,12 @@ Each container is now offered on its own, so the other targets' containers are
 merged, and the first failure is re-raised afterwards naming its target: the
 scanner-level handler logs it as it logs any failure ("Scanner failed: ...", the
 contract tests/unit/core/phases/test_scanner_executor_logs_tool_text_as_given.py
-pins) and files the failure container UNDER THAT TARGET, so the record lands where
-the processing failed and never replaces a merged target's file. The scanner stays
-out of ``completed_scanners`` so the completeness check records it.
+pins) and files THAT TARGET'S OWN ROW again with the failure added (status ERROR,
+the reason in its errors), so the report keeps what the scan recorded (a refused
+sandbox's own error text, say; tests/unit/core/phases/
+test_a_probing_scanner_under_a_refused_sandbox.py pins that it survives) and never
+replaces a merged target's file. The scanner stays out of ``completed_scanners`` so
+the completeness check records it.
 """
 
 from __future__ import annotations
@@ -121,16 +124,21 @@ def test_the_other_targets_are_still_merged(plugin_context, tmp_path):
     assert executor.completed_scanners == []
 
 
-def test_the_failure_is_filed_under_the_target_that_failed(plugin_context, tmp_path):
-    """The failure record names the failed target and the reason, so it replaces
-    that target's record and no other's."""
+def test_the_failure_is_filed_on_the_row_of_the_target_that_failed(
+    plugin_context, tmp_path
+):
+    """The failed target's own row is filed again, ERROR, with the reason added
+    to the errors it already carried, so its report keeps what the scan recorded
+    and no other target's record is touched."""
     seen, _ = _run(plugin_context, tmp_path, failing_target="converted")
 
     record = seen[-1]
     assert [c.target_type for c in seen] == ["source", "converted", "converted"]
-    assert record.status == ScannerStatus.FAILED
-    assert "the report could not be read" in " ".join(str(e) for e in record.errors)
-    assert "converted" in " ".join(str(e) for e in record.errors)
+    assert record is seen[1], "the row itself is filed again, not a new container"
+    assert record.status == ScannerStatus.ERROR
+    reasons = " ".join(str(e) for e in record.errors)
+    assert "the report could not be read" in reasons
+    assert "converted" in reasons
 
 
 def test_every_target_merged_completes_the_scanner(plugin_context, tmp_path):

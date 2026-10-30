@@ -621,13 +621,21 @@ class ResultsProcessingFailed(Exception):
 
     Raised by ``ScannerExecutor._process_each`` after every container of a
     scanner has been offered to the processor, naming the first target whose
-    processing raised. The scanner-level handlers catch it as they catch any
-    failure and file the failure under ``target_type``, so the record lands on
-    the target that failed and never replaces a merged target's file.
+    processing raised and carrying its ``container``. The scanner-level handlers
+    catch it as they catch any failure and file the failure on that container,
+    so the target's report keeps what the scan recorded (its status, errors and
+    counts), gains the reason it could not be merged, and never replaces a
+    merged target's file.
     """
 
-    def __init__(self, target_type: Optional[str], error: BaseException) -> None:
+    def __init__(
+        self,
+        target_type: Optional[str],
+        error: BaseException,
+        container: Optional[ScanResultsContainer] = None,
+    ) -> None:
         self.target_type = target_type
+        self.container = container
         super().__init__(
             f"could not process its results on {target_type}: {error_text(error)}"
         )
@@ -843,7 +851,9 @@ class ScannerExecutor:
             except Exception as process_error:
                 if failed is None:
                     failed = ResultsProcessingFailed(
-                        getattr(container, "target_type", None), process_error
+                        getattr(container, "target_type", None),
+                        process_error,
+                        container,
                     )
                     failed.__cause__ = process_error
         if failed is not None:
@@ -2282,17 +2292,26 @@ class ScannerExecutor:
                 ASH_LOGGER.error(
                     f"Scanner failed: {scanner_name} - {described}", extra=NO_MARKUP
                 )
-                failure_container = ScanResultsContainer.for_failure(
-                    scanner_name,
-                    errors=[f"Scanner {scanner_name} failed: {described}"],
-                    exception=e,
-                    values=environment_values,
-                )
-                # A results-processing failure names its target, so its record
-                # lands there and never replaces a merged target's file.
-                failed_target = getattr(e, "target_type", None)
-                if failed_target is not None:
-                    failure_container.target_type = failed_target
+                failed_container = getattr(e, "container", None)
+                if isinstance(failed_container, ScanResultsContainer):
+                    # A results-processing failure carries the target's own row:
+                    # it is filed again with the failure added, so the report
+                    # keeps what the scan recorded (its status, its errors, its
+                    # counts), reads ERROR, names why it could not be merged,
+                    # and never replaces a merged target's file.
+                    failure_container = failed_container
+                    failure_container.add_error(
+                        f"Scanner {scanner_name} failed: {described}"
+                    )
+                    failure_container.set_exception(e, environment_values)
+                    failure_container.status = ScannerStatus.ERROR
+                else:
+                    failure_container = ScanResultsContainer.for_failure(
+                        scanner_name,
+                        errors=[f"Scanner {scanner_name} failed: {described}"],
+                        exception=e,
+                        values=environment_values,
+                    )
                 failure_container.raw_results = {
                     "errors": [
                         home_as_tilde(f"Scanner {scanner_name} failed: {described}")
@@ -2583,19 +2602,26 @@ class ScannerExecutor:
                         f"Scanner execution failed in thread pool: {scanner_name} - {described}",
                         extra=NO_MARKUP,
                     )
-                    failure_container = ScanResultsContainer.for_failure(
-                        scanner_name,
-                        errors=[
+                    failed_container = getattr(e, "container", None)
+                    if isinstance(failed_container, ScanResultsContainer):
+                        # See run_sequential: a results-processing failure
+                        # carries the target's own row, filed again with the
+                        # failure added.
+                        failure_container = failed_container
+                        failure_container.add_error(
                             f"Scanner {scanner_name} failed in thread pool: {described}"
-                        ],
-                        exception=e,
-                        values=environment_values,
-                    )
-                    # See run_sequential: a results-processing failure names
-                    # its target, so its record lands there.
-                    failed_target = getattr(e, "target_type", None)
-                    if failed_target is not None:
-                        failure_container.target_type = failed_target
+                        )
+                        failure_container.set_exception(e, environment_values)
+                        failure_container.status = ScannerStatus.ERROR
+                    else:
+                        failure_container = ScanResultsContainer.for_failure(
+                            scanner_name,
+                            errors=[
+                                f"Scanner {scanner_name} failed in thread pool: {described}"
+                            ],
+                            exception=e,
+                            values=environment_values,
+                        )
                     failure_container.raw_results = {
                         "errors": [
                             home_as_tilde(
