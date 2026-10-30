@@ -763,8 +763,21 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     def _ignored_by(
         self, ipynb_file: str, ignore_paths: List[IgnorePathWithReason]
     ) -> Optional[IgnorePathWithReason]:
-        """The first of ``ignore_paths`` naming the notebook, or None."""
-        rel_path = Path(ipynb_file).relative_to(self.context.source_dir).as_posix()
+        """The first of ``ignore_paths`` naming the notebook, or None.
+
+        None, without reading the path, when there are no ignore paths; and None
+        for a scan-set path that is not lexically under the source directory (one
+        reached through a link, or spelled another way), since an ignore path is
+        written relative to the tree and names no such path. Raising there made a
+        notebook's conversion a gating tool failure where nothing was wrong with
+        the notebook.
+        """
+        if not ignore_paths:
+            return None
+        try:
+            rel_path = Path(ipynb_file).relative_to(self.context.source_dir).as_posix()
+        except ValueError:
+            return None
         for ignore_path in ignore_paths:
             if ignore_path_matches(rel_path, ignore_path.path):
                 return ignore_path
@@ -1022,18 +1035,23 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         ).hexdigest()[:_OUTPUT_DIGEST_CHARS]
         name = folded
         reason = None
-        if len(name.encode("utf-8")) > _OUTPUT_NAME_MAX_BYTES:
+        # Encoded with surrogateescape, as the digest is: a name that holds a byte
+        # the filesystem did not decode is folded, not failed.
+        if len(name.encode("utf-8", "surrogateescape")) > _OUTPUT_NAME_MAX_BYTES:
             name = (
-                name.encode("utf-8")[:_OUTPUT_NAME_MAX_BYTES]
+                name.encode("utf-8", "surrogateescape")[:_OUTPUT_NAME_MAX_BYTES]
                 .decode("utf-8", "ignore")
                 .rstrip("-_")
             )
             reason = "its folded name is longer than a file name may be"
-        if name in taken:
-            reason = f"its folded name is also that of {taken[name]}"
+        # ``taken`` is keyed case-folded: the results directory may sit on a
+        # case-insensitive filesystem (APFS, NTFS), where two names that differ
+        # only in case are one file.
+        if name.casefold() in taken:
+            reason = f"its folded name is also that of {taken[name.casefold()]}"
         if reason is not None:
             name = f"{name}-{digest}"
-            while name in taken:
+            while name.casefold() in taken:
                 name = f"{name}-{digest}"
             ASH_LOGGER.info(
                 shown_on_one_line(
@@ -1041,7 +1059,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 ),
                 extra=NO_MARKUP,
             )
-        taken[name] = relative
+        taken[name.casefold()] = relative
         return self.results_dir.joinpath(f"{name}-converted")
 
     @staticmethod

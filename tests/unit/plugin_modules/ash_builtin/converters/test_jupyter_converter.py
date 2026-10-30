@@ -2172,6 +2172,32 @@ class TestScanSetNamesAreReadAsGiven:
         assert converter.failed_inputs == []
 
 
+class TestIgnoredBy:
+    """``_ignored_by`` reads a scan-set path against the ignore paths and never
+    raises: with no ignore paths it reads nothing, and a path that is not lexically
+    under the source directory is named by no entry. It used to call
+    ``relative_to`` first, so such a path raised ValueError into the conversion
+    and was recorded as a gating tool failure of a sound notebook."""
+
+    def test_a_path_outside_the_tree_is_not_ignored_and_does_not_raise(self, converter):
+        entries = [IgnorePathWithReason(path="nb.ipynb", reason="x")]
+
+        assert converter._ignored_by("/elsewhere/nb.ipynb", entries) is None
+
+    def test_no_ignore_paths_means_no_notebook_is_ignored(self, converter):
+        assert converter._ignored_by("/elsewhere/nb.ipynb", []) is None
+
+    def test_a_notebook_under_the_tree_is_named_by_its_entry(self, converter):
+        """The control."""
+        source = converter.context.source_dir
+        entry = IgnorePathWithReason(path="vendor/*", reason="third-party")
+
+        assert (
+            converter._ignored_by(str(Path(source) / "vendor" / "nb.ipynb"), [entry])
+            is entry
+        )
+
+
 class TestOutputNames:
     """Every notebook that converts keeps an output of its own.
 
@@ -2212,6 +2238,23 @@ class TestOutputNames:
         assert converter.failed_inputs == []
         info = messages_at(ash_log_records, logging.INFO)
         assert any("a-b.ipynb" in m and "a b.ipynb" in m for m in info), info
+
+    def test_two_notebooks_whose_folded_names_differ_only_in_case_both_keep_an_output(
+        self, converter, monkeypatch
+    ):
+        """On a case-insensitive filesystem the two names are one file; the
+        second is told apart everywhere, so the outputs are the same on every
+        host."""
+        monkeypatch.setattr(f"{MODULE}._OUTPUT_NAME_MAX_BYTES", 100_000, raising=False)
+        lower = write_notebook(converter.context.source_dir, "nb.ipynb")
+        upper = write_notebook(converter.context.source_dir, "NB.ipynb")
+
+        results, run = self._convert(converter, monkeypatch, [lower, upper])
+
+        assert len(run.calls) == 2
+        assert len(results) == 2, results
+        assert len({path.name.casefold() for path in results}) == 2
+        assert converter.failed_inputs == []
 
     def test_a_notebook_whose_folded_name_is_too_long_for_a_file_still_converts(
         self, converter, monkeypatch
