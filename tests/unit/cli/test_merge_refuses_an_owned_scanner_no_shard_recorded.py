@@ -20,11 +20,12 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.cli.merge import (
+    _verify_shard_contributions,
     merge_shard_results,
     read_shard_assignment,
 )
 from automated_security_helper.core.exceptions import ShardCoverageError
-from tests.unit.cli.merge_shard_support import build_shards
+from tests.unit.cli.merge_shard_support import SCANNERS, build_shard, build_shards
 
 pytestmark = pytest.mark.unit
 
@@ -49,3 +50,21 @@ def test_an_owned_scanner_that_no_shard_recorded_is_refused():
 
     with pytest.raises(ShardCoverageError, match=r"recorded no result for them"):
         merge_shard_results(_as_loaded(shards))
+
+
+def test_the_completion_check_names_an_owned_scanner_with_no_entry():
+    # merge_shard_results never reaches this arm (the union check refuses first),
+    # so the completion check is called on its own: a shard that owns scanners
+    # and recorded none of them is refused, each listed as "(no result recorded)".
+    shard = build_shard(0, 1, SCANNERS)
+    for scanner in SCANNERS:
+        shard.scanner_results.pop(scanner, None)
+        shard.additional_reports.pop(scanner, None)
+    assignment = read_shard_assignment(shard)
+
+    with pytest.raises(ShardCoverageError) as excinfo:
+        _verify_shard_contributions([(Path("shard-0.json"), shard, assignment)])
+
+    message = str(excinfo.value)
+    assert "completed none of the scanners they owned" in message
+    assert message.count("(no result recorded)") == len(SCANNERS), message

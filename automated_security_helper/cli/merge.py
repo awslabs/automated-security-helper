@@ -41,8 +41,8 @@ exist and would make every consumer's per-run attribution meaningless.
 What merge_sarif_report does not do, and why there is an extra step
 ------------------------------------------------------------------
 ``merge_sarif_report`` was written to fold one *scanner's* SARIF into ASH's
-aggregate, so it reads ``runs[0].tool.driver`` and never looks at
-``runs[0].tool.extensions``. Merging two ASH *aggregates* is the case it was not
+aggregate, so it reads each run's ``tool.driver`` and never looks at a run's
+``tool.extensions``. Merging two ASH *aggregates* is the case it was not
 written for: every shard's driver is ASH itself, and each shard's per-scanner
 tool components live in ``extensions``. Left alone, the rule metadata for every
 scanner owned by shards 1..n-1 would be silently dropped, and the merged report
@@ -991,8 +991,8 @@ def _verify_scanner_union(
             f"them: {listed}. No shard ran them, so merging would report them as "
             f"deliberately skipped rather than never attempted. The status of each "
             f"is named above because the cause differs: the executors resolved "
-            f"different scanner sets (one missing a plugin module, or --python-only "
-            f"or a config override applied to some jobs and not others), or a "
+            f"different scanner sets (one missing a plugin module, or a config "
+            f"override applied to some jobs and not others), or a "
             f"scanner was excluded by every shard's partition. A scanner that failed "
             f"to construct, or whose plugin module failed to import, is recorded "
             f"ERROR or MISSING instead and is reported through "
@@ -1320,11 +1320,12 @@ def _verify_shard_contributions(
     a fraction of which never ran -- and because that fraction produced no
     findings, the merged verdict is the same 0 a genuinely clean scan produces.
 
-    Also catches the case a status check structurally cannot: an owned scanner
-    with no entry at all, where there is no status to inspect.
-    :func:`_verify_scanner_union` refuses that shape first, whether or not some
-    other shard left a skip marker under the same name; the arm here is the
-    second line for a caller that reaches this check without it.
+    Also names the case a status check structurally cannot: an owned scanner
+    with no entry at all, where there is no status to inspect, listed as ``(no
+    result recorded)``. In ``merge_shard_results`` that shape never reaches this
+    check, because :func:`_verify_scanner_union` refuses it first, whether or not
+    some other shard left a skip marker under the same name; the arm stays for a
+    caller of this function alone and is tested as such.
 
     A shard that owns nothing is not an offender. A shard count above the scanner
     count leaves surplus shards with an empty assignment, which
@@ -1418,8 +1419,9 @@ def _merge_tool_extensions(
 ) -> None:
     """Union ``runs[0].tool.extensions`` from *other* into *base*.
 
-    Needed because ``merge_sarif_report`` reads only ``runs[0].tool.driver``; see
-    the module docstring. Components are matched on the same triple
+    Needed because ``merge_sarif_report`` reads each run's ``tool.driver`` and
+    never a run's ``tool.extensions``; see the module docstring. Components are
+    matched on the same triple
     ``merge_sarif_report`` uses, and rules are unioned by id for a component that
     already exists, so a scanner appearing on two shards -- which coverage
     verification forbids, but which would otherwise corrupt rule metadata --
