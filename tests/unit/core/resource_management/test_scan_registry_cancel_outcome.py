@@ -166,6 +166,34 @@ class TestRecordCancelOutcome:
         assert "server's log" in warning
         assert entry.could_not_stop == (("bandit", 4242),)
 
+    def test_the_pid_free_warning_names_a_tool_by_its_basename(self, tmp_path):
+        """A tool is recorded as argv0 as spawned, which can be a server path.
+        The warning a remote client reads names the basename; the entry keeps
+        the recorded pair, and the pid-naming warning (stdio) keeps the path."""
+        registry = _registry_with_running_scan(tmp_path)
+        registry.cancel_scan("scan-1")
+        spawned = "/opt/scanners/venv/bin/bandit"
+
+        assert (
+            registry.record_cancel_outcome(
+                "scan-1", ((spawned, 4242),), name_process_ids=False
+            )
+            is True
+        )
+
+        entry = registry.get_scan("scan-1")
+        warning = entry.warnings[0]
+        assert "bandit" in warning
+        assert "/opt/scanners" not in warning
+        assert "4242" not in warning
+        assert entry.could_not_stop == ((spawned, 4242),)
+
+        # The owner on stdio reads the path as recorded.
+        local = _registry_with_running_scan(tmp_path, "scan-2")
+        local.cancel_scan("scan-2")
+        assert local.record_cancel_outcome("scan-2", ((spawned, 4242),)) is True
+        assert f"{spawned} (pid 4242)" in local.get_scan("scan-2").warnings[0]
+
     def test_an_unknown_scan_is_reported_not_raised(self, tmp_path):
         registry = _registry_with_running_scan(tmp_path)
         assert registry.record_cancel_outcome("no-such-scan", (("bandit", 1),)) is False

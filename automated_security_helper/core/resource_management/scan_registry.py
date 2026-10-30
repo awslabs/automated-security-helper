@@ -1186,8 +1186,12 @@ class ScanRegistry:
 
         ``name_process_ids`` False keeps the process ids out of the warning: on
         a network transport the client is remote, and a server-side pid is
-        nothing it can act on and nothing it should learn. The caller logs the
-        ids on the server side instead; the entry keeps them either way.
+        nothing it can act on and nothing it should learn. The same warning
+        names each tool by its basename: a tool is recorded as argv0 as spawned
+        (utils/subprocess_utils ``_shown_tool``), which can be a full path on
+        the server, and a remote client has no use for that path either. The
+        caller logs the ids on the server side instead; the entry keeps the
+        pairs as recorded either way.
 
         Returns:
             True if a warning was attached, False if there was nothing new to
@@ -1208,7 +1212,10 @@ class ScanRegistry:
                 named = ", ".join(f"{tool} (pid {pid})" for tool, pid in new)
                 how = "end the listed process(es) before reading or reusing it."
             else:
-                named = ", ".join(tool for tool, _pid in new)
+                # The basename, or the recorded name when it has none.
+                named = ", ".join(
+                    os.path.basename(str(tool)) or str(tool) for tool, _pid in new
+                )
                 how = (
                     "the server's log names the process(es); end them before "
                     "reading or reusing it."
