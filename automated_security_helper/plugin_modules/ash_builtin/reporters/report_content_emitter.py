@@ -491,12 +491,24 @@ class ReportContentEmitter:
     def _additional_report_findings(self) -> List[FlatVulnerability]:
         """The flattened findings that came from list-form additional reports.
 
-        ``to_flat_vulnerabilities`` appends them after the SARIF results, one
-        per dict in a scanner's list. The scanner rows count SARIF results
-        only, so these are the findings a row-based summary does not see.
+        The scanner rows count SARIF results only, so these are the findings a
+        row-based summary does not see. A row the flattening marks with
+        ``source_report`` (the key of the additional report it was listed
+        under; None for a SARIF result) is read by that key wherever it sits.
+        Rows without the marker are read as ``to_flat_vulnerabilities`` laid
+        them out: appended after the SARIF results, one per dict in a scanner's
+        list.
         """
         reports = self.model.additional_reports
         names = {name for name, found in reports.items() if isinstance(found, list)}
+        if not names:
+            return []
+        if any(hasattr(vuln, "source_report") for vuln in self.flat_vulns):
+            return [
+                vuln
+                for vuln in self.flat_vulns
+                if getattr(vuln, "source_report", None) in names
+            ]
         count = sum(
             1 for name in names for entry in reports[name] if isinstance(entry, dict)
         )

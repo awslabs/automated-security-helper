@@ -354,6 +354,59 @@ class TestFindingsAnAdditionalReportListsAreCounted:
         assert summary["active"] == 2, summary
         assert summary["below_threshold"] == 0, summary
 
+    def test_a_row_marked_with_its_source_report_is_read_by_the_mark_not_its_place(
+        self,
+    ):
+        """Rows that carry ``source_report`` are selected by that key.
+
+        The additional-report findings were read as the last N flat rows,
+        checked only by scanner name, so a SARIF row of the same scanner that
+        sat in the tail was counted twice and a listed finding that sat
+        elsewhere was dropped. With the marker, the two listed findings are
+        found between the SARIF rows, and the SARIF rows of the same scanner
+        are not.
+        """
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {"title": "a", "severity": "HIGH", "file_path": "app.py"},
+                    {"title": "b", "severity": "LOW", "file_path": "app.py"},
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+
+        def row(severity: str, source_report: "str | None") -> SimpleNamespace:
+            return SimpleNamespace(
+                scanner="custom-plugin",
+                severity=severity,
+                is_suppressed=False,
+                workspace_project=None,
+                source_report=source_report,
+            )
+
+        emitter.flat_vulns = [
+            row("CRITICAL", None),
+            row("HIGH", "custom-plugin"),
+            row("CRITICAL", None),
+            row("LOW", "custom-plugin"),
+        ]
+
+        extras = emitter._additional_report_findings()
+
+        assert [vuln.severity for vuln in extras] == ["HIGH", "LOW"], extras
+        summary = emitter.get_scan_summary()
+        assert summary["counts"]["high"] == 1, summary
+        assert summary["counts"]["low"] == 1, summary
+        assert summary["counts"]["critical"] == 0, summary
+
     def test_the_buckets_are_the_five_levels_when_every_severity_is_known(self):
         model = _model(
             {
