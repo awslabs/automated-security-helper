@@ -673,13 +673,16 @@ A client cannot add a profile.
   discarded, an SSE event stream that closes, and every session it issued when it shuts down.
 - It also removes a workspace nobody used for `--session-workspace-ttl` seconds, 86400 (24
   hours) by default, which covers sessions whose end it cannot see, such as every stateless
-  one. Each request that names a session counts as a use. A session the server still holds as
-  issued, a stateful session it has not seen end or an open event stream, is kept whatever its
-  age: its workspace, with the profile copy and the upload in it, ends with the session, not
-  with the sweep. A workspace whose scan is running, or whose tree is being changed, is kept,
-  and so is anything under the workspace root that ASH did not create as a session workspace.
-  A `set_source_zip_chunk` or `select_profile` call holds its session from the moment the tool
-  starts, so a sweep that runs while the call writes keeps the session.
+  one. Each request that names a session counts as a use. A workspace whose scan is running,
+  or whose tree is being changed, is kept, and so is anything under the workspace root that
+  ASH did not create as a session workspace. A `set_source_zip_chunk` or `select_profile` call
+  holds its session from the moment the tool starts, so a sweep that runs while the call
+  writes keeps the session.
+- A stateful session nobody has used for that long is removed like any other, whether or not
+  the server has seen it end: the MCP SDK drops an idle stateful session without telling the
+  server, so the server cannot keep it on that account. Only a session whose SSE event stream
+  is still open is kept whatever its age, and the sweep marks that workspace used so another
+  server sharing the root keeps it too.
 - Servers that share one workspace root take a lock under the root before a sweep removes a
   session. A sweep that cannot take that lock within about a second, because another server
   holds it, removes nothing more and leaves the remaining sessions to its next sweep, so
