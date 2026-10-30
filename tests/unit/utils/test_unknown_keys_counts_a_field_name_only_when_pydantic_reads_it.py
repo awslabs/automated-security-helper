@@ -48,4 +48,6 @@ def test_a_dead_key_written_by_field_name_is_refused():
         refuse_unknown_keys(_AliasOnly, {"rule_id": "B101"}, None, "a suppression")
     message = str(raised.value)
     assert "'rule_id'" in message
-    assert "did you mean 'ruleId'" in message, message
+    # Both aliases fold to the dead name; closest_key suggests the first in
+    # sorted order, and "-" sorts before "I".
+    assert "did you mean 'rule-id'" in message, message
