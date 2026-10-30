@@ -1204,18 +1204,32 @@ def _own_path(path: str) -> str:
 def _is_running_interpreter(candidate: str) -> bool:
     """The Python running ASH: already started, so refusing it protects nothing.
 
-    Compared by path, never by inode. A tree's virtual environment links its
-    python to the interpreter running ASH, and ``samefile`` calls the two one
-    file; started through the venv's path, that python reads the tree's
+    Compared by path first, never by inode alone. A tree's virtual environment
+    links its python to the interpreter running ASH, and ``samefile`` calls the
+    two one file; started through the venv's path, that python reads the tree's
     pyvenv.cfg and site-packages, so the link is not the running interpreter.
     The same holds for an in-tree link named after another tool, which would
-    start the interpreter with that tool's arguments. Only the interpreter's own
-    path is exempt: a tool installed beside it inside a scanned tree is refused
-    like any other in-tree file.
+    start the interpreter with that tool's arguments. The interpreter's own path
+    is exempt, and so is a sibling name of it: a link beside ``sys.executable``
+    that is the same file (``python3`` next to the ``python`` ASH runs from, in
+    the tree's own venv when ASH is installed there) reads the same pyvenv.cfg,
+    so it IS the running interpreter under another name, and refusing it read a
+    tool that is already running as MISSING. A link in another directory, such
+    as another venv's link to the base interpreter, stays refused, and so does
+    a tool installed beside the interpreter inside a scanned tree.
     """
     if not sys.executable:
         return False
-    return _own_path(candidate) == _own_path(sys.executable)
+    own = _own_path(sys.executable)
+    path = _own_path(candidate)
+    if path == own:
+        return True
+    if os.path.dirname(path) != os.path.dirname(own):
+        return False
+    try:
+        return os.path.samefile(path, own)
+    except OSError:
+        return False
 
 
 def _containing_tree(candidate: str, roots: Sequence[str]) -> Optional[str]:
