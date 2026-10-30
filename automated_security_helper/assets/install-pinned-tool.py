@@ -1133,6 +1133,10 @@ def _rename_or_copy(src: Path, dst: Path) -> None:
             raise
 
 
+# Names the scratch directory publish_third_party works in, inside third_party_dir.
+_PUBLISH_WORK_PREFIX = ".ash-third-party-"
+
+
 def _same_files(first: Path, second: Path) -> bool:
     """Whether two directories hold the same plain files with the same bytes."""
     try:
@@ -1169,7 +1173,7 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
         path.chmod(0o644)
     staged.chmod(0o755)
     final = third_party_dir / staged.name
-    work = Path(tempfile.mkdtemp(prefix=".ash-third-party-", dir=third_party_dir))
+    work = Path(tempfile.mkdtemp(prefix=_PUBLISH_WORK_PREFIX, dir=third_party_dir))
     try:
         incoming = work / "incoming"
         shutil.copytree(staged, incoming)
@@ -1438,7 +1442,11 @@ def verify_third_party(
     for unexpected in sorted(
         p.name
         for p in third_party_dir.iterdir()
-        if p.is_dir() and p.name not in entries
+        if p.is_dir()
+        and p.name not in entries
+        # The work directory of a publish that was killed: this script's own
+        # scratch space, not a license claim for a tool.
+        and not p.name.startswith(_PUBLISH_WORK_PREFIX)
     ):
         problems.append(f"{unexpected}: directory with no license entry")
 

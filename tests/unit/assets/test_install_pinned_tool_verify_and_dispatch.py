@@ -167,6 +167,24 @@ class TestVerifyThirdParty:
         )
         assert not (verify.third_party / "index.json").exists()
 
+    def test_the_work_directory_of_a_killed_publish_is_not_a_license_claim(
+        self, monkeypatch, tmp_path
+    ):
+        verify = _Verify(monkeypatch, tmp_path)
+        (verify.third_party / ".ash-third-party-leftover").mkdir()
+        assert verify.run() == []
+
+    def test_any_other_directory_with_no_entry_is_still_a_problem(
+        self, monkeypatch, tmp_path
+    ):
+        """Control for the test above."""
+        verify = _Verify(monkeypatch, tmp_path)
+        (verify.third_party / "retired-tool").mkdir()
+        problems = verify.run()
+        assert any(
+            "retired-tool: directory with no license entry" in p for p in problems
+        )
+
     def test_a_source_file_that_is_not_utf8_is_a_problem_not_a_crash(
         self, monkeypatch, tmp_path
     ):
