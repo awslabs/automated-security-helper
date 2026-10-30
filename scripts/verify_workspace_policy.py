@@ -86,9 +86,11 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess  # nosec B404 - runs ash itself, argv-only, no shell
 import sys
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -211,6 +213,89 @@ def build_fixture(root: Path) -> Path:
 #: ran until the runner's own limit cancelled it with no output from this script.
 DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
 
+#: Seconds the scan child gets to shut down after SIGTERM before it is killed.
+SHUTDOWN_GRACE_SECONDS = 15.0
+
+#: Seconds to keep reading the child's output once it has been stopped.
+DRAIN_SECONDS = 15.0
+
+
+def _kill_process_group(process: Any) -> None:
+    """SIGKILL the child's process group, or the child alone without groups."""
+    if hasattr(os, "killpg") and hasattr(signal, "SIGKILL"):
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+    elif process.poll() is None:
+        process.kill()
+
+
+def _stop_process_group(
+    process: Any, grace_seconds: float = SHUTDOWN_GRACE_SECONDS
+) -> None:
+    """Stop the scan child and the tools it started, SIGTERM first.
+
+    ``subprocess.run(timeout=...)`` SIGKILLed the ASH process alone, which skips
+    ASH's own shutdown, so the scanner tools it had started kept running after
+    this gate gave up and kept writing into the scratch directory ``rmtree`` was
+    removing, or into the evidence kept with ``--keep``. The child is started as
+    the leader of its own process group: SIGTERM goes to the group so ASH runs
+    its own shutdown (which is what stops the tools ASH starts in sessions of
+    their own; its spawn plan decides that per tool), then a grace period, then
+    SIGKILL to the group. Where process groups are not available the child alone
+    is terminated, then killed.
+
+    The group gets the SIGKILL sweep even when the child exited in time: a tool
+    that traps SIGTERM, or one ASH did not wait for, can outlive the child in
+    the group and keep the output pipes open. ``ProcessLookupError`` from an
+    empty group is expected and suppressed.
+    """
+    group_signals = hasattr(os, "killpg") and hasattr(signal, "SIGKILL")
+    if group_signals:
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGTERM)
+    elif process.poll() is None:
+        process.terminate()
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=grace_seconds)
+        return
+    _kill_process_group(process)
+
+
+def _as_text(stream: Any) -> str:
+    """A captured stream as text, whether the child wrote bytes or text."""
+    if stream is None:
+        return ""
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", "replace")
+    return str(stream)
+
+
+def _drain_output(
+    process: Any, drain_seconds: float = DRAIN_SECONDS
+) -> tuple[str, str]:
+    """Read what a stopped child wrote, without waiting for ever.
+
+    A process that outlives the child, outside its group, can hold the output
+    pipes open, and a bare ``communicate()`` then blocks until that process
+    exits. On Windows that is what ``subprocess.run`` did after its kill, so a
+    grandchild holding the pipe hung the gate anyway. Read for *drain_seconds*;
+    if the pipes are still open, kill the group once more and read for the same
+    time again; if they are still open after that, return the output read so far
+    and let the caller close the pipes.
+    """
+    try:
+        return process.communicate(timeout=drain_seconds)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+    try:
+        return process.communicate(timeout=drain_seconds)
+    except subprocess.TimeoutExpired as still_open:
+        return _as_text(still_open.stdout), _as_text(still_open.stderr)
+
 
 def child_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
     """The environment the scan child runs under.
@@ -264,8 +349,11 @@ def run_ash(
 ) -> tuple[int, dict[str, Any], str]:
     """Run a real workspace scan; return (exit code, workspace payload, output).
 
-    Raises ``subprocess.TimeoutExpired`` when the scan outlives *timeout*; the
-    caller reports that as a broken run rather than hanging the gate.
+    Raises ``subprocess.TimeoutExpired`` carrying the output read so far when the
+    scan outlives *timeout*; the child and its tools are stopped first
+    (``_stop_process_group``) and its output is read for a bounded time
+    (``_drain_output``), as the sibling gates do. The caller reports that as a
+    broken run rather than hanging the gate.
     """
     argv = [
         sys.executable,
@@ -288,28 +376,49 @@ def run_ash(
     # cwd is the repository root and is passed to the child rather than set with
     # os.chdir, matching verify_multi_project_attribution.py: this project
     # deliberately removed process-wide cwd dependence.
-    completed = subprocess.run(  # nosec B603 - argv list, no shell, argv[0] is sys.executable
+    popen_options: dict[str, Any] = {}
+    if hasattr(os, "setsid"):
+        # The child leads its own process group, so a timeout can stop it and
+        # every tool it started together; see _stop_process_group.
+        popen_options["start_new_session"] = True
+    # A non-zero exit is never raised on. It is the expected result for most
+    # runs here: 2 when a project has actionable findings, 4 when the policy is
+    # deliberately malformed. Raising on it would turn the measurement into a
+    # crash.
+    with subprocess.Popen(  # nosec B603 - argv list, no shell, argv[0] is sys.executable
         argv,
-        capture_output=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
+        env=child_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
         # The child is told to write UTF-8 (child_environment), so it is decoded
         # as UTF-8 here too. text=True alone decodes with the locale codec, and
         # a cp1252 console turned a box-drawing character in the child's table
         # into a UnicodeDecodeError in this process.
         encoding="utf-8",
         errors="replace",
-        cwd=str(Path(__file__).resolve().parent.parent),
-        env=child_environment(),
-        timeout=timeout,
-        # Explicitly not check=True. A non-zero exit is the expected result for
-        # most runs here: 2 when a project has actionable findings, 4 when the
-        # policy is deliberately malformed. Raising on it would turn the
-        # measurement into a crash.
-        check=False,
-    )
-    combined = completed.stdout + completed.stderr
+        **popen_options,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as expired:
+            _stop_process_group(process)
+            stdout, stderr = _drain_output(process)
+            raise subprocess.TimeoutExpired(
+                argv, timeout, output=stdout, stderr=stderr
+            ) from expired
+        except BaseException:
+            # Ctrl-C, a CI cancel or a SIGTERM to the gate turned into
+            # SystemExit. The child leads its own session, so the terminal's
+            # SIGINT never reached it, and Popen.__exit__ assumes it did: it
+            # waits a moment and returns with the child still running.
+            _stop_process_group(process)
+            raise
+    combined = stdout + stderr
 
     payload, note = read_workspace_payload(output_dir / "ash_aggregated_results.json")
-    return completed.returncode, payload, combined + note
+    return process.returncode, payload, combined + note
 
 
 def _by_project(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -573,6 +682,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    # The child's output is decoded as UTF-8 and printed raw on the failure
+    # paths. A piped stdout on Windows encodes cp1252 in strict mode, so the
+    # box-drawing characters of the child's table turned the report of a broken
+    # run into a UnicodeEncodeError: a traceback and exit 1 where the contract
+    # is an explanation and exit 3. Replacing what the console cannot encode
+    # keeps the explanation.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
 
     scratch = Path(tempfile.mkdtemp(prefix="ash-policy-verify-"))
     failures = []

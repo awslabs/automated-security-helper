@@ -20,7 +20,9 @@ cannot show going wrong without a scanner on the host:
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -100,13 +102,18 @@ class TestChildEnvironment:
     ):
         recorded: dict = {}
 
-        def fake_run(argv, **kwargs):
-            recorded["argv"] = argv
-            recorded.update(kwargs)
-            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        class FakePopen(_FakeScanChild):
+            def __init__(self, argv, **kwargs):
+                super().__init__()
+                recorded["argv"] = argv
+                recorded.update(kwargs)
+
+            def communicate(self, timeout=None):
+                recorded["communicate_timeout"] = timeout
+                return "", ""
 
         monkeypatch.setenv("ASH_EXCLUDED_SCANNERS", "bandit")
-        monkeypatch.setattr(policy_script.subprocess, "run", fake_run)
+        monkeypatch.setattr(policy_script.subprocess, "Popen", FakePopen)
         code, payload, output = policy_script.run_ash(
             tmp_path / "ws.code-workspace", tmp_path / "out", timeout=17.5
         )
@@ -114,8 +121,130 @@ class TestChildEnvironment:
         assert "ASH_EXCLUDED_SCANNERS" not in recorded["env"]
         assert recorded["encoding"] == "utf-8"
         assert recorded["errors"] == "replace"
-        assert recorded["timeout"] == 17.5
-        assert "text" not in recorded
+        assert recorded["text"] is True
+        assert recorded["communicate_timeout"] == 17.5
+        # The child leads its own session where the platform allows, so a
+        # timeout can stop ASH and the tools it started together.
+        assert recorded.get("start_new_session", False) is hasattr(os, "setsid")
+
+
+class _FakeScanChild:
+    """A Popen stand-in for run_ash: exited, with the pipes still readable."""
+
+    pid = 4242
+
+    def __init__(self, *args, **kwargs):
+        self.returncode = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def communicate(self, timeout=None):
+        return "", ""
+
+
+class TestRunAshStopsTheScan:
+    """The policy gate used subprocess.run(timeout=...), which SIGKILLs the ASH
+    process alone and then, on Windows, drains the pipes with no deadline. Both
+    sibling gates had replaced that with a process group stop and a bounded
+    drain; this gate pinned the old shape in its tests.
+    """
+
+    def test_a_timeout_stops_the_group_and_drains_with_a_deadline(
+        self, policy_script, tmp_path: Path, monkeypatch
+    ):
+        class HungChild(_FakeScanChild):
+            def communicate(self, timeout=None):
+                assert timeout is not None, "the output must be read with a deadline"
+                raise subprocess.TimeoutExpired(
+                    cmd="ash", timeout=timeout, output="tail", stderr=""
+                )
+
+        stopped: list = []
+        monkeypatch.setattr(policy_script.subprocess, "Popen", HungChild)
+        monkeypatch.setattr(
+            policy_script,
+            "_stop_process_group",
+            lambda process, **_: stopped.append(process),
+        )
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            policy_script.run_ash(tmp_path / "ws", tmp_path / "out", timeout=0.01)
+        assert len(stopped) == 1
+        assert raised.value.output == "tail"
+        assert raised.value.timeout == 0.01
+
+    def test_an_interrupt_during_the_scan_stops_the_group(
+        self, policy_script, tmp_path: Path, monkeypatch
+    ):
+        """Ctrl-C reaches only the gate once the child leads its own session."""
+
+        class Interrupted(_FakeScanChild):
+            def communicate(self, timeout=None):
+                raise KeyboardInterrupt
+
+        stopped: list = []
+        monkeypatch.setattr(policy_script.subprocess, "Popen", Interrupted)
+        monkeypatch.setattr(
+            policy_script,
+            "_stop_process_group",
+            lambda process, **_: stopped.append(process),
+        )
+        with pytest.raises(KeyboardInterrupt):
+            policy_script.run_ash(tmp_path / "ws", tmp_path / "out", timeout=0.01)
+        assert len(stopped) == 1
+
+    @pytest.mark.skipif(
+        not hasattr(os, "killpg") or not hasattr(signal, "SIGKILL"),
+        reason="process groups are a POSIX feature",
+    )
+    def test_the_group_gets_sigterm_then_a_kill_sweep(self, policy_script, monkeypatch):
+        """A tool that outlives ASH in the group is killed, not left writing."""
+        calls: list = []
+        monkeypatch.setattr(
+            policy_script.os, "killpg", lambda pgid, signum: calls.append(signum)
+        )
+        process = _FakeScanChild()
+        policy_script._stop_process_group(process, grace_seconds=0.01)
+        assert calls == [signal.SIGTERM, signal.SIGKILL]
+
+    @pytest.mark.skipif(
+        not hasattr(os, "killpg") or not hasattr(signal, "SIGKILL"),
+        reason="process groups are a POSIX feature",
+    )
+    def test_an_empty_group_is_not_an_error(self, policy_script, monkeypatch):
+        def no_such_group(pgid, signum):
+            raise ProcessLookupError(pgid)
+
+        monkeypatch.setattr(policy_script.os, "killpg", no_such_group)
+        policy_script._stop_process_group(_FakeScanChild(), grace_seconds=0.01)
+
+    def test_pipes_held_open_return_the_partial_output(
+        self, policy_script, monkeypatch
+    ):
+        class HeldOpen(_FakeScanChild):
+            def __init__(self):
+                super().__init__()
+                self.timeouts: list = []
+
+            def communicate(self, timeout=None):
+                self.timeouts.append(timeout)
+                raise subprocess.TimeoutExpired(
+                    cmd="ash", timeout=timeout, output=b"half", stderr=None
+                )
+
+        monkeypatch.setattr(policy_script, "_kill_process_group", lambda process: None)
+        process = HeldOpen()
+        assert policy_script._drain_output(process, drain_seconds=0.01) == ("half", "")
+        assert process.timeouts == [0.01, 0.01]
 
 
 class TestInheritedPythonPath:
@@ -390,3 +519,22 @@ class TestFailedControlStopsTheRun:
         out = capsys.readouterr().out
         assert "did not finish within 5 seconds" in out
         assert "partial" in out
+
+    def test_the_report_of_a_broken_run_survives_a_strict_console(
+        self, policy_script, scratch_under_tmp, monkeypatch, capsys
+    ):
+        """The child's table holds box-drawing characters; a piped Windows
+        stdout encodes cp1252 in strict mode and raised UnicodeEncodeError on
+        exactly the paths that explain a broken run."""
+        if not hasattr(sys.stdout, "reconfigure"):
+            pytest.skip("the captured stdout cannot be reconfigured here")
+
+        def fake_run_ash(workspace, output_dir, policy=None, timeout=None):
+            raise subprocess.TimeoutExpired(
+                cmd=["ash"], timeout=timeout, output="── table", stderr=None
+            )
+
+        monkeypatch.setattr(policy_script, "run_ash", fake_run_ash)
+        assert policy_script.main(["--timeout", "5"]) == 3
+        assert sys.stdout.errors == "replace"
+        assert "table" in capsys.readouterr().out
