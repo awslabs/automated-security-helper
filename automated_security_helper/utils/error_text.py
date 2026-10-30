@@ -144,10 +144,20 @@ def _files_quoted(error: OSError) -> Optional[Tuple[str, str]]:
     filename, filename2 = error.filename, error.filename2
     if not isinstance(filename, str) or not isinstance(filename2, (str, type(None))):
         return None
-    quoted, given = f": {filename!r}", f": '{filename}'"
+    # Inside the quotes repr chose: double quotes around a name that holds a
+    # single quote and no double quote, single quotes otherwise. Single quotes
+    # written in every case left such a name between mismatched quotes.
+    quoted, given = f": {filename!r}", f": {_quoted_as_given(filename)}"
     if filename2 is not None:
-        quoted, given = f"{quoted} -> {filename2!r}", f"{given} -> '{filename2}'"
+        quoted = f"{quoted} -> {filename2!r}"
+        given = f"{given} -> {_quoted_as_given(filename2)}"
     return quoted, given
+
+
+def _quoted_as_given(name: str) -> str:
+    """*name* as given, between the quote characters ``repr`` puts around it."""
+    quote = repr(name)[0]
+    return f"{quote}{name}{quote}"
 
 
 def _files_as_given(error: BaseException, text: str) -> str:
@@ -215,7 +225,13 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
         if counted:
             described = f"{_counted(validation_error)}: {described}"
         if validation_error is error:
-            return _without_escape_codes(described)
+            # Redacted as the other path is below: as written by the describer,
+            # then stripped of codes and matched again, so a value an escape
+            # code split in a location's text is not re-joined in clear by the
+            # strip alone.
+            return _without_escape_codes(
+                _redacted_keeping_codes(described, values) if values else described
+            )
         text, changed = _without_refused_inputs(text, validation_error, described)
         withheld = withheld or changed
         descriptions.append(described)
@@ -239,14 +255,40 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
 def os_error_without_named_file(e: OSError, named: "os.PathLike[str] | str") -> str:
     """``error_text(e)``, without the OSError's own filename when it names
     ``named``: a message built around it already names that file
-    (``could not read <file>: ...``), so the error's copy said it twice."""
+    (``could not read <file>: ...``), so the error's copy said it twice.
+
+    The rest of Python's own text is kept: the code as Python heads it
+    (``[WinError N]`` where the error carries a Windows error code, ``[Errno N]``
+    otherwise) and the second file of a two-file error (``-> 'other'``), as given.
+    An error whose filename is a file descriptor (an int) names no path, so its
+    text is ``error_text(e)`` as it is.
+    """
     from pathlib import Path
 
-    filename = os.fsdecode(e.filename) if e.filename else ""
-    if e.strerror and filename and Path(filename) == Path(named):
-        errno_part = f"[Errno {e.errno}] " if e.errno is not None else ""
-        return f"{errno_part}{e.strerror}"
-    return error_text(e)
+    filename = e.filename
+    if not isinstance(filename, (str, bytes, os.PathLike)):
+        return error_text(e)
+    try:
+        name = os.fsdecode(filename)
+    except TypeError:
+        return error_text(e)
+    if not (e.strerror and name and Path(name) == Path(named)):
+        return error_text(e)
+    winerror = getattr(e, "winerror", None)
+    if winerror is not None:
+        code = f"[WinError {winerror}] "
+    elif e.errno is not None:
+        code = f"[Errno {e.errno}] "
+    else:
+        code = ""
+    text = f"{code}{e.strerror}"
+    other = e.filename2
+    if isinstance(other, (str, bytes, os.PathLike)):
+        try:
+            text = f"{text} -> {_quoted_as_given(os.fsdecode(other))}"
+        except TypeError:
+            pass
+    return text
 
 
 def error_text(error: BaseException, values: Iterable[str] = ()) -> str:
@@ -607,11 +649,15 @@ CSI_CODES = _CSI_CODES
 #: and the trim dropped the text behind it. The hyperlink form
 #: ("\x1b]8;;https://host\x1b\\") is OSC, not CSI, so the CSI strip leaves
 #: it, and one inside a value splits the contiguous match the same way a
-#: color code does. The body excludes ESC, BEL and U+009C, so an
-#: unterminated OSC never swallows the text behind it; a cut-off OSC at a
-#: read's edge is the trim's incomplete-code branch, not this pattern's.
-#: Other C1 bytes, DCS and APC stay unstripped, as before.
-_OSC_CODES = re.compile(r"\x1b\][^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)")
+#: color code does. The body excludes ESC, BEL and U+009C, and a line break,
+#: so an unterminated OSC never swallows the text behind it: one that is not
+#: ended on its own line is left as it is rather than matched up to a BEL or
+#: a U+009C lines later, which dropped every line between them from the
+#: saved text (ECMA-48 admits a line break in a command string; a line is
+#: the unit every sink here keeps). A cut-off OSC at a read's edge is the
+#: trim's incomplete-code branch, not this pattern's. Other C1 bytes, DCS and
+#: APC stay unstripped, as before.
+_OSC_CODES = re.compile(r"\x1b\][^\x07\x1b\x9c\r\n]*(?:\x07|\x1b\\|\x9c)")
 OSC_CODES = _OSC_CODES
 
 #: Every escape sequence the shown layers strip: the CSI set and the OSC
@@ -735,12 +781,21 @@ def log_unexpected_error(
                 own = None
             logged = error if own is not None and text == own else text
         try:
-            getattr(error, "__notes__", None)
+            # Every member of the chain: the handlers' formatter walks them all
+            # as traceback_text does, and before Python 3.11's guard a notes
+            # lookup that raises on any of them fails the record's formatting,
+            # losing the record. Logged pre-rendered instead, through
+            # traceback_text's own fallback.
+            for member in _chain(error):
+                getattr(member, "__notes__", None)
         except Exception:
-            # The handlers' formatter walks the error as traceback_text does,
-            # and before Python 3.11's guard a notes lookup that raises
-            # fails the record's formatting, losing the record. Logged
-            # pre-rendered instead, through traceback_text's own fallback.
+            logger.error(f"{logged}\n{traceback_text(error)}".rstrip(), extra=NO_MARKUP)
+            return
+        if _names_a_file_by_repr(error):
+            # The handlers' formatter would render the traceback from the
+            # error, whose own text quotes its files by repr: the doubled
+            # backslashes this module removes. Pre-rendered, the names are as
+            # given, through traceback_text.
             logger.error(f"{logged}\n{traceback_text(error)}".rstrip(), extra=NO_MARKUP)
             return
         logger.error(logged, exc_info=error, extra=NO_MARKUP)
@@ -758,4 +813,25 @@ def log_unexpected_error(
     if context is not None:
         message = f"{context}: {message}"
     logger.error(message, extra=NO_MARKUP)
-    logger.debug("".join(traceback.format_tb(error.__traceback__)), extra=NO_MARKUP)
+    # The frames alone, redacted as traceback_text redacts them: a frame's path
+    # or source line can quote a value, and the file handlers write what they
+    # are given.
+    frames = "".join(traceback.format_tb(error.__traceback__))
+    if values:
+        frames = _without_escape_codes(_redacted_keeping_codes(frames, values))
+    logger.debug(frames, extra=NO_MARKUP)
+
+
+def _names_a_file_by_repr(error: BaseException) -> bool:
+    """Whether an OSError in ``error``'s chain has Python's own text quote a file
+    whose repr differs from the name as given (a backslash, a control)."""
+    for current in _chain(error):
+        if (
+            not isinstance(current, OSError)
+            or type(current).__str__ is not OSError.__str__
+        ):
+            continue
+        quoted = _files_quoted(current)
+        if quoted is not None and quoted[0] != quoted[1]:
+            return True
+    return False
