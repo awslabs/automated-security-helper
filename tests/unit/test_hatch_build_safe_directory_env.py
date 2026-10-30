@@ -25,6 +25,18 @@ between two safe.directory entries: git is given exactly the two safe.directory
 entries, numbered from zero, and none of the other entry. A count that is not a
 number, entries with no value, and a caller with no safe.directory entry give git no
 GIT_CONFIG_* variable at all; GIT_DIR and GIT_CONFIG_PARAMETERS are still removed.
+
+GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM and GIT_CONFIG_NOSYSTEM are removed too, with or
+without a safe.directory entry beside them: they name whole config files, which cannot
+be filtered to one key. That is a decision, and a test pins it so that a widening of
+the allowlist is a visible change.
+
+The entries only work where git reads safe.directory from the command scope, which is
+believed to be git 2.38 and later. Every test here replaces git with a stub, so none
+shows a real git accepting an entry (that is an integration cell for a host with a
+second user and a git of each age); what these tests can pin is that the version
+bound is recorded where a reader of the code will find it, in the docstrings of
+``_safe_directory_config`` and ``_get_commit_sha``.
 """
 
 from __future__ import annotations
@@ -166,3 +178,40 @@ def test_without_a_usable_safe_directory_entry_git_gets_no_config(
         monkeypatch.setenv(key, value)
 
     assert _git_config(_env_git_receives(monkeypatch, hook)) == {}
+
+
+@pytest.mark.parametrize("with_entry", [False, True], ids=["alone", "with-entry"])
+@pytest.mark.parametrize(
+    "name", ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"]
+)
+def test_the_config_file_variables_are_still_removed(
+    monkeypatch, hook, name, with_entry
+):
+    """Green at the base and the fix: the decision that these three stay dropped.
+    They name whole config files, which cannot be filtered to safe.directory, so
+    they are not passed even beside a safe.directory entry that is."""
+    monkeypatch.setenv(name, "/srv/ci/gitconfig")
+    if with_entry:
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/srv/ash-first")
+
+    seen = _env_git_receives(monkeypatch, hook)
+
+    assert name not in seen
+    # The control: the safe.directory entry is passed in the same run.
+    assert ("GIT_CONFIG_VALUE_0" in seen) is with_entry
+
+
+def test_the_minimum_git_version_is_recorded_where_the_code_is_read(hook):
+    """Red before: neither docstring named a git version, so a reader had no way
+    to tell why the forwarded entries do nothing on an older git."""
+    for documented in (
+        hook._safe_directory_config,
+        hook.CustomBuildHook._get_commit_sha,
+    ):
+        text = " ".join(documented.__doc__.split())
+        assert "git 2.38" in text, documented.__name__
+    config_text = " ".join(hook._safe_directory_config.__doc__.split())
+    for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"):
+        assert name in config_text, name

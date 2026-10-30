@@ -192,6 +192,25 @@ def _safe_directory_config(environ) -> dict:
     are kept, since any other key set this way (core.worktree, core.fsmonitor, a
     hook path) can point git at another repository or run a program. A count that
     is not a number, and an entry with a key and no value, give nothing.
+
+    GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM and GIT_CONFIG_NOSYSTEM stay dropped
+    with the rest. They name whole config files, every key of which git would
+    honor, and a file's content cannot be filtered to safe.directory the way
+    numbered entries can. A container or CI step that supplies safe.directory
+    through one of them gets "unknown-commit" here, and can pass it through
+    GIT_CONFIG_COUNT instead.
+
+    Minimum git version. These entries work only where git reads safe.directory
+    from the command scope. git-config(1) puts the command scope in "protected
+    configuration" (with the system and global scopes), and says safe.directory is
+    respected only there; that is how it reads in git 2.50. The first release that
+    does is believed to be git 2.38, which introduced protected configuration.
+    That bound was not measured here. A git that carries the CVE-2022-24765 fix
+    but is older (2.35.2 up to 2.37, and the distribution builds of 2.34 and
+    earlier that backport it) is believed to read safe.directory from the
+    system and global config only, so the forwarded entries do nothing there and
+    the record reads "unknown-commit". Nothing here tests for the version: git
+    gives the same refusal either way.
     """
     try:
         count = int(environ.get("GIT_CONFIG_COUNT", ""))
@@ -233,7 +252,10 @@ def _commit_from_git(git_path: str) -> str | None:
         if not k.startswith("GIT_") or k == "GIT_CEILING_DIRECTORIES"
     }
     # The one GIT_CONFIG_* setting that is kept: safe.directory, the caller's
-    # own statement that git may read this tree despite its owner.
+    # own statement that git may read this tree despite its owner. It needs a
+    # git that reads safe.directory from the command scope (believed to be git
+    # 2.38 and later; see _safe_directory_config). GIT_CONFIG_GLOBAL,
+    # GIT_CONFIG_SYSTEM and GIT_CONFIG_NOSYSTEM stay dropped by the filter above.
     git_env.update(_safe_directory_config(os.environ))
     try:
         git_result_full = subprocess.run(  # nosec B603 - This code is run during package build
@@ -449,7 +471,10 @@ class CustomBuildHook(BuildHookInterface):
         git sees none of the caller's GIT_* variables except
         GIT_CEILING_DIRECTORIES and the safe.directory entries of GIT_CONFIG_COUNT,
         GIT_CONFIG_KEY_<n> and GIT_CONFIG_VALUE_<n> (every other config entry there
-        can move the worktree or run a program, so it is dropped). So a tree that
+        can move the worktree or run a program, so it is dropped; the entries
+        work on git 2.38 and later, which is believed to be the first to read
+        safe.directory from the command scope, and GIT_CONFIG_GLOBAL, _SYSTEM
+        and _NOSYSTEM are dropped too: see _safe_directory_config). So a tree that
         has no .git of its own, built with GIT_DIR (and GIT_WORK_TREE) naming its
         repository from outside, is treated as a tree with no git metadata: it keeps
         an earlier record (an unpacked sdist only) or records "unknown-commit".
