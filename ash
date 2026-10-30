@@ -1658,17 +1658,20 @@ else
       if [[ "${COLOR_OUTPUT}" = "true" ]] && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
-      # The container's stdin is kept open (-i) only when the caller's stdin is not a
-      # terminal: a pipe or a file, such as an MCP client driving `./ash mcp` on its
-      # default stdio transport, or input redirected into the scan, which without -i
-      # never reached the container. A terminal stdin gets no -i: with one, the runner
-      # reads the terminal, and a wrapper started in the background (`./ash scan &`)
-      # stops on that read. A terminal stdin with input redirected to the wrapper
-      # (`while read x; do ./ash ...; done < list`) is a file, so the container reads
-      # it, as -i means.
-      if [ ! -t 0 ]; then
-        DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -i"
-      fi
+      # The container's stdin is kept open (-i) for the two subcommands that read it:
+      # mcp, whose default stdio transport is driven by the client over stdin, and
+      # inspect, the Textual app, which reads keys. Without -i neither got any input.
+      # No other subcommand reads stdin, and -i on one of them makes the container
+      # consume the caller's input: `while read d; do ./ash --source-dir "$d"; done
+      # < dirs.txt` ended after one directory, a job script fed to bash on stdin lost
+      # the commands after ./ash, and `./ash scan &` from an interactive shell had the
+      # runner read the terminal and stopped on SIGTTIN. SUBCOMMAND is the first of
+      # ash's words that names a subcommand (detect_subcommand, above).
+      case "${SUBCOMMAND}" in
+        mcp | inspect)
+          DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -i"
+          ;;
+      esac
       # --quiet and --no-color are this script's options as well as ash's, and they
       # are handed on to ash in front of its arguments. ash passes an option given
       # before a subcommand on to it only when the subcommand takes it, and refuses

@@ -10,7 +10,8 @@ the CLI inside the container does. `-v` is the CLI's --verbose, not the wrapper'
 --version, so `./ash scan -v` scans. `--help` and `--version` run the CLI from the
 wrapper's own directory, not the caller's, so a package planted in a scanned checkout
 is not what runs. The script's own directory is read with CDPATH unset, and the
-container is run with its stdin open when the caller's stdin is a pipe or a file.
+container is run with its stdin open only for `mcp` and `inspect`, the two
+subcommands that read it.
 
 A fake OCI runner stands in for docker, as in
 test_ash_bash_entrypoint_container_inputs.py, and records each call's argv
@@ -354,9 +355,9 @@ def test_the_scripts_directory_is_read_with_cdpath_unset(runner, tmp_path):
 
 
 def test_the_containers_stdin_is_kept_open_for_piped_input(runner, tmp_path):
-    """An MCP client drives `./ash mcp` over stdin: without -i the container got no
-    input. Here stdin is not a terminal (a file), so the container's stdin is kept
-    open."""
+    """An MCP client drives `./ash mcp` over stdin on the default stdio transport:
+    without -i the container got no input. mcp is one of the two subcommands the
+    wrapper keeps the container's stdin open for."""
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,
@@ -373,12 +374,51 @@ def test_the_containers_stdin_is_kept_open_for_piped_input(runner, tmp_path):
     assert _inner(run) == ["ash", "mcp"], run
 
 
-def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(runner, tmp_path):
+@pytest.mark.parametrize(
+    ("words", "kept_open"),
+    [
+        pytest.param([], False, id="default-scan"),
+        pytest.param(["scan"], False, id="scan"),
+        pytest.param(["report"], False, id="report"),
+        pytest.param(["mcp"], True, id="mcp"),
+        pytest.param(["inspect"], True, id="inspect"),
+    ],
+)
+def test_only_mcp_and_inspect_keep_the_containers_stdin_open(
+    runner, tmp_path, words, kept_open
+):
+    """Stdin here is a file (the shape of `./ash --source-dir "$d" < dirs.txt` inside
+    a `while read` loop, or a job script fed to bash on stdin). A scan given -i
+    consumed that input, so the loop ended after one directory and the script lost
+    the commands after ./ash; only mcp and inspect read stdin, so only they get -i."""
+    source, out = _dirs(tmp_path)
+    result, calls = _run(
+        runner,
+        ["--no-build", "--source-dir", str(source), "--output-dir", str(out), *words],
+        stdin=subprocess.DEVNULL,
+    )
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    options = _runner_options(_only_run(calls, shown))
+    assert ("-i" in options) is kept_open, options
+
+
+@pytest.mark.parametrize(
+    ("words", "kept_open"),
+    [
+        pytest.param([], False, id="scan-in-the-background"),
+        pytest.param(["inspect"], True, id="inspect-at-the-terminal"),
+    ],
+)
+def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(
+    runner, tmp_path, words, kept_open
+):
     """`./ash scan &` from an interactive shell: the terminal is on stdin AND stdout.
     With -i the runner reads the terminal and the background job stops on that read,
-    so a terminal stdin gets no -i, whatever stdout is. The terminal is a real
-    pseudo-terminal on both ends, which is the shape the earlier `[ -t 1 ]` arm
-    gave -i to; a captured stdout would not tell the two apart. The runner's options
+    so a scan gets no -i there. `./ash inspect` at the same terminal reads keys, so
+    it keeps -i. The terminal is a real pseudo-terminal on both ends, which is the
+    shape an earlier condition (-i whenever stdout was a terminal) gave -i to for a
+    scan; a captured stdout would not tell the shapes apart. The runner's options
     come from the recording runner's log, not from the wrapper's output."""
     source, out = _dirs(tmp_path)
     try:
@@ -404,7 +444,14 @@ def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(runner, tmp_pa
     try:
         result, calls = _run(
             runner,
-            ["--no-build", "--source-dir", str(source), "--output-dir", str(out)],
+            [
+                "--no-build",
+                "--source-dir",
+                str(source),
+                "--output-dir",
+                str(out),
+                *words,
+            ],
             stdin=terminal,
             stdout=terminal,
         )
@@ -416,4 +463,4 @@ def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(runner, tmp_pa
     assert result.returncode == 0, shown
     run = _only_run(calls, shown)
     options = _runner_options(run)
-    assert "-i" not in options, options
+    assert ("-i" in options) is kept_open, options
