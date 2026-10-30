@@ -109,14 +109,14 @@ def _finding_at(uri: str) -> dict:
 class RegionFaultCfnLint:
     """Exits 32 for any invocation that names ``faulty``; otherwise writes SARIF."""
 
-    def __init__(self, faulty: str):
+    def __init__(self, *faulty: str):
         self.faulty = faulty
         self.calls: list = []
 
     def __call__(self, command, **kwargs):
         self.calls.append(list(command))
         files = command[command.index("--") + 1 :]
-        if any(f.endswith(self.faulty) for f in files):
+        if any(f.endswith(name) for f in files for name in self.faulty):
             return {
                 "stdout": "",
                 "stderr": "Regions ['mars-north-1'] are unsupported.",
@@ -354,11 +354,13 @@ class RunWideFaultCfnLint:
 
 
 def test_a_run_wide_failure_is_not_repeated_once_per_template(ash_temp_path):
-    """At the base a batch of four that failed for the run's own reason was re-run
-    one template at a time: five cfn-lint start-ups to report one failure four
-    times. The first and the last template alone fail alike, so the two between
-    them are recorded with that failure and not re-run: three invocations."""
-    repo = _repo(ash_temp_path, "a.yaml", "b.yaml", "c.yaml", "d.yaml")
+    """At the base a batch of eight that failed for the run's own reason was re-run
+    one template at a time: nine cfn-lint start-ups to report one failure eight
+    times. The first and the last template alone fail alike, the failure names no
+    template, and six sit between them (more than the fold's floor), so those six
+    are recorded with that failure and not re-run: three invocations."""
+    names = [f"{letter}.yaml" for letter in "abcdefgh"]
+    repo = _repo(ash_temp_path, *names)
     fake = RunWideFaultCfnLint()
     scanner = _scanner(repo)
 
@@ -366,12 +368,37 @@ def test_a_run_wide_failure_is_not_repeated_once_per_template(ash_temp_path):
 
     batches = [call[call.index("--") + 1 :] for call in fake.calls]
     assert len(batches) == 3, batches
-    assert len(batches[0]) == 4
+    assert len(batches[0]) == 8
     assert len(batches[1]) == 1 and batches[1][0].endswith("a.yaml")
-    assert len(batches[2]) == 1 and batches[2][0].endswith("d.yaml")
-    assert scanner.targets_attempted == 4
-    assert scanner.targets_failed == 4
+    assert len(batches[2]) == 1 and batches[2][0].endswith("h.yaml")
+    assert scanner.targets_attempted == 8
+    assert scanner.targets_failed == 8
     assert any("read as a failure of the run" in e for e in scanner.errors)
+
+
+def test_a_small_batch_with_alike_failures_at_both_ends_still_runs_the_middle(
+    ash_temp_path,
+):
+    """Two templates with the SAME per-template fault at both ends of a small batch
+    fail alike when run alone. At the previous tip that equality alone folded the
+    template between them as failed without running it, and its finding was never
+    produced; below the fold's floor every middle template runs on its own."""
+    repo = _repo(ash_temp_path, "aaa-faulty.yaml", "mmm.yaml", "zzz-faulty.yaml")
+    fake = RegionFaultCfnLint("aaa-faulty.yaml", "zzz-faulty.yaml")
+    scanner = _scanner(repo)
+
+    report = _run(scanner, fake, repo)
+
+    batches = [call[call.index("--") + 1 :] for call in fake.calls]
+    assert len(batches) == 4, batches
+    assert scanner.targets_attempted == 3
+    assert scanner.targets_failed == 2
+    assert not any("read as a failure of the run" in e for e in scanner.errors)
+    uris = [
+        r.locations[0].physicalLocation.artifactLocation.uri
+        for r in report.runs[0].results
+    ]
+    assert [u.rsplit("/", 1)[-1] for u in uris] == ["mmm.yaml"]
 
 
 def test_a_faulty_first_template_does_not_hide_the_others(ash_temp_path):

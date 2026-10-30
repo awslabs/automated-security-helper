@@ -306,6 +306,26 @@ def _one_template_can_fail_the_run(response: Dict[str, Any]) -> bool:
     return bool(response) and not response.get("timed_out") and "error" not in response
 
 
+#: The fewest templates between a batch's first and last that are recorded with a
+#: run-wide failure instead of being re-run one at a time. Below it the re-runs are
+#: cheap and exact, so they are made; above it, two identical failures at both ends
+#: are read as the run's.
+_RUN_WIDE_FOLD_MIN_MIDDLE = 4
+
+
+def _names_a_template(text: str, names: List[str]) -> bool:
+    """Whether a failure text names one of the batch's templates.
+
+    A failure that quotes a template path is that template's (cfn-lint names the
+    file it could not process), never the run's, so it is not folded over the
+    others however alike the first and last re-runs read.
+    """
+    for name in names:
+        if name and (name in text or name.rsplit("/", 1)[-1] in text):
+            return True
+    return False
+
+
 def _successful_exit(code: object) -> bool:
     try:
         value = int(code)  # type: ignore[call-overload]
@@ -1288,9 +1308,14 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     # failure once per template, each a cfn-lint start-up with a
                     # fresh scan_timeout. So the first and the last template are
                     # re-run alone first: when both fail exactly as the batch did,
-                    # the failure is the run's and the templates between them are
+                    # the failure names no template, and more than
+                    # _RUN_WIDE_FOLD_MIN_MIDDLE templates sit between them, the
+                    # failure is read as the run's and those templates are
                     # recorded with it, not re-run; otherwise each is linted on
-                    # its own and only the faulty ones fail.
+                    # its own and only the faulty ones fail. Two templates with
+                    # the same per-template fault at both ends of a large batch
+                    # still read as the run's: the recorded text says which
+                    # templates were not re-run and why.
                     self._plugin_log(
                         f"cfn-lint did not evaluate {len(batch)} template(s) in one "
                         f"invocation ({failure}); linting each one on its own.",
@@ -1319,7 +1344,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     if (
                         failure == batch_failure
                         and not timed_out
-                        and len(remaining) > 1
+                        and len(remaining) - 1 > _RUN_WIDE_FOLD_MIN_MIDDLE
+                        and not _names_a_template(
+                            batch_failure,
+                            [*arguments, *(shown_by_argument[a] for a in arguments)],
+                        )
                     ):
                         last_position, last_argument = remaining.pop()
                         failure, batch_report, response = lint_alone(
