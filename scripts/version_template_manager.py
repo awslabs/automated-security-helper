@@ -79,6 +79,15 @@ def _in_an_ash_command(prefix: str) -> Tuple[str, str]:
 
 _FORM_PREFIX = {name: prefix for name, prefix, _branch in INSTALL_REF_FORMS}
 
+# What unrecognized_pins looks for where the install form has more spellings than the
+# anchored patterns read: a YAML value may follow `rev:` after any run of blanks, and a
+# clone takes its tag as `--branch v1`, `--branch=v1` or `-b v1`. The safety net has to
+# be looser than the anchors, or a pin in a spelling nobody anchored is never seen.
+_LOOSE_PREFIX = {
+    "--branch": r"(?:--branch[ =]|(?<![\w-])-b )",
+    "rev:": r"(?<![\w-])rev:[ \t]+",
+}
+
 # For every form of INSTALL_REF_FORMS, the patterns that match a release pin of ASH in
 # it, and no other project's. Each pattern has one group, the text up to and including
 # the `v` that starts the version, and ends with the version number, so `convert`
@@ -379,7 +388,8 @@ class VersionTemplateManager:
         """
         recognized = {start for _form, _version, start in _ash_pins(text)}
         found = []
-        for name, prefix, _branch in INSTALL_REF_FORMS:
+        for name, install_prefix, _branch in INSTALL_REF_FORMS:
+            prefix = _LOOSE_PREFIX.get(name, install_prefix)
             for match in re.finditer(rf"(?:{prefix})v(?P<version>{_SEMVER})", text):
                 if match.start("version") in recognized:
                     continue

@@ -390,8 +390,22 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
             ("rev:", f"- rev: v3.3.0\n  repo: {ASH_URL}\n"),
             ("rev:", f"- {{repo: {ASH_URL}, rev: v3.3.0}}\n"),
             ("--branch", 'git clone --branch v3.3.0 "$ASH_REPO_URL"\n'),
+            # Spellings the anchored patterns do not read either: the safety net has to
+            # search for the loose forms, or these pass silently.
+            ("rev:", f"- {{repo: {ASH_URL}, rev:  v3.3.0}}\n"),
+            ("rev:", f"- {{repo: {ASH_URL}, rev:\tv3.3.0}}\n"),
+            ("--branch", 'git clone --branch=v3.3.0 "$ASH_REPO_URL"\n'),
+            ("--branch", 'git clone -b v3.3.0 "$ASH_REPO_URL"\n'),
         ],
-        ids=["rev-before-repo", "flow-style", "url-in-a-variable"],
+        ids=[
+            "rev-before-repo",
+            "flow-style",
+            "url-in-a-variable",
+            "rev-two-spaces",
+            "rev-tab",
+            "branch-equals",
+            "short-flag",
+        ],
     )
     def test_a_pin_in_a_shape_no_anchor_knows_is_listed_not_dropped(self, form, text):
         """Red before: the readers counted only the anchored shapes, so a pin of this
@@ -405,6 +419,16 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
     @pytest.mark.parametrize("text", list(ASH_PINS.values()))
     def test_a_recognized_pin_is_not_listed_as_unrecognized(self, text):
         assert VersionTemplateManager(REPO_ROOT).unrecognized_pins(text) == []
+
+    def test_the_loose_search_does_not_list_what_an_anchor_accepts(self):
+        """The control for the loose prefixes: a block-style entry with extra blanks
+        after `rev:` is an anchored pin, so it is counted and not listed; and a key that
+        only ends in `rev:` is no pin."""
+        manager = VersionTemplateManager(REPO_ROOT)
+        block = f"  - repo: {ASH_URL}\n    rev:  v3.3.0\n"
+        assert manager.release_pins(block) == {"3.3.0"}
+        assert manager.unrecognized_pins(block) == []
+        assert manager.unrecognized_pins("prev: v3.3.0\nweb-b v3.3.0\n") == []
 
     @pytest.mark.parametrize(
         "text", list(OTHER_PROJECTS_PINS.values()), ids=list(OTHER_PROJECTS_PINS)
