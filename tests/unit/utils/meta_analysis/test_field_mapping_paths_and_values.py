@@ -72,6 +72,9 @@ class TestTheGrammar:
             '.runs[].results[].fingerprints["bandit/v1"]'
         )
         assert jq_path("runs[0].tool.driver-name") == '.runs[0].tool["driver-name"]'
+        # A bare ["x"] is an array literal to jq; a leading bracket is indexed.
+        assert jq_path('["a.b"].c') == '.["a.b"].c'
+        assert jq_path("[0].c") == ".[0].c"
 
 
 class TestExtractFieldPaths:

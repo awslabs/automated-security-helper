@@ -150,18 +150,21 @@ def jq_path(path: str) -> str:
     steps = parse_field_path(path)
     if steps is None:
         return "." + str(path)
-    rendered = []
+    rendered = ""
     for kind, value in steps:
+        if kind == "key" and _JQ_IDENTIFIER.match(value):
+            rendered += f".{value}"
+            continue
         if kind == "key":
-            if _JQ_IDENTIFIER.match(value):
-                rendered.append(f".{value}")
-            else:
-                rendered.append(f"[{json.dumps(value, ensure_ascii=False)}]")
+            bracket = f"[{json.dumps(value, ensure_ascii=False)}]"
         elif kind == "index":
-            rendered.append(f"[{value}]")
+            bracket = f"[{value}]"
         else:
-            rendered.append("[]")
-    return "".join(rendered)
+            bracket = "[]"
+        # A bracket at the start is written ".[...]": a bare ["x"] is an array
+        # literal to jq.
+        rendered += bracket if rendered else f".{bracket}"
+    return rendered
 
 
 # ---------------------------------------------------------------------------
