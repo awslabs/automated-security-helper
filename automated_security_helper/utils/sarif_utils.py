@@ -5,7 +5,7 @@ import os
 import random
 import re
 from contextlib import suppress
-from typing import Any, Callable, Dict, Iterable, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List
 import uuid
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
@@ -41,6 +41,13 @@ from automated_security_helper.utils.suppression_matcher import (
     written_suppression_id,
     written_suppression_reasons,
 )
+
+if TYPE_CHECKING:
+    # Imported at run time inside apply_suppressions_to_sarif: the module
+    # imports this one.
+    from automated_security_helper.config.client_scanner_exclusions import (
+        EvaluationBudget,
+    )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.package_identity import (
     extract_package_identity,
@@ -1608,6 +1615,39 @@ def apply_suppressions_to_sarif(
     collector's working directory, so the strip would read ``src/a.py`` as
     ``a.py`` whenever the collector runs from a directory named ``src``.
     """
+    # One time budget for every bounded search the client-supplied exclusions
+    # make in this pass: a client's checkov pattern gets the scanner's
+    # scan_timeout once over the whole run, as checkov would have, not once per
+    # finding (config/client_scanner_exclusions.EvaluationBudget). The pass owns
+    # it as a context manager, so its worker process ends on every exit of the
+    # pass, an exception included, not only on the normal return.
+    from automated_security_helper.config.client_scanner_exclusions import (
+        EvaluationBudget,
+    )
+
+    with EvaluationBudget() as evaluation_budget:
+        return _apply_suppressions_within_budget(
+            sarif_report,
+            plugin_context,
+            used_suppressions,
+            exclude_output_dir,
+            strip_source_dir_basename,
+            evaluation_budget,
+        )
+
+
+def _apply_suppressions_within_budget(
+    sarif_report: SarifReport,
+    plugin_context: PluginContext,
+    used_suppressions: set | None,
+    exclude_output_dir: bool,
+    strip_source_dir_basename: bool,
+    evaluation_budget: "EvaluationBudget",
+) -> SarifReport:
+    """The suppression pass itself; the caller owns *evaluation_budget*'s lifetime.
+
+    The arguments are :func:`apply_suppressions_to_sarif`'s, which documents them.
+    """
     # KNOWN_IGNORE_PATHS (.venv/, venv/, node_modules/) are not applied here.
     # Applied, they would drop findings that matter: grype and npm-audit locate a
     # vulnerable dependency at node_modules/<pkg>/package.json, and that finding
@@ -1634,15 +1674,6 @@ def apply_suppressions_to_sarif(
     client_exclusions = list(
         getattr(plugin_context.config, "_client_scanner_exclusions", None) or []
     )
-    # One time budget for every bounded search those exclusions make in this
-    # pass: a client's checkov pattern gets the scanner's scan_timeout once over
-    # the whole run, as checkov would have, not once per finding
-    # (config/client_scanner_exclusions.EvaluationBudget).
-    from automated_security_helper.config.client_scanner_exclusions import (
-        EvaluationBudget,
-    )
-
-    evaluation_budget = EvaluationBudget()
 
     ignore_suppressions = (
         hasattr(plugin_context, "ignore_suppressions")
@@ -1981,8 +2012,6 @@ def apply_suppressions_to_sarif(
         )
 
     output_exclusion.report()
-    # The pass is done: end the budget's worker process, if one was started.
-    evaluation_budget.close()
     return sarif_report
 
 

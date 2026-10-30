@@ -358,3 +358,34 @@ def test_the_written_spelling_is_probed_only_under_the_scan_root(tmp_path):
         _matched_path_text("fixtures/a\\..%2Fb.json", root) == "fixtures/a\\../b.json"
     )
     assert _matched_path_text("C:x%2Fb.json", root) == "C:x/b.json"
+
+
+def test_the_evaluation_budget_is_closed_when_the_pass_raises(tmp_path, monkeypatch):
+    """The pass closed its EvaluationBudget on the normal return only, so an
+    exception raised inside it left the budget's worker child to the garbage
+    collector. The pass now owns the budget as a context manager: a pass that
+    raises on its first step still closes it, exactly once."""
+    from automated_security_helper.config import client_scanner_exclusions
+    from automated_security_helper.utils import sarif_utils
+
+    closed: list[bool] = []
+
+    class RecordingBudget(client_scanner_exclusions.EvaluationBudget):
+        def close(self, graceful: bool = True) -> None:
+            closed.append(graceful)
+            super().close(graceful)
+
+    def planted_failure(_ignore_paths):
+        raise RuntimeError("planted")
+
+    # The pass imports the budget from its module at call time, so the module
+    # attribute is what it reads; the first step of the pass is made to raise.
+    monkeypatch.setattr(client_scanner_exclusions, "EvaluationBudget", RecordingBudget)
+    monkeypatch.setattr(sarif_utils, "active_ignore_paths", planted_failure)
+
+    with pytest.raises(RuntimeError, match="planted"):
+        apply_suppressions_to_sarif(_report(_result()), _context(tmp_path))
+
+    # The finalizer closes the worker, never the budget, so this list is empty
+    # when the pass leaves its budget to the collector.
+    assert closed == [True]
