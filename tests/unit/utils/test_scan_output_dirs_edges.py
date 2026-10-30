@@ -37,6 +37,7 @@ from automated_security_helper.utils.scan_output_dirs import (
     PatternSyntax,
     _repository_root_of,
     _result_paths,
+    _through_a_link_in_the_tree,
     committed_files_at_results_paths,
     drop_results_in_ash_output_dirs,
     escape_for_pattern,
@@ -106,15 +107,56 @@ def test_control_without_the_ceiling_the_repository_above_is_found(
 def test_a_directory_that_cannot_be_looked_up_is_answered_not_asked(
     tmp_path, monkeypatch
 ):
-    def refused(self):
-        raise PermissionError(13, "Permission denied", str(self))
+    # The refusal is confined to the path the function under test builds for
+    # itself: patching Path.is_dir on the class would refuse pytest's own
+    # teardown lookups too (measured: the test's body passed and its teardown
+    # failed on the venue).
+    class Refusing(type(Path())):
+        def is_dir(self, *args, **kwargs):
+            raise PermissionError(13, "Permission denied", str(self))
 
-    monkeypatch.setattr(scan_output_dirs.Path, "is_dir", refused)
+    monkeypatch.setattr(
+        scan_output_dirs, "_absolute", lambda path: Refusing(os.path.abspath(path))
+    )
 
     answer = git_index_below(tmp_path / "out")
 
     assert answer.names is None
     assert answer.repository is None
+
+
+@needs_symlinks
+def test_the_link_check_takes_a_resolved_root_alone_as_its_other_caller_does(
+    tmp_path,
+):
+    """The form the check had before the spelled root was told apart from the
+    resolved one, and the one ``get_scan_set._own_output_of`` passed for a while:
+    when it was refused, every scan set raised TypeError with it."""
+    root = Path(os.path.realpath(tmp_path)) / "repo"
+    (root / "real").mkdir(parents=True)
+    (root / "link").symlink_to(root / "real", target_is_directory=True)
+
+    assert _through_a_link_in_the_tree(root / "link" / "out", root) is True
+    assert _through_a_link_in_the_tree(root / "real" / "out", root) is False
+    # The same answers as the two-root form, the root being its own resolution.
+    assert _through_a_link_in_the_tree(root / "link" / "out", root, root) is True
+    assert _through_a_link_in_the_tree(root / "real" / "out", root, root) is False
+
+
+def test_get_scan_sets_own_output_lookup_runs_on_the_shared_link_check(tmp_path):
+    """A pin, green before and after: the caller that once raised TypeError on the
+    link check's signature answers, whatever form it passes."""
+    from automated_security_helper.utils.get_scan_set import _own_output_of
+
+    source = tmp_path / "repo"
+    output = source / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+
+    own = _own_output_of(output, source)
+
+    assert own is not None
+    assert own.path == os.path.normcase(str(output))
+    assert own.identity is not None
 
 
 def test_a_checked_out_submodule_is_the_entry_its_superproject_tracks(

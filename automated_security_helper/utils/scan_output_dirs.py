@@ -889,7 +889,7 @@ def _reached_through_a_link(directory: Path, base: Path) -> bool:
 
 
 def _through_a_link_in_the_tree(
-    candidate: Path, root: Path, root_resolved: Path
+    candidate: Path, root: Path, root_resolved: Optional[Path] = None
 ) -> bool:
     """Whether a component of *candidate*, as given, is a link placed in the tree.
 
@@ -902,10 +902,18 @@ def _through_a_link_in_the_tree(
     this run's output directory included. A candidate spelled under *root* is
     walked from *root* down; any other from the top. Each component is
     ``lstat``-ed; one that does not exist ends the check.
+
+    *root_resolved* is *root* with its links resolved; left out, it is resolved
+    here, so the one-root form this function had before *root* and
+    *root_resolved* were told apart still answers (``get_scan_set._own_output_of``
+    passed the source's real path alone for a while): a resolved root has no link
+    component of its own, so the two forms answer alike for it.
     """
     # Imported here, as in _reached_through_a_link.
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
+    if root_resolved is None:
+        root_resolved = _resolved(root)
     if _strictly_inside(candidate, root):
         current = root
         parts = candidate.parts[len(root.parts) :]
