@@ -3504,8 +3504,11 @@ def main() -> int:
         try:
             filter_pattern = re.compile(args.filter_pattern)
         except re.error as error:
+            # The error quotes the pattern the operator typed: shown, not obeyed.
             print(
-                f"--filter-pattern is not a regular expression: {error}",
+                shown_not_obeyed(
+                    f"--filter-pattern is not a regular expression: {error}"
+                ),
                 file=sys.stderr,
             )
             return 2
