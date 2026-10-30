@@ -417,6 +417,28 @@ def _artifact_location(location: Any) -> Optional[Dict[str, Any]]:
     return artifact
 
 
+def _declared_base(table: Mapping[str, Any], base_id: Any) -> Optional[str]:
+    """The absolute ``uri`` *table* declares for *base_id*, or None.
+
+    None for the project root (the ordinary anchor, which the project-relative
+    reading already assumes), for an id the run does not declare, and for a base
+    whose own ``uri`` is relative or is itself anchored (a ``uriBaseId`` on the
+    base entry): only an absolute base places a relative uri on disk.
+    """
+    if not base_id or base_id == PROJECT_ROOT_URI_BASE_ID:
+        return None
+    entry = table.get(str(base_id))
+    if not isinstance(entry, Mapping) or entry.get("uriBaseId"):
+        return None
+    uri = entry.get("uri")
+    if not isinstance(uri, str) or not uri:
+        return None
+    text = _posix_text(uri)
+    if not (text.startswith("/") or _DRIVE_ANCHOR.match(text)):
+        return None
+    return uri
+
+
 def rebase_run_for_project(
     run: Mapping[str, Any], project: ProjectPlan
 ) -> tuple[Dict[str, Any], int]:
@@ -491,6 +513,22 @@ def rebase_run_for_project(
             rewritten = False
             if reduced is NOT_ABSOLUTE:
                 placed: Optional[str] = str(uri)
+                base_uri = _declared_base(table, artifact.get("uriBaseId"))
+                if base_uri is not None:
+                    # The scanner anchored this relative uri to a base of its
+                    # own, which need not be the project root, and the file it
+                    # names is base + uri. workspace_uri has to come from that
+                    # path read back through the project, or the two
+                    # coordinates name two files. The artifact itself stays as
+                    # the scanner wrote it: its uri and its uriBaseId agree.
+                    joined = base_uri.rstrip("/") + "/" + str(uri).lstrip("/")
+                    anchored = project_relative_uri(joined, project.path)
+                    if anchored is None:
+                        # Inside the base, outside this project: counted, and
+                        # not placed in the workspace.
+                        placed = None
+                    elif anchored is not NOT_ABSOLUTE:
+                        placed = anchored
             elif reduced is None:
                 # Absolute and outside the project. Left exactly as the scanner
                 # wrote it, and deliberately NOT anchored: an artifactLocation

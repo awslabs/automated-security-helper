@@ -25,7 +25,11 @@ The contract these cases pin:
 - a ``..`` URI keeps its text, carries no ``uriBaseId``, has no ``workspace_uri``
   and is counted as unconvertible;
 - an absolute URI reduced to project-relative is anchored to the project root
-  even when the scanner had anchored its absolute form elsewhere.
+  even when the scanner had anchored its absolute form elsewhere;
+- a relative URI anchored to a base of the scanner's own takes its
+  ``workspace_uri`` from base + uri read back through the project, so the two
+  coordinates name one file; a base outside the project counts the finding as
+  unconvertible and anchors nothing.
 """
 
 from __future__ import annotations
@@ -98,6 +102,45 @@ def test_a_parent_component_uri_is_counted_and_not_anchored():
     artifact = _artifact(rebased)
     assert artifact["uri"] == "../../ws/api/src/app.py"
     assert "uriBaseId" not in artifact
+    assert "workspace_uri" not in rebased["results"][0]["properties"]
+    assert unconvertible == 1
+
+
+def test_a_relative_uri_under_a_scanners_own_base_is_placed_through_that_base():
+    """``%SRCROOT%`` is ``file:///``, the uri spells the path below it.
+
+    Read as project-relative, ``ws/api/src/app.py`` would be placed at
+    ``api/ws/api/src/app.py``, a file that does not exist, while a SARIF consumer
+    resolving base + uri finds ``/ws/api/src/app.py``. The workspace coordinate
+    has to agree with the consumer's.
+    """
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "ws/api/src/app.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={"%SRCROOT%": {"uri": "file:///"}},
+        ),
+        PROJECT,
+    )
+
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "ws/api/src/app.py"
+    assert artifact["uriBaseId"] == "%SRCROOT%"
+    assert rebased["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
+    assert unconvertible == 0
+
+
+def test_a_relative_uri_under_a_base_outside_the_project_is_counted_not_anchored():
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "src/app.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={"%SRCROOT%": {"uri": "file:///ws/web/"}},
+        ),
+        PROJECT,
+    )
+
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "src/app.py"
+    assert artifact["uriBaseId"] == "%SRCROOT%"
     assert "workspace_uri" not in rebased["results"][0]["properties"]
     assert unconvertible == 1
 
