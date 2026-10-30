@@ -45,7 +45,10 @@ from automated_security_helper.config.config_linter import (
     LintCategory,
     LintSeverity,
 )
-from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.resolve_config import (
+    ConfigFileRefused,
+    resolve_config,
+)
 from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models import asharp_model
@@ -369,14 +372,16 @@ class TestMalformedExpiration:
     def test_config_file_with_a_malformed_date_is_refused(self, tmp_path):
         """The scanned repository's own config is refused whole, never applied in part.
 
-        A discovered in-tree config is advisory, so its invalidity does not veto
-        the operator's scan: resolve_config refuses the FILE, warns, and
-        resolves on the operator and default chain as if it were absent
-        (config/resolve_config.py, the ConfigFileRefused containment). What
-        this pins is that the entry is not applied: the resolution carries no
-        ignore path from the refused file, and the warning names the date rule.
-        A config the operator NAMED with the same date still raises; that is
-        TestWorkspacePolicy's subject.
+        A discovered in-tree config with a malformed date is refused as a
+        named one is: resolve_config re-raises the file's refusal
+        (config/resolve_config.py, the ConfigFileRefused arm: "refused, never
+        replaced by the default config, for a discovered file as for a named
+        one"), so the scan exits 3 instead of running with the file's ignore
+        paths and suppressions switched off, and the refusal names the date
+        rule. Whether such a file should instead be contained (warned about
+        and resolved without) is a design question this test does not decide.
+        A config the operator NAMED with the same date raises the same way;
+        the workspace policy's own refusal is TestWorkspacePolicy's subject.
         """
         source = tmp_path / "src"
         source.mkdir()
@@ -389,18 +394,9 @@ class TestMalformedExpiration:
             "      expiration: '2026/06/30'\n",
             encoding="utf-8",
         )
-        with patch(
-            "automated_security_helper.config.resolve_config.ASH_LOGGER"
-        ) as logger:
-            config = resolve_config(source_dir=source)
-        warned = [str(c.args[0]) for c in logger.warning.call_args_list]
-        assert any("contributes nothing" in w and "YYYY-MM-DD" in w for w in warned), (
-            warned
-        )
-        assert config is not None
-        assert not any(
-            entry.path == "vendor/**" for entry in config.global_settings.ignore_paths
-        ), config.global_settings.ignore_paths
+        with pytest.raises(ConfigFileRefused) as excinfo:
+            resolve_config(source_dir=source)
+        assert "YYYY-MM-DD" in str(excinfo.value)
 
     def test_unvalidated_malformed_entry_is_not_applied(self, tmp_path):
         """An entry built without validation fails toward scanning, with a warning.
