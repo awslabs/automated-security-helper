@@ -49,9 +49,12 @@ def _app(captured: dict) -> typer.Typer:
     return demo
 
 
-def _invoke(tmp_path: Path, payload: dict):
+def _invoke(tmp_path: Path, payload):
+    """*payload* is a dict, written with json.dumps, or the document's text as
+    is, for a spelling json.dumps would not keep (``1e2`` is written ``100.0``)."""
     document = tmp_path / "params.json"
-    document.write_text(json.dumps(payload), encoding="utf-8")
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    document.write_text(text, encoding="utf-8")
     captured: dict = {}
     result = CliRunner().invoke(
         _app(captured), ["run", "--cli-json-input", str(document)]
@@ -118,10 +121,14 @@ def test_an_integer_too_large_for_a_float_parameter_is_refused(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "number", [1.9, 2.0, 1e2], ids=["fraction", "whole", "exponent"]
+    "document",
+    ['{"shard_index": 1.9}', '{"shard_index": 2.0}', '{"shard_index": 1e2}'],
+    ids=["fraction", "whole", "exponent"],
 )
-def test_a_non_integral_number_for_an_integer_parameter_is_refused(tmp_path, number):
-    result, captured = _invoke(tmp_path, {"shard_index": number})
+def test_a_non_integral_number_for_an_integer_parameter_is_refused(tmp_path, document):
+    # The documents are written as text: json.dumps would write 1e2 as 100.0,
+    # the "whole" case again, and the exponent spelling is its own case.
+    result, captured = _invoke(tmp_path, document)
 
     assert result.exit_code == 2, result.output
     assert captured == {}

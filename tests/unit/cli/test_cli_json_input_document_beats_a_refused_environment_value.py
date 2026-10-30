@@ -17,8 +17,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import click.testing
 import pytest
 import typer
+import typer.main
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.json_input import CliJsonInputCommand
@@ -76,17 +78,67 @@ def test_the_environment_variable_is_read_again_after_a_document_set_the_key(
     tmp_path,
 ):
     """The command's parameter objects outlive one invocation: the variable
-    suspended for a parse the document set must be back for the next one."""
+    suspended for a parse the document set must be back for the next one.
+
+    The click command is built ONCE and invoked twice: typer's runner rebuilds
+    the options from the function signature on every invoke, so an unrestored
+    suspension would have gone unseen."""
     captured: dict = {}
-    demo = _app(captured)
-    first = CliRunner().invoke(
-        demo,
+    command = typer.main.get_command(_app(captured))
+    first = click.testing.CliRunner().invoke(
+        command,
         ["run", "--cli-json-input", _document(tmp_path, {"count": 3})],
         env={VARIABLE: "5"},
     )
     assert first.exit_code == 0, first.output
     assert captured == {"count": 3}
 
-    second = CliRunner().invoke(demo, ["run"], env={VARIABLE: "5"})
+    second = click.testing.CliRunner().invoke(command, ["run"], env={VARIABLE: "5"})
     assert second.exit_code == 0, second.output
     assert captured == {"count": 5}
+
+
+def test_the_environment_variable_is_restored_after_a_parse_that_failed(tmp_path):
+    """The restore runs in a finally: a parse that fails after the document set
+    the key (here on an option the command does not have) must leave the
+    variable in place for the next invocation."""
+    captured: dict = {}
+    command = typer.main.get_command(_app(captured))
+    first = click.testing.CliRunner().invoke(
+        command,
+        ["run", "--cli-json-input", _document(tmp_path, {"count": 3}), "--nope"],
+        env={VARIABLE: "5"},
+    )
+    assert first.exit_code == 2, first.output
+    assert captured == {}
+
+    second = click.testing.CliRunner().invoke(command, ["run"], env={VARIABLE: "5"})
+    assert second.exit_code == 0, second.output
+    assert captured == {"count": 5}
+
+
+def test_a_key_set_to_null_leaves_the_environment_variable_in_force(tmp_path):
+    """The skeleton writes null for a parameter an environment variable backs,
+    so an unedited skeleton must not suspend the variable: null is "not
+    provided", and the variable's value is read."""
+    captured: dict = {}
+    result = CliRunner().invoke(
+        _app(captured),
+        ["run", "--cli-json-input", _document(tmp_path, {"count": None})],
+        env={VARIABLE: "5"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {"count": 5}
+
+
+def test_a_key_set_to_null_does_not_hide_a_refused_environment_value(tmp_path):
+    captured: dict = {}
+    result = CliRunner().invoke(
+        _app(captured),
+        ["run", "--cli-json-input", _document(tmp_path, {"count": None})],
+        env={VARIABLE: "nine"},
+    )
+
+    assert result.exit_code == 2, result.output
+    assert captured == {}
