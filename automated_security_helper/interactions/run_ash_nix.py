@@ -201,12 +201,17 @@ _NO_SHOW_SUMMARY = "--no-show-summary"
 def rewrite_mode_args(argv: List[str]) -> List[str]:
     """Rewrite the caller's arguments so the inner invocation runs a local scan.
 
-    The caller's argv is forwarded verbatim apart from ``--mode`` and the summary
-    switch, rather than rebuilt from parsed options. Rebuilding is how a forwarded
-    invocation quietly loses a flag: every option has to be handled explicitly, and
-    one that is missed simply does not reach the inner scan. Container mode has to
-    rebuild because its paths need remapping. A Nix shell does not move any files,
-    so verbatim forwarding is both simpler and safer here.
+    The argv given is forwarded verbatim apart from ``--mode`` and the summary
+    switch; this function rebuilds nothing. Which argv that is depends on the
+    caller: a program forwarding its own command line (``run_ash_nix(argv=None)``
+    reads ``sys.argv[1:]``) hands over what the operator typed, while the scan
+    entry point (``run_ash_scan._run_nix_mode``) builds the argv from the call's
+    ScanOptions (``_nix_inner_argv``), because a library caller has no command
+    line of its own and the host program's would run the wrong scan. Rebuilding
+    is how a forwarded invocation can quietly lose a flag, so that builder's
+    field list is guarded by a test over ``ScanOptions.model_fields`` (every
+    field forwarded, refused or excluded by name). Container mode rebuilds too,
+    with path remapping; a Nix shell moves no files, so the paths pass as given.
 
     Everything after a bare ``--`` is positional whatever it looks like, so it is
     forwarded as it is, and the options this adds are placed before it; a ``--mode``

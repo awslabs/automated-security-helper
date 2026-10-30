@@ -336,6 +336,134 @@ def test_the_output_directorys_own_results_file_is_forwarded_as_use_existing(
     assert "--use-existing" in ras._nix_inner_argv(opts)
 
 
+# Every ScanOptions field is placed: forwarded by the builder, refused for the
+# mode before the builder runs, or left off on purpose. A field added to
+# ScanOptions lands in none of these sets and fails the test below, so it cannot
+# silently never reach the scan inside the shell.
+_FORWARDED = {
+    "source_dir",
+    "output_dir",
+    "allow_missing_projects",
+    "config",
+    "config_overrides",
+    "scanners",
+    "excluded_scanners",
+    "ash_plugin_modules",
+    "output_formats",
+    "phases",
+    "strategy",
+    "offline",
+    "offline_semgrep_rulesets",
+    "progress",
+    "color",
+    "show_summary",
+    "quiet",
+    "verbose",
+    "debug",
+    "simple",
+    "cleanup",
+    "inspect",
+    "python_based_plugins_only",
+    "ignore_suppressions",
+    "log_level",
+    "fail_on_findings",
+    "fail_on_incomplete_scanners",
+    "min_severity",
+    "changed_files_only",
+    "base_ref",
+    "existing_results",
+    "shard_index",
+    "shard_count",
+}
+_REFUSED_FOR_THE_MODE = {
+    "config_base_gate",
+    "untrusted_config",
+    "client_config_policy",
+    "remote_client",
+    "severity_threshold_restriction",
+    "keep_previous_results",
+    "trusted_config_path",
+}
+_NOT_FORWARDED_ON_PURPOSE = {
+    "mode",
+    "workspace_plan",
+    "workspace_config_as_named",
+    "client_overrides",
+    "selection_origin",
+    "build",
+    "run",
+    "force",
+    "oci_runner",
+    "build_target",
+    "container_uid",
+    "container_gid",
+    "ash_revision_to_install",
+    "custom_containerfile",
+    "custom_build_arg",
+}
+
+
+def test_every_scan_option_is_forwarded_refused_or_excluded_by_name():
+    fields = set(ras.ScanOptions.model_fields)
+
+    unplaced = fields - _FORWARDED - _REFUSED_FOR_THE_MODE - _NOT_FORWARDED_ON_PURPOSE
+    assert not unplaced, (
+        f"ScanOptions gained {sorted(unplaced)}; decide whether the Nix inner "
+        "scan is given it, refuses it or leaves it out, and list it"
+    )
+    stale = (_FORWARDED | _REFUSED_FOR_THE_MODE | _NOT_FORWARDED_ON_PURPOSE) - fields
+    assert not stale, (
+        f"the lists name fields ScanOptions no longer has: {sorted(stale)}"
+    )
+    assert not (_FORWARDED & _REFUSED_FOR_THE_MODE)
+    assert not (_FORWARDED & _NOT_FORWARDED_ON_PURPOSE)
+
+
+def test_the_builder_reads_every_forwarded_field(tmp_path):
+    """The forwarded set is the builder's own: a field listed as forwarded that
+    the builder never reads would pass the placement test above and still be
+    lost."""
+    import inspect
+
+    source = inspect.getsource(ras._nix_inner_argv)
+    unread = sorted(name for name in _FORWARDED if f"opts.{name}" not in source)
+    assert not unread, unread
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        pytest.param({"severity_threshold_restriction": "HIGH"}, id="restriction"),
+        pytest.param({"keep_previous_results": True}, id="keep-previous-results"),
+        pytest.param({"trusted_config_path": "/elsewhere/ash.yaml"}, id="trusted"),
+    ],
+)
+def test_an_option_the_shell_cannot_be_given_is_refused_for_nix_mode(tmp_path, option):
+    """The scan CLI has no flag for these, so a run in Nix mode dropped them
+    without a word: a restriction dropped loosens the gate, a kept-results
+    request dropped deletes what the caller asked to keep, a trusted config path
+    dropped leaves its grants unread."""
+    with pytest.raises(ValueError) as refused:
+        ras.run_ash_scan(
+            source_dir=str(tmp_path / "src"),
+            output_dir=str(tmp_path / "out"),
+            mode=RunMode.nix,
+            progress=False,
+            show_summary=False,
+            **option,
+        )
+
+    (name,) = option
+    assert name in str(refused.value)
+    assert "nix" in str(refused.value)
+
+
+def test_the_missing_payload_message_names_what_ran():
+    assert "Nix shell" in ras._no_workspace_payload_message(RunMode.nix)
+    assert "container" in ras._no_workspace_payload_message(RunMode.container)
+    assert "container" not in ras._no_workspace_payload_message(RunMode.nix)
+
+
 def test_a_stand_in_runner_is_asked_nothing_about_nix(launched, tmp_path, monkeypatch):
     """The refusals travel with the runner: a recorder in run_ash_nix's place
     starts no shell, so a host without `nix` is no reason to refuse before it.

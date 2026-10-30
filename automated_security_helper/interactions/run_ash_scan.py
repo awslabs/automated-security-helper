@@ -5485,6 +5485,17 @@ def _run_container_mode(
 # ---------------------------------------------------------------------------
 
 
+def _no_workspace_payload_message(mode: RunMode) -> str:
+    """The error for an outer mode whose inner run returned no workspace payload,
+    naming the thing that ran: the container, or the Nix shell. One text named
+    the container for a Nix run too."""
+    ran = "Nix shell" if mode == RunMode.nix else "container"
+    return (
+        f"The {ran} produced no workspace payload, so no per-project exit code "
+        "is available."
+    )
+
+
 def _refuse_a_results_file_the_shell_cannot_be_handed(
     opts: ScanOptions, logger
 ) -> None:
@@ -5526,12 +5537,35 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
     ``run_ash_scan(mode=RunMode.nix, ...)`` has no command line of its own, and
     forwarding the host program's arguments ran the inner scan on whatever that
     program was started with (another directory, another scanner set, another
-    output directory) and read that run's results back as this call's. Every
-    option here is one the scan CLI reads as a flag; the options that are not
-    flags (an MCP client's settings) are refused for this mode before this
-    point. ``--cli-json-input`` never reaches the inner scan: its document was
-    read into these options already, and the shell's standard input is empty.
-    ``--mode`` is left to ``rewrite_mode_args``, which appends ``--mode local``.
+    output directory) and read that run's results back as this call's.
+
+    Every ScanOptions field is one of three things here, and
+    tests/unit/interactions/test_run_ash_scan_nix_inner_arguments.py lists the
+    fields by name so a field added later has to be placed:
+
+    * FORWARDED, as the flag the scan CLI reads it by (the body below).
+      ``--mode`` is left to ``rewrite_mode_args``, which appends ``--mode local``.
+      ``--cli-json-input`` never reaches the inner scan: its document was read
+      into these options already, and the shell's standard input is empty.
+    * REFUSED before this point, in ``run_ash_scan``, because the scan CLI has
+      no flag for them and the scan inside the shell cannot be given them:
+      ``config_base_gate``, ``untrusted_config``, ``client_config_policy``,
+      ``remote_client``, ``severity_threshold_restriction``,
+      ``keep_previous_results`` and ``trusted_config_path``.
+    * NOT FORWARDED on purpose: ``mode`` (rewritten), ``workspace_plan`` (its
+      definition and policy are forwarded as ``--workspace`` and
+      ``--workspace-config``), ``workspace_config_as_named`` (container mode's
+      hand-over spelling; the shell shares this filesystem and gets the
+      resolved path), ``client_overrides`` and ``selection_origin`` (who gave
+      the options on this side; the inner scan's own are the CLI's), and the
+      container-only fields (``build``, ``run``, ``force``, ``oci_runner``,
+      ``build_target``, ``container_uid``, ``container_gid``,
+      ``ash_revision_to_install``, ``custom_containerfile``,
+      ``custom_build_arg``), which no shell reads.
+
+    The host's own environment is kept out of the inner scan's option reading
+    by ``run_ash_nix`` (``INNER_SCAN_OPTION_VARIABLES``), so what this function
+    leaves off the command line is the default, not the host's setting.
     """
 
     def value_of(member: Any) -> str:
@@ -7499,9 +7533,17 @@ def run_ash_scan(
         # local orchestrator and each workspace project's orchestrator settle.
         # Container and nix mode hand neither to the ASH they run, so a caller
         # that sets one there is told, as for the three above, instead of
-        # scanning with it dropped.
+        # scanning with it dropped: the scan CLI has no flag for either, a
+        # restriction dropped on the way is a gate loosened without a word, and a
+        # kept-results request dropped deletes what the caller asked to keep.
         ("severity_threshold_restriction", opts.severity_threshold_restriction, False),
         ("keep_previous_results", opts.keep_previous_results, True),
+        # The operator's trusted config path has no scan CLI flag either, so the
+        # scan a container or a shell runs cannot be given it, and the grants it
+        # names would go unread. Refused for the two modes that re-execute ASH;
+        # what workspace mode on the host does with it is that mode's own and is
+        # not changed by this line.
+        ("trusted_config_path", opts.trusted_config_path, True),
     ):
         if value and (
             opts.mode in (RunMode.container, RunMode.nix)
@@ -7703,10 +7745,7 @@ def _run_with_options(
             else int(WorkspaceExitCode.INTERNAL_ERROR)
         )
         if workspace_payload is None:
-            logger.error(
-                "The container produced no workspace payload, so no per-project "
-                "verdict is available."
-            )
+            logger.error(_no_workspace_payload_message(opts.mode))
         if exit_code != 0:
             sys.exit(exit_code)
         return results
