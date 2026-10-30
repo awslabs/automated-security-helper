@@ -313,7 +313,7 @@ def _timeout_ending(scanner_plugin: Any) -> str:
     still be running": the wrong tool. The kept flag names the most recent run
     that did not finish, and settles what the record can and cannot say:
 
-    - no could-not-stop recorded: " and was killed", as before;
+    - no could-not-stop recorded: the was-killed ending, as before;
     - recorded, and the most recent unfinished run is the timeout (or no flag is
       readable): the timeout's own could-not-stop ending, as before;
     - recorded, and the most recent unfinished run was CANCELLED, the one other
