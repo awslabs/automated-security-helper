@@ -16,9 +16,15 @@ over the scan's own graded status.
 The flip now also needs the reports to record the level they were graded against.
 The controls: a report that records the level keeps the flip, and a recorded LOW
 grades the LOW finding actionable, so the row stays FAILED on the counts alone.
+The recorded level is graded only when the configuration record holds the
+threshold as an environment reference (the scan read it from the environment, so
+the record keeps the reference, never the level); a literal threshold in the record
+is graded as written, whatever the reports say.
 """
 
 from __future__ import annotations
+
+from unittest.mock import patch
 
 import pytest
 
@@ -91,4 +97,18 @@ class TestARecordedFailedStaysWithoutARecordedLevel:
         assert _status(_model(recorded_level="MEDIUM")) == "PASSED"
 
     def test_control_a_recorded_low_grades_the_finding_actionable(self):
-        assert _status(_model(recorded_level="LOW")) == "FAILED"
+        """With the scanner's section holding an environment reference for its
+        threshold, the recorded LOW is what grades the counts: the LOW finding is
+        actionable and the row stays FAILED."""
+        model = _model(recorded_level="LOW")
+        with patch.object(
+            type(model.ash_config),
+            "get_plugin_config",
+            return_value={"options": {"severity_threshold": "${ASH_U18_LEVEL}"}},
+        ):
+            assert _status(model) == "FAILED"
+
+    def test_control_a_literal_threshold_in_the_record_is_graded_as_written(self):
+        """A literal MEDIUM in the record outranks the recorded LOW: the LOW finding
+        is nothing actionable at MEDIUM, so the row flips."""
+        assert _status(_model(recorded_level="LOW")) == "PASSED"

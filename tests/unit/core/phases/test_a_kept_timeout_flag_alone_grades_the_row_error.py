@@ -56,9 +56,11 @@ class _Config(ScannerPluginConfigBase):
 
 
 class PerTargetScanner(ScannerPluginBase):
-    """Counts two targets, one failed, and keeps the flag ``kept`` with the limit
-    ``limit`` recorded, as a run recorder that raised after the flag would leave
-    them; returns the other target's clean report."""
+    """Counts two targets and keeps the flag ``kept`` with the limit ``limit``
+    recorded, as a run recorder that raised after the flag would leave them; one
+    target failed when a flag is kept, none otherwise (a failed target grades the
+    row ERROR on its own, so the no-flag control must count none); returns the
+    other target's clean report."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
@@ -76,7 +78,7 @@ class PerTargetScanner(ScannerPluginBase):
     def scan(self, target, target_type, global_ignore_paths=None, config=None):
         self._pre_scan(target=target, target_type=target_type, config=config)
         self.targets_attempted = 2
-        self.targets_failed = 1
+        self.targets_failed = 1 if self.kept else 0
         self._scan_kept_flag = self.kept
         self._scan_timed_out_after = self.limit
         self.start_time = datetime(2026, 1, 1, 10, 0, 0)

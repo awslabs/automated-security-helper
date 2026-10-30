@@ -277,4 +277,5 @@ def test_a_parallel_run_records_the_exiting_scanner_and_the_clean_one(
     results = executor.run_parallel(AshAggregatedResults())
 
     assert results is not None
-    assert executor.completed_scanners == ["clean"]
+    # completed_scanners holds the plugin instances, not the task names.
+    assert executor.completed_scanners == [clean]

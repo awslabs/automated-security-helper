@@ -16,6 +16,8 @@ report's own ``scanner_name`` is matched the same way.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
@@ -135,10 +137,18 @@ class TestEveryReadFollowsTheFoldedKey:
         assert stats["Bandit"]["dependencies_missing"] is True
 
     def test_a_graded_level_under_a_folded_key_is_the_scanners(self):
+        """The recorded level is read under the folded key, and grades the
+        threshold when the record holds it as an environment reference (a literal
+        threshold in the record is graded as written)."""
         model = _model("Bandit", "bandit", scanner_severity_threshold="HIGH")
 
         assert ScannerStatisticsCalculator.graded_level_recorded(model, "Bandit")
-        threshold, _source = ScannerStatisticsCalculator.get_scanner_threshold_info(
-            model, "Bandit"
-        )
+        with patch.object(
+            type(model.ash_config),
+            "get_plugin_config",
+            return_value={"options": {"severity_threshold": "${ASH_U18_LEVEL}"}},
+        ):
+            threshold, _source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+                model, "Bandit"
+            )
         assert threshold == "HIGH"

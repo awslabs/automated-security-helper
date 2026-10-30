@@ -442,7 +442,10 @@ class TestAProcessingFailureIsAnnouncedAsAFailedTurn:
         assert by_name["shape-tool"]["succeeded"] is False
         assert by_name["clean-tool"]["succeeded"] is True
         assert all(c["total_count"] == 2 for c in completes)
-        assert executor.completed_scanners == ["clean-tool"]
+        # completed_scanners holds the plugin instances, not the task names.
+        assert [type(s).__name__ for s in executor.completed_scanners] == [
+            "CleanScanner"
+        ]
         if not parallel:
             # The failed scanner's turn ended before the clean one's began: its
             # event still names the clean scanner as running, and the clean

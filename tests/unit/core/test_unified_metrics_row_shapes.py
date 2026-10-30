@@ -85,8 +85,18 @@ class TestMoreFailuresThanAttemptsIsUnusable:
 
 
 class TestARecordedFailedWithNothingActionableReadsPassed:
+    """The flip also needs the report to record the level it was graded against
+    (``scanner_severity_threshold``); a report from before that was recorded keeps
+    the row's FAILED, see test_unified_metrics_failed_stays_without_a_recorded_level."""
+
     def test_the_row_is_passed(self):
-        model = _model({"source": _report("source", status="FAILED")})
+        model = _model(
+            {
+                "source": _report(
+                    "source", status="FAILED", scanner_severity_threshold="MEDIUM"
+                )
+            }
+        )
         model.scanner_results[SCANNER] = ScannerTargetStatusInfo(
             status=ScannerStatus.FAILED
         )
@@ -139,6 +149,7 @@ class TestARecordedFailedWithNothingActionableReadsPassed:
                 "source": _report(
                     "source",
                     status="FAILED",
+                    scanner_severity_threshold="MEDIUM",
                     raw_results={"findings": []},
                     severity_counts={
                         "critical": 0,
