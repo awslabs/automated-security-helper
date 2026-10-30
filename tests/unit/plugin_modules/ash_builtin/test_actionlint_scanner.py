@@ -37,7 +37,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 from unittest.mock import MagicMock
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -68,6 +67,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.subprocess_utils import COULD_NOT_STOP_REASON
 from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 
 FIXTURES = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "actionlint"
@@ -352,6 +352,16 @@ def test_every_kind_of_the_pinned_version_has_a_deliberate_severity():
             "HIGH",
         ),
         ("expression", 'property "foo" is not defined in object type {}', "LOW"),
+        # A type error quoting workflow-authored text that holds the marker's
+        # words is still a type error, not script injection.
+        (
+            "expression",
+            (
+                'property "x is potentially untrusted. avoid using it" is not '
+                "defined in object type {}"
+            ),
+            "LOW",
+        ),
         ("credentials", '"password" section in "db" service ...', "HIGH"),
         ("deprecated-commands", 'workflow command "set-env" was deprecated', "MEDIUM"),
         ("deprecated-commands", 'workflow command "add-path" was deprecated', "MEDIUM"),
@@ -491,7 +501,11 @@ def test_null_errors_with_exit_zero_is_clean():
         (".github/workflows/ci.yml", True),
         (".github/workflows/ci.YAML", True),
         ("svc/.github/workflows/ci.yaml", True),
-        (".github\\workflows\\ci.yml", True),
+        # A backslash separates on Windows and is a name character on POSIX,
+        # where a root-level file so named is not a workflow and a workflow
+        # whose name holds one still is.
+        (".github\\workflows\\ci.yml", os.sep == "\\"),
+        (".github/workflows/odd\\name.yml", os.sep != "\\"),
         (".github/workflows/sub/ci.yml", False),
         (".github/workflows/README.md", False),
         (".github/actionlint.yaml", False),
@@ -1081,7 +1095,7 @@ def test_an_operator_config_whose_ignores_cannot_be_listed_is_warned_about(
 def test_an_aliased_config_is_not_read_for_its_ignore_patterns(tmp_path):
     config = tmp_path / "actionlint.yaml"
     config.write_text(ALIASED_IGNORES)
-    with pytest.raises(yaml.composer.ComposerError, match="alias"):
+    with pytest.raises(module.IgnorePatternsUnlisted, match="alias"):
         config_ignore_patterns(config)
 
 
@@ -1091,8 +1105,11 @@ def test_an_aliased_config_is_not_read_for_its_ignore_patterns(tmp_path):
         ("paths:\n  a/**:\n    ignore: [x, y]\n  b:\n    ignore: [x]\n", ["x", "y"]),
         ("self-hosted-runner:\n  labels: [a]\n", []),
         ("paths: [1]\n", []),
-        (": : :\n", []),
         ("", []),
+        # go-yaml reads a null as "" and a bool as its lower-case spelling, and
+        # actionlint compiles each as a regular expression: "" drops every
+        # finding, which is the entry the log most needs to show.
+        ("paths:\n  '**':\n    ignore: ['', ~, 0, false]\n", ["", "0", "false"]),
     ],
 )
 @pytest.mark.unit
@@ -1100,6 +1117,53 @@ def test_config_ignore_patterns(tmp_path, body, expected):
     config = tmp_path / "actionlint.yaml"
     config.write_text(body)
     assert config_ignore_patterns(config) == expected
+
+
+@pytest.mark.parametrize(
+    ("body", "cause"),
+    [
+        pytest.param(": : :\n", "line", id="syntax-error"),
+        pytest.param("[" * 3000 + "]" * 3000 + "\n", "recursion", id="too-deep"),
+        pytest.param(
+            "paths:\n  x:\n    ignore: [2001-13-45]\n", "month", id="bad-date"
+        ),
+    ],
+)
+@pytest.mark.unit
+def test_a_config_ash_cannot_read_is_reported_rather_than_listed_as_empty(
+    tmp_path, body, cause
+):
+    """actionlint's go-yaml reads what PyYAML refuses (a date its constructor
+    rejects, nesting past its recursion limit), so "no patterns" would be a
+    guess; the caller is told instead."""
+    config = tmp_path / "actionlint.yaml"
+    config.write_text(body)
+    with pytest.raises(module.IgnorePatternsUnlisted, match=cause):
+        config_ignore_patterns(config)
+
+
+@pytest.mark.unit
+def test_a_utf16_config_is_read_by_its_byte_order_mark(tmp_path):
+    config = tmp_path / "actionlint.yaml"
+    body = "paths:\n  '**':\n    ignore: [x]\n"
+    config.write_bytes(codecs.BOM_UTF16_LE + body.encode("utf-16-le"))
+    assert config_ignore_patterns(config) == ["x"]
+
+
+@pytest.mark.unit
+def test_a_config_ash_cannot_parse_is_warned_about_in_the_scan(
+    repo, monkeypatch, on_path, caplog
+):
+    (repo / "ci").mkdir()
+    (repo / "ci" / "actionlint.yaml").write_text(": : :\n")
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
+    _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("could not list" in message for message in warnings), warnings
 
 
 @pytest.mark.parametrize(
@@ -1130,6 +1194,108 @@ def test_a_timeout_says_timed_out(repo, monkeypatch, on_path):
 
     with pytest.raises(ScannerError, match="timed out"):
         scanner.scan(target=repo, target_type="source")
+
+
+@pytest.mark.unit
+def test_a_timeout_prints_the_limit_as_the_shared_token(repo, monkeypatch, on_path):
+    """The limit goes through the base class's token (a quoted whole number, or
+    the option's name when the environment wrote it), never the raw float."""
+    scanner = _scanner(repo, scan_timeout=7)
+    _run(scanner, monkeypatch, "", 124, timed_out=True)
+
+    with pytest.raises(ScannerError) as caught:
+        scanner.scan(target=repo, target_type="source")
+
+    assert "timed out after '7' s and was killed" in str(caught.value)
+    assert "7.0s" not in str(caught.value)
+
+
+@pytest.mark.unit
+def test_a_timeout_whose_stop_failed_does_not_say_the_tool_was_killed(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(repo, scan_timeout=7)
+    _run(scanner, monkeypatch, "", 124, timed_out=True)
+    scanner._scan_could_not_stop = "the tool could not be stopped"
+
+    with pytest.raises(ScannerError) as caught:
+        scanner.scan(target=repo, target_type="source")
+
+    message = str(caught.value)
+    assert "timed out after '7' s" in message
+    assert "was killed" not in message
+    assert COULD_NOT_STOP_REASON in message
+
+
+@pytest.mark.unit
+def test_output_that_is_not_json_is_not_kept(repo, monkeypatch, on_path):
+    """Output that does not parse cannot be redacted, and a credentials
+    finding's snippet (the password) may be in it, so nothing of it is written
+    to the output directory or kept in the plugin's record lines."""
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, "not json: password hunter2", 1)
+
+    with pytest.raises(ScannerError, match="not JSON"):
+        scanner.scan(target=repo, target_type="source")
+
+    assert not (Path(scanner.results_dir) / "source" / "actionlint.json").exists()
+    assert "hunter2" not in "\n".join(scanner.output)
+
+
+@pytest.mark.unit
+def test_a_failure_before_actionlint_starts_is_described_as_not_started(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(repo, operator=True, config_file="ci/missing.yaml")
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    with pytest.raises(ScannerError) as caught:
+        scanner.scan(target=repo, target_type="source")
+
+    assert fake.calls == []
+    assert "was not started" in str(caught.value)
+    assert "exit code 0" not in str(caught.value)
+
+
+@pytest.mark.unit
+def test_workflow_batches_split_by_the_argv_budget():
+    assert module.workflow_batches([], 10) == []
+    assert module.workflow_batches(["a.yml", "b.yml", "c.yml"], 12) == [
+        ["a.yml", "b.yml"],
+        ["c.yml"],
+    ]
+    long_name = "x" * 30
+    assert module.workflow_batches([long_name, "a.yml"], 12) == [
+        [long_name],
+        ["a.yml"],
+    ]
+    assert module.workflow_batches(["a.yml", "b.yml"]) == [["a.yml", "b.yml"]]
+
+
+@pytest.mark.unit
+def test_many_workflows_are_linted_in_several_runs_and_one_report(
+    repo, monkeypatch, on_path
+):
+    """A tree with more workflows than one command line holds is linted in
+    several runs, each judged by its own exit code, and reported once."""
+    monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30, raising=False)
+    scanner = _scanner(repo)
+    stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
+    fake = _run(scanner, monkeypatch, stdout, 1)
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    assert [argv[argv.index("--") + 1 :] for argv, _ in fake.calls] == [
+        [".github/workflows/clean.yml"],
+        [".github/workflows/vulnerable.yml"],
+    ]
+    assert len(report.runs[0].results) == 2 * len(EXPECTED_DEFAULT)
+    assert scanner.targets_attempted == 2
+    kept = json.loads(
+        (Path(scanner.results_dir) / "source" / "actionlint.json").read_text()
+    )
+    assert len(kept["errors"]) == 2 * len(EXPECTED_DEFAULT)
+    assert "hunter2" not in json.dumps(kept)
 
 
 @pytest.mark.unit
@@ -2335,6 +2501,10 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         ('steps:\n  - uses: "./a\\\n      b"\n  bad: [\n', {"./ab"}),
         ("steps:\n  - uses: ./my dir/act\n  bad: [\n", {"./my", "./my dir/act"}),
         ("steps:\n  - uses: './a\n      b'\n  bad: [\n", {"./a b"}),
+        # With the walk gone (the document does not compose), the line scan
+        # reads a value on the line after its key, and one behind a tag.
+        ("steps:\n  - uses:\n      ./m\n  bad: [\n", {"./m"}),
+        ("steps:\n  - uses: !!str ./t\n  bad: [\n", {"./t"}),
     ],
     ids=[
         "block",
@@ -2360,9 +2530,214 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "double-quoted-escaped-break",
         "plain-with-space",
         "single-quoted-multi-line",
+        "next-line-value-without-the-walk",
+        "tagged-value-without-the-walk",
     ],
 )
 @pytest.mark.unit
 def test_local_uses_references(text, expected):
     """Every form actionlint's parser could read a local ``uses`` from."""
     assert module.local_uses_references(text) == expected
+
+
+# --------------------------------------------------------------------------- #
+# The password line, the integrations at scan time, and what the lint left out
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.unit
+def test_the_password_line_is_dropped_from_every_finding_on_it():
+    """actionlint quotes the line in the snippet of every finding on it, so a
+    second finding on the credentials line carries the password too."""
+    payload = {
+        "version": "1.7.12",
+        "errors": [
+            {
+                "kind": "credentials",
+                "filepath": "w.yml",
+                "line": 17,
+                "column": 21,
+                "message": "m",
+                "snippet": "password: hunter2",
+            },
+            {
+                "kind": "syntax-check",
+                "filepath": "w.yml",
+                "line": 17,
+                "column": 1,
+                "message": "m",
+                "snippet": "password: hunter2\n^",
+            },
+            {
+                "kind": "syntax-check",
+                "filepath": "w.yml",
+                "line": 18,
+                "column": 1,
+                "message": "m",
+                "snippet": "safe line",
+            },
+        ],
+    }
+
+    redacted = module.redact_credentials(payload)
+    assert "hunter2" not in json.dumps(redacted)
+    assert redacted["errors"][2]["snippet"] == "safe line"
+
+    sarif = build_sarif(payload, exit_code=1)
+    assert "hunter2" not in json.dumps(sarif)
+    regions = [
+        result["locations"][0]["physicalLocation"]["region"]
+        for result in sarif["runs"][0]["results"]
+    ]
+    assert "snippet" not in regions[1]
+    assert regions[2]["snippet"] == {"text": "safe line"}
+
+
+@pytest.mark.unit
+def test_an_integration_that_no_longer_resolves_at_scan_time_is_missing(
+    repo, monkeypatch
+):
+    """The dependency check found shellcheck; by the time scan() resolves it
+    again it is gone. An enabled integration is never run quietly off: the
+    scan is MISSING, as the dependency check would have made it."""
+    answers = ["/usr/bin/shellcheck"]
+
+    def find(name):
+        if name == "actionlint":
+            return FAKE_ACTIONLINT
+        if name == "shellcheck" and answers:
+            return answers.pop(0)
+        return None
+
+    monkeypatch.setattr(module, "find_absolute_executable", find)
+    scanner = _scanner(repo, shellcheck="shellcheck")
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    assert scanner.scan(target=repo, target_type="source") is False
+
+    assert fake.calls == []
+    assert "shellcheck" in scanner.dependency_unavailable_reason
+    assert scanner.dependencies_satisfied is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.unit
+def test_an_integration_path_holding_a_space_is_quoted_for_actionlint(
+    repo, tmp_path, monkeypatch, on_path
+):
+    """actionlint reads the value as a command line split on whitespace, so a
+    path with a space is passed quoted, or it names a program that does not
+    exist and the integration drops."""
+    tool = _plant(tmp_path / "my tools", "shellcheck")
+    scanner = _scanner(repo, operator=True, shellcheck=tool.as_posix())
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert f'-shellcheck="{tool.as_posix()}"' in argv
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_workflows_left_out_of_the_lint_are_named_not_called_absent(
+    repo, tmp_path, monkeypatch, on_path
+):
+    """When the only workflow files were refused (here a link out of the tree),
+    the scan records them as inputs it did not scan and the nothing-to-scan
+    reason names them, rather than saying the tree holds no workflow file."""
+    workflows = repo / ".github" / "workflows"
+    for name in ("clean.yml", "vulnerable.yml"):
+        (workflows / name).unlink()
+    outside = tmp_path / "outside.yml"
+    outside.write_text("on: push\n")
+    (workflows / "leak.yml").symlink_to(outside)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    reason = scanner.nothing_to_scan_reason()
+    assert reason != module.NO_WORKFLOW_FILE
+    assert "left out of the lint" in reason
+    assert ".github/workflows/leak.yml" in reason
+
+    assert scanner.scan(target=repo, target_type="source") is True
+    assert fake.calls == []
+    assert scanner.inputs_not_scanned == [
+        {
+            "path": ".github/workflows/leak.yml",
+            "reason": "it resolves outside the scan root",
+        }
+    ]
+
+
+@pytest.mark.unit
+def test_a_reference_that_names_nothing_under_an_ancestor_is_not_a_leak(
+    repo, tmp_path, on_path
+):
+    """An ancestor holding .github/workflows is a candidate project root, but a
+    reference that names nothing there is one actionlint reads no file through,
+    so an ordinary local action does not exempt the workflow from the lint."""
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    local = repo / ".github" / "actions" / "local"
+    local.mkdir(parents=True)
+    (local / "action.yml").write_text(_OUTSIDE_ACTION)
+    (repo / ".github" / "workflows" / "refs.yml").write_text(
+        _step_uses("./.github/actions/local")
+    )
+    scanner = _scanner(repo)
+
+    workflows = scanner._workflow_files(repo, "source", [])
+
+    assert ".github/workflows/refs.yml" in workflows
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_the_real_paths_ancestors_are_candidate_roots_under_a_linked_scan_root(
+    tmp_path,
+):
+    """actionlint computes its project root from the physical working directory,
+    so under a scan root that is a symbolic link the roots it may pick are the
+    real path's ancestors; a reference an ancestor of the real path resolves
+    outside the tree is judged there."""
+    real = tmp_path / "real"
+    (real / ".github" / "workflows").mkdir(parents=True)
+    (real / "sibling").mkdir()
+    (real / "sibling" / "action.yml").write_text(_OUTSIDE_ACTION)
+    project = real / "proj"
+    (project / ".github" / "workflows").mkdir(parents=True)
+    workflow = project / ".github" / "workflows" / "w.yml"
+    workflow.write_text(_step_uses("./sibling"))
+    link = tmp_path / "link"
+    link.symlink_to(project, target_is_directory=True)
+    scanner = _scanner(link)
+
+    spec = scanner._reference_outside_the_tree(
+        link / ".github" / "workflows" / "w.yml", link.resolve()
+    )
+
+    assert spec == "./sibling"
+
+
+@pytest.mark.unit
+def test_an_ancestor_whose_stat_is_refused_does_not_fail_the_reference_check(
+    repo, tmp_path, monkeypatch
+):
+    """Before Python 3.13 Path.is_dir() raises the stat's PermissionError for a
+    path under an unsearchable directory; an ancestor the scan does not own
+    must not fail the whole scan."""
+    local = repo / ".github" / "actions" / "local"
+    local.mkdir(parents=True)
+    (local / "action.yml").write_text(_OUTSIDE_ACTION)
+    workflow = repo / ".github" / "workflows" / "refs.yml"
+    workflow.write_text(_step_uses("./.github/actions/local"))
+    denied = tmp_path / ".github" / "workflows"
+    original = Path.is_dir
+
+    def is_dir(self, *args, **kwargs):
+        if self == denied:
+            raise PermissionError(13, "Permission denied", str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+    scanner = _scanner(repo)
+
+    assert scanner._reference_outside_the_tree(workflow, repo.resolve()) is None

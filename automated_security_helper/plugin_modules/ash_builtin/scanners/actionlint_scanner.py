@@ -165,7 +165,18 @@ import logging
 import os
 import re
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 import yaml
 from pydantic import Field, PrivateAttr, model_validator
@@ -187,6 +198,7 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.config.tool_config_trust import empty_tool_config
+from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.config_trust import (
     INSIDE_THE_TREE,
     LEADS_OUT_OF_THE_TREE,
@@ -202,7 +214,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    WAS_KILLED_ENDING,
+    find_executable,
+)
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
@@ -224,6 +240,19 @@ ACTIONLINT_FORMAT = '{"version":{{getVersion | json}},"errors":{{json .}}}'
 #: directly in inline scripts...`` and ``object filter extracts potentially untrusted
 #: properties %s...``.
 UNTRUSTED_INPUT_MARKER = "potentially untrusted"
+
+#: Those two messages by their shape, anchored at the start: the quoted input
+#: (``%q``, Go-escaped) followed by the first sentence, or the object-filter
+#: wording. Other ``expression`` messages quote workflow-authored text (a property
+#: name, a format string), which can hold the marker's words without being this
+#: finding, so the marker alone is not what raises a finding to HIGH.
+_UNTRUSTED_INPUT_MESSAGE = re.compile(
+    r'^(?:"(?:[^"\\]|\\.)*" '
+    + re.escape(f"is {UNTRUSTED_INPUT_MARKER}.")
+    + r"|"
+    + re.escape(f"object filter extracts {UNTRUSTED_INPUT_MARKER} properties ")
+    + r")"
+)
 
 #: The two deprecated workflow commands GitHub disabled for injection, as actionlint
 #: quotes them in its message (``workflow command %q was deprecated``).
@@ -291,7 +320,7 @@ _KNOWN_IGNORED_DIRS = frozenset(item.strip("/") for item in KNOWN_IGNORE_PATHS)
 
 def severity_for(kind: str, message: str) -> str:
     """The ASH severity for one actionlint finding."""
-    if kind == "expression" and UNTRUSTED_INPUT_MARKER in message:
+    if kind == "expression" and _UNTRUSTED_INPUT_MESSAGE.match(message):
         return "HIGH"
     if kind == "deprecated-commands" and any(
         command in message for command in INJECTABLE_DEPRECATED_COMMANDS
@@ -310,8 +339,13 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
     ``scan_root`` is the directory *relative_path* is relative to. Its own name and
     its parent's count, so a scan root that is itself a ``.github`` or
     ``.github/workflows`` directory has its workflows recognized.
+
+    Split as the running platform splits a path: on Windows a backslash
+    separates, on POSIX it is a character of the name, so a root-level file
+    named ``.github\\workflows\\x.yml`` is not a workflow there, and one named
+    ``.github/workflows/a\\b.yml`` is.
     """
-    parts: Tuple[str, ...] = Path(relative_path.replace("\\", "/")).parts
+    parts: Tuple[str, ...] = Path(relative_path).parts
     if scan_root is not None:
         parts = (scan_root.parent.name, scan_root.name, *parts)
     return (
@@ -325,11 +359,15 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
 #: A ``uses:`` value, in block or flow style: double-quoted (group 1, with its
 #: escapes still encoded; an escaped line break is part of it), single-quoted
 #: (group 2, with ``''`` for a quote; it may span lines) or plain (group 3, the
-#: rest of the line, cut down in ``_uses_values_of``). The key is matched
-#: whatever its case, as actionlint reads workflow keys. Backs up the YAML walk
-#: in ``local_uses_references``.
+#: rest of the line, cut down in ``_uses_values_of``). The value may start on
+#: the line after the key, and may carry a tag or an anchor (``!!str ./x``,
+#: ``&a ./x``). The key is matched whatever its case, as actionlint reads
+#: workflow keys. Backs up the YAML walk in ``local_uses_references``, which is
+#: why it reads more than one line: the walk is gone for a document PyYAML
+#: cannot compose, and that document can still spell a reference actionlint's
+#: parser reads.
 _LOCAL_USES_LINE = re.compile(
-    r"""(?:^|[\s{,])["']?uses["']?[ \t]*:[ \t]*"""
+    r"""(?:^|[\s{,])["']?uses["']?[ \t]*:[ \t]*(?:\r?\n[ \t]+)?(?:[!&]\S*[ \t]+)*"""
     r"""(?:"((?:[^"\\]|\\[\s\S])*)"|'((?:[^']|'')*)'|(\./[^\n]*))""",
     re.MULTILINE | re.IGNORECASE,
 )
@@ -471,25 +509,62 @@ def find_absolute_executable(name: str) -> Optional[str]:
     return Path(found).absolute().as_posix()
 
 
+class IgnorePatternsUnlisted(Exception):
+    """ASH could not list the ``paths.<glob>.ignore`` patterns of an actionlint
+    config; the text says why (a YAML alias, a syntax error, an unreadable file,
+    a value PyYAML's constructor rejects, nesting too deep for it). actionlint
+    reads the file by its own parser and still drops the findings those patterns
+    match, so the caller warns that ASH cannot say which."""
+
+
+def _yaml_problem(exc: yaml.YAMLError) -> str:
+    """A YAML error's own problem text with its line, or its str()."""
+    problem = getattr(exc, "problem", None) or str(exc)
+    mark = getattr(exc, "problem_mark", None)
+    line = getattr(mark, "line", None)
+    if isinstance(line, int):
+        return f"{problem} (line {line + 1})"
+    return str(problem)
+
+
+def _ignore_pattern_text(item: Any) -> str:
+    """One ``ignore`` entry as actionlint reads it into a string.
+
+    go-yaml decodes a null into the empty string and a bool into its lower-case
+    spelling, and actionlint compiles every entry as a regular expression, so an
+    empty entry matches every message and drops every finding: the one entry
+    the log line most needs to show, which ``if item`` left out.
+    """
+    if item is None:
+        return ""
+    if isinstance(item, bool):
+        return "true" if item else "false"
+    return str(item)
+
+
 def config_ignore_patterns(config_path: Path) -> List[str]:
     """The ``paths.<glob>.ignore`` patterns in an actionlint config, sorted.
 
-    Read with ``load_config_yaml``, which refuses YAML aliases as every YAML
-    config ASH reads does. actionlint reads aliases, so a config that uses one
-    can still ignore findings ASH cannot list: that raises
-    ``yaml.composer.ComposerError``, for the caller to say so. Nothing else
-    raises: actionlint owns the verdict on its own config, and reports a
+    Read by its byte-order mark (``decode_workflow``), as actionlint's go-yaml
+    reads it, so a UTF-16 config is listed like any other, and with
+    ``load_config_yaml``, which refuses YAML aliases as every YAML config ASH
+    reads does. actionlint reads aliases, dates PyYAML's constructor rejects and
+    nesting deeper than PyYAML's recursion allows, so a config it accepts can
+    still ignore findings ASH cannot list. Every such case, and a file that
+    cannot be read, raises ``IgnorePatternsUnlisted`` naming the cause, for the
+    caller to warn with; nothing is reported as "no patterns" that was not read
+    as such. actionlint owns the judgment of its own config, and reports a
     malformed one itself with exit 3.
     """
     # Imported here: config/ash_config.py imports this module.
     from automated_security_helper.config.ash_config import load_config_yaml
 
     try:
-        document = load_config_yaml(config_path.read_text(encoding="utf-8"))
-    except yaml.composer.ComposerError:
-        raise
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
-        return []
+        document = load_config_yaml(decode_workflow(config_path.read_bytes()))
+    except yaml.YAMLError as exc:
+        raise IgnorePatternsUnlisted(_yaml_problem(exc)) from exc
+    except (OSError, ValueError, RecursionError) as exc:
+        raise IgnorePatternsUnlisted(str(exc) or exc.__class__.__name__) from exc
     paths = document.get("paths") if isinstance(document, dict) else None
     if not isinstance(paths, dict):
         return []
@@ -497,24 +572,123 @@ def config_ignore_patterns(config_path: Path) -> List[str]:
     for section in paths.values():
         ignore = section.get("ignore") if isinstance(section, dict) else None
         if isinstance(ignore, list):
-            found.update(str(item) for item in ignore if item)
+            found.update(_ignore_pattern_text(item) for item in ignore)
     return sorted(found)
 
 
-def redact_credentials(payload: Any) -> Any:
-    """A copy of *payload* with the snippet of every ``credentials`` finding removed.
+def _credential_lines(errors: Any) -> Set[Tuple[Any, Any]]:
+    """The ``(filepath, line)`` of every ``credentials`` finding in *errors*.
 
-    That snippet is the hard-coded password, and the payload is written into the
-    output directory.
+    The password is the text of that line, and actionlint quotes the line in
+    the snippet of every finding on it, not only the credentials finding's.
+    """
+    if not isinstance(errors, list):
+        return set()
+    return {
+        (error.get("filepath"), error.get("line"))
+        for error in errors
+        if isinstance(error, dict) and error.get("kind") == "credentials"
+    }
+
+
+def redact_credentials(payload: Any) -> Any:
+    """A copy of *payload* with the snippet of every finding on a line a
+    ``credentials`` finding points at removed.
+
+    That snippet holds the hard-coded password, whichever finding quotes the
+    line, and the payload is written into the output directory.
     """
     if not isinstance(payload, dict) or not isinstance(payload.get("errors"), list):
         return payload
+    lines = _credential_lines(payload["errors"])
     errors = []
     for error in payload["errors"]:
-        if isinstance(error, dict) and error.get("kind") == "credentials":
-            error = {k: v for k, v in error.items() if k != "snippet"}
+        if isinstance(error, dict):
+            where = (error.get("filepath"), error.get("line"))
+            if where in lines:
+                error = {k: v for k, v in error.items() if k != "snippet"}
         errors.append(error)
     return {**payload, "errors": errors}
+
+
+#: Characters of workflow paths one actionlint invocation is given. Windows
+#: caps a command line at 32,767 characters and the fixed arguments (the
+#: executable, the format template, the config path) take a few hundred, so a
+#: tree with more workflows than fit is linted in several runs, each judged by
+#: its own exit code.
+_WORKFLOW_ARGV_BUDGET = 24_000
+
+
+def workflow_batches(
+    workflows: Sequence[str], budget: Optional[int] = None
+) -> List[List[str]]:
+    """*workflows* in order, split so that each batch's paths (with a separator
+    each) fit *budget* characters; a path longer than the budget is a batch of
+    its own. Empty for no workflows."""
+    if budget is None:
+        budget = _WORKFLOW_ARGV_BUDGET
+    batches: List[List[str]] = []
+    current: List[str] = []
+    used = 0
+    for workflow in workflows:
+        cost = len(workflow) + 1
+        if current and used + cost > budget:
+            batches.append(current)
+            current, used = [], 0
+        current.append(workflow)
+        used += cost
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _joined_sarif(sarif_dicts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """One SARIF dict from the per-batch dicts ``build_sarif`` returned: the
+    first one's driver, every batch's results in order, and the rules of every
+    batch, each once, sorted by id."""
+    if len(sarif_dicts) == 1:
+        return sarif_dicts[0]
+    joined = json.loads(json.dumps(sarif_dicts[0]))
+    run = joined["runs"][0]
+    rules: Dict[str, Dict[str, Any]] = {
+        rule["id"]: rule for rule in run["tool"]["driver"]["rules"]
+    }
+    for part in sarif_dicts[1:]:
+        part_run = part["runs"][0]
+        run["results"].extend(part_run["results"])
+        for rule in part_run["tool"]["driver"]["rules"]:
+            rules.setdefault(rule["id"], rule)
+    run["tool"]["driver"]["rules"] = [rules[name] for name in sorted(rules)]
+    return joined
+
+
+def _command_word(path: str) -> str:
+    """*path* as the one word of an ``-shellcheck=``/``-pyflakes=`` value.
+
+    actionlint reads the value as a command line, the program and its
+    arguments split on whitespace with shell-style quoting, so a path holding
+    a space would be split into a program that does not exist and an argument,
+    and the integration dropped. Such a path is double-quoted, with the quote
+    and the backslash escaped; a path with neither is passed as it is.
+    """
+    if not any(ch.isspace() or ch in '"\\' for ch in path):
+        return path
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _probe(path: Path, method: str) -> bool:
+    """``path.<method>()`` for ``is_dir``, ``is_file``, ``exists`` or
+    ``is_symlink``, read as False when the stat is refused.
+
+    Before Python 3.13 those methods raise the stat's PermissionError for a
+    path under an unsearchable directory instead of answering, and the
+    reference check walks every ancestor of a workflow, some of which the scan
+    does not own.
+    """
+    try:
+        return bool(getattr(path, method)())
+    except OSError:
+        return False
 
 
 def build_sarif(
@@ -560,6 +734,7 @@ def build_sarif(
 
     results: List[Dict[str, Any]] = []
     kinds_seen: Dict[str, str] = {}
+    credential_lines = _credential_lines(errors)
     for index, error in enumerate(errors):
         if not isinstance(error, dict):
             raise ScannerError(f"actionlint error #{index} is not a JSON object")
@@ -587,7 +762,11 @@ def build_sarif(
         severity = severity_for(kind, message)
         kinds_seen.setdefault(kind, KIND_SEVERITY.get(kind, UNKNOWN_KIND_SEVERITY))
 
-        uri = filepath.replace("\\", "/")
+        # actionlint writes the platform's separator. On Windows that is the
+        # backslash, rewritten to the SARIF form; on POSIX a backslash is a
+        # character of the file's name and stays, or the finding would name a
+        # path that does not exist.
+        uri = filepath.replace("\\", "/") if os.sep == "\\" else filepath
         if uri_base is not None:
             uri = (uri_base / uri).as_posix()
         physical_location: Dict[str, Any] = {"artifactLocation": {"uri": uri}}
@@ -618,8 +797,13 @@ def build_sarif(
                     region["endColumn"] = end_column + 1
             snippet = error.get("snippet")
             # A credentials finding's snippet is the hard-coded password itself,
-            # so it is not copied into the report.
-            if isinstance(snippet, str) and snippet and kind != "credentials":
+            # and so is the snippet of any other finding on that line, so
+            # neither is copied into the report.
+            if (
+                isinstance(snippet, str)
+                and snippet
+                and (filepath, line) not in credential_lines
+            ):
                 region["snippet"] = {"text": snippet}
             physical_location["region"] = region
 
@@ -880,19 +1064,30 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         usable = candidate.is_file() and os.access(candidate, os.X_OK)
         return candidate.as_posix() if usable else None
 
-    def validate_plugin_dependencies(self) -> bool:
-        self.dependency_unavailable_reason = None
+    def _missing_integrations(
+        self, integrations: Dict[str, Optional[str]]
+    ) -> Optional[str]:
+        """The MISSING reason for the enabled integrations *integrations* could
+        not resolve, or None when every enabled one resolved."""
+        options = self._options()
         missing = [
-            f"{flag} ({getattr(self._options(), flag)!s})"
-            for flag, path in self._integration_executables().items()
+            f"{flag} ({getattr(options, flag)!s})"
+            for flag, path in integrations.items()
             if path is None
         ]
-        if missing:
-            self.dependency_unavailable_reason = (
-                f"actionlint is configured to use {', '.join(missing)}, which was not "
-                "found. Install it, or unset the option to run actionlint without "
-                "that integration."
-            )
+        if not missing:
+            return None
+        return (
+            f"actionlint is configured to use {', '.join(missing)}, which was not "
+            "found. Install it, or unset the option to run actionlint without "
+            "that integration."
+        )
+
+    def validate_plugin_dependencies(self) -> bool:
+        self.dependency_unavailable_reason = self._missing_integrations(
+            self._integration_executables()
+        )
+        if self.dependency_unavailable_reason:
             self._plugin_log(self.dependency_unavailable_reason, level=logging.WARNING)
             return False
         found = find_absolute_executable(self.command or "actionlint")
@@ -914,13 +1109,25 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         input here either. ``global_settings.ignore_paths`` is not applied:
         scan() is handed its list by the scan, and without it this can find more
         workflows than scan() does, never fewer. Logs nothing; scan() logs the
-        warnings for the workflows it skips.
+        warnings for the workflows it skips. When every workflow file was left
+        out of the lint, the reason names them rather than saying there is no
+        workflow file: there is, and the warnings say why each was not linted.
         """
         if self.context is None:
             return None
+        left_out: List[Dict[str, str]] = []
         for target_type, target in scan_targets(self.context):
-            if self._workflow_files(target, target_type, [], report=False):
+            if self._workflow_files(
+                target, target_type, [], report=False, left_out=left_out
+            ):
                 return None
+        if left_out:
+            names = ", ".join(sorted({entry["path"] for entry in left_out}))
+            return (
+                "every GitHub Actions workflow file in the scanned files was left "
+                f"out of the lint ({names}; the scan log says why each one was not "
+                "linted), so actionlint evaluated nothing"
+            )
         return NO_WORKFLOW_FILE
 
     def _workflow_files(
@@ -929,11 +1136,24 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason],
         report: bool = True,
+        left_out: Optional[List[Dict[str, str]]] = None,
     ) -> List[str]:
         """Workflow files under *target*, as POSIX paths relative to it, sorted.
 
         ``report`` False leaves out the warnings for the workflows it skips.
+        ``left_out``, when given, collects a ``{path, reason}`` record for each
+        workflow file the selection refused (a link out of the tree, a reference
+        outside it, a path that is not a regular file); scan() reports them as
+        the scanner's ``inputs_not_scanned``. A file the ignore rules leave out
+        is not an input and is not recorded.
         """
+
+        def refuse(rel: str, reason: str) -> None:
+            if left_out is not None:
+                left_out.append({"path": rel, "reason": reason})
+            if report:
+                self._plugin_log(f"Not linting {rel}: {reason}.", level=logging.WARNING)
+
         target_abs = Path(target).absolute()
         target_real = Path(target).resolve()
         if target_type == "converted":
@@ -983,44 +1203,32 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 continue
             # A link whose target is missing, or that loops, is a file actionlint
             # cannot open: it exits 3 and no workflow in the run is linted. Checked
-            # before resolve(), which raises on a loop before Python 3.13.
-            if path.is_symlink() and not path.is_file():
-                if report:
-                    self._plugin_log(
-                        f"Not linting {rel}: it is a symbolic link that does not "
-                        "resolve to a file.",
-                        level=logging.WARNING,
-                    )
+            # before resolve(), which raises on a loop before Python 3.13. The
+            # probes read a refused stat as "not that", never as an error that
+            # ends the selection.
+            if _probe(path, "is_symlink") and not _probe(path, "is_file"):
+                refuse(rel, "it is a symbolic link that does not resolve to a file")
                 continue
             # A FIFO or a device named like a workflow is not one: opening it to
             # read its local references would block ASH itself, outside any scan
             # timeout, and actionlint could not lint it either.
-            if not path.is_file():
-                if report:
-                    self._plugin_log(
-                        f"Not linting {rel}: it is not a regular file.",
-                        level=logging.WARNING,
-                    )
+            if not _probe(path, "is_file"):
+                refuse(rel, "it is not a regular file")
                 continue
             # A symlinked workflow is followed by actionlint, which copies the
             # target's lines into the SARIF snippet. Only pass files whose real
             # path is inside the real scan root.
             if not path.resolve().is_relative_to(target_real):
-                if report:
-                    self._plugin_log(
-                        f"Not linting {rel}: it resolves outside the scan root.",
-                        level=logging.WARNING,
-                    )
+                refuse(rel, "it resolves outside the scan root")
                 continue
             spec = self._reference_outside_the_tree(path, target_real)
             if spec is not None:
-                if report:
-                    self._plugin_log(
-                        f"Not linting {rel}: its local reference 'uses: {spec}' "
-                        "resolves outside the scanned tree, and actionlint would "
-                        "read that file and quote it in its findings.",
-                        level=logging.WARNING,
-                    )
+                refuse(
+                    rel,
+                    f"its local reference 'uses: {spec}' resolves outside the "
+                    "scanned tree, and actionlint would read that file and quote "
+                    "it in its findings",
+                )
                 continue
             relative.append(rel)
         return sorted(set(relative))
@@ -1034,13 +1242,23 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         actionlint resolves ``./`` against its project root: in 1.7.12, the nearest
         ancestor holding ``.github/workflows`` that is also a git root. Every
         ancestor holding ``.github/workflows`` is checked here, so a different
-        project rule cannot widen what is read. For each, the reference is joined
-        to the ancestor lexically, as actionlint joins it (``..`` taken before any
-        link is followed), and the path that names and the
+        project rule cannot widen what is read. The ancestors are those of the
+        path as given and those of its real path: actionlint computes its root
+        from the physical working directory (Go's ``os.Getwd`` falls back to the
+        kernel's answer when ``$PWD`` is not the directory it was started in),
+        so under a scan root that is itself a symbolic link the roots it may
+        pick are the real path's. For each, the reference is joined to the
+        ancestor lexically, as actionlint joins it (``..`` taken before any link
+        is followed), and the path that names and the
         ``action.yml``/``action.yaml`` inside it are then followed through
-        symlinks; one that lands outside both the scanned tree and the scan
-        target is reported. An unreadable workflow is left to actionlint, which
-        reports it.
+        symlinks; one that exists and lands outside both the scanned tree and
+        the scan target is reported. A reference that names nothing under an
+        ancestor is not one actionlint can read a file through, so it does not
+        keep the workflow from being linted: without that test every ancestor
+        holding ``.github/workflows`` exempted every workflow with an ordinary
+        local action from the lint. An unreadable workflow is left to
+        actionlint, which reports it, and an ancestor whose stat is refused is
+        read as holding no project root.
         """
         try:
             text = decode_workflow(workflow.read_bytes())
@@ -1051,10 +1269,18 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             return None
         context_config = self.context.config if self.context is not None else None
         root = scan_root(context_config, self._source_dir())
+        ancestors: List[Path] = list(workflow.parents)
+        real_workflow = Path(os.path.realpath(workflow))
+        if real_workflow != workflow:
+            ancestors.extend(
+                directory
+                for directory in real_workflow.parents
+                if directory not in ancestors
+            )
         bases = [
             directory
-            for directory in workflow.parents
-            if (directory / ".github" / "workflows").is_dir()
+            for directory in ancestors
+            if _probe(directory / ".github" / "workflows", "is_dir")
         ]
         for base in bases:
             for spec in specs:
@@ -1065,8 +1291,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 # <root>/x to actionlint, whatever the link points at.
                 named = Path(os.path.normpath(os.path.join(str(base), spec)))
                 for candidate in (named, named / "action.yml", named / "action.yaml"):
-                    if candidate is not named and not (
-                        candidate.is_symlink() or candidate.exists()
+                    # Nothing there: actionlint reads no file through it.
+                    if not (
+                        _probe(candidate, "is_symlink") or _probe(candidate, "exists")
                     ):
                         continue
                     try:
@@ -1215,14 +1442,43 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             self._post_scan(target=target, target_type=target_type)
             return False
 
-        workflows = self._workflow_files(target, target_type, global_ignore_paths)
+        # Resolved once more here, with the config scan() was given: the
+        # dependency check ran against the config the scanner was built with. An
+        # enabled integration that does not resolve now is MISSING, as it is
+        # there (decision 2), never run with the integration quietly off.
+        integrations = self._integration_executables()
+        missing = self._missing_integrations(integrations)
+        if missing:
+            self.dependency_unavailable_reason = missing
+            self._plugin_log(missing, target_type=target_type, level=logging.WARNING)
+            self.dependencies_satisfied = False
+            self._post_scan(target=target, target_type=target_type)
+            return False
+
+        left_out: List[Dict[str, str]] = []
+        workflows = self._workflow_files(
+            target, target_type, global_ignore_paths, left_out=left_out
+        )
+        # The workflow files this scan found and did not lint, for the report
+        # (scanner_executor reads it as ``inputs_not_scanned``). Per target.
+        self.inputs_not_scanned = left_out
         if not workflows:
-            self._plugin_log(
-                f"No GitHub Actions workflow files (.github/workflows/*.yml or *.yaml) "
-                f"in the {target_type} scan set; actionlint evaluated nothing.",
-                target_type=target_type,
-                level=logging.INFO,
-            )
+            if left_out:
+                self._plugin_log(
+                    f"Every GitHub Actions workflow file in the {target_type} scan "
+                    "set was left out of the lint (see the warnings above); "
+                    "actionlint evaluated nothing.",
+                    target_type=target_type,
+                    level=logging.INFO,
+                )
+            else:
+                self._plugin_log(
+                    "No GitHub Actions workflow files (.github/workflows/*.yml or "
+                    f"*.yaml) in the {target_type} scan set; actionlint evaluated "
+                    "nothing.",
+                    target_type=target_type,
+                    level=logging.INFO,
+                )
             self._post_scan(target=target, target_type=target_type)
             # True with targets_attempted left at 0 is what ScannerExecutor grades
             # as SKIPPED, with nothing_to_scan_reason() as the reason, as zizmor
@@ -1237,19 +1493,25 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         results_dir = Path(self.results_dir).joinpath(target_type)
         results_dir.mkdir(parents=True, exist_ok=True)
         post_scanned = False
+        # Whether actionlint was started, so a failure before it (a config file
+        # that does not exist, one that leads out of the tree) is described as
+        # that, and not with an exit code the tool never returned.
+        tool_started = False
+        # No exit code until a run returns one: the 0 set above is for the clean
+        # skips, which the invocation record reads as accepted.
+        self.exit_code = None
 
         try:
             config_file = self._resolve_config_file(target)
             try:
                 ignore_patterns = config_ignore_patterns(config_file)
-            except yaml.composer.ComposerError as exc:
+            except IgnorePatternsUnlisted as exc:
                 ignore_patterns = []
                 self._plugin_log(
                     "ASH could not list the findings the actionlint config at "
-                    f"{config_file.as_posix()} ignores: {exc.problem} (line "
-                    f"{exc.problem_mark.line + 1 if exc.problem_mark else '?'}). "
-                    "actionlint still reads it, and drops the findings its "
-                    "paths.<glob>.ignore patterns match before ASH sees them.",
+                    f"{config_file.as_posix()} ignores: {exc}. actionlint still "
+                    "reads it, and drops the findings its paths.<glob>.ignore "
+                    "patterns match before ASH sees them.",
                     target_type=target_type,
                     level=logging.WARNING,
                 )
@@ -1263,61 +1525,108 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     level=logging.WARNING,
                 )
 
-            integrations = self._integration_executables()
-            final_args: List[str] = [
+            common_args: List[str] = [
                 self._executable or self.command or "actionlint",
                 "-no-color",
-                f"-shellcheck={integrations.get('shellcheck') or ''}",
-                f"-pyflakes={integrations.get('pyflakes') or ''}",
+                f"-shellcheck={_command_word(integrations.get('shellcheck') or '')}",
+                f"-pyflakes={_command_word(integrations.get('pyflakes') or '')}",
                 "-config-file",
                 config_file.as_posix(),
                 "-format",
                 ACTIONLINT_FORMAT,
                 "--",
-                *workflows,
             ]
             effective_timeout = self._effective_scan_timeout()
             # The run's stdout is appended to self.output as record lines, and
             # those are persisted with the results when a scan fails. Remembered
             # so the lines can be replaced with the redacted payload below.
             output_before = len(self.output)
-            response = self._run_subprocess(
-                command=final_args,
-                results_dir=results_dir,
-                stdout_preference="return",
-                stderr_preference="write",
-                cwd=target,
-                timeout=effective_timeout,
-            )
+            uri_base = Path(target).absolute() if target_type == "converted" else None
+            # The workflows go on the command line in batches that fit the
+            # platform's limit (workflow_batches); each run is judged by its own
+            # exit code and parsed on its own, then the findings are joined.
+            payloads: List[Dict[str, Any]] = []
+            sarif_dicts: List[Dict[str, Any]] = []
+            final_args: List[str] = common_args
+            for batch in workflow_batches(workflows):
+                final_args = [*common_args, *batch]
+                tool_started = True
+                response = self._run_subprocess(
+                    command=final_args,
+                    results_dir=results_dir,
+                    stdout_preference="return",
+                    stderr_preference="write",
+                    cwd=target,
+                    timeout=effective_timeout,
+                )
+                # This run's code, not the largest of the batches so far.
+                self._record_target_exit_code(response)
+
+                if isinstance(response, dict) and response.get("timed_out"):
+                    # The limit through the shared token, so an environment-read
+                    # number is not printed, and "was killed" only when the stop
+                    # worked: a tool ASH could not stop may still be running.
+                    limit = self._timeout_limit_token(effective_timeout)
+                    ending = (
+                        COULD_NOT_STOP_ENDING
+                        if self.scan_could_not_stop is not None
+                        else WAS_KILLED_ENDING
+                    )
+                    raise ScannerError(
+                        text_without_values(
+                            f"actionlint timed out after {limit}{ending}. Raise "
+                            "scanners.actionlint.options.scan_timeout if this "
+                            "target legitimately needs longer.",
+                            self._values_to_redact(),
+                        )
+                    )
+                if self.exit_code not in self.success_exit_codes:
+                    raise ScannerError(
+                        f"actionlint exited {self.exit_code} (2 is a bad command "
+                        "line, 3 a fatal error such as an unreadable file or "
+                        "invalid config)"
+                    )
+
+                stdout = (response or {}).get("stdout") or ""
+                try:
+                    payload = json.loads(stdout)
+                except json.JSONDecodeError as exc:
+                    # Not kept: output that does not parse cannot be redacted,
+                    # and a credentials finding's snippet, the password, may be
+                    # in it. The record lines hold the same text, so they are
+                    # replaced with a note of what was dropped.
+                    self.output[output_before:] = [
+                        (
+                            f"actionlint wrote {len(stdout)} characters that are not "
+                            "JSON; not kept, since they could not be redacted"
+                        )
+                    ]
+                    raise ScannerError(
+                        f"actionlint output is not JSON ({exc}); the output is not "
+                        "kept, since it could not be redacted"
+                    ) from exc
+                # Validated per run: a run that exited 1 with no findings, or 0
+                # with some, is a broken run whatever the other runs reported.
+                sarif_dicts.append(build_sarif(payload, self.exit_code, uri_base))
+                payloads.append(payload)
+
             self._post_scan(target=target, target_type=target_type)
             post_scanned = True
 
-            if isinstance(response, dict) and response.get("timed_out"):
-                raise ScannerError(
-                    f"actionlint timed out after {effective_timeout}s and was killed. "
-                    "Raise scanners.actionlint.options.scan_timeout if this target "
-                    "legitimately needs longer."
-                )
-            if self.exit_code not in self.success_exit_codes:
-                raise ScannerError(
-                    f"actionlint exited {self.exit_code} (2 is a bad command line, 3 "
-                    "a fatal error such as an unreadable file or invalid config)"
-                )
-
-            stdout = (response or {}).get("stdout") or ""
-            raw_output = results_dir / "actionlint.json"
-            try:
-                payload = json.loads(stdout)
-            except json.JSONDecodeError as exc:
-                # Kept verbatim for diagnosis: output that does not parse cannot
-                # be redacted, and is not findings.
-                with open_for_write(raw_output) as handle:
-                    handle.write(stdout)
-                raise ScannerError(
-                    f"actionlint output is not JSON ({exc}); raw output kept at "
-                    f"{raw_output.as_posix()}"
-                ) from exc
+            payload = (
+                payloads[0]
+                if len(payloads) == 1
+                else {
+                    **payloads[0],
+                    "errors": [
+                        error
+                        for part in payloads
+                        for error in (part.get("errors") or [])
+                    ],
+                }
+            )
             redacted = redact_credentials(payload)
+            raw_output = results_dir / "actionlint.json"
             with open_for_write(raw_output) as handle:
                 handle.write(json.dumps(redacted, indent=2))
             # The record lines hold the raw stdout, a credentials finding's
@@ -1329,13 +1638,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # source finding stays relative (the scan reads it from the source
             # directory); a converted finding is made absolute under the work
             # directory, which is how the scan recognizes a converted file.
-            sarif_dict = build_sarif(
-                payload,
-                self.exit_code,
-                uri_base=Path(target).absolute()
-                if target_type == "converted"
-                else None,
-            )
+            sarif_dict = _joined_sarif(sarif_dicts)
             self.tool_version = sarif_dict["runs"][0]["tool"]["driver"]["version"]
             if self.tool_version.lstrip("v") != PINNED_VERSION.lstrip("v"):
                 self._plugin_log(
@@ -1360,5 +1663,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             if not post_scanned:
                 self._post_scan(target=target, target_type=target_type)
             raise ScannerError(
-                self._describe_scan_failure(exc, results_dir / "actionlint.json")
+                self._describe_scan_failure(
+                    exc, results_dir / "actionlint.json", tool_started=tool_started
+                )
             ) from exc

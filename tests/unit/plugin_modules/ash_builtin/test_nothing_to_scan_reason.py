@@ -294,9 +294,10 @@ WORKFLOW = (
     "    steps:\n"
     "      - run: echo hi\n"
 )
-#: A workflow whose local reference resolves outside the scanned tree. actionlint
-#: would read and quote what it names, so _workflow_files leaves it out.
-WORKFLOW_USING_A_PATH_OUTSIDE = WORKFLOW + "      - uses: ./../elsewhere\n"
+#: A workflow whose local reference resolves outside the scanned tree (the
+#: scan root's parent, which exists). actionlint would read and quote what it
+#: names, so _workflow_files leaves it out.
+WORKFLOW_USING_A_PATH_OUTSIDE = WORKFLOW + "      - uses: ./..\n"
 COMPOSITE_ACTION = "name: a\nruns:\n  using: composite\n  steps: []\n"
 
 WORKFLOW_TREES = [
@@ -379,7 +380,11 @@ def test_actionlint_the_hook_does_not_repeat_the_scans_warnings(tmp_path, caplog
     with caplog.at_level(logging.DEBUG):
         reason = ActionlintScanner(context=context).nothing_to_scan_reason()
 
-    assert reason == NO_WORKFLOW_FILE
+    # There is a workflow file, left out of the lint: the reason names it
+    # rather than saying the tree holds none.
+    assert reason != NO_WORKFLOW_FILE
+    assert "left out of the lint" in reason
+    assert ".github/workflows/ci.yml" in reason
     assert "Not linting" not in caplog.text
 
 
