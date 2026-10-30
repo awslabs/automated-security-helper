@@ -31,6 +31,8 @@ def test_both_modules_resolve_through_the_shared_resolver():
     asharp_model._resolve_forward_refs()
     assert plugin_context_module._forward_refs.resolved is True
     assert asharp_model._forward_refs.resolved is True
+    # The bind put the class on the module, where the model's annotation names it.
+    assert getattr(asharp_model, "AshConfig", None) is not None
 
 
 def test_the_resolver_binds_once_and_sets_the_flag_after_the_bind():
