@@ -2159,9 +2159,15 @@ async def mcp_scan_directory(
         previous_results_moved = False
         try:
             # Register the scan in the registry, within the operator's
-            # concurrency limit; see _resource_limits.
+            # concurrency limit; see _resource_limits. Off the event loop, as
+            # the other registry work of this tool is: the registration waits
+            # for an output-tree removal still in progress for the same
+            # directory (ScanRegistry.register_scan), and that wait, run on the
+            # loop's thread, froze every other request for as long as the
+            # delete took.
             registry = get_scan_registry()
-            scan_id = registry.register_scan(
+            scan_id = await asyncio.to_thread(
+                registry.register_scan,
                 directory_path=str(directory_path_obj),
                 output_directory=str(output_dir),
                 # Not known yet: the scan runs at the stricter of the request
