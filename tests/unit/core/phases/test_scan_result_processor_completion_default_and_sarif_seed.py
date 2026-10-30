@@ -46,7 +46,9 @@ AshAggregatedResults.model_rebuild()
 def _plugin_context(tmp_path):
     ctx = MagicMock()
     for name in ("source", "work", "output"):
-        (tmp_path / name).mkdir()
+        # parents=True: the two-models test passes a subdirectory of tmp_path that
+        # nothing has created yet.
+        (tmp_path / name).mkdir(parents=True)
     ctx.source_dir = tmp_path / "source"
     ctx.work_dir = tmp_path / "work"
     ctx.output_dir = tmp_path / "output"
