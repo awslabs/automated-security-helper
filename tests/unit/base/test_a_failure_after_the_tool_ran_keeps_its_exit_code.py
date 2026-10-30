@@ -511,7 +511,7 @@ def test_the_uv_runner_after_a_clean_exit_keeps_the_code_when_its_conversion_rai
 
 
 class _UvResponseHandlingFails(_IgnoresTheResponse):
-    def _explain_offline_resolve_failure(self, response, results_dir):
+    def _explain_offline_resolve_failure(self, response, results_dir, **_kwargs):
         raise RuntimeError("reading the uv run's response failed")
 
 
@@ -1015,7 +1015,7 @@ def markup_console():
 
 
 class _UvResponseHandlingFailsWithMarkup(_IgnoresTheResponse):
-    def _explain_offline_resolve_failure(self, response, results_dir):
+    def _explain_offline_resolve_failure(self, response, results_dir, **_kwargs):
         raise RuntimeError(_MARKUP_IN_THE_ERROR)
 
 
