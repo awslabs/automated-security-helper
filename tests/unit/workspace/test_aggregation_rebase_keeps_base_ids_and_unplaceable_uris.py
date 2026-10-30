@@ -258,6 +258,48 @@ def test_a_percent_encoded_base_places_the_uri_through_the_decoded_path(tmp_path
     assert rebased["originalUriBaseIds"]["%SRCROOT%"] == {"uri": base}
 
 
+def test_a_percent_encoded_absolute_artifact_uri_is_reduced_through_the_decoded_path(
+    tmp_path,
+):
+    """Red at the base: the base-id path was decoded (above) and the artifact's own
+    ``file:`` URI was not, so ``file:///.../My%20Repo/api/src/app.py`` read as a path
+    outside ``My Repo/api`` and was kept absolute, placed nowhere in the workspace."""
+    root = tmp_path / "ws" / "My Repo" / "api"
+    project = ProjectPlan(
+        key="api",
+        relative_path="api",
+        path=root.as_posix(),
+        label="api",
+        display_label="api",
+    )
+    absolute = (root / "src" / "app.py").as_uri()
+    assert "%20" in absolute, (
+        "Path.as_uri() no longer percent-encodes; nothing measured"
+    )
+
+    rebased, unconvertible = rebase_run_for_project(_run({"uri": absolute}), project)
+
+    assert unconvertible == 0
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "src/app.py"
+    assert artifact["uriBaseId"] == PROJECT_ROOT_URI_BASE_ID
+    assert rebased["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
+
+
+def test_a_scheme_less_name_keeps_its_percent_sign(project):
+    """Control: only a ``file:`` URI is decoded; a bare name is a file name, and
+    ``%20`` in it is part of that name."""
+    rebased, unconvertible = rebase_run_for_project(
+        _run({"uri": "src/odd%20name.py"}), project
+    )
+
+    assert unconvertible == 0
+    assert _artifact(rebased)["uri"] == "src/odd%20name.py"
+    assert (
+        rebased["results"][0]["properties"]["workspace_uri"] == "api/src/odd%20name.py"
+    )
+
+
 def test_a_chained_base_is_resolved_to_its_root(project, tmp_path):
     """Red at the base: the anchored base answered None and ``app.py`` was placed
     at the project root, dropping the ``src/`` and naming another file."""

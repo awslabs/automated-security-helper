@@ -157,6 +157,7 @@ from automated_security_helper.utils.uri_separators import (
     sanitized_uri_text,
 )
 from automated_security_helper.utils.severity_ladder import (
+    ScannerThresholdResolver,
     result_fails_scanner_threshold,
     result_scanner_name,
     result_severity,
@@ -289,9 +290,15 @@ def _posix_text(uri: str, project_path: Optional[str] = None) -> str:
     loses it, so a drive is always spelled the same way before anything
     compares paths. Any other backslash is part of a POSIX file name and is
     kept: the project's scan sanitized the URI, which wrote ``/`` for its
-    separators (``utils/uri_separators.py``).
+    separators (``utils/uri_separators.py``). A ``file:``-schemed URI is
+    percent-decoded first (``Path.as_uri`` writes ``My%20Repo`` for ``My Repo``,
+    and the project's path is never encoded), as :func:`_absolute_base` decodes a
+    declared base; a scheme-less name keeps its ``%``, which is part of it.
     """
-    text = sanitized_uri_text(_strip_file_scheme(uri), project_path)
+    text = uri.strip()
+    if text.lower().startswith("file:"):
+        text = unquote(text)
+    text = sanitized_uri_text(_strip_file_scheme(text), project_path)
     if len(text) > 2 and text[0] == "/" and text[2] == ":":
         text = text[1:]
     return text
@@ -687,17 +694,20 @@ def rebase_run_for_project(
     return rebased, unconvertible
 
 
-#: Resolves the threshold governing one scanner's findings from the scanner's
-#: name as ``properties.scanner_name`` records it (``None`` for a finding that
-#: names none). An answer of ``None`` means "the project-wide threshold".
+#: Resolves a scanner's OWN threshold (its ``options.severity_threshold``) from
+#: the scanner's name as ``properties.scanner_name`` records it (``None`` for a
+#: finding that names none). An answer of ``None`` means "no own threshold: the
+#: project-wide one governs".
 #:
 #: The same call shape as ``severity_ladder.ScannerThresholdResolver`` with the
 #: opposite meaning for a falsy answer: there a falsy answer turns the gate OFF
-#: for that scanner. A resolver of this type is never handed to the ladder's
+#: for that scanner. Python's structural typing cannot tell the two apart, so
+#: the names do: a value of this type is never handed to the ladder's
 #: ``result_fails_scanner_threshold`` as it is; :func:`effective_threshold_resolver`
-#: wraps it first, filling the project-wide threshold in for ``None``, and that
-#: wrapped resolver is the one the counters below pass down.
-ThresholdResolver = Callable[[Optional[str]], Optional[str]]
+#: is the one conversion, filling the project-wide threshold in for ``None`` and
+#: returning a ``ScannerThresholdResolver``, and that resolver is the one the
+#: counters below pass down.
+OwnThresholdResolver = Callable[[Optional[str]], Optional[str]]
 
 #: The scanner a finding with no ``properties.scanner_name`` is credited to, in
 #: the per-scanner counts and in the rollup alike.
@@ -726,8 +736,8 @@ def result_is_suppressed(result: Mapping[str, Any]) -> bool:
 
 def effective_threshold_resolver(
     threshold: Optional[str],
-    threshold_for: Optional[ThresholdResolver] = None,
-) -> ThresholdResolver:
+    threshold_for: Optional[OwnThresholdResolver] = None,
+) -> ScannerThresholdResolver:
     """The threshold each scanner's findings are graded against, memoised.
 
     *threshold_for* answers a scanner's own ``options.severity_threshold`` (``None``
@@ -736,7 +746,9 @@ def effective_threshold_resolver(
     ``_compute_exit_code`` upper-cases the configured value and the ladder is
     case-sensitive. One resolver for the actionable count and the
     ``--min-severity`` gate, so the two cannot grade one finding against two
-    thresholds.
+    thresholds. The result is the ladder's type: it answers ``None`` only when the
+    project-wide threshold is itself unset, which is the one case the gate is
+    meant to be off.
     """
     resolved: Dict[Optional[str], Optional[str]] = {}
 
@@ -754,7 +766,7 @@ def actionable_results_by_scanner(
     results: Iterable[Mapping[str, Any]],
     threshold: Optional[str],
     *,
-    threshold_for: Optional[ThresholdResolver] = None,
+    threshold_for: Optional[OwnThresholdResolver] = None,
 ) -> Dict[str, int]:
     """Per scanner, the findings at or above that scanner's own threshold.
 
@@ -819,7 +831,7 @@ def count_actionable_results(
     results: Iterable[Mapping[str, Any]],
     threshold: Optional[str],
     *,
-    threshold_for: Optional[ThresholdResolver] = None,
+    threshold_for: Optional[OwnThresholdResolver] = None,
 ) -> int:
     """Count findings at or above their scanner's threshold, as ``_compute_exit_code`` does.
 
@@ -841,7 +853,7 @@ def has_finding_at_min_severity(
     min_severity: str,
     threshold: Optional[str] = None,
     *,
-    threshold_for: Optional[ThresholdResolver] = None,
+    threshold_for: Optional[OwnThresholdResolver] = None,
 ) -> bool:
     """Whether any finding meets ``--min-severity``, the way ``_compute_exit_code`` does.
 

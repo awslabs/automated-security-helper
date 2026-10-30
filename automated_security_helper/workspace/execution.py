@@ -391,7 +391,7 @@ from automated_security_helper.utils.subprocess_utils import SANDBOX_STOP_GRACE_
 from automated_security_helper.workspace.aggregation import (
     POLICY_ORIGIN,
     RESULTS_FILENAME,
-    ThresholdResolver,
+    OwnThresholdResolver,
     WorkspaceAggregator,
     actionable_results_by_scanner,
     converter_refusals_for_project,
@@ -1101,7 +1101,7 @@ def _scanner_threshold_resolver(
     results: Any,
     project: ProjectPlan,
     environment_read: Optional[Set[str]] = None,
-) -> ThresholdResolver:
+) -> OwnThresholdResolver:
     """The threshold governing each of this project's scanners, by scanner name.
 
     The same resolution ``_compute_exit_code`` makes for a single scan, read from
@@ -1169,7 +1169,7 @@ def _scanner_threshold_resolver(
 
 
 def _recorded_scanner_thresholds(
-    resolve: ThresholdResolver,
+    resolve: OwnThresholdResolver,
     statuses: Mapping[str, str],
     results: Sequence[Mapping[str, Any]],
     environment_read: Collection[str] = frozenset(),

@@ -48,10 +48,12 @@ from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.workspace import aggregation
 from automated_security_helper.workspace.aggregation import (
     UNATTRIBUTED_SCANNER,
     actionable_results_by_scanner,
     count_actionable_results,
+    effective_threshold_resolver,
     has_finding_at_min_severity,
 )
 from tests.unit.workspace.test_execution import (
@@ -128,6 +130,31 @@ def test_the_counter_grades_each_finding_by_its_scanners_threshold():
     )
     # Control: without a resolver, the project-wide threshold judges them all.
     assert count_actionable_results(findings, "MEDIUM") == 3
+
+
+class TestTheTwoResolverMeaningsHaveTwoNames:
+    """A scanner's OWN threshold (``None`` = the project-wide one governs) and the
+    ladder's effective threshold (``None`` = the gate is off) share one call shape.
+    Structural typing cannot tell them apart, so the names must, and the one
+    conversion between them is ``effective_threshold_resolver``."""
+
+    def test_the_own_threshold_resolver_is_named_for_what_it_answers(self):
+        """Red at the base: one name, ``ThresholdResolver``, read as the ladder's."""
+        assert hasattr(aggregation, "OwnThresholdResolver")
+        assert not hasattr(aggregation, "ThresholdResolver")
+
+    def test_the_conversion_fills_the_project_threshold_in_for_none(self):
+        """The wrapped resolver never answers None while the project has a threshold,
+        which is what makes it safe to hand to the ladder's gate."""
+        effective = effective_threshold_resolver(
+            "medium", lambda scanner: "critical" if scanner == "bandit" else None
+        )
+
+        assert effective("bandit") == "CRITICAL"
+        assert effective("semgrep") == "MEDIUM"
+        assert effective(None) == "MEDIUM"
+        # Only an unset project-wide threshold reaches the ladder as None: gate off.
+        assert effective_threshold_resolver(None)("semgrep") is None
 
 
 class TestTheCounterAndTheGateReadOneFinding:
