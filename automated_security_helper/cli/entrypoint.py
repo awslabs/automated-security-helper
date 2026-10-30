@@ -45,10 +45,15 @@ Two mechanisms here, because they cover different failures:
   other ``sys.excepthook``, one a library, a plugin or the user installed, is
   called, so what else it does (a crash reporter, say) still happens, with
   ``sys.stdout`` and ``sys.stderr`` writing each line it writes shown, not
-  obeyed, for that call only. If that hook raises, :func:`_ash_traceback`
-  reports; a ``sys.exit`` in either ends the process with its code, as CPython
-  lets it, and a Ctrl-C with 130, printing nothing. After those comes plain
-  ``traceback`` formatting, then ``os.write`` on a raw descriptor.
+  obeyed, for that call only. typer's own hook, on its standard-traceback path
+  (``TYPER_STANDARD_TRACEBACK``, or an exception it did not tag), prints
+  nothing itself and calls the hook that was installed when typer was imported
+  (a crash reporter a ``sitecustomize`` installed, say); ASH, reporting in
+  typer's place, calls that hook the same way. If that hook raises,
+  :func:`_ash_traceback` reports; a ``sys.exit`` in either ends the process
+  with its code, as CPython lets it, and a Ctrl-C with 130, printing nothing.
+  After those comes plain ``traceback`` formatting, then ``os.write`` on a raw
+  descriptor, each written whole.
   :func:`_ash_traceback` imports typer, Rich
   and ASH's console itself, and when one of them cannot be imported the floor
   falls back. Otherwise the floor imports nothing outside the standard library:
@@ -94,6 +99,38 @@ _BANNER = "ash: fatal error"
 #: traceback prints in their place: typer's, and rich.traceback.install()'s. A
 #: wrapper of one (it has ``__wrapped__``) is not one of them.
 _PRINTERS = frozenset({"typer.main", "rich.traceback"})
+
+#: The descriptors :func:`ensure_std_streams` found closed when it ran: a
+#: stream was ``None`` and the descriptor under it could not be opened. A
+#: number the run opens later (the scan log, a report) can be given that
+#: descriptor, so the raw floor never writes to one of these. Empty until
+#: ensure_std_streams has run, and on every normal invocation.
+_CLOSED_AT_START: set[int] = set()
+
+
+def _stream_codec() -> tuple[str | None, str]:
+    """The encoding and error handler a reattached stream is opened with.
+
+    As the interpreter chooses them for the streams it makes at start:
+    ``PYTHONIOENCODING`` (``encoding[:errors]``, unless ``-E`` ignores the
+    environment), UTF-8 under UTF-8 mode (``-X utf8``, ``PYTHONUTF8=1``), else the
+    locale's codec, ``None`` here. A repaired channel written in a codec other
+    than the one the environment asked for gave a reader of machine output
+    (JSON through echo_raw) bytes it did not expect.
+
+    The handler is ``PYTHONIOENCODING``'s when it names one, else
+    ``backslashreplace``: on Windows the locale's codec is often a code page
+    which cannot represent the box-drawing characters Rich uses to frame a
+    traceback, and a stream that raises ``UnicodeEncodeError`` while reporting
+    an error is no better than no stream at all.
+    """
+    requested = (
+        "" if sys.flags.ignore_environment else os.environ.get("PYTHONIOENCODING", "")
+    )
+    encoding, _, errors = requested.partition(":")
+    if not encoding and getattr(sys.flags, "utf8_mode", 0):
+        encoding = "utf-8"
+    return encoding or None, errors or "backslashreplace"
 
 
 #: The standard descriptors that were closed when the process started. A closed
@@ -152,19 +189,19 @@ def _reserve_descriptor(fd: int, flags: int = os.O_WRONLY) -> bool:
 def _reattach(fd: int):
     """Return a text stream writing to descriptor *fd*, or ``None``.
 
-    ``errors="backslashreplace"`` because this stream is opened with the
-    platform's default encoding, and on Windows that is often a code page which
-    cannot represent the box-drawing characters Rich uses to frame a traceback.
-    A stream that raises ``UnicodeEncodeError`` while reporting an error is no
-    better than no stream at all.
-
-    ``closefd=False`` so garbage collection of this object does not close the
-    process's real stderr underneath anything else holding it.
+    Opened with the codec :func:`_stream_codec` chooses. ``closefd=False`` so
+    garbage collection of this object does not close the process's real stderr
+    underneath anything else holding it.
     """
+    encoding, errors = _stream_codec()
     try:
-        return os.fdopen(fd, "w", buffering=1, errors="backslashreplace", closefd=False)
-    except OSError:
-        # EBADF: the descriptor is genuinely closed, not merely unattached.
+        return os.fdopen(
+            fd, "w", buffering=1, encoding=encoding, errors=errors, closefd=False
+        )
+    except (OSError, LookupError):
+        # EBADF: the descriptor is genuinely closed, not merely unattached. A
+        # LookupError is a PYTHONIOENCODING naming a codec Python does not
+        # have, which the interpreter itself refuses at start.
         return None
 
 
@@ -199,7 +236,9 @@ def ensure_std_streams() -> tuple[str, ...]:
                 # closed at startup whether or not the hold below succeeds.
                 _RESERVED_DESCRIPTORS.add(fd)
                 _reserve_descriptor(fd)
+            _CLOSED_AT_START.add(fd)
             continue
+        _CLOSED_AT_START.discard(fd)
         setattr(sys, name, stream)
         # The docs quoted above warn that the saved original can be None as
         # well. logging's lastResort handler and several libraries reach for
@@ -211,25 +250,110 @@ def ensure_std_streams() -> tuple[str, ...]:
     return tuple(repaired)
 
 
+def _flush_quietly(stream) -> None:
+    """Flush *stream*, a Python-level stream that may be broken, and tell nobody."""
+    flush = getattr(stream, "flush", None)
+    if flush is None:
+        return
+    try:
+        flush()
+    except Exception:
+        pass
+
+
 def _write_raw(text: str) -> bool:
     """Write *text* to a raw descriptor, bypassing ``sys.stderr`` entirely.
 
     Reached only when there is no Python-level stream object left to trust, so
     it uses ``os.write`` and tries stderr before stdout. Returns whether the
-    text reached anything. A descriptor that was closed when the process
-    started (:data:`_RESERVED_DESCRIPTORS`) is skipped: nothing is reading it,
-    and had it not been held, its number could by now be a file ASH opened.
+    whole text reached something.
+
+    Each ``os.write`` is repeated until its count covers the text: a pipe can
+    take part of a write, and a short write counted as the whole report cut
+    the report. When a descriptor fails part-way, the next one gets the rest,
+    not the whole text again. A descriptor that had no stream when the process
+    started (:data:`_CLOSED_AT_START`), or that was closed outright and is held
+    with ``os.devnull`` (:data:`_RESERVED_DESCRIPTORS`), is skipped: nothing is
+    reading it, and had it not been held, its number could by now be a file the
+    run opened. Before stdout is written, ``sys.stdout`` is flushed, so the
+    report lands after what ASH printed through it, not ahead.
     """
     payload = text.encode("utf-8", "backslashreplace")
     for fd in (2, 1):
-        if fd in _RESERVED_DESCRIPTORS:
+        if fd in _CLOSED_AT_START or fd in _RESERVED_DESCRIPTORS:
             continue
+        if fd == 1:
+            _flush_quietly(getattr(sys, "stdout", None))
         try:
-            os.write(fd, payload)
+            while payload:
+                payload = payload[os.write(fd, payload) :]
             return True
         except OSError:
             continue
     return False
+
+
+def _exception_text(exc: BaseException) -> str:
+    """``str(exc)``, or a stand-in when that raises: the floor reports every
+    exception, the ones whose ``__str__`` is broken included."""
+    try:
+        return str(exc)
+    except Exception:
+        return f"<{type(exc).__name__} whose text could not be read>"
+
+
+def _is_printer(hook: Any) -> bool:
+    """Whether *hook* is one of :data:`_PRINTERS`' own hooks, which only print.
+
+    By module, and only unwrapped: a functools.wraps wrapper takes the module
+    name of the hook it wraps, but is a crash reporter's own, so it runs.
+    """
+    return getattr(hook, "__module__", None) in _PRINTERS and not hasattr(
+        hook, "__wrapped__"
+    )
+
+
+def _standard_traceback(exc: BaseException, typer_main: Any) -> bool:
+    """Whether typer's hook would print the plain traceback for *exc*, as
+    typer.main.except_hook decides: ``TYPER_STANDARD_TRACEBACK`` set, or no
+    pretty-traceback tag on the exception. On that path typer's hook prints
+    nothing itself and calls the hook it found installed when it was imported.
+    """
+    if os.getenv("TYPER_STANDARD_TRACEBACK", os.getenv("_TYPER_STANDARD_TRACEBACK")):
+        return True
+    attribute = getattr(
+        typer_main,
+        "_typer_developer_exception_attr_name",
+        "__typer_developer_exception__",
+    )
+    config = getattr(exc, attribute, None)
+    return config is None or not getattr(config, "pretty_exceptions_enable", False)
+
+
+def _installed_hook(exc: BaseException) -> Callable[..., Any] | None:
+    """The ``sys.excepthook`` an installer put there, to call for *exc*, or None.
+
+    The interpreter's own and the printers' (:data:`_PRINTERS`) are None: ASH's
+    traceback reports in their place. typer's hook, on its standard-traceback
+    path, calls the hook that was installed before typer was imported
+    (``typer.main._original_except_hook``, a crash reporter a sitecustomize or
+    a ``.pth`` installed); replacing typer's hook dropped that call, so that
+    hook is the one to call then, unless it is the interpreter's or a printer.
+    """
+    hook = getattr(sys, "excepthook", None)
+    if hook is None or hook is sys.__excepthook__:
+        return None
+    if not _is_printer(hook):
+        return hook
+    typer_main = sys.modules.get("typer.main")
+    if typer_main is None or getattr(hook, "__module__", None) != "typer.main":
+        return None
+    if not _standard_traceback(exc, typer_main):
+        return None
+    chained = getattr(typer_main, "_original_except_hook", None)
+    if chained is None or chained is sys.__excepthook__ or _is_printer(chained):
+        return None
+    return chained
 
 
 def _report_failure(exc: BaseException, repaired: tuple[str, ...] = ()) -> None:
@@ -277,16 +401,12 @@ def _report_failure(exc: BaseException, repaired: tuple[str, ...] = ()) -> None:
     # that picked color when it was made, so through the shown streams its frame
     # was color codes written as text. ASH's renders the same traceback through
     # ASH's console instead of each. Any other hook is the installer's, so it
-    # runs, writing through streams that show what it writes.
-    hook = getattr(sys, "excepthook", None)
-    # By module, and only unwrapped: a functools.wraps wrapper takes the module
-    # name of the hook it wraps, but is a crash reporter's own, so it runs.
-    printer = getattr(hook, "__module__", None) in _PRINTERS and not hasattr(
-        hook, "__wrapped__"
-    )
-    if hook is sys.__excepthook__ or printer:
-        hook = None
-    if stderr is not None and hook is not None:
+    # runs, writing through streams that show what it writes (_installed_hook).
+    # With no stderr as well: the hook may write to stdout, or to nothing a
+    # stream carries (a crash report sent elsewhere), and its call is the
+    # module's promise; _call_shown shows only the streams that exist.
+    hook = _installed_hook(exc)
+    if hook is not None:
         try:
             _call_shown(hook, exc)
             return
@@ -316,17 +436,26 @@ def _report_failure(exc: BaseException, repaired: tuple[str, ...] = ()) -> None:
             # is worth more than a pretty one that never arrived.
             pass
 
+    # traceback's own formatting reads a broken __str__ past; the banner's
+    # text does the same (_exception_text), so this line cannot be the one
+    # that makes the floor raise.
     detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-    _emit(_shown(f"{_BANNER}: {type(exc).__name__}: {exc}\n{detail}"), stderr)
+    _emit(
+        _shown(f"{_BANNER}: {type(exc).__name__}: {_exception_text(exc)}\n{detail}"),
+        stderr,
+    )
 
 
 class _ShownLines:
     """A text stream that writes each line written to it to *stream*, shown.
 
-    A line is held until its newline, or until :meth:`end`, so a line written in
-    pieces is shown whole: a ``::`` that starts it is a CI command only as a
-    whole line. Not a terminal (``isatty()`` is false) and no descriptor, so a
-    writer that asks does not color its text or write past the stream.
+    A line is held until its newline, until :meth:`flush`, or until :meth:`end`,
+    so a line written in pieces is shown whole: a ``::`` that starts it is a CI
+    command only as a whole line. A flush writes the held piece as far as it
+    goes: a hook that writes a prompt without its newline and flushes before it
+    reads the answer is waiting for a reader who must see the prompt. Not a
+    terminal (``isatty()`` is false) and no descriptor, so a writer that asks
+    does not color its text or write past the stream.
     """
 
     def __init__(self, stream) -> None:
@@ -337,6 +466,8 @@ class _ShownLines:
         self._show = shown_not_obeyed
         self._stream = stream
         self._held = ""
+        # A line a flush wrote without its newline: end() still ends it.
+        self._unended = False
         self.encoding = getattr(stream, "encoding", None) or "utf-8"
         self.errors = getattr(stream, "errors", None) or "strict"
 
@@ -345,6 +476,7 @@ class _ShownLines:
         lines, newline, self._held = self._held.rpartition("\n")
         if newline:
             self._stream.write(self._show(lines + newline))
+            self._unended = False
         return len(text)
 
     def writelines(self, lines) -> None:
@@ -352,11 +484,15 @@ class _ShownLines:
             self.write(line)
 
     def flush(self) -> None:
+        if self._held:
+            self._stream.write(self._show(self._held))
+            self._held = ""
+            self._unended = True
         self._stream.flush()
 
     def end(self) -> None:
         """Write the line still held, ended, so nothing after it joins it."""
-        if self._held:
+        if self._held or self._unended:
             self.write("\n")
         self.flush()
 
@@ -380,30 +516,69 @@ def _call_shown(hook: Callable[..., Any], exc: BaseException) -> None:
     left unended is ended. The shown streams are made before the call: when ASH's
     text rule cannot be imported, nothing could be shown, and the hook is not
     called.
+
+    For the call, the environment says no color (``PYTHON_COLORS=0``,
+    ``NO_COLOR``, no ``FORCE_COLOR``): the shown streams are not terminals, but
+    the interpreter's own traceback printer, which a hook may chain to, colors
+    under ``FORCE_COLOR`` or ``PYTHON_COLORS=1`` whatever it writes to, and its
+    codes would be shown as text. Ending a shown stream writes and flushes the
+    real one; a failure there is swallowed, so a hook's outcome (its report, its
+    ``sys.exit`` code) is never replaced by the cleanup's, and the other stream's
+    held line is still ended.
     """
     stdout, stderr = sys.stdout, sys.stderr
     shown = [_ShownLines(s) if s is not None else None for s in (stdout, stderr)]
+    colors = {
+        name: os.environ.get(name)
+        for name in ("PYTHON_COLORS", "NO_COLOR", "FORCE_COLOR")
+    }
     sys.stdout, sys.stderr = shown
+    os.environ["PYTHON_COLORS"] = "0"
+    os.environ["NO_COLOR"] = "1"
+    os.environ.pop("FORCE_COLOR", None)
     try:
         hook(type(exc), exc, exc.__traceback__)
     finally:
         sys.stdout, sys.stderr = stdout, stderr
+        for name, value in colors.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         for stream in shown:
             if stream is not None:
-                stream.end()
+                try:
+                    stream.end()
+                except Exception:
+                    pass
 
 
 def _shown(text: str) -> str:
     """*text* shown, not obeyed, when ASH's text rule can be imported, else as is.
 
     The floor imports nothing it needs: ASH's own modules could be what is broken.
+    A Ctrl-C is not that: it ends the report, with 130, as the callers say.
     """
     try:
         from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
         return shown_not_obeyed(text)
-    except BaseException:
+    except Exception:
         return text
+
+
+def _shown_suppress(paths: list[str]) -> list[str]:
+    """*paths*, Rich's suppress list, shown as _show_trace shows each frame's file name.
+
+    Rich leaves out the source of a frame whose file name starts with one of
+    these. _show_trace rewrites the file names in place, so a path holding the
+    text of an escape (a Windows install under ``C:\\x64``) no longer started
+    with the path as given, and typer's frames, which the suppress list is for,
+    came back. Shown the same way, the prefix matches again.
+    """
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+    return [str(shown_not_obeyed(path)) for path in paths]
 
 
 def _ash_traceback(exc_type, exc, tb) -> None:
@@ -455,18 +630,29 @@ def _ash_traceback(exc_type, exc, tb) -> None:
         word_wrap=True,
     )
     _show_trace(rendered.trace)
+    rendered.suppress = _shown_suppress(list(rendered.suppress))
     typer_console(stderr=True).print(rendered)
 
 
 def _emit(text: str, stream) -> None:
-    """Write *text* to *stream*, falling back to a raw descriptor."""
+    """Write *text* to *stream*, falling back to a raw descriptor.
+
+    The raw fallback is for a write that failed: the text never reached the
+    stream. A flush that fails after a write that succeeded leaves the text with
+    the stream, which writes it when it can; written raw as well, it was shown
+    twice. A Ctrl-C in either is not swallowed: it ends the report with 130.
+    """
     if stream is not None:
         try:
             stream.write(text)
-            stream.flush()
+        except Exception:
+            _write_raw(text)
             return
-        except BaseException:
+        try:
+            stream.flush()
+        except Exception:
             pass
+        return
     _write_raw(text)
 
 
@@ -516,9 +702,54 @@ def run_module_app(app: Callable[[], Any]) -> None:
     For a command module run as a script (``python -m
     automated_security_helper.cli.config``), which calls its own app rather than
     ASH's: an exception escaping it is reported as main() reports one, through
-    ASH's console, instead of by typer's hook.
+    ASH's console, instead of by typer's hook. A usage error exits as it does
+    under the ``ash`` root group (cli/main.py's AshTyperGroup): with
+    ASH_EXIT_USAGE_ERROR, its message shown, not obeyed. Run as its own app the
+    sub-app had click's own handling, which exits 2, ASH's code for actionable
+    findings, and prints the mistyped token as given.
     """
-    _run_reporting_failures(app)
+
+    def run() -> None:
+        _run_module_app(app)
+
+    _run_reporting_failures(run)
+
+
+def _run_module_app(app: Callable[..., Any]) -> None:
+    """Run *app* outside click's standalone mode and exit as the root group would.
+
+    click's standalone handling prints a usage error itself and exits with its
+    code, 2; outside it the error is raised to here, where ASH prints it as
+    cli/main.py does for the root group and exits ASH_EXIT_USAGE_ERROR. typer's
+    NoArgsIsHelpError prints the help instead, as typer prints it. A command's
+    ``typer.Exit`` comes back as its code, a return comes back as 0, and
+    click's Abort (an interrupted prompt) exits 1 with its one word, as click
+    does. Imports are inside: this runs after the streams are known good.
+    """
+    from typer._click.exceptions import Abort, UsageError
+
+    from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+
+    try:
+        result = app(standalone_mode=False)
+    except UsageError as exc:
+        from automated_security_helper.cli.main import _shown_usage_error
+
+        exc.exit_code = ASH_EXIT_USAGE_ERROR
+        shown = _shown_usage_error(exc)
+        if shown is exc:
+            # typer's NoArgsIsHelpError: its message is the help text, which
+            # _shown_usage_error leaves to typer's own printer.
+            from typer import rich_utils
+
+            rich_utils.rich_format_error(exc)
+            raise SystemExit(exc.exit_code) from None
+        raise SystemExit(getattr(shown, "exit_code", ASH_EXIT_USAGE_ERROR)) from None
+    except Abort:
+        _emit("Aborted!\n", getattr(sys, "stderr", None))
+        raise SystemExit(1) from None
+    code = result if isinstance(result, int) and not isinstance(result, bool) else 0
+    raise SystemExit(code)
 
 
 def _run_reporting_failures(run: Callable[[], Any]) -> None:
