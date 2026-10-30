@@ -255,6 +255,12 @@ OTHER_PROJECTS_PINS = {
     "a package whose name has a dot before this repository's": (
         f"      - uses: example/my.{REPO}@v1.0.0\n"
     ),
+    "another project's action, shortened with an ellipsis": (
+        "      - uses: actions/...@v4.1.2\n"
+    ),
+    "another organization's workflow, shortened with an ellipsis": (
+        "      uses: some-org/...@v2.0.0\n"
+    ),
     "another project's reusable workflow": (
         "      uses: example/other-project/.github/workflows/x.yml@v1.0.0\n"
     ),

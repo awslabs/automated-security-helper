@@ -96,8 +96,9 @@ _FORM_PREFIX = {name: prefix for name, prefix, _branch in INSTALL_REF_FORMS}
 ASH_PIN_PATTERNS = {
     "@ (git URL, uses:)": (
         # The ellipsis form is prose for "the workflow of this repository":
-        # `uses: ...@v<version>`.
-        rf"((?<![\w./-])@v|\.\.\.@v|{_ASH_NAME}(?:/[\w./-]+)?@v){_SEMVER}",
+        # `uses: ...@v<version>`. It stands alone: after a path or a name it is a
+        # shortened reference to another project (`actions/...@v4.1.2`).
+        rf"((?<![\w./-])@v|(?<![\w./-])\.\.\.@v|{_ASH_NAME}(?:/[\w./-]+)?@v){_SEMVER}",
     ),
     "--branch": _in_an_ash_command(_FORM_PREFIX["--branch"]),
     "rev:": (
