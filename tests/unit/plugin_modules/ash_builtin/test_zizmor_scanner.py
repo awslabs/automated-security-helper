@@ -2335,9 +2335,9 @@ def test_batch_exit_codes_are_folded_by_the_scanners_own_ranking(repo, monkeypat
     refuses a batch outside the set before its report is read), so the scan
     below proves the mechanism: every batch's code reaches the scanner's own
     hook twice, once from the template's _process_command_response, which
-    folds each run's code into the fresh per-run None (plugin_base's
-    _folded_exit_code reads the hook), and once from the batch loop, whose
-    current is the worst code so far."""
+    folds each run's code into the 0 this scanner's _execute_scan sets per run
+    (plugin_base's _folded_exit_code reads the hook), and once from the batch
+    loop, whose current is the worst code so far."""
     scanner = _scanner(repo)
     assert scanner._worse_exit_code(None, 3) == 3
     assert scanner._worse_exit_code(0, 3) == 3
@@ -2365,10 +2365,12 @@ def test_batch_exit_codes_are_folded_by_the_scanners_own_ranking(repo, monkeypat
     assert [new for _, new in folded] == [code for code in batch_codes for _ in (0, 1)]
     per_run = folded[0::2]
     across_batches = folded[1::2]
-    assert all(current is None for current, _ in per_run)
+    # _execute_scan resets the code to 0 for each run before the tool starts,
+    # so the template's per-run fold always starts from 0.
+    assert [current for current, _ in per_run] == [0] * len(calls), folded
     assert [current for current, _ in across_batches] == [None, 3, 3] + [3] * (
         len(calls) - 3
-    )
+    ), folded
     assert scanner.exit_code == 3
 
 
