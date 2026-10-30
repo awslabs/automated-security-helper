@@ -1779,7 +1779,30 @@ def test_an_early_return_does_not_keep_the_previous_targets_not_scanned_inputs(
 
 
 @pytest.mark.unit
-def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
+def test_a_failure_after_the_redaction_keeps_the_redacted_output(
+    repo, monkeypatch, on_path
+):
+    """The redacted payload replaces the raw record lines once every run is
+    parsed. A failure after that (here the invocation record) must leave it in
+    place, not overwrite it with a note saying the scan failed before the output
+    could be redacted, which would be false and would lose the output."""
+    scanner = _scanner(repo)
+    stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
+    assert "hunter2" in stdout
+    _through_the_base_class(monkeypatch, [{"returncode": 1, "stdout": stdout}])
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("the invocation record could not be built")
+
+    monkeypatch.setattr(scanner, "_inject_invocation", fail)
+
+    with pytest.raises(ScannerError):
+        scanner.scan(target=repo, target_type="source")
+
+    record = "\n".join(scanner.output)
+    assert "hunter2" not in record
+    assert "before the output could be redacted" not in record
+    assert any('"errors"' in line for line in scanner.output)
     sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
     credentials = sarif["runs"][0]["results"][0]
     assert credentials["ruleId"] == "credentials"

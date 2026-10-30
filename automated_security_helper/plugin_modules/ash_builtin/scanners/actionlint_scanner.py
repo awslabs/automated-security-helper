@@ -1572,6 +1572,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         # password included, in the records.
         output_before = len(self.output)
         raw_output_note: Optional[str] = None
+        # Set once the redacted payload has replaced the raw record lines: a
+        # failure after that point must keep it, not replace it with a note
+        # saying the scan failed before the output could be redacted.
+        redacted_recorded = False
 
         try:
             config_file = self._resolve_config_file(target)
@@ -1714,6 +1718,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # password included; the redacted payload takes their place so a
             # later failure of this scanner does not persist the password.
             self.output[output_before:] = [json.dumps(redacted)]
+            redacted_recorded = True
 
             # actionlint ran in the target, so its paths are relative to it. A
             # source finding stays relative (the scan reads it from the source
@@ -1744,8 +1749,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             if not post_scanned:
                 self._post_scan(target=target, target_type=target_type)
             # Whatever ended the scan, no run's raw stdout stays in the record
-            # lines: the redacted payload never replaced them, so a note does.
-            if len(self.output) > output_before:
+            # lines: when the redacted payload never replaced them, a note does.
+            # Once it has, the record lines hold the redacted payload and a
+            # failure after that point (the SARIF model, the invocation record,
+            # the SARIF file) leaves it there.
+            if not redacted_recorded and len(self.output) > output_before:
                 self.output[output_before:] = [
                     raw_output_note
                     or (
