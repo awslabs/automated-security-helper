@@ -5,7 +5,10 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, TYPE_CHECKING
 
-from automated_security_helper.utils.sarif_utils import get_finding_id
+from automated_security_helper.utils.sarif_utils import (
+    get_finding_id,
+    suppressions_in_effect,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -17,12 +20,30 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
+from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.severity_ladder import result_severity
 from automated_security_helper.utils.undecodable_text import recorded
 from pydantic import Field
 from typing import Annotated
+
+#: The SARIF result kinds that state no problem: the rule was evaluated and
+#: passed, did not apply, or produced information only. Such a result is not a
+#: vulnerability and is left out of the report; written as one, a cdk-nag rule
+#: that was not evaluated became an Info vulnerability on the dashboard.
+_NON_FINDING_KINDS = frozenset({"pass", "notApplicable", "informational"})
+
+#: The GitLab security-report schema's maxLength for ``vulnerabilities[].solution``
+#: (schemas/gitlab/sast.py, the generated model). A suppression's justification is
+#: copied into the solution, and one long justification made the whole report
+#: invalid.
+_SOLUTION_MAX_LENGTH = 7000
+
+#: The prefix of a secret finding's rule id, read once, so a rule such as
+#: SECRET-SECRET-KEYWORD keeps the rest of its name (``replace`` took every
+#: occurrence and described it as type Keyword).
+_SECRET_RULE_PREFIX = "SECRET-"
 
 # The GitLab security-report schema version this reporter's output conforms to, and
 # the single place that states it.
@@ -108,14 +129,18 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # Collected before the per-result loop so a failure here -- a model whose
         # SARIF cannot even be enumerated -- is distinguishable from a failure
         # transforming one result.
+        # Exception text goes through error_text, as ReportPhase does for a
+        # reporter's own failure: a pydantic ValidationError quotes the input it
+        # refused, which can be a scanned file's text, and str(e) wrote it as it
+        # was into scan.messages and the log.
         try:
             # Read field by field below, so a name set on a result after it was
             # validated is read from a copy in the record form.
             all_results = recorded(model.sarif).get_all_results() if model.sarif else []
         except Exception as e:
-            ASH_LOGGER.error(f"Failed to read SARIF results: {str(e)}")
+            ASH_LOGGER.error(f"Failed to read SARIF results: {error_text(e)}")
             return self._failure_report(
-                model, f"ASH could not read the SARIF results: {str(e)}"
+                model, f"ASH could not read the SARIF results: {error_text(e)}"
             )
 
         vulnerabilities: List[Dict[str, Any]] = []
@@ -124,6 +149,8 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             shared_ids = self._shared_finding_ids(model, all_results)
             ASH_LOGGER.trace("Creating rule dict")
             for index, result in enumerate(all_results):
+                if self._is_not_a_finding(result):
+                    continue
                 # Scoped to one result so that a result this reporter cannot
                 # transform costs that result rather than the entire report. The
                 # exception set is open -- results arrive from third-party
@@ -136,7 +163,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                     skipped_results += 1
                     ASH_LOGGER.error(
                         f"Skipping SARIF result {index} in the GitLab SAST "
-                        f"report, which could not be transformed: {str(e)}"
+                        f"report, which could not be transformed: {error_text(e)}"
                     )
                     continue
                 if vuln is not None:
@@ -145,10 +172,35 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         try:
             return self._assemble_report(model, vulnerabilities, skipped_results)
         except Exception as e:
-            ASH_LOGGER.error(f"Failed to create GitLab SAST report: {str(e)}")
+            ASH_LOGGER.error(f"Failed to create GitLab SAST report: {error_text(e)}")
             return self._failure_report(
-                model, f"ASH could not assemble the GitLab SAST report: {str(e)}"
+                model,
+                f"ASH could not assemble the GitLab SAST report: {error_text(e)}",
             )
+
+    @staticmethod
+    def _is_not_a_finding(result: Any) -> bool:
+        """Whether *result*'s ``kind`` says no problem was found (SARIF 3.27.9:
+        pass, notApplicable, informational). An absent kind is ``fail``."""
+        kind = getattr(result, "kind", None)
+        kind_value = str(getattr(kind, "value", kind) or "fail")
+        return kind_value in _NON_FINDING_KINDS
+
+    @staticmethod
+    def _message_text(result: Any) -> str:
+        """The result's message as text: its ``text``, else its ``markdown``, else
+        the ``id`` of the message string it names, else "".
+
+        SARIF lets a message be given by ``id`` alone, resolved against the
+        rule's ``messageStrings``; read as ``text`` alone, such a result had an
+        empty description and source extract.
+        """
+        message_root = getattr(getattr(result, "message", None), "root", None)
+        for field in ("text", "markdown", "id"):
+            value = getattr(message_root, field, None)
+            if isinstance(value, str) and value:
+                return value
+        return ""
 
     @staticmethod
     def _shared_finding_ids(
@@ -204,17 +256,16 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # and make them look like recurrences of each other. The identifier is
         # omitted instead -- see the guard further down.
         rule_id = result.ruleId or ""
-        # Same reasoning for the message: `text` is optional beside `markdown`,
-        # and `message` itself is reached through a RootModel wrapper.
-        message_root = getattr(result.message, "root", None)
-        message_text = getattr(message_root, "text", None) or ""
+        # Same reasoning for the message: `text` is optional beside `markdown`
+        # and an `id`, and `message` itself is reached through a RootModel
+        # wrapper.
+        message_text = self._message_text(result)
 
-        # Check if finding is suppressed
-        is_suppressed = (
-            hasattr(result, "suppressions")
-            and result.suppressions
-            and len(result.suppressions) > 0
-        )
+        # Check if finding is suppressed: by a suppression in effect. One
+        # rejected or under review has not taken effect (SARIF 3.35.4) and the
+        # gate still counts the finding, so the report shows it as the gate does.
+        suppressions = suppressions_in_effect(getattr(result, "suppressions", None))
+        is_suppressed = bool(suppressions)
 
         # Optionally exclude suppressed findings entirely
         if is_suppressed and self.config and self.config.options.exclude_suppressed:
@@ -229,16 +280,31 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # scanner declared counts.
         severity = result_severity(result).title()
 
-        # Suppressed findings: downgrade to Info with solution
+        # Suppressed findings: downgrade to Info with solution. The reason is
+        # the first suppression in effect that gives one: ASH's own reasoned
+        # suppression can sit after a scanner's bare one, and reading the first
+        # entry alone said "No reason provided" beside it.
         suppression_solution = None
         if is_suppressed:
             severity = "Info"
-            justification = result.suppressions[0].justification or "No reason provided"
+            justification = next(
+                (
+                    str(getattr(s, "justification", None)).strip()
+                    for s in suppressions
+                    if str(getattr(s, "justification", None) or "").strip()
+                ),
+                "No reason provided",
+            )
             suppression_solution = (
                 f"This finding was suppressed by ASH: {justification}. "
                 "You can dismiss this vulnerability in the "
                 "GitLab Security Dashboard."
             )
+            if len(suppression_solution) > _SOLUTION_MAX_LENGTH:
+                # The schema caps the field; a cut reason beats an invalid report.
+                suppression_solution = (
+                    suppression_solution[: _SOLUTION_MAX_LENGTH - 3] + "..."
+                )
 
         # Get location information
         file_path = None
@@ -276,21 +342,24 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 mode="json",
             )
 
-            # Try to extract scanner name from various property fields
-            if "scanner_name" in props_dict:
-                scanner_name = props_dict["scanner_name"]
-            elif "scanner_details" in props_dict and isinstance(
-                props_dict["scanner_details"], dict
-            ):
-                scanner_details = props_dict["scanner_details"]
-                if "tool_name" in scanner_details:
-                    scanner_name = scanner_details["tool_name"]
-            elif "tags" in props_dict and isinstance(props_dict["tags"], list):
+            # The scanner name, from the first of three places that has one:
+            # scanner_name, scanner_details.tool_name, a tool_name:: tag. Read
+            # as an elif chain keyed on key presence, an empty scanner_name or
+            # a scanner_details without tool_name ended the lookup with nothing
+            # and dropped the scanner and rule identifiers.
+            scanner_name = props_dict.get("scanner_name") or None
+            if not scanner_name:
+                scanner_details = props_dict.get("scanner_details")
+                if isinstance(scanner_details, dict):
+                    scanner_name = scanner_details.get("tool_name") or None
+            if not scanner_name and isinstance(props_dict.get("tags"), list):
                 # Look for tool_name in tags
                 for tag in props_dict["tags"]:
                     if isinstance(tag, str) and tag.startswith("tool_name::"):
-                        scanner_name = tag.replace("tool_name::", "")
+                        scanner_name = tag[len("tool_name::") :] or None
                         break
+            if scanner_name is not None and not isinstance(scanner_name, str):
+                scanner_name = str(scanner_name)
 
         # The finding's id: the one every other report gives it, else the legacy
         # rule-file-line hash.
@@ -424,8 +493,8 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # a source excerpt is a separate question from removing the crash, and
         # answering it here would alter this reporter's output for every located
         # non-secret finding. TestSecretExtractSelection pins both branches.
-        if rule_id.startswith("SECRET-"):
-            secret_kind = rule_id.replace("SECRET-", "").replace("-", " ").title()
+        if rule_id.startswith(_SECRET_RULE_PREFIX):
+            secret_kind = rule_id[len(_SECRET_RULE_PREFIX) :].replace("-", " ").title()
             source_extract = (
                 raw_source_code_extract or f"Secret of type {secret_kind} detected"
             )
@@ -500,13 +569,15 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         coverage_messages = self._coverage_messages(model)
         messages.extend(coverage_messages)
 
-        # Determine scan status
+        # Determine scan status. "success" says the scan ran to completion and
+        # this report carries everything it found.
+        # Findings do not make it a failure; GitLab's analyzers report
+        # "success" with a full vulnerabilities array, and the value "failure"
+        # is what the transform-failure and incomplete-scan paths use, so a
+        # scan that completed with findings was indistinguishable from one
+        # that broke. The findings themselves decide the exit code elsewhere.
         scan_status = (
-            "success"
-            if model.metadata.summary_stats.actionable == 0
-            and not skipped_results
-            and not coverage_messages
-            else "failure"
+            "success" if not skipped_results and not coverage_messages else "failure"
         )
 
         # Create the final report structure matching the reference
