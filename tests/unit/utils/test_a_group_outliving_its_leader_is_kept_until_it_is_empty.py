@@ -20,7 +20,9 @@ kernel refuses to probe (EPERM: a member now runs as another user) exists, so
 the entry is kept and nothing is raised out of the spawn that ran the reap. The
 probe is the module's _group_survives, which reaps the zombie orphans this
 process inherited as PID 1 before asking, so a group left with nothing but
-zombies is forgotten rather than kept for as long as they sit.
+zombies is forgotten rather than kept for as long as they sit. A reaped leader
+whose pid a live process holds again has had it reused: the group that answers
+may be a stranger's, so the entry is dropped before anything could aim at it.
 """
 
 from __future__ import annotations
@@ -81,10 +83,16 @@ class _GroupCalls:
             self.alive = False
 
 
+def _no_process_holds(pid: int, signum: int) -> None:
+    """kill(pid, 0) for a pid nobody holds: the reaped leader's pid is not reused."""
+    raise ProcessLookupError(f"no process holds pid {pid}")
+
+
 @pytest.fixture
 def group(monkeypatch) -> _GroupCalls:
     calls = _GroupCalls()
     monkeypatch.setattr(subprocess_utils.os, "killpg", calls.killpg)
+    monkeypatch.setattr(subprocess_utils.os, "kill", _no_process_holds)
     return calls
 
 
@@ -164,6 +172,27 @@ def test_the_reap_asks_whether_the_group_survives(monkeypatch, registered_leader
         f"asked: {asked}"
     )
     assert subprocess_utils._RUNNING_GROUPS.get(_FAKE_PGID) is registered_leader
+
+
+def test_a_reaped_leader_whose_pid_was_reused_is_forgotten(
+    group, registered_leader, monkeypatch
+):
+    """A live process holds the reaped leader's pid again, so the group that still
+    answers killpg may be a stranger's: the entry and the mirror are dropped, and
+    nothing is ever aimed at that group."""
+    monkeypatch.setattr(subprocess_utils, "_pid_names_a_live_process", lambda pid: True)
+    with subprocess_utils._RUNNING_GROUPS_LOCK:
+        subprocess_utils._forget_exited_groups()
+    assert _FAKE_PGID not in subprocess_utils._RUNNING_GROUPS, (
+        "the leader's pid is held by another live process, so its group id may "
+        "be a stranger's; keeping the entry aims a later kill at that stranger"
+    )
+    assert _FAKE_PGID not in cancellation._TOOL_GROUPS
+    killed = subprocess_utils.kill_running_groups()
+    assert (_FAKE_PGID, signal.SIGKILL) not in group.calls, (
+        f"a stranger's group was signalled: {group.calls}"
+    )
+    assert killed == 0
 
 
 def test_kill_running_groups_signals_the_group_of_a_reaped_leader(

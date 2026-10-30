@@ -3138,12 +3138,20 @@ def _forget_exited_groups() -> None:
     may no longer signal (EPERM: a member now runs as another user) still exists,
     so its entry is kept rather than letting the probe raise out of a spawn. When
     this process is PID 1 the orphans it inherited are reaped first, so a group
-    left with nothing but zombies reads as gone.
+    left with nothing but zombies reads as gone. A reaped leader's pid that some
+    live process holds again has been reused: the group that answers may be a
+    stranger's, so the entry is dropped, or the die-now kill would aim at
+    whatever holds the group id next. No process holding the pid means the
+    surviving group can only be the leader's own orphans.
     """
     for pid, process in list(_RUNNING_GROUPS.items()):
         if process.poll() is None:
             continue
-        if os.name != "nt" and _group_survives(pid):
+        if (
+            os.name != "nt"
+            and not _pid_names_a_live_process(pid)
+            and _group_survives(pid)
+        ):
             continue
         del _RUNNING_GROUPS[pid]
         discard_tool_group(pid)
