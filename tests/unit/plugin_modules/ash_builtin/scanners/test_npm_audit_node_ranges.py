@@ -10,7 +10,7 @@ split into several ranges (minimist's ``<0.2.4`` and ``>=1.0.0 <1.2.6``) was
 reported once per range on every copy. When the lockfile gives a copy's
 installed version and the advisory's own range excludes it, no result is
 made; when the answer is uncertain (no version, an unparsable range, a
-prerelease) the result is kept as before.
+prerelease) the result is kept, once per advisory and copy.
 """
 
 from __future__ import annotations
@@ -120,9 +120,11 @@ def test_a_fixed_copy_carries_no_advisory_meant_for_another(scanner, monkeypatch
     assert _rows(report) == [(old, "<0.2.4")]
 
 
-def test_an_unknown_version_keeps_every_pairing(scanner, monkeypatch):
-    """Control: with no installed version the answer is uncertain, so every
-    advisory is still reported on every copy, as before."""
+def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):
+    """Control: with no installed version the answer is uncertain, so the
+    advisory is still reported on the copy. Once: the two via entries are one
+    GHSA split into two ranges, and one advisory on one copy is one result (the
+    first range named), where it used to be one result per range."""
     node = "node_modules/minimist"
     _versions(monkeypatch, {})
 
@@ -130,7 +132,8 @@ def test_an_unknown_version_keeps_every_pairing(scanner, monkeypatch):
         _report([node]), scanner.context.source_dir
     )
 
-    assert _rows(report) == [(node, "<0.2.4"), (node, ">=1.0.0 <1.2.6")]
+    assert _rows(report) == [(node, "<0.2.4")]
+    assert len(report.runs[0].tool.driver.rules) == 1
 
 
 def test_an_unparsable_range_keeps_the_result(scanner, monkeypatch):
