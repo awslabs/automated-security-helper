@@ -23,7 +23,10 @@ Each test here pins one reading that went wrong before:
 - the operator's own skip entries, given back as flags, went through pflag's CSV
   reader unquoted: a ``"`` failed the run and a line break skipped another path.
 - ``TRIVY_SEVERITY`` and the other filtering variables narrowed the report with
-  nothing in the run saying so.
+  nothing in the run saying so; then the set left out ``TRIVY_PKG_TYPES``,
+  ``TRIVY_PKG_RELATIONSHIPS`` and ``TRIVY_IGNORED_LICENSES``, fired on a variable
+  set to ``false``, and said nothing for an honored ignore file.
+- ``trivy_timeout`` raised on a bound that is not a finite number.
 - the offline cache check judged only ``TRIVY_CACHE_DIR`` and warned about every
   offline scan whose default cache held a database; then it warned about a
   database a scan without ``vuln`` never opens.
@@ -172,6 +175,13 @@ def test_a_timeout_past_what_a_go_duration_holds_is_passed_as_unbounded():
 def test_control_a_bound_a_go_duration_holds_is_passed_in_seconds():
     assert trivy_timeout(_MAX_GO_DURATION_SECONDS) == f"{_MAX_GO_DURATION_SECONDS}s"
     assert trivy_timeout(90) == "90s"
+
+
+@pytest.mark.parametrize("seconds", [float("inf"), float("nan")])
+def test_a_bound_that_is_not_a_finite_number_is_passed_as_unbounded(seconds):
+    """``math.ceil`` raises on infinity and on NaN before the Go bound is reached;
+    neither is a deadline."""
+    assert trivy_timeout(seconds) == UNBOUNDED_TRIVY_TIMEOUT
 
 
 # --- line splitting in trivy's messages --------------------------------------------
@@ -578,7 +588,37 @@ def test_the_restricting_variables_are_the_trivy_flags_that_drop_results():
         "TRIVY_SKIP_DIRS",
         "TRIVY_SKIP_FILES",
         "TRIVY_VEX",
+        "TRIVY_PKG_TYPES",
+        "TRIVY_PKG_RELATIONSHIPS",
+        "TRIVY_IGNORED_LICENSES",
     }
+
+
+@pytest.mark.parametrize("spelling", ["false", "False", "FALSE", "f", "0", " false "])
+def test_a_filtering_variable_set_to_false_is_not_a_filter(tmp_path, spelling):
+    """``TRIVY_IGNORE_UNFIXED=false`` is the default written out; warning about it
+    would train a reader to ignore the warning, as grype's config-key warning
+    reads a falsy key."""
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_IGNORE_UNFIXED": spelling}
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._process_config_options()
+
+    assert not [m for m in messages if "restrict" in m], messages
+
+
+def test_control_a_filtering_variable_set_to_true_or_a_value_is_a_filter(tmp_path):
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_IGNORE_UNFIXED": "true", "TRIVY_PKG_TYPES": "os"}
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._process_config_options()
+
+    (warning,) = [m for m in messages if "restrict" in m]
+    assert "TRIVY_IGNORE_UNFIXED, TRIVY_PKG_TYPES are set" in warning
 
 
 def test_filtering_variables_in_trivys_environment_are_named_without_their_values(
@@ -1002,6 +1042,62 @@ def test_the_database_update_is_given_the_scanners_values_to_redact(
 
     assert "values" in seen
     assert tuple(seen["values"]) == tuple(scanner._values_to_redact())
+
+
+# --- an honored ignore file is said to restrict the report --------------------------
+
+
+def test_an_honored_environment_ignore_file_is_warned_about_by_variable(
+    tmp_path, monkeypatch
+):
+    """trivy drops every finding the file lists with nothing else saying so; the
+    warning names the variable, never the path, which the environment chose."""
+    scanner = _repo_scanner(tmp_path)
+    operator = tmp_path / "operator" / "zz-ignore-path"
+    operator.parent.mkdir()
+    operator.write_text("CVE-2018-18074\n", encoding="utf-8")
+    monkeypatch.setenv("TRIVY_IGNOREFILE", str(operator))
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        passed = scanner._ignore_file()
+        scanner._ignore_file()
+
+    assert Path(passed) == operator.resolve()
+    (warning,) = [m for m in messages if "withheld" in m]
+    assert "TRIVY_IGNOREFILE" in warning
+    assert "zz-ignore-path" not in warning
+
+
+def test_an_honored_ignore_file_option_is_warned_about_by_key(tmp_path):
+    operator = tmp_path / "operator" / "zz-ignore-path"
+    operator.parent.mkdir()
+    operator.write_text("CVE-2018-18074\n", encoding="utf-8")
+    scanner = _repo_scanner(tmp_path, ignore_file=str(operator))
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._ignore_file()
+
+    (warning,) = [m for m in messages if "withheld" in m]
+    assert "scanners.trivy-repo.options.ignore_file" in warning
+    assert "zz-ignore-path" not in warning
+
+
+def test_control_a_refused_in_tree_ignore_file_restricts_nothing_and_is_not_warned(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path)
+    inside = Path(scanner.context.source_dir) / "ignore-rules"
+    inside.write_text("CVE-2018-18074\n", encoding="utf-8")
+    monkeypatch.setenv("TRIVY_IGNOREFILE", str(inside))
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        passed = scanner._ignore_file()
+
+    assert not Path(passed).resolve().is_relative_to(inside.parent.resolve())
+    assert not [m for m in messages if "withheld" in m], messages
 
 
 # --- the environment values both scanners redact -----------------------------------

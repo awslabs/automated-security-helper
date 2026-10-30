@@ -161,9 +161,11 @@ def trivy_timeout(seconds: Optional[float]) -> str:
     the bound the operator set (``scan_timeout``) as trivy's. A bound past what a
     Go duration can hold is passed as the unbounded value instead: trivy would
     refuse the number as an invalid duration, and a deadline of 292 years is no
-    deadline either way.
+    deadline either way. So is a bound that is not a finite number (infinity, or
+    not a number at all), which ``math.ceil`` would raise on before the bound
+    above was ever compared.
     """
-    if seconds is None:
+    if seconds is None or not math.isfinite(seconds):
         return UNBOUNDED_TRIVY_TIMEOUT
     whole = max(1, math.ceil(seconds))
     if whole > _MAX_GO_DURATION_SECONDS:
@@ -251,13 +253,17 @@ def skip_args_budget(environment: Mapping[str, str]) -> int:
 
 #: Settings in trivy's environment that remove results from its report with
 #: nothing in the run saying so, each the TRIVY_ form of a trivy flag: --severity,
-#: --ignore-unfixed, --ignore-status, --ignore-policy, --skip-dirs, --skip-files
-#: and --vex (pkg/flag, trivy 0.75.0: every flag reads TRIVY_<FLAG> with the
-#: dashes as underscores). The sandbox passes every TRIVY_ variable through
-#: (env_prefixes), so the operator's filters apply to the scan; the scan names
-#: the variables it saw, never their values. TRIVY_EXIT_CODE is pinned by
-#: --exit-code=0 and TRIVY_IGNOREFILE is replaced by --ignorefile, so neither is
-#: here.
+#: --ignore-unfixed, --ignore-status, --ignore-policy, --skip-dirs, --skip-files,
+#: --vex, --pkg-types (``os`` drops every library finding), --pkg-relationships
+#: (``direct`` drops the transitive ones) and --ignored-licenses (pkg/flag, trivy
+#: 0.75.0: every flag reads TRIVY_<FLAG> with the dashes as underscores). The
+#: sandbox passes every TRIVY_ variable through (env_prefixes), so the operator's
+#: filters apply to the scan; the scan names the variables it saw, never their
+#: values. TRIVY_EXIT_CODE is pinned by --exit-code=0, so it is not here.
+#: TRIVY_IGNOREFILE is not here for another reason: ASH reads it itself and passes
+#: the file as --ignorefile only when it is honored (outside the scanned tree), so
+#: its warning is given there (``_trivy_input_file``), where a refused value, which
+#: restricts nothing, is not warned about.
 OUTPUT_RESTRICTING_TRIVY_ENV = (
     "TRIVY_SEVERITY",
     "TRIVY_IGNORE_UNFIXED",
@@ -266,7 +272,27 @@ OUTPUT_RESTRICTING_TRIVY_ENV = (
     "TRIVY_SKIP_DIRS",
     "TRIVY_SKIP_FILES",
     "TRIVY_VEX",
+    "TRIVY_PKG_TYPES",
+    "TRIVY_PKG_RELATIONSHIPS",
+    "TRIVY_IGNORED_LICENSES",
 )
+
+#: The spellings Go's strconv.ParseBool reads as false, lowercased. A filtering
+#: variable set to one of them turns its filter off and restricts nothing.
+_FALSE_SPELLINGS = frozenset({"0", "f", "false"})
+
+
+def _restricting_value(value: Optional[str]) -> bool:
+    """Whether ``value``, a filtering TRIVY_ variable's, turns its filter on.
+
+    Set, not blank, and not a spelling of false: ``TRIVY_IGNORE_UNFIXED=false`` is
+    the default written out, and warning about it would train a reader to ignore
+    the warning, as grype's config-key warning reads a falsy key.
+    """
+    if value is None:
+        return False
+    text = value.strip()
+    return bool(text) and text.lower() not in _FALSE_SPELLINGS
 
 
 def skip_dirs_value(path: str) -> str:
@@ -1152,7 +1178,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             if path is not None:
                 key = f"scanners.{name}.options.{option}"
                 if required or path.is_file():
-                    return _existing_file(key, value, path)
+                    return self._honored_input(
+                        option, key, _existing_file(key, value, path)
+                    )
                 self._warn_unread_input(key)
         # The variable is the operator's, set where ASH runs, so a relative path
         # in it names a file there, as written, not one at the root of the
@@ -1174,7 +1202,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             )
             if path is not None:
                 if required or path.is_file():
-                    return _existing_file(env, from_env, path)
+                    return self._honored_input(
+                        option, env, _existing_file(env, from_env, path)
+                    )
                 self._warn_unread_input(env)
         in_tree = source_dir / default_name
         if in_tree.is_file() and in_tree.as_posix() not in self._warned_inputs:
@@ -1186,6 +1216,30 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 level=logging.WARNING,
             )
         return empty_tool_config(ash_name, ash_content, context=self.context).as_posix()
+
+    def _honored_input(self, option: str, key: str, path: str) -> str:
+        """``path``, the input file ``key`` names, with the warning an ignore file earns.
+
+        trivy drops every finding the ignore file lists with nothing else in the
+        run saying so, as the filtering TRIVY_ variables do
+        (``_warn_about_filtering_environment``); the file is named here, where it
+        is known to be honored and to exist, rather than by its variable in the
+        generic set, where a refused in-tree value, which restricts nothing, would
+        have been warned about too. Named by key, never by path: the value can
+        come from the environment. Once per key. The secret config narrows the
+        secret rules, not the findings, and is not warned about.
+        """
+        if option == "ignore_file":
+            refusal = f"ignore-file:restricts:{key}"
+            if refusal not in self._warned_inputs:
+                self._warned_inputs.add(refusal)
+                self._plugin_log(
+                    f"{key} names the ignore file trivy reads, which restricts which "
+                    "results reach the report: every finding it lists is withheld, "
+                    "and the scan can pass with findings withheld.",
+                    level=logging.WARNING,
+                )
+        return path
 
     def _warn_unread_input(self, key: str) -> None:
         """Say once that ``key`` names no file, for an input this scan never reads."""
@@ -1689,7 +1743,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         found = [
             name
             for name in OUTPUT_RESTRICTING_TRIVY_ENV
-            if (environment.get(name) or "").strip()
+            if _restricting_value(environment.get(name))
         ]
         if not found:
             return
