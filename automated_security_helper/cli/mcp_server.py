@@ -1610,33 +1610,6 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         }
 
 
-#: The keys of a results document that name a coverage gap; see the
-#: get_scan_progress docstring for each. Every filter level carries them.
-_COVERAGE_KEYS = (
-    "coverage_complete",
-    "incomplete_scanners",
-    "no_scanner_ran",
-    "incomplete_converters",
-    "unevaluated_rules",
-    "stale_content_databases",
-)
-
-
-def _with_coverage(filtered: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
-    """``filtered`` with the coverage keys of ``results`` carried over.
-
-    The summary and minimal levels are built from a fixed key set, which left
-    out whether every scanner ran: a summary read as complete for a scan whose
-    results said a scanner was MISSING. The docstring of get_scan_results
-    promises the gap keys at every level, as get_scan_progress reports them, so
-    the ones the document carries are copied onto the filtered response.
-    """
-    for key in _COVERAGE_KEYS:
-        if key in results:
-            filtered[key] = results[key]
-    return filtered
-
-
 @mcp.tool()
 async def get_scan_results(
     ctx: Context,
@@ -1757,13 +1730,15 @@ async def get_scan_results(
             results.get("raw_results", {}).pop("sarif", None)
             results.get("raw_results", {}).pop("severity_thresholds", None)
 
-        # Apply response size filter based on parameter
+        # Apply response size filter based on parameter. The summary and minimal
+        # filters carry the coverage keys of the document themselves, as the
+        # docstring promises, so nothing is copied onto their result here.
         if filter_level == "full":
             return results
         elif filter_level == "summary":
-            return _with_coverage(filter_summary(results), results)
+            return filter_summary(results)
         elif filter_level == "minimal":
-            return _with_coverage(filter_minimal(results), results)
+            return filter_minimal(results)
         else:
             await _tell_client(
                 ctx,
