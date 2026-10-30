@@ -1665,10 +1665,14 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # not the last batch. Within the loop self.exit_code is the current
             # batch's own code, which judges that batch.
             worst_exit_code: Optional[int] = None
-            for batch in workflow_batches(workflows):
+            for index, batch in enumerate(workflow_batches(workflows)):
                 final_args = [*common_args, *batch]
+                # The first batch is given the limit as the operator set it (a
+                # single-batch target reads its own timeout unchanged, not the
+                # limit minus the microseconds since the deadline was set); the
+                # batches after it get what the deadline leaves.
                 batch_timeout = effective_timeout
-                if deadline is not None:
+                if deadline is not None and index > 0:
                     batch_timeout = deadline - time.monotonic()
                     if batch_timeout <= 0:
                         # The earlier batches used the whole limit; this one

@@ -1457,7 +1457,9 @@ def test_scan_timeout_bounds_the_target_not_each_batch(repo, monkeypatch, on_pat
     the deadline between the runs), the second never starts and the scan ends
     as a timeout, instead of each batch getting the whole limit again."""
     monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30)
-    readings = [0.0, 0.0, 10.0]
+    # The clock is read once when the deadline is set and once before the
+    # second batch (the first batch gets the limit as given, with no read).
+    readings = [0.0, 10.0]
 
     def monotonic():
         return readings.pop(0) if len(readings) > 1 else readings[0]
