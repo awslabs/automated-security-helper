@@ -178,3 +178,27 @@ class TestEnumFieldsOfAPlainJsonReport:
         assert result["level"] == "warning"
         assert result["suppressions"][0]["kind"] == "inSource"
         assert "i" + _derived("json-shape", 6) + "e" not in result["message"]["text"]
+
+    def test_a_thread_flow_locations_state_is_still_masked(self):
+        """``state`` is an enum only on a suppression; a thread flow location's
+        ``state`` is a free-text map that can carry the value a finding exposed."""
+        value = _derived("json-state-secret", 24)
+        tree = {
+            "results": [
+                {
+                    "level": "warning",
+                    "codeFlows": [
+                        {"threadFlows": [{"locations": [{"state": {"token": value}}]}]}
+                    ],
+                    "suppressions": [{"kind": "inSource", "state": "accepted"}],
+                }
+            ]
+        }
+
+        mask_secret_values_in_tree(tree, values=[value])
+
+        result = tree["results"][0]
+        location = result["codeFlows"][0]["threadFlows"][0]["locations"][0]
+        assert location["state"]["token"] == _mask_secret_value(value)
+        assert result["suppressions"][0]["state"] == "accepted"
+        assert result["level"] == "warning"

@@ -344,15 +344,20 @@ _SKIPPED_FIELDS = frozenset(
 )
 #: Enum-valued SARIF fields: ``Result.level`` and ``Result.kind``,
 #: ``Suppression.kind`` and ``Suppression.state``, ``Run.columnKind``,
-#: ``ThreadFlowLocation.importance`` and ``Artifact.roles``. A model holds them
-#: as ``Enum`` members, which ``_mask_tree`` leaves alone by type; these names
-#: cover only a report already reduced to plain JSON (``_is_skipped_key``), so a
-#: model's free-text ``kind`` fields stay masked. A value or shape that matched
-#: an enum (``warning``, ``inSource``) rewrote a result's severity and wrote a
-#: value the model refuses on the next load.
+#: ``ThreadFlowLocation.importance`` and ``Artifact.roles``. A model field of one
+#: of these names is skipped when the model declares it as an enum
+#: (``_is_skipped_field``), so a model's free-text ``kind`` fields stay masked.
+#: A value or shape that matched an enum (``warning``, ``inSource``) rewrote a
+#: result's severity and wrote a value the model refuses on the next load.
 _ENUM_FIELDS = frozenset(
     {"level", "kind", "state", "columnKind", "importance", "roles"}
 )
+#: The same, for a report already reduced to plain JSON (``_is_skipped_key``),
+#: which carries no declarations: these names are enum-valued wherever SARIF uses
+#: them. ``state`` is not among them, because ``threadFlowLocation.state`` is a
+#: free-text map that can hold a secret; a suppression's ``state`` is told by its
+#: parent key instead.
+_ENUM_KEYS = frozenset({"level", "kind", "columnKind", "importance", "roles"})
 #: Fields under which nothing is masked by value: a tool's rule metadata,
 #: taxonomies and policies, a result's rule reference and every ``tags`` list.
 #: They describe or classify findings; a finding tagged ``secret`` whose tag was
@@ -413,13 +418,18 @@ def _is_skipped_field(model_type: type, name: str) -> bool:
     )
 
 
-def _is_skipped_key(key: str) -> bool:
+def _is_skipped_key(key: str, parent: Optional[str] = None) -> bool:
     """Whether nothing under a plain-JSON key of this name is masked by value.
 
     A report reduced to plain data carries no declarations, so its enum-valued
-    fields are known by name (``_ENUM_FIELDS``) alone.
+    fields are known by name (``_ENUM_KEYS``), and a suppression's ``state`` by
+    the key its dict sits under (``parent``).
     """
-    return _is_skipped(key) or key in _ENUM_FIELDS
+    return (
+        _is_skipped(key)
+        or key in _ENUM_KEYS
+        or (key == "state" and parent == "suppressions")
+    )
 
 
 _WORD_CHARACTER = re.compile(r"\w")
@@ -1752,7 +1762,7 @@ def _mask_text_whole(text: str) -> str:
     return _mask_lines(text, None, True, _LineRanges())
 
 
-def _mask_source_whole(node: Any, seen: Set[int]) -> Any:
+def _mask_source_whole(node: Any, seen: Set[int], parent: Optional[str] = None) -> Any:
     """Mask every line of every string in ``node`` in place; returns a string node's replacement."""
     if isinstance(node, Enum):
         return node
@@ -1777,17 +1787,19 @@ def _mask_source_whole(node: Any, seen: Set[int]) -> Any:
     if isinstance(node, list):
         seen.add(id(node))
         for position, item in enumerate(node):
-            masked = _mask_source_whole(item, seen)
+            masked = _mask_source_whole(item, seen, parent)
             if isinstance(item, str) and masked != item:
                 node[position] = masked
         return node
     if isinstance(node, dict):
         seen.add(id(node))
         for key in list(node):
-            if isinstance(key, str) and _is_skipped_key(key):
+            if isinstance(key, str) and _is_skipped_key(key, parent):
                 continue
             item = node[key]
-            masked = _mask_source_whole(item, seen)
+            masked = _mask_source_whole(
+                item, seen, key if isinstance(key, str) else None
+            )
             if isinstance(item, str) and masked != item:
                 node[key] = masked
         return node
@@ -1920,7 +1932,9 @@ def _mask_url(node: AnyUrl, index: _SecretIndex) -> Any:
         return masked
 
 
-def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
+def _mask_tree(
+    node: Any, index: _SecretIndex, seen: Set[int], parent: Optional[str] = None
+) -> Any:
     """Mask ``node`` in place; returns the replacement for a string or URL node."""
     if isinstance(node, Enum):
         # An enum member (Result.level, Suppression.kind) is a str as well, and
@@ -2050,16 +2064,18 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
         return node
     if isinstance(node, list):
         for position, item in enumerate(node):
-            masked = _mask_tree(item, index, seen)
+            masked = _mask_tree(item, index, seen, parent)
             if _changed(item, masked):
                 node[position] = masked
         return node
     if isinstance(node, dict):
         for key in list(node):
-            if isinstance(key, str) and _is_skipped_key(key):
+            if isinstance(key, str) and _is_skipped_key(key, parent):
                 continue
             item = node[key]
-            masked = _mask_tree(item, index, seen)
+            masked = _mask_tree(
+                item, index, seen, key if isinstance(key, str) else None
+            )
             if _changed(item, masked):
                 node[key] = masked
             # A value used as a key (a map keyed by the values it holds) is text
