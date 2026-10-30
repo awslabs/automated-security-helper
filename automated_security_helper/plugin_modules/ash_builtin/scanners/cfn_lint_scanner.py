@@ -681,8 +681,13 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if self.dependency_unavailable_reason:
             return False
         if not self._validate_uv_tool_availability():
+            # The resolver probes under this scanner's own offline mode, as every
+            # uv call of the mixin does: without it a scanner offline by its
+            # options probed PyPI online while its run and install were offline.
             resolved = get_uv_tool_command(
-                _COMMAND, from_spec=self._uv_probe_from_spec()
+                _COMMAND,
+                from_spec=self._uv_probe_from_spec(),
+                offline=self._is_offline_mode(),
             )
             if resolved is None:
                 return False
@@ -703,7 +708,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 "consolidated resolver",
                 level=logging.WARNING,
             )
-        resolved = get_uv_tool_command(_COMMAND, from_spec=self._uv_probe_from_spec())
+        resolved = get_uv_tool_command(
+            _COMMAND,
+            from_spec=self._uv_probe_from_spec(),
+            offline=self._is_offline_mode(),
+        )
         if resolved is None:
             return False
         # As the uv-absent branch above: a dependency declared satisfied on a
