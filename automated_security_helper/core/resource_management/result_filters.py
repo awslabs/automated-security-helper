@@ -139,6 +139,29 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     return stats
 
 
+def _seed_scanners_the_sarif_never_named(
+    raw_results: Dict[str, Any], kept_per_scanner: Dict[str, Dict[str, int]]
+) -> None:
+    """Give every PASSED or FAILED scanner row the SARIF never named zero kept buckets.
+
+    Called by ``filter_actionable_only`` once the SARIF's results have been
+    read, and only when the SARIF can attribute its results (see the call).
+    A scanner that ran and has no result in the SARIF has nothing kept, so its
+    row recounts to zero and its actionable count is known. Scanners that did
+    not run (MISSING, SKIPPED, ERROR) are left as they are: ``_stats_of_scanners``
+    already reads them as nothing actionable.
+    """
+    rows = raw_results.get("scanner_results")
+    if not isinstance(rows, dict):
+        return
+    for name, data in rows.items():
+        if not isinstance(data, dict):
+            continue
+        counter = _OUTCOME_COUNTERS.get(str(data.get("status") or "").upper())
+        if counter in ("passed", "failed"):
+            kept_per_scanner.setdefault(name, dict.fromkeys(_SEVERITY_KEYS, 0))
+
+
 def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     """Filter results to return only summary information.
 
@@ -333,6 +356,10 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     # severity_counts under this filter, with only their suppressed counts
     # zeroed, so a scanner's row counted findings the view no longer listed.
     kept_per_scanner: Dict[str, Dict[str, int]] = {}
+    # Whether the SARIF held any result before the filter: with results it
+    # attributes them only when they name their scanner; with none, every
+    # scanner that ran has nothing kept.
+    saw_a_result = False
 
     raw = filtered_results.get("raw_results")
     if isinstance(raw, dict) and "sarif" in raw and raw["sarif"] is None:
@@ -365,6 +392,7 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
             projects = _workspace_project_gates(filtered_results["raw_results"])
             for run in sarif["runs"]:
                 if "results" in run and run["results"]:
+                    saw_a_result = True
                     for r in run["results"]:
                         name = _sarif_scanner_name(r)
                         if name is not None:
@@ -383,6 +411,20 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
                         name = _sarif_scanner_name(r)
                         if name is not None and bucket in kept_per_scanner[name]:
                             kept_per_scanner[name][bucket] += 1
+            # The SARIF is the one document that holds every finding, so a
+            # scanner that ran (PASSED or FAILED) and that it never names has
+            # none: nothing kept, actionable 0, which is known. Left unnamed,
+            # such a row kept its shape, and a workspace row has no
+            # actionable_finding_count, so the derived summary read the whole
+            # document's actionable and total as None beside findings the SARIF
+            # had decided. Only when the SARIF can attribute: its results carry
+            # scanner names (some scanner was named), or it has no results at
+            # all. A SARIF whose results name no scanner attributes nothing and
+            # seeds nothing.
+            if kept_per_scanner or not saw_a_result:
+                _seed_scanners_the_sarif_never_named(
+                    filtered_results["raw_results"], kept_per_scanner
+                )
 
     # The per-scanner rows first: the summary below may be derived from them.
     scanner_rows = None
@@ -952,19 +994,27 @@ def _stats_of_sarif(
 
     The counts a scanner row would carry, read from the findings themselves:
     a result with a suppression in effect is in the ``suppressed`` bucket, every
-    other one in its severity's, ``total`` is the non-suppressed buckets, and
+    other one in its severity's, ``total`` is every non-suppressed result, and
     ``actionable`` is exit 2's test at the scan's thresholds, or None when the
-    document records no thresholds to judge it by.
+    document records no thresholds to judge it by. Every non-suppressed result
+    is in exactly one named bucket: ``result_severity`` returns a declared
+    severity only when it names one of the ladder's five, and reads any other
+    declared value from the SARIF level, so ``total`` equals the sum of the
+    five buckets and ``actionable`` never exceeds it. ``total`` is counted
+    directly rather than summed back from the buckets, so it stays the plain
+    "non-suppressed results" figure whatever the bucket set becomes.
     """
     from automated_security_helper.utils.sarif_utils import is_result_suppressed
 
     counts = dict.fromkeys(_SEVERITY_KEYS, 0)
+    total = 0
     actionable: Optional[int] = 0 if isinstance(thresholds, dict) else None
     for run in sarif.get("runs") or []:
         for result in (run.get("results") or []) if isinstance(run, dict) else []:
             if is_result_suppressed(result):
                 counts["suppressed"] += 1
                 continue
+            total += 1
             bucket = _get_finding_severity(result).lower()
             if bucket in counts:
                 counts[bucket] += 1
@@ -974,7 +1024,7 @@ def _stats_of_sarif(
                 actionable += 1
     return {
         "severity_counts": counts,
-        "total": _total_of(counts),
+        "total": total,
         "actionable": actionable,
     }
 

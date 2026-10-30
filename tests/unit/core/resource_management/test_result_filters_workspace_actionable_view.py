@@ -25,6 +25,7 @@ from automated_security_helper.core.resource_management.error_handling import (
 )
 from automated_security_helper.core.resource_management.result_filters import (
     ResultFilterInputError,
+    _stats_of_sarif,
     add_findings_list,
     apply_content_filters,
     filter_actionable_only,
@@ -256,3 +257,116 @@ class TestAnUnknownFilterNameIsTheClientsInputError:
     def test_an_unknown_scanner_raises_it(self):
         with pytest.raises(ResultFilterInputError, match="Unknown scanner"):
             apply_content_filters(_workspace_results(), scanners="bandit,nope")
+
+
+def _nameless(rule, severity):
+    """A SARIF result that names no scanner: the SARIF cannot attribute it."""
+    return {
+        "ruleId": rule,
+        "level": "note",
+        "properties": {"issue_severity": severity},
+    }
+
+
+class TestAScannerTheSarifNeverNamesHasNothingActionable:
+    """The SARIF is the one document that holds every finding. A PASSED or
+    FAILED scanner it never names has none kept, so its actionable count is 0
+    and known; left unnamed, the row kept its field-less shape, and the summary
+    derived from the rows read the whole document's actionable and total as
+    None (bandit PASSED with nothing + semgrep FAILED with 2 read None/None
+    where 2/2 is right)."""
+
+    @staticmethod
+    def _bandit_found_nothing():
+        results = _workspace_results()
+        results["raw_results"]["scanner_results"]["bandit"] = _row("PASSED", {})
+        run = results["raw_results"]["sarif"]["runs"][0]
+        run["results"] = [r for r in run["results"] if "S-" in r["ruleId"]]
+        return results
+
+    def test_the_summary_is_decided_by_the_sarif(self):
+        filtered = filter_actionable_only(self._bandit_found_nothing())
+
+        stats = filtered["summary_stats"]
+        assert stats["actionable"] == 2
+        assert stats["total"] == 2
+        rows = filtered["raw_results"]["scanner_results"]
+        assert rows["bandit"]["actionable_finding_count"] == 0
+        assert rows["bandit"]["finding_count"] == 0
+        assert rows["semgrep"]["actionable_finding_count"] == 2
+        # A scanner that did not run is not a scanner the SARIF decides for.
+        assert "actionable_finding_count" not in rows["grype"]
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+        assert by_severity["actionable"] == 2
+        assert by_severity["total"] == 2
+
+    def test_a_sarif_with_no_results_leaves_every_scanner_that_ran_at_zero(self):
+        results = _workspace_results()
+        results["raw_results"]["sarif"]["runs"][0]["results"] = []
+
+        filtered = filter_actionable_only(results)
+
+        stats = filtered["summary_stats"]
+        assert stats["actionable"] == 0
+        assert stats["total"] == 0
+        rows = filtered["raw_results"]["scanner_results"]
+        assert rows["bandit"]["actionable_finding_count"] == 0
+        assert rows["semgrep"]["actionable_finding_count"] == 0
+        assert "actionable_finding_count" not in rows["grype"]
+
+    def test_a_sarif_whose_results_name_no_scanner_decides_for_none(self):
+        """The control: results that carry no scanner name cannot be attributed,
+        so no row is seeded and a PASSED row without a count stays unknown."""
+        results = self._bandit_found_nothing()
+        results["raw_results"]["sarif"]["runs"][0]["results"] = [
+            _nameless("S-CRIT", "CRITICAL"),
+            _nameless("S-MED", "MEDIUM"),
+        ]
+
+        filtered = filter_actionable_only(results)
+
+        rows = filtered["raw_results"]["scanner_results"]
+        assert "actionable_finding_count" not in rows["bandit"]
+        assert "actionable_finding_count" not in rows["semgrep"]
+        assert filtered["summary_stats"]["actionable"] is None
+        assert filtered["summary_stats"]["total"] is None
+
+
+class TestADeclaredSeverityOutsideTheLadderFallsToItsLevel:
+    """result_severity returns a declared issue_severity only when it names one
+    of the ladder's five; any other declared value is read from the SARIF level
+    instead (severity_ladder.result_severity), so every non-suppressed result
+    lands in exactly one named bucket, total equals the bucket sum, and the
+    gate judges the same level. The earlier cut of this file read a declared
+    value outside the ladder as "in no bucket and CRITICAL"; the bytes say
+    otherwise, and this test pins what they say."""
+
+    @staticmethod
+    def _sarif(*results):
+        return {"runs": [{"results": list(results)}]}
+
+    def test_an_unknown_declared_severity_counts_in_its_levels_bucket(self):
+        stats = _stats_of_sarif(
+            self._sarif(
+                _result("W", "WEIRD", "checkov"), _result("H", "HIGH", "checkov")
+            ),
+            {"": "MEDIUM"},
+            {},
+        )
+
+        # "WEIRD" at SARIF level note reads LOW: below the MEDIUM threshold, in
+        # the low bucket, in the total; "HIGH" is actionable and in high.
+        assert stats["total"] == 2
+        assert stats["actionable"] == 1
+        assert stats["severity_counts"]["high"] == 1
+        assert stats["severity_counts"]["low"] == 1
+        assert sum(stats["severity_counts"].values()) == stats["total"]
+
+    def test_a_ladder_severity_still_counts_once(self):
+        stats = _stats_of_sarif(
+            self._sarif(_result("H", "HIGH", "checkov")), {"": "MEDIUM"}, {}
+        )
+
+        assert stats["total"] == 1
+        assert stats["actionable"] == 1
+        assert stats["severity_counts"]["high"] == 1
