@@ -137,6 +137,52 @@ class TestTheHandedIgnoreList:
 
         assert _names(started) == ["app", "vendor"]
 
+    def test_an_empty_list_lifts_the_config_s_paths_with_suppressions_honored(
+        self, online, tmp_path
+    ):
+        """The test above runs under --ignore-suppressions, where a list
+        recomputed from the config is empty too, so it could not tell the
+        handed empty list from a recomputed one. Here suppressions are honored:
+        the config's vendor/ would keep its package out, and the handed empty
+        list is what applies, so both packages are audited."""
+        context = _context(tmp_path)
+        context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/", reason="vendored")
+        ]
+        _package(context.source_dir / "app")
+        _package(context.source_dir / "vendor")
+        started = _audited(online)
+
+        _scanner(context).scan(
+            target=context.source_dir, target_type="source", global_ignore_paths=[]
+        )
+
+        assert _names(started) == ["app", "vendor"]
+
+    def test_the_handed_list_replaces_the_config_s_paths_rather_than_joining_them(
+        self, online, tmp_path
+    ):
+        """The config names app/ and the handed list names vendor/: app is
+        audited, so the config's entry did not apply beside the handed list,
+        and vendor is not."""
+        context = _context(tmp_path)
+        context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="app/", reason="the config's entry")
+        ]
+        _package(context.source_dir / "app")
+        _package(context.source_dir / "vendor")
+        started = _audited(online)
+
+        _scanner(context).scan(
+            target=context.source_dir,
+            target_type="source",
+            global_ignore_paths=[
+                IgnorePathWithReason(path="vendor/", reason="the orchestrator's")
+            ],
+        )
+
+        assert _names(started) == ["app"]
+
     def test_without_a_list_the_config_s_paths_apply_as_the_orchestrator_applies_them(
         self, online, tmp_path
     ):
