@@ -2758,6 +2758,25 @@ def test_an_integration_path_holding_a_space_is_quoted_for_actionlint(
     assert f'-shellcheck="{tool.as_posix()}"' in argv
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.unit
+def test_an_integration_path_holding_a_quote_or_a_backslash_is_escaped(
+    repo, tmp_path, monkeypatch, on_path
+):
+    """Inside the double quotes actionlint's shell-style splitting honors, a
+    quote would end the value early and a backslash would swallow the next
+    character, so both are escaped; plain wrapping would name a program that
+    does not exist and the integration would quietly drop."""
+    tool = _plant(tmp_path / 'my "tools"' / "back\\slash", "shellcheck")
+    scanner = _scanner(repo, operator=True, shellcheck=tool.as_posix())
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    escaped = tool.as_posix().replace("\\", "\\\\").replace('"', '\\"')
+    assert escaped != tool.as_posix()
+    assert f'-shellcheck="{escaped}"' in argv
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 @pytest.mark.unit
 def test_workflows_left_out_of_the_lint_are_named_not_called_absent(
