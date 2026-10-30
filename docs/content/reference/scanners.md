@@ -80,7 +80,7 @@ Bandit is a Python source code security analyzer.
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `bandit`
-- Install: `uv tool install` on first use (`bandit[sarif,toml]>=1.7.0,<2.0.0`)
+- Install: `uv tool install` on first use (`bandit[sarif,toml]>=1.7.8,<2.0.0`)
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: `BANDIT_*`
@@ -99,7 +99,7 @@ Options, under `scanners.bandit.options`. An option not listed here refuses the 
 | <a id="scanners.bandit.options.ignore_nosec"></a>`ignore_nosec` | boolean | `false` | Whether to ignore #nosec comments in the code |
 | <a id="scanners.bandit.options.excluded_paths"></a>`excluded_paths` | list of mapping | `[]` | List of paths to exclude from the bandit scan |
 | <a id="scanners.bandit.options.additional_formats"></a>`additional_formats` | list of string | `[]` | Additional output formats (e.g., html, csv, xml). bandit writes one format per run through a single --format option, and ASH needs that run's output to be SARIF, so these formats are not produced: a value here is accepted and logged as a warning. Convert the SARIF results with ASH's reporters instead. |
-| <a id="scanners.bandit.options.tool_version"></a>`tool_version` | string or null | `">=1.7.0,<2.0.0"` | Version constraint for bandit tool installation (e.g., '&gt;=1.7.0'). If not specified, uses '&gt;=1.7.0,&lt;2.0.0' for stability. |
+| <a id="scanners.bandit.options.tool_version"></a>`tool_version` | string or null | `">=1.7.8,<2.0.0"` | Version constraint for bandit tool installation (e.g., '&gt;=1.7.8'). If not specified, uses '&gt;=1.7.8,&lt;2.0.0' for stability. |
 | <a id="scanners.bandit.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation (default: 300) |
 
 ## `cdk-nag`

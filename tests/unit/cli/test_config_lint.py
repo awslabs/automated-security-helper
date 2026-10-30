@@ -87,7 +87,7 @@ def config_with_internal_fields(tmp_path):
                 "enabled": True,
                 "name": "bandit",
                 "extension": "json",
-                "tool_version": ">=1.7.0,<2.0.0",
+                "tool_version": ">=1.7.8,<2.0.0",
             },
         },
         "reporters": {
@@ -407,7 +407,7 @@ scanners:
     # option's own default, and a value an operator wrote beside `enabled` by
     # hand.
     OPTION_NAMED_FIELDS = [
-        ("scanners", "bandit", "tool_version", ">=1.7.0,<2.0.0", "==1.7.5"),
+        ("scanners", "bandit", "tool_version", ">=1.7.8,<2.0.0", "==1.7.5"),
         ("scanners", "bandit", "install_timeout", 300, 900),
         ("scanners", "checkov", "tool_version", None, "==3.2.250"),
         ("scanners", "semgrep", "tool_version", None, "==1.50.0"),
@@ -701,7 +701,7 @@ scanners:
 
     @pytest.mark.parametrize(
         "base_field,base_value",
-        [("install_timeout", 901), ("tool_version", ">=1.7.0,<2.0.0")],
+        [("install_timeout", 901), ("tool_version", ">=1.7.8,<2.0.0")],
         ids=["another-field", "the-same-field"],
     )
     def test_a_base_field_beside_a_fixable_one_stays_an_issue(
@@ -721,7 +721,7 @@ scanners:
         config_path = tmp_path / ".ash.yaml"
         config_path.write_text(
             "extends: base.yaml\nproject_name: demo\n"
-            "scanners:\n  bandit:\n    tool_version: '>=1.7.0,<2.0.0'\n",
+            "scanners:\n  bandit:\n    tool_version: '>=1.7.8,<2.0.0'\n",
             encoding="utf-8",
         )
 
@@ -755,7 +755,7 @@ scanners:
             "scanners:\n"
             "  bandit:\n"
             # The options' defaults, which --fix may remove.
-            "    tool_version: '>=1.7.0,<2.0.0'\n"
+            "    tool_version: '>=1.7.8,<2.0.0'\n"
             "    severity_threshold: HIGH\n"
             "    install_timeout: 300\n"
             "  cdk_nag:\n"

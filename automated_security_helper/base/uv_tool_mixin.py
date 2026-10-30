@@ -281,7 +281,7 @@ class UVToolMixin:
         applies the same rule, comparing the two names as PEP 503 does.
 
         Why the probe needs this: ``uv tool run bandit`` and
-        ``uv tool run --from 'bandit[sarif,toml]>=1.7.0,<2.0.0' bandit`` resolve
+        ``uv tool run --from 'bandit[sarif,toml]>=1.7.8,<2.0.0' bandit`` resolve
         to different environments. stevedore's entry-point cache is keyed on
         ``sys.executable`` and ``sys.prefix``, so those two invocations warm two
         different cache files -- and a probe that warms the wrong one leaves the

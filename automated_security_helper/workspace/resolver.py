@@ -111,7 +111,7 @@ Failure modes and known limitations
   readable, and the failure surfaces during the scan instead.
 * Scanner pins are compared as *effective* values, including the constraint a
   scanner plugin declares as its own default. That is deliberate: bandit's
-  built-in ``>=1.7.0,<2.0.0`` really does constrain a project that never
+  built-in ``>=1.7.8,<2.0.0`` really does constrain a project that never
   mentioned bandit, so a sibling pinning ``>=2.0.0`` really is a conflict. Since
   the default is identical for every project it can never manufacture one.
 * Pins are compared pairwise first, then all of a scanner's distinct pins

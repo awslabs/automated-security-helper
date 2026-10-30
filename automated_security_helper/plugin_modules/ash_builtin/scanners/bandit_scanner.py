@@ -567,9 +567,9 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         str | None,
         tool_version_constraint("scanners.bandit.options.tool_version"),
         Field(
-            description="Version constraint for bandit tool installation (e.g., '>=1.7.0'). If not specified, uses '>=1.7.0,<2.0.0' for stability."
+            description="Version constraint for bandit tool installation (e.g., '>=1.7.8'). If not specified, uses '>=1.7.8,<2.0.0' for stability."
         ),
-    ] = ">=1.7.0,<2.0.0"
+    ] = ">=1.7.8,<2.0.0"
     install_timeout: Annotated[
         int,
         Field(description="Timeout in seconds for tool installation (default: 300)"),

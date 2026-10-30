@@ -513,7 +513,7 @@ def _checked(status: str, executable: str, detail: str):
     return SimpleNamespace(
         status=status,
         executable=executable,
-        requirement="bandit[sarif,toml]>=1.7.0,<2.0.0",
+        requirement="bandit[sarif,toml]>=1.7.8,<2.0.0",
         detail=detail,
     )
 

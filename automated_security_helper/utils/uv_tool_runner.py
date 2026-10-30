@@ -1443,7 +1443,7 @@ class UVToolRunner:
 
         ``package_name`` is the ``--from`` specification. Passing the SAME spec
         the scan will use matters: ``uv tool run bandit`` and
-        ``uv tool run --from 'bandit[sarif,toml]>=1.7.0,<2.0.0' bandit`` resolve
+        ``uv tool run --from 'bandit[sarif,toml]>=1.7.8,<2.0.0' bandit`` resolve
         to different environments, and stevedore's digest is over
         ``sys.executable`` and ``sys.prefix``, so they warm different cache
         files. A probe that warms the wrong file leaves the scan's file cold for

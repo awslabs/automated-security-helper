@@ -2413,7 +2413,7 @@ Options, under `scanners.bandit.options`:
 | `ignore_nosec` | boolean | `false` | x |
 | `excluded_paths` | list | `[]` | x |
 | `severity_threshold` | string | `null` | x |
-| `tool_version` | string | `">=1.7.0,<2.0.0"` | x |
+| `tool_version` | string | `">=1.7.8,<2.0.0"` | x |
 | `scan_timeout` | number | `1800` | x |
 
 <!-- doctest: options of=global_settings -->

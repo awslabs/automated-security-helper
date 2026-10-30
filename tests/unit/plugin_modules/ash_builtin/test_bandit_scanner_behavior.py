@@ -186,7 +186,7 @@ def test_uv_missing_but_bandit_on_path_falls_back_to_direct_execution(
         lambda *args, **kwargs: SimpleNamespace(
             status="satisfied",
             executable=binary,
-            requirement="bandit[sarif,toml]>=1.7.0,<2.0.0",
+            requirement="bandit[sarif,toml]>=1.7.8,<2.0.0",
             detail="1.9.4 with the extras",
         ),
     )

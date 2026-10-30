@@ -9,7 +9,7 @@ bandit, checkov and semgrep run through ``uv tool run --from <requirement>``.
 When ``uv tool list`` cannot see the tool but an executable of the same name is
 on PATH, the scanners logged "Using pre-installed <tool> at <path>" and then
 ran through uv anyway. Under ``ASH_OFFLINE`` that is ``uv tool run --offline
---from 'bandit[sarif,toml]>=1.7.0,<2.0.0'``, which has to resolve the
+--from 'bandit[sarif,toml]>=1.7.8,<2.0.0'``, which has to resolve the
 requirement from uv's cache. A container whose tools were installed under one
 ``$HOME`` and that runs under another sees an empty tool dir and an empty cache,
 so the resolve fails and the scanner reports ERROR with uv's resolver output
