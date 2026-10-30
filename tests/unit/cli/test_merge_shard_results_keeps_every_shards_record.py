@@ -258,9 +258,40 @@ class TestConverterRowsAcrossThreeShards:
         second = ConverterStatusInfo(failure="TimeoutError: timed out")
         third = ConverterStatusInfo(failure="RuntimeError: crashed")
 
-        row = _merge_converter_rows(_merge_converter_rows(first, second), third)
+        row = _merge_converter_rows([first, second, third])
 
         assert row.failure == "RuntimeError: crashed; TimeoutError: timed out"
+
+    def test_a_message_holding_the_join_text_survives_whole(self):
+        """A CalledProcessError's text holds "; " itself. Folding two rows at a
+        time read the join back as parts, so the second message lost the
+        fragment it shared with the first and the merged text said what no
+        shard recorded. Whole messages, once each, in shard order."""
+        first = ConverterStatusInfo(failure="nbconvert timed out; partial output kept")
+        second = ConverterStatusInfo(failure="nbconvert timed out; killed")
+        third = ConverterStatusInfo(failure="nbconvert timed out; partial output kept")
+
+        row = _merge_converter_rows([first, second, third])
+
+        assert row.failure == (
+            "nbconvert timed out; partial output kept; nbconvert timed out; killed"
+        )
+
+    def test_a_reason_holding_the_join_text_survives_whole(self):
+        rows = [
+            ConverterStatusInfo(
+                dependencies_satisfied=False,
+                candidate_inputs=1,
+                dependency_unavailable_reason=reason,
+            )
+            for reason in ("pandoc missing; see docs", "pandoc missing; install it")
+        ]
+
+        row = _merge_converter_rows(rows)
+
+        assert row.dependency_unavailable_reason == (
+            "pandoc missing; see docs; pandoc missing; install it"
+        )
 
     def test_the_dependency_reason_reaches_the_merged_row(self):
         ran = ConverterStatusInfo(converted_paths=["converted/nb.py"])
@@ -270,13 +301,13 @@ class TestConverterRowsAcrossThreeShards:
             dependency_unavailable_reason="jupyter nbconvert is not installed",
         )
 
-        row = _merge_converter_rows(ran, unavailable)
+        row = _merge_converter_rows([ran, unavailable])
 
         assert row.dependencies_satisfied is False
         assert row.dependency_unavailable_reason == "jupyter nbconvert is not installed"
 
     def test_a_reason_folded_in_once_is_not_repeated_by_a_third_shard(self):
-        """The reasons join as the failures do, so they are read back the same way."""
+        """The reasons are gathered as the failures are: whole, once each."""
         rows = [
             ConverterStatusInfo(
                 dependencies_satisfied=False,
@@ -286,7 +317,7 @@ class TestConverterRowsAcrossThreeShards:
             for reason in ("nbconvert missing", "pandoc missing", "nbconvert missing")
         ]
 
-        row = _merge_converter_rows(_merge_converter_rows(rows[0], rows[1]), rows[2])
+        row = _merge_converter_rows(rows)
 
         assert row.dependency_unavailable_reason == "nbconvert missing; pandoc missing"
 
@@ -298,7 +329,7 @@ class TestConverterRowsAcrossThreeShards:
         )
         ran = ConverterStatusInfo(converted_paths=["converted/nb.py"])
 
-        row = _merge_converter_rows(excluded, ran)
+        row = _merge_converter_rows([excluded, ran])
 
         assert row.excluded is False
         assert row.dependencies_satisfied is True
@@ -314,7 +345,7 @@ class TestConverterRowsAcrossThreeShards:
         )
         ran_without = ConverterStatusInfo(dependencies_satisfied=False)
 
-        row = _merge_converter_rows(excluded, ran_without)
+        row = _merge_converter_rows([excluded, ran_without])
 
         assert row.dependencies_satisfied is False
         assert row.dependency_unavailable_reason is None
@@ -325,7 +356,7 @@ class TestConverterRowsAcrossThreeShards:
         first = ConverterStatusInfo(dependencies_satisfied=False)
         second = ConverterStatusInfo(dependencies_satisfied=False)
 
-        row = _merge_converter_rows(first, second)
+        row = _merge_converter_rows([first, second])
 
         assert row.dependencies_satisfied is False
         assert "dependency_unavailable_reason" not in row.model_fields_set
@@ -348,7 +379,7 @@ class TestConverterRowsAcrossThreeShards:
             ]
         )
 
-        row = _merge_converter_rows(accepted, failed)
+        row = _merge_converter_rows([accepted, failed])
 
         assert [(r.path, r.accepted) for r in row.failed_inputs] == [
             ("nb.ipynb", False)
@@ -360,7 +391,7 @@ class TestConverterRowsAcrossThreeShards:
         first = ConverterStatusInfo(excluded=True, dependencies_satisfied=False)
         second = ConverterStatusInfo(excluded=True, dependencies_satisfied=False)
 
-        row = _merge_converter_rows(first, second)
+        row = _merge_converter_rows([first, second])
 
         assert row.excluded is True
         assert row.dependencies_satisfied is False

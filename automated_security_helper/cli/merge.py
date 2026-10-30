@@ -1656,6 +1656,20 @@ def merge_shard_results(
     # utils/inner_run_outcome.py.
     merged.validation_checkpoints = without_run_records(merged.validation_checkpoints)
 
+    # Every shard's row for each converter, gathered first and merged once below.
+    # Converters are not sharded: every shard converts the whole tree, so the
+    # rows normally agree. They are still each shard's own record, and one
+    # shard's runner can fail where another's succeeded -- nbconvert timing out,
+    # a tool missing -- so the rows are combined rather than the lowest-indexed
+    # one kept. Folding them two at a time meant the joined text of a partial
+    # union was read back as its parts on the next fold, which broke a message
+    # that itself held the join text; one pass over whole messages never splits.
+    # Shards are visited in index order, so the result does not depend on the
+    # order they were passed in.
+    converter_rows: Dict[str, List[ConverterStatusInfo]] = {
+        name: [row] for name, row in shards[0][1].converter_results.items()
+    }
+
     for _, shard, _ in shards[1:]:
         if merged.sarif is None:
             merged.sarif = shard.sarif.model_copy(deep=True) if shard.sarif else None
@@ -1677,18 +1691,7 @@ def merge_shard_results(
         merged.used_suppressions.update(shard.used_suppressions)
 
         for name, converter_result in shard.converter_results.items():
-            # Converters are not sharded: every shard converts the whole tree, so
-            # the rows normally agree. They are still each shard's own record, and
-            # one shard's runner can fail where another's succeeded -- nbconvert
-            # timing out, a tool missing -- so the rows are combined rather than
-            # the lowest-indexed one kept. Shards are visited in index order, so
-            # the result does not depend on the order they were passed in.
-            base = merged.converter_results.get(name)
-            merged.converter_results[name] = (
-                converter_result.model_copy(deep=True)
-                if base is None
-                else _merge_converter_rows(base, converter_result)
-            )
+            converter_rows.setdefault(name, []).append(converter_result)
 
         # additional_reports is not gathered here: _adopt_owning_shard_results below
         # rebuilds the merged set from every shard, as copies, so a copy made here
@@ -1702,6 +1705,15 @@ def merge_shard_results(
         # (vulnerabilities, services, annotations, compositions) are not carried,
         # and syft writes none of them.
         merged.cyclonedx = merge_cyclonedx_reports(merged.cyclonedx, shard.cyclonedx)
+
+    # One pass per converter over every shard's row; a converter one shard alone
+    # recorded keeps that shard's row, as a copy.
+    for name, rows in converter_rows.items():
+        merged.converter_results[name] = (
+            rows[0].model_copy(deep=True)
+            if len(rows) == 1
+            else _merge_converter_rows(rows)
+        )
 
     _adopt_owning_shard_results(merged, shards, owner_by_scanner)
     _merge_scan_set_records(merged, shards)
@@ -1808,60 +1820,59 @@ def _merge_scan_set_records(
 
 
 #: Joins the distinct failures, and the distinct dependency reasons, of one
-#: converter's merged row; read back by the same text when the row meets the
-#: next shard's.
+#: converter's merged row, for display. Never read back: each shard's message
+#: is kept whole, so a message that itself holds this text survives.
 _FAILURE_JOIN = "; "
 
 
-def _merge_converter_rows(
-    base: ConverterStatusInfo, other: ConverterStatusInfo
-) -> ConverterStatusInfo:
-    """One converter's row for the union of two shards' rows.
+def _merge_converter_rows(rows: Sequence[ConverterStatusInfo]) -> ConverterStatusInfo:
+    """One converter's row for the union of every shard's rows, merged in one pass.
 
     Combined so that the completeness gate (``run_ash_scan.incomplete_converters``)
-    sees in the union whatever it would have seen in either shard:
+    sees in the union whatever it would have seen in any shard:
 
-    * ``failure``: every distinct one, in shard order. A row that is already the
-      union of earlier shards holds its failures joined by ``; ``, so the join is
-      read back as its parts before the next shard's is added: deduplicating
-      against the joined text repeated a failure on every third shard.
+    * ``failure``: every distinct message, in shard order, joined by ``; `` for
+      display. Each shard's text is kept whole. Folding two rows at a time
+      meant reading a partial union's join back as its parts before the next
+      shard's text was added, so a message that itself held ``; `` (a
+      CalledProcessError's text does) was broken into fragments, a fragment
+      shared with another shard's message collapsed into it, and a third
+      shard's identical text was still appended again when the split did not
+      restore the original.
     * ``failed_inputs`` and ``refused_inputs``: every shard's, listed once per path
       (and per archive member for a refusal), first record kept, except that a
       failed-input record the gate counts replaces an accepted one for the same
       path, so an acceptance recorded by one shard cannot hide another shard's
       tool failure.
-    * ``dependencies_satisfied``: False if it was False in either shard that ran
-      the converter, with the candidate count of the shards where it was and the
-      reason those shards recorded (``dependency_unavailable_reason``). Only a
+    * ``dependencies_satisfied``: False if it was False in any shard that ran
+      the converter, with the largest candidate count of those shards (missing
+      when any of them recorded none) and every distinct reason they recorded
+      (``dependency_unavailable_reason``), whole, joined for display. Only a
       count of 0 exempts an unavailable converter, so 0 is kept only when every
-      such shard reported 0, and a missing count stays missing. A shard that
-      excluded the converter never checked its dependencies, so its dependency
-      fields say nothing when another shard ran it.
-    * ``excluded``: True only if both shards excluded it; a shard that ran it is
+      such shard reported 0. A shard that excluded the converter never checked
+      its dependencies, so its dependency fields say nothing when another shard
+      ran it.
+    * ``excluded``: True only if every shard excluded it; a shard that ran it is
       not overridden by one that did not.
     * ``converted_paths``: the union, in order.
 
-    A field neither row set is left unset, so a simple dump of two agreeing rows is
-    the base row's dump. Neither input is modified.
+    A field no row set is left unset, so a simple dump of agreeing rows is the
+    first row's dump. No input is modified; the result is a copy of the first row
+    with the merged fields set.
     """
+    base = rows[0]
     update: Dict[str, Any] = {}
-    fields_set = base.model_fields_set | other.model_fields_set
+    fields_set: set = set()
+    for row in rows:
+        fields_set |= row.model_fields_set
 
-    failures = list(
-        dict.fromkeys(
-            part
-            for text in (base.failure, other.failure)
-            if text
-            for part in text.split(_FAILURE_JOIN)
-            if part
-        )
-    )
+    failures = list(dict.fromkeys(row.failure for row in rows if row.failure))
     if failures:
         update["failure"] = _FAILURE_JOIN.join(failures)
 
     # The rows that ran the converter decide its dependency fields; an excluded
-    # row's say nothing unless both rows are excluded.
-    ran = [row for row in (base, other) if not row.excluded] or [base, other]
+    # row's say nothing unless every row is excluded.
+    ran = [row for row in rows if not row.excluded] or list(rows)
     if not all(row.dependencies_satisfied for row in ran):
         update["dependencies_satisfied"] = False
         unavailable = [row for row in ran if not row.dependencies_satisfied]
@@ -1870,30 +1881,24 @@ def _merge_converter_rows(
             update["candidate_inputs"] = None
         else:
             update["candidate_inputs"] = max(c for c in counts if c is not None)
-        # Read back as its parts, as the failures are: a row already the union
-        # of earlier shards holds its reasons joined, and deduplicating against
-        # the joined text appended a reason folded in once again from the third
-        # shard on.
         reasons = list(
             dict.fromkeys(
-                part
+                row.dependency_unavailable_reason
                 for row in unavailable
                 if row.dependency_unavailable_reason
-                for part in row.dependency_unavailable_reason.split(_FAILURE_JOIN)
-                if part
             )
         )
         # From the rows that ran it alone: with none recorded, the merged row has
-        # none, where leaving the field alone kept the base row's, an excluded
-        # row's "never checked" text included. A field neither row set stays
-        # unset, as the docstring promises for every field.
+        # none, where leaving the field alone kept the first row's, an excluded
+        # row's "never checked" text included. A field no row set stays unset,
+        # as the docstring promises for every field.
         if reasons:
             update["dependency_unavailable_reason"] = _FAILURE_JOIN.join(reasons)
         elif "dependency_unavailable_reason" in fields_set:
             update["dependency_unavailable_reason"] = None
-    elif base.dependencies_satisfied != other.dependencies_satisfied:
-        # One row ran it with its dependencies and the other was excluded with
-        # dependencies_satisfied False: the merged row ran it.
+    elif any(not row.dependencies_satisfied for row in rows):
+        # Every row that ran it had its dependencies, and a row that was excluded
+        # recorded dependencies_satisfied False: the merged row ran it.
         update["dependencies_satisfied"] = True
         update["dependency_unavailable_reason"] = None
         if "candidate_inputs" in fields_set:
@@ -1904,10 +1909,10 @@ def _merge_converter_rows(
         update["candidate_inputs"] = base.candidate_inputs
 
     if "excluded" in fields_set:
-        update["excluded"] = base.excluded and other.excluded
+        update["excluded"] = all(row.excluded for row in rows)
 
     failed: Dict[str, FailedInputInfo] = {}
-    for record in [*base.failed_inputs, *other.failed_inputs]:
+    for record in [record for row in rows for record in row.failed_inputs]:
         existing = failed.get(record.path)
         # One record per path, and the one that counts against the completeness
         # gate when the shards disagree: a record one shard's suppression
@@ -1918,14 +1923,14 @@ def _merge_converter_rows(
         update["failed_inputs"] = [r.model_copy() for r in failed.values()]
 
     refused: Dict[Tuple[str, Optional[str]], RefusedInputInfo] = {}
-    for refusal in [*base.refused_inputs, *other.refused_inputs]:
+    for refusal in [refusal for row in rows for refusal in row.refused_inputs]:
         refused.setdefault((refusal.path, refusal.member), refusal)
     if refused:
         update["refused_inputs"] = [r.model_copy() for r in refused.values()]
 
     if "converted_paths" in fields_set:
         update["converted_paths"] = list(
-            dict.fromkeys([*base.converted_paths, *other.converted_paths])
+            dict.fromkeys(path for row in rows for path in row.converted_paths)
         )
 
     merged = base.model_copy(deep=True)
