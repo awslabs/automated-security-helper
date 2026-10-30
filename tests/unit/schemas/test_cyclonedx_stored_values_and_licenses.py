@@ -265,6 +265,15 @@ def test_a_license_expression_is_typed_and_keeps_its_bom_ref():
 LOGGER = "automated_security_helper.utils.log.ASH_LOGGER"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_license_warnings(monkeypatch):
+    """Each test starts with no license entry shape warned about yet: the
+    module warns once per shape per process, and the tests below count calls."""
+    import automated_security_helper.schemas.cyclonedx_bom_1_6_schema as module
+
+    monkeypatch.setattr(module, "_LICENSE_ENTRY_SHAPES_WARNED", set())
+
+
 @pytest.mark.parametrize(
     "entries",
     [
@@ -297,7 +306,25 @@ def test_a_stray_entry_leaves_its_neighbors_typed_and_warns_once():
     assert choice.root[1] == {"license": {}}
     assert isinstance(choice.root[2], LicenseExpression)
     assert logger.warning.call_count == 1
-    assert "entry 1" in logger.warning.call_args.args[0]
+    message = logger.warning.call_args.args[0]
+    assert "entry 1" in message
+    assert "an object with the keys license" in message
+
+
+def test_the_same_entry_shape_warns_once_per_process():
+    """A BOM with thousands of components carrying the same stray entry, or a
+    results file loaded again, repeats no warning; a new shape warns again."""
+    stray = {"license": {"id": "MIT"}, "expression": "MIT"}
+    with patch(LOGGER) as logger:
+        LicenseChoice.model_validate([stray, stray, {"license": {"id": "MIT"}}])
+        LicenseChoice.model_validate([stray])
+        Component.model_validate(
+            {"type": "library", "name": "lib", "licenses": [stray, "MIT"]}
+        )
+    assert logger.warning.call_count == 2
+    first, second = (call.args[0] for call in logger.warning.call_args_list)
+    assert "an object with the keys expression, license" in first
+    assert "a value of type str" in second
 
 
 def test_control_a_well_formed_list_warns_nothing():

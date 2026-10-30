@@ -370,16 +370,43 @@ class LicenseChoice(RootModel):
 
     @model_validator(mode="after")
     def _warn_about_entries_kept_as_written(self) -> "LicenseChoice":
+        # Once per entry shape per process. A validator runs on every load of a
+        # results file and on every model built in code, a BOM can carry
+        # thousands of components with the same stray entry, and a smart-mode
+        # union (Metadata.tools, say) can validate one list more than once, so a
+        # warning per entry per validation repeated one line without end. The
+        # shape (the entry's keys, or its type) is what an operator can search
+        # a BOM for; the list has no view of the component that carries it.
         from automated_security_helper.utils.log import ASH_LOGGER
 
         for index, entry in enumerate(self.root):
-            if not isinstance(entry, (LicenseEntry, LicenseExpression)):
-                ASH_LOGGER.warning(
-                    f"License entry {index} of a CycloneDX license list fits neither "
-                    "license form (a license, or an SPDX expression); it is kept as "
-                    "written."
-                )
+            if isinstance(entry, (LicenseEntry, LicenseExpression)):
+                continue
+            shape = _license_entry_shape(entry)
+            if shape in _LICENSE_ENTRY_SHAPES_WARNED:
+                continue
+            _LICENSE_ENTRY_SHAPES_WARNED.add(shape)
+            ASH_LOGGER.warning(
+                f"License entry {index} of a CycloneDX license list is {shape}, "
+                "which fits neither license form (a license, or an SPDX "
+                "expression); it is kept as written. Further entries of this "
+                "shape are kept without a warning."
+            )
         return self
+
+
+#: The shapes of license entries already warned about in this process
+#: (LicenseChoice._warn_about_entries_kept_as_written).
+_LICENSE_ENTRY_SHAPES_WARNED: set = set()
+
+
+def _license_entry_shape(entry: Any) -> str:
+    """How a stray license entry is described: its keys, or its type."""
+    if isinstance(entry, dict):
+        if not entry:
+            return "an empty object"
+        return "an object with the keys " + ", ".join(sorted(str(k) for k in entry))
+    return f"a value of type {type(entry).__name__}"
 
 
 class Type1(str, Enum):
