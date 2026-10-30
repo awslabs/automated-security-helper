@@ -244,6 +244,10 @@ jobs:
           path: |
             .ash/ash_output/reports
             .ash/ash_output/ash_aggregated_results.json
+          # Overwrite on re-runs only (run_attempt 2 and later), so the first
+          # attempt still fails loudly on a name taken twice, while "Re-run failed
+          # jobs" replaces its own earlier upload instead of failing on the name.
+          overwrite: ${{ github.run_attempt != '1' }}
   merge:
     needs: shard
     if: ${{ !cancelled() }}
@@ -301,6 +305,8 @@ jobs:
           path: |
             .ash/ash_output/reports
             .ash/ash_output/ash_aggregated_results.json
+          # As for the shards: overwrite on re-runs only.
+          overwrite: ${{ github.run_attempt != '1' }}
       - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: ${{ !cancelled() }}
         with:
