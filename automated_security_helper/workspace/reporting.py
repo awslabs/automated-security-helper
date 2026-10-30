@@ -70,18 +70,42 @@ Failure modes and known limitations
   stop the others. One broken reporter must not cost an operator every other
   report. The failure does *not* fail the run: a reporter error is not a finding,
   and ``execute_workspace``'s exit code is a verdict about code under scan.
+  The same holds for a reporter that cannot be constructed (its entry carries
+  the construction error, under its declared name), for a unified results file
+  that cannot be loaded (every reporter that needed it is recorded failed), and
+  for a link that appears at a report's name after the pre-write check (that
+  reporter is recorded failed and the others still write). A reporter whose
+  ``is_python_only`` raises is excluded as not Python-only, as ``ReportPhase``
+  excludes it, rather than taking the step down. Error text goes through
+  ``error_text`` and ``traceback_text`` (utils/error_text.py), so a value a
+  config read from the environment is not written into the manifest or the log.
+* A cancel request (``core/cancellation``) is honored before each reporter runs
+  and before the manifest is written, as ``ReportPhase`` honors one before each
+  of its reporters: the step raises ``ScanCancelled`` and runs no further
+  reporter. What a reporter wrote before the cancel stays on disk, as the
+  results file does; the manifest is not written, so nothing claims the step
+  completed.
+* Two selected reporters with one configured name (a plugin bug) get two
+  manifest entries, the second keyed as ``<name> (<class name>)``, and their
+  artefacts and failures are recorded under the same keys. Keying both on the
+  name lost one reporter's record while both wrote files.
 * An ``UNSUPPORTED`` reporter *does* fail the run, at
   ``WorkspaceExitCode.INTERNAL_ERROR``, and only when the run would otherwise
   have succeeded. It does not override exit 2 or 3: those are verdicts about the
   code under scan, and a reporter that cannot render them is not one. No
   reporter shipped here declares ``UNSUPPORTED``; the path is
   built and tested so the enum member is a mechanism rather than a comment.
-* A per-project reporter that ASH's default config leaves off (the AWS reporters)
-  is listed with the per-project artefacts that exist on disk, because the
-  projects' own configs decided whether it ran. Only the projects that wrote one
-  are listed, and none is reported missing: the step cannot tell a project whose
-  config left the reporter off from one whose report phase failed. With no
-  artefact on disk it is recorded as ``skipped: disabled``.
+* A reporter that ASH's default config leaves off (the AWS reporters) is listed
+  with the per-project artefacts that exist on disk, whatever its workspace
+  behaviour, because the projects' own configs decided whether it ran and every
+  project's report phase writes the reporters that project enables. Only the
+  projects that wrote one are listed, and none is reported missing: the step
+  cannot tell a project whose config left the reporter off from one whose report
+  phase failed. With no artefact on disk it is recorded as ``skipped: disabled``.
+  A reporter ``--output-format`` or ``--python-based-plugins-only`` excluded is
+  recorded by that reason first: the exclusion applied to every project's own
+  report phase too, so a per-project artefact on disk would be an earlier run's
+  and is not listed as this run's.
 * A symlink or directory junction at ``reports/``, at a file a workspace-level
   reporter writes there, or at the manifest refuses the run with
   ``ReportPathLinkRefused`` (exit 1), before any project is scanned
@@ -107,7 +131,6 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import json
-import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -124,10 +147,11 @@ from automated_security_helper.base.reporter_plugin import (
     reporter_matches_requested_formats,
     write_report_file,
 )
+from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.utils.error_text import error_text, traceback_text
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
-    ReportPathRefused,
     ensure_reports_dir,
     refuse_colliding_report_names,
     refuse_linked_report_paths,
@@ -428,8 +452,19 @@ def _default_reporter_classes(plugin_modules: Sequence[str] = ()) -> List[type]:
 
 
 def _build_instance(
-    reporter_class: type, context, config_lookup
+    reporter_class: type,
+    context,
+    config_lookup,
+    construction_failures: Optional[Dict[str, str]] = None,
 ) -> Optional[ReporterPluginBase]:
+    """Construct *reporter_class*, or record why it could not be.
+
+    A failure is logged and, when *construction_failures* is given, recorded
+    there under the reporter's declared name (``plugin_config_key``), so the
+    manifest can carry an entry for a reporter that never became an instance.
+    Before this the reporter was absent from the manifest and from
+    ``failed_reporters`` alike, the silence the manifest exists to prevent.
+    """
     plugin_name = getattr(reporter_class, "__name__", "Unknown")
     try:
         return reporter_class(
@@ -437,11 +472,33 @@ def _build_instance(
             config=config_lookup(plugin_config_key(reporter_class)),
         )
     except Exception as exc:  # noqa: BLE001 -- mirrors ReportPhase's tolerance
+        described = f"{type(exc).__name__}: {error_text(exc)}"
         ASH_LOGGER.error(
             f"Could not construct reporter {plugin_name} for workspace-level "
-            f"reporting: {exc}"
+            f"reporting: {described}"
         )
+        if construction_failures is not None:
+            construction_failures[plugin_config_key(reporter_class)] = (
+                f"the reporter could not be constructed: {described}"
+            )
         return None
+
+
+def _is_python_only(instance: ReporterPluginBase, name: str) -> bool:
+    """``instance.is_python_only()``, read as ``ReportPhase`` reads it.
+
+    A reporter whose check raises is excluded under ``--python-based-plugins-only``
+    rather than taking the whole step down: the flag asks for the reporters known
+    to need nothing beyond Python, and one that cannot answer is not known to.
+    """
+    try:
+        return bool(instance.is_python_only())
+    except Exception as exc:  # noqa: BLE001 -- a broken check must not break the step
+        ASH_LOGGER.warning(
+            f"Reporter {name} raised while reporting whether it is Python-only and "
+            f"is excluded under --python-based-plugins-only: {error_text(exc)}"
+        )
+        return False
 
 
 def _declared_behaviour(reporter_class: type, name: str) -> ReporterWorkspaceBehaviour:
@@ -481,6 +538,7 @@ def _selected_reporters(
     reporter_classes: Optional[Sequence[type]],
     check_dependencies: bool = True,
     plugin_modules: Sequence[str] = (),
+    construction_failures: Optional[Dict[str, str]] = None,
 ):
     """Every constructible reporter, with its declared behaviour and skip reason.
 
@@ -488,7 +546,16 @@ def _selected_reporters(
     reporter that will run, and otherwise one of the ``SKIP_*`` reasons -- yielded
     rather than filtered out, because the manifest has to account for those too.
     Filtering them here is what made six of the nineteen shipped reporters absent
-    from a real run's manifest with nothing to say why.
+    from a real run's manifest with nothing to say why. A reporter that cannot be
+    constructed yields nothing and is recorded in *construction_failures* when
+    the caller passes a dict (:func:`_build_instance`).
+
+    The reasons are decided in the order the operator's own switches apply:
+    ``--python-based-plugins-only`` and ``--output-format`` first, because they
+    excluded the reporter from every project's report phase too, and the default
+    config's ``enabled`` after them. Deciding "disabled" first listed a reporter
+    the formats excluded as considered, with an earlier run's per-project files
+    as this run's.
 
     One place, because two callers need exactly the same selection and a
     divergence between them would be invisible: :func:`unsupported_reporter_names`
@@ -505,7 +572,9 @@ def _selected_reporters(
         else _default_reporter_classes(plugin_modules)
     )
     for reporter_class in classes:
-        instance = _build_instance(reporter_class, context, config_lookup)
+        instance = _build_instance(
+            reporter_class, context, config_lookup, construction_failures
+        )
         if instance is None:
             continue
         name = _reporter_name(instance)
@@ -522,15 +591,17 @@ def _selected_reporters(
         # run -- not requested, or per-project, whose check its own project's
         # scan made -- is not checked here.
         skipped: Optional[str] = None
-        if _disabled_by_config(instance) or off_host_reporter_refused(
-            reporter_class, config_lookup(plugin_config_key(reporter_class))
-        ):
-            skipped = SKIP_DISABLED
-        if skipped is None and python_based_plugins_only:
-            if not instance.is_python_only():
-                skipped = SKIP_NOT_PYTHON_ONLY
+        if python_based_plugins_only and not _is_python_only(instance, name):
+            skipped = SKIP_NOT_PYTHON_ONLY
         if skipped is None and not _matches_requested_formats(instance, output_formats):
             skipped = SKIP_NOT_REQUESTED
+        if skipped is None and (
+            _disabled_by_config(instance)
+            or off_host_reporter_refused(
+                reporter_class, config_lookup(plugin_config_key(reporter_class))
+            )
+        ):
+            skipped = SKIP_DISABLED
         if (
             skipped is None
             and check_dependencies
@@ -812,7 +883,12 @@ def emit_workspace_reports(
         ReportNameCollision: Two reporters here, or a reporter and the manifest,
             would write the same file. Nothing is written.
         ReportPathLinkRefused: ``reports/``, a file a reporter here would write or
-            the manifest is a link. Nothing is written.
+            the manifest is a link, checked before any reporter runs. Nothing is
+            written. A link that appears at a reporter's file after that check
+            is recorded against that reporter instead, and the manifest is still
+            written; one at the manifest's own name raises when it is written.
+        ScanCancelled: The scan was cancelled before a reporter ran or before the
+            manifest was written. Reports already written stay; no manifest.
     """
     # The reports and the manifest are written as ASH's other output: never through
     # a link below the output directory (write_report_file replaces each file
@@ -829,10 +905,14 @@ def emit_workspace_reports(
     per_project: List[str] = []
     unsupported: List[str] = []
     failures: Dict[str, str] = {}
+    construction_failures: Dict[str, str] = {}
 
     # Loaded lazily, so a workspace whose every reporter is per-project never
-    # pays the cost of materialising the whole model.
+    # pays the cost of materialising the whole model. A load that fails is
+    # remembered, so every reporter that needed the model is recorded failed
+    # and the manifest is still written.
     model = None
+    model_failure: Optional[str] = None
 
     selection = list(
         _selected_reporters(
@@ -842,6 +922,7 @@ def emit_workspace_reports(
             python_based_plugins_only=python_based_plugins_only,
             reporter_classes=reporter_classes,
             plugin_modules=plugin_modules,
+            construction_failures=construction_failures,
         )
     )
     # Before any reporter runs and before the manifest: a link that appeared
@@ -867,8 +948,33 @@ def emit_workspace_reports(
             completed_runs.append(_projects_with_a_completed_run(Path(results_path)))
         return completed_runs[0]
 
+    for key, failure in construction_failures.items():
+        # A reporter that never became an instance still gets its entry, under
+        # its declared name, and fails the step: the operator asked for its
+        # report and nothing could even be built to write one.
+        manifest_reporters[key] = {
+            "behaviour": None,
+            "considered": False,
+            "covers_projects": False,
+            "workspace_artifact": None,
+            "per_project_artifacts": [],
+            "missing_per_project_artifacts": [],
+            "error": failure,
+        }
+        failures[key] = failure
+
     for instance, behaviour, skipped in selection:
         name = _reporter_name(instance)
+        # One record per reporter: a second reporter with the same configured
+        # name (a plugin bug) is keyed with its class name as well, so neither
+        # overwrites the other's entry, artefact or failure.
+        key = name
+        if key in manifest_reporters:
+            key = f"{name} ({instance.__class__.__name__})"
+            ASH_LOGGER.warning(
+                f"Two selected reporters are named {name!r}; the second is "
+                f"recorded as {key!r} in the workspace report manifest."
+            )
         filename = _report_filename(instance)
         entry: Dict[str, Any] = {
             "behaviour": behaviour.value,
@@ -878,24 +984,23 @@ def emit_workspace_reports(
             "per_project_artifacts": [],
             "missing_per_project_artifacts": [],
         }
-        manifest_reporters[name] = entry
+        manifest_reporters[key] = entry
 
-        if (
-            skipped == SKIP_DISABLED
-            and behaviour is ReporterWorkspaceBehaviour.PER_PROJECT
-        ):
+        if skipped == SKIP_DISABLED:
             # Disabled by ASH's default config, which is what this step reads, but
-            # each project's scan read its own config. A per-project reporter the
-            # default leaves off -- the AWS reporters -- may have run in the
-            # projects whose config enabled it, so list what they wrote rather
-            # than call it disabled. A project with no artefact is not missing
-            # one: its config may simply leave the reporter off.
+            # each project's scan read its own config. A reporter the default
+            # leaves off -- the AWS reporters -- may have run in the projects
+            # whose config enabled it, whatever its workspace behaviour, so list
+            # what they wrote rather than call it disabled. A project with no
+            # artefact is not missing one: its config may simply leave the
+            # reporter off. No merged artefact exists, so covers_projects is off.
             present = _present_per_project_artifacts(
                 plan, output_dir, filename, completed()
             )
             if present:
-                per_project.append(name)
+                per_project.append(key)
                 entry["considered"] = True
+                entry["covers_projects"] = False
                 entry["per_project_artifacts"] = present
                 ASH_LOGGER.verbose(
                     f"Reporter {name} is off in the default config but per-project; "
@@ -914,7 +1019,8 @@ def emit_workspace_reports(
             continue
 
         if behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED:
-            unsupported.append(name)
+            unsupported.append(key)
+            entry["covers_projects"] = False
             entry["error"] = (
                 "the reporter declares that it cannot produce a correct artefact "
                 "in workspace mode; disable it or scan the projects separately"
@@ -927,7 +1033,7 @@ def emit_workspace_reports(
             continue
 
         if behaviour is ReporterWorkspaceBehaviour.PER_PROJECT:
-            per_project.append(name)
+            per_project.append(key)
             entries, missing = _per_project_artifacts(
                 plan, output_dir, filename, completed()
             )
@@ -951,21 +1057,44 @@ def emit_workspace_reports(
             # Unreachable while the enum has four members and the three above are
             # handled. Kept so that adding a fifth fails loudly here rather than
             # silently producing nothing.
-            failures[name] = f"unhandled workspace behaviour {behaviour!r}"
-            entry["error"] = failures[name]
-            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}")
+            failures[key] = f"unhandled workspace behaviour {behaviour!r}"
+            entry["error"] = failures[key]
+            entry["covers_projects"] = False
+            ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
             continue
 
+        # As ReportPhase before each of its reporters: a cancelled scan runs no
+        # further reporter. Outside any try, so nothing below records it.
+        raise_if_cancelled()
+
+        if model is None and model_failure is None:
+            try:
+                model = _load_workspace_model(Path(results_path))
+            except Exception as exc:  # noqa: BLE001 -- the manifest still has to say what happened
+                model_failure = (
+                    f"the unified results file {Path(results_path).name!r} could "
+                    f"not be loaded: {type(exc).__name__}: {error_text(exc)}"
+                )
+                ASH_LOGGER.error(f"Workspace report step: {model_failure}")
+                ASH_LOGGER.debug(f"Results load traceback: {traceback_text(exc)}")
         if model is None:
-            model = _load_workspace_model(Path(results_path))
+            # Every reporter that needed the model fails the same way, recorded
+            # per reporter so the manifest names each report that did not arrive.
+            failures[key] = model_failure or "the unified results could not be loaded"
+            entry["error"] = failures[key]
+            entry["covers_projects"] = False
+            continue
 
         try:
             content = instance.report(model)
         except Exception as exc:  # noqa: BLE001 -- one reporter must not sink the rest
-            failures[name] = f"{type(exc).__name__}: {exc}"
-            entry["error"] = failures[name]
-            ASH_LOGGER.error(f"Reporter {name} failed at workspace level: {exc}")
-            ASH_LOGGER.debug(f"Reporter traceback: {traceback.format_exc()}")
+            failures[key] = f"{type(exc).__name__}: {error_text(exc)}"
+            entry["error"] = failures[key]
+            entry["covers_projects"] = False
+            ASH_LOGGER.error(
+                f"Reporter {name} failed at workspace level: {failures[key]}"
+            )
+            ASH_LOGGER.debug(f"Reporter traceback: {traceback_text(exc)}")
             continue
 
         if content is None:
@@ -974,52 +1103,54 @@ def emit_workspace_reports(
             # it is a failure like a raise: the operator asked for a report and
             # the reporter produced no answer. Recorded apart from the empty
             # string below, which several reporters legitimately return.
-            failures[name] = "the reporter returned None instead of a report"
-            entry["error"] = failures[name]
-            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}")
+            failures[key] = "the reporter returned None instead of a report"
+            entry["error"] = failures[key]
+            entry["covers_projects"] = False
+            ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
             continue
 
         if not content:
             # Not an error: several reporters legitimately return nothing when
             # they have nothing to say. Recorded so that "returned nothing" is
-            # distinguishable from "was never run".
+            # distinguishable from "was never run". No artefact covers anything.
             entry["error"] = "the reporter returned no content"
+            entry["covers_projects"] = False
             ASH_LOGGER.verbose(f"Reporter {name} returned no content")
             continue
 
-        from automated_security_helper.utils.output_dir_links import (
-            OutputDirLinkRefused,
-        )
-
         try:
             target = write_report_file(reports_dir, filename, content)
-        except (OutputDirLinkRefused, ReportPathRefused):
-            # A link at the file's name, or a name that is not a file in
-            # reports/: refused as every output file is, with nothing written.
-            raise
         except Exception as exc:  # noqa: BLE001 -- one reporter's write must not sink the rest, or the manifest
             # write_report_file returns None for an OSError; anything else (a
-            # reporter returning a non-str, a filesystem error outside OSError)
-            # used to abort the step here, with no manifest to say what happened.
-            failures[name] = (
+            # link that appeared at the file's name after the pre-write check,
+            # a reporter returning a non-str, a filesystem error outside
+            # OSError) used to abort the step here, with earlier reports written
+            # and no manifest to say what happened. Nothing was written for this
+            # reporter, so recording it keeps the "nothing through a link" rule.
+            failures[key] = (
                 f"report file {filename!r} could not be written in {reports_dir}: "
-                f"{type(exc).__name__}: {exc}"
+                f"{type(exc).__name__}: {error_text(exc)}"
             )
-            entry["error"] = failures[name]
-            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}")
-            ASH_LOGGER.debug(f"Reporter write traceback: {traceback.format_exc()}")
+            entry["error"] = failures[key]
+            entry["covers_projects"] = False
+            ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
+            ASH_LOGGER.debug(f"Reporter write traceback: {traceback_text(exc)}")
             continue
         if target is None:
-            failures[name] = (
+            failures[key] = (
                 f"report file {filename!r} could not be written in {reports_dir}"
             )
-            entry["error"] = failures[name]
-            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}")
+            entry["error"] = failures[key]
+            entry["covers_projects"] = False
+            ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
             continue
-        artifacts[name] = target
+        artifacts[key] = target
         entry["workspace_artifact"] = target.relative_to(output_dir).as_posix()
         ASH_LOGGER.info(f"Writing workspace {name} report to {target}")
 
+    # Before the manifest, as before each reporter: a manifest written after a
+    # cancel would say the step completed.
+    raise_if_cancelled()
     manifest_path = write_report_file(
         reports_dir,
         MANIFEST_FILENAME,
