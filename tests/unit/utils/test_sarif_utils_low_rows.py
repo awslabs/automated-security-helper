@@ -150,8 +150,33 @@ class TestFindingId:
         assert get_finding_id("r", None, 1, 2) != get_finding_id("r", "1", 2, None)
 
     def test_the_common_seeds_are_unchanged(self):
+        """The ids the pre-fix implementation gave, as exact values.
+
+        Suppression bookkeeping, GHAS fingerprints and baselines carry these ids,
+        so the fix (only trailing Nones dropped from the seed) had to keep every
+        seed with no inner None byte-identical. The pre-fix seed for these inputs
+        was ``"::".join(str(item) for item in parts if item is not None)``, i.e.
+        ``r::f::1::2``, ``r::f::1`` and ``r::f``, the same strings the fix
+        produces; the values below are the ids of those seed strings (a
+        ``random.Random`` seeded with a str is deterministic across Python
+        versions), so a change to the seed spelling or the derivation turns
+        this red.
+        """
+        assert get_finding_id("r", "f", 1, 2) == "c86d862b-9d1f-4f7b-a891-b3874444496b"
+        assert get_finding_id("r", "f", 1) == "8d7819da-50c3-4b8f-8689-e6bfdb5ddf78"
+        assert get_finding_id("r", "f") == "05a9d7f6-d962-4984-b5e3-c7321b4947db"
+        # The trailing-None spellings of the same seeds.
         assert get_finding_id("r", "f", 1, None) == get_finding_id("r", "f", 1)
-        assert get_finding_id("r", "f") == get_finding_id("r", "f", None, None)
+        assert get_finding_id("r", "f", None, None) == get_finding_id("r", "f")
+
+    def test_a_none_field_is_not_the_text_none_but_is_an_empty_field(self):
+        """An inner None is an EMPTY field in the seed (``r::::1``), so it differs
+        from the file literally named ``None`` (``r::None::1``) and equals a file
+        given as the empty string: both say "no file". Pinned as the bytes read;
+        whether ``""`` and None should differ is a design row, not this test's."""
+        assert get_finding_id("r", None, 1) != get_finding_id("r", "None", 1)
+        assert get_finding_id("r", None, 1) == get_finding_id("r", "", 1)
+        assert get_finding_id("r", None, 1) == "4aafb9e9-bce1-4896-bac0-b358925da635"
 
 
 class TestFileUris:
@@ -169,10 +194,36 @@ class TestFileUris:
         # Only a letter before the colon is a drive; "1:" is a POSIX name.
         assert _file_uri_to_path_text("file:///1:/file.py") == "/1:/file.py"
         assert _file_uri_to_path_text("file:///C:/file.py") == "C:/file.py"
+        # A lower-case drive letter is a drive too.
+        assert _file_uri_to_path_text("file:///c:/file.py") == "c:/file.py"
+
+    def test_an_encoded_hash_decodes_where_a_raw_one_is_kept(self):
+        """``%23`` is a percent-encoded ``#`` and decodes to one; the raw ``#``
+        of the test above is kept because the URI is cut on its own slashes, not
+        parsed. Both name the file ``/srv/a#b.py``."""
+        assert _file_uri_to_path_text("file:///srv/a%23b.py") == "/srv/a#b.py"
+        assert _file_uri_to_path_text("file:///srv/a%3Fb.py") == "/srv/a?b.py"
+
+    def test_an_encoded_drive_colon_is_not_folded_as_a_drive(self):
+        """VS Code spells a Windows file URI ``file:///c%3A/x``. The drive test
+        runs before the percent-decode and reads the third character, ``%``, so
+        this spelling keeps its leading slash: ``/c:/x``, the form pathlib calls
+        neither absolute nor drive-bearing. Pinned as the bytes read; folding the
+        encoded colon too is a design row, not this test's."""
+        assert _file_uri_to_path_text("file:///c%3A/x/a.py") == "/c:/x/a.py"
 
     def test_only_the_literal_two_slash_scheme_is_a_file_uri(self):
-        # The matchers read exactly "file://"; the other spellings stay as written
-        # so a location and its pattern are spelled alike on both sides.
+        """The matchers read exactly ``file://``; the other spellings stay as
+        written so a location and its pattern are spelled alike on both sides.
+
+        KNOWN LIMITATION, kept by design: the one-slash form ``file:/abs/path``
+        is a valid file URI (RFC 8089 section 2 admits the minimal
+        ``file:/path`` form, and Java's ``File.toURI()`` writes it) but is not
+        read as one here, so a scanner that writes it keeps the scheme in its
+        location text and a pattern against the bare path does not meet it.
+        No scanner ASH runs is known to write that form; widening the test would
+        change every matcher's reading at once, so it stays a row rather than a
+        cut, and this test pins the narrowing as the bytes read."""
         assert _is_file_uri("file:///abs/path")
         assert _is_file_uri("file://C:/abs/path")
         assert not _is_file_uri("file:/abs/path")
@@ -259,6 +310,34 @@ def test_attach_scanner_details_keeps_what_the_scanner_attached():
     assert details["tool_version"] == "1.7"
 
 
+def test_attach_scanner_details_lets_the_call_win_a_conflicting_key():
+    """The merge is ``{**existing, **scanner_details}``: a key both sides carry
+    takes the value of this call, and a key only the scanner attached is kept.
+    So a scanner that wrote ``tool_version: "unknown"`` is corrected by the
+    version ASH passes, while its ``tool_invocation`` and any extra key survive.
+    The run-level ``tool.driver.properties.scanner_details`` is still replaced
+    whole; only the per-result object is merged."""
+    result = _result(properties=PropertyBag())
+    result.properties.scanner_details = {
+        "tool_name": "bandit",
+        "tool_version": "unknown",
+        "tool_invocation": {"command_line": "bandit -r ."},
+        "extra": "kept",
+    }
+    report = _report(result)
+
+    attach_scanner_details(report, "bandit", "1.7")
+
+    details = report.runs[0].results[0].properties.scanner_details
+    assert details["tool_version"] == "1.7"
+    assert details["tool_invocation"] == {"command_line": "bandit -r ."}
+    assert details["extra"] == "kept"
+    assert report.runs[0].tool.driver.properties.scanner_details == {
+        "tool_name": "bandit",
+        "tool_version": "1.7",
+    }
+
+
 class TestSeverityNormalization:
     def _run(self, result: Result, driver_rules, extension_rules=None) -> SarifReport:
         return SarifReport(
@@ -306,12 +385,17 @@ class TestSeverityNormalization:
         assert report.runs[0].results[0].properties.issue_severity == "CRITICAL"
 
     def test_a_result_that_is_not_a_fail_is_not_graded(self):
-        result = _result(kind="pass", ruleId="A")
+        # SARIF 3.27.10: a result whose kind is not fail carries level "none";
+        # the fixture's default "error" is not a valid pairing.
+        result = _result(kind="pass", level="none", ruleId="A")
         report = self._run(result, [self._rule("A", "9.8")])
 
         normalize_sarif_result_severities(report)
 
-        assert report.runs[0].results[0].properties is None
+        graded = report.runs[0].results[0]
+        assert getattr(graded.properties, "issue_severity", None) is None
+        # The normalizer created no property bag for it either.
+        assert graded.properties is None
 
     def test_the_metrics_of_no_report_are_zero_not_an_error(self):
         counts = get_severity_metrics_from_sarif(None, MagicMock())
@@ -376,16 +460,19 @@ def test_a_symlinked_work_directory_is_the_scan_root_of_its_files(
     monkeypatch.setattr(sarif_utils, "find_inline_suppressions", _capture)
 
     _apply_inline_suppression(
-        _result(),
-        str(converted.resolve()),
-        context.source_dir,
-        3,
-        {},
+        result=_result(),
+        normalized_uri=str(converted.resolve()),
+        source_dir=context.source_dir,
+        result_line=3,
+        inline_cache={},
         work_dir=link / ASH_WORK_DIR_NAME,
     )
 
-    # The two spellings compared as text, so the file read against the source tree.
-    assert seen["scan_root"] == link / ASH_WORK_DIR_NAME
+    # The two spellings compared as text, so the file read against the source
+    # tree. The scan root is the work directory whichever spelling the read
+    # chose, so both sides are resolved before comparing.
+    assert seen["scan_root"] is not None
+    assert Path(seen["scan_root"]).resolve() == (link / ASH_WORK_DIR_NAME).resolve()
 
 
 def test_a_drive_letter_prefix_is_compared_without_regard_to_case():
@@ -461,3 +548,25 @@ def test_a_result_is_dropped_only_when_every_location_is_under_an_ignore_path(
 
     # The mixed result was dropped on its one matching location.
     assert [r.ruleId for r in report.runs[0].results] == ["MIXED"]
+
+
+def test_a_kept_result_keeps_its_ignored_location_in_place(tmp_path):
+    """The ignore pass is a filter over results, never an editor of them: the
+    location loop counts matches and drops the result only when every located
+    entry is under an ignore path. A result kept because one location lies
+    outside is passed on with its locations as the scanner wrote them, the
+    ignored one first here, so the order and the count are unchanged. Removing
+    or reordering would alter the scanner's report and move the primary
+    location (the first) that reporters read."""
+    context = _context(tmp_path, _ignore_config())
+    vendor_first = _result(locations=[_location("vendor/b.py"), _location("src/a.py")])
+    vendor_first.ruleId = "VENDOR-FIRST"
+
+    report = apply_suppressions_to_sarif(_report(vendor_first), context)
+
+    kept = report.runs[0].results
+    assert [r.ruleId for r in kept] == ["VENDOR-FIRST"]
+    assert [
+        loc.physicalLocation.root.artifactLocation.uri for loc in kept[0].locations
+    ] == ["vendor/b.py", "src/a.py"]
+    assert not kept[0].suppressions
