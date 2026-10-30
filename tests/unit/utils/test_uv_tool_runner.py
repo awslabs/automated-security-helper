@@ -3389,9 +3389,11 @@ class TestProbeLocksAreNamespaced:
             ):
                 get_uv_tool_command("bandit")
 
-        # The version probe's lock is keyed by the TOOL alone: two spec keys of
-        # one tool resolve to one installed environment, and locking them apart
-        # reopened the first-import race the lock exists to close.
+        # The version probe's lock is keyed by the TOOL alone, so two spec keys
+        # of one tool take ONE lock (the next test pins it): they can resolve to
+        # the same installed environment, and locking them apart reopened the
+        # first-import race the lock exists to close. How many environments a
+        # ``--from`` spec can name is ``_uv_from_spec``'s separate question.
         assert "version::bandit" in seen
         # The command probe's key goes on to name the environment it was made in.
         assert any(key.startswith("command::bandit::bandit::") for key in seen), seen
