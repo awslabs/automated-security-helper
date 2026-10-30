@@ -12,9 +12,12 @@ from automated_security_helper.base.plugin_config import (
 )
 from automated_security_helper.core.constants import PYTHON_ONLY_SKIPPED_REASON
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
+from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
+    exclusions_matching_no_scanner,
     refuse_selection_matching_no_scanner,
+    selection_after_exclusions,
     selection_names,
 )
 from automated_security_helper.models.asharp_model import (
@@ -24,6 +27,7 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
+    plugin_explains_its_own_refusal,
     plugin_missing_dependency_reason,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -112,6 +116,11 @@ def _declared_scanner_roster(config) -> List[str]:
 
     Extras (`__pydantic_extra__`) are included: a third-party scanner an operator
     configured is one they expect to run, and its silent absence is the same defect.
+    An extras section the configuration turns off (`enabled: false`) is not: the
+    operator expects it NOT to run, and when its module is not loaded it has no row
+    to be matched against, so counting it reported a scanner nobody wanted as one
+    that went missing. A built-in field stays whatever its flag says, because its
+    module always loads and a disabled one gets its SKIPPED row.
     """
     scanners_segment = getattr(config, "scanners", None)
     if scanners_segment is None:
@@ -122,7 +131,11 @@ def _declared_scanner_roster(config) -> List[str]:
         getattr(type(scanners_segment), "model_fields", {}) or {}
     ).items():
         roster.append(getattr(field_info, "alias", None) or field_name)
-    roster.extend(getattr(scanners_segment, "model_extra", None) or {})
+    for extra_name, section in (
+        getattr(scanners_segment, "model_extra", None) or {}
+    ).items():
+        if section_enabled(section):
+            roster.append(extra_name)
 
     seen = set()
     unique: List[str] = []
@@ -147,6 +160,11 @@ def _missing_dependency_reason(plugin_instance, values: Iterable[str] = ()) -> s
     if reason:
         # As the plugin gave it; the caller logs it so and tildes it for the results.
         return reason
+    return _generic_missing_dependency_reason(plugin_instance)
+
+
+def _generic_missing_dependency_reason(plugin_instance) -> str:
+    """The reason when the scanner's dependency check gave none: names the scanner."""
     return (
         f"{_scanner_display_name(plugin_instance)}'s dependency check failed; "
         "ash.log has the scanner's own message"
@@ -194,7 +212,14 @@ def _scanner_display_name(plugin_instance) -> str:
     the exclusion check never matches -- the scanner would run on every shard,
     and its findings would be counted once per shard.
     """
-    return scanner_display_name(plugin_instance)
+    # Read inside a guard: this runs for every instance outside the per-scanner
+    # try blocks (the shard partition, the registration loop), and a plugin whose
+    # config access raises ended the whole scan phase there. Such a plugin is
+    # identified by its class, as one with no configured name is.
+    try:
+        return scanner_display_name(plugin_instance)
+    except Exception:  # noqa: BLE001 -- plugin code
+        return plugin_instance.__class__.__name__.lower()
 
 
 def _regular_files_under(directory: Any) -> Iterable[str]:
@@ -323,6 +348,26 @@ def scan_phase_completed(aggregated_results: Any) -> bool:
     )
 
 
+class _NoProgress:
+    """Stands in for a progress display the caller did not give.
+
+    ``progress_display`` defaults to None, and the phase calls ``add_task`` and
+    ``update_task`` on it unconditionally, after the whole filter loop has run. A
+    library or MCP caller that built a phase with the default failed there with an
+    AttributeError. Every call is accepted and does nothing; ``add_task`` answers
+    a task id as the real display does.
+    """
+
+    def add_task(self, *args: Any, **kwargs: Any) -> int:
+        return 0
+
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        def accept(*args: Any, **kwargs: Any) -> None:
+            return None
+
+        return accept
+
+
 class ScanPhase(EnginePhase):
     """Implementation of the Scan phase."""
 
@@ -347,11 +392,14 @@ class ScanPhase(EnginePhase):
         super().__init__(
             plugin_context,
             plugins or [],
-            progress_display,
+            progress_display if progress_display is not None else _NoProgress(),
             asharp_model,
             plugin_filter=plugin_filter,
         )
         self.validation_manager = ScannerValidationManager(plugin_context)
+        # Whether _execute_phase has run on this object, so a second run starts
+        # from a clean validation record (see there).
+        self._has_executed = False
         # Set when this run is one shard of several; read by the caller to stamp
         # provenance onto the results so `ash merge` can verify coverage.
         self._shard_assignment: ShardAssignment | None = None
@@ -406,6 +454,46 @@ class ScanPhase(EnginePhase):
         )
         return self._record_scanner_error(display_name, refusal, aggregated_results)
 
+    def _record_duplicate_scanner_name(
+        self,
+        display_name: str,
+        plugin_instance: Any,
+        first_instance: Any,
+        aggregated_results: AshAggregatedResults,
+    ) -> AshAggregatedResults:
+        """Record ERROR for a scanner whose name another scanner already carries.
+
+        Two registered scanner classes with one configured name were both queued.
+        Both ran, the second's row replaced the first's in ``scanner_results``, their
+        results shared one directory, and the shard provenance counted the name once.
+        The first to carry the name runs. The later one is recorded under a row of its
+        own, named by its class so it cannot replace the first's, and does not run:
+        ERROR, not SKIPPED, because the operator did not leave it out and the
+        completeness gate has to see it.
+        """
+        later = plugin_instance.__class__
+        earlier = first_instance.__class__
+        later_text = f"{later.__module__}.{later.__name__}"
+        earlier_text = f"{earlier.__module__}.{earlier.__name__}"
+        # A directory name in the results tree: plain characters only.
+        qualifier = "".join(c if c.isalnum() or c in "._-" else "_" for c in later_text)
+        taken = {
+            key.lower().strip() for key in (aggregated_results.scanner_results or {})
+        }
+        row_name = f"{display_name} ({qualifier})"
+        index = 2
+        while row_name.lower().strip() in taken:
+            row_name = f"{display_name} ({qualifier} #{index})"
+            index += 1
+        refusal = (
+            f"Scanner {later_text} was not run: its name {display_name!r} is already "
+            f"carried by {earlier_text}, which runs. A scanner's name keys its row, "
+            "its results directory, its shard and the --scanners and "
+            "--exclude-scanners matching, so two scanners cannot share one. Give "
+            "one of them a different configured name."
+        )
+        return self._record_scanner_error(row_name, refusal, aggregated_results)
+
     def _record_scanner_error(
         self, display_name: str, error_text_: str, aggregated_results: Any
     ) -> AshAggregatedResults:
@@ -459,8 +547,6 @@ class ScanPhase(EnginePhase):
         """
         ASH_LOGGER.info(f"Scanner {display_name} excluded from execution: {reason}")
 
-        excluded_scanner_names.append(display_name)
-
         self._track_scanner_state(
             display_name,
             registration_status="registered",
@@ -481,6 +567,10 @@ class ScanPhase(EnginePhase):
             dependencies_satisfied=True,
             skipped_reason=reason,
         )
+        # Counted as excluded only once its row is written. Appended first, a raise
+        # between the two left the scanner counted as excluded and, with no row,
+        # recorded MISSING as one that "left filtering with no status".
+        excluded_scanner_names.append(display_name)
         return aggregated_results
 
     def _execute_phase(
@@ -534,6 +624,16 @@ class ScanPhase(EnginePhase):
         # rather than watching a partial scan run to completion and exit 0.
         validate_shard_selection(shard_index, shard_count)
 
+        # The exclusions taken out of the allowlist, as the engine does when it is
+        # built. A phase called directly (a library, the MCP tool) with an
+        # allowlist its own exclusions empty ran zero scanners and reported clean,
+        # because the backstop below compared the allowlist as given. Idempotent for
+        # an engine's call, which already passed the subtracted list; raises when
+        # the exclusions cancel a non-empty allowlist.
+        enabled_scanners = selection_after_exclusions(
+            enabled_scanners, excluded_scanners, selection_origin
+        )
+
         # Not mutated in place: excluded_scanners is the caller's list, and the
         # shard's additions are scoped to this invocation. Appending to the
         # caller's object would make a second call in the same process inherit
@@ -551,6 +651,19 @@ class ScanPhase(EnginePhase):
         self._scan_results = {}
         self._global_ignore_paths = global_ignore_paths or []
         self._max_workers = max_workers
+        # The shard provenance of an earlier run on this object is not this run's:
+        # a second execute without shards kept it and went on mutating it, so an
+        # unsharded run's results read as one shard of the earlier split.
+        self._shard_assignment = None
+        # The validation record likewise: scanners of an earlier run it still
+        # tracked were backfilled into this run's results. Only a real manager is
+        # replaced, and only on a later run, so a manager a caller set up before
+        # the first run is the one that run uses.
+        if self._has_executed and type(self.validation_manager) is (
+            ScannerValidationManager
+        ):
+            self.validation_manager = ScannerValidationManager(self.plugin_context)
+        self._has_executed = True
         # Any regular file, whatever its name: see _holds_a_regular_file.
         self._include_work_dir = _holds_a_regular_file(self.plugin_context.work_dir)
 
@@ -564,7 +677,14 @@ class ScanPhase(EnginePhase):
         # walk skips an entry it cannot stat instead of aborting the scan.
         source_files = list(_regular_files_under(self.plugin_context.source_dir))
         if self._include_work_dir:
-            source_files.extend(_regular_files_under(self.plugin_context.work_dir))
+            # Each file once: a work directory inside the source tree (an output
+            # directory under the project) was walked by both listings.
+            already_listed = set(source_files)
+            source_files.extend(
+                path
+                for path in _regular_files_under(self.plugin_context.work_dir)
+                if path not in already_listed
+            )
         # Store on the context so individual scanners can access it
         self.plugin_context.cached_source_files = source_files
         ASH_LOGGER.debug(f"Cached {len(source_files)} source files for scanner use")
@@ -784,8 +904,23 @@ class ScanPhase(EnginePhase):
                 # recorded ERROR under its name and left out of the run, and the
                 # others are registered as before.
                 admitted_instances = []
+                # The first instance to carry a name, by name. Rows, results
+                # directories, the shard partition and --exclude-scanners all key
+                # on the name, so a second scanner class that carries one already
+                # taken would run beside the first and overwrite its row.
+                first_by_name: Dict[str, Any] = {}
                 for plugin_instance in scanner_instances:
                     display_name = _scanner_display_name(plugin_instance)
+                    name_key = display_name.lower().strip()
+                    if name_key in first_by_name:
+                        aggregated_results = self._record_duplicate_scanner_name(
+                            display_name,
+                            plugin_instance,
+                            first_by_name[name_key],
+                            aggregated_results,
+                        )
+                        continue
+                    first_by_name[name_key] = plugin_instance
                     try:
                         self.validation_manager.update_scanner_state(
                             display_name,
@@ -933,20 +1068,81 @@ class ScanPhase(EnginePhase):
                         f"{', '.join(sorted(registered_names))}"
                         + (f".{hint}" if hint else "")
                     )
-                # A refusal whose every unresolved name is a community scanner
-                # from an unloaded module names the module to add, not spelling.
+                # A refusal whose requested names are all unresolved and at least one
+                # is a community scanner from an unloaded module names the module to
+                # add, not spelling. Names beside it that no scanner goes by are
+                # named too: the hint alone sent the operator to add a module and
+                # then to a second refusal about the misspelling it had dropped.
                 if hint and not any(key in known_names for _, key in requested):
-                    from automated_security_helper.core.exceptions import (
-                        ScannerSelectionError,
+                    misspelled = sorted(set(unresolved) - set(unloaded))
+                    also = (
+                        " No registered scanner matches "
+                        f"{', '.join(misspelled)} either: check the spelling, "
+                        "names use hyphens, not underscores."
+                        if misspelled
+                        else ""
                     )
-
-                    raise ScannerSelectionError(hint.strip())
+                    raise ScannerSelectionError(hint.strip() + also)
                 # ScanExecutionEngine makes the same refusal when it is built, from
                 # the registered classes; this is the backstop for an engine built
                 # some other way. known_names, so a scanner whose construction
                 # raised is not refused as a name that matches nothing.
                 refuse_selection_matching_no_scanner(
                     list(enabled_scanners), known_names, selection_origin
+                )
+
+                # The third silent-zero shape: names that resolve, and a
+                # Python-only run that leaves every one of them out. The two
+                # refusals above cannot see it (each name matches a scanner), and
+                # the run executed nothing and exited clean.
+                if python_based_plugins_only:
+                    wanted = [
+                        _scanner_display_name(instance)
+                        for instance in scanner_instances
+                        if operator_selection(
+                            instance,
+                            _scanner_display_name(instance),
+                            enabled_scanners=enabled_scanners,
+                            excluded_scanners=excluded_scanners,
+                        ).selected
+                    ]
+                    runnable = [
+                        name
+                        for instance, name in (
+                            (i, _scanner_display_name(i)) for i in scanner_instances
+                        )
+                        if operator_selection(
+                            instance,
+                            name,
+                            enabled_scanners=enabled_scanners,
+                            excluded_scanners=excluded_scanners,
+                            python_only=True,
+                        ).selected
+                    ]
+                    if wanted and not runnable:
+                        raise ScannerSelectionError(
+                            f"Every scanner {names.allowlist} selects is left out by "
+                            "the Python-only run (--python-only runs only Python-only "
+                            f"scanners): {', '.join(sorted(wanted))}. Refused rather "
+                            "than run, because this run would execute no scanner and "
+                            "report itself clean. Drop --python-only, or name a "
+                            "Python-only scanner."
+                        )
+
+            # An exclusion that matches no registered scanner excludes nothing, and a
+            # misspelled one leaves the scanner the operator meant to skip running.
+            # Said, not refused: a command line shared by installs that differ in
+            # their plugins can name a scanner this one does not have.
+            unmatched_exclusions = exclusions_matching_no_scanner(
+                excluded_scanners,
+                {_scanner_display_name(instance) for instance in scanner_instances}
+                | set(construction_failed),
+            )
+            if unmatched_exclusions:
+                ASH_LOGGER.warning(
+                    f"No registered scanner matches the {names.exclusion} name "
+                    f"{', '.join(unmatched_exclusions)}, so it excludes nothing. "
+                    "Check the spelling: names use hyphens, not underscores."
                 )
 
             # Apply the shard selection here, and not earlier.
@@ -967,7 +1163,12 @@ class ScanPhase(EnginePhase):
             # scanners running twice and others not at all. Here, a tool missing
             # on one runner is reported MISSING by the shard that owns it, which
             # is a visible failure rather than a silent gap.
-            if shard_count is not None and scanner_instances:
+            #
+            # Also when no scanner was constructed: a sharded run that resolved
+            # nothing still ran as shard i of n, and with no record of that its
+            # results read as an unsharded scan, which `ash merge` would not hold
+            # to the split the other shards made.
+            if shard_count is not None:
                 all_scanner_names = [
                     _scanner_display_name(instance) for instance in scanner_instances
                 ]
@@ -1064,9 +1265,6 @@ class ScanPhase(EnginePhase):
                         )
                         is_excluded = selection.excluded
                         if is_excluded:
-                            # Track excluded scanner for validation
-                            excluded_scanner_names.append(display_name)
-
                             # The shard split is applied as an exclusion, so the row
                             # says which of the two left this scanner out.
                             excluded_reason = (
@@ -1117,6 +1315,11 @@ class ScanPhase(EnginePhase):
                                     skipped_reason=excluded_reason,
                                 )
                             )
+                            # Tracked as excluded for the enablement validation
+                            # once its row is written, as in
+                            # _record_scanner_not_selected: appended first, a
+                            # raise before the row left it counted as excluded.
+                            excluded_scanner_names.append(display_name)
 
                             continue
 
@@ -1291,6 +1494,19 @@ class ScanPhase(EnginePhase):
                             else None
                         )
                         if isinstance(unsupported_reason, str) and unsupported_reason:
+                            # The plugin's own text, redacted of the values the
+                            # config and the plugin read from the environment as
+                            # every other plugin-supplied reason here is: this one
+                            # is logged and stored in the results.
+                            unsupported_reason = text_without_values(
+                                unsupported_reason,
+                                plugin_environment_values(
+                                    plugin_instance,
+                                    config_environment_values(
+                                        getattr(self.plugin_context, "config", None)
+                                    ),
+                                ),
+                            )
                             aggregated_results = self._record_scanner_not_selected(
                                 display_name,
                                 f"not supported on this platform: {unsupported_reason}",
@@ -1382,11 +1598,17 @@ class ScanPhase(EnginePhase):
                                     extra=NO_MARKUP,
                                 )
                                 nothing_to_scan_names.append(display_name)
+                                # ash.log keeps the reason as given, home directory
+                                # included, as for MISSING below; the results get it
+                                # written with the home directory as ~.
+                                stored_nothing_reason = home_as_tilde(nothing_reason)
                                 self.validation_manager.update_scanner_state(
                                     display_name,
                                     registration_status="registered",
                                     enablement_status="excluded",
-                                    enablement_reason=f"Nothing to scan: {nothing_reason}",
+                                    enablement_reason=(
+                                        f"Nothing to scan: {stored_nothing_reason}"
+                                    ),
                                     queued_for_execution=False,
                                     execution_completed=False,
                                 )
@@ -1406,7 +1628,7 @@ class ScanPhase(EnginePhase):
                                         # full claim rather than an attempt
                                         # count with no failure accounting.
                                         targets_failed=0,
-                                        skipped_reason=nothing_reason,
+                                        skipped_reason=stored_nothing_reason,
                                     ),
                                     aggregated_results=aggregated_results,
                                 )
@@ -1415,7 +1637,7 @@ class ScanPhase(EnginePhase):
                                         status=ScannerStatus.SKIPPED,
                                         dependencies_satisfied=True,
                                         excluded=False,
-                                        skipped_reason=nothing_reason,
+                                        skipped_reason=stored_nothing_reason,
                                     )
                                 )
                                 continue
@@ -1436,10 +1658,35 @@ class ScanPhase(EnginePhase):
                             # A refused in-tree copy is the reason, with its path
                             # and the remedy; otherwise the plugin's own
                             # explanation (_missing_dependency_reason).
+                            #
+                            # Both, when the scanner has words of its own: a refused
+                            # in-tree copy recorded while the check ran is not
+                            # necessarily why the check failed, and used alone it
+                            # replaced the scanner's own explanation. The base
+                            # hook's generic answer ("not found on PATH") is not
+                            # added beside a refusal, which it would contradict,
+                            # and the generic sentence below only stands in when
+                            # neither has anything to say.
+                            own_reason = plugin_missing_dependency_reason(
+                                plugin_instance, environment_values
+                            )
+                            reason_parts = list(in_tree_reasons)
+                            if (
+                                own_reason
+                                and own_reason not in reason_parts
+                                and (
+                                    not reason_parts
+                                    or plugin_explains_its_own_refusal(
+                                        plugin_instance, own_reason
+                                    )
+                                )
+                            ):
+                                reason_parts.append(own_reason)
                             raw_reason = text_without_values(
-                                "; ".join(in_tree_reasons)
-                                or _missing_dependency_reason(
-                                    plugin_instance, environment_values
+                                "; ".join(reason_parts)
+                                if reason_parts
+                                else _generic_missing_dependency_reason(
+                                    plugin_instance
                                 ),
                                 environment_values,
                             )
@@ -1655,10 +1902,27 @@ class ScanPhase(EnginePhase):
                         dependencies_satisfied=True,
                     )
                     container.add_error(unclassified_reason)
-                    aggregated_results = self._process_results(
-                        results=container,
-                        aggregated_results=aggregated_results,
-                    )
+                    # Guarded: this scanner is here because something in its own
+                    # filtering raised, and writing its results container can
+                    # raise the same way (a results directory that cannot be made).
+                    # Unguarded, one scanner's failed write ended the whole phase
+                    # before any scanner ran. The row below is the record, so it is
+                    # written whether or not the container was.
+                    try:
+                        aggregated_results = self._process_results(
+                            results=container,
+                            aggregated_results=aggregated_results,
+                        )
+                    except Exception as write_error:
+                        ASH_LOGGER.error(
+                            f"Could not write the results of scanner {display_name}: "
+                            + error_text(
+                                write_error,
+                                config_environment_values(
+                                    getattr(self.plugin_context, "config", None)
+                                ),
+                            )
+                        )
                     aggregated_results.scanner_results[display_name] = (
                         ScannerTargetStatusInfo(
                             status=ScannerStatus.MISSING,
@@ -2079,11 +2343,12 @@ class ScanPhase(EnginePhase):
         self, results: ScanResultsContainer, aggregated_results: AshAggregatedResults
     ) -> AshAggregatedResults:
         """Delegate to ScanResultProcessor.process_container."""
-        processor = getattr(
-            self,
-            "_result_processor",
-            ScanResultProcessor(plugin_context=self.plugin_context),
-        )
+        # Built only when the phase has none: the default of a getattr is
+        # evaluated on every call, so each result built a processor (and its
+        # validation manager) it then discarded.
+        processor = getattr(self, "_result_processor", None)
+        if processor is None:
+            processor = ScanResultProcessor(plugin_context=self.plugin_context)
         return processor.process_container(results, aggregated_results)
 
     def _safe_execute_scanner(
@@ -2319,17 +2584,15 @@ class ScanPhase(EnginePhase):
             completed_scanner_names = []
             if self._completed_scanners:
                 for scanner_plugin in self._completed_scanners:
-                    # Get scanner name from plugin instance
-                    if hasattr(scanner_plugin, "config") and hasattr(
-                        scanner_plugin.config, "name"
-                    ):
-                        scanner_name = scanner_plugin.config.name
-                    elif hasattr(scanner_plugin, "__class__"):
-                        scanner_name = scanner_plugin.__class__.__name__.lower()
-                    else:
-                        scanner_name = str(scanner_plugin).lower()
-
-                    completed_scanner_names.append(scanner_name)
+                    # The name the scanner was queued, registered and recorded
+                    # under (_scanner_display_name). A copy of that rule that read
+                    # config.name directly yielded None for a scanner with no
+                    # configured name: it was reported as a different scanner than
+                    # the one queued, and sorted() below raised on the None and
+                    # skipped the whole validation.
+                    completed_scanner_names.append(
+                        _scanner_display_name(scanner_plugin)
+                    )
 
             # Remove duplicates and sort for consistent output
             completed_scanner_names = sorted(set(completed_scanner_names))
@@ -2548,6 +2811,10 @@ class ScanPhase(EnginePhase):
         try:
             ASH_LOGGER.info("Validating result completeness...")
 
+            # The rows that were there before, so what the call added can be told
+            # from what it only listed.
+            rows_before = set(aggregated_results.scanner_results or {})
+
             # Call the validation manager to ensure complete results
             validation_checkpoint = self.validation_manager.ensure_complete_results(
                 aggregated_results
@@ -2556,31 +2823,48 @@ class ScanPhase(EnginePhase):
             # Extract validation results for reporting
             missing_scanners = validation_checkpoint.get_missing_scanners()
             unexpected_scanners = validation_checkpoint.get_unexpected_scanners()
+            # ensure_complete_results lists every scanner that had no result, and
+            # adds an entry only for one that was not deliberately excluded. Said
+            # as "added" for all of them, a scanner left out of this run was
+            # reported as one the validation had to supply.
+            rows_after = set(aggregated_results.scanner_results or {})
+            added_scanners = [
+                name
+                for name in missing_scanners
+                if name in rows_after and name not in rows_before
+            ]
+            left_out_scanners = [
+                name for name in missing_scanners if name not in added_scanners
+            ]
 
             # Report validation results
             if missing_scanners or unexpected_scanners:
-                total_adjustments = len(missing_scanners) + len(unexpected_scanners)
-                ASH_LOGGER.info(
-                    f"Result completeness validation made {total_adjustments} adjustments"
-                )
-
-                # Notify about result completeness adjustments via event system
-                try:
-                    from automated_security_helper.plugins.events import AshEventType
-
-                    self.notify_event(
-                        AshEventType.INFO,
-                        message=f"Result completeness validation made {total_adjustments} adjustments",
-                        missing_scanners=missing_scanners,
-                        unexpected_scanners=unexpected_scanners,
-                        total_adjustments=total_adjustments,
-                        phase="scan",
-                        validation_checkpoint="result_completeness_validation",
+                total_adjustments = len(added_scanners) + len(unexpected_scanners)
+                if total_adjustments:
+                    ASH_LOGGER.info(
+                        f"Result completeness validation made {total_adjustments} adjustments"
                     )
-                except Exception as event_error:
-                    ASH_LOGGER.debug(
-                        f"Failed to notify result completeness info event: {str(event_error)}"
-                    )
+
+                    # Notify about result completeness adjustments via event system
+                    try:
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
+                        self.notify_event(
+                            AshEventType.INFO,
+                            message=f"Result completeness validation made {total_adjustments} adjustments",
+                            missing_scanners=missing_scanners,
+                            added_scanners=added_scanners,
+                            unexpected_scanners=unexpected_scanners,
+                            total_adjustments=total_adjustments,
+                            phase="scan",
+                            validation_checkpoint="result_completeness_validation",
+                        )
+                    except Exception as event_error:
+                        ASH_LOGGER.debug(
+                            f"Failed to notify result completeness info event: {str(event_error)}"
+                        )
 
                 # Generate detailed result completeness report
                 completeness_report = (
@@ -2590,11 +2874,11 @@ class ScanPhase(EnginePhase):
                 )
 
                 # Log detailed adjustment information
-                if missing_scanners:
+                if added_scanners:
                     ASH_LOGGER.info(
-                        f"Added missing scanners ({len(missing_scanners)}): {', '.join(missing_scanners)}"
+                        f"Added missing scanners ({len(added_scanners)}): {', '.join(added_scanners)}"
                     )
-                    for scanner_name in missing_scanners:
+                    for scanner_name in added_scanners:
                         scanner_state = self.validation_manager.get_scanner_state(
                             scanner_name
                         )
@@ -2602,6 +2886,11 @@ class ScanPhase(EnginePhase):
                             ASH_LOGGER.info(
                                 f"  - {scanner_name}: {scanner_state.failure_reason}"
                             )
+                if left_out_scanners:
+                    ASH_LOGGER.debug(
+                        "Scanners with no result that were left out, not added "
+                        f"({len(left_out_scanners)}): {', '.join(left_out_scanners)}"
+                    )
 
                 if unexpected_scanners:
                     ASH_LOGGER.info(

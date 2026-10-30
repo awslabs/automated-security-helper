@@ -1,0 +1,535 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Edges of ``ScanPhase`` in how it selects, names and reports scanners.
+
+Each test is red on the tree that carried the defect:
+
+* A disabled extras section was counted in the expected-scanner roster.
+* A plugin whose config access raised ended the phase in the name helper.
+* A phase built without a progress display failed at its first ``add_task``.
+* A second run kept the first run's shard provenance and validation record, and a
+  sharded run that built no scanner recorded no provenance at all.
+* Two scanner classes with one name were both queued and one row replaced the other.
+* A self-cancelling selection passed straight to the phase ran zero scanners, a
+  misspelled exclusion said nothing, and ``--python-only`` could leave nothing of
+  an allowlist to run with no word.
+* A refusal for an unloaded community scanner dropped the misspelled names beside it.
+* A platform reason was not redacted, a nothing-to-scan reason carried the home
+  directory, and an in-tree refusal replaced the scanner's own words.
+* One scanner's failed results write ended the phase from the reconciliation loop.
+* The completion check derived names by a second rule and was skipped on a nameless
+  config, and the completeness log called scanners it only listed "added".
+* The cached file list named a nested work directory's files twice, and a result
+  processor was built on every ``_process_results`` call.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.exceptions import ScannerSelectionError
+from automated_security_helper.core.phases import scan_phase as scan_phase_module
+from automated_security_helper.core.phases.scan_phase import (
+    ScanPhase,
+    _declared_scanner_roster,
+    _scanner_display_name,
+)
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerTargetStatusInfo,
+)
+from automated_security_helper.models.scanner_validation import (
+    ScannerValidationManager,
+)
+
+pytestmark = pytest.mark.unit
+
+AshConfig.model_rebuild()
+AshAggregatedResults.model_rebuild()
+
+ENV_VALUE = "env-read-canary-5c1d2-value"
+
+
+@pytest.fixture
+def ctx(tmp_path):
+    context = MagicMock()
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "app.py").write_text("print('hello')")
+    (tmp_path / "work").mkdir()
+    (tmp_path / "output").mkdir()
+    context.source_dir = source_dir
+    context.work_dir = tmp_path / "work"
+    context.output_dir = tmp_path / "output"
+    context.config = MagicMock()
+    context.config.get_plugin_config.return_value = None
+    context.config.global_settings.ignore_paths = []
+    context.config._environment_values = []
+    context.ignore_suppressions = False
+    context.cached_source_files = []
+    context.plugin_load_record = {}
+    return context
+
+
+@pytest.fixture
+def logger(monkeypatch):
+    """The phase's logger, replaced so every level is read the same way."""
+    recorder = MagicMock()
+    monkeypatch.setattr(scan_phase_module, "ASH_LOGGER", recorder)
+    return recorder
+
+
+def _lines(recorder, level):
+    return [str(call.args[0]) for call in getattr(recorder, level).call_args_list]
+
+
+def _scanner_class(name, *, enabled=True, python_only=True, deps=True):
+    """A scanner class double named ``<Name>Scanner`` with config name *name*."""
+    class_name = name.replace("-", "").replace("_", "").capitalize() + "Scanner"
+    plugin_cls = MagicMock()
+    plugin_cls.__name__ = class_name
+    instance = MagicMock()
+    instance.__class__ = plugin_cls
+    instance.__class__.__name__ = class_name
+    config = MagicMock()
+    config.name = name
+    config.enabled = enabled
+    config.options.severity_threshold = "HIGH"
+    instance.config = config
+    instance.validate_plugin_dependencies.return_value = deps
+    instance.dependencies_satisfied = deps
+    instance.is_python_only.return_value = python_only
+    instance.unsupported_platform_reason.return_value = None
+    instance.nothing_to_scan_reason.return_value = None
+    instance.missing_dependency_reason.return_value = None
+    instance.errors = []
+    instance.output = []
+    instance.exit_code = 0
+    instance.start_time = datetime(2024, 1, 1, 10, 0, 0)
+    instance.end_time = datetime(2024, 1, 1, 10, 0, 5)
+    instance.context = None
+    plugin_cls.return_value = instance
+    return plugin_cls
+
+
+def _checkpoint(missing=()):
+    checkpoint = MagicMock()
+    checkpoint.get_missing_scanners.return_value = list(missing)
+    checkpoint.get_unexpected_scanners.return_value = []
+    checkpoint.has_issues.return_value = False
+    checkpoint.checkpoint_name = "test"
+    checkpoint.timestamp = datetime(2024, 1, 1)
+    checkpoint.expected_scanners = []
+    checkpoint.actual_scanners = []
+    checkpoint.discrepancies = []
+    checkpoint.errors = []
+    checkpoint.metadata = {}
+    return checkpoint
+
+
+def _manager():
+    manager = MagicMock(spec=ScannerValidationManager)
+    manager.validate_registered_scanners.return_value = None
+    manager.validate_scanner_enablement.return_value = None
+    checkpoint = _checkpoint()
+    manager.validate_task_queue.return_value = checkpoint
+    manager.validate_execution_completion.return_value = checkpoint
+    manager.ensure_complete_results.return_value = checkpoint
+    manager.report_execution_discrepancies.return_value = {}
+    manager.report_result_completeness.return_value = {}
+    return manager
+
+
+def _phase(ctx, plugins=(), progress="default"):
+    kwargs = {}
+    if progress == "default":
+        kwargs["progress_display"] = MagicMock(add_task=MagicMock(return_value=1))
+    elif progress is not None:
+        kwargs["progress_display"] = progress
+    with patch.object(scan_phase_module, "ScannerValidationManager") as manager_class:
+        manager_class.return_value = _manager()
+        phase = ScanPhase(plugin_context=ctx, plugins=list(plugins), **kwargs)
+    phase.validation_manager = _manager()
+    return phase
+
+
+def _run(phase, **kwargs):
+    return phase._execute_phase(
+        aggregated_results=AshAggregatedResults(), parallel=False, **kwargs
+    )
+
+
+class TestTheExpectedRoster:
+    class _Segment:
+        model_fields: dict = {}
+
+        def __init__(self, extra):
+            self.model_extra = extra
+
+    def test_a_disabled_extras_section_is_not_expected(self):
+        segment = self._Segment(
+            {
+                "kept": {"enabled": True},
+                "off-dict": {"enabled": False},
+                "off-model": SimpleNamespace(enabled=False),
+                "on-model": SimpleNamespace(enabled=True),
+                "bare": {},
+            }
+        )
+
+        roster = _declared_scanner_roster(SimpleNamespace(scanners=segment))
+
+        # Red at the base: every extras key was listed.
+        assert roster == ["kept", "on-model", "bare"]
+
+
+class TestTheDisplayName:
+    def test_a_config_access_that_raises_falls_back_to_the_class(self):
+        class Exploding:
+            @property
+            def config(self):
+                raise RuntimeError("config is not ready")
+
+        # Red at the base: the RuntimeError escaped.
+        assert _scanner_display_name(Exploding()) == "exploding"
+
+    def test_a_configured_name_still_wins(self):
+        plugin = SimpleNamespace(config=SimpleNamespace(name="detect-secrets"))
+        assert _scanner_display_name(plugin) == "detect-secrets"
+
+
+class TestAPhaseWithoutAProgressDisplay:
+    def test_it_runs(self, ctx):
+        phase = _phase(ctx, progress=None)
+
+        # Red at the base: 'NoneType' object has no attribute 'add_task'.
+        results = _run(phase)
+
+        assert isinstance(results, AshAggregatedResults)
+
+
+class TestShardProvenance:
+    def test_a_second_run_does_not_keep_the_first_runs_split(self, ctx):
+        phase = _phase(ctx, [_scanner_class(n) for n in ("bandit", "semgrep")])
+        _run(phase, shard_index=0, shard_count=2)
+        assert phase._shard_assignment is not None
+
+        _run(phase)
+
+        # Red at the base: still the first run's assignment.
+        assert phase._shard_assignment is None
+
+    def test_a_sharded_run_that_built_no_scanner_still_records_its_shard(self, ctx):
+        phase = _phase(ctx, [])
+
+        _run(phase, shard_index=1, shard_count=3)
+
+        # Red at the base: None, so the results read as an unsharded scan.
+        assignment = phase._shard_assignment
+        assert assignment is not None
+        assert (assignment.shard_index, assignment.shard_count) == (1, 3)
+        assert assignment.assigned_scanners == []
+
+    def test_a_later_run_gets_a_fresh_validation_record(self, ctx, monkeypatch):
+        class RealLooking:
+            """Exactly this class, as the phase builds, answering as the double."""
+
+            def __init__(self, plugin_context):
+                self._inner = _manager()
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        monkeypatch.setattr(scan_phase_module, "ScannerValidationManager", RealLooking)
+        phase = ScanPhase(
+            plugin_context=ctx,
+            plugins=[],
+            progress_display=MagicMock(add_task=MagicMock(return_value=1)),
+        )
+        first = phase.validation_manager
+        assert type(first) is RealLooking
+
+        _run(phase)
+        assert phase.validation_manager is first
+
+        _run(phase)
+        # Red at the base: the first run's tracker, backfilling its scanners.
+        assert phase.validation_manager is not first
+        assert type(phase.validation_manager) is RealLooking
+
+
+class TestTwoScannersWithOneName:
+    def test_the_second_is_recorded_not_run(self, ctx, logger):
+        first = _scanner_class("twin")
+        second = _scanner_class("twin")
+        second.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second])
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase)
+
+        queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
+        # Red at the base: ['twin', 'twin'], both queued and one row over the other.
+        assert queued == ["twin"]
+        duplicate_rows = [key for key in results.scanner_results if "OtherTwin" in key]
+        assert len(duplicate_rows) == 1
+        row = results.scanner_results[duplicate_rows[0]]
+        assert row.status == ScannerStatus.ERROR
+        assert any(
+            "is already carried by" in line for line in _lines(logger, "error")
+        ), _lines(logger, "error")
+
+    def test_the_control_distinct_names_both_run(self, ctx):
+        phase = _phase(ctx, [_scanner_class("one"), _scanner_class("two")])
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            _run(phase)
+
+        queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
+        assert sorted(queued) == ["one", "two"]
+
+
+class TestSelectionRefusals:
+    def test_a_self_cancelling_selection_is_refused_by_the_phase(self, ctx):
+        phase = _phase(ctx, [_scanner_class("bandit"), _scanner_class("semgrep")])
+
+        # Red at the base: zero scanners ran and the run read clean.
+        with pytest.raises(ScannerSelectionError, match="cancels itself"):
+            _run(phase, enabled_scanners=["bandit"], excluded_scanners=["Bandit"])
+
+    def test_the_control_an_engine_subtracted_allowlist_is_unchanged(self, ctx):
+        phase = _phase(ctx, [_scanner_class("bandit"), _scanner_class("semgrep")])
+
+        results = _run(
+            phase, enabled_scanners=["semgrep"], excluded_scanners=["bandit"]
+        )
+
+        assert results.scanner_results["bandit"].excluded is True
+
+    def test_a_misspelled_exclusion_is_said(self, ctx, logger):
+        phase = _phase(
+            ctx, [_scanner_class("detect-secrets"), _scanner_class("bandit")]
+        )
+
+        _run(phase, excluded_scanners=["detect_secrets", "bandit"])
+
+        warnings = " ".join(_lines(logger, "warning"))
+        # Red at the base: nothing was said.
+        assert "No registered scanner matches the --exclude-scanners name" in warnings
+        assert "detect_secrets" in warnings
+        assert "bandit," not in warnings
+
+    def test_python_only_that_leaves_the_allowlist_nothing_is_refused(self, ctx):
+        phase = _phase(ctx, [_scanner_class("grype", python_only=False)])
+
+        # Red at the base: zero scanners ran and the run read clean.
+        with pytest.raises(ScannerSelectionError, match="Python-only"):
+            _run(phase, enabled_scanners=["grype"], python_based_plugins_only=True)
+
+    def test_the_control_a_python_only_scanner_in_the_allowlist_runs(self, ctx):
+        phase = _phase(
+            ctx,
+            [
+                _scanner_class("grype", python_only=False),
+                _scanner_class("bandit", python_only=True),
+            ],
+        )
+
+        results = _run(
+            phase,
+            enabled_scanners=["grype", "bandit"],
+            python_based_plugins_only=True,
+        )
+
+        assert isinstance(results, AshAggregatedResults)
+
+    def test_the_community_refusal_keeps_the_misspelled_names(self, ctx):
+        phase = _phase(ctx, [_scanner_class("bandit")])
+
+        def module_for(name):
+            return "ash_community.fake_module" if name == "comm-scanner" else None
+
+        with patch(
+            "automated_security_helper.core.community_scanners.community_module_for",
+            module_for,
+        ):
+            with pytest.raises(ScannerSelectionError) as raised:
+                _run(phase, enabled_scanners=["comm-scanner", "bandti"])
+
+        message = str(raised.value)
+        assert "ash_community.fake_module" in message
+        # Red at the base: only the hint, the misspelling dropped.
+        assert "bandti" in message
+
+
+class TestReasonsAreRedactedAndKeptApart:
+    def test_a_platform_reason_carries_no_environment_value(self, ctx):
+        ctx.config._environment_values = [ENV_VALUE]
+        scanner = _scanner_class("platformed")
+        scanner.return_value.unsupported_platform_reason.return_value = (
+            f"needs a build under {ENV_VALUE}"
+        )
+        phase = _phase(ctx, [scanner])
+
+        results = _run(phase)
+
+        reason = results.scanner_results["platformed"].skipped_reason
+        # Red at the base: the value was recorded as written.
+        assert "needs a build under" in reason
+        assert ENV_VALUE not in reason
+
+    def test_a_nothing_to_scan_reason_is_written_with_a_tilde(self, ctx):
+        home = Path.home().as_posix()
+        scanner = _scanner_class("idle", deps=False)
+        scanner.return_value.nothing_to_scan_reason.return_value = (
+            f"{home}/project has nothing to scan"
+        )
+        phase = _phase(ctx, [scanner])
+
+        results = _run(phase)
+
+        row = results.scanner_results["idle"]
+        assert row.status == ScannerStatus.SKIPPED
+        # Red at the base: the absolute home directory.
+        assert row.skipped_reason == "~/project has nothing to scan"
+
+    def test_an_in_tree_refusal_keeps_the_scanners_own_words(self, ctx, monkeypatch):
+        @contextlib.contextmanager
+        def refusals():
+            yield ["refused the in-tree copy ./bin/tool"]
+
+        monkeypatch.setattr(scan_phase_module, "recording_in_tree_refusals", refusals)
+        monkeypatch.setattr(
+            scan_phase_module, "plugin_explains_its_own_refusal", lambda *_: True
+        )
+        scanner = _scanner_class("toolish", deps=False)
+        scanner.return_value.missing_dependency_reason.return_value = "tool is v1.2"
+        phase = _phase(ctx, [scanner])
+
+        results = _run(phase)
+
+        reason = results.scanner_results["toolish"].missing_reason
+        assert "refused the in-tree copy ./bin/tool" in reason
+        # Red at the base: the in-tree text alone.
+        assert "tool is v1.2" in reason
+
+    def test_the_generic_hook_answer_is_not_added_beside_a_refusal(
+        self, ctx, monkeypatch
+    ):
+        @contextlib.contextmanager
+        def refusals():
+            yield ["refused the in-tree copy ./bin/tool"]
+
+        monkeypatch.setattr(scan_phase_module, "recording_in_tree_refusals", refusals)
+        monkeypatch.setattr(
+            scan_phase_module, "plugin_explains_its_own_refusal", lambda *_: False
+        )
+        scanner = _scanner_class("toolish", deps=False)
+        scanner.return_value.missing_dependency_reason.return_value = (
+            "tool not found on PATH"
+        )
+        phase = _phase(ctx, [scanner])
+
+        results = _run(phase)
+
+        reason = results.scanner_results["toolish"].missing_reason
+        assert reason == "refused the in-tree copy ./bin/tool"
+
+
+class TestOneScannersFailedWriteDoesNotEndThePhase:
+    def test_the_reconciliation_records_the_row_anyway(self, ctx, monkeypatch):
+        broken = _scanner_class("broken")
+        broken.return_value.unsupported_platform_reason.side_effect = RuntimeError(
+            "hook broke"
+        )
+        phase = _phase(ctx, [broken, _scanner_class("fine")])
+        original = ScanPhase._process_results
+
+        def refusing(self, results, aggregated_results):
+            if getattr(results, "scanner_name", None) == "broken":
+                raise OSError("cannot create the results directory")
+            return original(self, results, aggregated_results)
+
+        monkeypatch.setattr(ScanPhase, "_process_results", refusing)
+
+        # Red at the base: the OSError escaped the reconciliation loop.
+        results = _run(phase)
+
+        row = results.scanner_results["broken"]
+        assert row.status == ScannerStatus.MISSING
+
+
+class TestTheCompletionChecks:
+    def test_a_nameless_config_does_not_skip_the_execution_check(self, ctx, logger):
+        named = _scanner_class("named").return_value
+        nameless = _scanner_class("nameless").return_value
+        nameless.config.name = None
+        phase = _phase(ctx)
+        phase._completed_scanners = [named, nameless]
+
+        phase._validate_execution_completion(AshAggregatedResults())
+
+        # Red at the base: sorted(['named', None]) raised and the check was skipped.
+        assert not any(
+            "Error during execution completion validation" in line
+            for line in _lines(logger, "error")
+        )
+        asked = phase.validation_manager.validate_execution_completion.call_args.args[0]
+        assert asked == ["named", "nameless" + "scanner"]
+
+    def test_only_what_was_added_is_called_added(self, ctx, logger):
+        phase = _phase(ctx)
+        checkpoint = _checkpoint(missing=["added-one", "excluded-one"])
+
+        def ensure(aggregated_results):
+            aggregated_results.scanner_results["added-one"] = ScannerTargetStatusInfo(
+                status=ScannerStatus.MISSING
+            )
+            return checkpoint
+
+        phase.validation_manager.ensure_complete_results.side_effect = ensure
+
+        phase._validate_result_completeness(AshAggregatedResults())
+
+        info = _lines(logger, "info")
+        added = [line for line in info if line.startswith("Added missing scanners")]
+        # Red at the base: "(2): added-one, excluded-one".
+        assert added == ["Added missing scanners (1): added-one"]
+
+
+class TestSmallThings:
+    def test_a_work_directory_inside_the_source_tree_is_listed_once(self, ctx):
+        nested = ctx.source_dir / ".ash-work"
+        nested.mkdir()
+        (nested / "converted.py").write_text("x = 1\n")
+        ctx.work_dir = nested
+        phase = _phase(ctx)
+
+        _run(phase)
+
+        listed = [p for p in ctx.cached_source_files if p.endswith("converted.py")]
+        # Red at the base: twice.
+        assert listed == [str(nested / "converted.py")]
+
+    def test_a_result_processor_is_not_built_per_call(self, ctx):
+        phase = _phase(ctx)
+        phase._result_processor = MagicMock()
+
+        with patch.object(scan_phase_module, "ScanResultProcessor") as constructor:
+            phase._process_results(MagicMock(), AshAggregatedResults())
+            phase._process_results(MagicMock(), AshAggregatedResults())
+
+        # Red at the base: two throwaway processors.
+        constructor.assert_not_called()
+        assert phase._result_processor.process_container.call_count == 2
