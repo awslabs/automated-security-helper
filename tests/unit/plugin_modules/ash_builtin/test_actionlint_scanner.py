@@ -1750,6 +1750,34 @@ def test_each_target_starts_from_a_clean_exit_code(
         assert converted is True
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_an_early_return_does_not_keep_the_previous_targets_not_scanned_inputs(
+    repo, tmp_path, monkeypatch, on_path
+):
+    """One instance scans the source target and then the converted one. The
+    source run refused a workflow (a link out of the tree) and recorded it as
+    an input not scanned; the converted run returns before it selects any
+    workflow (an empty work directory), and must not carry the source's refused
+    workflow into its own record."""
+    outside = tmp_path / "outside.yml"
+    outside.write_text("on: push\n")
+    (repo / ".github" / "workflows" / "leak.yml").symlink_to(outside)
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=repo, target_type="source")
+    assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+        ".github/workflows/leak.yml"
+    ]
+
+    empty = tmp_path / "empty-work-dir"
+    empty.mkdir()
+    assert scanner.scan(target=empty, target_type="converted") is True
+
+    assert scanner.inputs_not_scanned == []
+
+
 @pytest.mark.unit
 def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
     sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)

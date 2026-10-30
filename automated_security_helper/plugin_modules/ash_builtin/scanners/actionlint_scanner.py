@@ -1484,6 +1484,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         # this, a source that exits 1 (findings) makes a clean converted target read
         # as "exited 1 but reported none". Reset above every return, as zizmor does.
         self.exit_code = 0
+        # Per target too: the list is filled after the workflow selection below,
+        # which the early returns never reach, so a converted run that returned
+        # early re-reported the source target's refused workflows.
+        self.inputs_not_scanned = []
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(
