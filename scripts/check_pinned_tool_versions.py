@@ -90,10 +90,10 @@ Known limitations
   the report and does not fail. The apt pin gives only major.minor, so the image's
   Ruby is compared as major.minor.0, and a release needing a later patch of the same
   minor is not counted. A Ruby pin or a required Ruby version this script cannot read
-  is refused (exit 2), not guessed at. A release's required RubyGems version is not
-  read: the image's RubyGems is whatever its Ruby package bundles, and nothing in the
-  repository pins it, so a release the image's Ruby admits but its RubyGems does not is
-  reported as installable.
+  is refused (exit 2), not guessed at. A release's required RubyGems version is compared
+  with ``IMAGE_RUBYGEMS``, the RubyGems the Debian Ruby package bundles. The Dockerfile
+  does not pin it, so the number is the upstream one for that Ruby and a test ties it to
+  the Dockerfile's ``ruby=`` pin; Debian's own build was not read.
 * A pin newer than upstream's latest is reported as ``ahead`` and does not fail.
   That happens when a release is yanked or demoted after it was pinned, and it is a
   reason to look, not something this script can decide.
@@ -710,15 +710,39 @@ def ruby_admits(requirement: object, ruby: tuple[int, int]) -> bool:
         ValueError: for a requirement this cannot read. A release whose Ruby cannot be
             judged is refused, not guessed at.
     """
+    return _requirement_admits(requirement, ruby, "Ruby")
+
+
+def rubygems_admits(
+    requirement: object, rubygems: tuple[int, ...] | None = None
+) -> bool:
+    """Whether a release's required RubyGems version admits the image's RubyGems.
+
+    ``requirement`` is the release's ``rubygems_version`` from RubyGems, in the grammar
+    of ``ruby_admits``; None or empty means no requirement. ``rubygems`` defaults to
+    ``IMAGE_RUBYGEMS``.
+
+    Raises:
+        ValueError: for a requirement this cannot read.
+    """
+    return _requirement_admits(
+        requirement, IMAGE_RUBYGEMS if rubygems is None else rubygems, "RubyGems"
+    )
+
+
+def _requirement_admits(
+    requirement: object, version: tuple[int, ...], what: str
+) -> bool:
+    """Whether a requirement in RubyGems' grammar admits ``version``; ``what`` names it."""
     if requirement is None or requirement == "":
         return True
     if not isinstance(requirement, str):
-        raise ValueError(f"cannot read the required Ruby version {requirement!r}")
-    have = _trimmed(ruby)
+        raise ValueError(f"cannot read the required {what} version {requirement!r}")
+    have = _trimmed(version)
     for clause in requirement.split(","):
         match = _REQUIREMENT_CLAUSE.match(clause)
         if match is None:
-            raise ValueError(f"cannot read the required Ruby version {requirement!r}")
+            raise ValueError(f"cannot read the required {what} version {requirement!r}")
         operator = match.group(1) or "="
         segments = [int(part) for part in match.group(2).split(".")]
         want = _trimmed(segments)
@@ -742,19 +766,42 @@ def ruby_admits(requirement: object, ruby: tuple[int, int]) -> bool:
     return True
 
 
+def _unmet_requirements(
+    release: dict[str, Any], ruby: tuple[int, int], rubygems: tuple[int, ...] | None
+) -> list[str]:
+    """What a release needs that the image does not have, as note text; [] if nothing."""
+    unmet = []
+    if not ruby_admits(release.get("ruby_version"), ruby):
+        unmet.append(
+            f"Ruby {release.get('ruby_version')} and the image installs Ruby "
+            f"{ruby[0]}.{ruby[1]}"
+        )
+    if not rubygems_admits(release.get("rubygems_version"), rubygems):
+        have = ".".join(str(n) for n in (rubygems or IMAGE_RUBYGEMS))
+        unmet.append(
+            f"RubyGems {release.get('rubygems_version')} and the image installs "
+            f"RubyGems {have}"
+        )
+    return unmet
+
+
 def newest_installable(
-    releases: Any, ruby: tuple[int, int], pinned: str
+    releases: Any,
+    ruby: tuple[int, int],
+    pinned: str,
+    rubygems: tuple[int, ...] | None = None,
 ) -> tuple[str, str]:
     """(the release a gem pin is compared with, a note about a newer one or "").
 
     The newest final release for the ``ruby`` platform whose required Ruby version
-    admits ``ruby``. Releases no newer than ``pinned`` are not judged: when none newer
-    is installable, the pin is compared with itself. When the newest release needs a
-    newer Ruby, the note says so and names it.
+    admits ``ruby`` and whose required RubyGems version admits ``rubygems`` (default
+    ``IMAGE_RUBYGEMS``). Releases no newer than ``pinned`` are not judged: when none
+    newer is installable, the pin is compared with itself. When the newest release
+    needs a newer Ruby or RubyGems, the note says so and names it.
 
     Raises:
         ValueError: for an answer that is not a list of releases, a release with no
-            version number, or a required Ruby version that cannot be read.
+            version number, or a required Ruby or RubyGems version that cannot be read.
     """
     if not isinstance(releases, list):
         raise ValueError(f"RubyGems answered {type(releases).__name__}, not a list")
@@ -775,15 +822,15 @@ def newest_installable(
     for release in finals:
         if parse_version(release["number"]) <= pin_key:
             break
-        if ruby_admits(release.get("ruby_version"), ruby):
+        if not _unmet_requirements(release, ruby, rubygems):
             target = release["number"]
             break
     note = ""
     if parse_version(newest["number"]) > parse_version(target):
+        needs = " and ".join(_unmet_requirements(newest, ruby, rubygems))
         note = (
-            f"{newest['number']} is the newest release, but it needs Ruby "
-            f"{newest.get('ruby_version')} and the image installs Ruby "
-            f"{ruby[0]}.{ruby[1]}; {target} is the newest release the image can run"
+            f"{newest['number']} is the newest release, but it needs {needs}; "
+            f"{target} is the newest release the image can run"
         )
     return target, note
 
@@ -1398,6 +1445,18 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
 # The Debian package that installs the Ruby the image runs the gems with. Its version
 # is the interpreter's major.minor, behind an epoch: ruby=1:3.1 installs Ruby 3.1.
 _RUBY_PACKAGE = "ruby"
+
+# The RubyGems the image has, which the Dockerfile does not pin: it is whatever the
+# Debian ruby package bundles. Ruby 3.1.2, the 3.1 release in the pinned Debian
+# bookworm package, bundles RubyGems 3.3.7 (``VERSION`` in lib/rubygems.rb at the
+# upstream v3_1_2 tag, read 2026-10-30). This is the upstream number: Debian's own
+# build of the package was not read, so it is a floor, and a release that needs a newer
+# RubyGems than this is treated as not installable. A release's ``rubygems_version``
+# is compared with it. IMAGE_RUBYGEMS_RUBY_PIN is the ``ruby=`` apt pin the number was
+# taken for; a test fails when the Dockerfile's pin differs, so a Ruby bump makes
+# whoever makes it look at this number.
+IMAGE_RUBYGEMS: tuple[int, ...] = (3, 3, 7)
+IMAGE_RUBYGEMS_RUBY_PIN = "1:3.1"
 
 
 def image_ruby(apt_pins: Iterable[AptPin]) -> tuple[int, int]:
