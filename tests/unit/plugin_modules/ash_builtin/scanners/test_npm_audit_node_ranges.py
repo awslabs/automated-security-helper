@@ -103,7 +103,9 @@ def test_each_copy_takes_the_range_that_covers_it(scanner, monkeypatch):
         _report([old, new]), scanner.context.source_dir
     )
 
-    assert _rows(report) == [(old, "<0.2.4"), (new, ">=1.0.0 <1.2.6")]
+    # One row per copy, each on the range that covers its version; _rows sorts
+    # by path, and "node_modules/minimist" sorts before "node_modules/mkdirp/".
+    assert _rows(report) == sorted([(old, "<0.2.4"), (new, ">=1.0.0 <1.2.6")])
     assert len(report.runs[0].tool.driver.rules) == 1
 
 
