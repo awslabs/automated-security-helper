@@ -2679,40 +2679,54 @@ def _run_plain(
     The runner of a spawn outside a sandbox and outside a cancel scope (_runner).
     It does what subprocess.run does, case by case: ``input`` (taken from kwargs,
     since the name is a builtin's) and ``capture_output`` set the pipes; a timeout
-    kills the child and every process it started (the child leads a process
-    group of its own, _start_in_own_group, stopped with _stop_tree), reaps it
-    and raises the TimeoutExpired communicate raised, with the output read so
-    far; any other error, KeyboardInterrupt included, kills the child's group
-    the same way and is raised as it is; ``check`` raises CalledProcessError.
-    The pipes are closed and the child is waited for on the way out, as ``with
-    Popen`` does, but for at most _REAP_SECONDS (_reap): a child the kill did not
-    end, in uninterruptible sleep say, is left running and named, never waited
-    for without end. What it adds is the record of its child right after Popen
-    returns (_note_start), and for a failure while waiting, whether the child
-    still ran and what it had written (_note_failed_wait). Called with no record
-    held, it is subprocess.run with that bound.
+    kills the child and every process it started (with a timeout the child leads
+    a process group of its own, _start_in_own_group, stopped with _stop_tree),
+    reaps it and raises the TimeoutExpired communicate raised, with the output
+    read so far; any other error, KeyboardInterrupt included, kills the child
+    (its group, when it leads one) the same way and is raised as it is;
+    ``check`` raises CalledProcessError. The pipes are closed and the child is
+    waited for on the way out, as ``with Popen`` does, but for at most
+    _REAP_SECONDS (_reap): a child the kill did not end, in uninterruptible
+    sleep say, is left running and named, never waited for without end. What it
+    adds is the record of its child right after Popen returns (_note_start), and
+    for a failure while waiting, whether the child still ran and what it had
+    written (_note_failed_wait). Called with no record held, it is
+    subprocess.run with that bound.
     """
     input_data = kwargs.pop("input", None)
     _pipes_for(kwargs, input_data, capture_output)
-    # The child leads a process group of its own, as every unsandboxed spawn in
-    # a cancel scope does, so the kill at a timeout reaches what it started: a
-    # tool run through uv is uv's child, and killing uv alone left the tool
-    # running while the TimeoutExpired said the stop had worked.
-    _start_in_own_group(kwargs)
+    # With a timeout the child leads a process group of its own, as every
+    # unsandboxed spawn in a cancel scope does, so the kill at the timeout
+    # reaches what it started: a tool run through uv is uv's child, and killing
+    # uv alone left the tool running while the TimeoutExpired said the stop had
+    # worked. Without a timeout the child stays in ASH's own session and group,
+    # as subprocess.run leaves it: a child in a session of its own has no
+    # controlling terminal (a prompt through /dev/tty, as git, ssh or sudo
+    # make one, fails), gets no SIGHUP, SIGTSTP or SIGQUIT from the terminal,
+    # and is missed by a group-wide kill from outside, and a spawn with no bound
+    # to enforce has nothing to gain for that. A group this runner makes is
+    # registered as a cancellable spawn's is, so the server's last stop and the
+    # SIGTERM handler's die-now kill reach it when ASH ends without unwinding;
+    # _reap forgets it.
+    own_group = timeout is not None
+    if own_group:
+        _start_in_own_group(kwargs)
     process = subprocess.Popen(*popenargs, **kwargs)  # nosec B603 - callers pass list argv
     started: Optional[_StartedChild] = None
     try:
         try:
             # Inside this handling: the child started when Popen returned, so a
-            # raise while noting the start is a failure after it, and the child
-            # is stopped like any other.
+            # raise while noting or registering the start is a failure after
+            # it, and the child is stopped like any other.
             started = _note_start(process)
+            if own_group:
+                _register_group(process)
             stdout, stderr = process.communicate(input_data, timeout=timeout)
         except subprocess.TimeoutExpired as expired:
-            # SIGKILL at once to the whole group, as subprocess.run kills its
-            # child at once; a refused stop is logged and recorded (_stop_child).
-            # The record says ASH stopped it, so its signal is never read as the
-            # tool's exit code.
+            # SIGKILL at once to the whole group (a timeout always has one), as
+            # subprocess.run kills its child at once; a refused stop is logged
+            # and recorded (_stop_child). The record says ASH stopped it, so its
+            # signal is never read as the tool's exit code.
             if started is not None:
                 started.stopped = True
             _stop_child(_argv_of(process), process, _stop_tree, 0.0, None)
@@ -2725,7 +2739,13 @@ def _run_plain(
             if started is None:
                 started = _claim_started(process)
             was_running = process.poll() is None
-            _stop_child(_argv_of(process), process, _stop_tree, 0.0, None)
+            # The whole group where the child leads one (this runner's own, or
+            # a caller's start_new_session), as _run_cancellable chooses; a
+            # child in ASH's own group is killed alone, as subprocess.run does.
+            stop = (
+                _stop_tree if own_group or _leads_its_own_group(process) else _kill
+            )
+            _stop_child(_argv_of(process), process, stop, 0.0, None)
             _note_failed_wait(started, process, was_running, error)
             raise
         # communicate() waited for the child, so this returns its code at once.

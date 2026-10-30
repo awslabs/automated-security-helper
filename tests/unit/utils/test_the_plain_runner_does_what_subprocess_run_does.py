@@ -289,9 +289,10 @@ def test_an_interrupt_waits_only_briefly_for_a_child_the_kill_did_not_stop():
     waits at most a quarter second for it, never without a bound. With the kill a
     no-op the child keeps running, so a wait without a bound shows as one.
 
-    The plain runner stops the child's own process group (it leads one, as every
-    spawn inside a cancel scope does), so the kill it sends is the group signal
-    rather than Popen.kill; both are made no-ops here and both count as a try."""
+    With a timeout the plain runner stops the child's own process group, so the
+    kill it sends is the group signal rather than Popen.kill; without one, as
+    here, it kills the child alone, as subprocess.run does. Both are made no-ops
+    here and both count as a try."""
     interrupt = KeyboardInterrupt()
     real_kill = subprocess.Popen.kill
     real_communicate = subprocess.Popen.communicate

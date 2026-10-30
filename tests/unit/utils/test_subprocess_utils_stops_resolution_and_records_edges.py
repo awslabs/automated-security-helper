@@ -362,6 +362,9 @@ class _TimingOutOncePopen(_FakeChild):
 def test_the_plain_runners_timeout_marks_the_record_stopped(monkeypatch):
     monkeypatch.setattr(spu.subprocess, "Popen", _TimingOutOncePopen)
     monkeypatch.setattr(spu, "_start_in_own_group", lambda kwargs: None)
+    # A timed-out spawn registers its group; the stand-in stays out of the
+    # registry, which no later test should find it in.
+    monkeypatch.setattr(spu, "_register_group", lambda process: None)
     monkeypatch.setattr(spu, "_stop_child", lambda *a, **k: None)
     monkeypatch.setattr(spu, "_reap", lambda args, process: None)
     started = spu._StartedChild()
