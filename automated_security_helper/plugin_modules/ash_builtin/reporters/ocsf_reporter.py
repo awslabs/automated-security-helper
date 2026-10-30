@@ -539,7 +539,14 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         suppression is also left out of ``status_detail``, which explains why the
         finding is closed.
         """
-        suppressions = suppressions_in_effect(suppressions)
+        try:
+            suppressions = suppressions_in_effect(suppressions)
+        except Exception as e:  # noqa: BLE001 -- the record degrades, as below
+            # A suppression list that cannot be read at all (len says there are
+            # suppressions, iterating raises) is an unknown status, the same
+            # answer the handler below gives when nothing in the list is readable.
+            ASH_LOGGER.error(f"Error reading suppressions for {rule_id}: {str(e)}")
+            return StatusId.integer_0, "Unknown suppression status", "Unknown"
         if not suppressions:
             # No suppression in effect - finding is active/open
             ASH_LOGGER.debug(

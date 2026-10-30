@@ -670,10 +670,16 @@ def suppressions_in_effect(suppressions: Iterable[Any] | None) -> list:
     """
     in_effect = []
     for suppression in suppressions or []:
-        if isinstance(suppression, dict):
-            state = suppression.get("state")
-        else:
-            state = getattr(suppression, "state", None)
+        # A state that cannot be read is no known inactive state, so the
+        # suppression counts; a fault in one field never drops the suppression
+        # (the OCSF reporter reads a suppression's other fields on their own).
+        try:
+            if isinstance(suppression, dict):
+                state = suppression.get("state")
+            else:
+                state = getattr(suppression, "state", None)
+        except Exception:  # noqa: BLE001 -- a stand-in's field raised; see above
+            state = None
         if state is None or (
             str(getattr(state, "value", state)) not in _INACTIVE_SUPPRESSION_STATES
         ):
