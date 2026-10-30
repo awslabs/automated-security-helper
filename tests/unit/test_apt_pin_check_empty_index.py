@@ -19,6 +19,7 @@ No network: the indexes are strings handed to ``check_apt``.
 from __future__ import annotations
 
 import importlib.util
+import lzma
 import sys
 from pathlib import Path
 
@@ -84,3 +85,43 @@ class TestAnEmptyIndex:
         """Control: the ordinary case."""
         (result,) = _check({"main": LISTED, "updates": LISTED})
         assert result.status == "current"
+
+
+XZ_INDEXES = [
+    checker.AptIndex("main", "https://deb.debian.org/main/{arch}/Packages.xz"),
+    checker.AptIndex("updates", "https://deb.debian.org/updates/{arch}/Packages.xz"),
+]
+
+
+class TestAnEmptyXzIndex:
+    """The path Debian serves: an ``xz`` stream whose content is empty."""
+
+    @staticmethod
+    def _serve(monkeypatch, updates: bytes) -> None:
+        main = lzma.compress(LISTED.encode("utf-8"))
+        monkeypatch.setattr(
+            checker,
+            "_get_bytes",
+            lambda url, headers=None: updates if "/updates/" in url else main,
+        )
+
+    def test_an_empty_xz_updates_index_does_not_fail_the_run(self, monkeypatch):
+        # Control (the empty-body case is cured at the base): the xz stream decodes
+        # to "", and fetch_index hands that body to the empty-index check.
+        self._serve(monkeypatch, lzma.compress(b""))
+        (result,) = checker.check_apt(
+            [PIN], XZ_INDEXES, checker.fetch_index, architectures=("amd64",)
+        )
+        assert (result.status, result.candidate) == ("current", "7.1-1")
+        assert checker.apt_exit_code([result], fail_on_outdated=True) == checker.EXIT_OK
+
+    def test_an_xz_index_that_decodes_to_an_error_page_is_still_refused(
+        self, monkeypatch
+    ):
+        """Control: text with no package stanza stays an error through the xz path."""
+        self._serve(monkeypatch, lzma.compress(b"<html>try again</html>"))
+        (result,) = checker.check_apt(
+            [PIN], XZ_INDEXES, checker.fetch_index, architectures=("amd64",)
+        )
+        assert result.status == "error"
+        assert "has text but lists no packages" in result.detail
