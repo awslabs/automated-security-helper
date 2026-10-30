@@ -307,8 +307,11 @@ def test_a_threshold_read_from_the_environment_grades_and_is_not_published(
     # The same, read from the unified file as written: the threshold fields the
     # project row carries name no bandit entry and carry no value read from the
     # environment. (A substring scan of the whole file read every spelling of
-    # the word, so any later field spelled CRITICAL would have failed it.)
-    written = json.loads(outcome.results_path.read_text("utf-8"))["projects"][0]
+    # the word, so any later field spelled CRITICAL would have failed it.) The
+    # project rows sit under the file's top-level "workspace" block, the one
+    # rewrite_workspace_block replaces; "scanner_results" is a sibling of it.
+    unified = json.loads(outcome.results_path.read_text("utf-8"))
+    written = unified["workspace"]["projects"][0]
     assert "bandit" not in written["scanner_thresholds"]
     assert "CRITICAL" not in written["scanner_thresholds"].values()
     assert written["severity_threshold"] == "MEDIUM"
