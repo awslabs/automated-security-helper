@@ -239,7 +239,9 @@ def test_the_rewrite_is_refused_while_the_sessions_workspace_is_being_removed(
         assert not gone.exists(), "the profile was written under the removal"
 
     # The hold ended without removing anything here: the next ask writes it.
-    assert resolve_session_config_path(SESSION) == str(gone)
+    # Compared as paths: the resolver spells a Windows path with forward
+    # slashes, str() of the Path with backslashes.
+    assert Path(resolve_session_config_path(SESSION)) == gone
     assert gone.is_file()
 
 
