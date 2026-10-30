@@ -549,11 +549,16 @@ class TestCoverageAssessmentFailureDoesNotFailTheProgressCall:
 
         with patch(
             f"{_MODULE}.assess_coverage", side_effect=KeyError("rule without id")
-        ):
+        ) as assess:
             progress = registry.check_scan_progress(scan_id)
             again = registry.check_scan_progress(scan_id)
 
+        # The patched assessment was reached, and reached again on the second
+        # poll: a failed assessment is not cached as "unknown", so a transient
+        # failure is retried on the next poll rather than pinned to the scan.
+        assert assess.call_count == 2
         assert progress["success"] is True
         assert progress["status"] == "completed"
         assert progress["coverage_complete"] is None
         assert again["success"] is True
+        assert again["coverage_complete"] is None
