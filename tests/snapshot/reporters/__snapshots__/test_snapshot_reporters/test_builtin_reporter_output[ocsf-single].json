@@ -295,7 +295,7 @@
     "class_uid": 2002,
     "finding_info": {
       "desc": "The last user in the container is 'root'. Switch back to an unprivileged user.",
-      "title": "dockerfile.security.last-user-is-root.last-user-is-root in Dockerfile - The last user in the container is 'root'. Switch...",
+      "title": "dockerfile.security.last-user-is-root.last-user-is-root in Dockerfile - The last user in the container is 'root'. Swi...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -343,7 +343,7 @@
     "class_uid": 2002,
     "finding_info": {
       "desc": "Command string built with an f-string; prefer an argument list.",
-      "title": "python.lang.best-practice.unpinned-shell-command in app.py - Command string built with an f-string; prefer an argument l...",
+      "title": "python.lang.best-practice.unpinned-shell-command in app.py - Command string built with an f-string; prefer an argumen...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -440,7 +440,7 @@
     "class_uid": 2002,
     "finding_info": {
       "desc": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
-      "title": "CVE-2018-18074-requests in requirements.txt - A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at...",
+      "title": "CVE-2018-18074-requests in requirements.txt - A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -488,7 +488,7 @@
     "class_uid": 2002,
     "finding_info": {
       "desc": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
-      "title": "CVE-2023-32681-requests in requirements.txt - A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at r...",
+      "title": "CVE-2023-32681-requests in requirements.txt - A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found a...",
       "uid": "<UUID>"
     },
     "metadata": {

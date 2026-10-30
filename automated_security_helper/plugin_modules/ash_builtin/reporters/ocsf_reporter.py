@@ -21,6 +21,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
+    AffectedCode,
     VulnerabilityFinding,
     Vulnerability,
     # Cve,
@@ -41,6 +42,86 @@ from typing import Optional, List, Tuple
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import suppressions_in_effect
 from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.undecodable_text import recorded
+
+#: The longest ``finding_info.title`` this reporter writes, ellipsis included. The
+#: cap was applied to the message part alone, so a long rule id and file name
+#: pushed a title past it, and the ellipsis was added after a full-width slice.
+TITLE_MAX_LENGTH = 120
+
+#: The SARIF result kinds that state no problem (3.27.9): the rule was evaluated
+#: and passed, did not apply, or produced information only. Such a result is no
+#: vulnerability finding and is left out of the array; emitted as one, a cdk-nag
+#: rule that was not evaluated reached a SIEM as a New vulnerability.
+_NON_FINDING_KINDS = frozenset({"pass", "notApplicable", "informational"})
+
+#: Marks a record built by the fallback path: a finding whose construction
+#: failed, kept with what could still be read of it (the gate's severity, the
+#: project). Same ``key:value`` shape as the other labels, so a SIEM can set it
+#: apart from a finding the builder read whole. Such records were counted as
+#: successes, so the failure rate never reflected them.
+DEGRADED_FINDING_LABEL = "ash_row_type:degraded_finding"
+
+#: Marks the one record that stands for findings this array does not carry:
+#: results whose construction and fallback both failed, and findings whose
+#: serialization failed. They were dropped with a log line each and the array
+#: looked complete; the record says how many are missing, so a reader of the
+#: file alone learns it is incomplete.
+CONVERSION_SHORTFALL_LABEL = "ash_row_type:conversion_shortfall"
+
+#: The ``finding_info.uid`` of the shortfall record, deterministic so a SIEM
+#: deduplicates it across runs of the same scan rather than accumulating one.
+CONVERSION_SHORTFALL_UID = "ash-ocsf-conversion-shortfall"
+
+#: Splits a location uri on either separator: a Windows scanner can write a
+#: drive-letter or UNC uri with backslashes, and splitting on "/" alone made
+#: the whole path the file name and the title's "in <file>" part.
+_PATH_SEPARATORS = re.compile(r"[\\/]")
+
+
+def _file_name(path: str) -> str:
+    """The last path component of *path*, whichever separator it uses."""
+    parts = [part for part in _PATH_SEPARATORS.split(path) if part]
+    return parts[-1] if parts else path
+
+
+def _message_text(result: Any) -> Optional[str]:
+    """The result's message as text: ``text``, else ``markdown``, else the ``id``
+    of the message string it names; None when it has none.
+
+    SARIF lets a message be given by ``id`` alone (resolved against the rule's
+    ``messageStrings``); read as ``text`` alone, such a result was described as
+    "No description" and titled so.
+    """
+    message_root = getattr(getattr(result, "message", None), "root", None)
+    for field in ("text", "markdown", "id"):
+        value = getattr(message_root, field, None)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _finding_title(rule_part: str, location_info: str, message_text: str) -> str:
+    """The title ``<rule><location> - <message>`` at most :data:`TITLE_MAX_LENGTH`
+    characters, the ellipsis counted, the prefix cut too when it alone is past
+    the cap."""
+    prefix = f"{rule_part}{location_info} - "
+    whole = prefix + message_text
+    if len(whole) <= TITLE_MAX_LENGTH:
+        return whole
+    room = TITLE_MAX_LENGTH - len(prefix) - 3
+    if room > 0:
+        return prefix + message_text[:room] + "..."
+    return whole[: TITLE_MAX_LENGTH - 3] + "..."
+
+
+def _is_not_a_finding(result: Any) -> bool:
+    """Whether *result*'s ``kind`` says no problem was found. An absent kind is
+    ``fail``."""
+    kind = getattr(result, "kind", None)
+    kind_value = str(getattr(kind, "value", kind) or "fail")
+    return kind_value in _NON_FINDING_KINDS
+
 
 #: OCSF severity_id for each ASH severity (OCSF: 1 Informational, 2 Low,
 #: 3 Medium, 4 High, 5 Critical).
@@ -270,8 +351,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # Safely extract message text
             desc = ""
             try:
-                if result.message and result.message.root and result.message.root.text:
-                    desc = result.message.root.text
+                desc = _message_text(result) or ""
                 ASH_LOGGER.debug(
                     f"Extracted message text for {rule_id}: {len(desc)} characters"
                 )
@@ -342,11 +422,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
                                 if file_path:
                                     try:
-                                        file_name = (
-                                            file_path.split("/")[-1]
-                                            if "/" in file_path
-                                            else file_path
-                                        )
+                                        file_name = _file_name(file_path)
 
                                         file_dict = {
                                             "name": file_name,
@@ -384,7 +460,15 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                                                 f"Error extracting region info for {rule_id} location {i}: {str(e)}"
                                             )
 
-                                        affected_code.append(code_dict)
+                                        # Validated one entry at a time: the
+                                        # whole Vulnerability was validated at
+                                        # once, so one location with a value
+                                        # the schema refuses discarded every
+                                        # location, the CVE and the description
+                                        # with it. This entry alone is skipped.
+                                        affected_code.append(
+                                            AffectedCode.model_validate(code_dict)
+                                        )
                                         ASH_LOGGER.debug(
                                             f"Successfully processed location {i} for {rule_id}"
                                         )
@@ -610,8 +694,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
             try:
                 # Safely extract message text
-                if result.message and result.message.root and result.message.root.text:
-                    message_text = result.message.root.text
+                message_text = _message_text(result) or message_text
                 ASH_LOGGER.debug(
                     f"Extracted message text for finding info {rule_id}: {len(message_text)} characters"
                 )
@@ -634,11 +717,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                             and first_location.physicalLocation.root.artifactLocation.uri
                         ):
                             file_path = first_location.physicalLocation.root.artifactLocation.uri
-                            file_name = (
-                                file_path.split("/")[-1]
-                                if "/" in file_path
-                                else file_path
-                            )
+                            file_name = _file_name(file_path)
                             location_info = f" in {file_name}"
                             ASH_LOGGER.debug(
                                 f"Extracted location info for {rule_id} title: {location_info}"
@@ -648,16 +727,10 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                         f"Error extracting location for {rule_id} title: {str(e)}"
                     )
 
-                # Create title with rule, location, and message
-                title_prefix = f"{rule_part}{location_info} - "
-                remaining_chars = max(
-                    0, 120 - len(title_prefix)
-                )  # Increased max length for more descriptive titles
-
-                if len(message_text) <= remaining_chars:
-                    title = f"{rule_part}{location_info} - {message_text}"
-                else:
-                    title = f"{rule_part}{location_info} - {message_text[:remaining_chars]}..."
+                # Create title with rule, location, and message, at most
+                # TITLE_MAX_LENGTH characters with the ellipsis counted.
+                title = _finding_title(rule_part, location_info, message_text)
+                if title.endswith("..."):
                     ASH_LOGGER.debug(
                         f"Truncated title for {rule_id} from {len(message_text)} to {len(title)} characters"
                     )
@@ -669,7 +742,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 ASH_LOGGER.debug(
                     f"Error creating title for {rule_id}, using fallback: {str(e)}"
                 )
-                title = f"{rule_part} - {message_text}"[:120]
+                title = f"{rule_part} - {message_text}"[:TITLE_MAX_LENGTH]
 
             # Create finding info with error handling
             ASH_LOGGER.debug(f"Creating FindingInfo object for {rule_id}")
@@ -720,7 +793,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 ASH_LOGGER.debug(f"Added status_id for {rule_id}: {status_id}")
             if status is not None:
                 vulnerability_finding_dict["status"] = status
-                ASH_LOGGER.debug(f"Added status_id for {rule_id}: {status_id}")
+                ASH_LOGGER.debug(f"Added status for {rule_id}: {status}")
             if status_detail is not None:
                 vulnerability_finding_dict["status_detail"] = status_detail
                 ASH_LOGGER.debug(
@@ -754,6 +827,11 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     fallback_metadata = _metadata_for_project(metadata, result)
                 except Exception:  # noqa: BLE001 -- the fallback's own fallback
                     fallback_metadata = metadata
+                # Marked, so report() counts it as degraded rather than as a
+                # finding read whole, and a SIEM can tell the two apart.
+                fallback_metadata = _metadata_with_labels(
+                    fallback_metadata, DEGRADED_FINDING_LABEL
+                )
 
                 fallback_vulnerability = Vulnerability(
                     desc="Error processing vulnerability details",
@@ -840,6 +918,52 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             vulnerabilities=[],
         )
 
+    def _create_shortfall_finding(
+        self,
+        missing: int,
+        degraded: int,
+        metadata: Metadata,
+        current_time_ms: int,
+    ) -> VulnerabilityFinding:
+        """One record standing for the findings this array does not carry whole.
+
+        *missing* results were converted by neither the builder nor its fallback,
+        or failed to serialize, and are absent; *degraded* records are present
+        but built by the fallback (:data:`DEGRADED_FINDING_LABEL`). Without this
+        record the array was shorter than the scan's findings and nothing in the
+        file said so; the log named each one, and nothing downstream reads the
+        log. Shaped like a skipped-project record: ``status_id`` 99 with
+        ``status`` naming it, severity Informational, an empty
+        ``vulnerabilities`` array so no consumer counts it as a finding, and a
+        label that makes it filterable.
+        """
+        detail = (
+            f"{missing} finding(s) of this scan could not be converted to OCSF and "
+            f"are absent from this array; {degraded} record(s) were built by the "
+            "fallback path and carry less than the scan knows. The ASH log names "
+            "each one. The array is incomplete."
+        )
+        return VulnerabilityFinding(
+            activity_id=ActivityId.integer_1,
+            activity_name=ACTIVITY_NAME,
+            severity_id=SeverityId.integer_1,
+            status_id=StatusId.integer_99,
+            status="Incomplete",
+            status_detail=detail,
+            type_uid=200201,
+            class_uid=2002,
+            category_uid=2,
+            category_name="Findings",
+            time=current_time_ms,
+            metadata=_metadata_with_labels(metadata, CONVERSION_SHORTFALL_LABEL),
+            finding_info=FindingInfo(
+                uid=CONVERSION_SHORTFALL_UID,
+                title=f"{missing} finding(s) could not be converted to OCSF",
+                desc=detail,
+            ),
+            vulnerabilities=[],
+        )
+
     def _serialize_skipped_project_findings(
         self, findings: list[VulnerabilityFinding]
     ) -> list[dict[str, Any]]:
@@ -902,13 +1026,24 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             skipped_project_findings
         )
 
-        def _only_skipped_projects() -> str:
+        def _only_skipped_projects(reason: str) -> str:
             """The array when there are no findings at all.
 
             ``json.dumps([], indent=2)`` is ``"[]"``, so a scan with nothing to
             report and nothing skipped produces the exact string it always has --
             which matters, because a consumer may well be comparing against it.
+            The log line says what the array holds: in workspace mode the same
+            return carries the skipped-project records, and "returning empty
+            array" was wrong there.
             """
+            if skipped_project_data:
+                ASH_LOGGER.info(
+                    f"{reason} - the OCSF array carries "
+                    f"{len(skipped_project_data)} skipped-project record(s) and "
+                    "no findings"
+                )
+            else:
+                ASH_LOGGER.info(f"{reason} - returning empty array")
             return json.dumps(skipped_project_data, indent=2, default=str)
 
         # Create array of individual VulnerabilityFinding objects
@@ -917,21 +1052,24 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         failed_results_count = 0
         suppressed_findings_count = 0
         active_findings_count = 0
+        degraded_findings_count = 0
+        non_finding_count = 0
 
         # Check if we have SARIF data to process
         if not model.sarif:
-            ASH_LOGGER.info("No SARIF data found in model - returning empty array")
-            return _only_skipped_projects()
+            return _only_skipped_projects("No SARIF data found in model")
 
         if not model.sarif.runs:
-            ASH_LOGGER.info("No SARIF runs found in model - returning empty array")
-            return _only_skipped_projects()
+            return _only_skipped_projects("No SARIF runs found in model")
 
-        all_results = model.sarif.get_all_results()
+        # Through the record form, as the GitLab SAST report reads them: a file
+        # name decoded with surrogateescape holds a lone surrogate, which
+        # json.dumps wrote as a lone \udcXX escape that strict JSON parsers
+        # reject; in the record form it is text every parser reads.
+        all_results = recorded(model.sarif).get_all_results()
 
         if not all_results:
-            ASH_LOGGER.info("No SARIF results found in any run - returning empty array")
-            return _only_skipped_projects()
+            return _only_skipped_projects("No SARIF results found in any run")
 
         total_results_count = len(all_results)
         ASH_LOGGER.info(
@@ -945,12 +1083,29 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 f"Processing SARIF result {i + 1}/{total_results_count}: {rule_id}"
             )
 
+            if _is_not_a_finding(result):
+                # Evaluated and passed, not applicable, or informational: not
+                # a vulnerability finding, and neither a success nor a failure
+                # of the conversion.
+                non_finding_count += 1
+                total_results_count -= 1
+                ASH_LOGGER.debug(
+                    f"Result {rule_id} states no problem (kind "
+                    f"{getattr(getattr(result, 'kind', None), 'value', getattr(result, 'kind', None))}); "
+                    "not an OCSF vulnerability finding"
+                )
+                continue
+
             try:
                 # Create individual VulnerabilityFinding for this result
                 finding = self._create_vulnerability_finding(
                     result, metadata, current_time_ms, shared_id=shared_ids[i]
                 )
                 vulnerability_findings.append(finding)
+
+                labels = getattr(getattr(finding, "metadata", None), "labels", None)
+                if isinstance(labels, list) and DEGRADED_FINDING_LABEL in labels:
+                    degraded_findings_count += 1
 
                 # Track finding status for statistics
                 if (
@@ -978,12 +1133,23 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 continue
 
         processed_results_count = len(vulnerability_findings)
-
-        # Log comprehensive processing statistics
-        if total_results_count > 0:
-            success_rate = (processed_results_count / total_results_count) * 100
+        if non_finding_count:
             ASH_LOGGER.info(
-                f"OCSF report processing complete: {processed_results_count}/{total_results_count} findings created successfully ({success_rate:.1f}% success rate)"
+                f"{non_finding_count} SARIF result(s) state no problem (kind pass, "
+                "notApplicable or informational) and are not OCSF findings"
+            )
+
+        # Log comprehensive processing statistics. A degraded record is a
+        # finding whose builder failed and whose fallback kept what it could;
+        # it is counted apart from the findings read whole, and with the
+        # failures in the rate, so the rate says what the array is worth.
+        if total_results_count > 0:
+            whole_count = processed_results_count - degraded_findings_count
+            success_rate = (whole_count / total_results_count) * 100
+            ASH_LOGGER.info(
+                f"OCSF report processing complete: {whole_count}/{total_results_count} "
+                f"findings created whole, {degraded_findings_count} degraded, "
+                f"{failed_results_count} failed ({success_rate:.1f}% success rate)"
             )
             ASH_LOGGER.info(
                 f"Finding status breakdown: {active_findings_count} active, {suppressed_findings_count} suppressed"
@@ -1015,10 +1181,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
         # If no findings were created from empty input, return empty array
         if not vulnerability_findings:
-            ASH_LOGGER.info(
-                "No vulnerability findings created from SARIF results - returning empty array"
+            return _only_skipped_projects(
+                "No vulnerability findings created from SARIF results"
             )
-            return _only_skipped_projects()
 
         try:
             # Convert array of findings to JSON
@@ -1066,11 +1231,15 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 ASH_LOGGER.error(
                     "All findings failed to serialize - returning error response"
                 )
+                # Zero processed: the response adds its two counts into a total,
+                # so passing the processed count as both doubled the total and
+                # stated a 50% success rate for a run in which nothing reached
+                # the file.
                 return self._create_error_response(
                     "All findings failed to serialize",
                     current_time_ms,
+                    0,
                     processed_results_count,
-                    processed_results_count,  # All processed findings failed to serialize
                 )
 
             # Appended AFTER the all-failed check, deliberately. The error response
@@ -1081,15 +1250,26 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # every finding failed to serialise has a larger problem to report.
             findings_data.extend(skipped_project_data)
 
+            # One record for what this array does not carry whole, so the file
+            # says it is incomplete; see _create_shortfall_finding.
+            missing = failed_results_count + serialization_failures
+            if missing or degraded_findings_count:
+                findings_data.append(
+                    self._create_shortfall_finding(
+                        missing, degraded_findings_count, metadata, current_time_ms
+                    ).model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
+                )
+
             final_json = json.dumps(findings_data, indent=2, default=str)
             # Counted apart from the findings rather than folded in, for the same
             # reason the records are marked in the output: a log line that called
             # them findings would be the first place the conflation appeared.
+            shortfall_records = 1 if (missing or degraded_findings_count) else 0
             ASH_LOGGER.info(
                 f"Successfully generated OCSF report with "
-                f"{len(findings_data) - len(skipped_project_data)} findings and "
-                f"{len(skipped_project_data)} skipped-project records "
-                f"({len(final_json)} characters)"
+                f"{len(findings_data) - len(skipped_project_data) - shortfall_records} "
+                f"findings, {len(skipped_project_data)} skipped-project records and "
+                f"{shortfall_records} shortfall record ({len(final_json)} characters)"
             )
             return final_json
 
