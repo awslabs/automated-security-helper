@@ -527,7 +527,12 @@ def report_command(
         # above the resolved directory and below nothing the guard roots at, so
         # a link at either was written through; as the output directory itself
         # the given directory was refused. Guard from its parent down as well.
-        refuse_linked_output_dir(Path(output_dir).absolute().parent, output_dir_path)
+        # abspath, not Path.absolute(): pathlib's parent of a path that ends in
+        # ".." drops the ".." instead of stepping up, so "--output-dir .." would
+        # root this guard at the working directory and miss its parent's .ash.
+        refuse_linked_output_dir(
+            Path(os.path.abspath(output_dir)).parent, output_dir_path
+        )
     except OutputDirLinkRefused as refusal:
         # The message names the output directory, built from the path as given:
         # on one line.

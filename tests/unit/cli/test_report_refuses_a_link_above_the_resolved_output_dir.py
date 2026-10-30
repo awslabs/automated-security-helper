@@ -95,6 +95,26 @@ def test_a_plain_given_directory_outside_cwd_is_still_read(tmp_path):
     assert result.exit_code == 0, result.output
 
 
+def test_a_link_at_the_parents_ash_is_refused_when_the_directory_is_given_as_dot_dot(
+    tmp_path, monkeypatch
+):
+    """``--output-dir ..`` from ``<repo>/sub``: pathlib's parent of a path ending in
+    ``..`` drops the ``..`` instead of stepping up, which rooted the guard at the
+    working directory and left ``<repo>/.ash`` below neither root."""
+    real = tmp_path / "real"
+    _write_results(real / ".ash" / "ash_output")
+    repo = tmp_path / "repo"
+    sub = repo / "sub"
+    sub.mkdir(parents=True)
+    (repo / ".ash").symlink_to(real / ".ash", target_is_directory=True)
+    monkeypatch.chdir(sub)
+
+    result = _report(Path(".."))
+
+    assert result.exit_code == 3, result.output
+    assert ".ash" in result.output
+
+
 def test_a_link_at_the_given_directorys_ash_under_cwd_is_refused(tmp_path, monkeypatch):
     """The in-cwd control: the working-directory guard already examined this."""
     monkeypatch.chdir(tmp_path)
