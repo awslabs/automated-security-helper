@@ -214,6 +214,31 @@ def test_both_listings_failing_is_the_whole_listings_failure():
     assert models.profile_listing_failure is None
 
 
+def test_both_listings_failing_names_the_profile_failure_beside_the_warning(
+    caplog,
+):
+    """One warning, the foundation listing's; the profile listing's failure,
+    which the answer does not carry, is named at debug beside it rather than
+    dropped, so ash.log says both calls failed and with what."""
+    client = _client(profile_error=_refused("ThrottlingException"))
+    client.list_foundation_models.side_effect = _refused(
+        "AccessDeniedException", "ListFoundationModels"
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        get_available_models(client)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1 and "AccessDeniedException" in warnings[0], warnings
+    named = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.DEBUG
+        and "inference profile listing had failed too" in r.getMessage()
+    ]
+    assert len(named) == 1 and "ThrottlingException" in named[0], named
+
+
 # ---------------------------------------------------------------------------
 # Every page, every profile, every identifier
 # ---------------------------------------------------------------------------
@@ -242,6 +267,43 @@ def test_the_profile_listing_is_read_over_every_page():
     assert [model["modelId"] for model in models] == [ON_DEMAND, US_PROFILE], models
     calls = client.list_inference_profiles.call_args_list
     assert [call.kwargs for call in calls] == [{}, {"nextToken": "page-two"}], calls
+
+
+def test_the_pages_read_before_a_failed_page_are_kept(caplog):
+    """A throttle on page two loses page two, not page one: the model page
+    one's profile routes is listed and validates, the listing's failure is
+    still carried (a profile on the pages never read may route the rest), and
+    the warning says how far the listing got."""
+    client = _client()
+
+    def answer(**kwargs):
+        if kwargs.get("nextToken") == "page-two":
+            raise _refused("ThrottlingException")
+        return {
+            "inferenceProfileSummaries": [
+                _profile(US_PROFILE, US_PROFILE_ARN, PROFILED_ARN)
+            ],
+            "nextToken": "page-two",
+        }
+
+    client.list_inference_profiles.side_effect = answer
+
+    with caplog.at_level(logging.WARNING):
+        models = get_available_models(client)
+
+    assert [model["modelId"] for model in models] == [ON_DEMAND, US_PROFILE], models
+    assert models.profile_listing_failure == "ThrottlingException"
+    assert models.profile_listing_transient is True
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1 and "after 1 profile(s) were read" in warnings[0], (
+        warnings
+    )
+    assert validate_bedrock_model(client, US_PROFILE)[0] is True
+    # The control: a profile the unread pages would have carried is unchecked,
+    # named by the listing's failure, never "not found".
+    check = validate_bedrock_model(client, GLOBAL_PROFILE)
+    assert check[0] is False and check_listing_failure(check) == "ThrottlingException"
+    assert "not found in available models" not in check[1], check
 
 
 def test_a_model_routed_by_two_profiles_is_listed_under_each():

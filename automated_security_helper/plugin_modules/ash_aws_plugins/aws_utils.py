@@ -559,7 +559,9 @@ class ListingsOnce:
         return listing
 
 
-def _inference_profile_summaries(bedrock_client: Any) -> List[Dict[str, Any]]:
+def _inference_profile_summaries(
+    bedrock_client: Any, summaries: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
     """Every inference profile summary the control plane lists, over every page.
 
     ``ListInferenceProfiles`` pages its answer and hands back ``nextToken`` while
@@ -567,8 +569,13 @@ def _inference_profile_summaries(bedrock_client: Any) -> List[Dict[str, Any]]:
     no arguments answers it as before. A page that repeats the token it was
     asked with ends the walk, so a control plane that answers the same page
     twice cannot make this loop without end.
+
+    The summaries are appended to ``summaries`` as each page is read, so a
+    caller that hands in its own list keeps the pages read before a later page
+    raised (a throttle on page three loses page three, not pages one and two).
     """
-    summaries: List[Dict[str, Any]] = []
+    if summaries is None:
+        summaries = []
     kwargs: Dict[str, Any] = {}
     seen_tokens: Set[str] = set()
     while True:
@@ -595,6 +602,24 @@ def _listing_failure_name(error: BaseException) -> str:
     )
 
 
+def _note_profile_failure_beside(
+    profile_failure: Optional[BaseException], values: Iterable[str]
+) -> None:
+    """When both listings failed, the foundation listing's failure is the
+    warning; the profile listing's, which would otherwise be dropped, is named
+    beside it at debug so ash.log says which calls failed."""
+    if profile_failure is None:
+        return
+    ASH_LOGGER.debug(
+        text_without_values(
+            "The inference profile listing had failed too "
+            f"({_listing_failure_name(profile_failure)}): "
+            f"{error_text(profile_failure, values)}",
+            values,
+        )
+    )
+
+
 def get_available_models(
     bedrock_client: Any, values: Iterable[str] = ()
 ) -> AvailableModels:
@@ -618,24 +643,29 @@ def get_available_models(
     """
     values = list(value_tuple(values))
     profile_failure: Optional[BaseException] = None
+    profile_summaries: List[Dict[str, Any]] = []
     try:
         final_model_list = []
         model_profile_map: Dict[str, List[Dict[str, Any]]] = {}
         try:
-            for profile in _inference_profile_summaries(bedrock_client):
-                for model in [
-                    item
-                    for item in profile.get("models", [])
-                    if item.get("modelArn", None) is not None
-                ]:
-                    model_profile_map.setdefault(model["modelArn"], []).append(profile)
+            _inference_profile_summaries(bedrock_client, profile_summaries)
         except Exception as error:
             # Kept for the answer below: the foundation-model listing is still
-            # asked, and only when it answers is this failure the listing's own
-            # news. When both fail, the second failure is the one reported, as
-            # before, so one failed control plane is one warning.
+            # asked (before, this failure failed the whole call and that listing
+            # was never asked), and only when it answers is this failure the
+            # listing's own news. When both fail, the foundation listing's
+            # failure is the one warned and this one is named beside it at
+            # debug, so one failed control plane is one warning. The pages read
+            # before the failure are kept: a model one of their profiles routes
+            # is listed, and only the profiles on the pages never read are not.
             profile_failure = error
-            model_profile_map = {}
+        for profile in profile_summaries:
+            for model in [
+                item
+                for item in profile.get("models", [])
+                if item.get("modelArn", None) is not None
+            ]:
+                model_profile_map.setdefault(model["modelArn"], []).append(profile)
         ASH_LOGGER.debug("Fetching available foundation models...")
         # Get foundation models. A LEGACY model is one Bedrock still serves
         # while it is being retired; it answers Converse as an ACTIVE one does,
@@ -685,10 +715,17 @@ def get_available_models(
         # Named with the foundation listing's own words, so a reader of ash.log
         # finds one shape of line for a failed listing; the suffix says which
         # call failed and what the list still holds.
-        suffix = (
-            "; the inference profile listing failed, so models reachable only "
-            "through an inference profile are not listed"
-        )
+        if profile_summaries:
+            suffix = (
+                f"; the inference profile listing failed after {len(profile_summaries)} "
+                "profile(s) were read, so models reachable only through an "
+                "inference profile on the pages it never read are not listed"
+            )
+        else:
+            suffix = (
+                "; the inference profile listing failed, so models reachable only "
+                "through an inference profile are not listed"
+            )
         if isinstance(profile_failure, KeptListingFailure):
             # Reported when it first came: this call only reads it.
             log = ASH_LOGGER.debug
@@ -744,6 +781,7 @@ def get_available_models(
                 values,
             )
         )
+        _note_profile_failure_beside(profile_failure, values)
         return AvailableModels(
             failed=True,
             failure_code=error_code,
@@ -754,6 +792,7 @@ def get_available_models(
         ASH_LOGGER.warning(
             f"Unexpected error getting available models: {error_text(e, values)}"
         )
+        _note_profile_failure_beside(profile_failure, values)
         return AvailableModels(
             failed=True,
             reported=True,
