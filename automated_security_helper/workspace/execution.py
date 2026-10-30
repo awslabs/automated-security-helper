@@ -205,8 +205,10 @@ exposed. Its reports were written before the abandon could be seen, and another
 project may pass one of those values on a command line, so once the pool has
 given the stop a bounded grace (``_ABANDONED_STOP_GRACE_SECONDS``, measured on
 the clock from the abandon) a worker that came back puts its values into the
-workspace masking set and has its own reports masked with the other projects'
-values. A worker that has not come back is named on its project's error and in
+workspace masking set; its own results and reports were discarded on its way
+back (they contradicted the recorded verdict), so what it left under
+``projects/<key>`` is the tools' own output, which the masking leaves alone for
+every project. A worker that has not come back is named on its project's error and in
 the log, with the grace it was given: its values are not in the set, and its
 output was not masked for the others' secrets.
 
@@ -1375,6 +1377,24 @@ def _scan_one_project(
         )
         handed = True
         results = orchestrator.execute_scan(phases=list(settings.phases))
+        # The reduction runs under the arms below, not after them: it reads and
+        # writes files (_verdict_results, _write_project_results), validates the
+        # outcome's fields and takes the commit-or-abandon gate. A raise from any
+        # of that used to leave this function unguarded, so the poll recorded a
+        # plain FAILED outcome with output_written False: the reports the scan
+        # had saved were never re-masked, the secret values its findings exposed
+        # never reached the masking set, and an abandoned project's output was
+        # never discarded.
+        return _reduce_project_scan(
+            project,
+            settings,
+            results,
+            project_output=project_output,
+            output_path=output_path,
+            started=started,
+            abandoned=abandoned,
+            resolved_config=resolved_config,
+        )
     except ScanCancelled:
         # A BaseException, so the arm below does not see it. The cancelled
         # outcome is built here, where ``handed`` is known, and not in the
@@ -1411,6 +1431,13 @@ def _scan_one_project(
         ASH_LOGGER.error(
             f"Project '{project.key}': {label}: {error_text(exc)}", extra=NO_MARKUP
         )
+        # The same gate the arm below takes. A refusal raised after the output
+        # was handed (the orchestrator refused the config as it ran) left what
+        # the scan had saved in place for an abandoned project, and a poll abandon
+        # landing after this verdict could overwrite the exit-3 refusal with a
+        # timeout verdict; claimed, neither happens.
+        if handed and abandoned is not None and not _claim_commit(abandoned):
+            _discard_project_output(project_output)
         refused = _failed_outcome(
             project,
             settings,
@@ -1445,6 +1472,29 @@ def _scan_one_project(
         failed.output_written = handed
         return failed
 
+
+def _reduce_project_scan(
+    project: ProjectPlan,
+    settings: ProjectScanSettings,
+    results: Any,
+    *,
+    project_output: Path,
+    output_path: str,
+    started: float,
+    abandoned: Optional["_AbandonGate"],
+    resolved_config: Any,
+) -> _ProjectRun:
+    """Reduce a finished scan's results to the project's outcome and SARIF run.
+
+    Called by ``_scan_one_project`` from inside its try, after the orchestrator
+    returned, so that every arm there (a cancel, a config refusal, any other
+    raise) covers this half too: the commit-or-abandon claim, the discard of an
+    abandoned project's output and ``output_written`` for the masking pass are
+    decided once, in those arms, for a raise before the scan and a raise after it
+    alike. Nothing in here is new; it is the half of ``_scan_one_project`` that
+    used to run after the arms, where a raise reached the pool's own guard as a
+    plain failure.
+    """
     # Before _extract_run, so the tag is present in both the model written to
     # projects/<key>/ and the dict carried into the unified file.
     _tag_policy_origin_findings(results, project)
@@ -3255,7 +3305,22 @@ def _read_back_abandoned_workers(
         if future.done() and not future.cancelled():
             try:
                 late = future.result()
-            except Exception:  # noqa: BLE001 -- the worker already guards
+            except Exception as exc:  # noqa: BLE001 -- the worker already guards
+                # The worker guards every raise of the scan and its reduction, so
+                # a raise reaching here came from the worker itself. Said, not
+                # skipped: what this worker brought back is lost the same way a
+                # worker that never came back loses it, and the docstring's
+                # promise is that such a loss is loud.
+                note = (
+                    f"its worker raised {type(exc).__name__}: {error_text(exc)}; "
+                    "the secret values its findings exposed did not reach the "
+                    "workspace masking set and its own output was not masked for "
+                    "the other projects' secrets"
+                )
+                ASH_LOGGER.error(f"Project '{project.key}': {note}.")
+                recorded.outcome.error = (
+                    f"{recorded.outcome.error or 'abandoned'}; {note}"
+                )
                 continue
             recorded.secret_values = set(late.secret_values)
             recorded.output_written = late.output_written

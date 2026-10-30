@@ -36,7 +36,13 @@ The contract these cases pin:
   with ``output_written`` set when its output had been handed, so the masking
   pass rewrites the reports it left, and unset when the cancel came first;
 - the discard removes the two things a scan writes, the results file and the
-  report directory, and leaves everything else an operator may have kept there.
+  report directory, and leaves everything else an operator may have kept there;
+- a raise AFTER the scan returned (the reduction: the verdict's file reads, the
+  results write, the outcome's own validation) is handled by the same arms as a
+  raise inside the scan: the outcome is FAILED with ``output_written`` set, the
+  gate is claimed, and an abandoned project's saved output is discarded; a config
+  refusal raised after the output was handed takes the gate too; and the read-back
+  of an abandoned worker whose future raised says so on the project's error.
 """
 
 from __future__ import annotations
@@ -44,10 +50,12 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+from concurrent.futures import Future
 
 import pytest
 
 from automated_security_helper.core.cancellation import ScanCancelled
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.workspace import ProjectRunStatus
 from automated_security_helper.workspace import execution
 from tests.unit.workspace.test_execution import (
@@ -459,3 +467,152 @@ def test_a_project_that_finished_before_the_poll_read_the_clock_is_not_abandoned
     assert widened["count"] == 1, "the widened gap never happened; nothing measured"
     assert entry.status is ProjectRunStatus.COMPLETED, entry.error
     assert entry.finding_count == 2
+
+
+# ---------------------------------------------------------------------------
+# A raise after the scan returned is handled like a raise inside it
+# ---------------------------------------------------------------------------
+
+
+def _verdict_read_raises(monkeypatch, error: BaseException) -> None:
+    """The reduction's first file read fails: it sits before the gate is taken,
+    so both the committed and the abandoned shape reach it."""
+
+    def raising(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(execution, "_verdict_results", raising)
+
+
+class TestARaiseAfterTheScanReturned:
+    def test_the_outcome_is_failed_and_its_output_is_marked_for_masking(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the OSError left ``_scan_one_project`` unguarded and
+        the poll recorded a plain FAILED outcome with ``output_written`` False, so
+        the reports the scan saved were never re-masked."""
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(level="error", count=1),
+            "save_results": True,
+        }
+        _verdict_read_raises(monkeypatch, OSError("disk full"))
+        gate = execution._AbandonGate()
+
+        run = execution._scan_one_project(
+            plan.projects[0], _settings(tmp_path), FakeOrchestrator.create, gate
+        )
+
+        assert FakeOrchestrator.built, "no orchestrator was built: the scan never ran"
+        assert run.outcome.status is ProjectRunStatus.FAILED
+        assert "disk full" in (run.outcome.error or ""), run.outcome.error
+        assert run.output_written is True, (
+            "the output was handed before the reduction raised; the masking pass "
+            "has to cover what the scan saved"
+        )
+        assert gate.set() is False, "the worker that raised must have claimed the gate"
+        # Not an abandon: what the scan saved stays, as it does for a raise inside
+        # the scan, and the masking pass rewrites it.
+        assert (
+            tmp_path / "out" / "projects" / "api" / "ash_aggregated_results.json"
+        ).exists()
+
+    def test_an_abandoned_project_has_its_saved_output_discarded(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the abandon's discard lived only in the arms, which the
+        reduction's raise never reached, so the results file stayed beside the
+        FAILED verdict."""
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(level="error", count=1),
+            "save_results": True,
+        }
+        _verdict_read_raises(monkeypatch, OSError("disk full"))
+        project_output = tmp_path / "out" / "projects" / "api"
+        gate = execution._AbandonGate()
+        assert gate.set() is True
+
+        run = execution._scan_one_project(
+            plan.projects[0], _settings(tmp_path), FakeOrchestrator.create, gate
+        )
+
+        assert FakeOrchestrator.built, "no orchestrator was built: the scan never ran"
+        assert run.outcome.status is ProjectRunStatus.FAILED
+        assert "disk full" in (run.outcome.error or ""), run.outcome.error
+        assert not (project_output / "ash_aggregated_results.json").exists(), (
+            "the results file the scan saved survived beside the FAILED verdict"
+        )
+        assert not (project_output / "reports").exists()
+        # The tools' own output is not the scan's to discard.
+        assert (project_output / "scanners" / "bandit" / "raw.json").exists()
+
+    def test_a_config_refusal_after_the_output_was_handed_takes_the_gate(
+        self, tmp_path
+    ):
+        """Red at the base: the refusal arm set ``output_written`` and claimed
+        nothing, so an abandoned project kept what the scan saved."""
+        _, plan = _make_workspace(tmp_path, ("refused", "MEDIUM"))
+        _SavesThenRaises.error = ASHConfigValidationError(
+            "a scanner section is invalid"
+        )
+        project_output = tmp_path / "out" / "projects" / "refused"
+        gate = execution._AbandonGate()
+        assert gate.set() is True
+
+        run = execution._scan_one_project(
+            plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
+        )
+
+        assert run.outcome.status is ProjectRunStatus.FAILED
+        assert run.outcome.invalid_config is True
+        assert "a scanner section is invalid" in (run.outcome.error or "")
+        assert not (project_output / "ash_aggregated_results.json").exists()
+        assert not (project_output / "reports").exists()
+
+    def test_a_config_refusal_with_the_gate_untaken_claims_it(self, tmp_path):
+        """Must-not-flag control: the refusal's exit-3 verdict stands; a poll
+        abandon landing afterwards finds the decision taken, and the output the
+        scan saved stays for the masking pass."""
+        _, plan = _make_workspace(tmp_path, ("refused", "MEDIUM"))
+        _SavesThenRaises.error = ASHConfigValidationError(
+            "a scanner section is invalid"
+        )
+        project_output = tmp_path / "out" / "projects" / "refused"
+        gate = execution._AbandonGate()
+
+        run = execution._scan_one_project(
+            plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
+        )
+
+        assert run.outcome.invalid_config is True
+        assert run.output_written is True
+        assert gate.set() is False, "the refused worker must have claimed the gate"
+        assert (project_output / "ash_aggregated_results.json").exists()
+
+
+def test_the_read_back_names_a_worker_whose_future_raised(tmp_path, caplog):
+    """Red at the base: the read-back ``continue``d past a raised future and the
+    project's error said nothing about what was lost."""
+    caplog.set_level(logging.ERROR, logger="ash")
+    _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"))
+    project = plan.projects[0]
+    recorded = execution._failed_outcome(project, _settings(tmp_path), "abandoned")
+    future: Future = Future()
+    future.set_exception(RuntimeError("the worker fell over"))
+
+    execution._read_back_abandoned_workers(
+        {future: project}, {project.key: recorded}, {future: 0.0}
+    )
+
+    error = recorded.outcome.error or ""
+    assert error.startswith("abandoned; its worker raised RuntimeError"), error
+    assert "the worker fell over" in error
+    assert "did not reach the workspace masking set" in error
+    assert any(
+        "its worker raised RuntimeError" in record.getMessage()
+        for record in caplog.records
+    )
+    # Nothing a raised future could have carried is read from it.
+    assert recorded.secret_values == set()
+    assert recorded.output_written is False

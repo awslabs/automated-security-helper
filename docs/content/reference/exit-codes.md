@@ -111,7 +111,7 @@ ASH stops at the first of these that applies:
 1. A usage error in the command line itself, such as an unknown option, an invalid value, or a missing required option: 5.
 2. A check before scanning: the shard and workspace options, workspace resolution, the source directory, an output directory that is a link or is reached through one, then an output directory that is not a directory, cannot be entered or written, or has a file on the way to it, `--use-existing`, `--output-formats`, an output directory that cannot be created for another reason, such as a parent directory that cannot be written, the config, then the scanner selection, which ASH checks when the scan phase starts. Each exits as the table above says: 3, 4 or 5, except `--use-existing` with no results to use, which exits 1 as the table says, and which is checked before `--output-formats` and the config, so a command that also carries one of those mistakes reports the missing results first.
 3. With `fail_on_incomplete_scanners` on: a selected scanner ERROR, MISSING, or with lost targets; then no scanner ran; then a failed converter: 1.
-4. A rule could not be evaluated: 1.
+4. A rule could not be evaluated, or a scanner tool ASH could not stop: 1.
 5. A stale content database under `content_db_staleness: fail`: 1.
 6. `fail_on_findings` off: 0.
 7. Actionable findings, counted against each scanner's own threshold, and at least one unsuppressed finding at or above `--min-severity`: 2.
