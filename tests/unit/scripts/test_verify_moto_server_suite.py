@@ -82,3 +82,31 @@ def test_failures_are_reported(moto):
     totals = _clean_totals(len(names))
     totals["failures"] = 2
     assert any("2 failure(s)" in p for p in moto.evaluate_report(totals, names))
+
+
+def test_a_module_is_matched_as_a_whole_name_not_a_prefix(moto):
+    """At the base, `module in name` let test_..._moto_server_v2 satisfy the S3 floor."""
+    names = _healthy_names(moto)
+    s3 = "test_deploy_s3_sync_moto_server"
+    renamed = [n.replace(f".{s3}.", f".{s3}_v2.") for n in names if f".{s3}." in n]
+    others = [n for n in names if f".{s3}." not in n]
+    problems = moto.evaluate_report(_clean_totals(len(names)), others + renamed)
+    assert any(f"no test ran from {s3}." in p for p in problems)
+
+
+def test_a_skip_in_a_moto_module_is_a_problem(moto):
+    names = _healthy_names(moto)
+    totals = _clean_totals(len(names))
+    totals["skipped"] = 1
+    problems = moto.evaluate_report(totals, names, skipped=[names[0]])
+    assert any("skipped in the moto-server modules" in p for p in problems)
+    assert any(names[0] in p for p in problems)
+
+
+def test_a_skip_in_an_unrelated_deploy_module_is_not_a_problem(moto):
+    """At the base, main counted every skip in tests/unit/deploy against the gate."""
+    names = _healthy_names(moto)
+    unrelated = _names("test_deploy_gate_claims", 1)
+    totals = _clean_totals(len(names) + 1)
+    totals["skipped"] = 1
+    assert moto.evaluate_report(totals, names + unrelated, skipped=unrelated) == []

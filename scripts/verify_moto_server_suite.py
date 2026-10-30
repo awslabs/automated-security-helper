@@ -86,11 +86,25 @@ PARAMETRIZED_MODULE = "test_deploy_s3_sync_moto_server"
 REQUIRED_PARAMS = ("cdk-template", "terraform")
 
 
-def evaluate_report(totals: dict[str, int], names: list[str]) -> list[str]:
+def module_of(name: str) -> set[str]:
+    """The dotted components of a ``classname::name`` test id's classname.
+
+    A module is matched as a whole component, not as a substring: a module
+    renamed to ``test_deploy_s3_sync_moto_server_v2`` must not keep satisfying the
+    floor of ``test_deploy_s3_sync_moto_server``.
+    """
+    classname = name.split("::", 1)[0]
+    return set(classname.split("."))
+
+
+def evaluate_report(
+    totals: dict[str, int], names: list[str], skipped: list[str] | None = None
+) -> list[str]:
     """The problems a parsed JUnit report shows, as strings; empty means clean.
 
-    ``names`` are ``classname::name`` per test case, so a module's tests are the
-    names that contain its module name.
+    ``names`` are ``classname::name`` per test case; ``skipped`` are the names of
+    the cases the report marks skipped. A module's tests are the names whose
+    classname carries the module as one dotted component.
     """
     problems: list[str] = []
 
@@ -101,9 +115,24 @@ def evaluate_report(totals: dict[str, int], names: list[str]) -> list[str]:
         )
 
     by_module = {
-        module: [name for name in names if module in name]
+        module: [name for name in names if module in module_of(name)]
         for module in REQUIRED_MODULES
     }
+
+    # The zero-skip rule guards the moto-server modules, whose Windows-only guards
+    # must not widen on Linux. A skip in one of the other modules under
+    # tests/unit/deploy is that module's business and does not make this gate red.
+    moto_skipped = [
+        name
+        for name in (skipped or [])
+        if any(module in module_of(name) for module in REQUIRED_MODULES)
+    ]
+    if moto_skipped:
+        problems.append(
+            f"{len(moto_skipped)} test(s) skipped in the moto-server modules. This "
+            f"gate runs on Linux, where nothing in those modules is expected to "
+            f"skip: {moto_skipped}"
+        )
     moto_total = sum(len(module_names) for module_names in by_module.values())
     if moto_total < MIN_TESTS:
         problems.append(
@@ -204,18 +233,12 @@ def main() -> int:
     cases = [c for suite in suites for c in suite.iter("testcase")]
     names = [f"{c.get('classname', '')}::{c.get('name', '')}" for c in cases]
 
-    problems = evaluate_report(totals, names)
-
-    if totals["skipped"]:
-        skipped = [
-            f"{c.get('classname')}::{c.get('name')}"
-            for c in cases
-            if c.find("skipped") is not None
-        ]
-        problems.append(
-            f"{totals['skipped']} test(s) skipped. This gate runs on Linux, where "
-            f"nothing in this suite is expected to skip: {skipped}"
-        )
+    skipped = [
+        f"{c.get('classname', '')}::{c.get('name', '')}"
+        for c in cases
+        if c.find("skipped") is not None
+    ]
+    problems = evaluate_report(totals, names, skipped)
 
     print(
         f"\nmoto server-mode suite: {totals['tests']} tests, "
