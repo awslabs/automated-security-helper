@@ -154,9 +154,16 @@ OFF_HOST_PLUGIN_PACKAGES: Tuple[str, ...] = tuple(OFF_HOST_PLUGIN_SENDS)
 
 
 def off_host_package(name: str) -> Optional[str]:
-    """The package of ``OFF_HOST_PLUGIN_PACKAGES`` that ``name`` is or is inside, or None."""
+    """The package of ``OFF_HOST_PLUGIN_PACKAGES`` that ``name`` is or is inside, or None.
+
+    Compared without regard to case: an import on a case-insensitive file system
+    with ``PYTHONCASEOK`` set loads the package's files under a differently
+    cased module name, and that name is still the off-host package.
+    """
+    folded = name.casefold()
     for package in OFF_HOST_PLUGIN_PACKAGES:
-        if name == package or name.startswith(package + "."):
+        lowered = package.casefold()
+        if folded == lowered or folded.startswith(lowered + "."):
             return package
     return None
 
@@ -303,7 +310,16 @@ def _own_package_dir() -> Optional[Path]:
 
 
 def _spec_locations(spec: ModuleSpec) -> List[Path]:
-    locations = [Path(p) for p in (spec.submodule_search_locations or [])]
+    locations: List[Path] = []
+    for entry in spec.submodule_search_locations or []:
+        location = Path(entry)
+        # A relative entry that names nothing on disk is a path hook's marker
+        # string (an editable install's finder uses one), not a place a module
+        # file lives; judged as a path it would be read against the working
+        # directory.
+        if not location.is_absolute() and not location.exists():
+            continue
+        locations.append(location)
     if spec.has_location and spec.origin:
         locations.append(Path(spec.origin))
     return locations
@@ -315,13 +331,24 @@ def _spec_without_importing(
     """The spec for ``name``, found without running any package's ``__init__``.
 
     A top-level name, or one whose parent is already imported, goes through
-    ``importlib.util.find_spec``, which then imports nothing. Otherwise the
+    ``importlib.util.find_spec``, which then imports nothing; a child of an
+    imported parent that is a plain module, not a package, has no spec. Otherwise the
     parent's spec gives the directories to search, and :func:`_find_spec_in` looks there
     directly. A package that adds to its ``__path__`` when imported, or a submodule
     only a custom finder can see, is then reported as not importable, which
     refuses it.
     """
     parent_name = name.rpartition(".")[0]
+    if (
+        parent_name in sys.modules
+        and name not in sys.modules
+        and not hasattr(sys.modules[parent_name], "__path__")
+    ):
+        # An imported parent that is a plain module has no ``__path__``, so
+        # ``find_spec`` would raise for the child. Answer as the not-yet-imported
+        # plain parent below does, so a name is judged the same whether or not
+        # the process has imported its parent.
+        return None
     if not parent_name or parent_name in sys.modules:
         return importlib.util.find_spec(name)
     if parent is None or not parent.submodule_search_locations:
@@ -365,8 +392,9 @@ def _is_ash_own_module(name: str) -> bool:
     Such a module is ASH's own code, which is already running, so even the
     fail-closed client refusal keeps it -- the exemption the module docstring
     states, located the way ``refusal_reason`` locates specs (importing
-    nothing). An unimportable name, or one with any location outside the
-    package, is not ASH's own.
+    nothing). An unimportable name, one with any location outside the
+    package, and one whose spec has no location at some level (a built-in or
+    frozen module, or one a finder serves without a file) is not ASH's own.
     """
     own = _own_package_dir()
     if own is None:
@@ -377,11 +405,12 @@ def _is_ash_own_module(name: str) -> bool:
         prefix = ".".join(parts[:depth])
         try:
             spec = _spec_without_importing(prefix, spec)
-        except (ImportError, ValueError):
+        except Exception:  # noqa: BLE001 -- a finder that fails has not located it
             spec = None
         if spec is None:
             return False
-        if not all(is_within(location, own) for location in _spec_locations(spec)):
+        locations = _spec_locations(spec)
+        if not locations or not all(is_within(location, own) for location in locations):
             return False
     return True
 
@@ -440,6 +469,11 @@ def refusal_reason(
     """
     from automated_security_helper.config.sandbox_grants import _named_within
 
+    # The scan's loader drops the import system's caches before it imports
+    # (plugins.loader), so a long-lived process (the MCP server) finds a module
+    # installed since the process started. This lookup does the same, or it
+    # would refuse a module the scan then imports.
+    importlib.invalidate_caches()
     own = _own_package_dir()
     parts = name.split(".")
     spec: Optional[ModuleSpec] = None
@@ -447,11 +481,20 @@ def refusal_reason(
         prefix = ".".join(parts[:depth])
         try:
             spec = _spec_without_importing(prefix, spec)
-        except (ImportError, ValueError):
+        except Exception:  # noqa: BLE001 -- a finder that fails has not located it
             spec = None
         if spec is None:
             return "it is not importable from the installed environment"
-        for location in _spec_locations(spec):
+        locations = _spec_locations(spec)
+        if not locations:
+            # Nothing to judge: a module with no file location (built in,
+            # frozen, or served by a finder) cannot be shown to sit outside
+            # the scanned tree, so it is refused rather than kept unjudged.
+            return (
+                "it has no file location to check, and a module that cannot "
+                "be placed is refused"
+            )
+        for location in locations:
             if (
                 own is not None
                 and is_within(location, own)
@@ -481,6 +524,11 @@ def refusal_reason(
                     )
                 if root_judged:
                     return "it resolves inside the given root's trees"
+                if any_checkout:
+                    # No root at all: the decision came from a mark the host set
+                    # or from a file a client delivered, and the load declared
+                    # it has no scanned tree to name.
+                    return "it resolves inside a tree the scanned party controls"
                 return "it resolves inside the scanned tree"
             if any_checkout:
                 judgment = checkout_judgment(location)
@@ -721,12 +769,18 @@ def confine_plugin_modules(
         # The off-host packages are ASH's own modules too, but the own-module
         # exemption never covers them: a client's config may not add a package
         # that sends findings off the host unless the trusted list names it,
-        # the same exception the judged path applies below.
+        # the same exception the judged path applies below. A name outside the
+        # plugin namespace is refused without being located: locating it asks
+        # every meta-path finder about a name the scan never imports.
         outside = [
             f"'{shown.get(name, name)}'"
             for name in split_plugin_modules(getattr(config, "ash_plugin_modules", []))
             if name not in trusted_names
-            and (not _is_ash_own_module(name) or off_host_package(name) is not None)
+            and (
+                not _is_allowed_module_path(name)
+                or not _is_ash_own_module(name)
+                or off_host_package(name) is not None
+            )
         ]
         if outside:
             from automated_security_helper.core.exceptions import (
@@ -1047,6 +1101,16 @@ def _names_a_plugin_module_entry(reference: Any) -> bool:
     )
 
 
+def _referenced_module_entries(owner: Any) -> FrozenSet[int]:
+    """The ``ash_plugin_modules`` indices that ``owner``'s reference lists name."""
+    return frozenset(
+        tuple(reference.path)[1]
+        for attribute in _MODULE_REFERENCE_LISTS
+        for reference in (getattr(owner, attribute, None) or ())
+        if _names_a_plugin_module_entry(reference)
+    )
+
+
 def reindex_plugin_module_references(
     config: "AshConfig", entries: Sequence[str], kept: Sequence[str]
 ) -> None:
@@ -1086,6 +1150,7 @@ def reindex_plugin_module_references(
     text in the piece's place.
     """
     new_index = {name: i for i, name in enumerate(kept)}
+    referenced = _referenced_module_entries(config)
     seen: set[str] = set()
     new_indices: Dict[int, List[int]] = {}
     respelled: Dict[int, bool] = {}
@@ -1101,7 +1166,12 @@ def reindex_plugin_module_references(
         for piece in pieces:
             if piece in seen:
                 continue
-            seen.add(piece)
+            # Only an entry that carries a reference claims its piece: a plain
+            # entry that repeats the name earlier must not take the place of
+            # the environment-read entry that follows it, or that entry's
+            # reference is dropped and the name is shown in clear.
+            if old in referenced:
+                seen.add(piece)
             if piece in new_index:
                 mine.append(new_index[piece])
         new_indices[old] = mine
@@ -1397,7 +1467,10 @@ def replace_plugin_module_list(
 
     The old list is read from the config itself, so the index map cannot be
     derived from an edited list. An index outside the current list or named
-    twice raises ValueError before the list is assigned.
+    twice raises ValueError before the list is assigned. A ValueError from the
+    move (its check that each moved reference still describes the entry at its
+    new position) puts the previous list back before it propagates, so the
+    list and the references are left as they were.
     ``move_plugin_module_references`` stays public as the lower-level function
     this one calls with the map it builds.
     """
@@ -1415,10 +1488,15 @@ def replace_plugin_module_list(
                 "index would collapse to one map row with no error"
             )
         stated.add(index)
+    previous = config.ash_plugin_modules
     config.ash_plugin_modules = [old[i] for i in kept_old_indices] + list(added)
-    move_plugin_module_references(
-        config, {old_index: new for new, old_index in enumerate(kept_old_indices)}
-    )
+    try:
+        move_plugin_module_references(
+            config, {old_index: new for new, old_index in enumerate(kept_old_indices)}
+        )
+    except ValueError:
+        config.ash_plugin_modules = previous
+        raise
 
 
 def refuse_plugin_modules_a_scan_refuses(
@@ -1589,6 +1667,30 @@ def _off_host_bases(cls: type) -> Dict[str, type]:
     return bases
 
 
+def _off_host_classes_trusted(cls: type, trusted: Sequence[str]) -> bool:
+    """Whether every off-host class of ``cls.__mro__`` is covered by ``trusted``.
+
+    An off-host class is covered when a trusted name is its defining module or a
+    package around it, or when it is a base of a covered class (a trusted
+    module's class carries what it derives from). Every such class has to be
+    covered, not only the first one per package: a class that mixes in a second
+    class from another module of the same package sends what that class sends.
+    """
+    mro = getattr(cls, "__mro__", (cls,))
+    off_host = [
+        base
+        for base in mro
+        if off_host_package(getattr(base, "__module__", "") or "") is not None
+    ]
+    covered = {
+        id(inherited)
+        for base in off_host
+        if any(_within(getattr(base, "__module__", "") or "", name) for name in trusted)
+        for inherited in getattr(base, "__mro__", (base,))
+    }
+    return all(id(base) in covered for base in off_host)
+
+
 def drop_untrusted_off_host_plugins(
     config: Optional["AshConfig"],
     plugins: Mapping[str, Sequence[type]],
@@ -1601,9 +1703,10 @@ def drop_untrusted_off_host_plugins(
     config's ``_trusted_plugin_modules`` and ``operator_modules``) is that module
     or a package around it, or is an imported module that lists the class in its
     ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_CONVERTERS``. A class defined
-    elsewhere that derives from such a class (``_off_host_bases``) is kept under
-    the same terms, or when a trusted name is the base's defining module or a
-    package around it, for the base of each off-host package it derives from.
+    elsewhere that derives from such a class is kept under the same terms, or
+    when a trusted name is the defining module, or a package around it, of
+    every off-host class it derives from (``_off_host_classes_trusted``; a base
+    of a trusted module's class is covered with it).
     Every other class is kept. For a config ``resolve_config`` recorded no trusted
     list on, every file it was built from is the operator's, so its own
     ``ash_plugin_modules`` are the trusted names. The classes a scan is offered
@@ -1648,10 +1751,7 @@ def drop_untrusted_off_host_plugins(
                 not bases
                 or any(_within(module, name) for name in trusted)
                 or any(cls is entry for entry in listed)
-                or all(
-                    any(_within(base.__module__, name) for name in trusted)
-                    for base in bases.values()
-                )
+                or _off_host_classes_trusted(cls, trusted)
             ):
                 kept.append(cls)
                 continue
