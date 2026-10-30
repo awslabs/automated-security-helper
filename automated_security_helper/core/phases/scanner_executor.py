@@ -1778,30 +1778,36 @@ class ScannerExecutor:
                                     # and the row rolled up PASSED.
                                     counted = ScannerSeverityCount()
                                     for finding in raw_results["findings"]:
-                                        # A finding whose severity ASH cannot place
-                                        # (the key is missing, the finding is not a
-                                        # mapping, the value is not text, or it is a
-                                        # name increment does not know) is read at
+                                        # Two defaults, on purpose. A finding that
+                                        # STATES NO severity (the key is missing, or
+                                        # the finding is not a mapping) is read at
                                         # the level SARIF gives a result that states
                                         # none, warning, so it is MEDIUM here as a
-                                        # level-less SARIF result is above. One rule
-                                        # for every such finding: an unknown name
-                                        # used to count as info, below the default
-                                        # gate, so a tool's own severity vocabulary
-                                        # ("blocker", "P1") graded lower than a
-                                        # finding that said nothing at all. Counted
-                                        # in finding_count alone, as before this
-                                        # branch, such a finding never reached the
-                                        # severity gate and could not fail it.
+                                        # level-less SARIF result is above; counted
+                                        # in finding_count alone, as before, such a
+                                        # finding never reached the gate. A finding
+                                        # that STATES a severity ASH cannot place (a
+                                        # name increment does not know, or a value
+                                        # that is not text) counts as info: that is
+                                        # the contract the lifecycle tests pin
+                                        # (test_findings_list_increments_counts_per_
+                                        # severity, "unknown severities fall back to
+                                        # info"), and a tool's own vocabulary is a
+                                        # claim this gate cannot rank, so it is kept
+                                        # at the lowest level rather than promoted
+                                        # above a finding that said nothing.
+                                        # increment raises ValueError for both.
                                         severity = (
                                             finding.get("severity")
                                             if isinstance(finding, dict)
                                             else None
                                         )
+                                        if severity is None:
+                                            severity = "medium"
                                         try:
                                             counted.increment(severity)
                                         except ValueError:
-                                            counted.increment("medium")
+                                            counted.increment("info")
                                     container.severity_counts = counted
                                     container.finding_count = len(
                                         raw_results["findings"]
