@@ -6,10 +6,14 @@
 ``test_convert_phase_rows_are_keyed_redacted_and_robust`` pinned the success
 row's ``dependencies_satisfied=True``: a converter in the loop survived
 ``filter_enabled_plugins``, whose own check admitted it. The exception handler's
-row still read the instance's attribute, the first dependency check's answer, so
-a converter whose first check said False, whose filter re-check said True, and
-whose ``convert()`` then raised was recorded with a failure and "tool absent" at
-once. The test here is red on the tree that carried it.
+row still read the instance's attribute, so a converter the filter admitted and
+whose ``convert()`` then raised could be recorded with a failure and "tool absent"
+at once. The test here is red on the tree that carried it.
+
+The phase now checks each converter's dependencies once, so the fixture's one
+check passes and its ``convert()`` raises; a converter whose check fails is
+recorded as dropped for its tool and never runs, which is the sibling module's
+case, not this one's.
 
 The fixtures mirror the sibling module's.
 """
@@ -62,23 +66,20 @@ def _run(plugin_context: PluginContext, plugins):
     return phase.execute(aggregated_results=agg)
 
 
-class _FlakyRaisingConfig(ConverterPluginConfigBase):
-    name: Literal["flaky-raising-converter"] = "flaky-raising-converter"
+class _AdmittedRaisingConfig(ConverterPluginConfigBase):
+    name: Literal["admitted-raising-converter"] = "admitted-raising-converter"
 
 
-class _FlakyRaisingConverter(ConverterPluginBase[_FlakyRaisingConfig]):
-    """First dependency check False, the filter's re-check True, convert raises."""
-
-    checks: int = 0
+class _AdmittedRaisingConverter(ConverterPluginBase[_AdmittedRaisingConfig]):
+    """Its one dependency check passes; convert raises."""
 
     def model_post_init(self, context):
         if self.config is None:
-            self.config = _FlakyRaisingConfig()
+            self.config = _AdmittedRaisingConfig()
         return super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:
-        type(self).checks += 1
-        return type(self).checks > 1
+        return True
 
     def convert(self, target: Path | str | None = None) -> List[Path]:
         raise RuntimeError("admitted, ran, and failed")
@@ -88,15 +89,14 @@ class TestTheFailureRowSaysWhatTheFilterDecided:
     def test_a_converter_the_filter_admitted_is_recorded_as_present(
         self, plugin_context
     ):
-        _FlakyRaisingConverter.checks = 0
+        results = _run(plugin_context, [_AdmittedRaisingConverter])
 
-        results = _run(plugin_context, [_FlakyRaisingConverter])
-
-        row = results.converter_results["flaky-raising-converter"]
+        row = results.converter_results["admitted-raising-converter"]
         assert row.failure is not None
         assert "RuntimeError" in row.failure
-        # Red at the base: the handler read the instance's attribute, the first
-        # check's False, and the report said "tool absent" of a converter that
-        # the filter admitted and that ran.
+        # Red at the base: the handler read the instance's attribute, and the
+        # report could say "tool absent" of a converter that the filter admitted
+        # and that ran. The row says what the filter decided: present, and failed.
         assert row.dependencies_satisfied is True
+        assert row.dependency_unavailable_reason is None
         assert row.excluded is False
