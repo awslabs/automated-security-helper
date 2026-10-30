@@ -310,7 +310,11 @@ def test_stop_after_interrupt_observes_before_it_signals_and_reaps_with_a_bound(
     child.send_signal = send_signal
     with pytest.raises(KeyboardInterrupt):
         spu.stop_after_interrupt(child, grace=0.01, child_got_the_interrupt=False)
-    assert order == ["observe", "sigint", "kill"]
+    # The exit is observed before the SIGINT is sent, and observed again when
+    # the second Ctrl-C arrives, before the kill: the interrupt arm's own
+    # observe-discard-reap step (stop_after_interrupt's documented order). The
+    # first shape of this assertion named three steps and was red by reading.
+    assert order == ["observe", "sigint", "observe", "kill"]
     assert ("wait", spu._REAP_SECONDS) in child.calls
     assert ("wait", None) not in child.calls
 
@@ -591,6 +595,9 @@ def test_a_failure_of_the_resolution_itself_is_a_spawn_failure(monkeypatch):
     response = spu.run_command_with_output_handling([sys.executable, "--version"])
     assert response["spawn_failed"] is True
     assert len(calls) == 2, "the resolution stand-in was not reached"
+    # The failure reported is the resolution's own, carried as the error text.
+    assert "the working directory is gone" in result.error
+    assert "the working directory is gone" in response["error"]
 
 
 def test_bytes_mode_passes_no_encoding_and_no_error_handler(monkeypatch):
