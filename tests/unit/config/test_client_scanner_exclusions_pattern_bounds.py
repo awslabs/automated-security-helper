@@ -14,15 +14,19 @@ running at the deadline fails the pass with a ScannerError that names the option
 the thread itself cannot be stopped and is left running until the process exits.
 A literal entry cannot backtrack and is searched inline, with no thread.
 
-The slow pattern is polynomial, not exponential: ``a*a*a*b`` searched in a run of
-300 ``a`` characters backtracks for a few tenths of a second (measured 0.4 s) and
-then finishes, so the thread a test leaves behind ends on its own.
+The overrunning search is a stand-in whose ``search`` sleeps for a known time
+(``_SlowSearch``), put in place of the compiled pattern through
+``_checkov_pattern``: a real backtracking pattern takes an interpreter-dependent
+time (``a*a*a*b`` over 300 ``a`` characters read 0.41 s on Python 3.9 and under the
+20 ms bound on Python 3.12), so it cannot pin the bound. The stand-in's thread
+ends on its own half a second later.
 """
 
 from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any, Optional
 
 import pytest
 
@@ -39,15 +43,30 @@ from automated_security_helper.models.core import IgnorePathWithReason
 
 pytestmark = pytest.mark.unit
 
-SLOW_PATTERN = "a*a*a*b"
-#: A path whose last component is a run of 300 ``a``: the pattern's three
-#: stars backtrack over it for a few tenths of a second before the search fails.
-SLOW_RELATIVE = "a" * 300
-SLOW_ABSOLUTE = "/scan/" + SLOW_RELATIVE
-#: The same shape, short enough to search inline in a few milliseconds.
+#: A backtracking pattern that matches nothing in a run of ``a``; searched inline
+#: over 120 characters in a few milliseconds on any interpreter.
+STAR_PATTERN = "a*a*a*b"
 QUICK_RELATIVE = "a" * 120
 QUICK_ABSOLUTE = "/scan/" + QUICK_RELATIVE
+#: A skip path with regular-expression syntax, so the bounded path is taken.
+REGEX_PATTERN = "vend.r"
 TINY_TIMEOUT = 0.02
+SLOW_SECONDS = 0.5
+
+
+class _SlowSearch:
+    """Stands in for a compiled pattern whose search overruns the bound."""
+
+    def search(self, text: str) -> Optional[Any]:
+        time.sleep(SLOW_SECONDS)
+        return None
+
+
+def _searches_slowly(monkeypatch) -> None:
+    """Every compiled skip path becomes the overrunning stand-in."""
+    monkeypatch.setattr(
+        exclusions_module, "_checkov_pattern", lambda pattern: _SlowSearch()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -78,15 +97,18 @@ def test_evaluated_within_fails_at_the_deadline_naming_the_source():
 # ---------------------------------------------------------------------------
 
 
-def test_a_slow_skip_path_is_stopped_at_the_bound():
+def test_a_slow_skip_path_is_stopped_at_the_bound(monkeypatch):
+    _searches_slowly(monkeypatch)
     started = time.monotonic()
 
     with pytest.raises(ScannerError) as raised:
-        checkov_skips(SLOW_PATTERN, SLOW_ABSOLUTE, SLOW_RELATIVE, timeout=TINY_TIMEOUT)
+        checkov_skips(
+            REGEX_PATTERN, "/scan/vendor/x.tf", "vendor/x.tf", timeout=TINY_TIMEOUT
+        )
 
-    assert time.monotonic() - started < 2.0
+    assert time.monotonic() - started < SLOW_SECONDS
     assert "scanners.checkov.options.skip_path" in str(raised.value)
-    assert SLOW_PATTERN not in str(raised.value)
+    assert REGEX_PATTERN not in str(raised.value)
 
 
 def test_a_fast_skip_path_answers_under_the_bound():
@@ -105,10 +127,10 @@ def test_a_fast_skip_path_answers_under_the_bound():
 def test_without_a_bound_the_search_runs_as_before():
     """``timeout=None`` is the scanner left unbounded (``scan_timeout: null``)."""
     assert (
-        checkov_skips(SLOW_PATTERN, QUICK_ABSOLUTE, QUICK_RELATIVE, timeout=None)
+        checkov_skips(STAR_PATTERN, QUICK_ABSOLUTE, QUICK_RELATIVE, timeout=None)
         is False
     )
-    assert checkov_skips(SLOW_PATTERN, QUICK_ABSOLUTE, QUICK_RELATIVE) is False
+    assert checkov_skips(STAR_PATTERN, QUICK_ABSOLUTE, QUICK_RELATIVE) is False
 
 
 def test_a_literal_skip_path_is_searched_inline(monkeypatch):
@@ -132,18 +154,19 @@ def test_a_literal_skip_path_is_searched_inline(monkeypatch):
     assert len(bounded) == 1
 
 
-def test_an_exclusion_carries_the_bound_into_hides():
+def test_an_exclusion_carries_the_bound_into_hides(monkeypatch):
+    _searches_slowly(monkeypatch)
     entry = ClientScannerExclusion(
         scanner="checkov",
         option="skip_path",
         kind="checkov",
-        pattern=SLOW_PATTERN,
+        pattern=REGEX_PATTERN,
         reason="r",
         scan_timeout=TINY_TIMEOUT,
     )
 
     with pytest.raises(ScannerError):
-        entry.hides(relative=SLOW_RELATIVE, absolute=SLOW_ABSOLUTE, rule_id=None)
+        entry.hides(relative="vendor/x.tf", absolute="/scan/vendor/x.tf", rule_id=None)
 
 
 def test_an_exclusion_without_a_bound_searches_as_before():
@@ -151,7 +174,7 @@ def test_an_exclusion_without_a_bound_searches_as_before():
         scanner="checkov",
         option="skip_path",
         kind="checkov",
-        pattern=SLOW_PATTERN,
+        pattern=STAR_PATTERN,
         reason="r",
     )
 

@@ -13,9 +13,11 @@ limit never started. The filter now runs in a thread bounded by the scanner's
 with a ScannerError that names the filter; the thread itself cannot be stopped
 and is left running until the process exits.
 
-The slow pattern is polynomial, not exponential: ``a*a*a*b`` searched in a run
-of 300 ``a`` characters backtracks for a few tenths of a second (measured 0.4 s)
-and then finishes, so the thread a test leaves behind ends on its own.
+The overrunning filter is a stand-in pattern whose ``search`` sleeps for a known
+time (``_SlowSearch``): a real backtracking pattern takes an interpreter-dependent
+time (``a*a*a*b`` over 300 ``a`` characters read 0.41 s on Python 3.9 and under
+the 20 ms bound on Python 3.12), so it cannot pin the bound. The stand-in's thread
+ends on its own half a second later.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
+from typing import Any, Optional
 
 import pytest
 
@@ -38,27 +41,31 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
-SLOW_PATTERN = "a*a*a*b"
-#: A file name that is a run of 300 ``a``: the pattern's three stars backtrack
-#: over it for a few tenths of a second before the search fails.
-SLOW_NAME = "a" * 300
 TINY_TIMEOUT = 0.02
+SLOW_SECONDS = 0.5
+
+
+class _SlowSearch:
+    """Stands in for a compiled pattern whose search overruns the bound."""
+
+    def search(self, text: str) -> Optional[Any]:
+        time.sleep(SLOW_SECONDS)
+        return None
 
 
 def test_a_slow_pattern_fails_the_filter_at_the_bound(tmp_path):
     root = tmp_path / "repo"
-    files = [str(root / SLOW_NAME), str(root / "src" / "app.py")]
+    files = [str(root / "settings.py"), str(root / "src" / "app.py")]
     started = time.monotonic()
 
     with pytest.raises(ScannerError) as raised:
         DetectSecretsScanner._apply_file_exclusions(
-            files, [re.compile(SLOW_PATTERN)], root, timeout=TINY_TIMEOUT
+            files, [_SlowSearch()], root, timeout=TINY_TIMEOUT
         )
 
-    assert time.monotonic() - started < 2.0
+    assert time.monotonic() - started < SLOW_SECONDS
     assert "should_exclude_file" in str(raised.value)
     assert "scan_timeout" in str(raised.value)
-    assert SLOW_PATTERN not in str(raised.value)
 
 
 def test_a_fast_pattern_filters_under_the_bound(tmp_path):
@@ -86,12 +93,12 @@ def test_without_a_bound_the_filter_runs_as_before(tmp_path):
 
 def test_the_error_names_the_baseline_the_filter_came_from(tmp_path):
     root = tmp_path / "repo"
-    files = [str(root / SLOW_NAME)]
+    files = [str(root / "settings.py")]
 
     with pytest.raises(ScannerError) as raised:
         DetectSecretsScanner._apply_file_exclusions(
             files,
-            [re.compile(SLOW_PATTERN)],
+            [_SlowSearch()],
             root,
             timeout=TINY_TIMEOUT,
             source="the baseline repo/.secrets.baseline",
