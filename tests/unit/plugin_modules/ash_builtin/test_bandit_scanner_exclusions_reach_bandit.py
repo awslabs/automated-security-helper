@@ -474,7 +474,9 @@ def test_the_skipped_files_are_still_read_after_the_invocation_record(tmp_path):
 
     [invocation] = report.runs[0].invocations
     [note] = invocation.toolConfigurationNotifications
-    uri = note.locations[0].physicalLocation.artifactLocation.uri
+    # ``PhysicalLocation`` is a root model over its two shapes; the record is
+    # under ``root``, as ``_skipped_file_paths`` reads it.
+    uri = note.locations[0].physicalLocation.root.artifactLocation.uri
     assert uri.endswith("/a.py")
 
 
@@ -496,7 +498,8 @@ def test_a_parsed_file_is_still_counted_after_the_invocation_record(tmp_path):
         ("file://server/share/proj/x.py", "\\\\server\\share\\proj\\x.py", True),
         ("file:///home/u/proj/x.py", "/home/u/proj/x.py", False),
         ("file:///a:/proj/x.py", "/a:/proj/x.py", False),
-        ("proj/x%41.py", "proj/x%41.py", False),
+        # ``to_uri`` percent-encodes the ``%`` of a file named ``x%41.py``.
+        ("proj/x%2541.py", "proj/x%41.py", False),
     ],
     ids=["drive", "unc", "posix", "posix-colon-dir", "relative-encoded"],
 )
