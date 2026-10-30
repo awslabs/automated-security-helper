@@ -280,6 +280,12 @@ def plugin_config_key(plugin_class: type) -> str:
     )
 
 
+#: The spellings of false a string ``enabled`` is read as. The same set the
+#: config resolver reads for its own switches (``resolve_config._FALSE_SPELLINGS``),
+#: kept here because that module cannot be imported from this one.
+_DISABLED_SPELLINGS = frozenset({"0", "off", "f", "false", "n", "no"})
+
+
 def section_enabled(plugin_config: Any) -> bool:
     """Whether a plugin's config section leaves it enabled.
 
@@ -288,6 +294,13 @@ def section_enabled(plugin_config: Any) -> bool:
     row and the not-selected test of a scanner all ask this, so they cannot
     disagree. Read from the dict ``get_plugin_config`` returns as well as from
     a model; an absent section or an absent key means the default, enabled.
+
+    A section an external plugin keeps is never validated, so ``enabled`` can be
+    the text of an environment reference (``"false"``, ``"no"``, ``"0"``). Text
+    is read the way the plugin's own ``enabled: bool`` field would read it, not by
+    truthiness, which called every non-empty string enabled: a spelling of false
+    disables the plugin, an empty string is off as before, and any other text
+    leaves it enabled (a scanner that silently does not run is the worse error).
     """
     if plugin_config is None:
         return True
@@ -295,4 +308,7 @@ def section_enabled(plugin_config: Any) -> bool:
         enabled = plugin_config.get("enabled", True)
     else:
         enabled = getattr(plugin_config, "enabled", True)
+    if isinstance(enabled, str):
+        spelled = enabled.strip().lower()
+        return bool(enabled) and spelled not in _DISABLED_SPELLINGS
     return bool(enabled)
