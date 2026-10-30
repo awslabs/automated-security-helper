@@ -90,9 +90,10 @@ class TestAClientConfigWithASymlinkLoopIsJudgedNotRaised:
         still resolved with Path.resolve after the delivered-config judgment had
         moved to os.path.realpath, and raised RuntimeError on the loop.
 
-        The loop sits in a granted config root, so the as-named candidate is the
-        operator's and the judgment goes on to resolve it; a loop outside every
-        root is answered before the resolution and never reached the raise.
+        Both candidates are built before any is judged (the tuple is the
+        generator's iterable), so every loop raised at the base, inside a granted
+        root or not. The loop sits in a granted config root here so that the
+        cured judgment has an answer to assert: the operator's, not raised.
         """
         _delivered(OWN)
         granted = tmp_path / "granted-config"
