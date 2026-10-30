@@ -338,8 +338,10 @@ def test_the_scan_timeout_bounds_the_whole_scan(source, faked_scan, monkeypatch)
     ), scanner.errors
 
 
-def test_without_a_scan_timeout_every_template_runs_unbounded(source, faked_scan):
-    scanner = _scanner(source)
+def test_with_scan_timeout_null_every_template_runs_unbounded(source, faked_scan):
+    # The option defaults to 1800 (ScannerOptionsBase); null is the documented
+    # way to leave the scanner unbounded, and then no deadline is computed.
+    scanner = _scanner(source, scan_timeout=None)
     with (
         patch.object(
             cfn_guard_scanner, "discover_templates", return_value=_discovery(source)
@@ -396,8 +398,14 @@ class TestRuleFiles:
         empty.mkdir()
         (empty / "notes.txt").write_text("not a rule\n", encoding="utf-8")
         scanner = _scanner(source, rule_sets=[], rules_paths=[str(empty)])
-        with caplog.at_level(logging.WARNING, logger="ash"):
-            assert scanner.rule_files() == []
+        # The directory contributes nothing, so with rule_sets empty nothing is
+        # selected at all, which _selected_rules refuses by name; the warning
+        # about the directory is what tells the operator why.
+        with (
+            caplog.at_level(logging.WARNING, logger="ash"),
+            pytest.raises(RulesBundleUnavailable, match="names no rules file"),
+        ):
+            scanner.rule_files()
         assert "holds no .guard or .ruleset file" in caplog.text
 
     def test_a_rules_file_outside_the_source_is_recorded_by_name(
