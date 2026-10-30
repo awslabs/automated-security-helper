@@ -32,6 +32,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from automated_security_helper.core.resource_management import scan_registry
+from automated_security_helper.core.resource_management.error_handling import (
+    ErrorCategory,
+)
 from automated_security_helper.core.resource_management.scan_management import (
     cleanup_scan_resources,
 )
@@ -423,4 +427,125 @@ class TestALinkOnTheOutputPathIsNotFollowed:
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
         assert result["removed_output"] is True
+        assert not output.exists()
+
+
+BANDIT_PID = 4242
+
+
+class TestASurvivingToolKeepsTheTree:
+    """A cancel that could not end a scanner tool leaves the tool writing into the
+    output directory after the runner has finished (``could_not_stop``). The
+    cleanup waited for the runner only and asked the registry only whether OTHER
+    scans held the tree, so the tree came down under the writing tool;
+    ``cleanup_scan`` then refused the unregister (it keeps such an entry), and
+    the caller read ``removed_output`` True beside ``removed_from_registry``
+    False with a generic message. It is handed back as still stopping, with the
+    tool named and nothing removed, as the docstring promises."""
+
+    @pytest.fixture
+    def alive(self, monkeypatch):
+        """Which pids the probe reports running; a pid not listed is gone."""
+        table = {}
+        monkeypatch.setattr(
+            scan_registry, "_tool_may_be_running", lambda pid: table.get(pid, False)
+        )
+        return table
+
+    @staticmethod
+    def _stopped_with_a_surviving_tool(tmp_path):
+        entry = _entry(tmp_path, status=MCScanStatus.CANCELLED, has_runner=True)
+        entry.runner_done.set()
+        entry.could_not_stop = (("bandit", BANDIT_PID),)
+        return entry
+
+    def test_nothing_is_removed_while_the_tool_runs(self, registry, tmp_path, alive):
+        alive[BANDIT_PID] = True
+        entry = self._stopped_with_a_surviving_tool(tmp_path)
+        output = _output_of(entry)
+        registry.get_scan.return_value = entry
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is False
+        assert result["removed_output"] is False
+        assert result["removed_from_registry"] is False
+        assert "still stopping" in result["message"]
+        assert "bandit" in result["message"]
+        assert result["status"] == "cancelled"
+        assert output.exists()
+        registry.remove_output_of_scan.assert_not_called()
+        registry.cleanup_scan.assert_not_called()
+
+    def test_the_scan_is_cleaned_up_once_the_tool_is_gone(
+        self, registry, tmp_path, alive
+    ):
+        entry = self._stopped_with_a_surviving_tool(tmp_path)
+        output = _output_of(entry)
+        registry.get_scan.return_value = entry
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is True
+        assert result["removed_output"] is True
+        assert not output.exists()
+        registry.cleanup_scan.assert_called_once_with("scan-1")
+
+
+class TestTheEntryIsReadAgainAfterTheWait:
+    """The cancel and the runner wait both give up control. A cleanup of the same
+    scan that ran meanwhile removed the entry; this call then went on with the
+    stale object: it marked and deleted the output of an entry the registry no
+    longer held, so a ``register_scan`` of the same tree found no mark and was
+    admitted into a tree being deleted, and the unregister found nothing."""
+
+    def test_a_scan_removed_during_the_wait_is_reported_not_found(
+        self, registry, tmp_path
+    ):
+        entry = _entry(tmp_path, status=MCScanStatus.CANCELLED, has_runner=True)
+        output = _output_of(entry)
+        registry.get_scan.return_value = entry
+
+        def settle_and_vanish(timeout=None):
+            # The runner settles, and by then the concurrent cleanup has
+            # removed the entry from the registry.
+            entry.runner_done.set()
+            registry.get_scan.return_value = None
+            return True
+
+        entry.runner_done.wait = settle_and_vanish
+
+        with _use(registry), patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 2.0):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is False
+        assert result["error_category"] == ErrorCategory.SCAN_NOT_FOUND.value
+        assert output.exists()
+        registry.remove_output_of_scan.assert_not_called()
+        registry.cleanup_scan.assert_not_called()
+
+    def test_the_entry_read_after_the_wait_is_the_one_acted_on(
+        self, registry, tmp_path
+    ):
+        """The second read is what the removal and the unregister work from."""
+        stale = _entry(tmp_path, status=MCScanStatus.CANCELLED, has_runner=True)
+        output = _output_of(stale)
+        current = _entry(tmp_path, status=MCScanStatus.CANCELLED, has_runner=True)
+        current.runner_done.set()
+        registry.get_scan.return_value = stale
+
+        def settle(timeout=None):
+            stale.runner_done.set()
+            registry.get_scan.return_value = current
+            return True
+
+        stale.runner_done.wait = settle
+
+        with _use(registry), patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 2.0):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is True
+        assert registry.remove_output_of_scan.call_args.args[0] is current
         assert not output.exists()

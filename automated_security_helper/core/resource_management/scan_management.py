@@ -412,6 +412,64 @@ async def cleanup_scan_resources(
                     "timestamp": datetime.now().isoformat(),
                 }
 
+        # The entry was read before the cancel and the wait, and both give up
+        # control: a concurrent cleanup of the same scan can have removed the
+        # entry meanwhile. Working on from the stale object, the output removal
+        # marked an entry the registry no longer held, so register_scan found
+        # no mark and admitted a new scan of the same tree while this call was
+        # deleting it. So the entry is read again here, and a scan that is gone
+        # is reported as not found: whoever removed it did this work.
+        entry = registry.get_scan(scan_id, **_scoped(session_id))
+        if entry is None:
+            return create_error_response(
+                error=MCPResourceError(
+                    f"Scan {scan_id} not found",
+                    context={
+                        "scan_id": scan_id,
+                        "error_category": ErrorCategory.SCAN_NOT_FOUND.value,
+                    },
+                ),
+                operation="cleanup_scan_resources",
+                suggestions=[
+                    "The scan was removed from the registry while it was stopping",
+                    "Nothing is left to clean up for this scan id",
+                ],
+            )
+
+        # The runner's finish is not the last writer's. A cancel that could not
+        # end one of the scanner tools leaves that tool writing into the output
+        # directory on its own clock (ScanRegistryEntry.could_not_stop), and
+        # cleanup_scan keeps the entry for as long as it runs. The removal did
+        # not ask: it deleted the tree under the writing tool, cleanup_scan then
+        # refused, and the caller read removed_output True beside
+        # removed_from_registry False with a generic message. Handed back as
+        # still stopping instead, with the tools named and nothing removed, as
+        # the docstring promises for a scan that has not settled.
+        if entry.a_surviving_tool_is_running():
+            tools = ", ".join(
+                dict.fromkeys(tool for tool, _pid in entry.could_not_stop)
+            )
+            return {
+                "success": False,
+                "scan_id": scan_id,
+                "removed_output": False,
+                "removed_from_registry": False,
+                "message": (
+                    "Scan is still stopping: a scanner tool the cancel could not "
+                    f"end is still running ({tools})"
+                ),
+                "status": entry.status.value,
+                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                "suggestions": [
+                    (
+                        "End the tool's process (the scan's entry names it in its "
+                        "warnings), then retry: the output directory may still be "
+                        "written to while it runs"
+                    ),
+                ],
+                "timestamp": datetime.now().isoformat(),
+            }
+
         # Remove output files if requested
         removed_output = False
         output_dir_error = None

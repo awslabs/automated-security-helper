@@ -993,8 +993,31 @@ class ScanRegistry:
         (get_scan, list_scans, cancel_scan, register_scan), for as long as the
         tree took to remove. The remover still runs on the caller's thread;
         callers run this off the event loop (``asyncio.to_thread``).
+
+        Two refusals are about ``entry`` itself, decided under the same lock. An
+        entry the registry no longer holds (a concurrent cleanup removed it
+        between the caller's read and this call) is refused: the mark would sit
+        on an object no ``register_scan`` can see, so a new scan of the tree
+        would be admitted while it is being deleted. An entry that still
+        occupies its directory (:meth:`ScanRegistryEntry.occupies_its_directory`:
+        active, its runner not finished, or a scanner tool the cancel could not
+        end still running) is refused too: the tree is still being written,
+        and ``cleanup_scan`` keeps such an entry for the same reason.
         """
         with self._registry_lock:
+            if self._registry.get(entry.scan_id) is not entry:
+                return (
+                    "this scan is no longer in the registry",
+                    False,
+                )
+            if entry.occupies_its_directory():
+                return (
+                    (
+                        "this scan is still running or stopping, or a scanner tool "
+                        "the cancel could not end is still running"
+                    ),
+                    False,
+                )
             if entry.output_removal is not None:
                 return (
                     "this scan's output directory is already being removed",
