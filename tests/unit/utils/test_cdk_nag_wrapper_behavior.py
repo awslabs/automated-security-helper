@@ -721,8 +721,10 @@ def test_finding_line_number_uses_word_boundary_not_substring(
         f"means the search matched MyDataBucketPolicy on an earlier line."
     )
     assert region.endLine == BUCKET_DECLARATION_LINE
-    assert region.startColumn == BUCKET_DECLARATION_COLUMN
-    assert region.endColumn == BUCKET_DECLARATION_COLUMN + len("MyDataBucket")
+    # The constant is the 0-based index of the id in its line; SARIF counts columns
+    # from 1, and endColumn names the character after the region.
+    assert region.startColumn == BUCKET_DECLARATION_COLUMN + 1
+    assert region.endColumn == BUCKET_DECLARATION_COLUMN + 1 + len("MyDataBucket")
     # The snippet is the rendered resource, not the raw template line.
     assert "AWS::S3::Bucket" in region.snippet.text
 
@@ -784,8 +786,14 @@ def test_resource_absent_from_template_is_dropped(cdk_doubles, template_file, ou
         # demote every real error to a warning and slip it under a severity gate.
         ("error", Level.error, Kind.fail),
         ("ERROR", Level.error, Kind.fail),
-        ("warning", Level.warning, Kind.informational),
-        ("info", Level.warning, Kind.informational),
+        # A violation is a failed rule at every severity; the level carries the severity.
+        # SARIF 2.1.0 3.27.10 gives level=none to every kind but fail, so the
+        # warning/informational pair the wrapper used to write was not a SARIF result,
+        # and a consumer reading kind took a real violation for a non-problem.
+        ("warning", Level.warning, Kind.fail),
+        # cdk-nag's info level is SARIF's note, not warning: rendered as warning, an
+        # informational rule graded a step above what its pack declared.
+        ("info", Level.note, Kind.fail),
     ],
 )
 def test_report_severity_is_normalized_before_the_level_comparison(
@@ -842,8 +850,9 @@ def test_normalize_rule_level_maps_only_the_documented_strings():
         # Non-compliant + Error is the only combination that fails the scan, and the only one
         # the v3 report can currently produce.
         ("Non-Compliant", "Error", "N/A", Level.error, Kind.fail),
-        # Non-compliant at a lower rule level warns instead of failing.
-        ("Non-Compliant", "Warning", "N/A", Level.warning, Kind.informational),
+        # Non-compliant at a lower rule level is still a failed rule, at that level.
+        ("Non-Compliant", "Warning", "N/A", Level.warning, Kind.fail),
+        ("Non-Compliant", "Info", "N/A", Level.note, Kind.fail),
         # A suppression with a stated reason is routed to human review.
         (
             "Suppressed",
@@ -879,7 +888,8 @@ def test_the_four_compliance_rows_are_mutually_distinct():
     """
     rows = [
         (Level.error, Kind.fail),
-        (Level.warning, Kind.informational),
+        (Level.warning, Kind.fail),
+        (Level.note, Kind.fail),
         (Level.none, Kind.review),
         (Level.none, Kind.informational),
     ]
@@ -2939,7 +2949,8 @@ def test_the_finding_line_is_the_resources_declaration_not_an_earlier_reference(
 
     region = _only_finding(response).locations[0].physicalLocation.root.region
     assert region.startLine == 7, region
-    assert region.startColumn == 2, region
+    # Declared at index 2 of its line, which is SARIF column 3.
+    assert region.startColumn == 3, region
 
 
 def test_a_short_id_that_is_also_a_type_suffix_is_placed_on_its_declaration(
