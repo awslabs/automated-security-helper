@@ -19,7 +19,6 @@ from __future__ import annotations
 import errno
 import json
 import os
-import resource
 import signal
 import sys
 import time
@@ -29,6 +28,10 @@ import pytest
 
 if sys.platform != "linux":
     pytest.skip("the wrapper uses prctl and /proc, Linux only", allow_module_level=True)
+
+# After the guard: the resource module does not exist on Windows, and an import
+# above the skip would fail collection there instead of skipping the file.
+import resource  # noqa: E402
 
 from automated_security_helper.utils.sandbox import landlock_exec  # noqa: E402
 
