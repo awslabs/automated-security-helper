@@ -11,8 +11,8 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 
 from __future__ import annotations
 
+import logging
 import platform
-import struct
 import sys
 from pathlib import Path
 from typing import Annotated, ClassVar, Dict, List, Literal
@@ -37,7 +37,11 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
+from automated_security_helper.utils.subprocess_utils import (
+    find_executable,
+    in_tree_refusal,
+    spawn_run,
+)
 from automated_security_helper.utils.process_env import snapshot_environ
 
 
@@ -171,6 +175,38 @@ def _refuse_unverified_install_command(
     )
 
 
+def _release_number(version: str) -> str:
+    """``version`` without the one leading ``v`` a release tag may carry."""
+    return version.removeprefix("v")
+
+
+def _is_pinned_release(version: str) -> bool:
+    """Whether ``options.version`` names the pinned release, spelled with or
+    without the leading ``v``.
+
+    The validator (``base/options.release_tag``) accepts both spellings, and the
+    pinned table spells it with the ``v``, so ``1.30.2`` for a pinned ``v1.30.2``
+    used to take the custom-version branch: refused for want of a digest, or
+    fetched from a tag without the ``v``, which the release does not carry.
+    """
+    return _release_number(version) == _release_number(TOOL_VERSIONS["opengrep"])
+
+
+def _install_arch() -> str:
+    """The architecture key of ``custom_install_commands`` for this host.
+
+    From the machine name, as ``cli/dependencies.get_architecture`` reads it:
+    ``amd64`` for x86_64 and ``arm64`` for aarch64. The pointer size used to
+    decide it, which read every 64-bit host, an arm64 one included, as amd64.
+    """
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
+        return "amd64"
+    if machine in ("aarch64", "arm64"):
+        return "arm64"
+    return machine
+
+
 def patterns_mode_refusal(patterns: List[str]) -> str:
     """The message a configuration that sets ``options.patterns`` is refused with.
 
@@ -247,9 +283,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
         No path installs an unverified binary.
 
-        * The pinned version is installed from ``utils/tool_downloads.py``, verified
-          against its SHA256 before it is put on disk, exactly as grype, syft and
-          trivy are.
+        * The pinned version, spelled with or without its leading ``v``
+          (``_is_pinned_release``), is installed from ``utils/tool_downloads.py``,
+          verified against its SHA256 before it is put on disk, exactly as grype,
+          syft and trivy are.
         * A custom ``version`` is installed only on a platform for which the
           configuration supplies ``sha256``, and goes through the same verified
           download, failing closed on a mismatch.
@@ -263,7 +300,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         opengrep can scan with it, and only the install is refused.
         """
         version = self.config.options.version
-        if version == TOOL_VERSIONS["opengrep"]:
+        if _is_pinned_release(version):
             self.custom_install_commands.update(
                 pinned_tool_install_commands("opengrep")
             )
@@ -338,12 +375,19 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         inside it was thrown away (every later target lost ``--metrics``) and the
         first target's command lost the output-directory excludes the rebuild
         replaced.
+
+        The rebuild runs the offline-cache validation again, after
+        ``_execute_scan`` checked the reason construction recorded. A cache that
+        became unusable since then is recorded the same way, and the scan is
+        refused here rather than run with no cache ``--config`` and graded.
         """
         if self._metrics_decision_pending:
             self._metrics_decision_pending = False
             if self.emit_metrics_flag():
                 self.args.extra_args = []
                 self._process_config_options()
+                if self.dependency_unavailable_reason:
+                    raise ScannerError(self.dependency_unavailable_reason)
         return super()._resolve_scan_arguments(target, results_file)
 
     # ---------------------------------------------------------------
@@ -356,14 +400,25 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         Named for the ``GrepScannerBase`` hook rather than overriding
         ``validate_plugin_dependencies`` directly: the base method now consults the
         offline-cache verdict first, and an override here would skip it.
+
+        A copy found only inside the scanned tree is refused by the lookup
+        (``subprocess_utils.find_executable``); the reason is recorded for the
+        MISSING row, as ``ScannerPluginBase.validate_plugin_dependencies`` records
+        it, so the row says where the copy is and how to allow it rather than
+        "not installed".
         """
         found = find_executable(self.command)
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
+        if found is None:
+            refusal = in_tree_refusal(self.command)
+            if refusal is not None:
+                self.dependency_unavailable_reason = refusal
+                self._plugin_log(refusal, level=logging.WARNING)
         return found is not None
 
     def _has_install_commands(self) -> bool:
         system = platform.system().lower()
-        arch = "amd64" if struct.calcsize("P") * 8 == 64 else "arm64"
+        arch = _install_arch()
         if system in self.custom_install_commands:
             if arch in self.custom_install_commands[system]:
                 return len(self.custom_install_commands[system][arch]) > 0
