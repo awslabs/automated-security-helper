@@ -83,6 +83,37 @@ class TestCompare:
         _, problems = parity.compare("offline", off, boxed)
         assert problems == []
 
+    def test_identical_runs_with_an_unattributed_bucket_are_clean(
+        self, parity, tmp_path
+    ):
+        """The passing case for the "?" bucket: a compare that flagged every
+        bucket missing from scanner_results would still pass the test above."""
+        statuses = {"bandit": "PASSED"}
+        document = _results(
+            statuses, [_finding("bandit", "B101"), _finding(None, "X1")]
+        )
+        off = _write(tmp_path / "off", document)
+        boxed = _write(tmp_path / "boxed", document)
+        _, problems = parity.compare("offline", off, boxed)
+        assert problems == []
+
+    def test_a_named_bucket_absent_from_scanner_results_is_compared(
+        self, parity, tmp_path
+    ):
+        """A scanner that produced findings but no status entry is still a
+        bucket, not only the unattributed "?" one."""
+        statuses = {"bandit": "PASSED"}
+        off = _write(
+            tmp_path / "off",
+            _results(statuses, [_finding("bandit", "B101"), _finding("grype", "G1")]),
+        )
+        boxed = _write(
+            tmp_path / "boxed", _results(statuses, [_finding("bandit", "B101")])
+        )
+        rows, problems = parity.compare("offline", off, boxed)
+        assert any(row["scanner"] == "grype" for row in rows)
+        assert any("[offline] grype: findings differ" in p for p in problems)
+
 
 class TestFindingsAreCounted:
     """At the base findings were collected into sets, so a lost duplicate was parity."""
