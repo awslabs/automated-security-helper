@@ -7781,8 +7781,10 @@ def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
 _MCP_EXITS_FOR_REFUSED_OPTIONS = (
     "`ash mcp` exits with code 5 for an unknown option, a value of the wrong type, options "
     "that cannot be combined, or an `ASH_MCP_TRANSPORT` that names no transport, and with "
-    "code 3 when a `--profile` file does not load or an HTTP transport cannot listen on its "
-    "address."
+    "code 3 when a `--profile` file does not load, is kept inside the MCP workspace root "
+    "where a client could have supplied it (a config the server wrote there itself is "
+    "fine), or sits inside a git checkout under a scan root `ASH_MCP_ALLOWED_ROOTS` grants, "
+    "or when an HTTP transport cannot listen on its address."
 )
 _MCP_EXITS_WHEN_THE_SERVER_FAILS = (
     "It exits with code 1 when the MCP package is missing or the server fails, and prints "
