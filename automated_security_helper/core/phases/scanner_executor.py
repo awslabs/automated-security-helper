@@ -317,10 +317,14 @@ def _timeout_ending(scanner_plugin: Any) -> str:
     - no could-not-stop recorded: " and was killed", as before;
     - recorded, and the most recent unfinished run is the timeout (or no flag is
       readable): the timeout's own could-not-stop ending, as before;
-    - recorded, but the most recent unfinished run carries another flag: the
-      later run's tool may still be running, and the timed-out tool is not
-      said to be killed, because one record cannot tell whether both stops
-      failed.
+    - recorded, and the most recent unfinished run was CANCELLED, the one other
+      ending that goes through a stop: the later run's tool may still be
+      running, and the timed-out tool is not said to be killed, because one
+      record cannot tell whether both stops failed;
+    - recorded, and the most recent unfinished run ended ``signaled`` (its tool
+      died on a signal ASH did not send) or ``result_rejected``: those runs
+      have no stop of their own, so the record can only be the timeout's, and
+      the timeout's own ending is right.
 
     Exact attribution needs a could-not-stop record per run on the plugin
     (``plugin_base``); this reads what the plugin records today.
@@ -328,9 +332,9 @@ def _timeout_ending(scanner_plugin: Any) -> str:
     if _could_not_stop(scanner_plugin) is None:
         return WAS_KILLED_ENDING
     kept = _kept_flag(scanner_plugin)
-    if kept is None or kept[0] == "timed_out":
-        return COULD_NOT_STOP_ENDING
-    return UNSTOPPED_LATER_RUN_ENDING
+    if kept is not None and kept[0] == "cancelled":
+        return UNSTOPPED_LATER_RUN_ENDING
+    return COULD_NOT_STOP_ENDING
 
 
 def _unfinished_run_reason(

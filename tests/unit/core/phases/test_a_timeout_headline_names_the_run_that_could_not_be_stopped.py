@@ -202,8 +202,17 @@ class TestTheEndingFromTheRecords:
     def test_a_failed_stop_with_no_flag_is_the_timeouts(self):
         assert _timeout_ending(self._plugin("pid 1", None)) == COULD_NOT_STOP_ENDING
 
-    @pytest.mark.parametrize("flag", ["cancelled", "result_rejected", "signaled"])
-    def test_a_failed_stop_on_another_run_is_that_runs(self, flag):
-        assert _timeout_ending(self._plugin("pid 1", (flag, "r"))) == (
+    def test_a_failed_stop_on_a_later_cancelled_run_is_that_runs(self):
+        """A cancel is the one other ending that goes through a stop."""
+        assert _timeout_ending(self._plugin("pid 1", ("cancelled", "r"))) == (
             UNSTOPPED_LATER_RUN_ENDING
+        )
+
+    @pytest.mark.parametrize("flag", ["result_rejected", "signaled"])
+    def test_a_later_run_with_no_stop_leaves_the_record_to_the_timeout(self, flag):
+        """A tool that died on a signal ASH did not send, or whose result was
+        rejected, was never stopped by ASH, so the could-not-stop record can only
+        be the timeout's; blaming the later run was the reverse of the fixed bug."""
+        assert _timeout_ending(self._plugin("pid 1", (flag, "r"))) == (
+            COULD_NOT_STOP_ENDING
         )
