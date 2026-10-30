@@ -27,7 +27,11 @@ The rules the reader follows now, each with a case below:
   and leaves a name unread, on the caller's side and on the callee's (the raising
   helper's own parameter is never read as the module name it shadows);
 * a parameter that shadows the helper's name is not the helper, so the helper's
-  uses outnumber its calls and nothing is claimed for it.
+  uses outnumber its calls and nothing is claimed for it;
+* a handler local assigned from the caught exception and passed back into a
+  construction of the same class is read once: the second read of that caught
+  type, inside the first, is unread, so the reading ends instead of feeding
+  itself (a second planted package, below the first).
 
 The planted package below holds one module-level ``kind`` that every case shadows
 or reads. Every input is a plain name lookup or a literal; nothing is executed.
@@ -309,19 +313,67 @@ def mcp_sh_shadow(url, _sh_step):
     return {"success": True}
 """
 
+# A handler whose local is built from the caught exception and raised again.
+# Reading ``e`` builds every ``CycleErr(...)``; the second one passes ``kind``,
+# whose value reads ``e`` again.
 
-@pytest.fixture
-def planted_contracts(tmp_path: Path, script_loader):
+CYCLE_SERVER = """
+from automated_security_helper.cli.tools import mcp_cycle
+
+mcp = object()
+
+
+@mcp.tool()
+def cycle(url):
+    return mcp_cycle(url)
+"""
+
+CYCLE_TOOLS = """
+class CycleErr(RuntimeError):
+    def __init__(self, message, error_type):
+        super().__init__(message)
+        self.error_type = error_type
+
+
+def _cycle_step(url):
+    raise CycleErr("cycle", "probe_kind")
+
+
+def mcp_cycle(url):
+    try:
+        _cycle_step(url)
+    except CycleErr as e:
+        kind = e.error_type or "fallback_kind"
+        if url is None:
+            raise CycleErr("cycle", kind)
+        return {"success": False, "error_type": e.error_type}
+    return {"success": True}
+"""
+
+
+def _plant(tmp_path: Path, server: str, tools: str) -> Path:
     package = tmp_path / "automated_security_helper"
     (package / "cli").mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "cli" / "__init__.py").write_text("", encoding="utf-8")
     (package / "cli" / "mcp_server.py").write_text(
-        textwrap.dedent(PLANTED_SERVER).lstrip("\n"), encoding="utf-8"
+        textwrap.dedent(server).lstrip("\n"), encoding="utf-8"
     )
     (package / "cli" / "tools.py").write_text(
-        textwrap.dedent(PLANTED_TOOLS).lstrip("\n"), encoding="utf-8"
+        textwrap.dedent(tools).lstrip("\n"), encoding="utf-8"
     )
+    return package
+
+
+@pytest.fixture
+def planted_contracts(tmp_path: Path, script_loader):
+    package = _plant(tmp_path, PLANTED_SERVER, PLANTED_TOOLS)
+    return script_loader("_mcp_contract").tool_contracts(package)
+
+
+@pytest.fixture
+def cycle_contracts(tmp_path: Path, script_loader):
+    package = _plant(tmp_path, CYCLE_SERVER, CYCLE_TOOLS)
     return script_loader("_mcp_contract").tool_contracts(package)
 
 
@@ -440,3 +492,21 @@ def test_a_parameter_named_like_the_helper_is_not_a_call_of_the_helper(
     for tool in ("sh_real", "sh_shadow"):
         assert "not_the_helper" not in planted_contracts[tool].error_types
     assert planted_contracts["sh_real"].error_types_unread != ()
+
+
+# A caught type whose constructions read the caught value again.
+
+
+def test_a_handler_local_built_from_the_caught_exception_is_read_once(
+    cycle_contracts,
+):
+    """``except CycleErr as e: kind = e.error_type or "fallback_kind"; raise
+    CycleErr("cycle", kind)``: reading ``e`` builds ``CycleErr("cycle", kind)``,
+    whose ``kind`` reads ``e`` again. The second read is unread, so the reader
+    returns, lists the types the constructions do fix and leaves the self-fed
+    one unread. Before this guard the reading never ended."""
+    cycle = cycle_contracts["cycle"]
+
+    assert "probe_kind" in cycle.error_types
+    assert "fallback_kind" in cycle.error_types
+    assert cycle.error_types_unread != ()
