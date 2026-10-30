@@ -112,8 +112,9 @@ NESTED_ARCHIVE_SUFFIXES = (
 #: which admits members by their extension, cannot name them: container and build
 #: files (checkov, semgrep, opengrep), dependency manifests (grype, syft) and
 #: private keys (detect-secrets). Compared against the member's base name as read
-#: through ``_base_name``; a Dockerfile or Containerfile with a stage suffix
-#: (``Dockerfile.prod``) is admitted by its stem.
+#: through ``_base_name``, case-folded; a name with a variant suffix
+#: (``Dockerfile.prod``, ``Makefile_linux``, ``id_rsa.old``, ``.env.local``) is
+#: admitted by its stem (_SCANNABLE_MEMBER_STEMS, _SCANNABLE_DOTFILE_STEMS).
 SCANNABLE_MEMBER_NAMES = frozenset(
     {
         "Dockerfile",
@@ -157,6 +158,12 @@ _SCANNABLE_MEMBER_STEMS = frozenset(
         "id_ed25519",
     }
 )
+#: Dotfiles admitted by the name up to their second ``.``: an environment file
+#: with a stage suffix (``.env.local``, ``.env.production``), which detect-secrets
+#: reads as it reads ``.env``. A dotfile's stem starts at its leading ``.``, so
+#: the split _SCANNABLE_MEMBER_STEMS is read with would leave it empty.
+#: Case-folded.
+_SCANNABLE_DOTFILE_STEMS = frozenset({".env"})
 
 #: Extensions scanners read that KNOWN_SCANNABLE_EXTENSIONS leaves out: ES module
 #: and TypeScript module spellings and component files (semgrep, opengrep), C++
@@ -1034,15 +1041,21 @@ def _member_is_scannable(member_name: str) -> bool:
     """Whether some scanner reads an archive member of this name, so extracting it
     puts it before one: by its extension (KNOWN_SCANNABLE_EXTENSIONS and
     SCANNABLE_MEMBER_SUFFIXES), or by its name where it has no extension
-    (SCANNABLE_MEMBER_NAMES, and a Dockerfile or Containerfile with a stage
-    suffix). Names are read through ``_base_name`` and ``_archive_suffix``, the
-    spelling authorities."""
+    (SCANNABLE_MEMBER_NAMES), or by its stem where the name carries a variant
+    suffix: a Dockerfile, Containerfile or Makefile with a stage or variant
+    (``Dockerfile.prod``, ``Makefile_linux``), a key file with a backup suffix
+    (``id_rsa.old``), an environment file with a stage (``.env.local``). Names
+    are read through ``_base_name`` and ``_archive_suffix``, the spelling
+    authorities, and compared case-folded."""
     suffix = _archive_suffix(member_name)
     if suffix in KNOWN_SCANNABLE_EXTENSIONS or suffix in SCANNABLE_MEMBER_SUFFIXES:
         return True
     base = _base_name(member_name).casefold()
     if base in _SCANNABLE_MEMBER_NAMES_FOLDED:
         return True
+    if base.startswith("."):
+        # A dotfile's stem runs to its second ".": .env.local is an .env file.
+        return "." + base[1:].split(".", 1)[0] in _SCANNABLE_DOTFILE_STEMS
     stem = base.split(".", 1)[0]
     if stem in _SCANNABLE_MEMBER_STEMS:
         return True

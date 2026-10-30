@@ -149,6 +149,10 @@ def test_members_scanners_read_by_name_or_an_unlisted_extension_are_extracted(
         ".pgpass",
         ".htpasswd",
         ".env",
+        ".env.local",
+        ".env.production",
+        ".env.development",
+        "config/.ENV.Staging",
         "authorized_keys",
         "known_hosts",
         "go.mod",
@@ -161,7 +165,18 @@ def test_the_admission_test_names_what_scanners_read(name):
 
 
 @pytest.mark.parametrize(
-    "name", ["logo.png", "a.woff", "README", "Dockerfiles", "identity", "id_card"]
+    "name",
+    [
+        "logo.png",
+        "a.woff",
+        "README",
+        "Dockerfiles",
+        "identity",
+        "id_card",
+        ".environment",
+        ".enviro.local",
+        ".gitkeep",
+    ],
 )
 def test_the_admission_test_leaves_out_what_no_scanner_reads(name):
     assert archive_converter._member_is_scannable(name) is False
