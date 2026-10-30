@@ -952,6 +952,27 @@ def _config_load_failure(
     )
 
 
+def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, Any]:
+    """The response of ``operation`` when the session's bound profile cannot be used.
+
+    The profile ``select_profile`` bound is no longer registered, or its file is
+    gone and cannot be written to the session's workspace again. That is the
+    session's state, not the file the call asked about, so it is answered as
+    ``run_ash_scan`` answers it (``bound_profile_unavailable``, exit code 3) and
+    never as that file's load failure.
+    """
+    return with_exit_code(
+        {
+            "success": False,
+            "error": raw_controls_on_one_line(str(error)),
+            "error_type": "bound_profile_unavailable",
+            "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+            "operation": operation,
+        },
+        REFUSED_CONFIG_EXIT_CODE,
+    )
+
+
 class _ConfigPreCheck(NamedTuple):
     """What one resolution of the scan's config gives the start path.
 
@@ -5326,6 +5347,24 @@ def _answer_get_config(
         if config_path is not None
         else config_is_client_supplied(path)
     )
+    # The trusted base a client-supplied config is resolved against: the
+    # session's bound profile, written again from the binding when its file is
+    # gone. Resolved before the load, so a binding that cannot be written again
+    # (its profile unregistered, its workspace unwritable) is answered as the
+    # session's refusal, the way run_ash_scan answers it, and never as the named
+    # file's load failure: that blamed the client's config for the server's own
+    # state. A BoundProfileUnavailableError is a ValueError too, so inside the
+    # load's try it was caught as one.
+    trusted_config_path: Optional[str] = None
+    if untrusted_config:
+        from automated_security_helper.cli.mcp.profile_registry import (
+            ProfileRegistryError,
+        )
+
+        try:
+            trusted_config_path = resolve_session_trusted_config_path(session_id)
+        except ProfileRegistryError as exc:
+            return _bound_profile_unavailable(exc, "get_config")
     # The selected config's chain, handed out by the load itself (chain_out),
     # so this tool never reverse-engineers how the load's file lists were put
     # together: a subtraction over files_read dropped the first copy of a
@@ -5347,11 +5386,7 @@ def _answer_get_config(
             permit_base=config_base_gate(session_id),
             scanned_root=scanned_root,
             untrusted_config=untrusted_config,
-            trusted_config_path=(
-                resolve_session_trusted_config_path(session_id)
-                if untrusted_config
-                else None
-            ),
+            trusted_config_path=trusted_config_path,
             # The rules' trusted default config is the ASH_CONFIG file, read with
             # the settings the pre-check above used (a fresh instance: one
             # instance records one read), so a value the load leaves out never

@@ -114,3 +114,30 @@ def test_a_bound_profile_copy_that_is_gone_is_no_binding(bound):
     result = _get_config(delivered)
 
     assert result.get("project_name") == "delivered", result
+
+
+def test_a_bound_profile_that_cannot_be_written_again_is_the_sessions_refusal(
+    bound,
+):
+    """The copy is gone and the profile is no longer registered, so the trusted
+    base cannot be written again. That is the session's state, not the delivered
+    file's: the answer is the refusal run_ash_scan gives (bound_profile_unavailable,
+    exit code 3, naming select_profile), never a load failure that blames the
+    file the client asked about, and the delivered file is not named as the one
+    that could not be loaded."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_profile_registry,
+    )
+
+    _, session_copy, delivered = bound
+    session_copy.unlink()
+    clear_profile_registry()
+
+    result = _get_config(delivered)
+
+    assert result["success"] is False, result
+    assert result["error_type"] == "bound_profile_unavailable", result
+    assert result["exit_code"] == 3, result
+    assert "select_profile" in result["error"], result
+    assert "cannot be loaded" not in result["error"], result
+    assert delivered.as_posix() not in result["error"], result
