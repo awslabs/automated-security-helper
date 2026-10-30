@@ -41,6 +41,11 @@ _WARN_TRIVY = {
     "expiration": "2099-01-01",
     "reason": "upstream publishing is paused",
 }
+_EXPIRED_FAIL_GRYPE = {
+    **_FAIL_GRYPE,
+    "expiration": "2000-01-01",
+    "reason": "a hold the repository never removed",
+}
 
 
 def _policies(config: AshConfig) -> List[Tuple[str, str]]:
@@ -112,3 +117,68 @@ def test_the_operators_warn_entry_is_not_copied_in(tmp_path):
     _confine(config, trusted, tmp_path)
 
     assert _policies(config) == []
+
+
+def test_only_the_operators_fail_entry_is_carried_when_the_config_holds_neither(
+    tmp_path,
+):
+    """The operator holds one database to fail and another to warn; the config
+    has an entry for neither. Only the fail entry narrows the scan-wide warn
+    the config repeats, so only it is carried."""
+    trusted = AshConfig.model_validate(
+        {
+            "content_db_staleness": "warn",
+            "content_db_staleness_overrides": [_FAIL_GRYPE, _WARN_TRIVY],
+        }
+    )
+    config = AshConfig.model_validate({"content_db_staleness": "warn"})
+
+    _confine(config, trusted, tmp_path)
+
+    assert _policies(config) == [("grype-db", "fail")]
+
+
+def test_an_expired_own_fail_entry_makes_way_for_the_operators_fail_entry(tmp_path):
+    """At run time an expired entry is ignored and the database returns to the
+    scan-wide policy, here the repository's warn, and the run-time read stops at
+    the first entry naming the database. The config's own fail entry for grype-db
+    has expired, so it holds the database to nothing; kept as written, it blocked
+    the carry of the operator's entry, still in force, for the same database.
+    It is dropped and the operator's entry is carried in its place."""
+    trusted = AshConfig.model_validate(
+        {
+            "content_db_staleness": "warn",
+            "content_db_staleness_overrides": [_FAIL_GRYPE],
+        }
+    )
+    config = AshConfig.model_validate(
+        {
+            "content_db_staleness": "warn",
+            "content_db_staleness_overrides": [_EXPIRED_FAIL_GRYPE],
+        }
+    )
+
+    _confine(config, trusted, tmp_path)
+
+    assert _policies(config) == [("grype-db", "fail")]
+    entries = config.content_db_staleness_overrides
+    assert [entry.expiration for entry in entries] == [_FAIL_GRYPE["expiration"]]
+    assert not entries[0].is_expired()
+
+
+def test_an_expired_own_fail_entry_stands_where_the_operator_holds_nothing(tmp_path):
+    """The control: with no operator entry for the database, the config's own
+    expired entry is left as written, for the run-time read to ignore and name
+    in its own warning."""
+    trusted = AshConfig.model_validate({"content_db_staleness": "warn"})
+    config = AshConfig.model_validate(
+        {
+            "content_db_staleness": "warn",
+            "content_db_staleness_overrides": [_EXPIRED_FAIL_GRYPE],
+        }
+    )
+
+    _confine(config, trusted, tmp_path)
+
+    entries = config.content_db_staleness_overrides
+    assert [entry.expiration for entry in entries] == ["2000-01-01"]

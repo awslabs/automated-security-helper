@@ -29,7 +29,10 @@ base's, and an overrides entry equal to one of the trusted base's entries. A
 value that only makes the gate stricter is kept too: ``content_db_staleness:
 fail``, and any entry with ``policy: fail``. Every other entry, a ``policy: warn``
 the operator did not set, is dropped, and the policy and the dropped entries' databases are
-named in one warning. One kind of entry is added: the operator's ``policy: fail``
+named in one warning. An own ``policy: fail`` entry that has expired is dropped too when the
+operator holds that database to ``fail`` with an entry still in force: at run time an expired
+entry is ignored and the database returns to the scan-wide policy, laxer than the operator's,
+so the operator's entry is carried in its place. One kind of entry is added: the operator's ``policy: fail``
 entries for databases the repository's config has no entry for, since those
 narrow a scan-wide ``warn`` the config may have repeated, and without them the
 repository's config would hold those databases to a laxer policy than the
@@ -132,10 +135,24 @@ def confine_content_db_staleness(
     trusted_entries = [
         _dump(entry) for entry in trusted_config.content_db_staleness_overrides
     ]
+    # The databases the operator holds to ``fail`` with an entry still in force.
+    # A config's own entry for one of them that has expired holds the database
+    # to nothing: at run time an expired entry is ignored and the database
+    # returns to the scan-wide policy (``utils/content_db_staleness.py``), laxer
+    # than the operator's entry for it, and the run-time read stops at the first
+    # entry naming the database. Kept, it blocked the carry below; it is dropped
+    # first, and the operator's entry is carried in its place.
+    operator_fail_databases = {
+        entry.database
+        for entry in trusted_config.content_db_staleness_overrides
+        if entry.policy == STALENESS_FAIL and not entry.is_expired()
+    }
     kept = []
     dropped: List[str] = []
     for entry in config.content_db_staleness_overrides:
-        if entry.policy == STALENESS_FAIL or _dump(entry) in trusted_entries:
+        if entry.database in operator_fail_databases and entry.is_expired():
+            dropped.append(entry.database)
+        elif entry.policy == STALENESS_FAIL or _dump(entry) in trusted_entries:
             kept.append(entry)
         else:
             dropped.append(entry.database)
