@@ -121,3 +121,13 @@ def test_a_missing_path_and_a_link_loop_on_the_real_filesystem(tmp_path):
     loop.symlink_to(loop)
     looped = stat_named_path(loop)
     assert isinstance(looped, StatProblem) and looped.kind == LOOP
+
+
+def test_a_link_to_a_missing_target_on_the_real_filesystem_is_missing(tmp_path):
+    """A dangling link is a missing path, not a loop, on every platform: the
+    control for the Windows reading of an unresolvable link as LOOP, which must
+    not reach a link whose target is merely absent."""
+    dangling = tmp_path / "dangling.yaml"
+    dangling.symlink_to(tmp_path / "absent-target.yaml")
+    result = stat_named_path(dangling)
+    assert isinstance(result, StatProblem) and result.kind == MISSING, result
