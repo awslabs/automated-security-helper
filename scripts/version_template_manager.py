@@ -47,6 +47,10 @@ _RELEASE_PIN = re.compile(
     "(?:" + "|".join(prefix for _name, prefix, _branch in INSTALL_REF_FORMS) + r")"
     r"v(\d+\.\d+\.\d+)"
 )
+# The rest of one shell command: any text up to a newline that is not escaped, or to a
+# separator that starts another command. `convert` uses it to tell a `--branch v<version>`
+# that belongs to a clone of this repository from one that belongs to another project.
+_SAME_COMMAND = r"(?:\\\n|[^\n;&|])*"
 
 
 class VersionTemplateManager:
@@ -55,6 +59,11 @@ class VersionTemplateManager:
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.template_suffix = ".template"
+        # The files the last convert_all_to_templates or generate_all_from_templates
+        # could not process: a read or write that failed, a version that could not be
+        # determined, a listed target with no template. Both return only a count, so
+        # without this a caller cannot tell a skipped file from a failed one.
+        self.failures: List[Path] = []
         # The ref an install command uses. A release's docs render it as the release,
         # the docs site's main version as `main` (see render_for_branch).
         self.version_placeholder = "{{VERSION}}"
@@ -107,11 +116,19 @@ class VersionTemplateManager:
         if re.search(git_pattern, content):
             patterns.append((git_pattern, git_replacement))
 
-        # Pattern 2: --branch v3.x.y
-        branch_pattern = rf"(--branch v){semver}"
+        # Pattern 2: --branch v3.x.y, in a command that names this repository. Unanchored,
+        # the pattern also templatized the tag of any other project cloned in a page's
+        # example (`git clone --branch v1.2.3 <another repository>`), and `generate`
+        # then stamped ASH's version into that command. The repository can come before
+        # the flag or after it, in the same command.
         branch_replacement = rf"\g<1>{self.version_placeholder}"
-        if re.search(branch_pattern, content):
-            patterns.append((branch_pattern, branch_replacement))
+        branch_patterns = (
+            rf"([/:]{_REPO_NAME}(?:\.git)?{_SAME_COMMAND}--branch v){semver}",
+            rf"(--branch v){semver}(?={_SAME_COMMAND}[/:]{_REPO_NAME})",
+        )
+        for branch_pattern in branch_patterns:
+            if re.search(branch_pattern, content):
+                patterns.append((branch_pattern, branch_replacement))
 
         # Pattern 3: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)"),
         # and the two `uses:` forms naming this repository: the action,
@@ -139,8 +156,15 @@ class VersionTemplateManager:
         if re.search(at_version_pattern, content):
             patterns.append((at_version_pattern, at_version_replacement))
 
-        # Pattern 4: rev: v3.x.y (pre-commit config)
-        rev_pattern = rf"(rev: v){semver}"
+        # Pattern 4: rev: v3.x.y (pre-commit config), in the entry whose `repo:` is this
+        # repository. A pre-commit config pins every hook repository with a `rev:`, so
+        # unanchored the pattern also templatized the pin of each other repository a
+        # page's example lists. Only blank and comment lines may sit between the
+        # `repo:` line and its `rev:` line, so the match cannot reach into the next entry.
+        rev_pattern = (
+            rf"(repo:[ \t]*\S*[/:]{_REPO_NAME}(?:\.git)?/?[\"']?[ \t]*(?:#[^\n]*)?\n"
+            r"(?:[ \t]*(?:#[^\n]*)?\n)*[ \t]*rev:[ \t]+v)" + semver
+        )
         rev_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(rev_pattern, content):
             patterns.append((rev_pattern, rev_replacement))
@@ -305,6 +329,7 @@ class VersionTemplateManager:
 
         except Exception as e:
             print(f"Error converting {file_path} to template: {e}")
+            self.failures.append(file_path)
             return False
 
     def generate_from_template(self, template_path: Path) -> bool:
@@ -319,6 +344,7 @@ class VersionTemplateManager:
         """
         if not template_path.exists():
             print(f"Warning: Template {template_path} does not exist, skipping.")
+            self.failures.append(template_path)
             return False
 
         try:
@@ -333,7 +359,16 @@ class VersionTemplateManager:
             # templates belong to, read from its pyproject.toml: the installed
             # distribution's metadata lags a `version_bump.py set` until the
             # next install, and rendered the old version into every doc.
-            content = self.render(content, get_version(self.project_root))
+            version = get_version(self.project_root)
+            if version == "unknown":
+                # get_version's last resort when neither the checkout's pyproject.toml
+                # nor installed metadata names a version. Rendered, it would replace
+                # every pin in every doc with the word "unknown".
+                raise ValueError(
+                    f"no version could be determined for {self.project_root}; "
+                    "not rendering the docs with a placeholder version"
+                )
+            content = self.render(content, version)
 
             # Generate output file (remove .template suffix)
             output_path = template_path.with_suffix("")
@@ -350,6 +385,7 @@ class VersionTemplateManager:
 
         except Exception as e:
             print(f"Error generating from template {template_path}: {e}")
+            self.failures.append(template_path)
             return False
 
     def convert_all_to_templates(self, overwrite: bool = False) -> int:
@@ -360,8 +396,11 @@ class VersionTemplateManager:
             overwrite: Replace existing templates instead of keeping them.
 
         Returns:
-            Number of files successfully converted.
+            Number of files successfully converted. A file that failed with an
+            error is listed in ``failures``; a file skipped for a reason that is
+            not an error (a template kept, no version reference) is not.
         """
+        self.failures = []
         converted_count = 0
 
         for file_path_str in self.target_files:
@@ -376,8 +415,10 @@ class VersionTemplateManager:
         Generate all files from their templates.
 
         Returns:
-            Number of files successfully generated.
+            Number of files successfully generated. Every target that is not
+            generated is listed in ``failures``.
         """
+        self.failures = []
         generated_count = 0
 
         for file_path_str in self.target_files:
@@ -397,8 +438,18 @@ class VersionTemplateManager:
         return templates
 
 
-def main():
-    """Main entry point."""
+def _report_failures(manager: VersionTemplateManager, what: str) -> int:
+    """Name the files that failed on stderr and return the exit status for them."""
+    names = ", ".join(str(path) for path in manager.failures)
+    print(
+        f"Error: {len(manager.failures)} file(s) were not {what}: {names}",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def main() -> int:
+    """Main entry point. Returns the exit status: 1 when a file failed."""
     parser = argparse.ArgumentParser(
         description="Manage version templates for documentation"
     )
@@ -426,11 +477,15 @@ def main():
     if args.action == "convert":
         print("Converting files to templates...")
         count = manager.convert_all_to_templates(overwrite=args.overwrite)
+        if manager.failures:
+            return _report_failures(manager, "converted to templates")
         print(f"Successfully converted {count} files to templates.")
 
     elif args.action == "generate":
         print("Generating files from templates...")
         count = manager.generate_all_from_templates()
+        if manager.failures:
+            return _report_failures(manager, "generated from templates")
         print(f"Successfully generated {count} files from templates.")
 
     elif args.action == "list":
@@ -442,6 +497,8 @@ def main():
         else:
             print("No template files found.")
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
