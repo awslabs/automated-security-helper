@@ -341,6 +341,48 @@ class TestAResourceLevelCredentialFinding:
 
         assert _context(model, 1) == RESOURCE_MASKED + "Outputs: {}\n"
 
+    @pytest.mark.parametrize(
+        "snippet_break", ["\f", "\v", "\x85", chr(0x2028), chr(0x2029)]
+    )
+    def test_a_snippet_with_an_uncounted_break_does_not_bound_the_range(
+        self, snippet_break
+    ):
+        """A region snippet holding a break only some scanners count cannot be
+        placed line by line. Counting its lines as the file's lines ended the
+        range at the second line and left the properties after it unmasked; the
+        range runs to the end of the file as it does with no snippet at all."""
+        finding = self._credential_finding(end=3)
+        region = finding["locations"][0]["physicalLocation"]["region"]
+        region["snippet"] = {"text": "Database:" + snippet_break + "Type"}
+        model = _results(finding, _neighbor("template.yaml", 6, 3, RESOURCE_LINES))
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == RESOURCE_MASKED
+
+    def test_a_snippet_with_an_uncounted_break_still_covers_its_own_lines(self):
+        """Control: a finding that reports a column is not a resource, so the
+        lines its snippet spans are its whole range and the lines after them
+        stay as they were."""
+        finding = _result(
+            "AwsSolutions-RDS-1",
+            "template.yaml",
+            3,
+            "The database password must not be a plaintext string.",
+            "cdk-nag",
+            end=3,
+            column=10,
+        )
+        region = finding["locations"][0]["physicalLocation"]["region"]
+        region["snippet"] = {"text": "Database:\fType"}
+        model = _results(finding, _neighbor("template.yaml", 6, 3, RESOURCE_LINES))
+
+        mask_secrets_in_results(model)
+
+        masked = _context(model, 1)
+        assert masked.startswith("  " + MASKED_LINE + "\n")
+        assert masked.endswith("".join(RESOURCE_LINES[2:]))
+
     def test_a_finding_that_quotes_its_value_is_bounded_to_its_own_line(self):
         """bandit's hardcoded-password rule names a credential in code too, but
         it quotes the value on the line it reports, so the line itself is the

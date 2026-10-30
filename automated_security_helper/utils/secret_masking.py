@@ -1350,6 +1350,13 @@ def _region_last_line(region: Any, start: int) -> int:
     return last
 
 
+def _snippet_cannot_be_placed(region: Any) -> bool:
+    """Whether a region's snippet holds a break only some scanners count, so its
+    lines cannot be matched to the file's lines."""
+    text = getattr(getattr(region, "snippet", None), "text", None)
+    return isinstance(text, str) and bool(_UNCOUNTED_LINE_BREAK.search(text))
+
+
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
     _resolve_artifact_uris(sarif_report)
     index = _SecretIndex()
@@ -1434,10 +1441,17 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                     else:
                         end = _TO_END_OF_FILE
                     index.end_marks.append((result, block_end))
-                elif resource_only and not _has_columns(region) and end <= start:
+                elif (
+                    resource_only
+                    and not _has_columns(region)
+                    and (end <= start or _snippet_cannot_be_placed(region))
+                ):
                     # cdk-nag writes endLine == startLine for the resource's
                     # first line; a one-line region says nothing about where
-                    # the resource ends. A finding that reports a column (bandit,
+                    # the resource ends. A snippet with a break some scanners
+                    # do not count cannot be placed line by line, so the lines
+                    # it spans (_region_last_line) say nothing about the
+                    # resource either. A finding that reports a column (bandit,
                     # semgrep) points at a span of its line, not at a resource,
                     # whatever its message says about hard-coded credentials.
                     end = _TO_END_OF_FILE
