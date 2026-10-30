@@ -23,7 +23,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
-from typer._click.core import Option
+
+# Typer 0.27 vendors click as ``typer._click`` and has no ``Option`` class there:
+# its options are ``typer.core.TyperOption``, a ``Parameter`` subclass of the
+# vendored copy, so the parser under test sees the type it is given at runtime.
+from typer.core import TyperOption
 from typer.testing import CliRunner
 
 from automated_security_helper.cli import entrypoint
@@ -47,9 +51,9 @@ ORCHESTRATOR_CREATE = (
 @pytest.fixture
 def params():
     return [
-        Option(["--format", "-f"], multiple=True),
-        Option(["--verbose", "-v"], is_flag=True),
-        Option(["--output-dir", "-o"]),
+        TyperOption(param_decls=["--format", "-f"], multiple=True),
+        TyperOption(param_decls=["--verbose", "-v"], is_flag=True),
+        TyperOption(param_decls=["--output-dir", "-o"]),
     ]
 
 
