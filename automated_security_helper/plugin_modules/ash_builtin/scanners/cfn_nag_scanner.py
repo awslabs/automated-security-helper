@@ -6,7 +6,7 @@ import os
 import platform
 import re
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, ClassVar, Dict, List, Literal
 
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -197,6 +197,43 @@ def _rule_exception_lines(stderr: str) -> List[str]:
         ):
             raised.append(stripped)
     return raised
+
+
+#: Where macOS keeps a real compiler: the Command Line Tools, Xcode, or the
+#: developer directory ``xcode-select`` points at. Without one of these,
+#: ``/usr/bin/cc``, ``gcc`` and ``clang`` are stubs that offer to install the
+#: tools and build nothing.
+_MACOS_DEVELOPER_DIRS = (
+    "/Library/Developer/CommandLineTools",
+    "/Applications/Xcode.app/Contents/Developer",
+)
+
+
+def _macos_developer_tools_present() -> bool:
+    """Whether a real C compiler is installed on macOS, by its developer directory.
+
+    A filesystem probe, not a process: ``xcode-select -p`` would say the same,
+    and this runs while the scanner is constructed, which starts nothing.
+    """
+    candidates = [os.environ.get("DEVELOPER_DIR"), *_MACOS_DEVELOPER_DIRS]
+    return any(
+        Path(directory, "usr", "bin", "clang").exists()
+        for directory in candidates
+        if directory
+    )
+
+
+def _unique_name(name: str, used: Dict[str, int]) -> str:
+    """``name``, or ``name-2``, ``name-3`` and so on when an earlier template of
+    this scan took it.
+
+    ``get_normalized_filename`` maps ``/`` and ``.`` alike to ``__``, so
+    ``a/b.yaml`` and ``a__b.yaml`` named one results directory and the later
+    template's stdout and stderr logs overwrote the earlier one's.
+    """
+    count = used.get(name, 0) + 1
+    used[name] = count
+    return name if count == 1 else f"{name}-{count}"
 
 
 def _ruby_headers_present(system_include: Path = Path("/usr/include")) -> bool:
@@ -431,6 +468,16 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 "no C compiler (cc, gcc or clang) is on PATH, and cfn-nag's `psych` "
                 "dependency has to build from source"
             )
+        elif platform.system() == "Darwin" and not _macos_developer_tools_present():
+            # macOS ships cc, gcc and clang as stubs that pass a PATH probe and
+            # then offer to install the Command Line Tools instead of compiling,
+            # so the gem install was declared, failed building psych, and took
+            # every other scanner's install down with it.
+            missing.append(
+                "the Xcode Command Line Tools are not installed (the cc, gcc and "
+                "clang on PATH are the stubs that offer to install them), and "
+                "cfn-nag's `psych` dependency has to build from source"
+            )
         elif platform.system() == "Linux" and not _ruby_headers_present():
             # Linux only: distributions ship the headers as a separate package
             # (ruby-dev, ruby-devel), and a host with ruby and gcc but no headers
@@ -482,10 +529,20 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         """
         missing = self._missing_gem_prerequisites()
         if missing:
-            ASH_LOGGER.warning(
-                f"cfn-nag cannot be installed here: {', '.join(missing)}. It will be "
-                "reported as having no install path on this machine rather than "
-                "failing the install of every other scanner."
+            # At WARNING only where it matters: with cfn_nag_scan already on PATH
+            # (the official image installs the gem and then purges its compiler)
+            # nothing needs installing, and every scanner construction warned
+            # about an install that was never going to run.
+            installed = find_executable("cfn_nag_scan") is not None
+            ASH_LOGGER.log(
+                logging.DEBUG if installed else logging.WARNING,
+                f"cfn-nag cannot be installed here: {', '.join(missing)}. "
+                + (
+                    "cfn_nag_scan is already on PATH, so nothing needs installing."
+                    if installed
+                    else "It will be reported as having no install path on this "
+                    "machine rather than failing the install of every other scanner."
+                ),
             )
             return self
 
@@ -581,13 +638,12 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         set ``{0, 1}`` graded a clean run with two violations unsuccessful.
         The non-zero exit that rendered nothing is already a
         failed target in the counters, which grade first. A signal death is
-        no count, and ``SPAWN_FAILURE_RETURNCODE`` keeps the base rule: ASH's
-        own could-not-start marker is never a count cfn_nag returned."""
-        from automated_security_helper.utils.subprocess_utils import (
-            SPAWN_FAILURE_RETURNCODE,
-        )
-
-        if self.exit_code == SPAWN_FAILURE_RETURNCODE:
+        no count. A tool that never started is read from the recorded spawn
+        failure (``scan_spawn_failure``, set by ``_run_subprocess`` from the
+        response's flag), not from the code: ASH's could-not-start marker,
+        127, is also what cfn_nag returns for a template with 127 (mod 256)
+        failing violations, and that complete run was graded unsuccessful."""
+        if self.scan_spawn_failure is not None:
             return False
         return self.exit_code is not None and self.exit_code >= 0
 
@@ -696,7 +752,12 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             return False
 
         try:
-            target_results_dir = self.results_dir.joinpath(target_type)
+            # Absolute: cfn_nag_scan runs in the source directory and opens its
+            # --input-path by name, so a staged copy under a relative --output-dir
+            # was looked for relative to the source directory and not found.
+            target_results_dir = Path(
+                os.path.abspath(self.results_dir.joinpath(target_type))
+            )
 
             # Every JSON and YAML file in the tree; shared with cdk-nag and with
             # nothing_to_scan_reason, which answers from this same selection. The
@@ -746,6 +807,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 if target_type == "converted"
                 else self.context.source_dir
             )
+            # The results directory names already taken in this scan (_unique_name).
+            results_dir_names: Dict[str, int] = {}
             for cfn_file in scannable:
                 # Whether this template was already counted as a failed target, so
                 # the except arm below does not count it a second time.
@@ -857,12 +920,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                             level=logging.ERROR,
                         )
                         continue
-                    self._plugin_log(
-                        f"Not a CloudFormation file: {cfn_file}. "
-                        f"Exception: {describe_parse_error(e)}",
-                        target_type=target_type,
-                        level=logging.TRACE,
-                    )
                     # A SKIPPED target says a template could not be parsed only when
                     # this file could be one: the tool-absent check counts it, so the
                     # same tree without the tool is MISSING. A mkdocs.yml or a Helm
@@ -871,6 +928,24 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         self._nothing_scanned_reason = (
                             NO_PARSEABLE_CLOUDFORMATION_TEMPLATE
                         )
+                        # Named on the scanner's error stream, as a refused or
+                        # unreadable file is: a damaged template left at TRACE
+                        # vanished from the results, while cdk-nag records it.
+                        self._plugin_log(
+                            f"Skipped {cfn_file}: it could be a CloudFormation "
+                            "template but could not be parsed: "
+                            f"{describe_parse_error(e)}",
+                            target_type=target_type,
+                            level=logging.WARNING,
+                            append_to_stream="stderr",
+                        )
+                        continue
+                    self._plugin_log(
+                        f"Not a CloudFormation file: {cfn_file}. "
+                        f"Exception: {describe_parse_error(e)}",
+                        target_type=target_type,
+                        level=logging.TRACE,
+                    )
                     continue
                 if cfn_model is None:
                     self._plugin_log(
@@ -883,7 +958,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 # are non-CloudFormation files, which are an expected skip rather than a
                 # scanner failure.
                 self.targets_attempted += 1
-                normalized_filename = get_normalized_filename(str_to_normalize=cfn_file)
+                normalized_filename = _unique_name(
+                    get_normalized_filename(str_to_normalize=cfn_file),
+                    results_dir_names,
+                )
                 results_file_dir = target_results_dir.joinpath(normalized_filename)
                 try:
                     results_file_dir.mkdir(exist_ok=True, parents=True)
@@ -983,19 +1061,31 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         self.errors.append(f"{cfn_file}: {reason}")
                         self.record_unevaluated_target(cfn_file)
                         continue
-                    if sarif_report is None and file_sarif is not None:
-                        sarif_report = file_sarif
-                    elif file_sarif is not None:
-                        sarif_report.merge_sarif_report(
-                            sarif_report=file_sarif,
-                            include_invocation=False,
-                            include_driver=False,
-                            # CFN Nag includes the full rule list regardless if there were
-                            # results matching the rule ID.
-                            # Since `include_driver=True`, it will include the rule list
-                            # when it attaches the initial driver.
-                            include_rules=False,
-                        )
+                    # cfn_nag writes its whole rule list into every report, so the
+                    # first parsed one supplies the rules the merged results name.
+                    # The merge below carries neither driver nor rules, and the
+                    # branch that was meant to keep the first report's driver was
+                    # dead (sarif_report is built above and is never None), so the
+                    # merged report named rule ids its driver did not define.
+                    driver = sarif_report.runs[0].tool.driver
+                    file_run = file_sarif.runs[0] if file_sarif.runs else None
+                    file_driver = (
+                        file_run.tool.driver
+                        if file_run is not None and file_run.tool is not None
+                        else None
+                    )
+                    if (
+                        not driver.rules
+                        and file_driver is not None
+                        and file_driver.rules
+                    ):
+                        driver.rules = list(file_driver.rules)
+                    sarif_report.merge_sarif_report(
+                        sarif_report=file_sarif,
+                        include_invocation=False,
+                        include_driver=False,
+                        include_rules=False,
+                    )
                 except Exception as e:
                     ASH_LOGGER.warning(
                         f"Failed to parse CFN Nag results as SARIF: {str(e)}"
@@ -1083,25 +1173,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             return sarif_report
 
         except Exception as e:
+            # The end time is recorded on this path too: without it the executor
+            # computed the row's duration from the previous target's end time.
+            with contextlib.suppress(Exception):
+                self._post_scan(target=target, target_type=target_type)
             # Check if there are useful error details
             raise ScannerError(f"{self.__class__.__name__} failed: {str(e)}")
-
-
-if __name__ == "__main__":
-    scanner = CfnNagScanner(
-        source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
-    )
-    report = scanner.scan(target=scanner.source_dir)
-
-    report_json = report.model_dump_json(
-        indent=2,
-        by_alias=True,
-        exclude_unset=True,
-    )
-    with open_for_write(
-        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"),
-        encoding=None,
-        errors=None,
-    ) as f:
-        f.write(report_json)
