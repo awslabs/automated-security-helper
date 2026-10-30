@@ -226,7 +226,7 @@ def test_a_file_with_no_final_line_break_is_rewritten_whole(
     fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
 
     assert len(fixed_issues) == len(unused)
-    assert "# reason: two" in fixed_content
+    assert "#   reason: two" in fixed_content
     data = yaml.safe_load(fixed_content)
     suppressions = data["global_settings"]["suppressions"]
     assert [s["path"] for s in suppressions] == kept_paths

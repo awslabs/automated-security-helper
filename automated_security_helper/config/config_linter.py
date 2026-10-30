@@ -60,6 +60,11 @@ from automated_security_helper.base.plugin_config import _options_class
 from automated_security_helper.config.config_validator import (
     _built_in_section_classes,
 )
+from automated_security_helper.config.plugin_section_names import (
+    PLUGIN_SEGMENT_KEYS,
+    declared_section_names,
+    folded_section_name,
+)
 from automated_security_helper.utils.unknown_keys import (
     INTERNAL_FIELD_MESSAGE,
     INTERNAL_SECTION_FIELDS,
@@ -113,6 +118,10 @@ class LintCategory(str, Enum):
     # A value the AshConfig model refuses, so a scan refuses the config.
     SCHEMA_ERROR = "schema-error"
     PLUGIN_OPTIONS_UNCHECKED = "plugin-options-unchecked"
+    # A warning ConfigValidator gives in words lint has no category for. Not
+    # SYNTAX_ERROR: that category says the file did not load, and the CLI skips
+    # the fixers for a file that has one.
+    OTHER = "other"
 
 
 @dataclass
@@ -359,8 +368,36 @@ class ConfigLinter:
         if check_unused:
             cls._check_unused_suppressions(config_path, config_data, output_dir, result)
 
+        cls._clear_fixable_a_fixer_refuses(config_path, result)
         cls._merge_path_duplicates(result)
         return result
+
+    @classmethod
+    def _clear_fixable_a_fixer_refuses(
+        cls, config_path: Path, result: LintResult
+    ) -> None:
+        """Mark no issue auto-fixable that the fixer would refuse the file for.
+
+        ``--fix`` rewrites the file from its parsed values, so it refuses a TOML
+        file (the rewrite would replace every other table of pyproject.toml) and
+        a YAML one that reads the environment (it would replace each reference
+        with its value). ``--fix-unused`` edits the text instead, so it refuses
+        TOML and JSON only. Left marked, the issues told the operator to run a
+        fixer that then refuses the file.
+        """
+
+        def refused(issue: LintIssue) -> bool:
+            unused = issue.category == LintCategory.SUPPRESSION_UNUSED
+            if is_toml_file(config_path):
+                return True
+            if is_json_file(config_path):
+                return unused
+            return not unused and uses_env_references(config_path)
+
+        for issue in result.issues:
+            if issue.fixable and refused(issue):
+                issue.fixable = False
+                issue.fix_description = ""
 
     @classmethod
     def _merge_path_duplicates(cls, result: LintResult) -> None:
@@ -518,7 +555,9 @@ class ConfigLinter:
             return None, [], None
 
         # Find the unused suppressions report
-        report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
+        report_path, report_timestamp = cls._find_unused_report(
+            config_path, output_dir, config_data
+        )
 
         if report_path is None:
             return raw_content, [], None
@@ -577,11 +616,16 @@ class ConfigLinter:
         )
 
         # Identify which suppression indices are unused
+        written_ids = {
+            cls._make_suppression_id(written)
+            for written in written_suppressions
+            if isinstance(written, dict)
+        }
         unused_indices = set()
         for i, (suppression, written) in enumerate(
             zip(suppressions, written_suppressions)
         ):
-            if cls._suppression_ids(suppression, written) & unused_ids:
+            if cls._is_listed_unused(suppression, written, unused_ids, written_ids):
                 unused_indices.add(i)
 
         if not unused_indices:
@@ -608,7 +652,7 @@ class ConfigLinter:
                 LintIssue(
                     severity=LintSeverity.INFO,
                     category=LintCategory.SUPPRESSION_UNUSED,
-                    message=f"Commented out unused suppression: path='{shown.get('path', '')}', rule_id='{shown.get('rule_id', '*')}'",
+                    message=f"Commented out unused suppression: path='{shown.get('path', '')}', rule_id='{cls._rule_shown(shown)}'",
                     path=f"global_settings.suppressions[{i}]",
                     fixable=True,
                     fix_description="Comment out unused suppression",
@@ -616,6 +660,41 @@ class ConfigLinter:
             )
 
         return fixed_content, fixed_issues, report_timestamp
+
+    @classmethod
+    def _is_listed_unused(
+        cls,
+        entry: Any,
+        written: Any,
+        unused_ids: Set[str],
+        written_ids: Set[str],
+    ) -> bool:
+        """Whether the report lists ``entry``, a suppression of the file.
+
+        By its written form's id, the one the report carries since the reference
+        record, or by its resolved id, which a report written before it holds. A
+        resolved id that some entry of the file writes as its own written id is
+        that entry's: an entry whose environment value is itself reference text
+        resolves to another entry's written form, and matching it by that would
+        comment out an entry the report never listed.
+        """
+        written_form = written if isinstance(written, dict) else entry
+        if (
+            isinstance(written_form, dict)
+            and cls._make_suppression_id(written_form) in unused_ids
+        ):
+            return True
+        if not isinstance(entry, dict):
+            return False
+        resolved_id = cls._make_suppression_id(entry)
+        return resolved_id in unused_ids and resolved_id not in written_ids
+
+    @staticmethod
+    def _rule_shown(entry: Dict[str, Any]) -> Any:
+        """``entry``'s ``rule_id`` as a message names it: ``*`` for an entry that
+        has none, whether the key is absent or null (a report writes ``null``)."""
+        rule_id = entry.get("rule_id")
+        return "*" if rule_id is None else rule_id
 
     @classmethod
     def _read_unused_report(cls, report_path: Path) -> Dict[str, Any]:
@@ -707,7 +786,16 @@ class ConfigLinter:
                 stripped = text.lstrip()
                 if not stripped or stripped.startswith("#"):
                     continue
-                lines[line_no] = (f"{indent}# {stripped}", ending)
+                # The comment marker sits at the dash's column and the line keeps
+                # what it had beyond that column inside the comment, so taking the
+                # marker off restores the entry as it was. Flush to the marker, a
+                # line lost its own indentation, and the entry did not parse.
+                kept = (
+                    text[dash_column:]
+                    if len(text) - len(stripped) >= dash_column
+                    else stripped
+                )
+                lines[line_no] = (f"{indent}# {kept}", ending)
             commented.add(index)
 
         if commented and len(commented) == len(dash_positions):
@@ -857,8 +945,18 @@ class ConfigLinter:
         if report_path is None or report_timestamp is None:
             return None
 
-        age_seconds = (datetime.now() - report_timestamp).total_seconds()
-        return report_path, report_timestamp, age_seconds
+        return report_path, report_timestamp, cls._seconds_since(report_timestamp)
+
+    @staticmethod
+    def _seconds_since(moment: datetime) -> float:
+        """Seconds from ``moment``, a naive local time, to now.
+
+        Both are put on the timeline first. Two naive local times subtract as
+        wall-clock readings, and across a daylight-saving change an hour is
+        missing from them or counted twice, so a report was an hour older or
+        younger than it was and a staleness warning fired or was missed.
+        """
+        return (datetime.now().astimezone() - moment.astimezone()).total_seconds()
 
     # -------------------------------------------------------------------------
     # Private helpers
@@ -961,6 +1059,11 @@ class ConfigLinter:
         for warning in check.warnings:
             for issue in cls._validator_error_to_lint_issues(warning, config_data):
                 issue.severity = LintSeverity.WARNING
+                if issue.category == LintCategory.SYNTAX_ERROR:
+                    # The fallback of _validator_error_to_lint_issue, for words
+                    # it does not know. A warning is something a scan accepts, so
+                    # the file loads and is not a syntax error.
+                    issue.category = LintCategory.OTHER
                 if issue.category == LintCategory.IGNORE_PATH_ISSUE:
                     issue.pattern = cls._take_path_pattern(path_patterns, warning)
                 result.issues.append(issue)
@@ -1113,11 +1216,17 @@ class ConfigLinter:
         if value is None:
             # A null pins nothing, whichever plugin it is under.
             return None
-        config_class = (
-            _built_in_section_classes(segment_name).get(section_name)
-            if segment_name in INTERNAL_SECTION_FIELDS
-            else None
-        )
+        config_class = None
+        if segment_name in INTERNAL_SECTION_FIELDS:
+            classes = _built_in_section_classes(segment_name)
+            config_class = classes.get(section_name)
+            if config_class is None:
+                # A scan reads any spelling of a built-in plugin's section as
+                # its section (plugin_section_names): `Bandit`, `CDK_NAG`.
+                declared = declared_section_names(segment_name).get(
+                    folded_section_name(section_name)
+                )
+                config_class = classes.get(declared) if declared else None
         if config_class is None:
             return (
                 "its plugin is not loaded here, so whether it declares this "
@@ -1396,25 +1505,52 @@ class ConfigLinter:
     def _check_ignore_path_expirations(
         cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
     ) -> None:
-        """Report ignore-path entries that have expired or carry a bad date."""
+        """Report ignore-path entries that have expired or carry a bad date.
+
+        A scanner's section is found under any spelling the file gives it, as a
+        scan finds it (``plugin_section_names``): an expired entry under
+        ``Bandit:`` is applied as one under ``bandit:`` and is reported the same.
+        A message names the entry by the declared spelling, never by a key the
+        file may have read from the environment.
+        """
         for keys, subject in cls._IGNORE_PATH_LISTS:
-            entries: Any = config_data
-            for key in keys:
-                entries = entries.get(key) if isinstance(entries, dict) else None
-            if not isinstance(entries, list):
-                continue
-            shown_entries = cls._shown_entries(entries, shown_data, keys)
-            for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
-                if isinstance(entry, dict):
-                    cls._check_expiration(
-                        entry.get("expiration"),
-                        f"{'.'.join(keys)}[{i}]",
-                        subject,
-                        result,
-                        shown=cls._shown_entry(entry, shown).get(
-                            "expiration", ENVIRONMENT_VALUE_SHOWN
-                        ),
-                    )
+            for spelled in cls._as_the_file_spells(config_data, keys):
+                entries: Any = config_data
+                for key in spelled:
+                    entries = entries.get(key) if isinstance(entries, dict) else None
+                if not isinstance(entries, list):
+                    continue
+                shown_entries = cls._shown_entries(entries, shown_data, spelled)
+                for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
+                    if isinstance(entry, dict):
+                        cls._check_expiration(
+                            entry.get("expiration"),
+                            f"{'.'.join(keys)}[{i}]",
+                            subject,
+                            result,
+                            shown=cls._shown_entry(entry, shown).get(
+                                "expiration", ENVIRONMENT_VALUE_SHOWN
+                            ),
+                        )
+
+    @staticmethod
+    def _as_the_file_spells(
+        config_data: Any, keys: Tuple[str, ...]
+    ) -> List[Tuple[str, ...]]:
+        """The key paths of ``config_data`` that ``keys`` names, with a known
+        plugin's section taken under every spelling the file gives it. Any other
+        path is ``keys`` as it is."""
+        if len(keys) < 2 or keys[0] not in PLUGIN_SEGMENT_KEYS:
+            return [keys]
+        segment = config_data.get(keys[0]) if isinstance(config_data, dict) else None
+        if not isinstance(segment, dict):
+            return []
+        wanted = folded_section_name(keys[1])
+        return [
+            (keys[0], name, *keys[2:])
+            for name in segment
+            if isinstance(name, str) and folded_section_name(name) == wanted
+        ]
 
     @classmethod
     def _check_expiration(
@@ -1649,7 +1785,9 @@ class ConfigLinter:
         result: LintResult,
     ) -> None:
         """Check for unused suppressions based on the report."""
-        report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
+        report_path, report_timestamp = cls._find_unused_report(
+            config_path, output_dir, config_data
+        )
 
         if report_path is None:
             result.issues.append(
@@ -1693,7 +1831,7 @@ class ConfigLinter:
 
         # Report age warning
         if report_timestamp:
-            age_seconds = (datetime.now() - report_timestamp).total_seconds()
+            age_seconds = cls._seconds_since(report_timestamp)
             if age_seconds > cls.MAX_REPORT_AGE_SECONDS:
                 age_hours = age_seconds / 3600
                 result.issues.append(
@@ -1714,26 +1852,36 @@ class ConfigLinter:
         shown_by_id = cls._shown_suppressions_by_id(
             result.resolved_data, result.shown_resolved, result.references
         )
+        # --fix-unused edits the checked file's own list only. An entry that an
+        # extends base or a patch operation supplies, or one the config no longer
+        # holds, is reported but is not something the fixer can comment out.
+        own_ids = cls._own_suppression_ids(config_data, result.file_references)
         for unused in unused_suppressions:
             if not isinstance(unused, dict):
                 continue
-            shown = shown_by_id.get(cls._make_suppression_id(unused))
+            unused_id = cls._make_suppression_id(unused)
+            shown = shown_by_id.get(unused_id)
             message = (
                 f"Unused suppression: path='{(shown or unused).get('path', '')}', "
-                f"rule_id='{(shown or unused).get('rule_id', '*')}'"
+                f"rule_id='{cls._rule_shown(shown or unused)}'"
             )
             if shown is None:
                 # An entry the config no longer holds names no place in it:
                 # free text, with what the chain read from the environment
                 # redacted.
                 message = redact_values(message, result.environment_values)
+            fixable = unused_id in own_ids
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.INFO,
                     category=LintCategory.SUPPRESSION_UNUSED,
                     message=message,
-                    fixable=True,
-                    fix_description="Remove unused suppression (use --fix-unused)",
+                    fixable=fixable,
+                    fix_description=(
+                        "Remove unused suppression (use --fix-unused)"
+                        if fixable
+                        else ""
+                    ),
                 )
             )
 
@@ -1750,6 +1898,24 @@ class ConfigLinter:
             ids.add(cls._make_suppression_id(entry))
         if isinstance(written, dict):
             ids.add(cls._make_suppression_id(written))
+        return ids
+
+    @classmethod
+    def _own_suppression_ids(
+        cls, config_data: Any, references: List[EnvironmentReference]
+    ) -> Set[str]:
+        """The ids (_suppression_ids) of the suppressions ``config_data``, the
+        checked file as parsed, holds itself: the entries ``--fix-unused`` can
+        comment out. ``references`` are what the file read from the environment."""
+        entries = cls._suppressions_of(config_data)
+        written = cls._suppressions_of(
+            record_environment_references(config_data, references)
+        )
+        ids: Set[str] = set()
+        for index, entry in enumerate(entries):
+            ids |= cls._suppression_ids(
+                entry, written[index] if index < len(written) else None
+            )
         return ids
 
     @classmethod
@@ -1786,16 +1952,58 @@ class ConfigLinter:
         return entries if isinstance(entries, list) else []
 
     @classmethod
+    def _unused_report_name(cls, config_data: Any) -> str:
+        """The report's path below the output directory.
+
+        ``UNUSED_SUPPRESSIONS_REPORT``, unless the file sets the reporter's
+        ``extension`` (``reporters.unused-suppressions.extension``): the reporter
+        then writes ``reports/ash.<extension>``, and a lookup of the default name
+        found nothing of that scan. The section is read under any spelling a scan
+        reads (plugin_section_names). An extension that is not a file name is
+        the reporter's to refuse, and the default stands.
+        """
+        reporters = (
+            config_data.get("reporters") if isinstance(config_data, dict) else None
+        )
+        if isinstance(reporters, dict):
+            for key, section in reporters.items():
+                if (
+                    isinstance(key, str)
+                    and folded_section_name(key) == "unusedsuppressions"
+                    and isinstance(section, dict)
+                ):
+                    extension = section.get("extension")
+                    if (
+                        isinstance(extension, str)
+                        and extension not in ("", ".", "..")
+                        and "/" not in extension
+                        and "\\" not in extension
+                    ):
+                        return f"reports/ash.{extension}"
+        return cls.UNUSED_SUPPRESSIONS_REPORT
+
+    @classmethod
     def _find_unused_report(
         cls,
         config_path: Path,
         output_dir: Optional[Path],
+        config_data: Any = None,
     ) -> Tuple[Optional[Path], Optional[datetime]]:
         """Find the unused suppressions report file.
+
+        ``config_data`` is the checked file as parsed, which names the report
+        (``_unused_report_name``); read here when the caller holds none.
 
         Returns:
             Tuple of (report_path, report_modification_time) or (None, None)
         """
+        if config_data is None:
+            try:
+                config_data = cls._load_config(config_path)
+            except (OSError, ValueError, yaml.YAMLError, ASHConfigSourceError):
+                # The caller's own load reports why; the default name stands.
+                config_data = None
+        report_name = cls._unused_report_name(config_data)
         # Determine the output directory
         if output_dir is not None:
             search_dirs = [output_dir]
@@ -1813,7 +2021,7 @@ class ConfigLinter:
             ]
 
         for search_dir in search_dirs:
-            report_path = search_dir / cls.UNUSED_SUPPRESSIONS_REPORT
+            report_path = search_dir / report_name
             if report_path.exists():
                 # Get the modification time of the report
                 mtime = report_path.stat().st_mtime
@@ -1994,7 +2202,24 @@ class ConfigLinter:
             ):
                 shown_keys = list(shown_segment)
             else:
-                shown_keys = [ENVIRONMENT_VALUE_SHOWN] * len(segment_data)
+                # The copy does not line up with the segment: two keys read from
+                # the environment are both `<value>` in it, so they are one key
+                # of it. Each key is then shown as itself unless the file's record
+                # says it read that key from the environment; with no such
+                # record, every key is shown as read from it.
+                read_from_environment = {
+                    reference.resolved
+                    for reference in result.file_references
+                    if reference.key
+                    and tuple(str(part) for part in reference.path) == (segment_name,)
+                }
+                if read_from_environment:
+                    shown_keys = [
+                        ENVIRONMENT_VALUE_SHOWN if key in read_from_environment else key
+                        for key in segment_data
+                    ]
+                else:
+                    shown_keys = [ENVIRONMENT_VALUE_SHOWN] * len(segment_data)
 
             for key, shown_key in zip(list(segment_data), shown_keys):
                 if not isinstance(key, str):
@@ -2134,11 +2359,13 @@ class ConfigLinter:
     @classmethod
     def _fix_internal_field(cls, config_data: Dict[str, Any], issue: LintIssue) -> bool:
         """Remove an internal-only field from a scanner/reporter/converter."""
-        parts = issue.path.split(".")
-        if len(parts) != 3:
+        # ``<segment>.<plugin>.<field>``: the segment and the field hold no dot,
+        # the plugin's name may.
+        section, _, rest = issue.path.partition(".")
+        plugin_name, _, field_name = rest.rpartition(".")
+        if not (section and plugin_name and field_name):
             return False
 
-        section, plugin_name, field_name = parts
         if section in config_data and isinstance(config_data[section], dict):
             plugin_config = config_data[section].get(plugin_name)
             if isinstance(plugin_config, dict) and field_name in plugin_config:
@@ -2286,8 +2513,10 @@ class ConfigLinter:
             return json.dumps(config_data, indent=2) + "\n"
         config_strings = []
 
-        # Preserve the schema reference if it exists in the original file
-        for line in raw_content.split("\n"):
+        # Preserve the schema reference if it exists in the original file. A
+        # leading byte order mark is not whitespace to ``strip``, so it hid the
+        # first line's comment and the default reference replaced it.
+        for line in raw_content.removeprefix(chr(0xFEFF)).split("\n"):
             stripped = line.strip()
             if stripped.startswith("#") and "schema" in stripped.lower():
                 config_strings.append(line)

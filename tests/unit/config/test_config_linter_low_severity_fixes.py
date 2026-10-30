@@ -1,0 +1,462 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Small corrections to ``ash config lint`` and its two fixers.
+
+Each test names what the code did before. They are grouped by the function
+they pin, and each builds the smallest input that reaches it: most call the
+function directly, because the lint of a whole file takes the path through
+ConfigValidator and the environment record, which these tests are not about.
+"""
+
+from __future__ import annotations
+
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from automated_security_helper.config import config_linter
+from automated_security_helper.config.config_linter import (
+    ConfigLinter,
+    LintCategory,
+    LintIssue,
+    LintResult,
+    LintSeverity,
+)
+from automated_security_helper.config.config_validator import ConfigValidator
+from automated_security_helper.config.environment_record import EnvironmentReference
+
+pytestmark = pytest.mark.unit
+
+
+def _issue(category: LintCategory, fixable: bool = True) -> LintIssue:
+    return LintIssue(
+        severity=LintSeverity.WARNING,
+        category=category,
+        message="m",
+        path="p",
+        fixable=fixable,
+        fix_description="fix it" if fixable else "",
+    )
+
+
+class TestValidatorWarningCategory:
+    def test_a_warning_in_words_lint_does_not_know_is_not_a_syntax_error(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the fallback category of an unrecognized validator
+        warning was SYNTAX_ERROR, the category that says the file did not load.
+        The CLI skips the fixers for a file with one, so a warning a scan
+        accepts switched ``--fix`` off."""
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+        check = SimpleNamespace(
+            chain=[],
+            environment_values=[],
+            file_references=[],
+            references=[],
+            environment_paths=frozenset(),
+            resolved_data=None,
+            shown_resolved=None,
+            errors=[],
+            warnings=["A scan accepts this, and lint has no words for it"],
+            path_patterns=[],
+        )
+        monkeypatch.setattr(
+            ConfigValidator, "check_config_file", staticmethod(lambda *a, **k: check)
+        )
+        result = LintResult(config_path=config_path)
+
+        ConfigLinter._check_validation_issues(config_path, {}, result)
+
+        assert [i.category for i in result.issues] == [LintCategory.OTHER]
+        assert result.issues[0].severity == LintSeverity.WARNING
+        assert LintCategory.SYNTAX_ERROR not in {i.category for i in result.issues}
+
+
+class TestFixableMarks:
+    @pytest.mark.parametrize("name", ["pyproject.toml", "ash.toml"])
+    def test_nothing_in_a_toml_file_is_marked_fixable(self, tmp_path, name):
+        """Red at the base: both fixers refuse a TOML file, and the issues said
+        to run them."""
+        config_path = tmp_path / name
+        config_path.write_text("[tool.ash]\n", encoding="utf-8")
+        result = LintResult(config_path=config_path)
+        result.issues = [
+            _issue(LintCategory.SUPPRESSION_UNUSED),
+            _issue(LintCategory.SUPPRESSION_EXPIRED),
+        ]
+
+        ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
+
+        assert [i.fixable for i in result.issues] == [False, False]
+        assert [i.fix_description for i in result.issues] == ["", ""]
+
+    def test_an_unused_suppression_in_a_json_file_is_not_fixable_but_others_are(
+        self, tmp_path
+    ):
+        """Red at the base: ``--fix-unused`` edits text and refuses JSON, while
+        ``--fix`` rewrites JSON as JSON."""
+        config_path = tmp_path / "ash.json"
+        config_path.write_text("{}", encoding="utf-8")
+        result = LintResult(config_path=config_path)
+        result.issues = [
+            _issue(LintCategory.SUPPRESSION_UNUSED),
+            _issue(LintCategory.SUPPRESSION_EXPIRED),
+        ]
+
+        ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
+
+        assert [i.fixable for i in result.issues] == [False, True]
+
+    def test_a_yaml_file_that_reads_the_environment_keeps_only_unused_fixable(
+        self, tmp_path
+    ):
+        """Red at the base: ``--fix`` refuses a file that reads the environment
+        (it would write each reference's value over it); ``--fix-unused`` edits
+        text and does not."""
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text("project_name: ${ASH_LOW_NAME}\n", encoding="utf-8")
+        result = LintResult(config_path=config_path)
+        result.issues = [
+            _issue(LintCategory.SUPPRESSION_UNUSED),
+            _issue(LintCategory.SUPPRESSION_EXPIRED),
+        ]
+
+        ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
+
+        assert [i.fixable for i in result.issues] == [True, False]
+        assert result.issues[1].fix_description == ""
+
+    def test_a_plain_yaml_file_keeps_every_mark(self, tmp_path):
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+        result = LintResult(config_path=config_path)
+        result.issues = [
+            _issue(LintCategory.SUPPRESSION_UNUSED),
+            _issue(LintCategory.SUPPRESSION_EXPIRED),
+        ]
+
+        ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
+
+        assert [i.fixable for i in result.issues] == [True, True]
+
+
+class TestUnusedReport:
+    @pytest.mark.parametrize(
+        "config_data, expected",
+        [
+            pytest.param({}, "reports/ash.unused-suppressions.json", id="default"),
+            pytest.param(
+                {"reporters": {"unused-suppressions": {"extension": "found.json"}}},
+                "reports/ash.found.json",
+                id="kebab",
+            ),
+            pytest.param(
+                {"reporters": {"Unused_Suppressions": {"extension": "found.json"}}},
+                "reports/ash.found.json",
+                id="another-spelling",
+            ),
+            pytest.param(
+                {"reporters": {"unused-suppressions": {"extension": "../up"}}},
+                "reports/ash.unused-suppressions.json",
+                id="path-like-extension-is-the-reporters-to-refuse",
+            ),
+            pytest.param(
+                {"reporters": {"unused-suppressions": {"extension": ""}}},
+                "reports/ash.unused-suppressions.json",
+                id="empty-extension",
+            ),
+            pytest.param(
+                {"reporters": {"unused-suppressions": {"extension": 3}}},
+                "reports/ash.unused-suppressions.json",
+                id="not-a-string",
+            ),
+            pytest.param(
+                {"reporters": "x"},
+                "reports/ash.unused-suppressions.json",
+                id="reporters-not-a-mapping",
+            ),
+        ],
+    )
+    def test_the_report_name_follows_the_reporters_extension(
+        self, config_data, expected
+    ):
+        """Red at the base: the lookup used the default name only, so a scan
+        configured with ``extension`` wrote a report the lint never found."""
+        assert ConfigLinter._unused_report_name(config_data) == expected
+
+    def test_the_report_is_found_under_the_configured_name(self, tmp_path):
+        out = tmp_path / "out"
+        (out / "reports").mkdir(parents=True)
+        report = out / "reports" / "ash.found.json"
+        report.write_text("{}", encoding="utf-8")
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+        data = {"reporters": {"unused-suppressions": {"extension": "found.json"}}}
+
+        found, stamp = ConfigLinter._find_unused_report(config_path, out, data)
+
+        assert found == report
+        assert stamp is not None
+
+
+class TestReportAge:
+    @pytest.fixture
+    def pacific_time(self, monkeypatch):
+        if not hasattr(time, "tzset"):
+            pytest.skip("no tzset on this platform")
+        monkeypatch.setenv("TZ", "America/Los_Angeles")
+        time.tzset()
+        if datetime(2026, 1, 15, 12).astimezone().utcoffset() != timedelta(hours=-8):
+            monkeypatch.undo()
+            time.tzset()
+            pytest.skip("the time zone database has no America/Los_Angeles")
+        yield
+        monkeypatch.undo()
+        time.tzset()
+
+    def test_the_age_counts_the_hour_a_daylight_saving_change_skips(
+        self, pacific_time, monkeypatch
+    ):
+        """Red at the base: two naive local times subtract as wall-clock
+        readings. 01:30 and 03:30 on the morning clocks move forward are one
+        hour apart, and the subtraction said two."""
+
+        class SpringForward(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 3, 8, 3, 30)
+
+        monkeypatch.setattr(config_linter, "datetime", SpringForward)
+
+        age = ConfigLinter._seconds_since(datetime(2026, 3, 8, 1, 30))
+
+        assert age == 3600.0
+
+
+class TestWhichSuppressionsTheReportLists:
+    def test_an_entry_whose_value_is_another_entrys_written_form_is_not_listed(self):
+        """Red at the base: entry V reads ``${OTHER}``, and the environment gives
+        that variable the text ``${A}``, so V resolves to the written form of
+        entry U. The report lists U by its written form; matching V by its
+        resolved id commented V out too."""
+        make = ConfigLinter._make_suppression_id
+        u_written = {"path": "${A}", "rule_id": "B1"}
+        u_resolved = {"path": "src/a.py", "rule_id": "B1"}
+        v_written = {"path": "${OTHER}", "rule_id": "B1"}
+        v_resolved = {"path": "${A}", "rule_id": "B1"}
+        unused_ids = {make(u_written)}
+        written_ids = {make(u_written), make(v_written)}
+
+        assert ConfigLinter._is_listed_unused(
+            u_resolved, u_written, unused_ids, written_ids
+        )
+        assert not ConfigLinter._is_listed_unused(
+            v_resolved, v_written, unused_ids, written_ids
+        )
+
+    def test_an_older_report_lists_an_entry_by_its_resolved_id(self):
+        make = ConfigLinter._make_suppression_id
+        resolved = {"path": "src/a.py", "rule_id": "B1"}
+        written = {"path": "${A}", "rule_id": "B1"}
+
+        assert ConfigLinter._is_listed_unused(
+            resolved, written, {make(resolved)}, {make(written)}
+        )
+
+    @pytest.mark.parametrize(
+        "entry", [{"path": "src/a.py"}, {"path": "src/a.py", "rule_id": None}]
+    )
+    def test_an_entry_with_no_rule_is_named_with_a_star(self, entry):
+        """Red at the base: a report writes a missing rule as ``null``, and the
+        message read ``rule_id='None'``."""
+        assert ConfigLinter._rule_shown(entry) == "*"
+
+    def test_only_the_files_own_entries_are_fixable(self):
+        own = {"path": "src/own.py", "rule_id": "B1"}
+        other = {"path": "src/base.py", "rule_id": "B2"}
+
+        ids = ConfigLinter._own_suppression_ids(
+            {"global_settings": {"suppressions": [own]}}, []
+        )
+
+        assert ConfigLinter._make_suppression_id(own) in ids
+        assert ConfigLinter._make_suppression_id(other) not in ids
+
+
+class TestCommentedOutEntries:
+    TEXT = (
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: |\n"
+        "        first line\n"
+        "          deeper line\n"
+        "    - path: src/b.py\n"
+        "      rule_id: B102\n"
+    )
+
+    def test_taking_the_comment_marker_off_restores_the_entry(self):
+        """Red at the base: the marker was put flush to the dash column and the
+        line's own indentation was lost, so un-commenting an entry left lines
+        that did not parse."""
+        fixed, commented = ConfigLinter._comment_out_suppressions(
+            self.TEXT, {0}, "2026-01-01"
+        )
+
+        assert commented == {0}
+        restored = []
+        for line in fixed.split("\n"):
+            if "[ash-lint" in line:
+                continue
+            if line.startswith("    # "):
+                line = "    " + line[len("    # ") :]
+            restored.append(line)
+        assert "\n".join(restored) == self.TEXT
+
+    def test_the_continuation_lines_keep_their_indentation_inside_the_comment(self):
+        fixed, _ = ConfigLinter._comment_out_suppressions(self.TEXT, {0}, "2026-01-01")
+
+        assert "    # - path: src/a.py\n" in fixed
+        assert "    #   rule_id: B101\n" in fixed
+        assert "    #     first line\n" in fixed
+        assert "    #       deeper line\n" in fixed
+
+    def test_an_anchored_list_is_left_as_it_is(self):
+        """An edit of a list another key aliases would change every use of the
+        anchor; the list is not found, and nothing is reported commented out."""
+        text = (
+            "global_settings:\n"
+            "  suppressions: &shared\n"
+            "  - path: src/a.py\n"
+            "    rule_id: B101\n"
+        )
+
+        fixed, commented = ConfigLinter._comment_out_suppressions(
+            text, {0}, "2026-01-01"
+        )
+
+        assert fixed == text
+        assert commented == set()
+
+
+class TestPluginSectionSpellings:
+    def test_a_section_under_another_spelling_is_the_built_in_one(self):
+        """Red at the base: ``--fix`` looked the class up by the exact name, so a
+        section a scan reads as ``bandit`` (``Bandit``) was an unknown plugin and
+        its internal-only field was kept."""
+        config = {"scanners": {"Bandit": {"install_timeout": 300}}}
+
+        assert ConfigLinter.fix_removes(
+            ("scanners", "Bandit", "install_timeout"), config
+        )
+
+    def test_an_option_the_plugin_declares_is_kept_under_any_spelling(self):
+        config = {"scanners": {"Bandit": {"tool_version": "1.2.3"}}}
+
+        reason = ConfigLinter._option_pin_kept_because(
+            "scanners", "Bandit", "tool_version", config
+        )
+
+        assert reason is not None
+        assert "declares this option" in reason
+
+    @pytest.mark.parametrize("spelling", ["checkov", "Checkov", "CHECK_OV"])
+    def test_an_expired_entry_is_found_under_every_spelling(self, spelling):
+        """Red at the base: the walk read the exact key ``checkov``, so an
+        entry a scan applies (and so expires) under ``Checkov`` was not reported."""
+        config = {
+            "scanners": {
+                spelling: {
+                    "options": {
+                        "skip_path": [
+                            {
+                                "path": "a",
+                                "reason": "r",
+                                "expiration": "2020-01-01",
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        result = LintResult()
+
+        ConfigLinter._check_ignore_path_expirations(config, result)
+
+        assert [i.category for i in result.issues] == [LintCategory.IGNORE_PATH_ISSUE]
+        assert "Checkov skip path has expired" in result.issues[0].message
+
+
+class TestKeysReadFromTheEnvironment:
+    def test_a_literal_key_is_named_when_its_neighbours_came_from_the_environment(
+        self,
+    ):
+        """Red at the base: two keys read from the environment are both ``<value>``
+        in the shown copy, so the copy has fewer keys than the section and every
+        key was shown as ``<value>``, the literal ``cdk_nag`` included."""
+        config = {
+            "scanners": {
+                "cdk_nag": {"enabled": True},
+                "vendor-one": {"enabled": True},
+                "vendor-two": {"enabled": True},
+            }
+        }
+        shown = {"scanners": {"<value>": {"enabled": True}}}
+        result = LintResult()
+        result.file_references = [
+            EnvironmentReference(
+                path=("scanners",),
+                written="${ASH_LOW_KEY_ONE}",
+                resolved="vendor-one",
+                value="vendor-one",
+                key=True,
+            ),
+            EnvironmentReference(
+                path=("scanners",),
+                written="${ASH_LOW_KEY_TWO}",
+                resolved="vendor-two",
+                value="vendor-two",
+                key=True,
+            ),
+        ]
+
+        ConfigLinter._check_legacy_name_variants(config, result, shown)
+
+        issues = [i for i in result.issues if i.path == "scanners.cdk_nag"]
+        assert len(issues) == 1
+        assert "'cdk_nag'" in issues[0].message
+
+
+class TestInternalFieldPath:
+    def test_a_plugin_name_with_a_dot_is_removed_whole(self):
+        """Red at the base: the path was split on every dot and a name with one
+        was not three parts, so the field was never removed."""
+        config = {"scanners": {"my.plugin": {"name": "x", "enabled": True}}}
+        issue = _issue(LintCategory.INTERNAL_FIELD)
+        issue.path = "scanners.my.plugin.name"
+
+        assert ConfigLinter._fix_internal_field(config, issue) is True
+        assert config == {"scanners": {"my.plugin": {"enabled": True}}}
+
+
+class TestSchemaComment:
+    def test_a_byte_order_mark_does_not_hide_the_schema_comment(self):
+        """Red at the base: the mark is not whitespace to ``strip``, so the first
+        line did not read as a comment and the default reference replaced the
+        file's own."""
+        comment = "# yaml-language-server: $schema=./my-schema.json"
+        raw = chr(0xFEFF) + comment + "\nproject_name: demo\n"
+
+        content = ConfigLinter._generate_config_content(
+            Path("ash.yaml"), raw, {"project_name": "demo"}
+        )
+
+        assert content.startswith(comment + "\n")
+        assert "raw.githubusercontent.com" not in content
