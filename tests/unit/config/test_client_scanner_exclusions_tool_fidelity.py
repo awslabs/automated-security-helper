@@ -104,6 +104,34 @@ def test_a_trivy_ignore_entry_no_longer_applies_on_its_expiry_date():
     ]
 
 
+@pytest.mark.parametrize(
+    ("text", "yaml_format"),
+    [
+        ("CVE-1 exp:soon\nCVE-2\n", False),
+        (
+            yaml.safe_dump(
+                {
+                    "vulnerabilities": [
+                        {"id": "CVE-1", "expired_at": "soon"},
+                        {"id": "CVE-2"},
+                    ]
+                }
+            ),
+            True,
+        ),
+    ],
+    ids=["plain", "yaml"],
+)
+def test_an_expiry_that_is_not_a_date_makes_the_file_unreadable(text, yaml_format):
+    """Read as unexpired before, so the entry applied and suppressed findings
+    whatever trivy made of a date it could not read. The file is unreadable, as
+    one with a scalar section is, so none of its entries is applied and every
+    finding they name is reported; the client entry's own rule reads an
+    unreadable expiration as expired, the same side."""
+    with pytest.raises(ValueError, match="not a YYYY-MM-DD date"):
+        parse_trivy_ignore_file(text, yaml_format=yaml_format, today=date(2026, 1, 1))
+
+
 def test_a_hash_later_in_a_plain_ignore_line_is_text_not_a_comment():
     text = "CVE-1 # exp:2020-01-01\n# CVE-2\n  # CVE-3\nCVE-4 # a note\nCVE-5\n"
     assert parse_trivy_ignore_file(text, yaml_format=False, today=date(2026, 1, 1)) == [

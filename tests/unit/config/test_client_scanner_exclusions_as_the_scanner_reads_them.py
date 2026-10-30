@@ -91,6 +91,11 @@ def test_glob_excludes_reads_the_pattern_as_the_tool_does(pattern, relative, exc
         ("**/requirements.txt", "vendor/requirements.txt", True),
         ("vendor/*/requirements.txt", "vendor/a/requirements.txt", True),
         ("vendor/*/requirements.txt", "vendor/a/b/requirements.txt", False),
+        # Matched as written: trivy's whole-glob match takes none of these for
+        # vendor/x, and stripping the ./ and the slashes here took all three.
+        ("./vendor/x", "vendor/x", False),
+        ("/vendor/x", "vendor/x", False),
+        ("vendor/x/", "vendor/x", False),
     ],
 )
 def test_trivy_paths_match_whole_from_the_scan_root(pattern, relative, matched):

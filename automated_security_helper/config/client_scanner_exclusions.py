@@ -177,7 +177,6 @@ from pydantic import BaseModel, ConfigDict
 from typing_extensions import Self
 
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.utils.log import ASH_LOGGER
 
 ExclusionKind = Literal["bandit", "checkov", "glob", "trivy-ignore-file"]
 
@@ -898,13 +897,14 @@ def trivy_path_matches(pattern: str, relative: str) -> bool:
     one path applied to that name at every depth.
     """
     candidate = _slashed(pattern.strip())
-    while candidate.startswith("./"):
-        candidate = candidate[2:]
-    candidate = candidate.strip("/")
     if not candidate:
         return False
+    # Matched as written: a leading ``./`` or ``/`` and a trailing ``/`` were
+    # stripped before, so ``./vendor/x`` and ``/vendor/x`` took ``vendor/x`` here,
+    # where trivy's whole-glob match takes neither, and the entry hid findings
+    # trivy had reported.
     parts = [part for part in _slashed(relative).split("/") if part not in ("", ".")]
-    return _components_match([part for part in candidate.split("/") if part], parts)
+    return _components_match(candidate.split("/"), parts)
 
 
 def glob_excludes(pattern: str, relative: str) -> bool:
@@ -1934,16 +1934,23 @@ def _expired(value: Any, today: date) -> bool:
     an ``expiration`` (``models/core.expiration_has_passed``). A strict
     less-than before, so an entry still applied on the day itself, which both
     drop it on.
+
+    Raises:
+        ValueError: the expiry is not a YYYY-MM-DD date. The file is then
+            unreadable, as the caller reports it, and none of its entries is
+            applied, so every finding it names is reported. Read as unexpired
+            before, such an entry suppressed findings whatever trivy made of a
+            date it could not read; ``_entry_expired`` reads a client entry's
+            unreadable expiration as expired, the same side.
     """
     if not value:
         return False
     try:
         return date.fromisoformat(str(value)[:10]) <= today
-    except ValueError:
-        ASH_LOGGER.debug(
-            f"Unreadable trivy ignore expiry {value!r}; treated as unexpired"
-        )
-        return False
+    except ValueError as exc:
+        raise ValueError(
+            f"an entry's expiry {str(value)!r} is not a YYYY-MM-DD date"
+        ) from exc
 
 
 def matching_exclusion(
