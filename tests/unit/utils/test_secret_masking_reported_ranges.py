@@ -448,3 +448,68 @@ class TestAResourceLevelCredentialFinding:
 
         assert _context(model, 1) == MASKED_LINE + "\nx = 1\ny = 2\nrun()\n"
         assert _region(model, 0).endLine == 3
+
+
+#: A longer PEM block as a second file holds it, lines 11-16.
+LONG_PEM_LINES = [
+    "-----BEGIN RSA PRIVATE " + "KEY-----\n",
+    _derived("ranges-long-body-1", 40) + "\n",
+    _derived("ranges-long-body-2", 40) + "\n",
+    _derived("ranges-long-body-3", 40) + "\n",
+    _derived("ranges-long-body-4", 40) + "\n",
+    "-----END RSA PRIVATE " + "KEY-----\n",
+]
+
+
+class TestAKeyFindingWithTwoLocations:
+    """One finding reports its key in two files whose blocks end on different lines.
+
+    The range a masking records on the finding is one property per finding, so
+    the widest range over its locations is recorded: recording each location in
+    turn kept only the last one, and a later masking cut the other file's block
+    short.
+    """
+
+    def _model(self):
+        key = _key_finding()
+        key["locations"] = [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "long.py"},
+                    "region": {"startLine": 11, "endLine": 11},
+                }
+            }
+        ] + key["locations"]
+        return _results(
+            key,
+            _neighbor("long.py", 10, 10, [BEFORE_PEM] + LONG_PEM_LINES + [AFTER_PEM]),
+            _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES + [AFTER_PEM]),
+        )
+
+    def test_both_blocks_are_masked(self):
+        model = self._model()
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == BEFORE_PEM + (MASKED_LINE + "\n") * 6 + AFTER_PEM
+        assert _context(model, 2) == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
+
+    def test_the_widest_end_line_is_recorded_on_the_finding(self):
+        """The longer block, reported first, ends at 16; the shorter, reported
+        second, at 14. The record is the widest, not the last."""
+        model = self._model()
+
+        mask_secrets_in_results(model)
+
+        recorded = model.sarif.runs[0].results[0].properties.model_dump()
+        assert recorded["masked_block_end"] == 16
+        assert "masked_to_end_of_file" not in recorded
+
+    def test_a_second_masking_keeps_both_blocks_masked(self):
+        model = self._model()
+        mask_secrets_in_results(model)
+
+        mask_secrets_in_results(model)
+
+        assert (MASKED_LINE + "\n") * 6 in _context(model, 1)
+        assert (MASKED_LINE + "\n") * 4 in _context(model, 2)

@@ -1120,7 +1120,8 @@ class _SecretIndex:
         #: (key finding, the END line its range ran to, or None for the end of the
         #: file) for the masking to record on the finding (``_mask_report``), so
         #: the next masking takes the same range instead of reading it off
-        #: snippet text, and the finding's own region is left as written.
+        #: snippet text, and the finding's own region is left as written. One
+        #: entry per finding: the widest range over its primary locations.
         self.end_marks: List[Tuple[Any, Optional[int]]] = []
         self._pattern: Optional[re.Pattern[str]] = None
 
@@ -1394,6 +1395,15 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
         }
         index.values_of[id(result)] = local
         primary = _locations_of(result)
+        # The range a masking records on a finding (_mark_masked_range) is one
+        # per result, so a key finding with several primary locations records
+        # the widest of them: the end of the file when any location ran to it,
+        # else the furthest END line. Recording each location's own end in turn
+        # kept only the last one, and the next masking cut the other files'
+        # blocks short.
+        marked = False
+        widest_end: Optional[int] = None
+        to_end_of_file = False
         # A related location of a secret finding (a credential literal reported
         # where it is used) is a secret location too: indexed as is, with no
         # key or resource range of its own.
@@ -1442,7 +1452,11 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                         end = max(block_end, end)
                     else:
                         end = _TO_END_OF_FILE
-                    index.end_marks.append((result, block_end))
+                    marked = True
+                    if block_end is None:
+                        to_end_of_file = True
+                    elif widest_end is None or block_end > widest_end:
+                        widest_end = block_end
                 elif (
                     resource_only
                     and not _has_columns(region)
@@ -1467,6 +1481,8 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                     else start,
                     local,
                 )
+        if marked:
+            index.end_marks.append((result, None if to_end_of_file else widest_end))
     return index
 
 
