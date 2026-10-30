@@ -79,8 +79,17 @@ def test_a_short_flag_inside_a_cluster_is_found(params):
     assert _typed_spelling(fmt, ["-vf", "sarif"], params) == "-f"
 
 
-def test_the_equals_form_names_the_long_spelling(params):
-    fmt = _param(params, "--format")
+def test_the_equals_form_names_the_long_spelling():
+    """`--format=sarif` names --format.
+
+    This option declares its short spelling first, so the fallback to the first
+    spelling (``param.opts[0]``, what a reading that misses the equals form
+    returns) is "-f" here and cannot pass the assertion: with the shared
+    fixture's order both readings answered "--format".
+    """
+    fmt = TyperOption(param_decls=["-f", "--format"], multiple=True)
+    params = [fmt, TyperOption(param_decls=["--verbose", "-v"], is_flag=True)]
+    assert fmt.opts[0] == "-f"
 
     assert _typed_spelling(fmt, ["--format=sarif"], params) == "--format"
 
@@ -144,6 +153,10 @@ def test_the_control_a_bare_scan_still_reads_them(monkeypatch, tmp_path):
         result = CliRunner().invoke(app, ["--source-dir", str(tmp_path)])
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    # The usage error is the environment value's: click refuses "bogus" as a
+    # choice for --mode and names it. A usage error from anything else would
+    # have passed the exit-code check alone.
+    assert "bogus" in result.output, result.output
 
 
 # --- get-genai-guide ---
@@ -230,8 +243,11 @@ def test_the_file_size_is_the_files_bytes(tmp_path, installed):
     )
 
     assert result.exit_code == 0, result.output
-    assert f"File size: {len(GUIDE.encode('utf-8')):,} bytes" in result.output
-    assert f"File size: {len(GUIDE):,} bytes" not in result.output
+    # GUIDE is 54 characters and 55 bytes: the é of "Café" is two bytes in
+    # UTF-8. Pinned as literals, so the test does not repeat the command's own
+    # arithmetic.
+    assert "File size: 55 bytes" in result.output
+    assert "File size: 54 bytes" not in result.output
 
 
 def test_a_path_the_console_cannot_encode_is_still_reported(monkeypatch):
@@ -247,6 +263,26 @@ def test_a_path_the_console_cannot_encode_is_still_reported(monkeypatch):
     _echo_encodable("saved to: /out/café/guide.md")
 
     assert said == ["saved to: /out/caf\\xe9/guide.md"]
+
+
+def test_a_console_with_a_codec_of_its_own_escapes_in_that_codec(monkeypatch):
+    """The fallback encodes with the console's codec, not ASCII: under latin-1,
+    "é" is written as itself and only the euro sign becomes an escape. The
+    test above exercises the default taken when the console names no codec."""
+    said: list = []
+
+    def latin1_echo(text, **kwargs):
+        text.encode("latin-1")
+        said.append(text)
+
+    monkeypatch.setattr(cli_main, "echo", latin1_echo)
+    monkeypatch.setattr(
+        sys, "stdout", io.TextIOWrapper(io.BytesIO(), encoding="latin-1")
+    )
+
+    _echo_encodable("saved to: /out/café €/guide.md")
+
+    assert said == ["saved to: /out/café \\u20ac/guide.md"]
 
 
 # --- running the module as a script ---
