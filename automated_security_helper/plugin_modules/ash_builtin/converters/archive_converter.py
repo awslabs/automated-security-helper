@@ -6,6 +6,7 @@
 import bz2
 import contextlib
 import gzip
+import hashlib
 import importlib
 import io
 import lzma
@@ -351,6 +352,43 @@ def _zip_end_record(handle: BinaryIO) -> Optional[List[Any]]:
         return None
 
 
+def _zip_directory_start(
+    handle: BinaryIO, end_record: List[Any], directory_bytes: int
+) -> Optional[int]:
+    """Where the central directory starts, as this Python's zipfile starts reading
+    it, or None where zipfile would build no entry.
+
+    The directory ends where the end record says (``_ECD_LOCATION``) and is
+    ``directory_bytes`` long, which allows for data before the zip. For a zip64
+    archive the two shapes of zipfile ASH runs under disagree about the
+    location: the current ``_EndRecData64`` moves it to the zip64 end record,
+    right after the directory, while the releases before that fix leave it at
+    the plain end record and have ``_RealGetContents`` take the zip64 end record
+    and its locator (76 bytes) off the start itself. Whichever this interpreter
+    does, the directory's first entry carries the entry signature, so the start
+    tried is the one that does. Before this the walk began 76 bytes into the
+    directory on the older shape, met no signature there and counted nothing,
+    so the member pre-count never refused a zip64 archive.
+    """
+    location = end_record[_zipfile_private("_ECD_LOCATION")]
+    candidates = [location - directory_bytes]
+    if end_record[_zipfile_private("_ECD_SIGNATURE")] == _zipfile_private(
+        "stringEndArchive64"
+    ):
+        candidates.append(
+            candidates[0]
+            - _zipfile_private("sizeEndCentDir64")
+            - _zipfile_private("sizeEndCentDir64Locator")
+        )
+    for start in candidates:
+        if start < 0:
+            continue
+        handle.seek(start)
+        if handle.read(len(_ZIP_DIRECTORY_ENTRY)) == _ZIP_DIRECTORY_ENTRY:
+            return start
+    return None
+
+
 def _zip_has_more_entries_than(handle: BinaryIO, limit: int) -> bool:
     """Whether opening a zip would make zipfile build more than ``limit`` entries.
 
@@ -372,8 +410,8 @@ def _zip_has_more_entries_than(handle: BinaryIO, limit: int) -> bool:
     if end_record[_zipfile_private("_ECD_ENTRIES_TOTAL")] > limit:
         return True
     directory_bytes = end_record[_zipfile_private("_ECD_SIZE")]
-    start = end_record[_zipfile_private("_ECD_LOCATION")] - directory_bytes
-    if start < 0:
+    start = _zip_directory_start(handle, end_record, directory_bytes)
+    if start is None:
         return False
     handle.seek(start)
     counted = 0
@@ -498,10 +536,14 @@ _TAR_READ_CAP = 1024 * 1024
 
 #: What the header pass may read in all: this much, plus _TAR_HEADER_BYTES_PER_MEMBER
 #: for every member read so far. A member costs 512 bytes of header, and with a pax
-#: header (GNU tar's pax format writes one per member) about 1.5 KiB; a GNU sparse
-#: 1.0 map is read from the archive here too.
+#: header (GNU tar's pax format writes one per member) about 1.5 KiB; one that
+#: carries extended attributes, ACLs or a long path runs to several KiB, and a GNU
+#: sparse 1.0 map is read from the archive here too. The per-member allowance
+#: covers a pax header of up to about 7 KiB on its own: at 2048 it covered 1 KiB,
+#: and every member over that drew on the base, so a tar of thousands of such
+#: members was refused as unreadable once the base was spent.
 _TAR_HEADER_BYTES_BASE = 4 * 1024 * 1024
-_TAR_HEADER_BYTES_PER_MEMBER = 2048
+_TAR_HEADER_BYTES_PER_MEMBER = 8192
 
 
 def _zstd_file_class() -> Any:
@@ -600,21 +642,131 @@ class _BoundedTarStream(io.RawIOBase):
         return data
 
 
+#: How much of a gzip file _GzipMembersStream reads and decompresses at a time.
+_GZIP_READ_CHUNK = 64 * 1024
+
+
+class _GzipMembersStream(io.RawIOBase):
+    """A gzip file's decompressed bytes, member after member, read through zlib.
+
+    ``gzip.GzipFile`` reads a file as a run of gzip members and fails the whole
+    read at bytes after the last member that are not another member's header
+    (BadGzipFile), and the tar listing reads every byte there is
+    (utils/tar_listing.py), so a .tar.gz followed by anything, a few bytes of
+    padding or a signature a tool appended, lost every member it held. Here the
+    bytes after the last member end the stream, as gzip(1) ends it ("trailing
+    garbage ignored"); a member cut short still raises (EOFError, as GzipFile
+    raises), and zlib checks each member's CRC and length as it ends. At most
+    _GZIP_READ_CHUNK compressed and _COPY_CHUNK decompressed bytes are held at a
+    time. Seekable as GzipFile is: forward by reading, backward by starting over.
+    """
+
+    def __init__(self, raw: BinaryIO) -> None:
+        super().__init__()
+        self._raw = raw
+        self._start = raw.tell()
+        self._rewind()
+
+    def _rewind(self) -> None:
+        self._raw.seek(self._start)
+        self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
+        self._pending = b""
+        self._pos = 0
+        self._ended = False
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_CUR:
+            offset += self._pos
+        elif whence != io.SEEK_SET:
+            raise ValueError("Seek from end not supported")
+        if offset < self._pos:
+            self._rewind()
+        while self._pos < offset:
+            if not self.read(min(_COPY_CHUNK, offset - self._pos)):
+                break
+        return self._pos
+
+    def read(self, size: Optional[int] = -1) -> bytes:
+        wanted = None if size is None or size < 0 else size
+        out = bytearray()
+        while wanted is None or len(out) < wanted:
+            if not self._pending and (self._ended or not self._fill()):
+                break
+            take = len(self._pending) if wanted is None else wanted - len(out)
+            out += self._pending[:take]
+            self._pending = self._pending[take:]
+        self._pos += len(out)
+        return bytes(out)
+
+    def _fill(self) -> bool:
+        """Decompress the next piece into ``_pending``; False at the stream's end."""
+        decompressor = self._decompressor
+        if not decompressor.eof:
+            data = decompressor.unconsumed_tail or self._raw.read(_GZIP_READ_CHUNK)
+            if not data:
+                raise EOFError(
+                    "Compressed file ended before the end-of-stream marker was reached"
+                )
+            self._pending = decompressor.decompress(data, _COPY_CHUNK)
+            return True
+        rest = decompressor.unused_data
+        if len(rest) < 2:
+            rest += self._raw.read(_GZIP_READ_CHUNK)
+        if rest[:2] != b"\x1f\x8b":
+            # The gzip data ends here: nothing follows, or bytes that are not
+            # another member's, which gzip(1) ignores too.
+            self._ended = True
+            return False
+        self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
+        self._pending = self._decompressor.decompress(rest, _COPY_CHUNK)
+        return True
+
+
+def _is_bzip2_head(head: bytes) -> bool:
+    """Whether ``head``, a file's first six bytes, starts a bzip2 stream: the
+    ``BZh`` signature, a block size of 1 to 9, and the start of the magic that
+    follows, a block's (the digits of pi) or, for a stream of no blocks, the end
+    of stream's (the digits of the square root of pi). ``BZh`` alone is three
+    printable bytes, and an uncompressed tar whose first member is named
+    ``BZh...`` starts with them too: read as bzip2, that tar failed to
+    decompress and was recorded as unreadable, though it was a tar through and
+    through.
+    """
+    return (
+        len(head) >= 6
+        and head[:3] == b"BZh"
+        and head[3] in b"123456789"
+        and head[4:6] in (b"\x31\x41", b"\x17\x72")
+    )
+
+
 @contextlib.contextmanager
 def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
     """The archive's tar stream, decompressed by its leading bytes, and bounded.
 
     Chosen from the magic bytes rather than by letting tarfile try each
-    decompressor in turn: gzip, bzip2, xz, and zstd where this Python has it. Any
-    other content is read as an uncompressed tar.
+    decompressor in turn: gzip (through _GzipMembersStream, which ends at bytes
+    after the gzip data instead of failing on them), bzip2 (by its whole
+    six-byte head, _is_bzip2_head), xz, and zstd where this Python has it. Any
+    other content is read as an uncompressed tar. archive_kind probes a tar
+    through this same stream, so what it accepts and what is extracted agree.
     """
     head = handle.read(6)
     handle.seek(0)
     with contextlib.ExitStack() as stack:
         inner: Any = handle
         if head[:2] == b"\x1f\x8b":
-            inner = stack.enter_context(gzip.GzipFile(fileobj=handle, mode="rb"))
-        elif head[:3] == b"BZh":
+            inner = stack.enter_context(_GzipMembersStream(handle))
+        elif _is_bzip2_head(head):
             inner = stack.enter_context(bz2.BZ2File(handle))
         elif head == b"\xfd7zXZ\x00":
             inner = stack.enter_context(lzma.LZMAFile(handle))
@@ -866,12 +1018,14 @@ def archives_extracted_whole(context: object) -> FrozenSet[str]:
     none left out because no scanner reads its extension. A member left out because
     an ignore path names it still counts, since it is left out on purpose.
 
-    snyk-code's copy of the source leaves out exactly these, because their members
-    reach Snyk with the converted files, where ignore paths apply member by member.
-    The record lives on the run's PluginContext, so it is empty when this run's
-    convert phase did not run the converter (it is off, or the phase was left out)
-    and holds no archive the converter refused, failed on or could not read; each
-    of those stays in the copy.
+    For a consumer that copies the source whole, such as snyk-code's upload: such
+    a copy may leave out exactly these, because their members reach the scanner
+    with the converted files, where ignore paths apply member by member. No
+    scanner in this tree reads the record yet, so every archive still goes in
+    such a copy as it is. The record lives on the run's PluginContext, so it is
+    empty when this run's convert phase did not run the converter (it is off, or
+    the phase was left out) and holds no archive the converter refused, failed on
+    or could not read; each of those is for the copy to keep.
     """
     return frozenset(getattr(context, _EXTRACTED_WHOLE, None) or ())
 
@@ -892,9 +1046,10 @@ def archive_kind(name: str, handle: BinaryIO) -> Optional[Literal["zip", "tar"]]
     file, compressed or not, and None for one it does not extract (a .gz of one
     file, or a file that only has an archive's name).
 
-    convert() extracts by this, and snyk-code's copy of the source leaves out each
-    file it accepts: the members reach Snyk with the converted files, where ignore
-    paths apply to them one by one. The handle is left at its start. Names are
+    convert() extracts by this, and a consumer that copies the source whole may
+    leave out each file it accepts (archives_extracted_whole): the members reach
+    the scanner with the converted files, where ignore paths apply to them one by
+    one. The handle is left at its start. Names are
     read through ``_base_name``, the spelling authority, so a trailing dot or
     space does not change the kind. A tar is told by its first block, read
     through the bounded stream (_holds_a_tar), not by opening it with tarfile,
@@ -926,7 +1081,9 @@ def _named_kind(name: str) -> Optional[str]:
 
 
 _MEMBER_ABSOLUTE = "its path is absolute"
+_MEMBER_NUL = "its path holds a NUL character, which no file name can"
 _MEMBER_PARENT = "its path contains a '..' component"
+_MEMBER_ENCRYPTED = "it is encrypted, and an encrypted member is not extracted"
 _MEMBER_ESCAPES = "it would be extracted outside the destination directory"
 _MEMBER_LINK = "it is a symbolic or hard link"
 _MEMBER_NOT_REGULAR = "it is not a regular file"
@@ -1107,14 +1264,54 @@ def _failure_kind(error: Exception) -> Literal["input", "tool"]:
     return "input" if isinstance(error, _ARCHIVE_UNREADABLE_ERRORS) else "tool"
 
 
+#: The most bytes of UTF-8 an archive's folded path may take in the name of the
+#: directory it is extracted into (_target_name). A file name is 255 bytes at most
+#: on the common filesystems, and the rest of the name is a digest where one is
+#: added and the counter _unused_target may append.
+_TARGET_NAME_MAX_BYTES = 200
+#: How many characters of the archive path's SHA-256 tell two cut names apart.
+_TARGET_DIGEST_CHARS = 12
+
+
+def _target_name(archive_file: str, archive_display: str) -> str:
+    """The name of the directory ``archive_file`` is extracted into, under
+    ``results_dir``: its path folded into one component (get_normalized_filename
+    of get_shortest_name, as it was), and where that is longer than
+    _TARGET_NAME_MAX_BYTES, cut to that and given a digest of its path relative
+    to the scanned tree, so two cut names stay apart. The folded path of a deep
+    or absolute archive path ran past the 255 bytes a file name may take, so
+    making the directory failed and the archive was recorded as a failed input
+    for the length of its own path.
+    """
+    folded = get_normalized_filename(get_shortest_name(archive_file))
+    if len(folded.encode("utf-8")) <= _TARGET_NAME_MAX_BYTES:
+        return folded
+    cut = (
+        folded.encode("utf-8")[:_TARGET_NAME_MAX_BYTES]
+        .decode("utf-8", "ignore")
+        .rstrip("-_")
+    )
+    digest = hashlib.sha256(
+        archive_display.encode("utf-8", "surrogateescape")
+    ).hexdigest()[:_TARGET_DIGEST_CHARS]
+    ASH_LOGGER.debug(
+        shown_on_one_line(
+            f"Extracting {archive_display} under {cut}-{digest}: its folded "
+            "path is longer than a file name may be"
+        )
+    )
+    return f"{cut}-{digest}"
+
+
 def _unused_target(results_dir: Path, name: str) -> Path:
     """``results_dir / name``, or with ``-2``, ``-3`` ... appended if that exists.
 
-    The name comes from get_normalized_filename, which folds ``/`` and ``.`` to
-    ``__`` and other runs of non-word characters to ``-``, so two archives can map
-    to one name (``a b.zip`` and ``a-b.zip``). Each archive is extracted into a
-    directory no other archive wrote, so removing it on a failure removes only what
-    this archive wrote, and two archives never overwrite each other's members.
+    The name comes from _target_name: get_normalized_filename, which folds ``/``
+    and ``.`` to ``__`` and other runs of non-word characters to ``-``, so two
+    archives can map to one name (``a b.zip`` and ``a-b.zip``), cut where it is
+    too long for a file name. Each archive is extracted into a directory no
+    other archive wrote, so removing it on a failure removes only what this
+    archive wrote, and two archives never overwrite each other's members.
     """
     target = results_dir / name
     counter = 2
@@ -1169,6 +1366,12 @@ def _member_written_path(
     for separator in separators:
         parts = [piece for part in parts for piece in part.split(separator)]
     dropped = {"", ".", ".."} if kind == "zip" else {"", "."}
+    if kind == "zip" and _on_windows():
+        # zipfile writes the member's name on Windows with the characters the
+        # host forbids replaced and each part's trailing dots and spaces taken
+        # off (its _sanitize_windows_name), so the file written is named by
+        # that spelling, and an ignore path written for it has to match it.
+        parts = [part.translate(_WINDOWS_NAME_TABLE).rstrip(" .") for part in parts]
     return "/".join(part for part in parts if part not in dropped)
 
 
@@ -1207,12 +1410,66 @@ def _renamed_member_name(
         counter += 1
 
 
+#: The characters Windows forbids in a file name; zipfile writes each as ``_``.
+_WINDOWS_ILLEGAL_NAME_CHARACTERS = ':<>|"?*'
+_WINDOWS_NAME_TABLE = str.maketrans(
+    dict.fromkeys(_WINDOWS_ILLEGAL_NAME_CHARACTERS, "_")
+)
+
+
+def _on_windows() -> bool:
+    """Whether the extractor writes names as Windows takes them (see
+    _member_written_path); a function, so a test can read the other host's shape."""
+    return os.name == "nt"
+
+
+#: The zip general-purpose flag that marks a member as encrypted.
+_ZIP_ENCRYPTED_FLAG = 0x1
+
+#: The compression methods zipfile extracts; anything else (Deflate64, PPMd,
+#: an implode or shrink of old tools) raises NotImplementedError out of
+#: extractall.
+_ZIP_METHODS_EXTRACTED = frozenset(
+    method
+    for method in (
+        zipfile.ZIP_STORED,
+        zipfile.ZIP_DEFLATED,
+        zipfile.ZIP_BZIP2,
+        zipfile.ZIP_LZMA,
+        getattr(zipfile, "ZIP_ZSTANDARD", None),
+    )
+    if method is not None
+)
+
+
+def _zip_member_problem(member: zipfile.ZipInfo) -> Optional[str]:
+    """Why zipfile could not extract this member's content, or None: it is
+    encrypted (zipfile asks for a password and the converter has none), or its
+    compression method is one zipfile does not implement. ``extractall`` raised
+    on the first such member and the converter then removed every member it had
+    already written, so one such member lost the whole archive; refused one by
+    one here, the rest of the archive is extracted and the refusal is recorded.
+    """
+    if member.flag_bits & _ZIP_ENCRYPTED_FLAG:
+        return _MEMBER_ENCRYPTED
+    if member.compress_type not in _ZIP_METHODS_EXTRACTED:
+        return (
+            f"its compression method ({member.compress_type}) is not one zipfile "
+            "can extract"
+        )
+    return None
+
+
 def _member_name_problem(member_name: str) -> Optional[str]:
     """Why an archive member's name is unsafe to extract, or None.
 
     Read on the text with both separators, so a name written on Windows is judged
-    the same way on every platform.
+    the same way on every platform. A NUL in the name is refused first: no file
+    system takes one, and the escape check below (Path.resolve) raised
+    ValueError on it, which failed the whole archive rather than the member.
     """
+    if "\x00" in member_name:
+        return _MEMBER_NUL
     normalized = member_name.replace("\\", "/")
     if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
         return _MEMBER_ABSOLUTE
@@ -1399,8 +1656,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         shared budget of them (``budget_spent``), nothing after that was.
 
         Its results row names the byte, and the archive is then not recorded whole
-        (archives_extracted_whole), so snyk-code's copy keeps it. The warning names
-        the archive on one line, since its name comes from the scanned tree.
+        (archives_extracted_whole), so a consumer that copies the source whole
+        keeps it. The warning names the archive on one line, since its name comes
+        from the scanned tree.
         """
         parts = []
         if unreadable:
@@ -1468,7 +1726,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         A member is refused, with a warning naming it, when it is a link (a tar
         symlink or hard link, or a zip entry whose mode marks it a symlink), is not a
         regular file, is a sparse tar member whose map reaches past its declared
-        size, or has a name that is absolute, contains ``..`` or would land outside
+        size, is a zip entry zipfile cannot extract (encrypted, or compressed by a
+        method it does not implement; _zip_member_problem), or has a name that is
+        absolute, holds a NUL, contains ``..`` or would land outside
         ``target_path``, or, with ignore paths set, one that was not read as
         UTF-8 (``member_name_not_utf_8``), which no ignore path can be compared with.
         A member named as an archive or compressed file (a suffix in
@@ -1530,7 +1790,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 # it would not become a link, but it is not a file either.
                 is_link = stat.S_ISLNK(member.external_attr >> 16)
                 is_regular = True
-                content_problem = None
+                content_problem = _zip_member_problem(member)
             elif isinstance(member, str):
                 member_name = member
                 is_link = False
@@ -1648,12 +1908,19 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             f"Searching for archive files in search_path within the ASH scan set: {self.context.source_dir}"
         )
 
-        # Find all archive files to scan from the scan set
+        # Find all archive files to scan from the scan set. The workspace's output
+        # directory goes with the scan's own: when this run's recorded list cannot
+        # be read back, the walk here leaves it out as the orchestrator's did,
+        # instead of extracting archives from another project's output.
+        workspace_output_dir = getattr(self.context, "workspace_output_dir", None)
         archive_files = scan_set(
             source=self.context.source_dir,
             output=self.context.output_dir,
             honor_ignore_files=honors_ignore_files(self.context.config),
             run_id=getattr(self.context, "run_id", None),
+            workspace_output_dir=(
+                None if workspace_output_dir is None else str(workspace_output_dir)
+            ),
         )
         # Paths as the scan set gives them: stripping them would turn a file whose
         # name ends in a space into one that does not exist.
@@ -1732,10 +1999,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 if self._skipped(archive_file):
                     continue
 
-                short_archive_file = get_shortest_name(archive_file)
-                normalized_archive_file = get_normalized_filename(short_archive_file)
                 target_path = _unused_target(
-                    Path(self.results_dir), normalized_archive_file
+                    Path(self.results_dir), _target_name(archive_file, archive_display)
                 )
                 ASH_LOGGER.verbose(
                     shown_on_one_line(
@@ -1919,8 +2184,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         # Named as an archive the converter extracts, and none can
                         # be read from it (a tar's first header is damaged, a .zip
                         # holds neither a zip nor a tar): none of it is read, and
-                        # snyk-code's copy holds it back, so its results row says
-                        # that no scanner reads it. A .gz of one file is no such
+                        # it is not recorded whole, so its results row says that
+                        # no scanner reads it. A .gz of one file is no such
                         # name, and is left to the scanners as it is. Recorded as
                         # a FAILED input, not a refusal: the completeness gate
                         # reads failed_inputs, and an archive that could not be
