@@ -67,20 +67,24 @@ def warnings(monkeypatch) -> List[str]:
 
 
 @pytest.mark.parametrize(
-    "name",
+    ("name", "refusal"),
     [
-        STDIO_SERVERS_DIR,
-        SCAN_PRESENCE_DIR,
-        SCAN_PRESENCE_DIR.upper(),
-        PRESENCE_LOCK_NAME,
-        PRESENCE_LOCK_NAME.upper(),
-        PRESENCE_LOCK_NAME + ".",
+        (STDIO_SERVERS_DIR, "cannot name a session"),
+        (SCAN_PRESENCE_DIR, "cannot name a session"),
+        (SCAN_PRESENCE_DIR.upper(), "cannot name a session"),
+        (PRESENCE_LOCK_NAME, "cannot name a session"),
+        (PRESENCE_LOCK_NAME.upper(), "cannot name a session"),
+        # Windows drops a trailing period, so this spelling would name the
+        # guard file's directory. The path-component rules run first and refuse
+        # every trailing period with their own words (session_paths
+        # validated_path_component), before the reserved-name check is reached.
+        (PRESENCE_LOCK_NAME + ".", "must not end with '[.]'"),
     ],
 )
-def test_a_name_the_server_keeps_for_itself_is_refused(tmp_path, name) -> None:
+def test_a_name_the_server_keeps_for_itself_is_refused(tmp_path, name, refusal) -> None:
     registry = MCPSessionRegistry(workspace_parent=tmp_path / "sessions")
 
-    with pytest.raises(ValueError, match="cannot name a session"):
+    with pytest.raises(ValueError, match=refusal):
         registry.session_for(name)
     assert name not in registry
 
