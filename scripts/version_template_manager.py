@@ -120,11 +120,13 @@ class VersionTemplateManager:
         # the pattern also templatized the tag of any other project cloned in a page's
         # example (`git clone --branch v1.2.3 <another repository>`), and `generate`
         # then stamped ASH's version into that command. The repository can come before
-        # the flag or after it, in the same command.
+        # the flag or after it, in the same command. The name must end where the
+        # repository's does: a sibling such as `<this repository>-plugins` is another
+        # project.
         branch_replacement = rf"\g<1>{self.version_placeholder}"
         branch_patterns = (
-            rf"([/:]{_REPO_NAME}(?:\.git)?{_SAME_COMMAND}--branch v){semver}",
-            rf"(--branch v){semver}(?={_SAME_COMMAND}[/:]{_REPO_NAME})",
+            rf"([/:]{_REPO_NAME}(?:\.git)?(?![\w.-]){_SAME_COMMAND}--branch v){semver}",
+            rf"(--branch v){semver}(?={_SAME_COMMAND}[/:]{_REPO_NAME}(?:\.git)?(?![\w.-]))",
         )
         for branch_pattern in branch_patterns:
             if re.search(branch_pattern, content):

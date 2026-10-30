@@ -15,6 +15,17 @@ named this repository.
 The two patterns now require this repository in the same command (``--branch``) or in the
 ``repo:`` line of the same pre-commit entry (``rev:``). The ``@v`` form was anchored by an
 earlier change and is pinned in ``test_version_template_manager_at_pattern.py``.
+
+The ``--branch`` patterns also end the repository name where the name ends: a sibling
+repository whose name starts with this one's (``<name>-plugins.git``) is another project,
+as the ``rev:`` pattern already required.
+
+What is asserted
+----------------
+``convert``, run in memory over example pages, rewrites the pin of this repository and
+leaves every other project's pin as written: a ``rev:`` under another ``repo:``, a clone
+of another URL before or after the flag, chained commands, and a repository name that only
+begins with this one's.
 """
 
 from __future__ import annotations
@@ -144,3 +155,33 @@ class TestBranchPins:
     def test_a_pin_on_one_line_does_not_borrow_the_next_line(self):
         text = f"git clone --branch v1.2.3 {OTHER_URL}.git\ngit clone {ASH_URL}.git\n"
         assert _convert(text) == text
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            f"git clone --branch v1.0.0 {ASH_URL}-plugins.git\n",
+            f"git clone {ASH_URL}-plugins.git --branch v1.0.0\n",
+            f"git clone --branch v1.0.0 {ASH_URL}.github.io\n",
+        ],
+    )
+    def test_a_repository_that_only_starts_with_ash_s_name_is_left_alone(self, text):
+        """Red before: the patterns had no right boundary after the name, so a sibling
+        repository's tag was rewritten to the placeholder."""
+        assert _convert(text) == text
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            (
+                f"git clone --branch v3.4.0 {ASH_URL}\n",
+                f"git clone --branch v{{{{VERSION}}}} {ASH_URL}\n",
+            ),
+            (
+                f"git clone {ASH_URL}/ --branch v3.4.0\n",
+                f"git clone {ASH_URL}/ --branch v{{{{VERSION}}}}\n",
+            ),
+        ],
+    )
+    def test_a_url_without_a_git_suffix_is_still_templatized(self, text, expected):
+        """The control for the boundary: the name ends the URL or a slash follows."""
+        assert _convert(text) == expected
