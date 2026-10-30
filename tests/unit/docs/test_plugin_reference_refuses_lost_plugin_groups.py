@@ -69,6 +69,74 @@ def test_a_group_that_still_fails_to_import_fails_the_reference(
     assert "smaller set" in message
 
 
+def test_the_record_is_read_from_the_module_not_from_what_the_retry_returns(
+    builtin_only, monkeypatch
+):
+    """A retry that answers nothing useful does not hide a group the module still records."""
+    reference, ash_builtin = builtin_only
+    still_lost = {REPORTERS: "ImportError: an optional dependency is absent"}
+    monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", dict(still_lost))
+    monkeypatch.setattr(ash_builtin, "retry_failed_plugin_groups", lambda: None)
+
+    with pytest.raises(ImportError) as caught:
+        reference.discover("reporter")
+
+    assert REPORTERS in str(caught.value)
+
+
+def test_a_group_that_the_real_retry_cannot_import_fails_the_reference(
+    builtin_only, monkeypatch
+):
+    """The real retry runs; the reporters group fails to import again; the page refuses.
+
+    ``retry_failed_plugin_groups`` rebinds the module's lists and its error
+    record, so each is restored by the same monkeypatch that planted the
+    failure.
+    """
+    reference, ash_builtin = builtin_only
+    for name in (
+        "ASH_CONVERTERS",
+        "ASH_SCANNERS",
+        "ASH_REPORTERS",
+        "ASH_EVENT_HANDLERS",
+    ):
+        monkeypatch.setattr(ash_builtin, name, getattr(ash_builtin, name))
+    monkeypatch.setattr(
+        ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", {REPORTERS: "ImportError: earlier"}
+    )
+    real_load_module = ash_builtin._load_module
+
+    def failing_reporters(module_path):
+        if module_path == REPORTERS:
+            raise ImportError("No module named 'an_optional_dependency'")
+        return real_load_module(module_path)
+
+    monkeypatch.setattr(ash_builtin, "_load_module", failing_reporters)
+
+    with pytest.raises(ImportError) as caught:
+        reference.discover("reporter")
+
+    message = str(caught.value)
+    assert REPORTERS in message
+    assert "an_optional_dependency" in message
+    assert ash_builtin.ASH_PLUGIN_LOAD_ERRORS == {
+        REPORTERS: "ImportError: No module named 'an_optional_dependency'"
+    }
+
+
+def test_a_record_that_is_not_a_mapping_is_refused_as_unreadable(
+    builtin_only, monkeypatch
+):
+    reference, ash_builtin = builtin_only
+    monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", ["reporters"])
+    monkeypatch.setattr(ash_builtin, "retry_failed_plugin_groups", dict)
+
+    with pytest.raises(ImportError) as caught:
+        reference.discover("reporter")
+
+    assert "not a mapping" in str(caught.value)
+
+
 def test_control_a_group_recovered_on_retry_is_listed(builtin_only, monkeypatch):
     reference, ash_builtin = builtin_only
     monkeypatch.setattr(

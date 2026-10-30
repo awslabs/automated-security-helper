@@ -58,6 +58,7 @@ import tempfile
 import textwrap
 import tokenize
 import typing
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from unittest import mock
 from pathlib import Path
@@ -159,9 +160,16 @@ def _refuse_lost_plugin_groups(package: str, module: Any) -> None:
     """
     retry = getattr(module, "retry_failed_plugin_groups", None)
     if callable(retry):
-        errors = retry()
-    else:
-        errors = getattr(module, "ASH_PLUGIN_LOAD_ERRORS", None) or {}
+        # For its effect only: the record of what still fails is the module's
+        # own attribute, whatever the retry returns.
+        retry()
+    errors = getattr(module, "ASH_PLUGIN_LOAD_ERRORS", None) or {}
+    if not isinstance(errors, Mapping):
+        raise ImportError(
+            f"{package}.ASH_PLUGIN_LOAD_ERRORS is {type(errors).__name__}, not a "
+            f"mapping of failed module to error text, so the page cannot tell "
+            f"whether every plugin group loaded"
+        )
     if errors:
         failed = "; ".join(f"{name}: {error}" for name, error in sorted(errors.items()))
         raise ImportError(
