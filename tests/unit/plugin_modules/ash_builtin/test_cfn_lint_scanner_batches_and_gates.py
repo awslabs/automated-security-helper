@@ -182,13 +182,16 @@ def test_a_timeout_stops_the_remaining_invocations(ash_temp_path):
     assert len(calls) == 1, "every batch after the timeout was still started"
     assert scanner.targets_attempted == 3
     assert scanner.targets_failed == 3
-    # Each failed invocation is recorded once, by the ERROR log line (the base
-    # class appends ERROR logs to self.errors), and that line names its templates.
-    # At an earlier tip a second append beside the log recorded each twice, and
-    # this test read the templates from that second form.
+    # Each not-started template is recorded once, by the ERROR log line (the base
+    # class appends ERROR logs to self.errors), which names it; after a timeout
+    # the remaining templates are folded one at a time, so one line each. At an
+    # earlier tip a second append beside the log recorded each twice, and this
+    # test read the templates from that second form.
     not_started = [e for e in scanner.errors if "not started" in e]
-    assert len(not_started) == 1, scanner.errors
-    assert "b.yaml" in not_started[0] and "c.yaml" in not_started[0], not_started
+    named = sorted(
+        e.split("did not evaluate ", 1)[1].split(":", 1)[0] for e in not_started
+    )
+    assert named == ["b.yaml", "c.yaml"], scanner.errors
 
 
 def test_honored_template_ignores_merge_with_the_operators_ignore_checks(

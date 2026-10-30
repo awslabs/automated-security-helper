@@ -549,7 +549,15 @@ class TestScan:
         report = self._run(scanner, cfn_lint)
         assert scanner.targets_attempted == 2
         assert scanner.targets_failed == 1
-        assert "templates/compliant.yaml: cfn-lint exited 1: boom" in scanner.errors
+        # The failure is recorded once, by the ERROR log line the base class appends
+        # to self.errors; at an earlier tip a second, bare "<template>: <reason>"
+        # line sat beside it, and this test looked for that exact element.
+        recorded = [
+            e
+            for e in scanner.errors
+            if "templates/compliant.yaml: cfn-lint exited 1: boom" in e
+        ]
+        assert len(recorded) == 1, scanner.errors
         assert not any("insecure.yaml" in e for e in scanner.errors), scanner.errors
         _assert_parses_to(report, EXPECTED_INSECURE)
 
