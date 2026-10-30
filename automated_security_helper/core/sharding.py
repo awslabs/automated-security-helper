@@ -455,7 +455,7 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
             about the total count, if any index is missing or repeated, if two
             shards claim the same scanner, if the shards disagree about the
             candidate set, if the assignments do not union to it, or if a shard
-            selected a scanner assigned to another shard.
+            selected a scanner assigned to another shard or to no shard.
     """
     if not assignments:
         raise ShardCoverageError(
@@ -540,9 +540,9 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
 def _verify_selection_within_assignment(
     assignments: Sequence[ShardAssignment],
 ) -> None:
-    """Check no shard intended to run a scanner another shard owns.
+    """Check no shard intended to run a scanner another shard owns, or no shard owns.
 
-    The only condition ``selected_scanners`` supports refusing on, and it is worth
+    Two conditions ``selected_scanners`` supports refusing on, and it is worth
     being precise about why the others are not here. A scanner assigned to some
     shard and selected by none ran nowhere, which sounds like the refusal to make;
     but that is also exactly what a config-disabled or platform-declined scanner
@@ -556,6 +556,13 @@ def _verify_selection_within_assignment(
     check above cannot see it: the overlap is between one shard's selection and
     another's assignment, and the assignments themselves are still disjoint.
 
+    The second is a shard reporting that it selected a scanner no shard owns. The
+    selection is taken from the assignment, so a scanner outside every assignment
+    was selected by a run whose exclusion did not take effect either; it ran on
+    every shard that selected it, outside the split, and the shard's provenance
+    does not describe its run. The refusal names that case in its own words, since
+    no other shard ran the scanner.
+
     A shard carrying no selection record is skipped rather than refused, unlike the
     candidate set. The distinction is which absence can hide something: a shard with
     no candidate set could be concealing the union hole, while a shard with no
@@ -566,7 +573,8 @@ def _verify_selection_within_assignment(
         assignments: One entry per shard result being merged.
 
     Raises:
-        ShardCoverageError: If any shard selected a scanner assigned to another.
+        ShardCoverageError: If any shard selected a scanner assigned to another
+            shard, or one assigned to no shard.
     """
     owner: dict[str, int] = {}
     for assignment in assignments:
@@ -596,22 +604,43 @@ def _verify_selection_within_assignment(
                 )
 
     if trespasses:
-        message = (
-            "These shards intended to run a scanner assigned to another shard: "
-            f"{'; '.join(sorted(trespasses))}. A shard only runs what it was "
-            "assigned, so the exclusion that implements the split did not take "
-            "effect on that executor -- the scanner ran on both shards and its "
-            "findings would be counted once per shard. The assignments themselves "
-            "are disjoint, so no other check here can see this."
-        )
-        if any(item.endswith("assigned to no shard)") for item in trespasses):
-            # The header above speaks of two shards; a scanner outside every
-            # assignment ran on whichever shards selected it.
-            message += (
-                " A scanner assigned to no shard was selected by a run whose "
-                "exclusion did not take effect either: it ran on every shard that "
-                "selected it, outside the split, and its findings would be counted "
-                "once per such shard."
+        unowned = [
+            item for item in trespasses if item.endswith("assigned to no shard)")
+        ]
+        listed = "; ".join(sorted(trespasses))
+        if len(unowned) < len(trespasses):
+            # At least one scanner another shard owns: the two-shard wording,
+            # which tests/snapshot/errors pins, with a sentence for any scanner
+            # no shard owns beside it.
+            message = (
+                "These shards intended to run a scanner assigned to another shard: "
+                f"{listed}. A shard only runs what it was "
+                "assigned, so the exclusion that implements the split did not take "
+                "effect on that executor -- the scanner ran on both shards and its "
+                "findings would be counted once per shard. The assignments themselves "
+                "are disjoint, so no other check here can see this."
+            )
+            if unowned:
+                # The header above speaks of two shards; a scanner outside every
+                # assignment ran on whichever shards selected it.
+                message += (
+                    " A scanner assigned to no shard was selected by a run whose "
+                    "exclusion did not take effect either: it ran on every shard that "
+                    "selected it, outside the split, and its findings would be counted "
+                    "once per such shard."
+                )
+        else:
+            # Every selection names a scanner no shard owns: no other shard ran
+            # it, so the two-shard wording would describe a run that did not
+            # happen.
+            message = (
+                "These shards recorded selecting a scanner that is in no shard's "
+                f"assignment: {listed}. A shard only runs what it was assigned, so "
+                "its provenance does not describe its run: the exclusion that "
+                "implements the split did not take effect on that executor, the "
+                "scanner ran on every shard that selected it, outside the split, and "
+                "its findings would be counted once per such shard. The assignments "
+                "themselves are disjoint, so no other check here can see this."
             )
         raise ShardCoverageError(message)
 

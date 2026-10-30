@@ -126,9 +126,27 @@ class TestSelectingAScannerNoShardOwns:
             verify_shard_coverage(shards)
         assert "stray" in str(excinfo.value)
         assert "assigned to no shard" in str(excinfo.value)
-        # The header speaks of a scanner that ran on both shards; this case gets
-        # its own sentence.
+        # No other shard ran the scanner, so the refusal does not say one did.
         assert "outside the split" in str(excinfo.value)
+        assert "in no shard's assignment" in str(excinfo.value)
+        assert "assigned to another shard" not in str(excinfo.value)
+        assert "ran on both shards" not in str(excinfo.value)
+
+    def test_a_mix_keeps_the_two_shard_header_and_adds_the_no_owner_sentence(self):
+        shards = [
+            self._shard(
+                0, ["bandit", "grype"], ["bandit", "grype", "semgrep", "stray"]
+            ),
+            self._shard(1, ["checkov", "semgrep"], ["checkov", "semgrep"]),
+        ]
+
+        with pytest.raises(ShardCoverageError) as excinfo:
+            verify_shard_coverage(shards)
+        text = str(excinfo.value)
+        assert "assigned to another shard" in text
+        assert "assigned to shard 1" in text
+        assert "assigned to no shard" in text
+        assert "outside the split" in text
 
     def test_a_selection_of_another_shards_scanner_keeps_the_two_shard_wording(
         self,
