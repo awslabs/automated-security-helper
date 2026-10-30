@@ -2746,7 +2746,12 @@ def _finalize_zip_upload(
 
             total_uncompressed = 0
             for info in infos:
-                _validate_zip_member(info.filename)
+                # The name as the archive spells it. On Windows the reader
+                # rewrites a backslash in ``filename`` to ``/`` (ZipInfo keeps
+                # the raw spelling in ``orig_filename``), so an archive judged
+                # by ``filename`` was refused on POSIX and admitted on Windows
+                # as a nested path; one spelling is judged on every platform.
+                _validate_zip_member(info.orig_filename)
                 total_uncompressed += info.file_size
                 if total_uncompressed > _MAX_EXTRACTED_BYTES:
                     raise ValueError(

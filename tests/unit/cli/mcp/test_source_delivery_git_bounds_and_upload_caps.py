@@ -29,7 +29,6 @@ import base64
 import hashlib
 import io
 import subprocess
-import sys
 import zipfile
 from pathlib import Path
 from typing import List
@@ -60,9 +59,11 @@ def _zip_bytes(entries: dict) -> bytes:
         for name, content in entries.items():
             # The entry is stored under the name as written. ``ZipInfo``
             # rewrites ``os.sep`` to ``/`` when it is built from a name, so on
-            # Windows a backslash entry would reach the archive as the nested
-            # path ``src/main.py`` and the refusal below would have nothing to
-            # refuse; setting the name after construction keeps it literal.
+            # Windows a backslash entry would otherwise reach the archive as the
+            # nested path ``src/main.py``; setting the name after construction
+            # keeps it literal in the archive. The reader does the same rewrite
+            # into ``filename`` and keeps the archive's spelling in
+            # ``orig_filename``, which is what the delivery judges.
             info = zipfile.ZipInfo(name)
             info.filename = name
             info.compress_type = zipfile.ZIP_DEFLATED
@@ -330,13 +331,14 @@ class TestUploadsAreBoundedPerSession:
 
 
 class TestZipEntriesNamedWithBackslashesAreRefused:
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="zipfile's reader rewrites a backslash to / on Windows, so no "
-        "backslash entry ever reaches the delivery there",
-    )
     def test_a_backslash_entry_is_refused(self, tmp_path):
-        """Red at the base: extracted on POSIX as the flat file ``src\\\\main.py``."""
+        """Red at the base: extracted on POSIX as the flat file ``src\\\\main.py``.
+
+        On every platform: the reader rewrites the backslash to ``/`` in
+        ``ZipInfo.filename`` on Windows, so a delivery judged by that attribute
+        admitted there the archive it refused on POSIX; the archive's own
+        spelling (``orig_filename``) is judged instead.
+        """
         payload = _zip_bytes({"src\\main.py": b"print(1)\n"})
         sha256 = _upload(payload, "bs", tmp_path)
 
