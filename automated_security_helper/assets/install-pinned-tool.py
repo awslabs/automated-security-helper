@@ -633,6 +633,19 @@ def _prepare_executable(staged: Path, final: Path) -> Path:
     mount) and copied only when the rename fails with EXDEV, so the usual case
     neither reads nor writes the 80 MB twice. Returns the file beside ``final``,
     or leaves nothing behind and raises.
+
+    Known limit, a row for the owner: a renamed file keeps the inode it had in the
+    staging directory, so it keeps that directory's SELinux label (``tmp_t`` or
+    ``user_tmp_t``) and none of ``final.parent``'s default ACLs or setgid group,
+    which a file created there would have received. The copy this replaced gave
+    the destination's attributes. In the image build that does not matter (no
+    SELinux, one user). On an SELinux-enforcing host (RHEL family, where ``/tmp``
+    is usually on the root filesystem) a binary installed to ``/usr/local/bin``
+    this way can be refused by a confined domain until ``restorecon`` is run on
+    it. The cheapest cure is to stage the extraction under ``final.parent``
+    instead of the system temp directory, so every file is created with the
+    destination's attributes; it moves the 80 MB of extraction writes onto
+    ``final``'s filesystem, which is why it is not done here.
     """
     descriptor, partial_name = tempfile.mkstemp(
         prefix=f".{final.name}.", suffix=".partial", dir=final.parent
