@@ -80,8 +80,16 @@ def test_a_worker_that_never_checks_its_scope_still_frees_the_queue(
     tmp_path, monkeypatch
 ):
     """Must-not-regress control: a scan that ignores its scope is still written
-    off, one poll after the abandon, and the queued project is failed as never
-    started rather than waited for."""
+    off, one poll after the abandon AND after its stop grace has run out, and the
+    queued project is failed as never started rather than waited for.
+
+    The grace is shortened here: at its production value (the sandbox stop grace
+    plus its margin, over ten seconds) the wedged worker's ten-second wait ends
+    INSIDE the grace, the pool reads it as a worker that came back, and the
+    queued project starts and returns, so the case measured nothing about the
+    reaper. With a sub-second grace the wait outlives it and the write-off is
+    what frees the queue.
+    """
     release = threading.Event()
 
     def ignores_its_scope(
@@ -92,6 +100,7 @@ def test_a_worker_that_never_checks_its_scope_still_frees_the_queue(
         return execution_module._failed_outcome(project, settings, "returned")
 
     monkeypatch.setattr(execution_module, "_scan_one_project", ignores_its_scope)
+    monkeypatch.setattr(execution_module, "_ABANDONED_STOP_GRACE_SECONDS", 0.3)
     try:
         collected = _run_projects(
             [_project(tmp_path, "wedged"), _project(tmp_path, "queued")],
