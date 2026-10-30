@@ -129,8 +129,9 @@ class VersionTemplateManager:
         self.template_suffix = ".template"
         # The files the last convert_all_to_templates or generate_all_from_templates
         # could not process: a read or write that failed, a version that could not be
-        # determined, a listed target with no template. Both return only a count, so
-        # without this a caller cannot tell a skipped file from a failed one.
+        # determined, a listed target with no template (generate) or no page
+        # (convert). Both return only a count, so without this a caller cannot tell a
+        # skipped file from a failed one.
         self.failures: List[Path] = []
         # The ref an install command uses. A release's docs render it as the release,
         # the docs site's main version as `main` (see render_for_branch).
@@ -352,7 +353,11 @@ class VersionTemplateManager:
             True if conversion was successful and changes were made.
         """
         if not file_path.exists():
-            print(f"Warning: File {file_path} does not exist, skipping.")
+            # A listed target with no page is the convert-side twin of a target with no
+            # template, which generate reports as a failure: the list names a file that
+            # was renamed or deleted, and a run that exits 0 over it hides that.
+            print(f"Error: File {file_path} does not exist.")
+            self.failures.append(file_path)
             return False
 
         template_path = file_path.with_suffix(file_path.suffix + self.template_suffix)
@@ -459,8 +464,9 @@ class VersionTemplateManager:
 
         Returns:
             Number of files successfully converted. A file that failed with an
-            error is listed in ``failures``; a file skipped for a reason that is
-            not an error (a template kept, no version reference) is not.
+            error, or that is listed in ``target_files`` and does not exist, is
+            listed in ``failures``; a file skipped for a reason that is not an
+            error (a template kept, no version reference) is not.
         """
         self.failures = []
         converted_count = 0

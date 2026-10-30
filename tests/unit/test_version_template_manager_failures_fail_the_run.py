@@ -18,6 +18,11 @@ not an error (a template kept, no version reference).
 checkout's pyproject.toml nor the installed metadata names a version, that function
 returns the word "unknown", and every pin in every generated doc became "unknown". The
 render now refuses it.
+
+``convert`` skipped a listed target whose page does not exist with a warning and exited 0,
+the twin of the generate case above: the list names a file that was renamed or deleted,
+and nothing reported it. A missing page now fails the run. A template kept, or a page with
+no version reference, is still a skip.
 """
 
 from __future__ import annotations
@@ -163,6 +168,25 @@ class TestConvertExitStatus:
         assert status == 1
         assert "Successfully converted" not in captured.out
         assert "README.md" in captured.err
+
+    def test_a_listed_target_with_no_page_exits_one(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Red before: convert printed a warning for the missing page, counted it as a
+        skip and exited 0, while generate fails on a target with no template."""
+        root = _project(tmp_path / "project")
+        status = _run(monkeypatch, root, "convert", ["README.md", "docs/missing.md"])
+        captured = capsys.readouterr()
+        assert status == 1
+        assert "Successfully converted" not in captured.out
+        assert "missing.md" in captured.err
+
+    def test_the_failures_list_names_a_target_with_no_page(self, tmp_path):
+        root = _project(tmp_path / "project")
+        manager = module.VersionTemplateManager(root)
+        manager.target_files = ["README.md", "docs/missing.md"]
+        assert manager.convert_all_to_templates() == 0
+        assert manager.failures == [root / "docs/missing.md"]
 
     def test_a_template_kept_is_not_a_failure(self, tmp_path, monkeypatch, capsys):
         """The control: skipping a file for a reason that is not an error exits 0."""
