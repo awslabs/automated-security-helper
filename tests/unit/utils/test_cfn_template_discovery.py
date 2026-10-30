@@ -89,6 +89,13 @@ def test_a_candidate_that_is_not_utf8_is_judged_from_its_text(context):
     (source / "utf16.json").write_bytes(
         '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16")
     )
+    # No byte-order mark: the bytes decode as UTF-8 without an error (NUL is valid
+    # UTF-8), so the text reaches the parsers NUL-interleaved and both reject it;
+    # the reading as UTF-16 is what finds the template, and it is named as a
+    # template that could not be parsed, not dropped at TRACE.
+    (source / "utf16-nomark.json").write_bytes(
+        '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16-le")
+    )
 
     found = discover_templates(context, "source")
 
@@ -98,6 +105,7 @@ def test_a_candidate_that_is_not_utf8_is_judged_from_its_text(context):
         "latin-stack.yaml",
         "utf16.json",
     ]
+    assert [shown for shown, _ in found.unparseable] == ["utf16-nomark.json"]
     assert all("UnicodeDecodeError" in reason for _, reason in found.unreadable)
     assert [display_path(p, source) for p in found.templates] == [
         "intrinsics.yaml",

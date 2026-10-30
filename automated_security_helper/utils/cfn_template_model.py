@@ -537,13 +537,19 @@ _BYTE_ORDER_MARKS = (
 )
 
 
-def _decode_leniently(data: bytes) -> str:
-    """``data`` as text: by its byte-order mark when it has one, else as UTF-8 with
-    every undecodable byte replaced."""
+def _decode_leniently(data: bytes) -> list[str]:
+    """``data`` as text, every reading it could be: by its byte-order mark when it
+    has one; else as UTF-8 with every undecodable byte replaced, and, when the bytes
+    hold a NUL (what a UTF-16 file written without a mark looks like to a UTF-8
+    reader), as UTF-16 in both byte orders too. The caller takes any reading."""
     for mark, encoding in _BYTE_ORDER_MARKS:
         if data.startswith(mark):
-            return data[len(mark) :].decode(encoding, errors="replace")
-    return data.decode("utf-8", errors="replace")
+            return [data[len(mark) :].decode(encoding, errors="replace")]
+    readings = [data.decode("utf-8", errors="replace")]
+    if b"\x00" in data:
+        readings.append(data.decode("utf-16-le", errors="replace"))
+        readings.append(data.decode("utf-16-be", errors="replace"))
+    return readings
 
 
 def undecodable_candidate_is_a_template(
@@ -560,8 +566,10 @@ def undecodable_candidate_is_a_template(
     never makes a file a failed target; that takes a structure read.
 
     The file is read again, under the scanned-tree rule, and decoded as well as it
-    can be (:func:`_decode_leniently`); :func:`_could_be_a_template` then answers
-    from the text. True is a template ASH could not decode, which the scanners count
+    can be (:func:`_decode_leniently`: by its byte-order mark, else as UTF-8 with
+    replacement and, when it holds NUL bytes, as UTF-16 in both byte orders, since
+    a UTF-16 file written without a mark carries no readable marker under a UTF-8
+    reading); :func:`_could_be_a_template` then answers from any of the readings. True is a template ASH could not decode, which the scanners count
     as a failed target and the tool-absent check as a template. False is a file that
     is not CloudFormation, skipped and named at WARNING, as a Helm chart or a
     tsconfig.json is. The scanners and the tool-absent check all ask here, so the
@@ -579,7 +587,7 @@ def undecodable_candidate_is_a_template(
     """
     with open_in_scanned_tree(template_path, scan_root, allow_hardlinks=True) as f:
         data = f.read()
-    return _could_be_a_template(_decode_leniently(data))
+    return any(_could_be_a_template(text) for text in _decode_leniently(data))
 
 
 def get_model_from_template_text(
@@ -869,7 +877,21 @@ def _could_be_a_template(text: str) -> bool:
     a failed target; that takes a structure read (:func:`_has_top_level_resources`).
     A file whose root is a sequence could not be one, marker or not
     (:func:`_root_is_a_sequence`).
+
+    A UTF-16 file written without a byte-order mark decodes as UTF-8 without an
+    error (NUL is valid UTF-8), so its text arrives here NUL-interleaved and carries
+    no readable marker; such a template was skipped as not CloudFormation where its
+    marked twin was named. Text that holds a NUL is read again as UTF-16 in either
+    byte order, and a reading that is a template counts.
     """
+    if "\x00" in text:
+        raw = text.encode("utf-8", errors="surrogatepass")
+        for encoding in ("utf-16-le", "utf-16-be"):
+            reading = raw.decode(encoding, errors="replace")
+            # A reading that still holds a NUL would come back here; it is not
+            # UTF-16 text of this order, so it is not tried.
+            if "\x00" not in reading and _could_be_a_template(reading):
+                return True
     if _root_is_a_sequence(text):
         return False
     loader = None
