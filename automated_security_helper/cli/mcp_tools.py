@@ -6545,6 +6545,7 @@ def mcp_select_profile(
     the hold ends. A ``set_source_git`` or ``set_source_zip_finalize`` in
     progress does not refuse it.
     """
+    from automated_security_helper.cli.mcp.profile_registry import binding_writes
     from automated_security_helper.cli.mcp.sessions import (
         SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
@@ -6552,7 +6553,12 @@ def mcp_select_profile(
     )
 
     try:
-        with writing_session_state(session_id):
+        # The write hold keeps the sweep off the workspace; the binding lock
+        # keeps another writer of this session's binding files (a rewrite of a
+        # gone file, profile_registry._rematerialize_binding) from landing an
+        # older profile's files after this one's. Taken inside the hold, as the
+        # rewrite takes it.
+        with writing_session_state(session_id), binding_writes(session_id):
             return _select_profile(
                 profile_name,
                 patch_ops=patch_ops,

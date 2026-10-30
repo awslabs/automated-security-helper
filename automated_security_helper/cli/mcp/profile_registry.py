@@ -28,12 +28,22 @@ import copy
 import hashlib
 import os
 import re
+import contextlib
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.config_sources import (
@@ -472,6 +482,32 @@ class SessionState:
 
 _session_lock = RLock()
 _session_state: Dict[str, SessionState] = {}
+
+#: One lock per session id around the writes of its binding's files: the
+#: materialization ``select_profile`` does, and the one that writes a gone file
+#: again (:func:`_rematerialize_binding`). The session's write hold
+#: (``sessions.writing_session_state``) keeps the sweep off the workspace but
+#: admits two writers at once, so a rewrite that read the binding before a
+#: ``select_profile`` could land its files after it: both files then existed,
+#: so nothing repaired them, and the session's config held one profile while its
+#: state and rules said another. Taken inside the write hold, never around it.
+_binding_write_locks: Dict[str, threading.Lock] = {}
+
+
+@contextlib.contextmanager
+def binding_writes(session_id: Optional[str]) -> Iterator[None]:
+    """Hold the session's binding against another writer of its files.
+
+    Every write of a session's ``config/`` and ``client-config/`` copies runs
+    under this: ``select_profile``'s materialize-and-bind and the rewrite of a
+    gone file. One lock per session id, so sessions never wait on each other.
+    """
+    sid = DEFAULT_SESSION_ID if session_id is None else session_id
+    with _session_lock:
+        lock = _binding_write_locks.setdefault(sid, threading.Lock())
+    with lock:
+        yield
+
 
 # When no session id can be resolved (e.g. a stdio client that doesn't expose
 # one), tools fall back to a single shared key. This matches the existing
@@ -989,7 +1025,19 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
         )
     # The hold is taken outside the try: its own refusal is a RuntimeError too,
     # and inside it would be reported as a profile that cannot be written.
-    with writing_session_state(sid):
+    with writing_session_state(sid), binding_writes(sid):
+        # Read again under the binding lock, by identity, BEFORE anything is
+        # written: a select_profile that landed between the read above and
+        # here has written its own files and recorded its own paths, and
+        # writing the binding read above would put that older profile's files
+        # under the newer binding (both files present, so no later read
+        # repairs them). The newer binding's paths are the answer then.
+        with _session_lock:
+            current = _session_state.get(sid)
+            if current is not state:
+                if current is None or current.config_path is None:
+                    return None, None
+                return current.config_path, current.trusted_config_path
         try:
             config_path, trusted = materialize_session_binding(
                 sid, entry.config, patched
