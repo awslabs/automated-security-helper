@@ -140,7 +140,19 @@ def test_ash_log_is_written_as_utf8_whatever_the_locale(tmp_path, monkeypatch):
     finally:
         handler.close()
 
+    # The handler's own encoding, not only the open's: since Python 3.10
+    # FileHandler records its default as the name "locale", and a fallback at
+    # the open that read "self.encoding or 'utf-8'" kept that name.
+    assert handler.encoding == "utf-8"
     assert opened["encoding"] == "utf-8"
     # Read back strict: the bytes on disk are UTF-8 whatever the locale was.
     written = (tmp_path / "ash.log").read_bytes().decode("utf-8")
     assert written.rstrip() == "caf" + chr(0xE9)
+
+
+def test_a_callers_encoding_is_kept(tmp_path):
+    handler = LogFileHandler(os.fspath(tmp_path / "ash.log"), encoding="latin-1")
+    try:
+        assert handler.encoding == "latin-1"
+    finally:
+        handler.close()

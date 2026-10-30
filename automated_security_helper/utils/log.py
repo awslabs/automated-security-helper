@@ -1655,6 +1655,19 @@ class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
     """
 
     def __init__(self, filename: str, *args, **kwargs) -> None:
+        # UTF-8 unless the caller chose an encoding. FileHandler's own default,
+        # None, is the locale's encoding, under which a record holding a
+        # character outside the ANSI code page was dropped from the file on
+        # Windows; and since Python 3.10 FileHandler records that default on
+        # self.encoding as the name "locale", so a fallback read at the open
+        # ("self.encoding or 'utf-8'") found a name there and opened the file
+        # in the locale's encoding all the same. The default is chosen here,
+        # before FileHandler reads it. The files are read back as UTF-8.
+        if len(args) >= 2:
+            if args[1] is None:
+                args = (args[0], "utf-8", *args[2:])
+        elif kwargs.get("encoding") is None:
+            kwargs["encoding"] = "utf-8"
         # Imported here, not at the top: fs_guard imports this module for
         # ASH_LOGGER. Do not hoist.
         from automated_security_helper.utils.sandbox import fs_guard
@@ -1699,10 +1712,8 @@ class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
         # Not at the top: fs_guard imports this module. Do not hoist.
         from automated_security_helper.utils.sandbox import fs_guard
 
-        # UTF-8 unless the handler was given an encoding: FileHandler's default
-        # of None is the locale's encoding, under which a record holding a
-        # character outside the ANSI code page was dropped from the file on
-        # Windows. The files are read back as UTF-8.
+        # The encoding __init__ chose: UTF-8 unless the caller named one. The
+        # fallback stays for an encoding set to None after the construction.
         return fs_guard.open_for_write(
             self.baseFilename,
             encoding=self.encoding or "utf-8",
