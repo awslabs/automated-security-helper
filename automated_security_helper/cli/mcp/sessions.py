@@ -451,7 +451,11 @@ class MCPSessionRegistry:
         self.sessionless_scans = ScanCount()
         self._explicit_parent = workspace_parent
         if workspace_parent is not None:
-            workspace_parent.mkdir(parents=True, exist_ok=True)
+            # Private from the moment each level exists, as the default root
+            # the session paths make is: this parent's listing is the live
+            # session ids. Made under the umask it was 0o755, and every session
+            # directory created beneath it warned of a listable parent.
+            make_private_dir(workspace_parent)
 
     @property
     def _workspace_parent(self) -> Path:

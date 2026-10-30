@@ -150,3 +150,29 @@ def test_the_presence_registries_are_private_too(tmp_path, monkeypatch) -> None:
     assert _mode(root) == 0o700, oct(_mode(root))
     assert _mode(root / sessions.STDIO_SERVERS_DIR) == 0o700
     assert _mode(root / sessions.SCAN_PRESENCE_DIR) == 0o700
+
+
+def test_an_explicit_registry_parent_is_private_too(tmp_path, caplog) -> None:
+    """A registry given its workspace parent made it under the umask (0o755),
+    so every session directory created beneath it warned that other accounts
+    could list the live session ids: the parent is made private as the
+    default root is, and a session under it draws no warning."""
+    from automated_security_helper.cli.mcp import session_paths
+    from automated_security_helper.cli.mcp.sessions import MCPSessionRegistry
+
+    parent = tmp_path / "sessions"
+    previous = os.umask(0o022)
+    try:
+        registry = MCPSessionRegistry(workspace_parent=parent)
+        with caplog.at_level(logging.WARNING):
+            registry.get_or_create("session-g")
+    finally:
+        os.umask(previous)
+
+    assert _mode(parent) == 0o700, oct(_mode(parent))
+    assert parent not in session_paths._listable_parents_warned
+    assert not [
+        record.getMessage()
+        for record in caplog.records
+        if "live session ids" in record.getMessage()
+    ], caplog.text

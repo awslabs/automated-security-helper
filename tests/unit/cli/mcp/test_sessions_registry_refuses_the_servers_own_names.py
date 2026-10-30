@@ -40,7 +40,10 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def root(tmp_path, monkeypatch) -> Path:
     workspace = tmp_path / "ws"
-    workspace.mkdir()
+    # Private, as a root ASH makes itself is: a listable root draws the
+    # once-per-directory warning about the live session ids, which the
+    # "warns of nothing" tests below would otherwise read as their own.
+    workspace.mkdir(mode=0o700)
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
     sessions.reset_default_registry_for_tests()
     sessions._ended_while_scanning.clear()
