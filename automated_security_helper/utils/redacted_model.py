@@ -2594,10 +2594,13 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
             return fresh
         kind = type(node)
         if isinstance(node, tuple):
-            # Read on the instance, not on its class: the shown-text guard
-            # (tests/unit/utils/test_shown_text_is_shown_once.py) refuses a
-            # class taken from a value handed to any call but a check.
-            if hasattr(node, "_fields"):  # a NamedTuple instance
+            # Read with a builtin hasattr, not through _is_named_tuple: the
+            # shown-text guard (tests/unit/utils/test_shown_text_is_shown_once.py)
+            # refuses a class taken from a value handed to any call but a
+            # check or a constant-name getattr/hasattr. The class is asked,
+            # not the instance, so an instance attribute named _fields on a
+            # tuple subclass does not send it to a _make it has not got.
+            if hasattr(kind, "_fields"):  # a NamedTuple class
                 return kind._make(entries)
             if kind is tuple:
                 return tuple(entries)

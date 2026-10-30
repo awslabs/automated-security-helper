@@ -232,6 +232,26 @@ def test_a_counter_keeps_its_counts_and_its_class():
     assert any(key is marker for key in given)
 
 
+class _Loose(tuple):
+    """A tuple subclass with a ``__dict__``, so an instance can carry an
+    attribute named like a NamedTuple's ``_fields`` without being one."""
+
+    __slots__ = ("__dict__",)
+
+
+def test_a_tuple_subclass_with_an_instance_fields_attribute_is_rebuilt_as_itself():
+    """Whether a tuple is a NamedTuple is read on its class: an instance that
+    merely carries a ``_fields`` attribute has no ``_make``, and reading the
+    instance sent it there and raised."""
+    marker = env_resolved_scalar("loose-text", VARIABLE)
+    given = _Loose([marker, "kept"])
+    given._fields = ("not", "a", "namedtuple")
+    out = _downcast_what_validation_kept(given)
+    assert type(out) is _Loose
+    assert type(out[0]) is str and out[0] == "loose-text"
+    assert out[1] == "kept"
+
+
 class _Clinging(dict):
     """A dict subclass whose copy protocol answers with the object itself."""
 
