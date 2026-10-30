@@ -138,7 +138,10 @@ def test_on_a_network_transport_the_warning_names_the_tool_not_its_pid(
         "execute_workspace",
         _a_run_the_timeout_stops((("bandit", 4242),)),
     )
-    monkeypatch.setattr(workspace_module, "transport_is_networked", lambda: True)
+    # The pid is withheld from a remote caller, which the workspace module now
+    # reads per session (caller_is_remote), not from the transport alone: a
+    # stand-in that answers True for every session is the network transport.
+    monkeypatch.setattr(workspace_module, "caller_is_remote", lambda session_id: True)
 
     answer = _stopped_answer(workspace_file)
 
