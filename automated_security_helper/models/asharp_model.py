@@ -433,9 +433,10 @@ class InputNotScanned(RecordModel):
     reason: Annotated[str, Field(description="Why it was not scanned.")]
 
 
-#: The validation-context key under which RefusedInputInfo counts the keys it drops,
-#: for the one warning ``warning_of_dropped_keys`` logs per results file.
-_DROPPED_RECORD_KEYS = "dropped_refused_input_keys"
+#: The validation-context key under which the records that keep only their own keys
+#: (RefusedInputInfo, FailedInputInfo) count the keys they drop, for the one warning
+#: ``warning_of_dropped_keys`` logs per results file.
+_DROPPED_RECORD_KEYS = "dropped_record_keys"
 
 
 def _count_dropped_record_keys(
