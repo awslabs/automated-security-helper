@@ -2416,6 +2416,12 @@ def test_a_reference_through_a_link_is_judged_where_actionlint_reads_it(
     outside = tmp_path / "outside" / "action"
     outside.mkdir(parents=True)
     (outside / "action.yml").write_text(_OUTSIDE_ACTION)
+    # What following the outside link first and then taking ".." reaches: a
+    # real action outside the tree, so a scanner that resolved the link first
+    # would refuse the workflow instead of reading a reference that names
+    # nothing as harmless, and the two readings give different answers.
+    (tmp_path / "outside" / "inside").mkdir()
+    (tmp_path / "outside" / "inside" / "action.yml").write_text(_OUTSIDE_ACTION)
     actions = repo / ".github" / "actions"
     for name in ("inside", "deep/real"):
         (actions / name).mkdir(parents=True)
