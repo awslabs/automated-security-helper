@@ -2618,8 +2618,18 @@ class RedactedSection(BaseModel):
     @model_validator(mode="after")
     def _env_resolved_text_in_extras_reads_as_text(self) -> "RedactedSection":
         """Downcast the references an extra holds, for a section that sets
-        :attr:`_downcast_extras`. The extras dict is changed in place."""
-        if type(self)._downcast_extras:
+        :attr:`_downcast_extras`. The extras dict is changed in place.
+
+        A value given for a field typed as a section is handed through its
+        validators unchanged when it is already an instance
+        (``revalidate_instances="never"``), and this validator then runs on it.
+        A stand-in that passes the instance check without being one of these
+        models (a ``MagicMock`` built with ``spec=``) has no class attributes
+        and no extras dict to read, so it is left as given."""
+        cls = type(self)
+        if not (isinstance(cls, type) and issubclass(cls, RedactedSection)):
+            return self
+        if cls._downcast_extras:
             extras = self.__pydantic_extra__
             if extras and _holds_env_scalar(extras):
                 downcast = without_env_scalars(extras)

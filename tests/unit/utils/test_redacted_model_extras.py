@@ -18,6 +18,7 @@ plain str, keys included, so no str subclass reaches a config dump.
 """
 
 from typing import Any, ClassVar, Dict, Optional
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -165,3 +166,37 @@ def test_a_section_that_does_not_opt_in_keeps_the_markers_in_its_extras():
     marker = env_resolved_scalar("value-text", VARIABLE)
     section = _Keeping.model_validate({"free": marker})
     assert isinstance(section.__pydantic_extra__["free"], EnvResolvedScalar)
+
+
+class _Carried(RedactedSection):
+    name: str = ""
+
+
+class _Wrapper(RedactedSection):
+    carried: Optional[_Carried] = None
+    held: Optional[_Downcasting] = None
+
+
+def test_a_spec_double_given_for_a_section_field_is_kept_as_given():
+    """pydantic hands an instance given for a section field through the field's
+    validators unchanged and runs the after validator on it; a MagicMock built
+    with spec= passes the instance check with a type that has none of the
+    section's class attributes, so the validator leaves it as given."""
+    double = MagicMock(spec=_Carried)
+    double.name = "x"
+    section = _Wrapper(carried=double)
+    assert section.carried is double
+
+
+def test_a_real_section_given_for_a_section_field_is_kept_and_a_nested_one_is_downcast():
+    """The control: a real instance is kept as given, and a nested section built
+    from a dict still has its opted-in extras downcast by the same validator."""
+    carried = _Carried(name="x")
+    marker = env_resolved_scalar("value-text", VARIABLE)
+    section = _Wrapper.model_validate(
+        {"carried": carried, "held": {"name": "y", "free": marker}}
+    )
+    assert section.carried is carried
+    assert section.held is not None
+    assert section.held.__pydantic_extra__["free"] == "value-text"
+    assert type(section.held.__pydantic_extra__["free"]) is str
