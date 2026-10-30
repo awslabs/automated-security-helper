@@ -54,21 +54,49 @@ def test_with_the_collector_off_the_cleanup_runs_inline():
     assert seen["thread"] == threading.get_ident()
 
 
-def test_a_thread_that_cannot_start_at_shutdown_runs_the_cleanup_inline():
-    """Thread.start raises RuntimeError at interpreter shutdown with gc still on."""
+def test_a_thread_that_cannot_start_while_finalizing_runs_the_cleanup_inline():
+    """Thread.start raises RuntimeError once the interpreter is finalizing with
+    gc still on; no registry call of this thread can be in progress then."""
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
     assert gc.isenabled()
-    with patch.object(
-        threading.Thread,
-        "start",
-        side_effect=RuntimeError("can't create new thread at interpreter shutdown"),
+    with (
+        patch.object(
+            threading.Thread,
+            "start",
+            side_effect=RuntimeError("can't create new thread at interpreter shutdown"),
+        ),
+        patch.object(subprocess_utils.sys, "is_finalizing", return_value=True),
     ):
         subprocess_utils._run_cleanup_off_the_finalizer(plan)
     assert done.is_set()
     assert seen["thread"] == threading.get_ident()
     assert plan.cleanup == []
+
+
+def test_a_thread_that_cannot_start_mid_run_leaves_the_cleanup_to_the_exit_pass():
+    """Thread.start also raises RuntimeError when the process is out of threads.
+    Running the cleanup inline then would bring back the self-deadlock the
+    thread exists to avoid, so the cleanup is left to the interpreter's exit
+    pass instead."""
+    seen: dict = {}
+    done = threading.Event()
+    plan = _plan_recording_its_thread(seen, done)
+    assert gc.isenabled()
+    with (
+        patch.object(
+            threading.Thread,
+            "start",
+            side_effect=RuntimeError("can't start new thread"),
+        ),
+        patch.object(subprocess_utils.sys, "is_finalizing", return_value=False),
+        patch.object(subprocess_utils.atexit, "register") as register,
+    ):
+        subprocess_utils._run_cleanup_off_the_finalizer(plan)
+    assert not done.is_set(), "the cleanup ran on the finalizer's own thread"
+    assert plan.cleanup, "the plan's cleanup was consumed without running"
+    register.assert_called_once_with(plan.run_cleanup)
 
 
 @patch("subprocess.Popen")

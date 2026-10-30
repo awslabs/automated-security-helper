@@ -48,6 +48,7 @@ neither refuses nor protects ``!``. What a batch file does with the arguments it
 given is its own business.
 """
 
+import atexit
 import contextlib
 import contextvars
 import enum
@@ -5703,10 +5704,13 @@ def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
     (weakref.finalize's own exit pass runs that way, with no registry call in
     progress) no finalizer can interrupt an allocation, and the cleanup runs
     inline so the temporary files are gone before the interpreter is. A thread
-    that cannot be started (the interpreter is shutting down with the collector
-    still on, where Thread.start raises RuntimeError) runs the cleanup inline
-    too, rather than leaving the plan's files behind: at that point no registry
-    call of this thread is in progress for the cleanup to wait on.
+    that cannot be started (Thread.start raises RuntimeError) runs the cleanup
+    inline only once the interpreter is finalizing, where no registry call of
+    this thread can be in progress for the cleanup to wait on. Thread.start
+    raises the same error when the process is out of threads or memory, and
+    inline there is the self-deadlock the thread exists to avoid, so the
+    cleanup is left to the interpreter's exit pass instead (atexit, which runs
+    on the main thread with no registry call in progress), and logged.
     """
     if not gc.isenabled():
         plan.run_cleanup()
@@ -5716,5 +5720,13 @@ def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
     )
     try:
         worker.start()
-    except RuntimeError:
-        plan.run_cleanup()
+    except RuntimeError as error:
+        if sys.is_finalizing():
+            plan.run_cleanup()
+            return
+        atexit.register(plan.run_cleanup)
+        ASH_LOGGER.debug(
+            f"Could not start a thread for a sandbox plan's cleanup ({error}); "
+            f"it runs at exit instead",
+            extra=NO_MARKUP,
+        )
