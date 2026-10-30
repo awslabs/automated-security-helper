@@ -26,7 +26,8 @@ class _Model:
 
 
 @pytest.mark.parametrize(
-    "text", ["false", "False", " FALSE ", "no", "n", "off", "f", "0", ""]
+    "text",
+    ["false", "False", " FALSE ", "no", "n", "off", "f", "0", "", "  ", "\t\n"],
 )
 def test_a_text_spelling_of_false_disables_the_plugin(text):
     assert section_enabled({"enabled": text}) is False

@@ -299,7 +299,8 @@ def section_enabled(plugin_config: Any) -> bool:
     the text of an environment reference (``"false"``, ``"no"``, ``"0"``). Text
     is read the way the plugin's own ``enabled: bool`` field would read it, not by
     truthiness, which called every non-empty string enabled: a spelling of false
-    disables the plugin, an empty string is off as before, and any other text
+    disables the plugin, an empty or whitespace-only string is off (a bool field
+    would refuse it, and an empty value is not a choice to run), and any other text
     leaves it enabled (a scanner that silently does not run is the worse error).
     """
     if plugin_config is None:
@@ -310,5 +311,5 @@ def section_enabled(plugin_config: Any) -> bool:
         enabled = getattr(plugin_config, "enabled", True)
     if isinstance(enabled, str):
         spelled = enabled.strip().lower()
-        return bool(enabled) and spelled not in _DISABLED_SPELLINGS
+        return bool(spelled) and spelled not in _DISABLED_SPELLINGS
     return bool(enabled)
