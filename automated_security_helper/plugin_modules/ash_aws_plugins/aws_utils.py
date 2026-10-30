@@ -802,12 +802,23 @@ def get_available_models(
 
 
 #: The area prefix of the cross-region inference profiles the fallback chains
-#: are written with. A configured model under another area (``eu.``, ``apac.``,
-#: ``global.``, ``us-gov.``) gets the same chain under its own area.
+#: are written with. A configured model under another area is looked up by its
+#: family as its ``us.`` spelling; its candidates are answered under its own
+#: area only when that area is one of ``_MIRRORED_AREAS``.
 _CHAIN_AREA = "us"
 
+#: The geographic cross-region areas whose inference profiles mirror the
+#: ``us.`` chains model for model (``eu.amazon.nova-pro-v1:0`` exists as
+#: ``us.amazon.nova-pro-v1:0`` does). ``global.``, ``jp.``, ``au.`` and the
+#: others carry profiles for a few models only, none of them the chain models,
+#: so a candidate under one of those would pass no listing; their candidates
+#: stay under ``us.``, which the US regions list. Compared lower-cased: the
+#: area of a configured id is read case-insensitively, and the candidates
+#: carry the area's own spelling, never the operator's casing.
+_MIRRORED_AREAS = frozenset({"us", "eu", "apac"})
+
 #: The model every chain ends in, and the fallback for a model of no known
-#: family, under the configured model's area.
+#: family, under the configured model's area when that area is mirrored.
 _DEFAULT_FALLBACK = "amazon.nova-pro-v1:0"
 
 
@@ -829,11 +840,16 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
 
     The chains are written as the ``us.`` cross-region profiles. A model under
     another area (``eu.anthropic.claude-...``) is looked up as its ``us.``
-    spelling and its fallback is answered under its own area
-    (``eu.anthropic.claude-...``), so a run outside the US regions is offered
-    candidates its region can route; whether the region does is the walk's
-    check. Before this every such model fell straight to the ``us.`` default,
-    which no non-US region lists.
+    spelling, so its family's chain is found whatever the area, and its
+    fallback is answered under its own area (``eu.anthropic.claude-...``) when
+    that area mirrors the ``us.`` profiles (``_MIRRORED_AREAS``), so a run
+    outside the US regions is offered candidates its region can route; whether
+    the region does is the walk's check. Under any other area (``global.``,
+    ``jp.``) the candidates keep their ``us.`` spelling, the one the US regions
+    list; a translated candidate there would pass no listing at all. The area
+    is read case-insensitively and the candidates carry the area's own spelling
+    (``US.anthropic...`` gets ``us.amazon.nova-...``, never ``US.amazon...``,
+    which Converse does not know).
 
     Args:
         current_model_id: The current model ID that failed
@@ -841,20 +857,25 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
     Returns:
         A fallback model ID: the next model of the current model's chain, the
         chain's first model when the current one is not in it, or the default
-        model (``_DEFAULT_FALLBACK`` under the current model's area) for a
-        model of no known family and for a chain's last member. The walk ends
-        a chain on a repeat, never on None here.
+        model (``_DEFAULT_FALLBACK``) for a model of no known family and for a
+        chain's last member, under the current model's area when that area is
+        mirrored. The walk ends a chain on a repeat, never on None here.
     """
     area = _profile_area(current_model_id)
+    area_lower = area.lower() if area is not None else None
     lookup = current_model_id
-    if area is not None and area != _CHAIN_AREA:
+    if area is not None:
         lookup = f"{_CHAIN_AREA}.{current_model_id[len(area) + 1 :]}"
 
     def under_area(model: str) -> str:
-        if area is None or area == _CHAIN_AREA:
+        if (
+            area_lower is None
+            or area_lower == _CHAIN_AREA
+            or area_lower not in _MIRRORED_AREAS
+        ):
             return model
         if model.startswith(f"{_CHAIN_AREA}."):
-            return f"{area}.{model[len(_CHAIN_AREA) + 1 :]}"
+            return f"{area_lower}.{model[len(_CHAIN_AREA) + 1 :]}"
         return model
 
     # Define fallback chains for different model families

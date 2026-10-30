@@ -109,6 +109,31 @@ def test_a_model_with_no_area_keeps_the_us_default():
     assert get_fallback_model("amazon.titan-text-lite-v1") == "us.amazon.nova-pro-v1:0"
 
 
+def test_an_area_with_no_mirrored_chain_keeps_the_us_candidates():
+    """``global.``, ``jp.`` and the like have no inference profiles for the
+    chain models, so a model under one is looked up by its family and gets the
+    chain's ``us.`` spelling, which the US regions list. The configured
+    model's area never becomes the candidates' area here."""
+    fallback = get_fallback_model("global.anthropic.claude-sonnet-4-20250514-v1:0")
+
+    assert fallback == "us.anthropic.claude-3-7-sonnet-20250219-v1:0", fallback
+    assert get_fallback_model("jp.test-vendor.test-model-v1:0") == (
+        "us.amazon.nova-pro-v1:0"
+    )
+
+
+def test_an_upper_cased_area_gets_lower_cased_candidates():
+    """The area is read case-insensitively and the candidates carry the
+    area's own spelling, never the operator's casing: Converse knows
+    ``us.amazon.nova-pro-v1:0``, not ``US.amazon.nova-pro-v1:0``."""
+    fallback = get_fallback_model("US.anthropic.claude-sonnet-4-20250514-v1:0")
+
+    assert fallback == "us.anthropic.claude-3-7-sonnet-20250219-v1:0", fallback
+    assert get_fallback_model("EU.test-vendor.test-model-v1:0") == (
+        "eu.amazon.nova-pro-v1:0"
+    )
+
+
 # ---------------------------------------------------------------------------
 # A check names the listed spelling
 # ---------------------------------------------------------------------------
