@@ -22,8 +22,15 @@ Each test is pinned against the behavior it replaced:
   subscription's ``unregister`` control did not record that it ran; and
   ``auto_cleanup_on_error=False`` still unregistered on error.
 * Ages and timestamps came from the naive local clock.
+* The bulk cleanups ran in hash order (a set of the keys), detached their whole
+  set before any cleanup ran so a cancellation lost every cleanup it had not
+  reached, admitted a same-id registration while the old cleanup still ran,
+  raised a bare TypeError for an unhashable id, pruned expired cleanup errors in
+  only two of their readers, and the context managers recovered their own
+  registration with a second lookup by id.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -258,3 +265,261 @@ class TestTimesAreTimezoneAware:
         assert recorded.tzinfo is not None
         usage = await manager.get_resource_usage()
         assert usage["subscription_ages"]["count"] == 0
+
+
+class TestBulkCleanupRunsInRegistrationOrder:
+    """cleanup_all passed a set of the keys, and the two indices are sets, so the
+    cleanups ran in per-process hash order (PYTHONHASHSEED): a teardown that
+    needs an earlier-registered resource to still be up failed intermittently."""
+
+    @staticmethod
+    def _recording(ran, name):
+        def cleanup():
+            ran.append(name)
+
+        return cleanup
+
+    @pytest.mark.asyncio
+    async def test_cleanup_all_visits_in_registration_order(self):
+        manager = EventSubscriptionManager()
+        ran = []
+        names = [f"sub-{index}" for index in range(12)]
+        for name in names:
+            await _register(manager, name, cleanup_func=self._recording(ran, name))
+
+        await manager.cleanup_all_subscriptions()
+
+        assert ran == names
+
+    @pytest.mark.asyncio
+    async def test_the_scan_and_type_cleanups_visit_in_registration_order(self):
+        manager = EventSubscriptionManager()
+        ran = []
+        names = [f"sub-{index}" for index in range(12)]
+        for name in names:
+            await _register(
+                manager,
+                name,
+                scan_id="scan",
+                event_type="findings",
+                cleanup_func=self._recording(ran, name),
+            )
+
+        await manager.cleanup_subscriptions_by_scan("scan")
+        by_scan = list(ran)
+        ran.clear()
+        for name in names:
+            await _register(
+                manager,
+                name,
+                scan_id="scan",
+                event_type="findings",
+                cleanup_func=self._recording(ran, name),
+            )
+        await manager.cleanup_subscriptions_by_type("findings")
+
+        assert by_scan == names
+        assert ran == names
+
+
+class TestACancelledBulkCleanupKeepsWhatItNeverReached:
+    """The bulk cleanups detach their whole set before any cleanup runs; a
+    cancellation of the calling task (a shutdown with a deadline on
+    cleanup_all) landed in the awaited cleanup, and every subscription after it
+    was gone from the registry, never cleaned up and recorded nowhere."""
+
+    @staticmethod
+    async def _cancel_during_the_first_cleanup(manager, started):
+        task = asyncio.create_task(manager.cleanup_all_subscriptions())
+        await asyncio.wait_for(started.wait(), 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    @pytest.mark.asyncio
+    async def test_the_unreached_subscriptions_are_put_back(self):
+        manager = EventSubscriptionManager()
+        started, release = asyncio.Event(), asyncio.Event()
+        ran = []
+
+        async def blocks():
+            started.set()
+            await release.wait()
+
+        await _register(manager, "a", cleanup_func=blocks)
+        await _register(
+            manager, "b", scan_id="scan", cleanup_func=lambda: ran.append("b")
+        )
+        await _register(
+            manager, "c", scan_id="scan", cleanup_func=lambda: ran.append("c")
+        )
+
+        await self._cancel_during_the_first_cleanup(manager, started)
+
+        # The interrupted one is gone and recorded; the rest are back as they were.
+        assert manager.get_subscription_info("a") is None
+        assert manager.get_subscription_info("b") is not None
+        assert manager.get_subscription_info("c") is not None
+        assert manager.get_subscriptions_by_scan("scan") != []
+        assert ran == []
+        errors = manager.get_cleanup_errors()
+        assert [e["subscription_id"] for e in errors] == ["a"]
+        assert "cancelled" in errors[0]["error"]
+
+        # A later bulk cleanup finds them, in order.
+        results = await manager.cleanup_all_subscriptions()
+        assert results["total_subscriptions"] == 2
+        assert ran == ["b", "c"]
+
+    @pytest.mark.asyncio
+    async def test_an_id_registered_again_meanwhile_is_recorded_not_overwritten(self):
+        manager = EventSubscriptionManager()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def blocks():
+            # Before blocking, a handler re-registers c's id under another scan.
+            await _register(manager, "c", scan_id="other")
+            started.set()
+            await release.wait()
+
+        await _register(manager, "a", cleanup_func=blocks)
+        await _register(manager, "b", scan_id="scan")
+        await _register(manager, "c", scan_id="scan")
+
+        await self._cancel_during_the_first_cleanup(manager, started)
+
+        assert manager.get_subscription_info("b")["scan_id"] == "scan"
+        assert manager.get_subscription_info("c")["scan_id"] == "other"
+        recorded = {
+            e["subscription_id"]: e["error"] for e in manager.get_cleanup_errors()
+        }
+        assert set(recorded) == {"a", "c"}
+        assert "did not run" in recorded["c"]
+
+
+class TestAnUnhashableSubscriptionIdIsRefusedAsAResourceError:
+    @pytest.mark.asyncio
+    async def test_the_documented_error_is_raised_and_nothing_is_stored(self):
+        """The membership test raised TypeError, and the rollback's pop raised
+        it again from inside the handler, so the caller got a chained TypeError
+        where the contract promises MCPResourceError."""
+        manager = EventSubscriptionManager()
+
+        with pytest.raises(MCPResourceError):
+            await _register(manager, ["not", "hashable"])
+
+        assert manager.get_subscription_statistics()["total_subscriptions"] == 0
+        assert manager.get_all_subscriptions() == []
+
+
+class TestAnIdIsNotReusedWhileItsCleanupRuns:
+    @pytest.mark.asyncio
+    async def test_a_registration_during_the_old_cleanup_is_refused_then_admitted(self):
+        """With the cleanup moved outside the lock, a same-id registration was
+        admitted while the old cleanup_func was still awaiting; a cleanup that
+        tears down resources keyed by the id destroyed what the new registration
+        had just set up."""
+        manager = EventSubscriptionManager()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def slow():
+            started.set()
+            await release.wait()
+
+        await _register(manager, "sub", cleanup_func=slow)
+        unregistering = asyncio.create_task(manager.unregister_subscription("sub"))
+        try:
+            await asyncio.wait_for(started.wait(), 5)
+
+            assert await _register(manager, "sub") is False
+            assert manager.get_subscription_info("sub") is None
+        finally:
+            release.set()
+        assert await asyncio.wait_for(unregistering, 5) is True
+
+        assert await _register(manager, "sub") is True
+
+    @pytest.mark.asyncio
+    async def test_another_id_is_admitted_during_a_cleanup(self):
+        """The control: only the id whose cleanup runs is held."""
+        manager = EventSubscriptionManager()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def slow():
+            started.set()
+            await release.wait()
+
+        await _register(manager, "sub", cleanup_func=slow)
+        unregistering = asyncio.create_task(manager.unregister_subscription("sub"))
+        try:
+            await asyncio.wait_for(started.wait(), 5)
+            assert await _register(manager, "other") is True
+        finally:
+            release.set()
+        assert await asyncio.wait_for(unregistering, 5) is True
+
+
+class TestEveryReaderOfCleanupErrorsAgreesOnTheCount:
+    @pytest.mark.asyncio
+    async def test_an_expired_error_is_counted_by_no_reader(self):
+        """Pruned by get_cleanup_errors and get_health_status only, the health
+        status reported 0 errors while the statistics and the resource usage
+        reported 1 for the same state, and clear_cleanup_errors counted it."""
+        manager = EventSubscriptionManager()
+
+        def broken():
+            raise RuntimeError("boom")
+
+        await _register(manager, "sub", cleanup_func=broken)
+        await manager.unregister_subscription("sub")
+        assert manager.get_subscription_statistics()["cleanup_errors_count"] == 1
+        stale = datetime.now(timezone.utc) - timedelta(
+            seconds=event_manager.CLEANUP_ERROR_RETENTION_SECONDS + 60
+        )
+        manager._cleanup_errors[0]["timestamp"] = stale.isoformat()
+
+        assert manager.get_subscription_statistics()["cleanup_errors_count"] == 0
+        assert (await manager.get_resource_usage())["cleanup_errors_stored"] == 0
+        assert (await manager.get_health_status())["cleanup_errors"] == 0
+        assert manager.clear_cleanup_errors() == 0
+
+
+class TestTheContextManagersUnregisterTheObjectTheyStored:
+    """The context managers recovered their registration with a second lookup
+    by id after registering; a manager whose registration stored nothing left
+    them with None and they skipped the exit cleanup silently."""
+
+    @pytest.mark.asyncio
+    async def test_subscription_context_needs_no_second_lookup(self, monkeypatch):
+        manager = EventSubscriptionManager()
+        ran = []
+        monkeypatch.setattr(manager, "get_registration", lambda subscription_id: None)
+
+        async with manager.subscription_context(
+            subscription_id="sub",
+            event_type="scan_progress",
+            handler=lambda e: None,
+            cleanup_func=lambda: ran.append("ran"),
+        ):
+            assert manager.get_subscription_info("sub") is not None
+
+        assert ran == ["ran"]
+        assert manager.get_subscription_info("sub") is None
+
+    @pytest.mark.asyncio
+    async def test_managed_subscription_needs_no_second_lookup(self, monkeypatch):
+        manager = EventSubscriptionManager()
+        managed = EventSubscriptionContextManager(manager)
+        ran = []
+        monkeypatch.setattr(manager, "get_registration", lambda subscription_id: None)
+
+        async with managed.managed_subscription(
+            subscription_id="sub",
+            event_type="scan_progress",
+            handler=lambda e: None,
+            cleanup_func=lambda: ran.append("ran"),
+        ) as info:
+            assert info["registered"] is True
+
+        assert ran == ["ran"]
+        assert manager.get_subscription_info("sub") is None
