@@ -268,6 +268,79 @@ class TestWhereYarnsCopyGoes:
                 named
             ).st_uid not in (os.getuid(), 0)
 
+    def test_the_runtime_directory_holds_the_copy_when_the_home_cannot(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """A container with HOME unset or read-only has no usable cache
+        directory, and the default output directory is inside the tree, so yarn
+        fell to running in place and dropped the operator's settings. The
+        user's runtime directory (``/run/user/<uid>``, 0700, root-owned
+        ancestors) is the third candidate."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        parent = repo / ".ash" / "ash_output"
+        parent.mkdir(parents=True)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(repo / ".cache-inside"))
+        runtime = tmp_path / "run" / "user" / "1000"
+        runtime.mkdir(parents=True)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+
+        with package_manager_child(
+            "yarn", package, parent=parent, scan_root=repo, yarn_major=1
+        ) as child:
+            cwd, leading = child.cwd, child.leading_args
+
+        assert cwd.is_relative_to(runtime / "ash"), cwd
+        assert leading == ()
+
+    def test_a_relative_runtime_directory_is_ignored(self, monkeypatch):
+        monkeypatch.setenv("XDG_RUNTIME_DIR", "run")
+        assert child_module._runtime_dir() is None
+        monkeypatch.delenv("XDG_RUNTIME_DIR")
+        assert child_module._runtime_dir() is None
+
+    def test_yarn_running_in_place_unsandboxed_is_logged(
+        self, tmp_path, monkeypatch, trusted_copy_dirs, caplog
+    ):
+        """When no candidate will do, yarn runs in place with --no-default-rc,
+        which drops ~/.npmrc (the operator's registry and credentials) with no
+        way to add it back. Nothing recorded it; the warning names the package
+        directory and why each candidate was passed over."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        parent = repo / ".ash" / "ash_output"
+        parent.mkdir(parents=True)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(repo / ".cache-inside"))
+
+        with caplog.at_level("WARNING"):
+            with package_manager_child(
+                "yarn", package, parent=parent, scan_root=repo, yarn_major=1
+            ) as child:
+                cwd, leading = child.cwd, child.leading_args
+
+        assert cwd == package and leading == ("--no-default-rc",)
+        assert "every settings file dropped" in caplog.text
+        assert str(package) in caplog.text
+        assert "inside the scanned tree" in caplog.text
+        assert "runtime directory is not known" in caplog.text
+
+    def test_a_copy_that_is_made_logs_no_warning(
+        self, tmp_path, monkeypatch, trusted_copy_dirs, caplog
+    ):
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        parent = tmp_path / "out"
+        parent.mkdir()
+
+        with caplog.at_level("WARNING"):
+            with package_manager_child(
+                "yarn", package, parent=parent, scan_root=repo, yarn_major=1
+            ) as child:
+                cwd = child.cwd
+
+        assert cwd.is_relative_to(parent), cwd
+        assert "settings file dropped" not in caplog.text
+
     def test_a_relative_xdg_cache_home_is_ignored(self, tmp_path, monkeypatch):
         """The specification and the tools that read it ignore a relative value,
         which would name a directory under whatever the current directory is.

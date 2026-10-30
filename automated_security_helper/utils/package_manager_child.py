@@ -27,14 +27,15 @@ names in place of itself, ``yarn --version`` included.
   still are (measured). The copy's ancestors decide which other settings files it
   reads, so the copy goes under the scan's own output directory when that is
   outside the tree (where npm's and pnpm's copies go), else under the operator's
-  cache directory (``$XDG_CACHE_HOME/ash``, or ``~/.cache/ash``), and never under
-  the system temporary directory or below any directory another account owns or
-  can write: on a shared host ``/tmp``'s ancestors are writable by every user,
-  and a ``.npmrc`` or ``.yarnrc`` planted there would redirect the audit
-  (``_yarn_copy_parent``, ``_untrusted_ancestor``). ``--no-default-rc`` would
-  also drop the operator's files,
-  ``~/.npmrc`` with no way to add it back (measured: it ignores
-  ``npm_config_userconfig``).
+  cache directory (``$XDG_CACHE_HOME/ash``, or ``~/.cache/ash``), else under the
+  user's runtime directory (``$XDG_RUNTIME_DIR/ash``), and never under the
+  system temporary directory or below any directory another account owns or can
+  write: on a shared host ``/tmp``'s ancestors are writable by every user, and a
+  ``.npmrc`` or ``.yarnrc`` planted there would redirect the audit
+  (``_yarn_copy_parent``, ``_untrusted_ancestor``). When no candidate will do,
+  yarn runs in place with every settings file dropped and a warning says so,
+  since ``--no-default-rc`` also drops the operator's files, ``~/.npmrc`` with no
+  way to add it back (measured: it ignores ``npm_config_userconfig``).
 * Under a sandbox the tool's home is private, so the operator's files were never
   visible to it, and the copy has to be somewhere it can see. yarn then runs in the
   package directory with ``--no-default-rc`` (yarn 1) or ``YARN_RC_FILENAME`` naming
@@ -81,6 +82,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 
 #: pnpm's workspace settings file: pnpm 10 keeps ``auditConfig`` there as well as
@@ -191,6 +193,20 @@ def _operator_cache_dir() -> Optional[Path]:
         return None
 
 
+def _runtime_dir() -> Optional[Path]:
+    """``$XDG_RUNTIME_DIR/ash``, or None when the variable is unset or relative.
+
+    The runtime directory (``/run/user/<uid>`` on systemd hosts) is the user's
+    own, mode 0700 with root-owned ancestors, so it holds the copy where the
+    home directory cannot: a container with an unset or read-only ``HOME``, or
+    a home directory other accounts can write.
+    """
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    if runtime and os.path.isabs(runtime):
+        return Path(runtime) / "ash"
+    return None
+
+
 def _untrusted_ancestor(path: Path) -> Optional[Path]:
     """The nearest directory at or above ``path`` another account could write, or None.
 
@@ -232,8 +248,11 @@ def _yarn_copy_parent(
     directory and every parent, so the copy's ancestors decide which settings
     files it reads besides the operator's own. The scan's output directory
     (``parent``, where npm's and pnpm's copies go) is first, then the operator's
-    cache directory (the default output directory is inside the tree). A
-    candidate is passed over when it is inside the scanned tree (the repository's
+    cache directory (the default output directory is inside the tree), then the
+    user's runtime directory (``_runtime_dir``; a read-only or shared home has
+    no usable cache directory, and in-place yarn drops ``~/.npmrc`` with the
+    operator's registry and credentials). A candidate is passed over when it is
+    inside the scanned tree (the repository's
     own files would be on yarn's path), when it is under the system temporary
     directory (``--output-dir /tmp/ash-out`` or ``XDG_CACHE_HOME=/tmp/cache`` put
     ``/tmp``, which every account can write, back on it), when any directory at
@@ -249,6 +268,7 @@ def _yarn_copy_parent(
     candidates = (
         ("the output directory", Path(parent)),
         ("the operator's cache directory", _operator_cache_dir()),
+        ("the runtime directory", _runtime_dir()),
     )
     for what, candidate in candidates:
         if candidate is None:
@@ -667,9 +687,22 @@ def package_manager_child(
         # output directory was accepted wherever it was, so a results directory
         # under the package put the copy inside it, and yarn read the
         # package's own .npmrc and .yarnrc as parent-directory files.
-        copy_parent, _passed_over = _yarn_copy_parent(
+        copy_parent, passed_over = _yarn_copy_parent(
             Path(parent), Path(scan_root) if scan_root is not None else package_dir
         )
+        if copy_parent is None:
+            # The fallback below drops the operator's ~/.npmrc and ~/.yarnrc
+            # (a private registry and its credentials live there) and nothing
+            # said so: a container with HOME unset or read-only, or an output
+            # directory and cache both inside the tree, audited against the
+            # public registry with no line in the log.
+            ASH_LOGGER.warning(
+                "yarn runs in %s with every settings file dropped, the operator's "
+                "~/.npmrc and ~/.yarnrc included: no directory outside the scanned "
+                "tree could hold its copy (%s)",
+                package_dir,
+                "; ".join(passed_over) or "no candidate",
+            )
     in_place_yarn = binary == "yarn" and (sandboxed or copy_parent is None)
     if in_place_yarn:
         # Every settings file is dropped: the operator's are not visible under a
