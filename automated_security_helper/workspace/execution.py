@@ -353,12 +353,14 @@ from automated_security_helper.utils.error_text import (
     config_environment_values,
     error_text,
 )
+from automated_security_helper.utils.inner_run_outcome import report_file_written_as
 from automated_security_helper.utils.output_dir_links import (
     OutputDirLinkRefused,
     refuse_linked_output_dir,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.report_path_links import linked_report_path
 from automated_security_helper.utils.scan_source import recorded_scan_source
 from automated_security_helper.utils.secret_masking import (
     exposed_secret_values,
@@ -1308,7 +1310,13 @@ def _scan_one_project(
     _tag_policy_origin_findings(results, project)
 
     run = _extract_run(results)
-    results_list = list(run.get("results") or []) if run else []
+    # Counted where a single scan counts them: from the SARIF report this scan's
+    # reporter wrote when there is one, else from the model. The run carried into
+    # the unified file takes the same list, so the counts, the exit code and the
+    # unified findings agree on every suppression.
+    results_list = _verdict_results(results, run, project_output, project)
+    if run is not None:
+        run["results"] = results_list
 
     # A suppression that has not taken effect (rejected, underReview) hides
     # nothing: the same reading the per-scanner counts and the flat finding make.
@@ -1861,7 +1869,7 @@ def _tag_policy_origin_findings(results: Any, project: ProjectPlan) -> None:
     if not project.policy_scanners:
         return
 
-    wanted = {normalise_scanner_name(name) for name in project.policy_scanners}
+    wanted = _policy_scanner_names(project)
     sarif = getattr(results, "sarif", None)
     for run in getattr(sarif, "runs", None) or []:
         for result in getattr(run, "results", None) or []:
@@ -1956,6 +1964,114 @@ def _extract_run(results: Any) -> Optional[Dict[str, Any]]:
             f"expects one per project and will carry only the first."
         )
     return runs[0].model_dump(by_alias=True, exclude_none=True, mode="json")
+
+
+def _policy_scanner_names(project: ProjectPlan) -> Set[str]:
+    """The normalized names of the scanners only the policy added to *project*."""
+    return {normalise_scanner_name(name) for name in project.policy_scanners or ()}
+
+
+def _tag_policy_origin_entries(
+    entries: Iterable[Dict[str, Any]], project: ProjectPlan
+) -> None:
+    """:func:`_tag_policy_origin_findings` for results already reduced to dicts.
+
+    For the entries of the SARIF report a project's reporter wrote before the
+    model was tagged (:func:`_verdict_results`): the same rule, read from the
+    same attribution, so an entry counted from the file is excluded by
+    ``policy_scanners_gate`` exactly as its model twin is.
+    """
+    wanted = _policy_scanner_names(project)
+    if not wanted:
+        return
+    for entry in entries:
+        properties = entry.get("properties")
+        if not isinstance(properties, dict):
+            continue
+        scanner = properties.get("scanner_name")
+        if (
+            not isinstance(scanner, str)
+            or normalise_scanner_name(scanner) not in wanted
+        ):
+            continue
+        properties["origin"] = POLICY_ORIGIN
+        tags = list(properties.get("tags") or [])
+        if POLICY_ORIGIN not in tags:
+            tags.append(POLICY_ORIGIN)
+        properties["tags"] = tags
+
+
+def _verdict_results(
+    results: Any,
+    run: Optional[Dict[str, Any]],
+    project_output: Path,
+    project: ProjectPlan,
+) -> List[Dict[str, Any]]:
+    """The SARIF results this project's verdict counts, read where a single scan reads them.
+
+    ``_compute_exit_code`` counts a single scan's actionable findings from the
+    SARIF report the scan's own SARIF reporter wrote this run
+    (``report_file_written_as``, the ``reports_written`` record the report phase
+    leaves on the model), because the reporter serializes every suppression where
+    the in-memory model's ``result.suppressions`` is not reliably set. The
+    workspace counted from the model (:func:`_extract_run`), so a project's
+    workspace verdict and ``ash --source-dir P`` could disagree on a suppressed
+    finding. One function supplies the counts and the run carried into the
+    unified file, so the two cannot drift from each other.
+
+    The model's results are the fallback: no SARIF report recorded (the report
+    phase did not run, or the format was not selected), a recorded name that is
+    not a file in the project's ``reports/`` (``confined_report_path``), a link
+    where the file would be read (``linked_report_path``: the project's own scan
+    already refused a link where its reporter writes, so one found here appeared
+    after it, and the model is the honest reading), or a file that cannot be
+    read or parsed. The recorded name is this run's by construction: the
+    project's orchestrator runs with ``existing_results_path=None``, and a model
+    loaded from a file has the record stripped, so the identity check a single
+    scan makes for ``--use-existing`` has nothing to guard here.
+
+    The report was written before :func:`_tag_policy_origin_findings` tagged the
+    model, so the file's entries are tagged here the same way; otherwise the
+    ``policy_scanners_gate`` exclusion would silently stop excluding.
+    """
+    from automated_security_helper.base.reporter_plugin import confined_report_path
+
+    model_results = list(run.get("results") or []) if run else []
+    name = report_file_written_as(results, "sarif")
+    if not name:
+        return model_results
+    reports_dir = project_output / "reports"
+    linked = linked_report_path(reports_dir, ["ash.sarif", name])
+    if linked is not None:
+        ASH_LOGGER.warning(
+            f"Project '{project.key}': {linked}; its verdict is counted from the "
+            f"scan's own results rather than through the link.",
+            extra=NO_MARKUP,
+        )
+        return model_results
+    target = confined_report_path(reports_dir, name)
+    if target is None or not target.is_file():
+        return model_results
+    try:
+        document = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        ASH_LOGGER.warning(
+            f"Project '{project.key}': could not read its SARIF report "
+            f"{target.name} to count its verdict ({error_text(error)}); counted "
+            f"from the scan's own results instead.",
+            extra=NO_MARKUP,
+        )
+        return model_results
+    runs = document.get("runs") if isinstance(document, dict) else None
+    entries: List[Dict[str, Any]] = []
+    for sarif_run in runs if isinstance(runs, list) else []:
+        if not isinstance(sarif_run, dict):
+            continue
+        entries.extend(
+            entry for entry in sarif_run.get("results") or [] if isinstance(entry, dict)
+        )
+    _tag_policy_origin_entries(entries, project)
+    return entries
 
 
 def _resolve_fail_on_findings(settings: ProjectScanSettings, results: Any) -> bool:

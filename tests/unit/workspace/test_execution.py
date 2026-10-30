@@ -152,6 +152,26 @@ class FakeOrchestrator:
         # exact; a test about what the scan left behind turns it on.
         if spec.get("save_results"):
             model.save_model(self.output_dir)
+        # The SARIF report the scan's own SARIF reporter wrote, recorded on the
+        # model as ReportPhase records it (record_reports_written), for a test of
+        # what the verdict counts from. Off by default, so every other fixture's
+        # counts keep coming from the model it built.
+        if "written_sarif" in spec:
+            from automated_security_helper.utils.inner_run_outcome import (
+                record_reports_written,
+            )
+
+            reports = self.output_dir / "reports"
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / "ash.sarif").write_text(
+                json.dumps(spec["written_sarif"]), encoding="utf-8"
+            )
+            record_reports_written(model, [("ash.sarif", "sarif")])
+        # The raw values this project's own masking exposed, kept on the model as
+        # secret_masking._record keeps them, for a test of the workspace's
+        # cross-project masking.
+        if "secret_values" in spec:
+            model._secret_values = set(spec["secret_values"])
         return model
 
 
