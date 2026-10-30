@@ -439,6 +439,26 @@ def test_a_parse_failure_is_refused_as_a_covered_file(
         )
 
 
+def test_a_capitalized_exclude_spelling_is_still_the_exclude_refusal(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The exclude test reads the lowercased spelling too: a capitalized
+    ``Cli_exclude_flags_match`` (no tool measured writing it) is the operator's
+    exclude refusal, not a reason that lowercases into the known list and grades
+    SKIPPED.
+
+    Fails at the tip that compared this one spelling as written.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
+
+    with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
+        _grade(
+            scanner,
+            tmp_path,
+            [{"path": "src/app.py", "reason": "Cli_exclude_flags_match"}],
+        )
+
+
 def test_a_capitalized_unread_spelling_is_refused_as_unread(
     test_plugin_context, monkeypatch, tmp_path
 ):

@@ -1069,11 +1069,14 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             if scanned:
                 self.targets_attempted = len(scanned)
             else:
+                # Lowercased, as every reason below is read: a capitalized spelling
+                # of this one would otherwise skip the exclude refusal and lowercase
+                # into the known list.
                 excluded = [
                     entry
                     for entry in skipped
                     if isinstance(entry, dict)
-                    and entry.get("reason") == "cli_exclude_flags_match"
+                    and str(entry.get("reason")).lower() == "cli_exclude_flags_match"
                 ]
                 # Files left out for the global ignore paths, the ASH output
                 # directories or the tools' own default ignore list were left out
@@ -1166,7 +1169,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                     return super()._post_process_sarif(sarif_report, final_args, target)
                 reasons = sorted(
                     {
-                        str(entry.get("reason"))
+                        str(entry.get("reason")).lower()
                         for entry in skipped
                         if isinstance(entry, dict) and entry.get("reason")
                     }
