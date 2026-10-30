@@ -1914,9 +1914,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         stderr, and only 3 of the 8 call sites ask for one. So this reads the log
         file when ``self.errors`` is empty, which is the common case rather than
         the exotic one. It reads it too when ``self.errors`` holds nothing but
-        ASH's own notes (``_plugin_log``: a timeout notice, the offline
-        explainer): those say what ASH did, not what the tool wrote, and are
-        kept in the message ahead of the log's text.
+        ASH's own notes (``_plugin_log``: a timeout notice): those say what ASH
+        did, not what the tool wrote, and are kept in the message ahead of the
+        log's text. The offline explainer is not one of them: it quotes the log
+        itself ("uv said: ..."), so it stands in for the log and the log is not
+        read beside it.
 
         Why the exit code needs a verdict, not just a value
         --------------------------------------------------

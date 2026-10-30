@@ -1360,7 +1360,16 @@ class UVToolMixin:
         before = len(self.errors)
         self._plugin_log(message, level=logging.ERROR)
         if len(self.errors) > before and self.errors[-1].endswith(message):
-            self.errors.insert(0, self.errors.pop())
+            line = self.errors.pop()
+            self.errors.insert(0, line)
+            # The message quotes the stderr log ("uv said: ..."), so it stands
+            # in for the log's text and is not one of ASH's plain notes. Kept
+            # among the notes, the failure message read the log again beside
+            # it, printed uv's text twice, and cut the pair together, which
+            # could drop the log's last lines.
+            notes = getattr(self, "_plugin_log_lines", None)
+            if isinstance(notes, list) and line in notes:
+                notes.remove(line)
         else:
             self.errors.insert(0, message)
 

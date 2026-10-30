@@ -5,8 +5,8 @@
 
 ``_describe_scan_failure`` reads the stderr log when ``errors`` is empty: under
 the default ``stderr_preference="write"`` that log is where the tool's stderr
-is. A note ASH wrote itself through ``_plugin_log`` (a timeout notice, the
-offline explainer) sits in ``errors`` too, so the log was never read and the
+is. A note ASH wrote itself through ``_plugin_log`` (a timeout notice) sits in
+``errors`` too, so the log was never read and the
 message showed ASH's note as "Stderr" and left out what the tool wrote. Now a
 message whose ``errors`` hold only such notes shows them and then the log's
 text. ``errors`` itself is unchanged, and the invocation record still carries
