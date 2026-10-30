@@ -336,6 +336,32 @@ jobs:
           uv run --group dev --with 'ty==0.0.84' ty --version
           uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/
 
+      # scripts/verify_workspace_policy.py runs four real scans of a generated
+      # workspace and asserts that a workspace policy's severity ceiling and its
+      # suppressions reach exactly the projects they name. Until this step the
+      # script existed and no job ran it, so its own defects (a check no correct
+      # scan could satisfy) went unnoticed. A step of `lint` rather than a job of
+      # its own, for the reasons the publish-surfaces step above gives: `lint` is
+      # already in required-checks' `needs`, so no EXPECTED_UPSTREAM_JOBS bump, and
+      # it already carries the installed ASH. Last in the job so the cheap lint
+      # and type verdicts above are reported before the scans run. `uv pip
+      # install -e .` brings ASH and not its scanner tools, and the gate reads the
+      # fixture as broken (exit 3) when bandit reports nothing, so bandit and
+      # checkov are installed first, the two tools the attribution gates install
+      # for the same reason. No tool cache and no evidence upload here: both are
+      # publish surfaces the census above would have to allowlist, and the script
+      # prints the tail of the child's output on every failure path itself.
+      #
+      # --timeout bounds EACH of the four scans, not the run; a unit test ties four
+      # of them plus a setup margin to this job's timeout-minutes so the script's
+      # own diagnostics win the race against a job cancellation.
+      - name: Install the workspace policy gate's scanners
+        run: python -m automated_security_helper.cli.main dependencies install --tool bandit --tool checkov
+      - name: Verify the workspace policy end to end on a real scan
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: python scripts/verify_workspace_policy.py --timeout 120
+
   # ---------------------------------------------------------------------------
   # ensure-cache: the one job that writes uv's cache
   # ---------------------------------------------------------------------------
