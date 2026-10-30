@@ -317,6 +317,18 @@ _ALLOWED_SIZED_READS = {
         "utils/scan_source.py",
         "_read_gitdir_record",
     ): "bounded+1 read of a gitdir record, refused over the cap",
+    (
+        "workspace/aggregation.py",
+        "stamp_run_record",
+    ): "ASH's own aggregated-results header line, read back in bounded pieces "
+    "from the file ASH wrote one write() earlier, to copy it into the atomic "
+    "rewrite; never a tool log",
+    (
+        "workspace/aggregation.py",
+        "rewrite_workspace_block",
+    ): "ASH's own aggregated-results file, read in bounded pieces to find and "
+    "drop the old workspace block before the replacement is written; never a "
+    "tool log",
 }
 
 
