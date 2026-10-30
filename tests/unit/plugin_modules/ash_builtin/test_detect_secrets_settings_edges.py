@@ -18,6 +18,9 @@ Each test pins one behavior the scanner lacked:
   from loading;
 * a baseline's wordlist filter reached the worker with a relative file name it
   opened from its own empty working directory, and failed the scan;
+* the tree's own baseline could name a word list of values to drop from the
+  report, and the entry reached the worker unjudged by the settings-trust rule
+  the verification filter and ``file://`` entries follow;
 * a non-string exclude pattern raised TypeError past the ``re.error`` handler;
 * a request the scanner could not serialize was left part-written in the
   results directory;
@@ -231,21 +234,37 @@ def test_naming_a_version_still_loads_the_baselines_plugins_and_filters(
 # --------------------------------------------------------------------------- #
 
 
-def _wordlist_scanner(tmp_path, monkeypatch, *, words: bool, importable: bool):
+_WORDLIST_BASELINE = _baseline(
+    plugins_used=[{"name": "AWSKeyDetector"}],
+    filters_used=[{"path": WORDLIST_FILTER, "file_name": "words.txt"}],
+)
+
+
+def _wordlist_scanner(
+    tmp_path, monkeypatch, *, words: bool, importable: bool, trusted: bool = True
+):
+    """A scanner whose baseline names a relative word list.
+
+    ``trusted``: the baseline is the operator's, named by ``baseline_file`` and
+    kept outside the scanned tree (``ops/``), with the word list beside it;
+    otherwise it is the tree's own ``.secrets.baseline`` with the list in the
+    tree.
+    """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(module, "_module_importable", lambda name: importable)
     context = _context(tmp_path)
+    if trusted:
+        home = tmp_path / "ops"
+        home.mkdir()
+        baseline = home / "baseline.json"
+    else:
+        home = context.source_dir
+        baseline = home / ".secrets.baseline"
     if words:
-        (context.source_dir / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
-    (context.source_dir / ".secrets.baseline").write_text(
-        json.dumps(
-            _baseline(
-                plugins_used=[{"name": "AWSKeyDetector"}],
-                filters_used=[{"path": WORDLIST_FILTER, "file_name": "words.txt"}],
-            )
-        ),
-        encoding="utf-8",
-    )
+        (home / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    baseline.write_text(json.dumps(_WORDLIST_BASELINE), encoding="utf-8")
+    if trusted:
+        return _scanner(context, baseline_file=str(baseline))
     return _scanner(context)
 
 
@@ -257,23 +276,67 @@ def _wordlist_entries(scanner) -> list:
     ]
 
 
+def _handed_wordlists(scanner, monkeypatch) -> list:
+    seen = _record_worker(scanner, monkeypatch)
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+    return [
+        item["file_name"]
+        for item in seen["scan_settings_dict"]["filters_used"]
+        if item["path"] == WORDLIST_FILTER
+    ]
+
+
 def test_a_relative_word_list_is_anchored_at_the_baseline_and_handed_over(
     tmp_path, monkeypatch
 ):
     scanner = _wordlist_scanner(tmp_path, monkeypatch, words=True, importable=True)
     (entry,) = _wordlist_entries(scanner)
-    expected = Path(os.path.realpath(scanner.context.source_dir / "words.txt"))
+    expected = Path(os.path.realpath(tmp_path / "ops" / "words.txt"))
     assert entry.file_name == expected.as_posix()
     assert entry.min_length == 3
     assert entry.file_hash == ""
-    seen = _record_worker(scanner, monkeypatch)
-    scanner.scan(target=scanner.context.source_dir, target_type="source")
-    handed = [
-        item
-        for item in seen["scan_settings_dict"]["filters_used"]
-        if item["path"] == WORDLIST_FILTER
-    ]
-    assert [item["file_name"] for item in handed] == [expected.as_posix()]
+    assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
+
+
+def test_an_untrusted_baselines_word_list_is_refused_before_it_is_read(
+    tmp_path, monkeypatch, caplog
+):
+    """The tree's own baseline named a list of values to drop from the report;
+    the entry was anchored at the baseline, admitted on the file being there,
+    and handed to the worker. It is refused as the verification filter is."""
+    with caplog.at_level(logging.WARNING):
+        scanner = _wordlist_scanner(
+            tmp_path, monkeypatch, words=True, importable=True, trusted=False
+        )
+    assert _wordlist_entries(scanner) == []
+    assert "Ignoring the detect-secrets wordlist filter" in caplog.text
+    assert "inside the scanned directory" in caplog.text
+    assert "words.txt" not in caplog.text
+    assert _handed_wordlists(scanner, monkeypatch) == []
+
+
+def test_the_operators_own_word_list_entry_is_kept_beside_an_untrusted_baseline(
+    tmp_path, monkeypatch
+):
+    """Judged by the entry's source, not by which baseline is in use: the
+    operator's configured entry stays, anchored at the source directory."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "_module_importable", lambda name: True)
+    context = _context(tmp_path)
+    (context.source_dir / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    (context.source_dir / ".secrets.baseline").write_text(
+        json.dumps(_WORDLIST_BASELINE), encoding="utf-8"
+    )
+    scanner = _scanner(
+        context,
+        scan_settings=DetectSecretsScanSettings(
+            filters_used=[{"path": WORDLIST_FILTER, "file_name": "words.txt"}]
+        ),
+    )
+    (entry,) = _wordlist_entries(scanner)
+    expected = Path(os.path.realpath(context.source_dir / "words.txt"))
+    assert entry.file_name == expected.as_posix()
+    assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
 
 
 def test_a_word_list_that_is_not_there_drops_the_filter_with_a_warning(

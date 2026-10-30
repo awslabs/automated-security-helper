@@ -980,7 +980,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
 
         self._drop_in_tree_settings_paths(loaded_from_baseline)
-        self._check_wordlist_filter(loaded_from_baseline)
+        self._check_wordlist_filter(loaded_from_baseline, config_filter_ids)
         self._apply_settings_trust(
             settings_from_baseline=bool(loaded_from_baseline),
             config_entries={
@@ -1141,9 +1141,27 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         settings.filters_used = filters
 
     def _check_wordlist_filter(
-        self, loaded_from_baseline: Collection[str] = ()
+        self,
+        loaded_from_baseline: Collection[str] = (),
+        config_entries: Collection[int] = (),
     ) -> None:
-        """Keep the wordlist filter only when the worker can apply it.
+        """Keep the wordlist filter only when its source may supply it and the
+        worker can apply it.
+
+        The word list is a suppression surface: every candidate whose value is
+        a line of the file leaves the report. So an entry the baseline's
+        settings supplied is honored only when the baseline is the operator's,
+        by the rule the verification filter and ``file://`` entries already
+        follow (``_untrusted_baseline_reason``, applied in
+        ``_apply_settings_trust``): a baseline inside the scanned tree or the
+        checkout holding it, or named by a config the operator did not write,
+        cannot hand the worker a list of values to drop. Without this, a
+        repository's own ``.secrets.baseline`` named a relative word list, the
+        entry was anchored at the baseline's directory, admitted on the file
+        being there, and handed over, and the tree chose which of its own
+        secrets the report would not show. An entry the operator's config
+        wrote (``config_entries``, by identity) is the operator's whatever
+        baseline is in use.
 
         detect-secrets applies ``WORDLIST_FILTER`` when the settings are
         installed (``configure_settings_from_baseline``): it imports the
@@ -1158,19 +1176,31 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         A relative name is anchored where the entry was written: the directory
         of the baseline it came from, else the source directory. The entry is
         kept with the resolved absolute path and the defaults detect-secrets'
-        own ``initialize`` uses for the keys it lacks; one whose file is not a
-        regular file, or whose package is not importable, is dropped with a
-        warning that names the key, never the value (which can come from the
-        environment).
+        own ``initialize`` uses for the keys it lacks; one its source may not
+        supply, one whose file is not a regular file, or one whose package is
+        not importable, is dropped with a warning that names the key, never the
+        value (which can come from the environment).
         """
         settings = self.config.options.scan_settings
+        filters_from_baseline = "filters_used" in loaded_from_baseline
+        untrusted: Optional[str] = None
+        if filters_from_baseline:
+            record = getattr(
+                getattr(self.context, "config", None),
+                "_untrusted_detect_secrets_settings",
+                None,
+            )
+            untrusted = self._untrusted_baseline_reason(record)
         kept = []
         for item in settings.filters_used:
             if item.path != WORDLIST_FILTER:
                 kept.append(item)
                 continue
+            from_baseline = filters_from_baseline and id(item) not in config_entries
             reason = self._wordlist_filter_refusal(
-                item, from_baseline="filters_used" in loaded_from_baseline
+                item,
+                from_baseline=from_baseline,
+                untrusted=untrusted if from_baseline else None,
             )
             if reason is None:
                 kept.append(item)
@@ -1184,10 +1214,26 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         settings.filters_used = kept
 
     def _wordlist_filter_refusal(
-        self, item: Any, *, from_baseline: bool
+        self, item: Any, *, from_baseline: bool, untrusted: Optional[str] = None
     ) -> Optional[str]:
         """Why ``item``, a wordlist filter entry, cannot reach the worker; None
-        when it can, with its ``file_name`` made absolute and its keys filled."""
+        when it can, with its ``file_name`` made absolute and its keys filled.
+
+        ``untrusted`` is why the baseline the entry came from is not the
+        operator's (``_untrusted_baseline_reason``), or None when it is or the
+        entry is the operator's own. An untrusted entry is refused before its
+        ``file_name`` is read or resolved.
+        """
+        if untrusted is not None:
+            return (
+                f"it was loaded from the baseline's settings, and {untrusted}. "
+                "Every candidate whose value is a line of the word list leaves "
+                "the report, so only the operator's own settings may supply "
+                "one: name the filter in "
+                "scanners.detect-secrets.options.scan_settings.filters_used, or "
+                "name a baseline outside the scanned tree and the git checkout "
+                "holding it"
+            )
         file_name = getattr(item, "file_name", None)
         if not isinstance(file_name, str) or not file_name.strip():
             return "its entry names no word list file (file_name)"
