@@ -50,6 +50,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils import cdk_nag_wrapper as wrapper_module
 from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
+from automated_security_helper.utils.error_text import config_environment_values
 
 pytestmark = pytest.mark.unit
 
@@ -1422,3 +1423,32 @@ def test_the_missing_dependency_reason_offers_no_install_hint_for_a_wrapper_impo
 
     assert "cfn_tools" in reason
     assert "ash dependencies install" not in reason, reason
+
+
+# ---------------------------------------------------------------------------
+# Environment reads the redaction has to know about
+# ---------------------------------------------------------------------------
+
+
+def test_the_path_jsii_node_names_is_among_the_values_to_redact(
+    scanner, monkeypatch, tmp_path
+):
+    """The scanner reads JSII_NODE itself, outside the configuration, and the wrapper
+    hands that path to the worker; a child that cannot start the node it names can echo
+    the path in the text the scanner records. The scanner's own lines are redacted with
+    what _environment_values() gives, so the path has to be one of those values, and
+    whether it names a file is not the redaction's question."""
+    named = tmp_path / "opt" / "node"
+    monkeypatch.setenv("JSII_NODE", str(named))
+
+    assert str(named) in scanner._environment_values()
+    assert str(named) in scanner._values_to_redact()
+
+
+def test_an_unset_jsii_node_adds_nothing_to_the_values_to_redact(scanner, monkeypatch):
+    monkeypatch.delenv("JSII_NODE", raising=False)
+
+    assert scanner._environment_values() == config_environment_values(
+        scanner.context.config
+    )
+    assert "" not in scanner._environment_values()

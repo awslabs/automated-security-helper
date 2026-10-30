@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from collections.abc import Mapping
-from typing import Annotated, Any, ClassVar, List, Literal, Optional
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
 from pathlib import Path
 
 from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, model_validator
@@ -787,6 +787,19 @@ def _unsatisfied_cdk_requirements(
     return unsatisfied
 
 
+def _jsii_node_value() -> str:
+    """The value of ``JSII_NODE``, or "" when it is unset or empty.
+
+    The one place this module reads the variable. Two readers share it: the dependency
+    check asks whether the value names a file (:func:`_node_named_by_jsii_node`), and
+    the scanner's ``_environment_values()`` hands the value to the redaction, so a line
+    that echoes the path (a child that could not start the node it names) prints no
+    value. One read keeps the two from disagreeing and keeps the environment-read audit
+    (tests/unit/utils/test_uv_tool_runner.py) at one entry for this file.
+    """
+    return os.environ.get("JSII_NODE") or ""
+
+
 def _node_named_by_jsii_node() -> Optional[str]:
     """The node ``JSII_NODE`` names, when it names a file that exists, else None.
 
@@ -797,7 +810,7 @@ def _node_named_by_jsii_node() -> Optional[str]:
     The variable's value is read, never printed: the check says that the name was
     honored, not what it holds.
     """
-    named = os.environ.get("JSII_NODE") or ""
+    named = _jsii_node_value()
     if named and Path(named).is_file():
         return named
     return None
@@ -950,6 +963,20 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     #: Homebrew, Debian without python-is-python3) has none on PATH. The installer
     #: counts ``sys.executable`` as cdk-nag's tool instead of looking the name up.
     runs_in_ash_interpreter: ClassVar[bool] = True
+
+    def _environment_values(self) -> Tuple[str, ...]:
+        """The configuration's environment values, plus the node path ``JSII_NODE``
+        names, which this scanner reads straight from the environment (never through
+        the configuration).
+
+        The wrapper hands that path to the worker, and a child that cannot start the
+        node it names can echo it in the text this scanner records; the scanner's own
+        lines are redacted with the values this gives, so the path has to be one of
+        them. Whether the path names a file is the dependency check's question, not
+        the redaction's: a value that names nothing is still a value a line could echo.
+        """
+        named = _jsii_node_value()
+        return (*super()._environment_values(), *((named,) if named else ()))
 
     def model_post_init(self, context):
         if self.config is None:
