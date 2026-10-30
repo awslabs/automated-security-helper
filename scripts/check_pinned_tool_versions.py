@@ -1308,8 +1308,9 @@ def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
     The instruction name is read without regard to case. Inside a continued
     instruction a blank line and a comment line are skipped, as Docker skips them.
     The body of a here-document belongs to the instruction, each of its lines ended
-    with ``;`` as the shell ends a command at a newline. An instruction still open at
-    the end of the file is kept.
+    with ``;`` as the shell ends a command at a newline, except a line that ends with
+    a backslash, which continues on the next. An instruction still open at the end of
+    the file is kept.
     """
     blocks: list[list[tuple[int, str]]] = []
     current: list[tuple[int, str]] | None = None
@@ -1324,7 +1325,12 @@ def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
                     blocks.append(current)
                     current = None
             elif line and not line.startswith("#"):
-                current.append((number, f"{line} ;"))
+                # A command ends at a newline, unless the line ends with a backslash:
+                # then the next line continues it, as in the body of a here-document.
+                if line.endswith("\\"):
+                    current.append((number, line[:-1]))
+                else:
+                    current.append((number, f"{line} ;"))
             continue
         if current is None:
             if not _RUN_INSTRUCTION.match(line):
