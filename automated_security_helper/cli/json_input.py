@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 import re
 import warnings
 from enum import Enum
@@ -416,7 +417,9 @@ def _check_shape(param: Parameter, value: Any) -> str | None:
     (upstream click's ``BoolParamType`` takes 0 and 1 as the booleans; the
     bundled copy does not). A JSON number with a fraction for an integer
     parameter is refused too, as ``--shard-index 3.5`` is: click's integer type
-    truncated ``3.5`` to 3 without a word.
+    truncated ``3.5`` to 3 without a word. A number json reads as infinite
+    (``1e400``) is refused for a float parameter, which click accepted as
+    infinity; argv has no spelling for it.
     """
     takes_list = param.multiple or param.nargs != 1
     items = value if isinstance(value, list) else [value]
@@ -445,6 +448,10 @@ def _check_shape(param: Parameter, value: Any) -> str | None:
                     "expected a JSON integer for this parameter, not a number "
                     "with a fraction or an exponent"
                 )
+            # json reads 1e400 as infinity, which click's float type accepted
+            # as a value; argv has no spelling for it.
+            if isinstance(item, float) and math.isinf(item):
+                return "the number is too large for this parameter"
     return None
 
 
@@ -493,8 +500,11 @@ def _validated_values(
                 # Its value as given, not yet shown: the refusal shows it once.
                 problem = _typed_text(exc)
             except OverflowError:
-                # A number JSON reads as infinite (1e400) handed to an integer
-                # parameter: click's conversion raises past its own check.
+                # A JSON integer too large for a float parameter (10**400):
+                # click's float conversion raises past its own check. (1e400 for
+                # an integer parameter never reaches here: _check_shape refuses
+                # every float there, and 1e400 for a float parameter is refused
+                # there too, as infinite.)
                 problem = "the number is too large for this parameter"
         if problem is not None:
             raise _refused(

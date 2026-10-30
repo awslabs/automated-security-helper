@@ -38,8 +38,9 @@ def _app(captured: dict) -> typer.Typer:
     def run(
         verbose: bool = typer.Option(False, "--verbose"),
         shard_index: int = typer.Option(0, "--shard-index"),
+        ratio: float = typer.Option(0.5, "--ratio"),
     ):
-        captured.update(verbose=verbose, shard_index=shard_index)
+        captured.update(verbose=verbose, shard_index=shard_index, ratio=ratio)
 
     @demo.command()
     def other():  # a second command, so `run` is addressed by name
@@ -76,7 +77,44 @@ def test_a_json_boolean_for_a_boolean_parameter_is_accepted(tmp_path):
     result, captured = _invoke(tmp_path, {"verbose": True})
 
     assert result.exit_code == 0, result.output
-    assert captured == {"verbose": True, "shard_index": 0}
+    assert captured == {"verbose": True, "shard_index": 0, "ratio": 0.5}
+
+
+def test_an_infinite_number_for_a_float_parameter_is_refused(tmp_path):
+    """json reads 1e400 as infinity and click's float type accepted it; argv
+    has no spelling for it, so it is refused naming the key."""
+    document = tmp_path / "params.json"
+    document.write_text('{"ratio": 1e400}', encoding="utf-8")
+    captured: dict = {}
+
+    result = CliRunner().invoke(
+        _app(captured), ["run", "--cli-json-input", str(document)]
+    )
+
+    assert result.exit_code == 2, result.output
+    assert captured == {}
+    flat = _flat(result.output)
+    assert "'ratio'" in flat
+    assert "toolarge" in flat
+
+
+def test_an_integer_too_large_for_a_float_parameter_is_refused(tmp_path):
+    """float(10**400) raises OverflowError past click's own check; it is the
+    one shape that reaches the OverflowError arm, and is refused the same way."""
+    document = tmp_path / "params.json"
+    document.write_text('{"ratio": ' + "1" + "0" * 400 + "}", encoding="utf-8")
+    captured: dict = {}
+
+    result = CliRunner().invoke(
+        _app(captured), ["run", "--cli-json-input", str(document)]
+    )
+
+    assert result.exit_code == 2, result.output
+    assert captured == {}
+    flat = _flat(result.output)
+    assert "'ratio'" in flat
+    assert "toolarge" in flat
+    assert "Traceback" not in result.output
 
 
 @pytest.mark.parametrize(
