@@ -553,6 +553,14 @@ NOTHING_SENT_HEADER = (
     "No findings matched the analysis filters; nothing was sent to Amazon Bedrock."
 )
 
+#: The same line for ONE companion file whose section had nothing to analyze
+#: while the run's other sections were generated (a secrets-only scan: the
+#: executive summary is sent, the technical analysis has no finding to send).
+NOT_SENT_SECTION_HEADER = (
+    "No findings matched this section's analysis filters; nothing was sent to "
+    "Amazon Bedrock for it."
+)
+
 
 class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     # The environment defaults are read when the options are built, not when this
@@ -1258,7 +1266,12 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 # No model was called, so the companion files say so instead
                 # of claiming generated output.
                 self._write_files(
-                    model, summary, nothing, nothing, header=NOTHING_SENT_HEADER
+                    model,
+                    summary,
+                    nothing,
+                    nothing,
+                    exec_header=NOTHING_SENT_HEADER,
+                    tech_header=NOTHING_SENT_HEADER,
                 )
             return summary
 
@@ -2409,6 +2422,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             )
 
         tech_content: Optional[str] = None
+        tech_header = GENERATED_HEADER
         if "technical_analysis" in included:
             analysis_prompt = builder.technical_analysis(
                 all_findings,
@@ -2430,9 +2444,16 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     cache_key="technical_summary_only",
                 )
             else:
+                # A secrets-only scan: the section has nothing to send, so its
+                # file carries fixed text and says so instead of claiming
+                # generated output (the executive file, which was sent, keeps
+                # the generated-output notice).
                 tech_content = self._nothing_to_analyze()
+                tech_header = NOT_SENT_SECTION_HEADER
 
-        self._write_files(model, summary, exec_content, tech_content)
+        self._write_files(
+            model, summary, exec_content, tech_content, tech_header=tech_header
+        )
 
     def _write_files(
         self,
@@ -2441,13 +2462,17 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         exec_content: Optional[str],
         tech_content: Optional[str],
         *,
-        header: str = GENERATED_HEADER,
+        exec_header: str = GENERATED_HEADER,
+        tech_header: str = GENERATED_HEADER,
     ) -> None:
         """Write the summary file and, for each included section with content,
         its companion file. Shared by the run with findings and the run with
-        none, so a clean scan writes its files too; *header* is the line under
-        each companion file's title, the generated-output notice by default
-        and, for a run that called no model, a line that says so."""
+        none, so a clean scan writes its files too. *exec_header* and
+        *tech_header* are the line under each companion file's title: the
+        generated-output notice by default, and for a file whose text no model
+        produced (a run that called no model; a section with nothing to send)
+        a line that says so, per file, since one file may be generated while
+        the other is not."""
         opts = self.config.options
         included = set(opts.include_sections) - set(opts.exclude_sections)
 
@@ -2471,7 +2496,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 opts.output_executive_file,
                 self._scan_outcome(model)
                 + "\n\n## Executive summary\n\n"
-                + header
+                + exec_header
                 + "\n\n"
                 + exec_content
                 + f"\n\n{FOOTER_CREDIT}\n",
@@ -2489,7 +2514,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 opts.output_technical_file,
                 self._scan_outcome(model)
                 + "\n\n## Technical analysis\n\n"
-                + header
+                + tech_header
                 + "\n\n"
                 + tech_content
                 + f"\n\n{FOOTER_CREDIT}\n",

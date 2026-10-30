@@ -184,6 +184,33 @@ def test_a_run_with_no_findings_writes_its_files_without_a_model_call(
         assert "nothing was sent to Amazon Bedrock" in written, written
 
 
+def test_a_secrets_only_scans_technical_file_says_its_section_was_not_sent(
+    monkeypatch, tmp_path
+):
+    """With only secret findings the executive summary is generated (it
+    counts them) and the technical analysis has nothing to send: the technical
+    file says so for its own section, the executive file keeps the
+    generated-output notice, and neither claims the other's state."""
+    runtime = RuntimeDouble()
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", _session_double(runtime, ControlPlaneDouble())
+    )
+    reporter = make_reporter(plugin_context_in(tmp_path))
+    model = sarif_model([_result("AWS-KEY", "detect-secrets", snippet=SECRET_SNIPPET)])
+
+    reporter.report(model)
+
+    reports = tmp_path / "reports"
+    executive = (reports / "bedrock-executive.md").read_text(encoding="utf-8")
+    technical = (reports / "bedrock-technical.md").read_text(encoding="utf-8")
+    assert "Generated with Amazon Bedrock" in executive, executive
+    assert "nothing was sent to Amazon Bedrock for it" not in executive, executive
+    assert "Generated with Amazon Bedrock" not in technical, technical
+    assert "No findings matched this section's analysis filters" in technical, technical
+    assert "No actionable findings to analyze for this section." in technical
+    assert runtime.calls, "the executive summary was sent"
+
+
 def test_a_run_with_no_findings_and_markdown_off_writes_nothing(monkeypatch, tmp_path):
     """The control."""
     monkeypatch.setattr(
