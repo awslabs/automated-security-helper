@@ -1046,8 +1046,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         except Exception as e:  # noqa: BLE001 -- the findings outrank the note
             ASH_LOGGER.error(
                 f"The OCSF shortfall record could not be built ({e}); {missing} "
-                f"absent and {degraded} degraded finding(s) go unrecorded in the "
-                "array, which is written with the findings it holds"
+                f"absent and {degraded} degraded finding(s) are left unrecorded in "
+                "the array, which is written with the findings it holds"
             )
             return None
 
