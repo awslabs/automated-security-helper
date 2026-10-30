@@ -364,9 +364,16 @@ class PreviousResults:
                     continue
                 _remove(target)
             path.rename(target)
+        if mark:
+            # Before the directory goes, and only when there is no marker: every
+            # caller that marks has written one already (restore() writes it
+            # before the first move), and writing it again removed the marker
+            # first, so a write that failed left put-back results with neither a
+            # marker nor a restoring directory for a later call to finish from.
+            if not _exists(self.marker):
+                self._mark_restored()
         self.restoring.rmdir()
         if mark:
-            self._mark_restored()
             ASH_LOGGER.info(
                 f"The scan did not finish; restored the previous results in "
                 f"{self.output_dir}"
