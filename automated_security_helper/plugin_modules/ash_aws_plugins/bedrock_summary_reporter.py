@@ -2618,14 +2618,12 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         reports_dir = Path(self.context.output_dir) / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = write_report_file(reports_dir, opts.output_file, summary)
-        if output_path is not None:
-            ASH_LOGGER.info(
-                text_without_values(f"Bedrock summary written to {output_path}", values)
-            )
+        self._write_companion(
+            reports_dir, opts.output_file, summary, "Bedrock summary", values
+        )
 
         if "executive_summary" in included and exec_content is not None:
-            exec_path = write_report_file(
+            self._write_companion(
                 reports_dir,
                 opts.output_executive_file,
                 self._scan_outcome(model)
@@ -2634,16 +2632,12 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 + "\n\n"
                 + exec_content
                 + f"\n\n{FOOTER_CREDIT}\n",
+                "Executive summary",
+                values,
             )
-            if exec_path is not None:
-                ASH_LOGGER.info(
-                    text_without_values(
-                        f"Executive summary written to {exec_path}", values
-                    )
-                )
 
         if "technical_analysis" in included and tech_content is not None:
-            tech_path = write_report_file(
+            self._write_companion(
                 reports_dir,
                 opts.output_technical_file,
                 self._scan_outcome(model)
@@ -2652,13 +2646,35 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 + "\n\n"
                 + tech_content
                 + f"\n\n{FOOTER_CREDIT}\n",
+                "Technical analysis",
+                values,
             )
-            if tech_path is not None:
-                ASH_LOGGER.info(
-                    text_without_values(
-                        f"Technical analysis written to {tech_path}", values
-                    )
-                )
+
+    @staticmethod
+    def _write_companion(
+        reports_dir: Path,
+        filename: str,
+        content: str,
+        label: str,
+        values: Tuple[str, ...],
+    ) -> None:
+        """Write *content* as the file *filename* under *reports_dir* and log
+        the write as "*label* written to <path>".
+
+        The line names the path the file has, ``reports_dir / filename``,
+        which is where ``write_report_file`` writes when it writes at all (it
+        answers None, having logged why, for a name that is not a file in the
+        directory or a write the file system refused). The write's result is
+        not what the line is built from: the report text, which quotes values
+        the reporter has shown already (the model's answer, the project name),
+        goes into the file and nowhere near the line, so the line shows the path
+        once and nothing twice, and the shown-once check, which follows what a
+        logged value is bound from, reads it that way."""
+        if write_report_file(reports_dir, filename, content) is None:
+            return
+        ASH_LOGGER.info(
+            text_without_values(f"{label} written to {reports_dir / filename}", values)
+        )
 
     # ------------------------------------------------------------------
     # Caching
