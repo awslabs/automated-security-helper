@@ -72,13 +72,21 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
     if not methodName:
         methodName = levelName.lower()
 
-    # Guard against duplicate registration (e.g. module re-import). The level
-    # NAME is registered all the same when the attribute is there but the name
-    # is not (another library set logging.TRACE as a bare attribute): get_logger
-    # reads the level's name, and an unregistered one read as "Level 5".
+    # Guard against duplicate registration (e.g. module re-import). When the
+    # attribute is there but the NAME is not registered (another library set
+    # logging.TRACE as a bare attribute), the name is registered at the number
+    # the attribute carries: get_logger reads the level's name, and an
+    # unregistered one read as "Level 5". A name that is already registered is
+    # left where it is, whatever number this call asked for: registering it at
+    # the new number re-pointed the name for the whole process, so a second
+    # addLoggingLevel("TRACE", 99) made every logger get_logger pins to TRACE
+    # take level 99 and every file handler stay empty.
     if hasattr(logging, levelName):
-        if logging.getLevelName(levelNum) != levelName:
-            logging.addLevelName(levelNum, levelName)
+        existing = getattr(logging, levelName)
+        if isinstance(existing, int) and not isinstance(
+            logging.getLevelName(levelName), int
+        ):
+            logging.addLevelName(existing, levelName)
         return
     if hasattr(logging, methodName):
         return

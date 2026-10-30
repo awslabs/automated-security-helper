@@ -157,12 +157,36 @@ def closed_logger():
 
 
 def test_re_registering_an_existing_level_is_a_no_op():
-    """TRACE is registered at import time; a second call must not raise."""
+    """TRACE is registered at import time; a second call must not raise, and
+    must not move the name: a name re-pointed to the new number would make every
+    logger get_logger pins to TRACE take that number for the rest of the
+    process."""
     before = logging.TRACE
 
     addLoggingLevel("TRACE", 99)
 
     assert logging.TRACE == before
+    assert logging.getLevelName("TRACE") == before
+    assert logging.getLevelName(99) != "TRACE"
+
+
+def test_a_bare_level_attribute_gets_its_name_registered_at_its_own_number(
+    monkeypatch,
+):
+    """Another library may set ``logging.ZZ_BARE = 42`` without ``addLevelName``;
+    the name is then registered at 42, the attribute's value, not at the number
+    this call asked for."""
+    monkeypatch.setattr(logging, "ZZ_BARE_LEVEL", 42, raising=False)
+    assert not isinstance(logging.getLevelName("ZZ_BARE_LEVEL"), int)
+    try:
+        addLoggingLevel("ZZ_BARE_LEVEL", 7)
+
+        assert logging.getLevelName("ZZ_BARE_LEVEL") == 42
+        assert logging.getLevelName(42) == "ZZ_BARE_LEVEL"
+        assert logging.getLevelName(7) != "ZZ_BARE_LEVEL"
+    finally:
+        logging._levelToName.pop(42, None)
+        logging._nameToLevel.pop("ZZ_BARE_LEVEL", None)
 
 
 def test_an_existing_level_name_is_rejected_even_with_a_free_method_name():
@@ -181,6 +205,8 @@ def test_an_existing_level_name_is_rejected_even_with_a_free_method_name():
     addLoggingLevel("INFO", 3, methodName="zz_unused_method")
 
     assert logging.INFO == 20
+    assert logging.getLevelName("INFO") == 20
+    assert 3 not in logging._levelToName
     assert not hasattr(logging, "zz_unused_method")
 
 
@@ -385,15 +411,19 @@ def test_the_filter_rewrites_emoji_when_an_encoding_issue_is_detected(on_windows
     assert record.msg == "[OK] done"
 
 
-def test_the_filter_strips_residual_non_ascii_after_substitution(on_windows):
-    """A character with no mapping is dropped rather than left to raise later."""
+def test_the_filter_writes_residual_non_ascii_as_escapes_after_substitution(
+    on_windows,
+):
+    """A character with no mapping is written as its escape, so the console
+    write cannot raise and nothing of the text is lost (it used to be deleted,
+    and a path lost its accented letters)."""
     on_windows.setattr(sys, "stdout", FakeStream(encoding="cp1252"))
     log_filter = WindowsSafeFilter()
     record = logging.LogRecord("n", logging.INFO, "f", 1, "café ☃", None, None)
 
     log_filter.filter(record)
 
-    assert record.msg.encode("ascii") == b"caf "
+    assert record.msg.encode("ascii") == b"caf\\xe9 \\u2603"
 
 
 # ---------------------------------------------------------------------------
