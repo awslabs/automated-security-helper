@@ -348,6 +348,29 @@ def test_a_respelled_top_level_field_a_chain_applies_is_named_as_folded(tmp_path
     assert "folds it onto 'fail_on_findings' and applies its value" in folded[0], folded
 
 
+def test_a_respelled_mapping_field_a_chain_merges_is_named_as_folded(tmp_path):
+    """A mapping-valued field: the merge joins the child's mapping into the
+    base's, so the merged value holds the base's keys too and never equals the
+    child's; the check reads containment, as the merge folds, not equality."""
+    base = tmp_path / "base.yaml"
+    base.write_text(
+        "project_name: demo\nglobal_settings:\n  severity_threshold: LOW\n",
+        encoding="utf-8",
+    )
+    child = tmp_path / ".ash.yaml"
+    child.write_text(
+        "extends: base.yaml\nglobal-settings:\n  ignore_paths: []\n", encoding="utf-8"
+    )
+
+    check = ConfigValidator.check_config_file(child)
+
+    folded = [
+        w for w in check.warnings if w.startswith("Unknown top-level field 'global-")
+    ]
+    assert folded, check.warnings
+    assert "folds it onto 'global_settings' and applies its value" in folded[0], folded
+
+
 def test_an_unknown_top_level_field_is_still_unknown(tmp_path):
     cfg = tmp_path / ".ash.yaml"
     cfg.write_text("project_name: demo\nfoo_unknown: 1\n", encoding="utf-8")

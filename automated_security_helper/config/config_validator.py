@@ -2837,6 +2837,30 @@ def placed_at_appends(
     return found
 
 
+def _value_folded_into(written: Any, merged: Any) -> bool:
+    """Whether ``merged``, a value of the resolved chain, holds ``written``, a
+    file's value for the same setting, the way ``config_sources.deep_merge``
+    folds it.
+
+    The merge joins two mappings key by key under its spelling rule
+    (``_resolve_dict_key``: a key and its ``-``/``_`` twin are one key, which
+    is every alias a field declares), the file's values winning, so the merged
+    mapping holds every key the file wrote with its value folded the same way,
+    and a base's other keys beside them. Compared for equality, a merged mapping
+    that holds a base's keys too never matched the file's, and a respelled
+    mapping-valued field (``global-settings``) the chain did fold was said to be
+    ignored. Any other value (a scalar, a list) the merge replaces whole, so it
+    is held only when equal.
+    """
+    if isinstance(written, dict) and isinstance(merged, dict):
+        for key, value in written.items():
+            target = _resolve_dict_key(merged, key) if isinstance(key, str) else key
+            if target not in merged or not _value_folded_into(value, merged[target]):
+                return False
+        return True
+    return written == merged
+
+
 _MISSING_IN_RECORD = object()
 
 
@@ -4837,15 +4861,19 @@ class ConfigValidator:
                     declared not in config_data
                     and isinstance(resolved_data, dict)
                     and declared in resolved_data
-                    and resolved_data.get(declared) == config_data.get(field_name)
+                    and _value_folded_into(
+                        config_data.get(field_name), resolved_data.get(declared)
+                    )
                 ):
                     # A '-'/'_' respelling of a declared field that the chain
                     # applied: this file does not set the declared spelling, a
                     # base does, and the extends merge or the operator overlay
                     # folded this file's value onto it (config_sources.deep_merge,
-                    # Spellings), so "a scan ignores it" was wrong here. The
-                    # message keeps the unknown-field prefix `ash config lint`
-                    # files it under.
+                    # Spellings), so "a scan ignores it" was wrong here. Read as
+                    # the merge folds (_value_folded_into): a mapping the merge
+                    # joined holds the base's keys too and never equals this
+                    # file's. The message keeps the unknown-field prefix
+                    # `ash config lint` files it under.
                     warnings.append(
                         f"Unknown top-level field '{shown_field}' - a scan ignores "
                         f"it on its own, but this chain folds it onto '{declared}' "
