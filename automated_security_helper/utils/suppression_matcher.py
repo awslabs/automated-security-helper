@@ -65,17 +65,50 @@ _NEXT_LINE_PATTERNS = [_HASH_NEXT_LINE_PATTERN, _SLASH_NEXT_LINE_PATTERN]
 # The characters that open and close a quoted string on one line: double, single
 # or backtick quotes, a backslash escaping the next character. A quote that never
 # closes on its line (an apostrophe in prose, say) is no string, so it hides
-# nothing.
+# nothing; nor does a quote glued to the word before it (``Bob's``, ``isn't``),
+# unless that word is a string prefix (``f"..."``, ``rb'...'``).
 _QUOTE_CHARACTERS = ('"', "'", "`")
+_STRING_PREFIX_LETTERS = frozenset("rRbBfFuU")
+
+
+def _is_word_character(character: str) -> bool:
+    """What ``\\w`` matches in a ``str`` pattern: a letter, a digit or ``_``."""
+    return character.isalnum() or character == "_"
+
+
+def _opens_a_string(line: str, index: int) -> bool:
+    """Whether the quote at ``index`` can open a string.
+
+    A quote glued to the end of a word is an apostrophe, not a delimiter: in
+    ``Description: Bob's bucket  # ash-ignore: X logging isn't needed`` (a YAML
+    plain scalar with a comment) the two apostrophes once opened and closed a
+    "string" that held the marker, and the directive, which the plain search
+    found, went unseen with no warning: an existing suppression stopped working.
+    So a quote preceded by a word character opens nothing, with one exception:
+    the word is a string prefix of one or two letters from ``rRbBfFuU`` (Python's
+    ``f"..."``, ``b'...'``, ``rb"..."`` and their spellings), itself at a word
+    start, so ``f"# ash-ignore: X"`` is still a string and hides its marker.
+    Three or more word characters before the quote, or a letter outside the set,
+    is a word (``Bob``, ``isn``, ``it``), never a prefix. The walk back is at most
+    three characters, so the check is constant per quote.
+    """
+    start = index
+    while start > 0 and index - start < 3 and _is_word_character(line[start - 1]):
+        start -= 1
+    prefix = line[start:index]
+    if not prefix:
+        return True
+    return len(prefix) <= 2 and all(c in _STRING_PREFIX_LETTERS for c in prefix)
 
 
 def _quoted_spans(line: str) -> List[Tuple[int, int]]:
     """The ``[start, end)`` spans of the quoted strings in ``line``, left to right.
 
-    A string opens at a quote character and closes at the next quote character
-    of the same kind that no odd run of backslashes precedes; a quote with no
-    such closer on the line opens nothing, and the scan goes on from the next
-    character. That is what the regular expression this replaced found, but the
+    A string opens at a quote character that ``_opens_a_string`` admits and
+    closes at the next quote character of the same kind that no odd run of
+    backslashes precedes; a quote with no such closer on the line opens nothing,
+    and the scan goes on from the next character. That is what the regular
+    expression this replaced found (the word-character rule added), but the
     expression was tried afresh at every quote in the line, and each attempt
     from a quote that never closes ran to the end of the line: a line of many
     escaped quotes (a scanned tree holds whatever its author wrote, and under
@@ -102,7 +135,7 @@ def _quoted_spans(line: str) -> List[Tuple[int, int]]:
     index = 0
     while index < len(line):
         character = line[index]
-        if character not in closers:
+        if character not in closers or not _opens_a_string(line, index):
             index += 1
             continue
         candidates = closers[character]

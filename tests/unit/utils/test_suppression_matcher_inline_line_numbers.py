@@ -25,6 +25,13 @@ now stops at the first CR. And the quoted-string scan that keeps a marker inside
 a string literal from counting as a directive was a regular expression tried at
 every quote, quadratic on a line of escaped quotes; it is one linear pass now,
 with the same answer on every line.
+
+A third: that scan took every quote for a string delimiter, so two apostrophes
+in prose (``Bob's bucket  # ash-ignore: X logging isn't needed``, a YAML plain
+scalar with its comment) opened and closed a "string" that held the marker, and
+an existing suppression stopped working with no warning. A quote glued to the
+word before it opens nothing now, unless that word is a string prefix
+(``f"..."``, ``rb'...'``), so a marker inside a prefixed string stays hidden.
 """
 
 import re
@@ -169,9 +176,18 @@ def test_a_cr_right_after_the_marker_is_no_directive(tmp_path, directive):
 # --- the quoted-string scan is linear in the line ---
 
 # The expression the scan replaced, kept here as the reference for what a
-# quoted string is: the same spans on every line it finishes on.
+# quoted string is: the same spans on every line it finishes on. A quote opens
+# a string only at a word boundary, or after a one- or two-letter string prefix
+# that is itself at a word start (``f"``, ``rb'``); an apostrophe glued to a
+# word opens nothing.
+_OPENER = r"(?:(?<!\w)|(?<=\b[rRbBfFuU])|(?<=\b[rRbBfFuU]{2}))"
 _REFERENCE_QUOTED_STRING = re.compile(
-    r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`"
+    _OPENER
+    + r"\"(?:\\.|[^\"\\])*\"|"
+    + _OPENER
+    + r"'(?:\\.|[^'\\])*'|"
+    + _OPENER
+    + r"`(?:\\.|[^`\\])*`"
 )
 
 
@@ -191,6 +207,15 @@ _REFERENCE_QUOTED_STRING = re.compile(
         "\"\" '' `` # ash-ignore: X",
         '"a\\\\\\"b" # ash-ignore: X',
         "`a 'b` c' # ash-ignore: X",
+        "Description: Bob's bucket  # ash-ignore: X logging isn't needed",
+        "# it's ok # ash-ignore: X it's fixture-only",
+        'f"# ash-ignore: X"',
+        "rb'# ash-ignore: X'",
+        'Rf"x" # ash-ignore: X "y"',
+        "a_'b' # ash-ignore: X",
+        'abc"# ash-ignore: X"',
+        "x = 1 ;f'# ash-ignore: X'",
+        "1'# ash-ignore: X'",
     ],
 )
 def test_the_quoted_spans_are_the_reference_expressions(line):
@@ -203,6 +228,49 @@ def test_the_quoted_spans_are_the_reference_expressions(line):
     expected = [found.span() for found in _REFERENCE_QUOTED_STRING.finditer(line)]
 
     assert _quoted_spans(line) == expected
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        pytest.param(
+            "  Description: Bob's bucket  # ash-ignore: CKV_AWS_18 logging isn't needed",
+            id="yaml-plain-scalar",
+        ),
+        pytest.param(
+            "x = 1  # it's ok # ash-ignore: CKV_AWS_18 it's fixture-only",
+            id="apostrophes-in-the-comment",
+        ),
+    ],
+)
+def test_an_apostrophe_in_prose_does_not_hide_the_directive(tmp_path, line):
+    """Red at the base: the two apostrophes were read as a string that held the
+    marker, so the directive the plain search had always found went unseen and
+    an existing suppression stopped working with no warning."""
+    source = _write(tmp_path, f"{line}\n")
+
+    found = find_inline_suppressions(source)
+
+    assert [(f.line_number, f.rule_id) for f in found] == [(1, "CKV_AWS_18")]
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        pytest.param("'# ash-ignore: X'", id="plain"),
+        pytest.param('f"# ash-ignore: X"', id="f-prefix"),
+        pytest.param("rb'# ash-ignore: X'", id="rb-prefix"),
+        pytest.param('U"# ash-ignore: X"', id="upper-u-prefix"),
+    ],
+)
+def test_a_marker_inside_a_string_literal_stays_hidden(tmp_path, literal):
+    """The control for the apostrophe rule: a real string, plain or with a
+    Python string prefix, still hides a marker written inside it."""
+    source = _write(tmp_path, f"x = {literal}\n")
+
+    found = find_inline_suppressions(source)
+
+    assert found == []
 
 
 def test_a_line_of_escaped_quotes_is_scanned_once(tmp_path):
