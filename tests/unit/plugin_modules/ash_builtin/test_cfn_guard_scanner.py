@@ -788,7 +788,14 @@ class TestDependencies:
         ):
             assert scanner.validate_plugin_dependencies() is False
         assert "rules are not installed" in scanner.dependency_unavailable_reason
-        assert scanner.dependency_unavailable_reason in scanner.errors
+        # Recorded once, as the ERROR log's line (the plugin's name prefixed);
+        # a separate append of the bare reason recorded every reason twice.
+        recorded = [
+            line
+            for line in scanner.errors
+            if scanner.dependency_unavailable_reason in line
+        ]
+        assert len(recorded) == 1
 
     def test_install_commands_install_the_binary_then_the_rules(self, repo):
         commands = _scanner(repo).custom_install_commands
