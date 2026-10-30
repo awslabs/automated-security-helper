@@ -289,11 +289,14 @@ def test_a_pattern_of_repeated_doublestars_answers_at_once():
     [
         ("**/**/a.py", "x/y/a.py", True),
         ("**/**/a.py", "a.py", True),
-        # ``**`` takes no component too, so ``src/**`` reaches ``src`` itself,
-        # as the recursive match did. Whether a file named ``src`` should be
-        # left to its tool is a reading of the tools, not of this match.
-        ("src/**", "src", True),
+        # A trailing ``/**`` is everything inside the directory, as gitignore
+        # reads it, so a file named ``src`` is left to its tool; the match
+        # alone would reach it, since ``**`` takes no component too.
+        ("src/**", "src", False),
+        ("src/**/**", "src", False),
         ("src/**", "src/a.py", True),
+        ("**/build/**", "x/build", False),
+        ("**/build/**", "x/build/a.py", True),
         ("src/**/*.py", "src/a.py", True),
         ("src/**/*.py", "src/x/y/a.py", True),
         ("src/**/*.py", "src/x/y/a.js", False),

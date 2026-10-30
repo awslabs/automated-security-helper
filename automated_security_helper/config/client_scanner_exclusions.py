@@ -920,7 +920,10 @@ def glob_excludes(pattern: str, relative: str) -> bool:
     directories above the file, never the file itself, so ``build/`` leaves a
     file named ``build`` to its tool (the slash was stripped before matching,
     and the entry then hid findings in such a file, which the tool had scanned
-    and reported). A match on a directory excludes every file under it.
+    and reported). A trailing ``/**`` names everything inside the directory,
+    as gitignore reads it, and is matched the same way, so ``src/**`` leaves a
+    file named ``src`` to its tool too. A match on a directory excludes every
+    file under it.
 
     Before, ``fnmatch`` matched the pattern against every run of components, so
     ``*`` crossed ``/`` (``src/*.py`` took ``src/a/b.py``) and a ``/`` inside the
@@ -934,6 +937,14 @@ def glob_excludes(pattern: str, relative: str) -> bool:
         candidate = candidate[2:]
     directory_only = candidate.endswith("/")
     candidate = candidate.strip("/")
+    while candidate.endswith("/**"):
+        # ``src/**`` is everything inside the directory src, as gitignore reads
+        # it, and not a file named src, so it is matched as ``src/`` is. As a
+        # run of components ``**`` takes none too, and ``src/**`` reached a
+        # top-level file named src, and ``**/build/**`` any file named build,
+        # which their tools had scanned and reported.
+        directory_only = True
+        candidate = candidate[: -len("/**")].rstrip("/")
     if candidate.startswith("**/"):
         anchored = False
         while candidate.startswith("**/"):
