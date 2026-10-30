@@ -309,6 +309,32 @@ def _own_package_dir() -> Optional[Path]:
     return Path(origin).resolve().parent if origin else None
 
 
+def _location_is_own(location: Path, own: Path, *, as_named: bool) -> bool:
+    """Whether a module *location* sits inside ASH's own package directory *own*.
+
+    The one place the own-module test is written, so the two callers cannot
+    drift in what they call a location of the package. It always asks where
+    the location resolves (``is_within``). With ``as_named`` it also asks
+    whether the location sits there under the name its entry gave
+    (``sandbox_grants._named_within``), which a link the scanned repository
+    placed does not: such a link resolves into the package but is named in the
+    repository.
+
+    ``refusal_reason`` passes ``as_named=True``: its exemption is for code the
+    entry reaches as the installed package, never for a repository's link to
+    it. ``_is_ash_own_module`` passes ``as_named=False``: it runs only where no
+    tree is known (the fail-closed client refusal), keeps the resolved-only
+    test it has always used, and so behaves as before.
+    """
+    if not is_within(location, own):
+        return False
+    if not as_named:
+        return True
+    from automated_security_helper.config.sandbox_grants import _named_within
+
+    return _named_within(location, [own])
+
+
 def _spec_locations(spec: ModuleSpec) -> List[Path]:
     locations: List[Path] = []
     for entry in spec.submodule_search_locations or []:
@@ -410,7 +436,9 @@ def _is_ash_own_module(name: str) -> bool:
         if spec is None:
             return False
         locations = _spec_locations(spec)
-        if not locations or not all(is_within(location, own) for location in locations):
+        if not locations or not all(
+            _location_is_own(location, own, as_named=False) for location in locations
+        ):
             return False
     return True
 
@@ -467,8 +495,6 @@ def refusal_reason(
     through a link the repository placed is judged by where it sits, under the
     module name the tree gave it.
     """
-    from automated_security_helper.config.sandbox_grants import _named_within
-
     # The scan's loader drops the import system's caches before it imports
     # (plugins.loader), so a long-lived process (the MCP server) finds a module
     # installed since the process started. This lookup does the same, or it
@@ -495,11 +521,7 @@ def refusal_reason(
                 "be placed is refused"
             )
         for location in locations:
-            if (
-                own is not None
-                and is_within(location, own)
-                and _named_within(location, [own])
-            ):
+            if own is not None and _location_is_own(location, own, as_named=True):
                 continue
             tree_judgment = _judged_against_trees(location, scanned_root, also_scanned)
             if tree_judgment.verdict:

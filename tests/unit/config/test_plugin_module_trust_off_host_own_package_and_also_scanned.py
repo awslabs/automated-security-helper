@@ -30,6 +30,7 @@ import pytest
 import automated_security_helper
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.plugin_module_trust import (
+    _location_is_own,
     confine_plugin_modules,
     refusal_reason,
 )
@@ -118,6 +119,25 @@ def test_an_in_tree_link_into_ashs_own_package_is_judged_where_it_sits(
     assert refusal_reason(OWN_BUILTIN, repo) is None
     reason = refusal_reason(LINKED, repo)
     assert reason is not None and "scanned tree" in reason, reason
+
+
+def test_the_own_module_helper_answers_both_spellings(tmp_path):
+    """The one helper behind ``refusal_reason`` (as named) and the rootless
+    client refusal (resolved only): a location inside the package agrees on
+    both spellings, a repository's link into it differs, a location elsewhere
+    is not the package's on either."""
+    own = Path(automated_security_helper.__file__).resolve().parent
+    inside = own / "plugin_modules" / "ash_builtin"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _symlink(repo / LINKED, inside)
+
+    assert _location_is_own(inside, own, as_named=False)
+    assert _location_is_own(inside, own, as_named=True)
+    assert _location_is_own(repo / LINKED, own, as_named=False)
+    assert not _location_is_own(repo / LINKED, own, as_named=True)
+    assert not _location_is_own(tmp_path, own, as_named=False)
+    assert not _location_is_own(tmp_path, own, as_named=True)
 
 
 def test_a_module_inside_an_also_scanned_tree_is_refused(tmp_path, monkeypatch):
