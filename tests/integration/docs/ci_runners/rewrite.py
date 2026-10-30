@@ -3868,7 +3868,10 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
     # The action pins are checked on the text as given: the swap above has already
     # moved the two artifact actions to their pinned releases, so a tag or a branch on
     # either ("@v4", "@main") would pass a check of the swapped text.
-    original_jobs = _load(original, where).get("jobs")
+    original_document = _load(original, where)
+    original_jobs = (
+        original_document.get("jobs") if isinstance(original_document, dict) else None
+    )
     root = _compose(text, where)
     env = document.get("env") if isinstance(document, dict) else None
     source = env.get("ASH_UVX_SOURCE") if isinstance(env, dict) else None

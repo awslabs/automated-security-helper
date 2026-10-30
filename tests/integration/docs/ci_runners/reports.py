@@ -450,8 +450,14 @@ class JobPlan:
 _EXPRESSION_WRAP = re.compile(r"^\s*\$\{\{(?P<body>.*)\}\}\s*$", re.DOTALL)
 _EXPRESSION_TOKEN = re.compile(
     r"\s*(?:(?P<string>'(?:[^']|'')*')|(?P<op>&&|\|\||==|!=|!|\(|\))"
-    r"|(?P<number>-?\d+(?:\.\d+)?)|(?P<path>[A-Za-z_][\w.-]*(?:\(\))?))"
+    r"|(?P<number>-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)"
+    r"|(?P<path>[A-Za-z_][\w.-]*(?:\(\))?))"
 )
+#: A string GitHub's expressions read as a number: a decimal with an optional sign,
+#: fraction and exponent (JavaScript's Number() of the trimmed text; hexadecimal is
+#: left out). Anything else, `1_000`, `inf`, `nan`, `Infinity` and words included, is
+#: NaN.
+_NUMBER_TEXT = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 #: The literals GitHub's expressions know, as the values this reader uses for them:
 #: ``null`` is the empty string, which reads false and compares as GitHub's null does
 #: (both become the number 0).
@@ -594,7 +600,7 @@ class _JobCondition:
             return token[1:-1].replace("''", "'"), rest
         if token in _LITERALS:
             return _LITERALS[token], rest
-        if token[0].isdigit() or (token[0] == "-" and len(token) > 1):
+        if _NUMBER_TEXT.fullmatch(token):
             return float(token), rest
         return self._path(token, needs), rest
 
@@ -655,7 +661,9 @@ def _tokens(text: str) -> list[str]:
         match = _EXPRESSION_TOKEN.match(text, position)
         if match is None or match.end() == position:
             raise ValueError(f"cannot read {text[position:]!r}")
-        tokens.append(match["string"] or match["op"] or match["path"])
+        tokens.append(
+            match["string"] or match["op"] or match["number"] or match["path"]
+        )
         position = match.end()
     return tokens
 
@@ -685,10 +693,9 @@ def _as_number(value: Any) -> float:
     text = str(value).strip()
     if text == "":
         return 0.0
-    try:
+    if _NUMBER_TEXT.fullmatch(text):
         return float(text)
-    except ValueError:
-        return math.nan
+    return math.nan
 
 
 def _github_equal(left: Any, right: Any) -> bool:

@@ -354,6 +354,12 @@ def test_the_expression_reader_follows_githubs_literals_and_coercions():
         ("always() && null", False),
         ("${{ 1 == 1 }}", True),
         ("${{ 0 }}", False),
+        ("${{ 1.5 == 1.50 }}", True),
+        ("${{ 1e3 == 1000 }}", True),
+        ("${{ -1 }}", True),
+        # A string GitHub cannot read as a number is NaN, equal to nothing.
+        ("${{ '1_000' == 1000 }}", False),
+        ("${{ 'Infinity' == 'Infinity' }}", True),
         ("${{ null == '' }}", True),
         ("${{ 'A' == 'a' }}", True),
         # An unknown function: the value is unknown, so the job stays expected.
