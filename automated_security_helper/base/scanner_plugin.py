@@ -1787,6 +1787,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         part of the message that carries none of the run's text, is returned
         with a note saying why instead, and the hook's own failure never
         replaces the error being reported.
+
+        A uv run's text goes through the full uv layer
+        (``shown_uv_output``, with the run's plugin-built inputs, unbounded):
+        uv respells what it quotes ("9.9.9-RC777" prints as "9.9.9rc777") and
+        the plain layer matches a value only as written. A raise from that
+        layer (its setup or the shower) falls back to the plain layer: it
+        must not replace the error being reported either.
         """
         read = guarded_values_read(self)
         if read.values is None:
@@ -1794,6 +1801,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 f"{withheld} (text not shown: the plugin's values hook "
                 f"{read.failure()})"
             )
+        if getattr(self, "use_uv_tool", False):
+            try:
+                from automated_security_helper.utils.uv_tool_runner import (
+                    shown_uv_output,
+                )
+
+                return shown_uv_output(
+                    text,
+                    read.values,
+                    plugin_inputs=self._uv_run_inputs_for_records(),
+                    tool_name=self.command,
+                    limit=None,
+                )
+            except Exception:  # noqa: BLE001 -- the error being reported outranks it
+                pass
         return text_without_values(text, read.values)
 
     def _config_as_written(self, dumped: Any) -> Any:
