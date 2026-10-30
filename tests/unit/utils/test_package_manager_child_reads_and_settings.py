@@ -246,6 +246,35 @@ class TestTheReadWhereThePlatformHasNoNonblockingOpen:
         assert calls == [True]
 
 
+class TestTheReadOpensInBinaryMode:
+    def test_the_open_carries_o_binary_where_the_platform_has_it(
+        self, tmp_path, monkeypatch
+    ):
+        """os.open adds no O_BINARY of its own, and on Windows a descriptor in
+        the C runtime's text mode turns CRLF into LF and reads Ctrl-Z as the end
+        of the file, so the bytes handed to the tool were not the file's.
+        O_BINARY is absent on POSIX, so a spare bit stands in for it here and is
+        taken off again before the real open."""
+        package = _package(tmp_path / "repo" / "web", "package-lock.json")
+        stand_in = 1 << 30
+        monkeypatch.setattr(os, "O_BINARY", stand_in, raising=False)
+        seen = []
+        real_open = os.open
+
+        def recording_open(path, flags, *args, **kwargs):
+            seen.append(flags)
+            return real_open(path, flags & ~stand_in, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", recording_open)
+
+        data = package_manager_child._read_admitted(
+            package / "package-lock.json", [tmp_path / "repo"]
+        )
+
+        assert data == b"{}\n"
+        assert seen and all(flags & stand_in for flags in seen), [hex(f) for f in seen]
+
+
 class TestWithinByIdentity:
     def test_a_root_named_through_a_link_still_holds_its_tree(self, tmp_path):
         """The containment test compares files, not real-path strings, so a root

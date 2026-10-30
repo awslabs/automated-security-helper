@@ -572,8 +572,13 @@ def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
     """
     roots = list(roots)
     nonblocking = getattr(os, "O_NONBLOCK", 0)
+    # O_BINARY where the platform has it (Windows; 0 elsewhere): os.open adds
+    # none of its own, and a descriptor in the C runtime's text mode turns
+    # CRLF into LF and reads Ctrl-Z as the end of the file, so the bytes
+    # handed to the tool were not the file's.
+    binary = getattr(os, "O_BINARY", 0)
     try:
-        fd = os.open(path, os.O_RDONLY | nonblocking)
+        fd = os.open(path, os.O_RDONLY | nonblocking | binary)
     except OSError:
         return None
     try:
