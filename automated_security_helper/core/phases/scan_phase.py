@@ -793,6 +793,44 @@ class ScanPhase(EnginePhase):
                             plugin_class=plugin_instance.__class__,
                         )
                     except ValueError as e:
+                        # The refused scanner exists and has a row, so its name
+                        # is a known name for the allowlist check below (a
+                        # `--scanners` naming only it is not a misspelling), and
+                        # selection comes before diagnosis, as for a scanner
+                        # whose constructor raised: one the operator excluded,
+                        # left out of the allowlist or disabled was never going
+                        # to run, so its refused name is not a failure of this
+                        # scan and is recorded SKIPPED, excluded, not ERROR.
+                        refused_key = display_name.lower().strip()
+                        construction_failed.add(refused_key)
+                        not_selected_reasons = []
+                        if refused_key in operator_excluded:
+                            not_selected_reasons.append(
+                                f"excluded from this run ({names.exclusion})"
+                            )
+                        if operator_allowlist and refused_key not in operator_allowlist:
+                            not_selected_reasons.append(
+                                f"not named by {names.allowlist}"
+                            )
+                        if not section_enabled(
+                            getattr(plugin_instance, "config", None)
+                        ):
+                            not_selected_reasons.append(
+                                "disabled in the configuration (enabled: false)"
+                            )
+                        if not_selected_reasons:
+                            ASH_LOGGER.debug(
+                                f"Scanner {display_name}'s name is refused by the "
+                                f"tracker ({error_text(e)}), and it was not selected "
+                                f"to run"
+                            )
+                            aggregated_results = self._record_scanner_not_selected(
+                                display_name,
+                                ", ".join(not_selected_reasons),
+                                aggregated_results,
+                                excluded_scanner_names,
+                            )
+                            continue
                         aggregated_results = self._record_refused_scanner_name(
                             display_name, plugin_instance, e, aggregated_results
                         )
