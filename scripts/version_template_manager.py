@@ -183,17 +183,13 @@ class VersionTemplateManager:
 
         Returns list of (old_pattern, new_pattern) tuples.
         """
-        # Use a generic semver pattern to match any v3.x.y reference
-        semver = r"\d+\.\d+\.\d+"
+        # Every pattern is one of ASH_PIN_PATTERNS, which match any v3.x.y reference to
+        # this repository; the blocks below say why each one is anchored as it is. The
+        # form `git+https://github.com/<owner>/<this repository>[.git]@v3.x.y` is the
+        # `@` form's repository alternative, so it needs no pattern of its own.
         patterns = []
 
-        # Pattern 1: git+...@v3.x.y (also without .git suffix)
-        git_pattern = rf"(git\+https://github\.com/awslabs/automated-security-helper(?:\.git)?@v){semver}"
-        git_replacement = rf"\g<1>{self.version_placeholder}"
-        if re.search(git_pattern, content):
-            patterns.append((git_pattern, git_replacement))
-
-        # Pattern 2: --branch v3.x.y, in a command that names this repository. Unanchored,
+        # Pattern 1: --branch v3.x.y, in a command that names this repository. Unanchored,
         # the pattern also templatized the tag of any other project cloned in a page's
         # example (`git clone --branch v1.2.3 <another repository>`), and `generate`
         # then stamped ASH's version into that command. The repository can come before
@@ -206,7 +202,7 @@ class VersionTemplateManager:
             if re.search(branch_pattern, content):
                 patterns.append((branch_pattern, branch_replacement))
 
-        # Pattern 3: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)"),
+        # Pattern 2: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)"),
         # and the two `uses:` forms naming this repository: the action,
         # `<owner>/<this repository>@v<version>`, and the reusable workflow,
         # `<owner>/<this repository>/.github/workflows/<file>.yml@v<version>`,
@@ -230,7 +226,7 @@ class VersionTemplateManager:
         if re.search(at_version_pattern, content):
             patterns.append((at_version_pattern, at_version_replacement))
 
-        # Pattern 4: rev: v3.x.y (pre-commit config), in the entry whose `repo:` is this
+        # Pattern 3: rev: v3.x.y (pre-commit config), in the entry whose `repo:` is this
         # repository. A pre-commit config pins every hook repository with a `rev:`, so
         # unanchored the pattern also templatized the pin of each other repository a
         # page's example lists. Only blank and comment lines may sit between the
@@ -240,7 +236,7 @@ class VersionTemplateManager:
         if re.search(rev_pattern, content):
             patterns.append((rev_pattern, rev_replacement))
 
-        # Pattern 5: a Nix flake reference -- `github:<owner>/<repo>/v3.x.y`.
+        # Pattern 4: a Nix flake reference -- `github:<owner>/<repo>/v3.x.y`.
         #
         # Every pattern above keys on `@v`, because every install reference this
         # repository had ever carried used an `@`: `git+...@v`, `--branch v`, `rev: v`.
@@ -272,6 +268,26 @@ class VersionTemplateManager:
         flake_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(flake_pattern, content):
             patterns.append((flake_pattern, flake_replacement))
+
+        # Pattern 5: every other form of INSTALL_REF_FORMS, the tag lookup
+        # (`git ls-remote <this repository> refs/tags/v3.x.y`), the build flag and the
+        # action input. The reader of a built page counts a pin in any of them, so
+        # leaving them out meant `convert` wrote the stale literal into a template that
+        # the check would then report as a pin it never moved. Each form here names
+        # this repository by itself or in the same command, as above.
+        handled = {
+            "--branch",
+            "@ (git URL, uses:)",
+            "rev:",
+            "flake ref",
+        }
+        rest_replacement = rf"\g<1>{self.version_placeholder}"
+        for form, form_patterns in ASH_PIN_PATTERNS.items():
+            if form in handled:
+                continue
+            for rest_pattern in form_patterns:
+                if re.search(rest_pattern, content):
+                    patterns.append((rest_pattern, rest_replacement))
 
         return patterns
 

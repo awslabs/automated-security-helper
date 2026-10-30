@@ -322,10 +322,7 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
         "text",
         [
             *OTHER_PROJECTS_PINS.values(),
-            ASH_PINS["@ (git URL, uses:)"],
-            ASH_PINS["--branch"],
-            ASH_PINS["rev:"],
-            ASH_PINS["flake ref"],
+            *ASH_PINS.values(),
             f"uses: awslabs/{REPO}/.github/workflows/run.yml@v3.4.0\n",
             "Pin (`@v3.4.0`) for repeatable installs\n",
             "- `uses: ...@v3.4.0` selects the workflow file\n",
@@ -333,13 +330,19 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
         ],
     )
     def test_a_text_is_converted_exactly_when_it_holds_a_release_pin(self, text):
-        """The two readers and `convert` share one definition of an ASH pin.
-
-        Only the forms `convert` handles are listed: it has no pattern for the
-        refs/tags/, build-flag and action-input forms, which a template carries by hand.
-        """
+        """The two readers and `convert` share one definition of an ASH pin, in every
+        form of INSTALL_REF_FORMS."""
         converted = _convert(text) != text
         assert converted == bool(VersionTemplateManager(REPO_ROOT).release_pins(text))
+
+    @pytest.mark.parametrize("form, text", list(ASH_PINS.items()), ids=list(ASH_PINS))
+    def test_convert_templatizes_a_pin_in_every_form(self, form, text):
+        """Red before: convert had no pattern for the refs/tags/, build-flag and
+        action-input forms, so it wrote the stale literal into the template while
+        the reader of a built page counted it as a pin."""
+        converted = _convert(text)
+        assert "3.4.0" not in converted, converted
+        assert "{{VERSION}}" in converted, converted
 
     def test_the_ellipsis_form_is_ash_s_pin(self):
         """Red before: the bare form refuses a `@` after a dot, so the page's prose
