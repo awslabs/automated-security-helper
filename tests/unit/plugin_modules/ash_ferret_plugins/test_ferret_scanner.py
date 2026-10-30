@@ -713,7 +713,7 @@ class TestFerretScanScannerScanning:
             ),
             patch("pathlib.Path.exists", return_value=True),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -746,7 +746,7 @@ class TestFerretScanScannerScanning:
         with (
             patch.object(scanner, "_pre_scan", return_value=True) as mock_pre_scan,
             patch.object(scanner, "_post_scan"),
-            patch.object(scanner, "_run_subprocess"),
+            patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}),
             patch.object(scanner, "_plugin_log"),
             patch(
                 "builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))
@@ -890,7 +890,7 @@ class TestFerretScanScannerErrorHandling:
             patch("builtins.open", mock_open(read_data="not valid json")),
             patch("pathlib.Path.exists", return_value=True),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -924,7 +924,7 @@ class TestFerretScanScannerErrorHandling:
             patch.object(scanner, "_run_subprocess") as mock_subprocess,
             patch.object(scanner, "_plugin_log"),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -1501,7 +1501,7 @@ class TestFerretSarifShapeAcrossVersions:
             out = Path(command[command.index("--output") + 1])
             out.write_text(json.dumps(sarif), encoding="utf-8")
             scanner.exit_code = 0
-            return {"stdout": "", "stderr": ""}
+            return {"returncode": 0, "stdout": "", "stderr": ""}
 
         with (
             patch.object(scanner, "_pre_scan", return_value=True),

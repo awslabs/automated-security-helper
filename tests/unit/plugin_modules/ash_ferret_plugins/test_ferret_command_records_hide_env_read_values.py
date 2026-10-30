@@ -102,7 +102,7 @@ def _scan(
     def fake_run(*, command, results_dir, **kwargs):
         argv[:] = [str(a) for a in command]
         Path(results_dir, "ferret-scan.sarif").write_text(json.dumps(EMPTY_SARIF))
-        return {}
+        return {"returncode": 0}
 
     capture = _CapturedRecords()
     previous_level = ASH_LOGGER.level

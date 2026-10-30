@@ -64,7 +64,7 @@ def _argv(tmp_path: Path, source: Path, options=None) -> list:
     scanner.dependencies_satisfied = True
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
-        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+        patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}) as run,
     ):
         scanner.scan(target=source, target_type="source")
     return [str(a) for a in run.call_args.kwargs["command"]]
@@ -323,7 +323,7 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
         patch.object(scanner, "_resolve_arguments", return_value=list(resolved)),
-        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+        patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}) as run,
     ):
         scanner.scan(target=source, target_type="source")
     argv = run.call_args.kwargs["command"]
@@ -438,7 +438,7 @@ def _scan_recording_command_lines(tmp_path):
         results = Path(command[command.index("--output") + 1])
         results.parent.mkdir(parents=True, exist_ok=True)
         results.write_text(json.dumps(EMPTY_SARIF))
-        return {}
+        return {"returncode": 0}
 
     capture = _CapturedRecords()
     previous_level = ASH_LOGGER.level

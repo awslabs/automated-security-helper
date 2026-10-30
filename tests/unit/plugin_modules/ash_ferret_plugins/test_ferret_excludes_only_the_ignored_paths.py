@@ -127,7 +127,7 @@ def _excludes(scanner, target: Path, *ignore_paths: str) -> list[str]:
 
     def _run(command, **kwargs):
         started.append(list(command))
-        return {"stdout": "", "stderr": ""}
+        return {"returncode": 0, "stdout": "", "stderr": ""}
 
     with (
         patch.object(scanner, "_pre_scan", return_value=True),

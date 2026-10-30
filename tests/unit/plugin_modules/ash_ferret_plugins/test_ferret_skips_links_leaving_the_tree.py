@@ -45,7 +45,7 @@ def _scan(scanner, target: Path):
 
     def _run(command, **kwargs):
         started.append(list(command))
-        return {"stdout": "", "stderr": ""}
+        return {"returncode": 0, "stdout": "", "stderr": ""}
 
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
