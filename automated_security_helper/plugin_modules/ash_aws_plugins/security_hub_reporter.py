@@ -195,11 +195,15 @@ class SecurityHubImportError(RuntimeError):
 class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     # Read from the environment when the options are built, not when this module
     # is imported, so a config built later sees the run's environment.
+    # An empty value is unset: AWS_REGION="" does not hide AWS_DEFAULT_REGION,
+    # and an empty AWS_PROFILE is no profile.
     aws_region: Annotated[
         str | None,
         Field(
-            default_factory=lambda: os.environ.get(
-                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
+            default_factory=lambda: (
+                os.environ.get("AWS_REGION")
+                or os.environ.get("AWS_DEFAULT_REGION")
+                or None
             ),
             description="AWS Region for Security Hub integration",
         ),
@@ -207,7 +211,7 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     aws_profile: Annotated[
         str | None,
         Field(
-            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
+            default_factory=lambda: os.environ.get("AWS_PROFILE") or None,
             description="AWS Profile to use for authentication",
         ),
     ]
@@ -287,6 +291,16 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
         """
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             return f"{value:012d}"
+        return value
+
+    @field_validator("findings_scope", "aws_profile", mode="before")
+    @classmethod
+    def _digits_as_text(cls, value: Any) -> Any:
+        """An all-digit scope or profile name is read as an int by YAML and by
+        --config-overrides; it names the text the operator wrote, so it is taken
+        as that text rather than refused for not being a string."""
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
         return value
 
     @model_validator(mode="after")
@@ -454,7 +468,18 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
     # Sends findings to AWS with the host's credentials.
     sends_off_host = True
-    destination_options = ("aws_region", "aws_profile", "account_id")
+    # The two scope options are the operator's as much as the Region: which
+    # findings a scan owns, updates and archives. Declared here now that the
+    # options model defines them, so the declaration ``ash merge`` and
+    # ``ash report`` read (``declared_destination_options``) names them as the
+    # trust table does.
+    destination_options = (
+        "aws_region",
+        "aws_profile",
+        "account_id",
+        "archive_resolved_findings",
+        "findings_scope",
+    )
 
     #: Why the configuration given to this reporter was refused, when it was.
     _config_error: str | None = PrivateAttr(default=None)
@@ -500,12 +525,14 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             # a principal granted only BatchImportFindings (and GetFindings, to
             # archive) imports with `ash report`, which skips this check, so a
             # scan is not disabled on that one refusal. The refusal is named
-            # with its permission; the import's own errors say the rest.
+            # with its permission; the import's own errors say the rest. Both
+            # calls are retried on the reporter's schedule, as the import is: a
+            # throttled DescribeHub used to drop the reporter for the scan.
             securityhub_client = session.client("securityhub")
             try:
-                securityhub_client.describe_hub()
+                self._with_retry(securityhub_client.describe_hub)
             except ClientError as e:
-                if e.response["Error"]["Code"] not in _ACCESS_DENIED_ERRORS:
+                if e.response.get("Error", {}).get("Code") not in _ACCESS_DENIED_ERRORS:
                     raise
                 ASH_LOGGER.warning(
                     "securityhub:DescribeHub was refused for the configured "
@@ -519,7 +546,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             # Get account ID if not provided
             if not self.config.options.account_id:
                 sts_client = session.client("sts")
-                identity = sts_client.get_caller_identity()
+                identity = self._with_retry(sts_client.get_caller_identity)
                 self.config.options.account_id = identity["Account"]
 
             self.dependencies_satisfied = True
@@ -533,7 +560,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         except NoCredentialsError:
             ASH_LOGGER.error("AWS credentials not found for Security Hub reporter")
         except ClientError as e:
-            error_code = e.response["Error"]["Code"]
+            # .get: a ClientError built without an Error record must not leave
+            # the handler as a KeyError.
+            error_code = e.response.get("Error", {}).get("Code")
             if error_code == "InvalidAccessException":
                 ASH_LOGGER.error(
                     "Security Hub is not enabled in this region or insufficient permissions"
@@ -578,6 +607,13 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         if not region:
             raise SecurityHubImportError(_missing_region_message())
         base_key = _target_key(self._scan_target(), _model_project(model))
+        # The stored forms: a ProductFields value is cut at
+        # MAX_PRODUCT_FIELD_VALUE_LENGTH when a finding is sent, so the
+        # GetFindings filter and the ownership and scope comparisons below use
+        # the cut forms too. Compared uncut, a long workspace project key or scan
+        # path made every comparison miss and archiving silently stopped.
+        stored_base_key = _as_stored(base_key)
+        stored_project = _as_stored(_model_project(model))
 
         completed, archive_skipped = self._archive_scope(model)
         if options.archive_resolved_findings and self._scan_scope(model) is None:
@@ -637,7 +673,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         existing: list[dict[str, Any]] = []
         existing_error: Exception | None = None
         if options.archive_resolved_findings:
-            target_keys = {base_key} | {
+            target_keys = {stored_base_key} | {
                 f["ProductFields"]["ash/target"] for f in findings
             }
             try:
@@ -658,10 +694,10 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             archived = _archive_records(
                 existing,
                 current_ids={f["Id"] for f in findings},
-                owned={(base_key, _model_project(model))}
+                owned={(stored_base_key, stored_project)}
                 | {_owner(f["ProductFields"]) for f in findings},
                 completed=completed,
-                scope=scope,
+                scope=_as_stored(scope),
                 timestamp=timestamp,
             )
 
@@ -942,8 +978,13 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         ASH_LOGGER.debug(notice)
         # Through the console's echo, as is every message ASH prints for a
         # person. It flushes, so the notice reaches stderr before the reporter
-        # goes on.
-        echo(notice, err=True)
+        # goes on. A stderr that cannot be written (closed, or a full pipe) is
+        # no reason to abort the import: the receipt's archive_skipped and the
+        # debug line above still say so.
+        try:
+            echo(notice, err=True)
+        except OSError as e:
+            ASH_LOGGER.debug(f"The no-scan_source notice could not be printed: {e}")
 
     def _archive_scope(
         self, model: "AshAggregatedResults"
@@ -987,6 +1028,13 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
 
         if not self.config.options.archive_resolved_findings:
             return None, "archive_resolved_findings is false"
+        if getattr(model, "sarif", None) is None:
+            # No SARIF report is not "zero findings": what the scan reported is
+            # unknown, so nothing it did not report can be read as fixed.
+            return None, (
+                "the results carry no SARIF report, so what the scan reported "
+                "cannot be compared with the stored findings"
+            )
         if getattr(model.metadata, "shard", None) is not None:
             return None, "the results are one shard of a split scan"
         marker = getattr(model.metadata, "changed_files_only", None)
@@ -1118,11 +1166,13 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             raise SecurityHubImportError(_no_credentials_message(region)) from e
         except ClientError as e:
             error = e.response.get("Error", {})
+            # The call is made whether or not account_id is configured (a
+            # configured one is compared with the caller's), so setting it is
+            # not a way around this failure and is not suggested.
             raise SecurityHubImportError(
                 "aws-security-hub could not determine the AWS account: "
                 f"sts:GetCallerIdentity failed with {error.get('Code')}: "
-                f"{error.get('Message')}. Check the credentials, or set "
-                "reporters.aws-security-hub.options.account_id."
+                f"{error.get('Message')}. Check the credentials ASH runs with."
             ) from e
         except BotoCoreError as e:
             raise SecurityHubImportError(
@@ -1155,7 +1205,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 # Stop: the failures that reach here (no credentials, refused
                 # credentials, access denied, Security Hub off, throttling that
                 # outlasted the retries, a request botocore refused) would fail
-                # every later batch the same way.
+                # every later batch the same way. The findings an earlier batch
+                # rejected are logged first; the raise used to skip them.
+                self._log_rejections(rejected)
                 raise SecurityHubImportError(
                     _request_failure_message(
                         e,
@@ -1184,16 +1236,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 break
 
         if rejected_count or not_sent:
-            for failure in rejected[:_MAX_LOGGED_FAILURES]:
-                ASH_LOGGER.error(
-                    f"Security Hub rejected finding {failure.get('Id')}: "
-                    f"{failure.get('ErrorCode')}: {failure.get('ErrorMessage')}"
-                )
-            if len(rejected) > _MAX_LOGGED_FAILURES:
-                ASH_LOGGER.error(
-                    f"... and {len(rejected) - _MAX_LOGGED_FAILURES} more rejected "
-                    "finding(s)"
-                )
+            self._log_rejections(rejected)
             raise SecurityHubImportError(
                 _rejection_message(
                     rejected,
@@ -1206,6 +1249,31 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 )
             )
         return imported, requests
+
+    def _log_rejections(self, rejected: list[dict[str, Any]]) -> None:
+        """One ERROR line per rejected finding, up to ``_MAX_LOGGED_FAILURES``.
+
+        Security Hub's ErrorMessage can quote the finding it refused, and a
+        finding carries configured values (the scope, a path), so the line is
+        redacted with the config's environment values as the reporter's other
+        lines are.
+        """
+        if not rejected:
+            return
+        values = self._environment_values()
+        for failure in rejected[:_MAX_LOGGED_FAILURES]:
+            ASH_LOGGER.error(
+                text_without_values(
+                    f"Security Hub rejected finding {failure.get('Id')}: "
+                    f"{failure.get('ErrorCode')}: {failure.get('ErrorMessage')}",
+                    values,
+                )
+            )
+        if len(rejected) > _MAX_LOGGED_FAILURES:
+            ASH_LOGGER.error(
+                f"... and {len(rejected) - _MAX_LOGGED_FAILURES} more rejected "
+                "finding(s)"
+            )
 
     def _with_retry(self, call: Callable[[], Any]) -> Any:
         """``call()``, retried on the configured schedule when throttled.
@@ -1557,8 +1625,16 @@ def _keep_created_at(
         and isinstance(stored.get("CreatedAt"), str)
     }
     for finding in findings:
-        if finding["Id"] in created:
-            finding["CreatedAt"] = created[finding["Id"]]
+        if finding["Id"] not in created:
+            continue
+        # Not when the stored CreatedAt is later than this import's UpdatedAt:
+        # an older results file re-reported with `ash report` would then send a
+        # finding created after it was updated. Its own timestamps are kept.
+        kept = _parse_timestamp(created[finding["Id"]])
+        updated = _parse_timestamp(finding.get("UpdatedAt"))
+        if kept is not None and updated is not None and kept > updated:
+            continue
+        finding["CreatedAt"] = created[finding["Id"]]
 
 
 def _archive_records(
@@ -1749,14 +1825,18 @@ def _asff_timestamp(value: str | None) -> str:
     """
     moment = _parse_timestamp(value) if value else None
     if moment is None:
-        # Now is later than any stored UpdatedAt, so this import would replace a
-        # newer scan's findings. ReportMetadata always sets generated_at, so this
-        # is reached only for a hand-edited or foreign results file.
-        ASH_LOGGER.warning(
-            f"aws-security-hub: generated_at {value!r} is not an ISO 8601 "
-            "timestamp; using the current time for CreatedAt and UpdatedAt"
+        # Refused rather than replaced with the current time: now is later than
+        # any stored UpdatedAt, so an import stamped with it would overrule the
+        # findings of every newer scan and archive what they reported.
+        # ReportMetadata always sets generated_at, so this is reached only for
+        # a hand-edited or foreign results file.
+        raise SecurityHubImportError(
+            f"aws-security-hub: the results' generated_at {value!r} is not an "
+            "ISO 8601 timestamp, so the scan time that orders this import "
+            "against the findings already in Security Hub is unknown; nothing "
+            "was sent. Set metadata.generated_at in the results file to the "
+            "time of the scan."
         )
-        moment = datetime.now(timezone.utc)
     return (
         moment.astimezone(timezone.utc)
         .isoformat(timespec="milliseconds")
@@ -1772,3 +1852,12 @@ def _truncate(value: str, limit: int) -> str:
     if len(value) <= limit:
         return value
     return value[: limit - 3] + "..."
+
+
+def _as_stored(value: str | None) -> str | None:
+    """``value`` as a ProductFields value is stored: cut at the field's length.
+
+    For the comparisons with stored findings (the ``ash/target`` filter, the
+    owner pair, ``ash/scope``), which have to use the form ``_to_asff`` sent.
+    """
+    return None if value is None else _truncate(value, MAX_PRODUCT_FIELD_VALUE_LENGTH)

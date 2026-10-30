@@ -1057,11 +1057,9 @@ _REVIEWED_SECTION_FIELDS = {"name", "enabled", "options", "extension"}
 #: the model on another branch, and listing them first keeps a repository's or a
 #: client's config from setting them in between. When the model gains one, the
 #: tests below fail until it is removed from here and added to the reporter's
-#: ``destination_options``.
-_LISTED_BEFORE_DEFINED = {
-    ("aws-security-hub", "archive_resolved_findings"),
-    ("aws-security-hub", "findings_scope"),
-}
+#: ``destination_options``. Empty now: the Security Hub reporter's model defines
+#: ``archive_resolved_findings`` and ``findings_scope`` and declares both.
+_LISTED_BEFORE_DEFINED: set = set()
 
 #: Options whose names look like a destination but are not one.
 _REVIEWED_NOT_DESTINATIONS = {
