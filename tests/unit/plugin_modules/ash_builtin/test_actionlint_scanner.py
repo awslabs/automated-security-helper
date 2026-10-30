@@ -1284,24 +1284,38 @@ def test_many_workflows_are_linted_in_several_runs_and_one_report(
     repo, monkeypatch, on_path
 ):
     """A tree with more workflows than one command line holds is linted in
-    several runs, each judged by its own exit code, and reported once."""
-    monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30, raising=False)
+    several runs, each judged by its own exit code, and reported once.
+
+    Driven through the base class, whose exit-code accumulation keeps the worst
+    code across calls: the first run exits 1 with findings and the second exits
+    0 with none, so a scanner that judged the second run by the accumulated 1
+    would fail it as "exited 1 but reported none". The runs' findings are the
+    fixtures' and are not tied to the workflow each run was given."""
+    monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30)
     scanner = _scanner(repo)
-    stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
-    fake = _run(scanner, monkeypatch, stdout, 1)
+    with_findings = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
+    clean = (FIXTURES / "actionlint-1.7.12-clean.json").read_text()
+    calls = _through_the_base_class(
+        monkeypatch,
+        [
+            {"returncode": 1, "stdout": with_findings},
+            {"returncode": 0, "stdout": clean},
+        ],
+    )
 
     report = scanner.scan(target=repo, target_type="source")
 
-    assert [argv[argv.index("--") + 1 :] for argv, _ in fake.calls] == [
+    argvs = [call["command"] for call in calls]
+    assert [argv[argv.index("--") + 1 :] for argv in argvs] == [
         [".github/workflows/clean.yml"],
         [".github/workflows/vulnerable.yml"],
     ]
-    assert len(report.runs[0].results) == 2 * len(EXPECTED_DEFAULT)
+    assert len(report.runs[0].results) == len(EXPECTED_DEFAULT)
     assert scanner.targets_attempted == 2
     kept = json.loads(
         (Path(scanner.results_dir) / "source" / "actionlint.json").read_text()
     )
-    assert len(kept["errors"]) == 2 * len(EXPECTED_DEFAULT)
+    assert len(kept["errors"]) == len(EXPECTED_DEFAULT)
     assert "hunter2" not in json.dumps(kept)
 
 
@@ -1529,18 +1543,26 @@ def test_a_failing_exit_code_raises_even_with_valid_json(
         scanner.scan(target=repo, target_type="source")
 
 
-def _through_the_base_class(monkeypatch, responses: list) -> None:
-    """Replace only the process call, one response per run.
+def _through_the_base_class(monkeypatch, responses: list) -> list:
+    """Replace only the process call, one response per run; returns the recorded
+    calls (their keyword arguments, ``command`` among them).
 
     ``_run_subprocess`` and the base class's exit-code accumulation (it keeps the
     worst code across calls) run for real, which ``FakeRun`` bypasses.
     """
     remaining = iter(responses)
+    calls: list = []
+
+    def run(**kwargs):
+        calls.append(kwargs)
+        return next(remaining)
+
     monkeypatch.setattr(
         "automated_security_helper.utils.subprocess_utils."
         "run_command_with_output_handling",
-        lambda **_: next(remaining),
+        run,
     )
+    return calls
 
 
 def _converted_target(output: Path, workflow: Path | None) -> Path:
