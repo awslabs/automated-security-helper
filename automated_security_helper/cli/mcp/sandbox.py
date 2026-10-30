@@ -895,7 +895,7 @@ def _sibling_refusal(
     sandbox: SessionSandbox, path: object, resolved: Path
 ) -> Optional[MCPResourceError]:
     """Refuse a path inside the shared workspace root but not inside this sandbox,
-    and a path an existing shared workspace root is inside.
+    and a path the shared workspace root is inside, on disk yet or not.
 
     Checked before anything that could allow, and independent of both the
     operator grant and the transport. That independence is the point: the
@@ -916,17 +916,14 @@ def _sibling_refusal(
     shared = shared_workspace_root()
     if shared is None:
         return None
-    if (
-        _is_or_below(shared, resolved)
-        and not _is_or_below(resolved, shared)
-        and os.path.exists(shared)
-    ):
+    if _is_or_below(shared, resolved) and not _is_or_below(resolved, shared):
         # The target is an ancestor of the shared root: its parent, the home
         # directory, a granted tree above it. A scan of it walks every
         # session's delivered source, which is the same disclosure as scanning
         # a sibling directly, so it is refused on the same footing, before
-        # any grant is consulted. A root that is not on disk holds no
-        # session's source, so nothing above it is refused for containing it.
+        # any grant is consulted. Judged by path, whether or not the root is on
+        # disk yet: a root created after the judgment changes nothing, and a
+        # root that cannot be read does not read as absent.
         # The path shown is the caller's own, which names no other session.
         # No grant admits this target, so the remedy names the setting that
         # moves the workspace area rather than the one that grants roots.
@@ -1510,8 +1507,9 @@ def _legacy_denylist_refusal(
     the documented container workspace root (/var/cache/ash-mcp), "/usr" would
     refuse tool installs, and "/home" would refuse the common case. A grant is
     the mechanism for narrowing beyond this; on a network transport the sandbox
-    is, and this function is not reached there. An ancestor of an existing
-    workspace root is refused earlier, by ``_sibling_refusal``.
+    is, and this function is not reached there. An ancestor of the workspace
+    root is refused earlier, by ``_sibling_refusal``, whether or not the root is
+    on disk yet.
     """
 
     from automated_security_helper.cli.mcp.scan_target import _denied_roots

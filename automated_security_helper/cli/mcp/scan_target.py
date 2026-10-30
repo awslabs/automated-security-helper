@@ -43,10 +43,10 @@ net, not a security boundary, and the distinction matters: it declines the
 handful of directories that hold host configuration and kernel interfaces rather
 than source code, and it says nothing whatever about the rest of the filesystem.
 Home directories, ``/usr``, ``/var`` and everything else stay accepted, because
-that is where code lives, except an ancestor of an existing session workspace
-root. An operator who wants the scan surface actually bounded sets
-``ASH_MCP_ALLOWED_ROOTS``; on a network transport the sandbox bounds it without
-one.
+that is where code lives, except an ancestor of the session workspace root,
+whether or not that root is on disk yet. An operator who wants the scan surface
+actually bounded sets ``ASH_MCP_ALLOWED_ROOTS``; on a network transport the
+sandbox bounds it without one.
 
 Setting the variable replaces the default list rather than adding to it, which
 is also how a deliberate scan of a system directory is arranged: name it as a

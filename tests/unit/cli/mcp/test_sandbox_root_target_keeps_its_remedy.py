@@ -9,9 +9,9 @@ directory, so its refusal tells the caller to pass the directory explicitly.
 That judgment runs before the session workspace gate, which would otherwise
 describe the root as a tree that contains the workspace area.
 
-The workspace gate itself refuses an ancestor of the workspace root only when
-that root is on disk, and its remedy names the setting that moves the workspace
-area, since no grant admits such a target.
+The workspace gate itself refuses an ancestor of the workspace root by path,
+whether or not the root is on disk yet, and its remedy names the setting that
+moves the workspace area, since no grant admits such a target.
 """
 
 from __future__ import annotations
@@ -71,8 +71,11 @@ def test_the_filesystem_root_keeps_the_explicit_directory_remedy(tmp_path):
     assert "session workspace" not in message, message
 
 
-def test_a_home_above_a_workspace_root_that_is_not_on_disk_is_admitted(tmp_path):
-    """No root on disk means no session's source under it: the home passes."""
+def test_a_home_above_a_workspace_root_not_yet_on_disk_is_refused_by_path(
+    tmp_path,
+):
+    """The root is judged by path: a home above a root not yet created is refused
+    as one above a created root is, and with the same remedy."""
     home = tmp_path / "home"
     home.mkdir()
     shared = shared_workspace_root()
@@ -81,7 +84,11 @@ def test_a_home_above_a_workspace_root_that_is_not_on_disk_is_admitted(tmp_path)
 
     refusal = _sibling_refusal(session_sandbox(OWN), home, home.resolve())
 
-    assert refusal is None, str(refusal)
+    assert refusal is not None
+    message = str(refusal)
+    assert ASH_MCP_WORKSPACE_ROOT_ENV in message, message
+    assert "permitted roots" not in message, message
+    assert refusal.context["resolved_path"] == str(home.resolve())
 
 
 def test_a_home_above_an_existing_workspace_root_names_the_root_setting(tmp_path):
