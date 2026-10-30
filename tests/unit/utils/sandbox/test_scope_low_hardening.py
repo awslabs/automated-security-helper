@@ -11,7 +11,8 @@ cache-only scanner gets no read_path_scanners advice and a warning is written on
 per process; a converter's offline option is read from the converters section; the
 probe directory is removed when the scope build raises anything; any planning
 failure is counted on the scope; a registration that raises runs the plan's
-cleanup, and the sweep runs after the backend's own cleanup; and a DEBUG record
+cleanup; the sweep is the cleanup's first step and passes over the plan's private
+directories; a record that raises releases each root once; and a DEBUG record
 names no argv when the plugin's values could not be read. Nothing runs a backend.
 """
 
@@ -60,9 +61,15 @@ class _Recorder:
 
     def __init__(self):
         self.cleanups: list = []
+        self.private_dirs: list = []
 
     def plan(self, argv, env, policy):
-        return SpawnPlan(argv=list(argv), env=dict(env), cleanup=list(self.cleanups))
+        return SpawnPlan(
+            argv=list(argv),
+            env=dict(env),
+            cleanup=list(self.cleanups),
+            private_dirs=list(self.private_dirs),
+        )
 
 
 class _Logger:
@@ -275,17 +282,58 @@ def test_a_registration_that_raises_runs_the_plans_cleanup(
     assert ran == ["backend"]
 
 
-def test_the_sweep_runs_after_the_backends_own_cleanup(tmp_path, planning, monkeypatch):
+def test_the_sweep_runs_first_and_passes_over_the_plans_private_dirs(
+    tmp_path, planning, monkeypatch
+):
+    """The stream-log write relies on the sweep being the cleanup's first step
+    (subprocess_utils._write_stream_logs), and the backend's own private cache
+    under the results directory, which uv fills with links, is not the scanner's
+    to be counted: the plan names it and the sweep is told to pass it over."""
     recorder = _Recorder()
     backend_cleanup = lambda: None  # noqa: E731 - identity is what is asserted
     recorder.cleanups = [backend_cleanup]
+    recorder.private_dirs = [tmp_path / "out" / "scanner" / ".sandbox-cache-abc"]
+    swept: list = []
     monkeypatch.setattr(scope, "register_writable_root", lambda path: Path(path))
     monkeypatch.setattr(scope, "release_writable_root", lambda path: None)
+    monkeypatch.setattr(
+        scope,
+        "sweep_writable",
+        lambda roots, values=(), **kwargs: swept.append((list(roots), kwargs)) or 0,
+    )
 
     plan = scope._plan_spawn(_scope(tmp_path, backend=recorder), ["tool"], {}, None)
 
-    assert plan.cleanup[0] is backend_cleanup
     assert len(plan.cleanup) == 3
+    assert plan.cleanup[2] is backend_cleanup, "the backend's step comes last"
+    plan.cleanup[0]()
+    assert swept == [
+        ([Path("/w")], {"values_unread": False, "skip": recorder.private_dirs})
+    ]
+
+
+def test_a_record_that_raises_releases_each_root_once(tmp_path, planning, monkeypatch):
+    """The release step is already in the plan when the record runs, so the
+    failure path lets run_cleanup release the roots and does not release them
+    itself as well: a second release would take a registration the scope or the
+    output directory still holds on the same root (fs_guard._decrement counts)."""
+    ran: list = []
+    released: list = []
+    recorder = _Recorder()
+    recorder.cleanups = [lambda: ran.append("backend")]
+    monkeypatch.setattr(scope, "register_writable_root", lambda path: Path(path))
+    monkeypatch.setattr(scope, "release_writable_root", released.append)
+    monkeypatch.setattr(scope, "sweep_writable", lambda roots, values=(), **kw: 0)
+
+    def exploding(sandbox_scope, policy, plan):
+        raise RuntimeError("record exploded")
+
+    monkeypatch.setattr(scope, "_record_plan", exploding)
+    with pytest.raises(RuntimeError, match="record exploded"):
+        scope._plan_spawn(_scope(tmp_path, backend=recorder), ["tool"], {}, None)
+
+    assert released == [Path("/w")], "each root is released exactly once"
+    assert ran == ["backend"]
 
 
 def test_the_record_names_no_argv_when_the_values_are_unread(
