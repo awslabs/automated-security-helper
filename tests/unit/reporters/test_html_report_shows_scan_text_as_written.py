@@ -6,8 +6,10 @@
 * Source text that holds nothing a viewer acts on is printed as written. A
   snippet or description with a code sample's ``\\x41`` in it used to print
   ``\\\\x41``, a character the source does not hold.
-* The hotspot table prints a path as the finding card does, so a Windows path
-  with a ``\\x64`` segment is the same text in both.
+* The hotspot table shows a path on one line with the backslash of text that
+  reads as an escape doubled, so a name the record writes as an escape cannot be
+  taken for the escape itself. The finding card's code element and copy
+  attribute keep the path as recorded.
 * An additional report's severity is the results file's text, so the pill shows
   it as one line.
 * A finding with a line number and no file is located nowhere; it does not read
@@ -117,7 +119,9 @@ def test_snippet_text_with_a_control_is_still_shown_not_obeyed(test_plugin_conte
     assert "ok\\x1b[2Jgone" in document
 
 
-def test_a_hotspot_prints_a_windows_path_as_the_card_does(test_plugin_context):
+def test_a_hotspot_shows_a_windows_path_on_one_line_and_the_card_keeps_it(
+    test_plugin_context,
+):
     document = _render(
         test_plugin_context,
         [
@@ -137,7 +141,10 @@ def test_a_hotspot_prints_a_windows_path_as_the_card_does(test_plugin_context):
     hotspot_locations = re.findall(r"<td>\d+</td>\s*<td>(.*?)</td>", document)
     # The control: the hotspot table is there at all.
     assert hotspot_locations, "no hotspot row was rendered"
-    assert hotspot_locations == [WINDOWS_PATH], hotspot_locations
+    # The table doubles the backslash that starts an escape-like segment (the
+    # "\x64" of "x64"); the copy attribute keeps the path as recorded.
+    assert len(hotspot_locations) == 1, hotspot_locations
+    assert "\\\\x64" in hotspot_locations[0], hotspot_locations
     assert f'data-copy-location="{WINDOWS_PATH}:3"' in document
 
 

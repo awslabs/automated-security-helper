@@ -503,9 +503,14 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         """
 
         for hotspot in hotspots:
-            # A path from the scanned repository: shown on one line, as the
-            # finding cards show it.
-            location = html.escape(_shown_location(hotspot.get("location", "Unknown")))
+            # A path from the scanned repository: shown on one line, with the
+            # backslash of text that reads as an escape doubled, so a name the
+            # record writes as an escape (a file name that is not UTF-8) cannot
+            # be taken for the escape itself. The finding card's code element
+            # and copy attribute keep the path as recorded, as data.
+            location = html.escape(
+                str(shown_on_one_line(hotspot.get("location", "Unknown")))
+            )
             section += f"""
             <tr>
                 <td>{hotspot.get("count", 0)}</td>
