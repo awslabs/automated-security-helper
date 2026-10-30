@@ -25,6 +25,19 @@ The contract these cases pin:
   every project;
 - a worker that does not come back is named on the project's error and in the
   log, so the gap is loud rather than silent.
+
+How the wedged project is released
+----------------------------------
+``wedged`` blocks on its own cancel event, the one the executor sets when it
+abandons the project, so the release is the abandon itself and no clock is
+involved: the scan returns as soon as it has been given up on, however long the
+plan setup or the sibling took. An earlier shape released it from a
+``threading.Timer`` started before ``execute_workspace`` and gave the sibling a
+0.3 s budget; on a contended CI runner the sibling took 0.38 s and was abandoned
+before any masking assertion ran, and a slow start of ``wedged`` could fire the
+timer before its deadline. The budget is the one ``test_execution.py`` documents
+(``PROJECT_TIMEOUT``), for the reason given there: it has to cover the fixed cost
+of starting a project at all.
 """
 
 from __future__ import annotations
@@ -37,9 +50,9 @@ import pytest
 from automated_security_helper.core.cancellation import CancelEvent
 from automated_security_helper.models.workspace import ProjectRunStatus
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.workspace import execution
 from automated_security_helper.workspace.execution import execute_workspace
 from tests.unit.workspace.test_execution import (
+    PROJECT_TIMEOUT,
     FakeOrchestrator,
     _make_workspace,
     _sarif,
@@ -48,7 +61,6 @@ from tests.unit.workspace.test_execution import (
 
 pytestmark = pytest.mark.unit
 
-PROJECT_TIMEOUT = 0.3
 #: Values of the shape the masking propagates: long, mixed, no dictionary word.
 WEDGED_VALUE = "zzWedgedValue0071Kq"
 QUICK_VALUE = "zzQuickValue0072Lr"
@@ -71,12 +83,17 @@ def _plant_report(tmp_path, key, text):
     return path
 
 
-def _run_with_events(tmp_path, plan, **overrides):
+def _cancel_events(plan):
+    """One caller-given cancel event per project; the abandon sets the project's."""
+    return {project.key: CancelEvent() for project in plan.projects}
+
+
+def _run_with_events(tmp_path, plan, events, **overrides):
     return execute_workspace(
         plan,
-        _settings(tmp_path, **overrides),
+        _settings(tmp_path, project_timeout=PROJECT_TIMEOUT, **overrides),
         orchestrator_factory=FakeOrchestrator.create,
-        cancel_events={project.key: CancelEvent() for project in plan.projects},
+        cancel_events=events,
     )
 
 
@@ -87,22 +104,19 @@ def _entry(outcome, key):
 def test_an_abandoned_workers_values_are_masked_in_the_other_projects_output(
     tmp_path,
 ):
-    """``wedged`` overruns, is released shortly after, and comes back inside the grace."""
+    """``wedged`` overruns, is released by its abandon, and comes back inside the grace."""
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"), ("quick", "MEDIUM"))
-    release = threading.Event()
+    events = _cancel_events(plan)
     FakeOrchestrator.behaviour["wedged"] = {
-        "block": release,
+        "block": events["wedged"],
         "sarif": _sarif(level="error", count=1),
         "secret_values": [WEDGED_VALUE],
     }
     planted = _plant_report(tmp_path, "quick", WEDGED_VALUE)
-    timer = threading.Timer(PROJECT_TIMEOUT + 0.3, release.set)
-    timer.start()
     try:
-        outcome = _run_with_events(tmp_path, plan, project_timeout=PROJECT_TIMEOUT)
+        outcome = _run_with_events(tmp_path, plan, events)
     finally:
-        timer.cancel()
-        release.set()
+        events["wedged"].set()
 
     assert _entry(outcome, "wedged").status is ProjectRunStatus.FAILED
     assert _entry(outcome, "quick").status is ProjectRunStatus.COMPLETED
@@ -118,8 +132,8 @@ def test_an_abandoned_projects_own_output_keeps_no_other_projects_value_in_clear
 ):
     """The late worker discards the reports and keeps only the tools' own output."""
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"), ("quick", "MEDIUM"))
-    release = threading.Event()
-    FakeOrchestrator.behaviour["wedged"] = {"block": release}
+    events = _cancel_events(plan)
+    FakeOrchestrator.behaviour["wedged"] = {"block": events["wedged"]}
     FakeOrchestrator.behaviour["quick"] = {
         "sarif": _sarif(level="error", count=1),
         "secret_values": [QUICK_VALUE],
@@ -129,13 +143,10 @@ def test_an_abandoned_projects_own_output_keeps_no_other_projects_value_in_clear
     tool_output.mkdir(parents=True, exist_ok=True)
     raw = tool_output / "raw.txt"
     raw.write_text(f"{QUICK_VALUE}\n", encoding="utf-8")
-    timer = threading.Timer(PROJECT_TIMEOUT + 0.3, release.set)
-    timer.start()
     try:
-        outcome = _run_with_events(tmp_path, plan, project_timeout=PROJECT_TIMEOUT)
+        outcome = _run_with_events(tmp_path, plan, events)
     finally:
-        timer.cancel()
-        release.set()
+        events["wedged"].set()
 
     assert _entry(outcome, "wedged").status is ProjectRunStatus.FAILED
     assert not planted.exists(), (
@@ -148,14 +159,14 @@ def test_an_abandoned_projects_own_output_keeps_no_other_projects_value_in_clear
     ).exists(), "the results file survived the discard"
 
 
-def test_a_worker_that_does_not_come_back_is_named_as_unmasked(
-    tmp_path, caplog, monkeypatch
-):
-    """No caller event: the pool does not wait for the stop, and says so."""
+def test_a_worker_that_does_not_come_back_is_named_as_unmasked(tmp_path, caplog):
+    """No caller event: the pool does not wait for the stop, and says so.
+
+    ``wedged`` blocks on a plain event this test releases only after the
+    workspace has returned, so the worker has not come back whatever the host's
+    speed; without a caller-given event no grace is spent on it.
+    """
     caplog.set_level(logging.ERROR, logger=ASH_LOGGER.name)
-    # raising=False: at a base without the constant the case still measures the
-    # behaviour (the missing note) rather than failing on the attribute.
-    monkeypatch.setattr(execution, "_ABANDONED_STOP_GRACE_POLLS", 4, raising=False)
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"), ("quick", "MEDIUM"))
     release = threading.Event()
     FakeOrchestrator.behaviour["wedged"] = {
@@ -186,15 +197,12 @@ def test_a_worker_that_does_not_come_back_is_named_as_unmasked(
 def test_a_worker_that_comes_back_is_not_named_as_unmasked(tmp_path):
     """Must-not-flag control: a stop that finishes inside the grace adds no note."""
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"))
-    release = threading.Event()
-    FakeOrchestrator.behaviour["wedged"] = {"block": release}
-    timer = threading.Timer(PROJECT_TIMEOUT + 0.3, release.set)
-    timer.start()
+    events = _cancel_events(plan)
+    FakeOrchestrator.behaviour["wedged"] = {"block": events["wedged"]}
     try:
-        outcome = _run_with_events(tmp_path, plan, project_timeout=PROJECT_TIMEOUT)
+        outcome = _run_with_events(tmp_path, plan, events)
     finally:
-        timer.cancel()
-        release.set()
+        events["wedged"].set()
 
     entry = _entry(outcome, "wedged")
     assert entry.status is ProjectRunStatus.FAILED
