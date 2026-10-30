@@ -944,10 +944,18 @@ def test_a_listed_site_matches_its_offender_and_no_other():
 
 # -- every escaper of terminal_text is in a list ----------------------------------
 
-#: terminal_text's names that show nothing: the predicates (one names escape_for
-#: to compare with it), the marker, and as_written, which reads shown text back.
+#: terminal_text's names that show nothing: the predicates (two name escape_for
+#: to compare an escape's text with it: the "written" and the "ascii" lookalike
+#: readings of controls_shown), the marker, and as_written, which reads shown
+#: text back.
 _NO_ESCAPERS = frozenset(
-    {"is_shown_as_escape", "_reads_as_written_escape", "ShownText", "as_written"}
+    {
+        "is_shown_as_escape",
+        "_reads_as_written_escape",
+        "_reads_as_ascii_escape",
+        "ShownText",
+        "as_written",
+    }
 )
 #: Listed escapers that live outside terminal_text.
 _ESCAPERS_ELSEWHERE = frozenset({"controls_escaped"})
