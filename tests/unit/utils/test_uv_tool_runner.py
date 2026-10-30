@@ -3869,10 +3869,11 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
         ("scanners/cfn_nag_scanner.py", 'os.environ.get("DEVELOPER_DIR")'): (
             1,
             (
-                "a filesystem path candidate probed for the macOS developer"
-                " tools (_macos_developer_tools_present), beside"
-                " _MACOS_DEVELOPER_DIRS; only its existence is read, nothing"
-                " of it is passed on or printed; never a uv install input"
+                "a filesystem probe for the macOS developer tools"
+                " (_macos_developer_tools_present): the value is one candidate"
+                " directory tested for usr/bin/clang while the scanner is"
+                " constructed; it is never passed to a process or a uv install"
+                " input, and nothing of it prints"
             ),
         ),
         ("scanners/_trivy_scanner_base.py", 'os.environ.get("TRIVY_CONFIG")'): (
