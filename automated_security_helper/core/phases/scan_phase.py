@@ -125,11 +125,13 @@ def _declared_scanner_roster(config) -> List[str]:
 
     Extras (`__pydantic_extra__`) are included: a third-party scanner an operator
     configured is one they expect to run, and its silent absence is the same defect.
-    An extras section the configuration turns off (`enabled: false`) is not: the
-    operator expects it NOT to run, and when its module is not loaded it has no row
-    to be matched against, so counting it reported a scanner nobody wanted as one
-    that went missing. A built-in field stays whatever its flag says, because its
-    module always loads and a disabled one gets its SKIPPED row.
+    An extras section the configuration turns off (`enabled: false`) is listed too:
+    the roster is what the configuration declares, not what is switched on, and the
+    documentation says a scanner that is left off is still listed. A disabled
+    section whose module is not loaded has no row to be matched against, which is
+    what any section that never loaded looks like here; the roster cannot tell the
+    two apart, and it does not try to. A built-in field is listed whatever its flag
+    says, because its module always loads and a disabled one gets its SKIPPED row.
     """
     scanners_segment = getattr(config, "scanners", None)
     if scanners_segment is None:
@@ -140,11 +142,7 @@ def _declared_scanner_roster(config) -> List[str]:
         getattr(type(scanners_segment), "model_fields", {}) or {}
     ).items():
         roster.append(getattr(field_info, "alias", None) or field_name)
-    for extra_name, section in (
-        getattr(scanners_segment, "model_extra", None) or {}
-    ).items():
-        if section_enabled(section):
-            roster.append(extra_name)
+    roster.extend(getattr(scanners_segment, "model_extra", None) or {})
 
     seen = set()
     unique: List[str] = []
