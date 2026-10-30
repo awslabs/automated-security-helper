@@ -397,9 +397,14 @@ if os.name == "nt":
 
 
 try:
-    import pwd
-except ImportError:
-    pwd = None
+    FALLBACK = read_it()
+except OSError:
+    FALLBACK = None
+
+if os.name == "nt":
+    ONCE = 1
+else:
+    ONCE = 2
 
 with open("settings") as handle:
     SETTING = handle.read()
@@ -410,13 +415,17 @@ SETTING = "again"
 def test_the_binding_walk_sees_into_a_top_level_compound_statement():
     """Control: a def inside a top-level ``if`` that replaces a top-level def, and an
     assignment inside a ``with`` repeated at the top level, are each two bindings;
-    the ``try``/``except`` import idiom, which binds one name once at run time
-    whichever arm runs, is one."""
+    a ``try``/``except`` whose body and handler each assign one name, and an
+    ``if``/``else`` that assign one name once each, bind it once at run time
+    whichever arm runs, and are one. (An ``import`` is not a binding the walk
+    counts, so the arms are assignments here, which it does.)"""
     twice = _bound_more_than_once(_PLANTED_SECOND_BINDINGS)
 
     assert set(twice) == {"helper", "SETTING"}, twice
     assert twice["helper"] == [4, 10]
-    assert twice["SETTING"] == [20, 21]
+    assert twice["SETTING"] == [25, 26]
+    assert "FALLBACK" not in twice
+    assert "ONCE" not in twice
 
 
 def test_the_binding_walk_counts_an_arm_that_binds_twice_as_twice():
