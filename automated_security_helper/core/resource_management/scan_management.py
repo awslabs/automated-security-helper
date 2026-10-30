@@ -447,11 +447,12 @@ async def cleanup_scan_resources(
                 # tree under it, so this scan's output directory is also every
                 # other scan of the directory's. The registry decides, under
                 # its lock, whether another scan holds the tree (running or
-                # stopping, or registered later with its results in it) and
-                # runs the delete under that same lock, so a scan registered
-                # while the tree comes down waits instead of writing into it.
-                # Off the event loop: the delete blocks for as long as the tree
-                # takes to remove.
+                # stopping, or registered later with its results in it), marks
+                # the entry as removing, and runs the delete off the lock; a
+                # scan registered while the tree comes down waits on that mark
+                # instead of writing into it, and every other registry caller
+                # is not held by the delete. Off the event loop: the delete
+                # blocks for as long as the tree takes to remove.
                 reason, removed_output = await asyncio.to_thread(
                     registry.remove_output_of_scan, entry, remove
                 )

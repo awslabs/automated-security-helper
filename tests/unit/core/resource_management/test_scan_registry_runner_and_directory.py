@@ -26,6 +26,7 @@ Five mechanisms, each pinned against the behavior it replaced:
 
 import json
 import os
+import threading
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -269,7 +270,12 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
     """occupants_of_directory counted only scans that were running or settling,
     so cleanup of an old scan removed the shared output tree while a later,
     completed scan's results sat in it, and the check ran long before the
-    delete with the lock released in between."""
+    delete with the lock released in between. The first cure ran the delete
+    under the registry lock, which held every synchronous registry caller (the
+    event-loop thread's get_scan, list_scans, cancel_scan and register_scan
+    among them) for as long as the tree took to remove. The delete now runs off
+    the lock behind a per-entry mark: a registration of the same output tree
+    waits on the mark, a second removal is refused, and nothing else waits."""
 
     @staticmethod
     def _two_scans(registry, tmp_path, later_status):
@@ -305,13 +311,16 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert "running or stopping" in reason
         assert removed is False
 
-    def test_the_latest_scan_of_a_directory_removes_under_the_lock(self, tmp_path):
+    def test_the_latest_scan_of_a_directory_removes_off_the_lock(self, tmp_path):
         registry = ScanRegistry()
         _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
-        held = []
+        seen = []
 
         def remover():
-            held.append(registry._registry_lock.locked())
+            seen.append(registry._registry_lock.locked())
+            # A registry read from the remover's own thread: it takes the lock,
+            # which the delete no longer holds, and sees the removal mark.
+            seen.append(registry.get_scan(new).output_removal is not None)
             return True
 
         reason, removed = registry.remove_output_of_scan(
@@ -320,7 +329,92 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
 
         assert reason is None
         assert removed is True
-        assert held == [True]
+        assert seen == [False, True]
+        assert registry.get_scan(new).output_removal is None
+
+    @staticmethod
+    def _removal_in_progress(registry, scan_id):
+        """Start a removal of ``scan_id``'s tree whose remover blocks until
+        ``release`` is set; returns (thread, release) once the remover runs."""
+        started, release = threading.Event(), threading.Event()
+
+        def remover():
+            started.set()
+            release.wait(timeout=10)
+            return True
+
+        thread = threading.Thread(
+            target=registry.remove_output_of_scan,
+            args=(registry.get_scan(scan_id), remover),
+        )
+        thread.start()
+        assert started.wait(timeout=10)
+        return thread, release
+
+    def test_a_registration_of_the_tree_waits_and_other_callers_do_not(self, tmp_path):
+        registry = ScanRegistry()
+        _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        removing, release = self._removal_in_progress(registry, new)
+        outcome = {}
+
+        def register_a_third_scan():
+            outcome["scan_id"] = _register(registry, tmp_path / "proj")
+            # Registered only once the delete had ended and cleared its mark.
+            outcome["mark_after"] = registry.get_scan(new).output_removal
+
+        registering = threading.Thread(target=register_a_third_scan)
+        registering.start()
+        registering.join(timeout=0.5)
+
+        # The registration waits for the delete; a plain registry read does not.
+        assert registering.is_alive()
+        assert "scan_id" not in outcome
+        assert registry.get_scan(new).output_removal is not None
+        assert registry.get_scan_count() == 2
+
+        release.set()
+        removing.join(timeout=10)
+        registering.join(timeout=10)
+        assert not registering.is_alive()
+        assert registry.get_scan(outcome["scan_id"]) is not None
+        assert outcome["mark_after"] is None
+        assert registry.get_scan_count() == 3
+
+    def test_a_second_removal_of_the_tree_during_one_is_refused(self, tmp_path):
+        registry = ScanRegistry()
+        old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        removing, release = self._removal_in_progress(registry, new)
+        ran = []
+
+        again = registry.remove_output_of_scan(
+            registry.get_scan(new), lambda: ran.append(1) or True
+        )
+        the_old_one = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+
+        release.set()
+        removing.join(timeout=10)
+        assert again == ("this scan's output directory is already being removed", False)
+        assert "in progress" in the_old_one[0]
+        assert the_old_one[1] is False
+        assert ran == []
+
+    def test_a_remover_that_raises_clears_the_mark(self, tmp_path):
+        registry = ScanRegistry()
+        _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+
+        def remover():
+            raise PermissionError("not ours")
+
+        with pytest.raises(PermissionError):
+            registry.remove_output_of_scan(registry.get_scan(new), remover)
+
+        assert registry.get_scan(new).output_removal is None
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(new), lambda: True
+        )
+        assert (reason, removed) == (None, True)
 
 
 class TestProgressOfASupersededScanReadsNoFiles:

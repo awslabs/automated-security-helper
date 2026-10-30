@@ -265,6 +265,12 @@ class ScanRegistryEntry:
         # that restore. See occupies_its_directory.
         self.has_runner = False
         self.runner_done = Event()
+        # Set while remove_output_of_scan deletes this scan's output tree off
+        # the registry lock, and set-and-cleared when the delete has ended,
+        # whatever its outcome. register_scan waits on it for a scan of the
+        # same output tree; remove_output_of_scan refuses a second removal of
+        # the tree while it is set. None otherwise.
+        self.output_removal: Optional[Event] = None
         # Set when check_scan_progress closed this entry from a results file
         # while it was PENDING with no runner. That file can be a previous
         # scan's, so the runner's later RUNNING claim is admitted for such an
@@ -378,6 +384,18 @@ def _slot_of(entry: "ScanRegistryEntry") -> Tuple[str, str]:
     return ("own", entry.scan_id)
 
 
+class _OutputRemovalInProgress(Exception):
+    """register_scan's locked attempt met an output tree being removed.
+
+    Carries the removal's Event; the caller waits on it off the lock and tries
+    again. Never leaves ScanRegistry.
+    """
+
+    def __init__(self, removal: Event) -> None:
+        super().__init__("an output tree removal is in progress")
+        self.removal = removal
+
+
 class ScanRegistry:
     """Thread-safe registry for tracking active scans."""
 
@@ -400,8 +418,50 @@ class ScanRegistry:
         requested_severity_threshold: Optional[str] = None,
         environment_values: Iterable[str] = (),
     ) -> str:
+        """Register a new scan in the registry; see :meth:`_register_scan_once`.
+
+        A scan whose output tree is being removed by ``remove_output_of_scan``
+        (which deletes off the registry lock) waits for that removal to end
+        and is then registered, or refused, on the registry as it is then. The
+        wait is on the removal's own event, so the registry lock is free for
+        every other caller meanwhile; the delete used to run under the lock,
+        which held a synchronous caller on the event-loop thread (get_scan,
+        list_scans, cancel_scan, this method) for as long as the tree took to
+        remove.
         """
-        Register a new scan in the registry.
+        while True:
+            try:
+                return self._register_scan_once(
+                    directory_path,
+                    output_directory,
+                    severity_threshold=severity_threshold,
+                    config_path=config_path,
+                    scan_id=scan_id,
+                    max_active=max_active,
+                    session_id=session_id,
+                    slot=slot,
+                    requested_severity_threshold=requested_severity_threshold,
+                    environment_values=environment_values,
+                )
+            except _OutputRemovalInProgress as in_progress:
+                in_progress.removal.wait()
+
+    def _register_scan_once(
+        self,
+        directory_path: str,
+        output_directory: str,
+        severity_threshold: Optional[str] = "MEDIUM",
+        config_path: Optional[str] = None,
+        scan_id: Optional[str] = None,
+        max_active: Optional[int] = None,
+        session_id: Optional[str] = None,
+        slot: Optional[str] = None,
+        requested_severity_threshold: Optional[str] = None,
+        environment_values: Iterable[str] = (),
+    ) -> str:
+        """
+        Register a new scan in the registry (one attempt; ``register_scan``
+        retries it after an output tree removal in progress ends).
 
         Args:
             directory_path: Path to the directory being scanned
@@ -558,6 +618,17 @@ class ScanRegistry:
             requested = _canonical_directory(directory_path)
             requested_output = _canonical_directory(output_directory)
             for entry in self._registry.values():
+                if (
+                    entry.output_removal is not None
+                    and entry.canonical_output_directory == requested_output
+                ):
+                    # The tree is being deleted off the lock
+                    # (remove_output_of_scan). register_scan waits for that to
+                    # end and tries again, so the new scan is not registered
+                    # into a tree being removed from under it. Decided under
+                    # the lock, so a removal that starts after this attempt
+                    # found none sees this entry as an occupant instead.
+                    raise _OutputRemovalInProgress(entry.output_removal)
                 if not entry.occupies_its_directory():
                     continue
                 same_directory = entry.canonical_directory == requested
@@ -768,19 +839,39 @@ class ScanRegistry:
         removing them left that scan reporting results_available over an empty
         directory.
 
-        The check and the delete run under the registry lock, so a scan of the
-        directory registered while the tree is being removed waits for the
-        delete instead of writing into a tree deleted from under it. The remover
-        runs on the caller's thread with the lock held; callers run this off the
-        event loop (``asyncio.to_thread``), since the delete blocks for as long
-        as the tree takes to remove.
+        The check runs under the registry lock and the delete runs OFF it: the
+        entry is marked as having its output removal in progress
+        (``ScanRegistryEntry.output_removal``) under the lock, the lock is
+        released, the remover runs, and the mark is cleared under the lock
+        again, whatever the remover did. A ``register_scan`` of the same output
+        tree meanwhile waits on the mark's event and then proceeds against the
+        registry as it is after the delete, so it is not registered into a tree
+        being removed from under it; a second removal of the tree meanwhile is
+        refused. The delete used to run with the lock held, which held every
+        synchronous registry caller, on the event-loop thread included
+        (get_scan, list_scans, cancel_scan, register_scan), for as long as the
+        tree took to remove. The remover still runs on the caller's thread;
+        callers run this off the event loop (``asyncio.to_thread``).
         """
         with self._registry_lock:
+            if entry.output_removal is not None:
+                return (
+                    "this scan's output directory is already being removed",
+                    False,
+                )
             for other in self._registry.values():
                 if other.scan_id == entry.scan_id:
                     continue
                 if other.canonical_output_directory != entry.canonical_output_directory:
                     continue
+                if other.output_removal is not None:
+                    return (
+                        (
+                            "another scan's removal of this output directory is "
+                            "in progress"
+                        ),
+                        False,
+                    )
                 if other.occupies_its_directory():
                     return (
                         (
@@ -794,7 +885,13 @@ class ScanRegistry:
                         "a later scan holds its results in this output directory",
                         False,
                     )
+            removal = entry.output_removal = Event()
+        try:
             return None, remover()
+        finally:
+            with self._registry_lock:
+                entry.output_removal = None
+            removal.set()
 
     def update_scan_status(
         self, scan_id: str, status: MCScanStatus, error_message: Optional[str] = None
