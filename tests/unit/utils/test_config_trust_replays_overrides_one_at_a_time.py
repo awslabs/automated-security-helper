@@ -7,11 +7,14 @@
 section onto the trusted base in one call, so one override the bare base could
 not take (one writing under a section only the tree's config introduced) made the
 whole section unresolvable, and every key under ``scanners`` then read as not the
-operator's. The overrides are now replayed one at a time, and only the keys under
-or above a failed override's key are unresolvable. ``operator_paths`` decides
-provenance per entry for the same reason: an entry the operator appended to a
-list a tree config also fills is theirs. The replay is driven through a stand-in
-for ``apply_config_overrides`` over a dict, so the mechanism is tested on its own.
+operator's. The overrides are now replayed together first, as the scan applies
+them, and one at a time only when the batch raises, so only the keys under or
+above a failed override's key are unresolvable and a pair of overrides valid only
+together stays the operator's. ``operator_paths`` decides provenance per entry for
+the same reason: an entry the operator appended to a list a tree config also fills
+is theirs, while a list that leaves one of the operator's entries out is refused
+whole. The replay is driven through a stand-in for ``apply_config_overrides`` over
+a dict, so the mechanism is tested on its own.
 """
 
 from __future__ import annotations
@@ -118,4 +121,110 @@ def test_operator_paths_accepts_the_entry_the_operator_appended(
     assert [(c.path, c.refusal) for c in chosen] == [
         (None, NOT_THE_OPERATORS),
         (operators.resolve(), None),
+    ]
+
+
+def _apply_to_dict_validating(config: Dict[str, Any], overrides: List[str]):
+    """``_apply_to_dict`` plus the validation the real apply runs on the result:
+    a scanner whose ``options.mode`` is ``"file"`` must name ``options.path``.
+    ``apply_config_overrides`` validates the configuration it returns, so a pair
+    of overrides valid only together passes in one call and fails one at a time.
+    """
+    _apply_to_dict(config, overrides)
+    for section in config.get("scanners", {}).values():
+        options = section.get("options", {}) if isinstance(section, dict) else {}
+        if options.get("mode") == "file" and "path" not in options:
+            raise ValueError("options.mode is file, so options.path is required")
+    return config
+
+
+@pytest.fixture
+def validating_dict_overrides(monkeypatch):
+    monkeypatch.setattr(
+        resolve_config, "apply_config_overrides", _apply_to_dict_validating
+    )
+
+
+def test_overrides_valid_only_together_are_the_operators(
+    validating_dict_overrides, tmp_path
+):
+    """The scan applies a run's overrides in one call, so a mode and the path that
+    mode requires pass together. The replay applies them together first, and
+    the operator's own values read as the operator's; replayed one at a time
+    alone, the mode failed without its path, the path failed without its mode,
+    and both read as not the operator's."""
+    trusted = {"scanners": {"x": {"options": {"mode": "off"}}}}
+    config = _Config(
+        ConfigProvenance(
+            in_tree=(tmp_path / ".ash" / ".ash.yaml",),
+            trusted=trusted,
+            overrides=(
+                'scanners.x.options.mode="file"',
+                'scanners.x.options.path="/p"',
+            ),
+        )
+    )
+
+    assert set_by_operator(config, "scanners.x.options.mode", "file") is True
+    assert set_by_operator(config, "scanners.x.options.path", "/p") is True
+    assert set_by_operator(config, "scanners.x.options.mode", "off") is False
+
+
+def test_a_batch_that_fails_still_replays_the_rest_one_at_a_time(
+    validating_dict_overrides, tmp_path
+):
+    """When the batch raises (one override the bare base cannot take), the
+    replay falls back to one at a time and the other keys stay resolved, as
+    before."""
+    trusted = {"scanners": {"bandit": {"enabled": True}, "semgrep": {"enabled": True}}}
+    config = _Config(
+        ConfigProvenance(
+            in_tree=(tmp_path / ".ash" / ".ash.yaml",),
+            trusted=trusted,
+            overrides=(
+                "scanners.plugin-only.options.x=1",
+                "scanners.semgrep.enabled=false",
+            ),
+        )
+    )
+
+    assert set_by_operator(config, "scanners.semgrep.enabled", False) is True
+    assert set_by_operator(config, "scanners.plugin-only.options.x", 1) is False
+
+
+def test_operator_paths_refuses_a_list_that_leaves_the_operators_entries_out(
+    dict_overrides, tmp_path
+):
+    """The operator's ``rules_paths`` is ``[A, B]`` and the tree's config writes
+    ``[A]``. Taking ``A`` as the operator's would let the repository drop ``B``
+    with no refusal and no warning, so the whole list is refused, one refusal
+    per entry, and the caller warns and falls back as it does for a list the
+    operator did not set. A list that holds every operator entry keeps per-entry
+    provenance: the operator's entries are theirs, the tree's additions are
+    refused."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    first = tmp_path / "rules-a"
+    first.mkdir()
+    second = tmp_path / "rules-b"
+    second.mkdir()
+    trees = tmp_path / "tree-rules"
+    trees.mkdir()
+    key = "scanners.guard.options.rules_paths"
+    config = _Config(
+        ConfigProvenance(
+            in_tree=(repo / ".ash" / ".ash.yaml",),
+            trusted={"scanners": {"guard": {"options": {"rules_paths": []}}}},
+            overrides=(f"{key}={json.dumps([str(first), str(second)])}",),
+        )
+    )
+
+    left_out = operator_paths(config, key, [str(first)], repo)
+    assert [(c.path, c.refusal) for c in left_out] == [(None, NOT_THE_OPERATORS)]
+
+    superset = operator_paths(config, key, [str(first), str(trees), str(second)], repo)
+    assert [(c.path, c.refusal) for c in superset] == [
+        (first.resolve(), None),
+        (None, NOT_THE_OPERATORS),
+        (second.resolve(), None),
     ]

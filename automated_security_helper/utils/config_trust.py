@@ -61,9 +61,11 @@ Constraints and failure modes
 * Fail closed. A config with no recorded provenance (one built without
   ``resolve_config``) counts as the tree's, and so does a key whose trusted value
   cannot be resolved because an override does not apply to the bare trusted base.
-  The overrides of a section are replayed one at a time, so such an override
+  The overrides of a section are replayed together first, as the scan applies
+  them, and one at a time when the batch does not apply, so such an override
   makes only the keys it writes to (and the keys above them) unresolvable; the
-  other keys of the section keep their trusted value.
+  other keys of the section keep their trusted value, and a pair of overrides
+  valid only together stays the operator's.
 * A trusted config outside the tree that ``extends`` a base inside it counts as the
   tree's as a whole, as it does for the sandbox's grants: the merged document does not
   record which file set a value. Set such a value with ``--config-overrides``.
@@ -130,13 +132,19 @@ class ConfigProvenance:
         return value_at(resolved.value, key)
 
     def _resolve_section(self, section: str) -> Any:
-        """The trusted base with the section's overrides replayed, one at a time.
+        """The trusted base with the section's overrides replayed.
 
-        Each override is applied on its own, in the order given, so one that the
-        bare trusted base cannot take (it writes under a section only the tree's
-        config introduced, say) is recorded in ``failed`` by its key and the
-        others still apply. Replayed together, one such override made the whole
-        section unresolvable, and every key under ``scanners`` then read as not
+        The section's overrides are applied together first, as the scan applies
+        them: ``apply_config_overrides`` validates the configuration it returns,
+        so two overrides that are valid only together (a mode and the path that
+        mode requires) are taken as the operator wrote them. Only when the batch
+        raises is each override applied on its own, in the order given, so one
+        that the bare trusted base cannot take (it writes under a section only
+        the tree's config introduced, say) is recorded in ``failed`` by its key
+        and the others still apply. Replayed together alone, one such override
+        made the whole section unresolvable, and every key under ``scanners``
+        then read as not the operator's; replayed one at a time alone, a pair
+        valid only together failed, and the operator's own value read as not
         the operator's.
         """
         if self.trusted is None:
@@ -149,6 +157,13 @@ class ConfigProvenance:
             apply_config_overrides,
         )
 
+        try:
+            return _ResolvedSection(apply_config_overrides(base, mine), ())
+        except Exception:  # noqa: BLE001 - any failure means "cannot tell"
+            pass
+        # The batch may have been applied in part before it raised; replay from
+        # an untouched copy of the base.
+        base = copy.deepcopy(self.trusted)
         failed: List[Tuple[str, ...]] = []
         for override in mine:
             try:
@@ -463,8 +478,14 @@ def _operator_entries(config: Any, key: str, entries: List[Any]) -> List[bool]:
 
     Every entry is, when ``set_by_operator`` accepts the list as a whole; else an
     entry is, when the trusted base plus the operator's overrides resolves
-    ``key`` to a list holding it. An entry of the tree's, and every entry when
-    the trusted list cannot be resolved, is not.
+    ``key`` to a list holding it, and the list holds every entry of the
+    operator's. An entry of the tree's, and every entry when the trusted list
+    cannot be resolved, is not. Nor is any entry when the list leaves one of the
+    operator's own entries out: a tree config that writes ``[A]`` over the
+    operator's ``[A, B]`` chose which of the operator's rules run, and taking
+    ``A`` alone as the operator's would drop ``B`` with no refusal, no warning
+    and no fallback. Refusing the whole list gives the caller one refusal per
+    entry, as a list the operator did not set does, so it warns and falls back.
     """
     if set_by_operator(config, key, entries):
         return [True] * len(entries)
@@ -473,6 +494,11 @@ def _operator_entries(config: Any, key: str, entries: List[Any]) -> List[bool]:
         return [False] * len(entries)
     expected = provenance.trusted_value(key)
     if expected is _MISSING or not isinstance(expected, (list, tuple)):
+        return [False] * len(entries)
+    if any(
+        not any(_same_value(trusted_entry, entry) for entry in entries)
+        for trusted_entry in expected
+    ):
         return [False] * len(entries)
     return [
         any(_same_value(trusted_entry, entry) for trusted_entry in expected)
