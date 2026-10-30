@@ -244,6 +244,47 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         assert result["removed_output"] is False
         assert (elsewhere / "keep.txt").exists()
 
+    def test_a_source_directory_that_is_a_retargeted_link_is_not_removed_through(
+        self, registry, tmp_path
+    ):
+        """The lstat walk started below the source directory, so a source that
+        was itself a link, retargeted after registration, still redirected the
+        delete: resolving the stored path against the canonical directory does
+        not."""
+        if not hasattr(os, "symlink"):
+            pytest.skip("symlinks are not available on this platform")
+        real = tmp_path / "real"
+        (real / ".ash" / "ash_output").mkdir(parents=True)
+        link = tmp_path / "link"
+        try:
+            link.symlink_to(real)
+        except OSError:
+            pytest.skip("this platform refuses to create a symlink here")
+        entry = ScanRegistryEntry(
+            scan_id="scan-1",
+            directory_path=str(link),
+            output_directory=str(link / ".ash" / "ash_output"),
+        )
+        entry.status = MCScanStatus.COMPLETED
+        entry.has_runner = False
+        assert entry.canonical_directory == real.resolve()
+        # After the scan, the link is pointed at an unrelated tree.
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / ".ash" / "ash_output").mkdir(parents=True)
+        (elsewhere / ".ash" / "ash_output" / "keep.txt").write_text(
+            "keep", encoding="utf-8"
+        )
+        link.unlink()
+        link.symlink_to(elsewhere)
+        registry.get_scan.return_value = entry
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["removed_output"] is False
+        assert "outside the scanned directory" in result["output_dir_error"]
+        assert (elsewhere / ".ash" / "ash_output" / "keep.txt").exists()
+
     def test_a_real_output_tree_is_still_removed(self, registry, tmp_path):
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         output = _output_of(entry)

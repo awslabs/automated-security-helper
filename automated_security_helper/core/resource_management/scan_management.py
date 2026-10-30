@@ -11,9 +11,7 @@ to provide a higher-level interface for scan management.
 """
 
 import asyncio
-import os
 import shutil
-import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -43,36 +41,35 @@ class _OutputDirectoryInUse(Exception):
     """The output directory must not be removed now; the message says why."""
 
 
-def _link_in_output_path(output_dir: Path, directory_path: Optional[str]) -> bool:
-    """Whether a component of ``output_dir`` is a symbolic link at cleanup time.
+def _output_dir_within(output_dir: Path, canonical_directory: Path) -> bool:
+    """Whether ``output_dir`` still resolves to a path inside the scanned tree.
 
     The output directory is stored as a string at registration and removed by
-    that path later. Every component from the scan's source directory down to
-    the output directory (``<source>/.ash/ash_output`` for a scan) is checked
-    without following links, and the output directory itself always is: a
-    ``.ash`` that became a link after the scan would otherwise redirect the
-    recursive delete to wherever it points, outside the scanned tree.
+    that path later; MCP scans place it under the scanned directory
+    (``<source>/.ash/ash_output``), whose resolved form the registry fixed at
+    registration as ``canonical_directory``. The recursive delete must land
+    inside that tree. Resolving the stored path at cleanup time and requiring
+    the result to be under the canonical directory refuses every way a link
+    can redirect it: a ``.ash`` or ``ash_output`` that became a link after the
+    scan, a source directory that is itself a link retargeted since, and a
+    link anywhere above them. (A per-component lstat walk from the source
+    directory down checked none of the source's own ancestors, and checked
+    only the last component when the stored spelling did not sit under the
+    stored source.) A link that stays inside the tree is admitted: the delete
+    then removes a directory the scan owned.
+
+    False when the path cannot be resolved at all (a link loop, a NUL byte):
+    nothing is removed through a path that cannot be read.
     """
-    components = [output_dir]
-    if directory_path:
-        source = Path(directory_path)
-        try:
-            relative = output_dir.relative_to(source)
-        except ValueError:
-            relative = None
-        if relative is not None:
-            components = []
-            current = source
-            for part in relative.parts:
-                current = current / part
-                components.append(current)
-    for component in components:
-        try:
-            if stat.S_ISLNK(os.lstat(component).st_mode):
-                return True
-        except FileNotFoundError:
-            return False
-    return False
+    try:
+        resolved = output_dir.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    try:
+        resolved.relative_to(canonical_directory)
+    except ValueError:
+        return False
+    return True
 
 
 def _remove_output_tree(output_dir: Path) -> bool:
@@ -419,11 +416,13 @@ async def cleanup_scan_resources(
 
                 def remove() -> bool:
                     # The path was recorded at registration; a link placed on
-                    # it since would redirect the delete outside the scanned
-                    # tree.
-                    if _link_in_output_path(output_dir, entry.directory_path):
+                    # or above it since would redirect the delete outside the
+                    # scanned tree. Checked here, inside the registry's lock
+                    # and right before the delete.
+                    if not _output_dir_within(output_dir, entry.canonical_directory):
                         raise _OutputDirectoryInUse(
-                            "a component of the output path is now a symbolic link"
+                            "the output path now resolves outside the scanned "
+                            "directory (a component of it became a symbolic link)"
                         )
                     # The stats and the recursive delete, on the worker thread
                     # this remover runs on; True when the tree is absent
