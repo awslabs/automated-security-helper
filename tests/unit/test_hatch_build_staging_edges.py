@@ -20,7 +20,9 @@ the same sources staged a different file there.
 Staging the Dockerfile and recording the commit shared one handler. An error while
 staging (a Dockerfile that would not write, say) was caught by the handler that
 records "build-error", which overwrote the commit record before the commit was ever
-looked up, although git could still name it.
+looked up, although git could still name it. Both handlers also printed the same
+"asset staging error" line, whichever step had failed; each now prints one line
+that names its step.
 
 What is asserted
 ----------------
@@ -116,6 +118,57 @@ def test_the_staged_dockerfile_has_unix_line_breaks_on_every_host(
 
     staged = hook.ASH_ASSETS_PATH.joinpath("Dockerfile").read_bytes()
     assert staged == b"FROM scratch\nRUN true\n"
+
+
+@pytest.mark.parametrize(
+    ("staging_fails", "commit_fails", "steps"),
+    [
+        pytest.param(True, False, ["staging the Dockerfile"], id="staging-only"),
+        pytest.param(False, True, ["recording the commit"], id="commit-only"),
+        pytest.param(
+            True,
+            True,
+            ["staging the Dockerfile", "recording the commit"],
+            id="both",
+        ),
+    ],
+)
+def test_each_failing_step_prints_one_message_naming_it(
+    monkeypatch, tmp_path, capsys, staging_fails, commit_fails, steps
+):
+    """Red at the base: both handlers printed the same two lines ("Unexpected
+    error in build hook" and "Continuing build despite asset staging error"), so
+    a commit-record failure said it was a staging error, and both failing printed
+    the pair twice with nothing to tell the steps apart."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _give_it_its_inputs(hook, "FROM scratch\n")
+    sha = hashlib.sha1(b"a commit", usedforsecurity=False).hexdigest()
+    monkeypatch.setattr(hook.shutil, "which", lambda name: "/usr/bin/git")
+
+    def staged(content):
+        raise RuntimeError("the Dockerfile would not stage")
+
+    def run(*args, **kwargs):
+        if commit_fails:
+            raise PermissionError(13, "Permission denied", "/usr/bin/git")
+        return hook.subprocess.CompletedProcess(
+            args[0], 0, stdout=b"\n" + sha.encode("ascii") + b"\n", stderr=b""
+        )
+
+    if staging_fails:
+        monkeypatch.setattr(hook, "staged_dockerfile_text", staged)
+    monkeypatch.setattr(hook.subprocess, "run", run)
+
+    object.__new__(hook.CustomBuildHook)._stage_assets()
+
+    messages = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if "continuing the build" in line
+    ]
+    assert len(messages) == len(steps), messages
+    for step in steps:
+        assert sum(step in line for line in messages) == 1, (step, messages)
 
 
 def test_an_error_while_staging_the_dockerfile_keeps_the_commit(monkeypatch, tmp_path):

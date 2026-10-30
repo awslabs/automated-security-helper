@@ -365,8 +365,7 @@ class CustomBuildHook(BuildHookInterface):
             # run, which _record_commit handles.
             raise
         except Exception as e:
-            _say(f"Unexpected error in build hook: {e}")
-            _say("Continuing build despite asset staging error")
+            _say(f"Unexpected error staging the Dockerfile, continuing the build: {e}")
 
         # After the staging, outside its handler: an error while staging the
         # Dockerfile used to be caught by the same handler that records
@@ -383,13 +382,12 @@ class CustomBuildHook(BuildHookInterface):
                 f"Successfully wrote git details '{commit_sha}' to {ASH_INSTALLED_REVISION_PATH}"
             )
         except Exception as e:
-            _say(f"Unexpected error in build hook: {e}")
+            _say(f"Unexpected error recording the commit, continuing the build: {e}")
             # Ensure we have some revision file even if there's an error
             try:
                 ASH_INSTALLED_REVISION_PATH.write_text("build-error")
             except Exception:  # nosec B110 — build must continue even if revision file write fails
                 pass
-            _say("Continuing build despite asset staging error")
 
     def _get_commit_sha(self) -> str:
         """Get the Git commit SHA, with fallbacks for different build scenarios.
