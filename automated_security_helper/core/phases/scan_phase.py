@@ -1736,8 +1736,10 @@ class ScanPhase(EnginePhase):
             # additional_reports looking for a "source" key, and both were
             # structurally pinned at 0: _process_results keys that dict by
             # ScanResultsContainer.target_type, which is None for the excluded and
-            # missing-dependency containers built during preparation, so the
-            # "source" key the walk required was never there. Measured on a host
+            # missing-dependency containers built during preparation (filed under
+            # the string "None", the key they have once the results are saved
+            # as JSON and read back), so the "source" key the walk required was
+            # never there. Measured on a host
             # without cfn-nag, grype and syft: preparation logged
             # "Missing dependencies: 0" while validation, reading
             # dependency_error_scanners through the validation manager, reported
@@ -1747,7 +1749,7 @@ class ScanPhase(EnginePhase):
             #
             # Keying additional_reports by `target_type or "source"` instead was
             # rejected: ScannerStatisticsCalculator.get_scanner_status_info and
-            # cli.merge both read the None key deliberately to tell a shard's
+            # cli.merge both read the "None" key deliberately to tell a shard's
             # own scanners from the ones it recorded as not its own, so renaming
             # it would break the distributed path to fix a log line.
             excluded_scanners_count = len(excluded_scanner_names)
