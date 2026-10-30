@@ -994,9 +994,10 @@ def _plugin_error_text(plugin_report: Mapping) -> str:
     return ""
 
 
-# The name CDK's own CloudFormation Validate plugin writes its entry under, from
-# aws-cdk-lib 2.262.0. It is never a requested pack, so its entry can stand for none.
-_CDK_OWN_PLUGIN_NAME = "CloudFormation Validate"
+#: The name CDK's own CloudFormation Validate plugin writes its entry under, from
+#: aws-cdk-lib 2.262.0. It is never a requested pack, so its entry can stand for none,
+#: and the scanner does not count it as a pack that evaluated a template.
+CDK_OWN_PLUGIN_NAME = "CloudFormation Validate"
 
 
 def _violations_from_validation_report(
@@ -1336,7 +1337,7 @@ def _violations_from_validation_report(
         unaccounted = sorted(
             name
             for name in seen_names
-            if name not in (expected_plugins or ()) and name != _CDK_OWN_PLUGIN_NAME
+            if name not in (expected_plugins or ()) and name != CDK_OWN_PLUGIN_NAME
         )
         short = unnamed - len(unaccounted)
         if short > 0:

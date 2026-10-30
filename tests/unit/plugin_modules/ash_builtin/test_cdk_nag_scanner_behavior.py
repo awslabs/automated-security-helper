@@ -1562,6 +1562,41 @@ def test_a_pack_that_ran_clean_beside_one_that_threw_is_a_partly_evaluated_targe
     ]
 
 
+def test_cdk_own_validation_plugins_entry_does_not_make_a_target_partly_evaluated(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """CDK's own CloudFormation Validate plugin writes an entry into every report. On a
+    template where every requested pack threw, that entry was the only one in the
+    mapping, so the target read partly evaluated ("1 pack(s) evaluated it") and the
+    summary no longer said that no rules were evaluated, which was the true statement.
+    The entry is CDK's, never a requested pack's, and does not count."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"CloudFormation Validate": []},
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "AwsSolutions)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 0
+    assert any(
+        r.message.startswith("cdk-nag did not evaluate ")
+        and "every requested" not in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert any(
+        "failed on all 1 template(s)" in r.message
+        and "No rules were evaluated" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any("every requested pack on" in r.message for r in caplog.records)
+
+
 def test_the_missing_dependency_reason_offers_no_install_hint_for_a_wrapper_import_failure(
     scanner, monkeypatch
 ):

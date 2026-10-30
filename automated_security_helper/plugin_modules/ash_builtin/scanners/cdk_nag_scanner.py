@@ -1624,12 +1624,28 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         # evaluated. Deciding this by the kept findings instead read a
                         # template one pack evaluated cleanly as not evaluated at all,
                         # and the summary then said no rules were evaluated of it.
-                        ran = nag_result_dict.results or {}
+                        # CDK's own CloudFormation Validate plugin writes an entry into
+                        # every report and is never a requested pack, so its entry does
+                        # not make the target partly evaluated: with it counted, a
+                        # template every requested pack threw on read "1 pack(s)
+                        # evaluated it" where no cdk-nag rule had run.
+                        from automated_security_helper.utils.cdk_nag_wrapper import (
+                            CDK_OWN_PLUGIN_NAME,
+                        )
+
+                        results = nag_result_dict.results or {}
+                        ran = {
+                            pack: findings
+                            for pack, findings in results.items()
+                            if pack != CDK_OWN_PLUGIN_NAME
+                        }
                         kept = [
-                            finding for findings in ran.values() for finding in findings
+                            finding
+                            for findings in results.values()
+                            for finding in findings
                         ]
+                        sarif_results.extend(kept)
                         if ran:
-                            sarif_results.extend(kept)
                             self.targets_partly_evaluated += 1
                             ASH_LOGGER.error(
                                 f"cdk-nag did not evaluate every requested pack against "
@@ -1637,8 +1653,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                                 f"{len(kept)} finding(s) are kept): {failure}"
                             )
                         else:
+                            own = (
+                                f" ({len(kept)} finding(s) from CDK's own validation "
+                                "plugin are kept)"
+                                if kept
+                                else ""
+                            )
                             ASH_LOGGER.error(
-                                f"cdk-nag did not evaluate {cfn_file}: {failure}"
+                                f"cdk-nag did not evaluate {cfn_file}{own}: {failure}"
                             )
                         self.errors.append(f"{cfn_file}: {failure}")
                         continue
