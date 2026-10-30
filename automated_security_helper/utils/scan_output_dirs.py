@@ -566,11 +566,13 @@ def git_index_below(
 
     Every entry, whatever its type: a regular file, a link, a submodule. git is
     asked once, about the repository :func:`_repository_root_of` finds from where
-    *directory* really is (every link resolved), named on the command line
-    (``--git-dir`` and ``--work-tree``), so nothing inside *directory* decides
-    which repository answers; *directory* is the pathspec, taken literally, and
-    without regard to case where the filesystem compares names that way
-    (:func:`_pathspec_options`). ``core.fsmonitor`` is turned off and
+    *directory* really is (every link resolved; for a *directory* that is itself
+    a link, from where its parent really is, :func:`_where_git_is_asked`), named
+    on the command line (``--git-dir`` and ``--work-tree``), so nothing inside
+    *directory* decides which repository answers; *directory* is the pathspec,
+    taken literally, and without regard to case where the filesystem compares
+    names that way (:func:`_pathspec_options`). A *directory* that git tracks as
+    a link or a submodule is listed as the entry ``""``. ``core.fsmonitor`` is turned off and
     ``core.hooksPath`` pointed at ``/dev/null`` for the call (:func:`git_argv`),
     so the repository's own config cannot start a program, and the variables that
     would point git elsewhere or change what the pathspec matches are left out of
@@ -601,17 +603,41 @@ def git_index_below(
     # repository's, and one reached through a link in the repository that leads
     # out of it is not. The answer's base stays the directory as spelled, since
     # its callers join the names onto it, and the two are one directory.
-    real = _resolved(base)
-    root = _repository_root_of(real)
+    asked, tail = _where_git_is_asked(base)
+    root = _repository_root_of(asked)
     if root is None:
         return GitIndexAnswer(base)
-    relative = real.relative_to(root).as_posix()
+    relative = PurePosixPath(*asked.relative_to(root).parts, *tail).as_posix()
     names, error, could_not_run = _index_listing(root, relative, values=values)
     if names is None:
         return GitIndexAnswer(
             base, repository=root, error=error, could_not_run=could_not_run
         )
     return GitIndexAnswer(base, names=names, repository=root)
+
+
+def _where_git_is_asked(base: Path) -> Tuple[Path, Tuple[str, ...]]:
+    """Where the repository holding *base* is looked for, and the pathspec's tail.
+
+    *base* with every link resolved, and no tail, for a directory in its own
+    right. For a *base* that is itself a link or a junction: its parent with
+    every link resolved, and *base*'s own name as the tail. git tracks such a
+    link as an entry of the repository holding the link's directory, listed as
+    ``""`` below the link's own path, which is how a committed link at the output
+    directory is reported (:func:`committed_files_at_results_paths`); resolving
+    the link first asked git about the target's files and lost that entry, and
+    for a link leading out of the repository answered "no repository" where the
+    link itself is the repository's.
+    """
+    # Imported here, as in _reached_through_a_link.
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
+
+    try:
+        if _is_link_stat(os.lstat(base)):
+            return _resolved(base.parent), (base.name,)
+    except OSError:
+        pass
+    return _resolved(base), ()
 
 
 def _index_listing(

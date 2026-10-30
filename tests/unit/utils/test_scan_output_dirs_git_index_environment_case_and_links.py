@@ -21,7 +21,11 @@ the git spawn (no git runs):
 - a ``.git`` entry inside an earlier run's ``.ash/ash_output`` made that
   directory its own repository, whose empty index read as "nothing committed",
   so the directory was named and left out whole, every file in it hidden; a
-  directory is named only when a repository above it lists the index.
+  directory is named only when a repository above it lists the index;
+- resolving the directory before asking git also resolved a directory that is
+  itself a committed link, so git was asked about the link's target and the
+  entry that marks the directory as tracked (``""``) was lost; a directory that
+  is itself a link is asked about by its own name, under its parent resolved.
 """
 
 from __future__ import annotations
@@ -142,6 +146,74 @@ def test_the_repository_is_found_from_where_the_directory_really_is(
     assert f"--work-tree={repo}" in args
     assert args[-1] == "sub/out"
     assert kwargs["cwd"] == repo
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_a_directory_that_is_itself_a_link_is_asked_about_by_its_own_name(
+    tmp_path, monkeypatch
+):
+    """``.ash/ash_output`` committed as a link to ``../src``: git tracks the link
+    as an entry, listed as ``""`` below the link's own path. Asked about ``src``
+    instead, git listed src's files and never that entry."""
+    repo = _repository(tmp_path)
+    (repo / "src").mkdir()
+    (repo / ".ash").mkdir()
+    (repo / ".ash" / "ash_output").symlink_to(repo / "src", target_is_directory=True)
+    git = _GitStandIn(b".ash/ash_output\0")
+    monkeypatch.setattr(subprocess_utils, "spawn_run", git)
+
+    answer = git_index_below(repo / ".ash" / "ash_output")
+
+    assert answer.repository == repo
+    assert answer.base == repo / ".ash" / "ash_output"
+    assert answer.names == [""]
+    ((args, _),) = git.calls
+    assert args[-1] == ".ash/ash_output"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_a_link_whose_parent_sits_through_a_link_is_asked_where_the_parent_is(
+    tmp_path, monkeypatch
+):
+    """The parent is resolved, as any directory is; only the last component, the
+    link itself, is kept as spelled."""
+    repo = _repository(tmp_path)
+    (repo / "sub" / "src").mkdir(parents=True)
+    (repo / "sub" / "out").symlink_to(repo / "sub" / "src", target_is_directory=True)
+    alias = repo.parent / "alias"
+    alias.symlink_to(repo / "sub")
+    git = _GitStandIn(b"")
+    monkeypatch.setattr(subprocess_utils, "spawn_run", git)
+
+    answer = git_index_below(alias / "out")
+
+    assert answer.repository == repo
+    assert answer.names == []
+    ((args, _),) = git.calls
+    assert args[-1] == "sub/out"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_control_a_directory_below_a_link_is_still_asked_about_where_it_really_is(
+    tmp_path, monkeypatch
+):
+    repo = _repository(tmp_path)
+    (repo / "src" / "deep").mkdir(parents=True)
+    (repo / "linked").symlink_to(repo / "src", target_is_directory=True)
+    git = _GitStandIn(b"src/deep/kept.md\0")
+    monkeypatch.setattr(subprocess_utils, "spawn_run", git)
+
+    answer = git_index_below(repo / "linked" / "deep")
+
+    assert answer.names == ["kept.md"]
+    ((args, _),) = git.calls
+    assert args[-1] == "src/deep"
 
 
 def test_a_repository_inside_an_earlier_output_dir_does_not_name_it(
