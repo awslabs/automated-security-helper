@@ -48,14 +48,18 @@ def test_a_reaped_child_whose_pid_a_live_process_holds_is_not_signalled():
 
 @skip_on_windows
 def test_a_reaped_child_whose_group_outlives_it_is_still_stopped():
-    """No process holds the pid, so the group that exists is the child's own orphans."""
+    """No process holds the pid, so the group that exists is the child's own orphans.
+
+    Every group read in _stop_tree goes through the zombie-aware ``_group_survives``:
+    the first read, before the kill, finds the orphans' group; the read after the
+    kill finds it gone. A group read as gone before the kill is nothing to signal.
+    """
     process = _child(0)
     with (
         patch.object(subprocess_utils, "_pid_names_a_live_process", return_value=False),
-        patch.object(subprocess_utils, "_group_exists", return_value=True),
         patch.object(subprocess_utils, "_signal_group", return_value=False) as sg,
         patch.object(subprocess_utils, "_wait_after_kill"),
-        patch.object(subprocess_utils, "_group_survives", return_value=False),
+        patch.object(subprocess_utils, "_group_survives", side_effect=[True, False]),
     ):
         subprocess_utils._stop_tree(process, grace=0)
     sg.assert_called_once_with(4242, signal.SIGKILL)
@@ -63,13 +67,14 @@ def test_a_reaped_child_whose_group_outlives_it_is_still_stopped():
 
 @skip_on_windows
 def test_an_unreaped_child_is_stopped_without_asking_about_its_pid():
+    """An unreaped child still holds its pid, so the group it names is its own: the
+    pre-kill ``_group_survives`` read finds it, the post-kill read finds it gone."""
     process = _child(None)
     with (
         patch.object(subprocess_utils, "_pid_names_a_live_process") as live,
-        patch.object(subprocess_utils, "_group_exists", return_value=True),
         patch.object(subprocess_utils, "_signal_group", return_value=False) as sg,
         patch.object(subprocess_utils, "_wait_after_kill"),
-        patch.object(subprocess_utils, "_group_survives", return_value=False),
+        patch.object(subprocess_utils, "_group_survives", side_effect=[True, False]),
     ):
         subprocess_utils._stop_tree(process, grace=0)
     live.assert_not_called()
