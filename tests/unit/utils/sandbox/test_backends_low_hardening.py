@@ -412,6 +412,32 @@ def test_firejail_hides_a_sibling_whose_name_it_would_read_as_a_pattern(layout):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="firejail's plan reads os.getuid()")
+def test_firejail_refuses_a_hidden_pattern_that_would_also_hide_a_granted_path(
+    layout,
+):
+    """``too~`` beside the granted ``tool`` would become ``too?``, which hides the tool.
+
+    firejail expands the blacklist with glob(3), where ``?`` matches exactly one
+    character, so the substituted value matches the granted path too and the scanner
+    could not start. The plan is refused, naming both paths, instead.
+    """
+    persist = layout.tmp / "persist" / "local"
+    (persist / "tool" / "bin").mkdir(parents=True)
+    (persist / "too~").mkdir()
+    (layout.home / ".local").symlink_to(persist, target_is_directory=True)
+    backend = FirejailBackend()
+    backend._executable = "/fj"
+
+    with pytest.raises(SandboxUnavailable, match="too") as refused:
+        backend.plan(
+            ["/bin/true"],
+            {},
+            _policy(layout, read_only=(layout.system, persist / "tool")),
+        )
+    assert _real(persist / "tool").as_posix() in str(refused.value)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="firejail's plan reads os.getuid()")
 def test_firejail_refuses_a_path_it_would_read_as_a_pattern(layout):
     odd = layout.tmp / "out[1]"
     odd.mkdir()

@@ -14,6 +14,7 @@ See docs/content/docs/scanner-sandbox.md for what each backend can and cannot hi
 from __future__ import annotations
 
 import errno
+import fnmatch
 import json
 import os
 import platform
@@ -835,7 +836,7 @@ def _firejail_path(path: Path) -> str:
     return text
 
 
-def _firejail_hidden_path(path: Path) -> str:
+def _firejail_hidden_path(path: Path, granted: Sequence[Path] = ()) -> str:
     """``path`` as a --blacklist value, each pattern character replaced with ``?``.
 
     A blacklist names what the scanner may not see, so a value that matches more
@@ -846,11 +847,32 @@ def _firejail_hidden_path(path: Path) -> str:
     the whole spawn the way a pattern in a whitelist or a read-write value does. A
     control character still cannot be written and is refused as _firejail_path
     refuses it.
+
+    The one way "more" is wrong: firejail expands the value with glob(3), where
+    ``?`` matches exactly one character, so ``too~`` beside a granted ``tool``
+    becomes ``too?`` and hides the tool, and the scanner cannot start. A substituted
+    value is therefore matched against every path in ``granted`` (the policy's
+    readable and writable paths, resolved) and each directory above one; a match
+    refuses the plan, naming both paths, rather than hiding what the policy grants.
+    fnmatch's ``?`` also matches ``/``, so the check is at least as wide as glob's.
     """
     text = path.as_posix()
     if any(ord(ch) < 0x20 for ch in text):
         return _firejail_path(path)
-    return "".join("?" if ch in _FIREJAIL_PATTERN_CHARACTERS else ch for ch in text)
+    if not any(ch in _FIREJAIL_PATTERN_CHARACTERS for ch in text):
+        return text
+    value = "".join("?" if ch in _FIREJAIL_PATTERN_CHARACTERS else ch for ch in text)
+    for shown in granted:
+        for candidate in (shown, *shown.parents):
+            if fnmatch.fnmatchcase(candidate.as_posix(), value):
+                raise SandboxUnavailable(
+                    f"firejail cannot hide the path {text!r}: it reads *, ?, [, ], "
+                    "{, }, ~ and $ in a path option as a pattern or a macro, and the "
+                    f"pattern that would hide it ({value!r}) also matches "
+                    f"{candidate.as_posix()!r}, which this scan needs. Use --sandbox "
+                    "bwrap or --sandbox landlock for this scan"
+                )
+    return value
 
 
 class FirejailBackend(SandboxBackend):
@@ -961,6 +983,17 @@ class FirejailBackend(SandboxBackend):
         home_is_a_root = home == Path(home.anchor)
         home_variable = _real(policy.home)
         tmp_root = _real(_TMP_ROOT)
+        # What the scan needs to see: a --blacklist value spelled with ? must not
+        # match any of these (_firejail_hidden_path).
+        granted = [
+            _real(p)
+            for p in [
+                *policy.read_only,
+                *policy.cache,
+                *policy.writable,
+                *policy.uv_tool_locks,
+            ]
+        ]
         cmd = [self._executable, "--quiet", *_FIREJAIL_CONFINEMENT]
         if not policy.network:
             cmd.append("--net=none")
@@ -979,7 +1012,7 @@ class FirejailBackend(SandboxBackend):
         ]
         for path in ipc:
             if path and os.path.lexists(path):
-                cmd.append(f"--blacklist={_firejail_hidden_path(Path(path))}")
+                cmd.append(f"--blacklist={_firejail_hidden_path(Path(path), granted)}")
 
         # firejail has no throwaway overlay, so a cache is read-only like the rest;
         # _private_caches gives the tools that write one a private directory.
@@ -1010,7 +1043,7 @@ class FirejailBackend(SandboxBackend):
             and home_variable != Path(home_variable.anchor)
             and not _is_within(home_variable, tmp_root)
         ):
-            cmd.append(f"--blacklist={_firejail_hidden_path(home_variable)}")
+            cmd.append(f"--blacklist={_firejail_hidden_path(home_variable, granted)}")
         # A directory a link at the top of either home names (~/.local kept on
         # another disk) is part of that home but outside it, where firejail shows
         # everything: it is blacklisted, all but the policy's own paths inside it.
@@ -1023,7 +1056,7 @@ class FirejailBackend(SandboxBackend):
             if _is_within(target, tmp_root):
                 continue
             for hidden in _hidden_around(target, readable + writable, homes):
-                cmd.append(f"--blacklist={_firejail_hidden_path(hidden)}")
+                cmd.append(f"--blacklist={_firejail_hidden_path(hidden, granted)}")
         # A whitelisted path is mounted read-write whatever --read-only=/ said, so
         # every readable path is made read-only again here, and only then are the
         # writable ones (the results directory, inside the read-only output and
