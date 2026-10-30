@@ -622,6 +622,55 @@ class TestAReadOnlyPollDoesNotRecloseACompletedScan:
         assert registry.get_scan(scan_id).status is MCScanStatus.FAILED
 
 
+class TestAnEndedScanReportsNoRunningScanner:
+    """A cancel or a crash mid-write leaves a per-scanner file that is not yet a
+    JSON object and no aggregated file. The file view reports that scanner as
+    running until a later poll reads a document; for an ended scan none will,
+    so the response said is_complete True beside scanner_status_counts.running 1
+    on every poll. An ended entry now reports such a scanner as failed."""
+
+    @staticmethod
+    def _truncated_scanner_file(output):
+        path = output / "scanners" / "bandit" / "source" / "ASH.ScanResults.json"
+        path.parent.mkdir(parents=True)
+        path.write_text('{"scanner_name": "bandit", "fin', encoding="utf-8")
+
+    def test_a_running_scanner_of_an_ended_scan_reads_as_failed(self, tmp_path):
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        scan_id = _register(registry, project, output)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+        self._truncated_scanner_file(output)
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, "crashed")
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["is_complete"] is True
+        assert progress["scanner_status_counts"]["running"] == 0
+        assert progress["scanner_status_counts"]["failed"] == 1
+        assert progress["scanners"]["bandit"]["source"]["status"] == "failed"
+        assert progress["finished_scanners"] == 1
+
+    def test_a_running_scanner_of_a_running_scan_still_reads_as_running(self, tmp_path):
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        scan_id = _register(registry, project, output)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+        self._truncated_scanner_file(output)
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["is_complete"] is False
+        assert progress["scanner_status_counts"]["running"] == 1
+        assert progress["scanners"]["bandit"]["source"]["status"] == "running"
+
+
 class TestCoverageAssessmentFailureDoesNotFailTheProgressCall:
     def test_a_raising_assessment_leaves_coverage_unknown(self, tmp_path):
         registry = ScanRegistry()

@@ -27,6 +27,7 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
+    MCScannerStatus,
     ScanProgress,
     assess_coverage,
     coverage_has_gap,
@@ -1401,6 +1402,19 @@ class ScanRegistry:
                     # closes a project's entry this way when the run returned and
                     # nothing says the project did not.
                     scan_progress.mark_completed()
+
+                # A scanner still RUNNING in a scan that has ended did not
+                # finish. A cancel or a crash mid-write leaves a per-scanner
+                # file that is not yet a JSON object, which the file view
+                # reports as running until a later poll reads a document, and
+                # for an ended scan no later poll will. Left as it was, the
+                # response said is_complete True beside
+                # scanner_status_counts.running 1 on every poll.
+                if entry.status in ENDED:
+                    for targets in scan_progress.scanners.values():
+                        for scanner_progress in targets.values():
+                            if scanner_progress.status is MCScannerStatus.RUNNING:
+                                scanner_progress.mark_failed()
 
                 # A finished scan whose results file cannot be read as results
                 # (the two branches above that keep the entry's status). The
