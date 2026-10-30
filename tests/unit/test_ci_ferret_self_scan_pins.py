@@ -112,13 +112,20 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # Every line that draws a value from the random module, as the file was written.
     ("B311", DOCX_SCRIPT): [_Marker((_RANDOM_CALL,), every_line=True)],
     # The two narrative lines the entry was written for, which the pin takes with the
-    # lines between them. The generator builds the card numbers at run time, so
-    # neither holds one.
+    # lines between them. The generator builds the card numbers at run time, and
+    # since the Luhn-valid rewrite the MasterCard line names its last four digits
+    # through a variable too, so neither line holds a number.
     ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT): [
-        _Marker((r"The MasterCard ending in 3020", r"Expiration: 12/25")),
+        _Marker(
+            (r"The MasterCard ending in \{approved_last_four\}", r"Expiration: 12/25")
+        ),
     ],
-    # The two lines after the "MRZ-style lines" comment.
-    ("PASSPORT", DOCX_SCRIPT): [_Marker((r"Passport: P<",), every_line=True)],
+    # The two MRZ-style passport lines of the MRZ_LINES tuple, each padded to the TD3
+    # length with the "<" filler. The padding call is what no other line of the file
+    # has, so the pattern names the two lines without spelling out a passport line.
+    ("PASSPORT", DOCX_SCRIPT): [
+        _Marker((r'\.ljust\(TD3_LINE_LENGTH, "<"\)',), every_line=True),
+    ],
 }
 
 
@@ -589,8 +596,8 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         ),
         (
             ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT),
-            'f"The MasterCard ending in 3020 ({card()}) has been approved."',
-            'f"MasterCard: {card()}"',
+            'f"The MasterCard ending in {approved_last_four} ({approved_card}) has "',
+            'f"MasterCard: {approved_card}"',
         ),
         (
             ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT),
@@ -599,8 +606,8 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         ),
         (
             ("PASSPORT", DOCX_SCRIPT),
-            'doc.add_paragraph("Passport: P<',
-            'doc.add_paragraph(f"Passport: {fake_passport()}")',
+            '    "P<USA".ljust(TD3_LINE_LENGTH, "<"),',
+            "    for mrz_line in MRZ_LINES:",
         ),
     ],
     ids=[

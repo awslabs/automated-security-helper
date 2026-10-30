@@ -515,8 +515,8 @@ global_settings:
         fails when the block moves and this range does not.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
-      line_start: 624
-      line_end: 624
+      line_start: 626
+      line_end: 626
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B404
@@ -545,13 +545,13 @@ global_settings:
       reason: False positive — SETTING = "placeholder" uses a neutral variable name.
     - path: scripts/generate_test_docx.py
       rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      line_start: 227
-      line_end: 230
+      line_start: 346
+      line_end: 350
       reason: False positive — runtime-generated synthetic credit card numbers from seeded random for test data.
     - path: scripts/generate_test_docx.py
       rule_id: PASSPORT
-      line_start: 198
-      line_end: 199
+      line_start: 211
+      line_end: 212
       reason: Intentional test data — MRZ-format passport strings used to generate sample documents for ferret-scan integration testing.
     # === ferret-scan JWT_TOKEN: a shape the validator under test must accept ===
     - path: tests/unit/cli/mcp/test_session_id_single_component.py
