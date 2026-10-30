@@ -35,8 +35,10 @@ unprepared reporter a shape it has never seen and trusts it. ``UNSUPPORTED`` was
 rejected because it would fail an entire workspace run for any external plugin.
 """
 
+import os
 import threading
 from abc import abstractmethod
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -44,6 +46,7 @@ from typing import (
     Annotated,
     Any,
     ClassVar,
+    Collection,
     Generic,
     Iterable,
     Optional,
@@ -140,15 +143,21 @@ class ReporterPluginConfigBase(PluginConfigBase):
         """The report is written to ``ash.<extension>`` in the reports directory.
 
         So the value is a filename suffix, from every source: one with a path
-        separator, ``..`` or NUL is replaced by the reporter's default, with one
-        warning naming the key. Declared here so it covers every reporter's
-        ``extension``, including those that redeclare the field.
+        separator, a colon, ``..`` or NUL is replaced by the reporter's default,
+        with one warning naming the key. Declared here so it covers every
+        reporter's ``extension``, including those that redeclare the field.
         """
         value = handler(value)
         if value is None or is_filename_suffix(value):
             return value
-        name = (info.data or {}).get("name") or cls.__name__
-        key = f"reporters.{name}.extension"
+        name = (info.data or {}).get("name")
+        # A section validated against this generic class has no name, and the
+        # class name is no key of any config, so it is not put in the key's place.
+        key = (
+            f"reporters.{name}.extension"
+            if name
+            else "the extension of a reporters section"
+        )
         # The key and the rule, not the value: a value can be one read from the
         # environment, and the warning goes to the console and ash.log.
         _warn_once(
@@ -156,15 +165,20 @@ class ReporterPluginConfigBase(PluginConfigBase):
             str(value),
             f"Ignoring {key}: the value is not a filename suffix such as 'json'. "
             "The report is written to ash.<extension> in the reports directory, so "
-            "it cannot contain '/', '\\', '..' or NUL. Using the default instead.",
+            "it cannot contain '/', '\\', ':', '..' or NUL. Using the default "
+            "instead.",
         )
         raise PydanticUseDefault from None
 
 
 def is_filename_suffix(value: object) -> bool:
-    """Whether ``value`` can follow ``ash.`` in a file name without leaving its directory."""
+    """Whether ``value`` can follow ``ash.`` in a file name without leaving its directory.
+
+    A colon is refused as well, as ``is_report_file_name`` refuses one: on NTFS
+    ``ash.json:stream`` is a stream of the file ``ash.json``, another reporter's.
+    """
     return isinstance(value, str) and not any(
-        part in value for part in ("/", "\\", "..", "\x00")
+        part in value for part in ("/", "\\", ":", "..", "\x00")
     )
 
 
@@ -175,17 +189,26 @@ def confined_report_path(report_dir: Path, filename: str) -> Optional[Path]:
     directory is refused, whatever produced the name. So is any name while
     ``report_dir`` itself is a symlink or a directory junction, which it can
     become after the run's own check (utils/report_path_links.py), so each write
-    checks it again.
+    checks it again. So is a name that is not one file name by the rule the run's
+    own check applies (``is_report_file_name``): one holding a colon, which on
+    NTFS names a stream of another file, or a NUL, which no file system takes.
     """
-    from automated_security_helper.utils.report_path_links import link_kind
+    from automated_security_helper.utils.report_path_links import (
+        is_report_file_name,
+        link_kind,
+    )
 
     if link_kind(Path(report_dir)) is not None:
+        return None
+    if not is_report_file_name(filename):
         return None
     target = Path(report_dir) / filename
     try:
         if target.resolve().parent != Path(report_dir).resolve():
             return None
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
+        # ValueError: a NUL in ``report_dir``, which resolve() does not turn
+        # into an OSError.
         return None
     return target
 
@@ -199,16 +222,33 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
     that calls this declares the names in ``companion_file_names``, so that a link
     already at one of them, or a name that is not a file in ``report_dir``, refuses
     the run before any reporter writes. A link that is at the name by the time of
-    the write is refused and the refusal raised (``fs_guard.OutputLinkRefused``), as
-    for any other output file, rather than skipped with a warning.
+    the write, or that ``report_dir`` itself has become, is refused and the refusal
+    raised (``fs_guard.OutputLinkRefused``, or ``OutputDirLinkRefused`` for a
+    directory junction), as for any other output file, rather than skipped with a
+    warning. The write itself opens ``report_dir`` without following a link, so
+    nothing swapped in after those checks is written through.
+
+    An ``OSError`` from the write (a read-only directory, a directory at the name)
+    is logged and answered with None. Any other failure, such as content that
+    cannot be encoded as UTF-8, is raised for the caller to record against the
+    reporter.
     """
     from automated_security_helper.utils.atomic_write import write_text_atomically
     from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+    from automated_security_helper.utils.report_path_links import link_kind
     from automated_security_helper.utils.sandbox.fs_guard import OutputLinkRefused
 
-    named = Path(report_dir) / filename
-    if Path(filename).name == filename and named.is_symlink():
-        raise OutputLinkRefused(named, named)
+    directory = Path(report_dir)
+    named = directory / filename
+    links = [directory]
+    if Path(filename).name == filename:
+        links.append(named)
+    for link in links:
+        kind = link_kind(link)
+        if kind == "a symlink":
+            raise OutputLinkRefused(named, link)
+        if kind is not None:
+            raise OutputDirLinkRefused(f"{link.as_posix()} is {kind}")
     target = confined_report_path(report_dir, filename)
     if target is None:
         ASH_LOGGER.warning(
@@ -216,7 +256,7 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
         )
         return None
     try:
-        write_text_atomically(target, content)
+        write_text_atomically(target, content, root=directory)
     except OutputDirLinkRefused:
         raise
     except OSError as error:
@@ -276,12 +316,28 @@ def reporter_file_name(instance: object) -> str:
 def reporter_companion_file_names(instance: object) -> Tuple[str, ...]:
     """The files this reporter writes itself in the reports directory, from its declaration.
 
-    See ``ReporterPluginBase.companion_file_names``. Only strings are kept.
+    See ``ReporterPluginBase.companion_file_names``. Only file names are kept: a
+    string, or a path-like object written as its string. A declaration that
+    answers one string names that one file, not one file per character, and one
+    that answers None names none. A declaration that raises propagates: the
+    pre-write checks cannot vouch for the files of a reporter whose files are
+    unknown, so the run is refused rather than going on without them.
     """
     declared = getattr(instance, "companion_file_names", None)
     if not callable(declared):
         return ()
-    return tuple(name for name in declared() if isinstance(name, str))
+    answer = declared()
+    if answer is None:
+        return ()
+    if isinstance(answer, (str, os.PathLike)):
+        answer = (answer,)
+    names = []
+    for name in answer:
+        if isinstance(name, os.PathLike):
+            name = os.fspath(name)
+        if isinstance(name, str):
+            names.append(name)
+    return tuple(names)
 
 
 def reporter_file_names(instance: object) -> Tuple[str, ...]:
@@ -296,7 +352,7 @@ def reporter_file_names(instance: object) -> Tuple[str, ...]:
 
 
 def reporter_matches_requested_formats(
-    instance: "ReporterPluginBase", output_formats: "Iterable[object]"
+    instance: "ReporterPluginBase", output_formats: "Collection[object]"
 ) -> bool:
     """Whether ``--output-formats`` selected this reporter.
 
@@ -328,13 +384,27 @@ def reporter_matches_requested_formats(
         output_formats: What the operator asked for. Accepts ``ExportFormat``
             members as well as plain strings, because ``ScanExecutionEngine``
             threads the enum through unconverted while the CLI paths convert to
-            ``.value`` first. Normalised here so neither caller has to.
+            ``.value`` first. Normalised here so neither caller has to. A
+            collection that can be read again for the next reporter (a list or a
+            tuple), not an iterator: an iterator is always truthy, so an empty
+            one would read as a request for nothing, and a full one is spent by
+            the first reporter asked about it, so every later reporter would be
+            matched against an empty request.
 
     Returns:
         ``True`` if this reporter should run. An empty request means every
         reporter runs -- an operator who passed no ``--output-formats`` asked for
         the configured default set, not for nothing.
+
+    Raises:
+        TypeError: ``output_formats`` is an iterator.
     """
+    if isinstance(output_formats, Iterator):
+        raise TypeError(
+            "output_formats must be a collection such as a list or a tuple, not "
+            f"an iterator ({type(output_formats).__name__}), which only the first "
+            "reporter asked about could read."
+        )
     if not output_formats:
         return True
     requested = {str(getattr(fmt, "value", fmt)) for fmt in output_formats}
@@ -472,6 +542,14 @@ def reporter_classes_for_run(
     )
 
 
+def _as_given(value: Any, outer_location: Any = None) -> Any:
+    """The handler ``configure`` passes where the field validator is passed pydantic's.
+
+    The value a plugin's own model already holds needs no second pass.
+    """
+    return value
+
+
 class ReporterPluginBase(PluginBase, Generic[T]):
     """Base reporter plugin with some methods of the IReporter abstract class
     implemented for convenience.
@@ -514,6 +592,21 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     #: after the plugin modules are imported and before any reporter is built.
     destination_options: ClassVar[Tuple[str, ...]] = ()
 
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Read a ``sends_off_host`` that is not a bool as the bool it is truthy as.
+
+        Every test of it, here and in the config trust and merge code, is
+        ``is True``, so a reporter declaring ``sends_off_host = 1`` or ``"yes"``
+        was run as a local one, without ``enabled: true``, and its destination
+        options were not confined. Declared as the bool at class creation, the
+        declaration is read the same way at every one of those sites.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+        declared = cls.__dict__.get("sends_off_host", False)
+        if not isinstance(declared, bool):
+            cls.sends_off_host = bool(declared)
+
     @field_validator("config", mode="wrap")
     @classmethod
     def _config_is_validated_by_the_declared_model(
@@ -554,9 +647,17 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         self,
         config: ReporterPluginConfigBase | None = None,
     ) -> None:
-        """Configure the reporter with provided configuration."""
+        """Configure the reporter with provided configuration.
+
+        The config is held to the reporter's declared model as the ``config``
+        field holds one given at construction: a section it refuses is a
+        ValidationError, and one of another class is read through the declared
+        model. Assignment alone is not validated here.
+        """
         if config:
-            self.config = config
+            self.config = config_validated_by_declared_model(
+                type(self), ReporterPluginConfigBase, config, _as_given
+            )
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The files this reporter writes itself in the reports directory, beside its report.
