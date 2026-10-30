@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import tarfile
+import time
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -234,6 +236,80 @@ def test_three_members_written_to_one_path_count_up(test_plugin_context, monkeyp
     _, _, files = _convert(test_plugin_context, monkeypatch, archive)
 
     assert files == {"m.js": b"1\n", "m~2.js": b"2\n", "m~3.js": b"3\n"}
+
+
+def test_a_renamed_member_never_takes_a_later_members_own_name(
+    test_plugin_context, monkeypatch
+):
+    """``m~2.js`` is the archive's own third member. Picking the rename against the
+    members written so far gave the second ``m.js`` that name, and the real
+    ``m~2.js`` was then renamed in its turn, so the scan's paths named the wrong
+    bytes. Every member's name is read before any is renamed."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [("m.js", b"1\n"), ("m.js", b"2\n"), ("m~2.js", b"3\n")],
+    )
+
+    _, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"m.js": b"1\n", "m~3.js": b"2\n", "m~2.js": b"3\n"}
+
+
+@pytest.mark.skipif(os.sep != "/", reason="a backslash separates on this host")
+def test_a_backslash_stays_part_of_a_name_where_the_extractor_keeps_it(
+    test_plugin_context, monkeypatch
+):
+    """On POSIX zipfile writes ``a\\b.js`` as one file at the archive's top; the
+    rename used to read the backslash as a separator and put the second member at
+    ``a/b~2.js``, a different place from the member it stood beside."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [("a\\b.js", b"1\n"), ("a\\b.js", b"2\n")],
+    )
+
+    _, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"a\\b.js": b"1\n", "a\\b~2.js": b"2\n"}
+
+
+def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
+    test_plugin_context, monkeypatch, ash_log_records
+):
+    """N members named alike cost N names and a bounded number of notices. The
+    rename used to try every counter from 2 for each duplicate (N squared key
+    computations: 2,000 duplicates took about two million) and logged a WARNING
+    apiece."""
+    count = 2000
+    calls = {"n": 0}
+    real_key = archive_converter._written_key
+
+    def counting_key(member_name, kind):
+        calls["n"] += 1
+        return real_key(member_name, kind)
+
+    monkeypatch.setattr(archive_converter, "_written_key", counting_key)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo("m.js") for _ in range(count)]
+
+    started = time.monotonic()
+    admitted = converter.inspect_members(members, target_path=None)
+    elapsed = time.monotonic() - started
+
+    names = [member.filename for member in admitted]
+    assert len(names) == count and len(set(names)) == count
+    assert names[:3] == ["m.js", "m~2.js", "m~3.js"]
+    # Linear: one key per member before the loop, one for its destination, one
+    # or two per rename; never a walk over every earlier counter.
+    assert calls["n"] <= 6 * count, calls["n"]
+    assert elapsed < 10, elapsed
+    notices = [r.getMessage() for r in ash_log_records if r.levelno >= logging.WARNING]
+    single = [n for n in notices if "is written as" in n]
+    aggregate = [n for n in notices if "more members" in n]
+    assert len(single) == archive_converter.MEMBER_REFUSALS_LISTED, len(single)
+    expected = count - 1 - archive_converter.MEMBER_REFUSALS_LISTED
+    assert len(aggregate) == 1 and f"{expected} more members" in aggregate[0], aggregate
 
 
 def test_members_written_to_distinct_paths_are_all_extracted(

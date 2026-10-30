@@ -28,6 +28,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Set,
     Tuple,
 )
 import zipfile
@@ -1171,6 +1172,13 @@ _MEMBER_SAME_PATH = (
     "an earlier member of the archive is extracted to the same path, and a member "
     "given by name alone cannot be renamed beside it"
 )
+#: The one line that stands for the renamed members past MEMBER_REFUSALS_LISTED,
+#: so an archive of thousands of repeated names does not log a line apiece.
+_MEMBERS_RENAMED_UNLISTED = (
+    "{count} more members are each extracted to the same path as an earlier "
+    "member of the archive, so each is written under a numbered name beside it "
+    "and all are scanned"
+)
 _NOT_EXTRACTED = (
     "it is an archive or compressed file of a format that is not extracted (the "
     "archive converter extracts .zip, .tar and .gz), so its contents are not scanned"
@@ -1456,9 +1464,8 @@ def _member_written_path(
     zip its ``..`` parts, as zipfile drops them. See member_source_path. Two
     members whose names read the same here are written to one file.
     """
-    separators = {"/", os.sep} | ({os.altsep} if os.altsep else set())
     parts = [member_name]
-    for separator in separators:
+    for separator in _written_separators():
         parts = [piece for part in parts for piece in part.split(separator)]
     dropped = {"", ".", ".."} if kind == "zip" else {"", "."}
     if kind == "zip" and _on_windows():
@@ -1468,6 +1475,13 @@ def _member_written_path(
         # that spelling, and an ignore path written for it has to match it.
         parts = [part.translate(_WINDOWS_NAME_TABLE).rstrip(" .") for part in parts]
     return "/".join(part for part in parts if part not in dropped)
+
+
+def _written_separators() -> Set[str]:
+    """The characters the extractor splits a member's name on, on this host: ``/``
+    and the host's own separators. On POSIX that is ``/`` alone, so a backslash is
+    part of a name there (_member_written_path)."""
+    return {"/", os.sep} | ({os.altsep} if os.altsep else set())
 
 
 def _written_key(member_name: str, kind: Optional[Literal["zip", "tar"]]) -> str:
@@ -1481,28 +1495,57 @@ def _written_key(member_name: str, kind: Optional[Literal["zip", "tar"]]) -> str
     return os.path.normcase(_member_written_path(member_name, kind)).casefold()
 
 
+def _named_member(
+    member: "str | zipfile.ZipInfo | tarfile.TarInfo",
+) -> Optional[Tuple[str, Optional[Literal["zip", "tar"]]]]:
+    """The member's name and the archive kind it comes from, or None for a member
+    of a type inspect_members does not read."""
+    if isinstance(member, tarfile.TarInfo):
+        return member.name, "tar"
+    if isinstance(member, zipfile.ZipInfo):
+        return member.filename, "zip"
+    if isinstance(member, str):
+        return member, None
+    return None
+
+
 def _renamed_member_name(
-    member_name: str, kind: Optional[Literal["zip", "tar"]], written: Dict[str, str]
+    member_name: str,
+    kind: Optional[Literal["zip", "tar"]],
+    taken: Set[str],
+    written: Dict[str, str],
+    counters: Dict[str, int],
 ) -> str:
     """``member_name`` with a counter before its extension (``vendor/m~2.js``,
-    ``Dockerfile~2``), the first such name no earlier member of the archive is
-    written to (``written``, keyed by _written_key). The directory part and the
-    separators the name uses are kept, so the member lands beside the one it
-    would have overwritten.
+    ``Dockerfile~2``): the first such name that no member of the archive is named
+    by (``taken``, every member's _written_key, read before any is renamed) and no
+    earlier member is written to (``written``). A name only ``written`` was checked
+    against could be a later member's own, which then lost its name to the rename.
+
+    The directory part is kept, split where the extractor splits it
+    (_written_separators), so the member lands beside the one it would have
+    overwritten: on POSIX ``a\\b.js`` is one file at the archive's top and is
+    renamed ``a\\b~2.js``, not moved under a directory ``a``.
+
+    ``counters`` holds, per written key, the counter the next rename of that key
+    starts from, so N members bound for one path cost N names, not N squared.
     """
-    normalized = member_name.replace("\\", "/")
-    head, slash, base = normalized.rpartition("/")
+    cut = max(member_name.rfind(separator) for separator in _written_separators())
+    head, base = member_name[: cut + 1], member_name[cut + 1 :]
     stem, dot, extension = base.rpartition(".")
-    counter = 2
+    key = _written_key(member_name, kind)
+    counter = counters.get(key, 2)
     while True:
         if stem and dot:
             renamed_base = f"{stem}~{counter}.{extension}"
         else:
             renamed_base = f"{base}~{counter}"
-        renamed = f"{head}{slash}{renamed_base}"
-        if _written_key(renamed, kind) not in written:
-            return renamed
+        renamed = f"{head}{renamed_base}"
         counter += 1
+        renamed_key = _written_key(renamed, kind)
+        if renamed_key not in taken and renamed_key not in written:
+            counters[key] = counter
+            return renamed
 
 
 #: The characters Windows forbids in a file name; zipfile writes each as ``_``.
@@ -1850,9 +1893,12 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         scanned tree's terms (member_source_path) is left out too: it is never
         extracted, so no scanner reads it, snyk-code included, which would upload
         it. A member written to the same path as an earlier member of the archive
-        (``vendor//m.js`` after ``vendor/m.js``, or a tar's repeated name) is
-        refused, so neither silently overwrites the other and the archive is not
-        recorded as extracted whole.
+        (``vendor//m.js`` after ``vendor/m.js``, a tar's repeated name, or two
+        spellings of one name on a case-insensitive filesystem) is written beside
+        the earlier one under a numbered name (``vendor/m~2.js``,
+        _renamed_member_name) that no member of the archive is named by, with a
+        warning naming both, so neither silently overwrites the other and both are
+        scanned; past MEMBER_REFUSALS_LISTED such members one line counts the rest.
 
         Args:
             members: The archive's members.
@@ -1875,6 +1921,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # file is written beside the earlier one under a numbered name, and both
         # are scanned, rather than one written over the other.
         written: Dict[str, str] = {}
+        # Every member's key before any is renamed, so a renamed member never
+        # takes the name of a member that comes later in the archive.
+        taken: Set[str] = set()
+        for member in members:
+            named = _named_member(member)
+            if named is not None:
+                taken.add(_written_key(*named))
+        # Per written key, where the next rename of it starts counting.
+        rename_counters: Dict[str, int] = {}
+        renamed_count = 0
         for member in members:
             kind: Optional[Literal["zip", "tar"]] = None
             if isinstance(member, tarfile.TarInfo):
@@ -1963,15 +2019,19 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     # reads both, whichever of the two a consumer's unpacker
                     # keeps. The notice names the archive when inspect_members
                     # knows it.
-                    renamed = _renamed_member_name(member_name, kind, written)
-                    ASH_LOGGER.warning(
-                        shown_on_one_line(
-                            f"Archive member '{member_name}'"
-                            + (f" of '{archive}'" if archive is not None else "")
-                            + ": "
-                            + _MEMBER_RENAMED.format(renamed=renamed)
-                        )
+                    renamed = _renamed_member_name(
+                        member_name, kind, taken, written, rename_counters
                     )
+                    renamed_count += 1
+                    if renamed_count <= MEMBER_REFUSALS_LISTED:
+                        ASH_LOGGER.warning(
+                            shown_on_one_line(
+                                f"Archive member '{member_name}'"
+                                + (f" of '{archive}'" if archive is not None else "")
+                                + ": "
+                                + _MEMBER_RENAMED.format(renamed=renamed)
+                            )
+                        )
                     if isinstance(member, tarfile.TarInfo):
                         member.name = renamed
                     else:
@@ -2000,6 +2060,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 self.record_refused_input(
                     TreeInputRefused(archive, problem), unlisted_members=count
                 )
+        if renamed_count > MEMBER_REFUSALS_LISTED:
+            ASH_LOGGER.warning(
+                shown_on_one_line(
+                    (f"Archive '{archive}': " if archive is not None else "")
+                    + _MEMBERS_RENAMED_UNLISTED.format(
+                        count=renamed_count - MEMBER_REFUSALS_LISTED
+                    )
+                )
+            )
         return filtered_members
 
     def convert(self) -> List[Path]:
