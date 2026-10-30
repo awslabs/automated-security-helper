@@ -219,8 +219,33 @@ def child_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
     env = {key: value for key, value in source.items() if not key.startswith("ASH_")}
     env["PYTHONIOENCODING"] = "utf-8"
     env.setdefault("PYTHONUTF8", "1")
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
+    # Prepended, not assigned: a host that supplies the child's dependencies
+    # through PYTHONPATH kept them when the working tree was put in front, and
+    # lost them, with a misread "FIXTURE BROKEN", when the variable was replaced.
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    inherited = source.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        repo_root if not inherited else f"{repo_root}{os.pathsep}{inherited}"
+    )
     return env
+
+
+def read_workspace_payload(results: Path) -> tuple[dict[str, Any], str]:
+    """The ``workspace`` section of a scan's results file, and a note if unreadable.
+
+    A scan that crashed can leave a truncated results file; json.loads raised
+    out of run_ash and the gate ended in a traceback with the scratch directory
+    already removed. The note goes into the run's output so the FIXTURE BROKEN
+    report names what was wrong with the file.
+    """
+    if not results.exists():
+        return {}, ""
+    try:
+        document = json.loads(results.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as broken:
+        return {}, f"\n{results.name} is not readable JSON: {broken}\n"
+    payload = document.get("workspace", {}) if isinstance(document, dict) else {}
+    return (payload if isinstance(payload, dict) else {}), ""
 
 
 def run_ash(
@@ -275,11 +300,8 @@ def run_ash(
     )
     combined = completed.stdout + completed.stderr
 
-    results = output_dir / "ash_aggregated_results.json"
-    payload: dict[str, Any] = {}
-    if results.exists():
-        payload = json.loads(results.read_text(encoding="utf-8")).get("workspace", {})
-    return completed.returncode, payload, combined
+    payload, note = read_workspace_payload(output_dir / "ash_aggregated_results.json")
+    return completed.returncode, payload, combined + note
 
 
 def _by_project(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -301,6 +323,222 @@ def same_file(recorded: str | None, expected: Path) -> bool:
         return Path(recorded).resolve() == expected.resolve()
     except OSError:
         return False
+
+
+#: One check: its label, whether it held, and the detail printed under it.
+Check = tuple[str, bool, str]
+
+#: Exit codes a completed workspace scan ends with: 0 with nothing actionable,
+#: 2 with actionable findings. Anything else is a crash or a refusal, and a run
+#: that crashed after writing its results is not a measurement.
+COMPLETED_SCAN_EXIT_CODES = (0, 2)
+
+
+def evaluate_runs(
+    projects_a: dict[str, dict[str, Any]],
+    projects_b: dict[str, dict[str, Any]],
+    code_a: int,
+    code_b: int,
+) -> tuple[list[Check], list[str]]:
+    """The policy checks over the two runs' per-project payloads.
+
+    Returns the checks and the notes to print. Pure, so the decisions are
+    testable without a scanner: ``projects_a`` is the baseline run keyed by
+    project, ``projects_b`` the ceiling run.
+    """
+    checks: list[Check] = []
+    notes: list[str] = []
+    lax_a, lax_b = projects_a.get("lax", {}), projects_b.get("lax", {})
+    strict_a, strict_b = projects_a.get("strict", {}), projects_b.get("strict", {})
+
+    # The runs completed. Only runs C and D had their exit codes asserted, so a
+    # scan that crashed after writing the aggregate file was measured as valid.
+    checks.append(
+        (
+            "baseline run completed (exit 0 or 2, not a crash)",
+            code_a in COMPLETED_SCAN_EXIT_CODES,
+            f"exit={code_a}",
+        )
+    )
+    checks.append(
+        (
+            "ceiling run completed (exit 0 or 2, not a crash)",
+            code_b in COMPLETED_SCAN_EXIT_CODES,
+            f"exit={code_b}",
+        )
+    )
+
+    # 1. The ceiling tightened the lax project.
+    checks.append(
+        (
+            "ceiling tightens a lax project: actionable rises above zero",
+            (lax_b.get("actionable_finding_count") or 0) > 0,
+            (
+                f"without policy={lax_a.get('actionable_finding_count')}, "
+                f"with MEDIUM ceiling={lax_b.get('actionable_finding_count')}"
+            ),
+        )
+    )
+    checks.append(
+        (
+            "ceiling tightens a lax project: the result flips to failing",
+            lax_a.get("exceeds_threshold") is False
+            and lax_b.get("exceeds_threshold") is True,
+            (
+                f"exceeds_threshold {lax_a.get('exceeds_threshold')} -> "
+                f"{lax_b.get('exceeds_threshold')}"
+            ),
+        )
+    )
+    checks.append(
+        (
+            "the enforced threshold is reported, not the declared one",
+            lax_b.get("severity_threshold") == "MEDIUM",
+            f"reported={lax_b.get('severity_threshold')} (declared CRITICAL)",
+        )
+    )
+
+    # 2. The stricter project is untouched. The field has to be present on both
+    # sides: None == None passed this check when the payload carried no count.
+    strict_actionable_a = strict_a.get("actionable_finding_count")
+    checks.append(
+        (
+            "stricter project untouched: same actionable count both runs",
+            strict_actionable_a is not None
+            and strict_actionable_a == strict_b.get("actionable_finding_count"),
+            f"{strict_actionable_a} -> {strict_b.get('actionable_finding_count')}",
+        )
+    )
+    checks.append(
+        (
+            "stricter project untouched: still judged at its own LOW",
+            strict_b.get("severity_threshold") == "LOW",
+            f"reported={strict_b.get('severity_threshold')}",
+        )
+    )
+
+    # 2b. The ceiling's reach, disclosed from the findings actually present.
+    # The lax project's silence does not depend on checkov, so it is checked
+    # whatever the iac project reported.
+    checks.append(
+        (
+            "the project the ceiling DID reach discloses nothing",
+            (lax_b.get("ceiling_unreachable_findings") or {}) == {},
+            "lax carries severity, so there is nothing to qualify",
+        )
+    )
+    checks.append(
+        (
+            "the iac project is in both runs' payloads",
+            "iac" in projects_a and "iac" in projects_b,
+            f"projects: baseline={sorted(projects_a)} ceiling={sorted(projects_b)}",
+        )
+    )
+    iac_a, iac_b = projects_a.get("iac", {}), projects_b.get("iac", {})
+    unreachable_b = iac_b.get("ceiling_unreachable_findings") or {}
+    unreachable_a = iac_a.get("ceiling_unreachable_findings") or {}
+    if "iac" in projects_a and not iac_a.get("finding_count"):
+        notes.append(
+            "FIXTURE NOTE: checkov produced no findings for the iac project; "
+            "skipping the checkov disclosure checks rather than asserting vacuously"
+            f" (iac finding_count={iac_a.get('finding_count')})"
+        )
+    elif "iac" in projects_a:
+        checks.append(
+            (
+                "level-only findings stay actionable at CRITICAL (the limitation)",
+                (iac_a.get("actionable_finding_count") or 0) > 0,
+                (
+                    f"at declared CRITICAL: actionable="
+                    f"{iac_a.get('actionable_finding_count')} of "
+                    f"{iac_a.get('finding_count')} findings"
+                ),
+            )
+        )
+        checks.append(
+            (
+                "the ceiling could not tighten them, and says so per scanner",
+                bool(unreachable_b) and "checkov" in unreachable_b,
+                f"ceiling_unreachable_findings={unreachable_b}",
+            )
+        )
+        checks.append(
+            (
+                "no disclosure without a ceiling, so it stays load-bearing",
+                unreachable_a == {},
+                f"baseline run disclosure={unreachable_a}",
+            )
+        )
+
+    # 3. Suppression scoping on the findings. finding_count is the unsuppressed
+    # count, so the suppressed copy of the lax finding drops out of it in run B
+    # and nothing else changes.
+    checks.append(
+        (
+            "workspace suppression reaches the scan: lax loses one finding",
+            (lax_a.get("finding_count") or 0) - (lax_b.get("finding_count") or 0) == 1,
+            (
+                f"lax finding_count {lax_a.get('finding_count')} -> "
+                f"{lax_b.get('finding_count')}"
+            ),
+        )
+    )
+    checks.append(
+        (
+            "workspace suppression does NOT reach the other project's findings",
+            strict_a.get("finding_count") is not None
+            and strict_a.get("finding_count") == strict_b.get("finding_count"),
+            (
+                f"strict finding_count {strict_a.get('finding_count')} -> "
+                f"{strict_b.get('finding_count')}"
+            ),
+        )
+    )
+    return checks, notes
+
+
+def plan_checks(
+    by_key: Mapping[str, Any], plan_source: Any, policy: Path
+) -> list[Check]:
+    """The suppression-scoping checks on the resolved plan.
+
+    ``by_key`` maps a project key to its resolved project. A key the resolver
+    dropped or renamed is a failed check, not a KeyError out of the gate.
+    """
+    checks: list[Check] = []
+    missing = [key for key in ("lax", "strict") if key not in by_key]
+    checks.append(
+        (
+            "the resolved plan names both fixture projects",
+            not missing,
+            f"plan projects={sorted(by_key)}",
+        )
+    )
+    if not missing:
+        lax_paths = [s.path for s in by_key["lax"].policy_suppressions]
+        strict_paths = [s.path for s in by_key["strict"].policy_suppressions]
+        checks.append(
+            (
+                "workspace suppression is pushed into the project it names",
+                lax_paths == [LAX_SUPPRESSED_PROJECT_PATH],
+                f"lax={lax_paths}",
+            )
+        )
+        checks.append(
+            (
+                "workspace suppression is NOT passed to the other project",
+                strict_paths == [],
+                f"strict={strict_paths}",
+            )
+        )
+    checks.append(
+        (
+            "the plan records which policy file was applied",
+            same_file(plan_source, policy),
+            f"source={plan_source}",
+        )
+    )
+    return checks
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -344,7 +582,12 @@ def main(argv: list[str] | None = None) -> int:
         projects_a = _by_project(payload_a)
 
         if not projects_a:
-            print("FIXTURE BROKEN: run A produced no workspace payload")
+            # The exit code is named: a product crash or refusal (exit 1, 4, 5)
+            # is not a fixture problem, and the code says which it was.
+            print(
+                f"FIXTURE BROKEN: run A exited {code_a} and produced no workspace "
+                f"payload"
+            )
             print(out_a[-3000:])
             return 3
 
@@ -380,8 +623,11 @@ def main(argv: list[str] | None = None) -> int:
         # The suppressed file is the lax project's SECOND copy of its finding,
         # never runner.py: suppressing the only finding the ceiling could
         # tighten would make assertion 1 fail on a correct implementation.
+        # The policy sits where discovery would never find it: at the default
+        # location (.ash/ash-workspace.yaml beside the workspace) the ceiling
+        # assertions could not tell --workspace-config apart from discovery.
         policy = _write(
-            scratch / ".ash" / "ash-workspace.yaml",
+            scratch / "policy" / "ceiling-policy.yaml",
             "workspace:\n"
             "  max_severity_threshold: MEDIUM\n"
             "  suppressions:\n"
@@ -394,121 +640,28 @@ def main(argv: list[str] | None = None) -> int:
         projects_b = _by_project(payload_b)
 
         if not projects_b:
-            print("FIXTURE BROKEN: run B produced no workspace payload")
+            print(
+                f"FIXTURE BROKEN: run B exited {code_b} and produced no workspace "
+                f"payload"
+            )
             print(out_b[-3000:])
             return 3
 
-        lax_b = projects_b.get("lax", {})
-        strict_b = projects_b.get("strict", {})
-
-        # 1. The ceiling tightened the lax project.
-        check(
-            "ceiling tightens a lax project: actionable rises above zero",
-            (lax_b.get("actionable_finding_count") or 0) > 0,
-            f"without policy={lax_a.get('actionable_finding_count')}, "
-            f"with MEDIUM ceiling={lax_b.get('actionable_finding_count')}",
-        )
-        check(
-            "ceiling tightens a lax project: verdict flips to failing",
-            lax_a.get("exceeds_threshold") is False
-            and lax_b.get("exceeds_threshold") is True,
-            f"exceeds_threshold {lax_a.get('exceeds_threshold')} -> "
-            f"{lax_b.get('exceeds_threshold')}",
-        )
-        check(
-            "the enforced threshold is reported, not the declared one",
-            lax_b.get("severity_threshold") == "MEDIUM",
-            f"reported={lax_b.get('severity_threshold')} (declared CRITICAL)",
-        )
-
-        # 2. The stricter project is untouched.
-        check(
-            "stricter project untouched: same actionable count both runs",
-            strict_a.get("actionable_finding_count")
-            == strict_b.get("actionable_finding_count"),
-            f"{strict_a.get('actionable_finding_count')} -> "
-            f"{strict_b.get('actionable_finding_count')}",
-        )
-        check(
-            "stricter project untouched: still judged at its own LOW",
-            strict_b.get("severity_threshold") == "LOW",
-            f"reported={strict_b.get('severity_threshold')}",
-        )
-
-        # 2b. The ceiling's reach, disclosed from the findings actually present.
-        iac_a = projects_a.get("iac", {})
-        iac_b = projects_b.get("iac", {})
-        unreachable_b = iac_b.get("ceiling_unreachable_findings") or {}
-        unreachable_a = iac_a.get("ceiling_unreachable_findings") or {}
-
-        if not iac_a.get("finding_count"):
-            print(
-                "FIXTURE NOTE: checkov produced no findings for the iac project; "
-                "skipping the disclosure checks rather than asserting vacuously"
-            )
-            print(f"        iac finding_count={iac_a.get('finding_count')}")
-        else:
-            check(
-                "level-only findings stay actionable at CRITICAL (the limitation)",
-                (iac_a.get("actionable_finding_count") or 0) > 0,
-                f"at declared CRITICAL: actionable="
-                f"{iac_a.get('actionable_finding_count')} of "
-                f"{iac_a.get('finding_count')} findings",
-            )
-            check(
-                "the ceiling could not tighten them, and says so per scanner",
-                bool(unreachable_b) and "checkov" in unreachable_b,
-                f"ceiling_unreachable_findings={unreachable_b}",
-            )
-            check(
-                "no disclosure without a ceiling, so it stays load-bearing",
-                unreachable_a == {},
-                f"baseline run disclosure={unreachable_a}",
-            )
-            check(
-                "the project the ceiling DID reach discloses nothing",
-                (projects_b.get("lax", {}).get("ceiling_unreachable_findings") or {})
-                == {},
-                "lax carries severity, so there is nothing to qualify",
-            )
-
-        # 3. Suppression scoping, on the findings and on the resolved plan.
-        # finding_count is the unsuppressed count, so the suppressed copy of the
-        # lax finding drops out of it in run B and nothing else changes.
-        check(
-            "workspace suppression reaches the scan: lax loses one finding",
-            (lax_a.get("finding_count") or 0) - (lax_b.get("finding_count") or 0) == 1,
-            f"lax finding_count {lax_a.get('finding_count')} -> "
-            f"{lax_b.get('finding_count')}",
-        )
-        check(
-            "workspace suppression does NOT reach the other project's findings",
-            strict_a.get("finding_count") == strict_b.get("finding_count"),
-            f"strict finding_count {strict_a.get('finding_count')} -> "
-            f"{strict_b.get('finding_count')}",
-        )
+        run_checks, notes = evaluate_runs(projects_a, projects_b, code_a, code_b)
+        for label, ok, detail in run_checks:
+            check(label, ok, detail)
+        for note in notes:
+            print(note)
 
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from automated_security_helper.workspace.resolver import resolve_workspace
 
         plan = resolve_workspace(workspace, workspace_config=policy)
         by_key = {p.key: p for p in plan.projects}
-        check(
-            "workspace suppression is pushed into the project it names",
-            [s.path for s in by_key["lax"].policy_suppressions]
-            == [LAX_SUPPRESSED_PROJECT_PATH],
-            f"lax={[s.path for s in by_key['lax'].policy_suppressions]}",
-        )
-        check(
-            "workspace suppression is NOT passed to the other project",
-            by_key["strict"].policy_suppressions == [],
-            f"strict={[s.path for s in by_key['strict'].policy_suppressions]}",
-        )
-        check(
-            "the plan records which policy file was applied",
-            same_file(plan.workspace_config_source, policy),
-            f"source={plan.workspace_config_source}",
-        )
+        for label, ok, detail in plan_checks(
+            by_key, plan.workspace_config_source, policy
+        ):
+            check(label, ok, detail)
 
         # 4. An unrewritable pattern refuses with exit 4.
         bad_policy = _write(
@@ -556,6 +709,15 @@ def main(argv: list[str] | None = None) -> int:
             for label in failures:
                 print(f"  - {label}")
             return 1
+        if notes:
+            # The documented contract: checkov reporting nothing skips the
+            # disclosure checks with a note and is not a failure. The success
+            # line says so instead of claiming the whole set was verified.
+            print(
+                "\nWorkspace policy verified end to end on a real scan, except the "
+                "checkov disclosure checks, which were skipped (see the note above)."
+            )
+            return 0
         print("\nWorkspace policy verified end to end on a real scan.")
         return 0
     except subprocess.TimeoutExpired as expired:
