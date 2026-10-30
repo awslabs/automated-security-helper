@@ -13,7 +13,9 @@ check when it is built, from the registered scanner classes, so that
 ``ASHScanOrchestrator.create`` refuses the command line before the orchestrator
 asks git anything or clears the output directory. ``ScanPhase`` makes it again
 from the instantiated scanners, where the names first became authoritative; that
-check stays as the backstop for an engine built some other way.
+check stays as the backstop for an engine built some other way. An exclusion that
+matches no scanner is not refused, but :func:`exclusions_matching_no_scanner` names
+it so that ``ScanPhase`` can warn.
 
 Also the names a selection's two inputs go by for each origin, which
 ``interactions.run_ash_scan`` needs at import time for ``ScanOptions``. This
@@ -100,6 +102,16 @@ def selection_after_exclusions(
             tolerates one entry at a time, so it would be a silent zero rather
             than a visible refusal.
     """
+    # A stray comma ("--scanners bandit,") leaves an empty name, which names no
+    # scanner and is no exclusion either. Left in, it survived the subtraction
+    # and the refusal below never fired: "--scanners bandit, --exclude-scanners
+    # bandit" came back as [""], and the later check called that a misspelling
+    # of an empty name. An allowlist of nothing but empty names is left as given
+    # so the check for names that match no scanner still refuses it.
+    named = [name for name in enabled if name.strip()]
+    if named:
+        enabled = named
+    excluded = [name for name in excluded if name.strip()]
     if not enabled or not excluded:
         return list(enabled)
     excluded_keys = {name.lower().strip() for name in excluded}
@@ -141,9 +153,10 @@ def refuse_selection_matching_no_scanner(
         return
     if any(name.lower().strip() in registered for name in requested):
         return
+    shown = sorted(name for name in requested if name.strip()) or ["(an empty name)"]
     raise ScannerSelectionError(
         "None of the requested scanners exist: "
-        f"{', '.join(sorted(requested))}. "
+        f"{', '.join(shown)}. "
         f"Registered scanners: {', '.join(registered)}. "
         "Refused rather than scanned, because an allowlist that "
         "matches nothing selects nothing: every scanner would be "
@@ -152,3 +165,36 @@ def refuse_selection_matching_no_scanner(
         "the spelling -- names use hyphens, not underscores -- or "
         f"drop {selection_names(origin).allowlist} to run them all."
     )
+
+
+def exclusions_matching_no_scanner(
+    excluded: Iterable[str],
+    registered_names: Iterable[str],
+) -> List[str]:
+    """The names in *excluded* that no registered scanner goes by.
+
+    An exclusion that matches nothing is not refused: a command line shared by
+    several ASH versions or installs may name a scanner this one does not have.
+    But it is silent, and a misspelled exclusion ("--exclude-scanners
+    detect_secrets") leaves the scanner the operator meant to leave out running,
+    so the caller says so.
+
+    Names compare lower-cased and stripped, as the subtraction and ScanPhase
+    compare them. Each name comes back once, in the spelling it was given.
+    Empty names (a stray comma) are not reported. With no registered names there
+    is nothing to compare against, and the answer is empty.
+
+    Args:
+        excluded: The ``--exclude-scanners`` names, or the MCP workspace tool's
+            ``excluded_scanners``.
+        registered_names: The registered scanners' selectable names.
+    """
+    registered = {name.lower().strip() for name in registered_names}
+    if not registered:
+        return []
+    unmatched: Dict[str, str] = {}
+    for name in excluded:
+        key = name.lower().strip()
+        if key and key not in registered:
+            unmatched.setdefault(key, name.strip())
+    return list(unmatched.values())
