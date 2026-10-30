@@ -140,7 +140,9 @@ def test_a_worker_that_does_not_come_back_is_named_as_unmasked(
 ):
     """No caller event: the pool does not wait for the stop, and says so."""
     caplog.set_level(logging.ERROR, logger=ASH_LOGGER.name)
-    monkeypatch.setattr(execution, "_ABANDONED_STOP_GRACE_POLLS", 4)
+    # raising=False: at a base without the constant the case still measures the
+    # behaviour (the missing note) rather than failing on the attribute.
+    monkeypatch.setattr(execution, "_ABANDONED_STOP_GRACE_POLLS", 4, raising=False)
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"), ("quick", "MEDIUM"))
     release = threading.Event()
     FakeOrchestrator.behaviour["wedged"] = {

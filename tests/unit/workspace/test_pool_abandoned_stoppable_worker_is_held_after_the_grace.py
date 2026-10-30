@@ -90,7 +90,11 @@ def test_a_stoppable_worker_that_never_stops_is_counted_held_after_the_grace(
     passed; the pool still waits for ``wedged`` at shutdown, as the caller's
     event asks.
     """
-    monkeypatch.setattr(execution_module, "_ABANDONED_STOP_GRACE_POLLS", GRACE_POLLS)
+    # raising=False: at a base without the constant the case still measures the
+    # behaviour (the queued project never given up on) rather than the attribute.
+    monkeypatch.setattr(
+        execution_module, "_ABANDONED_STOP_GRACE_POLLS", GRACE_POLLS, raising=False
+    )
     release = threading.Event()
     scan = _AScanThatIgnoresItsScope(release)
     monkeypatch.setattr(execution_module, "_scan_one_project", scan)
@@ -123,7 +127,9 @@ def test_a_stoppable_worker_that_stops_inside_the_grace_frees_its_slot(
 ):
     """Must-not-flag control: a scan that honours its scope comes back at once,
     and the queued project runs on its slot instead of being failed."""
-    monkeypatch.setattr(execution_module, "_ABANDONED_STOP_GRACE_POLLS", GRACE_POLLS)
+    monkeypatch.setattr(
+        execution_module, "_ABANDONED_STOP_GRACE_POLLS", GRACE_POLLS, raising=False
+    )
     scan = _AScanThatWaitsForItsCancel()
     release = threading.Event()
     release.set()
