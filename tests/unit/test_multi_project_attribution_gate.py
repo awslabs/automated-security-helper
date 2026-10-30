@@ -67,6 +67,11 @@ gate = _load_gate()
 # ---------------------------------------------------------------------------
 
 
+def _producer(rule_id: str) -> str:
+    """The scanner that produces a rule ID: checkov's are CKV, the rest bandit's."""
+    return "checkov" if rule_id.startswith("CKV") else "bandit"
+
+
 def _result(
     rule_id: str,
     *,
@@ -88,7 +93,7 @@ def _result(
         "level": "error",
         "message": {"text": "fixture"},
         "properties": {
-            "scanner_name": "bandit",
+            "scanner_name": _producer(rule_id),
             "workspace_project": project,
             "workspace_uri": f"{relative_path}/{relative}",
         },
@@ -138,6 +143,12 @@ def healthy(workspace_root, output_dir):
     """
     runs = []
     projects = []
+    # The rollup carries both scanners the gate selects, each with its own share of
+    # the findings, so a check that reads only one of them cannot pass on this file.
+    rollup = {
+        scanner: {"finding_count": 0, "actionable_finding_count": 0}
+        for scanner in gate.GATE_SCANNERS
+    }
     for index, project in enumerate(gate.FIXTURE_PROJECTS):
         results = [
             _result("B307", project=project.key),
@@ -171,7 +182,21 @@ def healthy(workspace_root, output_dir):
         # makes the strict 'src < project-b' inequality hold, and it holds by a
         # margin equal to the number of bandit findings rather than by everything
         # being gated.
-        actionable = 1 if project.threshold == "CRITICAL" else len(live)
+        live_checkov = sum(
+            1 for entry in live if entry["properties"]["scanner_name"] == "checkov"
+        )
+        if project.threshold == "CRITICAL":
+            actionable_by_scanner = {"bandit": 0, "checkov": 1}
+        else:
+            actionable_by_scanner = {
+                "bandit": len(live) - live_checkov,
+                "checkov": live_checkov,
+            }
+        actionable = sum(actionable_by_scanner.values())
+        rollup["bandit"]["finding_count"] += len(live) - live_checkov
+        rollup["checkov"]["finding_count"] += live_checkov
+        for scanner, count in actionable_by_scanner.items():
+            rollup[scanner]["actionable_finding_count"] += count
         runs.append(
             {
                 "tool": {"driver": {"name": "ASH"}},
@@ -214,13 +239,8 @@ def healthy(workspace_root, output_dir):
             "unconvertible_finding_paths": 0,
         },
         "scanner_results": {
-            "bandit": {
-                "status": "PASSED",
-                "finding_count": sum(p["finding_count"] for p in projects),
-                "actionable_finding_count": sum(
-                    p["actionable_finding_count"] for p in projects
-                ),
-            },
+            scanner: {"status": "PASSED", **counts}
+            for scanner, counts in rollup.items()
         },
         "sarif": {"version": "2.1.0", "runs": runs},
     }
@@ -241,11 +261,11 @@ class TestHealthyResultsPass:
         assert outcome.violations == []
         assert outcome.passed
 
-    def test_exit_zero_is_also_tolerated(self, healthy, output_dir):
-        """In case a future default turns fail_on_findings off."""
+    def test_exit_zero_with_exceeding_projects_is_refused(self, healthy, output_dir):
+        """The healthy file has projects over their thresholds, so 0 contradicts it."""
         healthy["workspace"]["exit_code"] = 0
         outcome = _evaluate(healthy, output_dir, exit_code=0, repo_root=REPO_ROOT)
-        assert outcome.violations == []
+        assert any("exited 0 although" in v for v in outcome.violations)
 
 
 # ---------------------------------------------------------------------------
@@ -907,7 +927,8 @@ class TestScannerRollupRegression:
 
     def test_a_rollup_actionable_of_zero_fails(self, healthy, output_dir):
         """The exact shape of the defect: initialised, defaulted, never summed."""
-        healthy["scanner_results"]["bandit"]["actionable_finding_count"] = 0
+        for entry in healthy["scanner_results"].values():
+            entry["actionable_finding_count"] = 0
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any(
             "would conclude this workspace is clean" in v for v in outcome.violations
@@ -922,6 +943,12 @@ class TestScannerRollupRegression:
 
     def test_a_rollup_finding_total_that_disagrees_fails(self, healthy, output_dir):
         healthy["scanner_results"]["bandit"]["finding_count"] += 5
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("finding total" in v for v in outcome.violations)
+
+    def test_the_other_selected_scanners_count_is_read_too(self, healthy, output_dir):
+        """The rollup sums both selected scanners, so checkov's share is checked."""
+        healthy["scanner_results"]["checkov"]["finding_count"] += 5
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("finding total" in v for v in outcome.violations)
 
@@ -1041,11 +1068,33 @@ class TestFailedAndSkippedProjects:
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("status ERROR" in v for v in outcome.violations)
 
-    def test_a_scanner_that_is_missing_is_tolerated(self, healthy, output_dir):
-        """MISSING means the tool is not installed on this runner."""
+    def test_an_unselected_scanner_that_is_missing_is_tolerated(
+        self, healthy, output_dir
+    ):
+        """MISSING on a scanner the gate did not select is a normal runner state."""
         healthy["scanner_results"]["semgrep"] = {"status": "MISSING"}
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert outcome.violations == []
+
+    @pytest.mark.parametrize("status", ["MISSING", "SKIPPED"])
+    def test_a_selected_scanner_that_did_not_run_fails_the_gate(
+        self, healthy, output_dir, status
+    ):
+        """The gate reads checkov's status as well as bandit's."""
+        healthy["scanner_results"]["checkov"]["status"] = status
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("'checkov'" in v and status in v for v in outcome.violations)
+        assert any("'checkov'" in v for v in outcome.root_violations)
+
+    def test_a_selected_scanner_absent_from_the_rollup_fails_the_gate(
+        self, healthy, output_dir
+    ):
+        del healthy["scanner_results"]["checkov"]
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "'checkov'" in v and "absent from scanner_results" in v
+            for v in outcome.violations
+        )
 
 
 class TestFixtureScoping:

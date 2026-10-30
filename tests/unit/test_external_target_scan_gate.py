@@ -281,17 +281,20 @@ class TestAllScannersMissing:
 
 
 class TestMissingIsTolerated:
-    def test_some_missing_others_passed_with_findings_is_clean(self):
-        """MISSING means the tool is not installed; that must not fail the gate."""
+    def test_unselected_scanners_missing_with_both_selected_ones_run_is_clean(self):
+        """MISSING on a scanner the gate did not select must not fail the gate.
+
+        Both selected scanners run and leave their own rules; every other scanner
+        is not installed, which is the normal state of a runner.
+        """
         results = _results(
             scanners={
                 "bandit": _scanner("PASSED", findings=4, actionable=0),
-                "checkov": _scanner("MISSING"),
+                "checkov": _scanner("FAILED", findings=7, actionable=7),
                 "cdk-nag": _scanner("MISSING"),
                 "grype": _scanner("MISSING"),
                 "syft": _scanner("MISSING"),
             },
-            rule_ids=["B307", "B324"],
         )
         assert gate.evaluate_results(results).violations == []
 
@@ -308,15 +311,46 @@ class TestMissingIsTolerated:
         evidence = gate.collect_sarif_evidence(results)
         assert gate.check_expected_rules_present(states, evidence) == []
 
-    def test_skipped_is_treated_like_missing(self):
+    @pytest.mark.parametrize("status", ["MISSING", "SKIPPED"])
+    def test_a_selected_scanner_that_did_not_run_fails_the_gate(self, status):
+        """The gate reads checkov's result too: one scanner is not both."""
         results = _results(
             scanners={
                 "bandit": _scanner("PASSED", findings=4),
-                "checkov": _scanner("SKIPPED"),
+                "checkov": _scanner(status),
             },
             rule_ids=["B307"],
         )
-        assert gate.evaluate_results(results).violations == []
+        violations = gate.evaluate_results(results).violations
+        assert any(
+            "scanner 'checkov'" in v and f"did not run ({status})" in v
+            for v in violations
+        ), violations
+
+    def test_skipped_is_treated_like_missing_by_the_rule_check(self):
+        """No CKV rule is required of either; the gate still fails on both."""
+        for status in ("MISSING", "SKIPPED"):
+            results = _results(
+                scanners={
+                    "bandit": _scanner("PASSED", findings=4),
+                    "checkov": _scanner(status),
+                },
+                rule_ids=["B307"],
+            )
+            states = gate.parse_scanner_states(results)
+            evidence = gate.collect_sarif_evidence(results)
+            assert gate.check_expected_rules_present(states, evidence) == [], status
+
+    def test_a_selected_scanner_absent_from_the_results_fails_the_gate(self):
+        results = _results(
+            scanners={"bandit": _scanner("PASSED", findings=4)},
+            rule_ids=["B307"],
+        )
+        violations = gate.evaluate_results(results).violations
+        assert any(
+            "scanner 'checkov'" in v and "absent from scanner_results" in v
+            for v in violations
+        ), violations
 
     def test_missing_scanner_is_not_counted_as_having_run(self):
         states = {
