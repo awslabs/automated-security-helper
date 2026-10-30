@@ -115,9 +115,12 @@ admitted like any other, because it is declared, where a ``pytest.skip`` found a
 time is not.
 
 ``ASH_TEST_TIER_FLOOR=warn`` opts in like ``1`` and reports instead of failing: the
-same line is printed with a warning prefix and the exit status is left alone. The e2e
-legs run in warn mode until a hosted run shows every one of them executing a real test
-with its scanners installed. An empty value leaves the floor off; any other value is a
+same line is printed with a warning prefix, followed by a GitHub warning annotation
+(``::warning title=tier run executed no test::<the line>``), and the exit status is left
+alone. The annotation puts the report on the workflow run's page, so a reader can see
+whether any e2e leg still executed no test without opening each step log. The e2e legs
+run in warn mode until a hosted run shows every one of them executing a real test with
+its scanners installed. An empty value leaves the floor off; any other value is a
 usage error, as a malformed ``ASH_TEST_SHARD`` is, so that a mistyped ``WARN`` does not
 turn the floor off without a word.
 
@@ -437,8 +440,10 @@ def fail_a_tier_run_that_executed_no_test(
     ``leg_assertions`` (tests marked ``leg_assertion``, which are in neither count)
     apart so that the numbers add up. The line is followed by a GitHub error annotation
     carrying the same text. In warn mode (``ASH_TEST_TIER_FLOOR=warn``) the same line is
-    printed with :data:`WARN_PREFIX`, without the annotation, and the status is left
-    alone, so this returns False. It does nothing in an xdist worker,
+    printed with :data:`WARN_PREFIX`, followed by a GitHub warning annotation
+    (``::warning title=...::<the line>``) so that the run page shows which legs still
+    executed no test, and the status is left alone, so this returns False. It does
+    nothing in an xdist worker,
     whose share of the tests may be all skips while the run executed hundreds; the
     controller counts every worker's reports and decides.
     """
@@ -486,6 +491,7 @@ def fail_a_tier_run_that_executed_no_test(
     )
     if config.stash.get(_FLOOR_WARN_KEY, False):
         _write_line(config, WARN_PREFIX + line)
+        _write_line(config, f"::warning title={FAILURE_TITLE}::{line}")
         return False
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
     _write_line(config, line)

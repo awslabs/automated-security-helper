@@ -1112,11 +1112,15 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         self._plant(tmp_path, absent_tool=1)
         done = self._run(tmp_path, floor="warn", gate_open=True)
         assert done.returncode == 0, done.stdout + done.stderr
-        assert (
-            sharding.WARN_PREFIX
-            + "tier run executed no test: 1 collected, 1 skipped, 0 executed; "
+        line = (
+            "tier run executed no test: 1 collected, 1 skipped, 0 executed; "
             "a leg that runs nothing is not green"
-        ) in done.stdout, done.stdout
+        )
+        assert sharding.WARN_PREFIX + line in done.stdout, done.stdout
+        warning = f"::warning title=tier run executed no test::{line}"
+        assert warning in done.stdout.splitlines(), (
+            "the annotation starts its own line, which is where GitHub reads it"
+        )
         assert "::error" not in done.stdout, "a warning is not an error annotation"
 
     def test_the_value_1_on_the_same_tree_exits_1(self, tmp_path):
@@ -1295,6 +1299,7 @@ class TestATierRunThatExecutedNoTestFails:
         "a leg that runs nothing is not green"
     )
     ANNOTATION = "::error title=tier run executed no test::" + LINE
+    WARNING = "::warning title=tier run executed no test::" + LINE
 
     @staticmethod
     def _session(
@@ -1361,9 +1366,8 @@ class TestATierRunThatExecutedNoTestFails:
         assert written[1] == prefix + written[0]
 
     def test_a_run_that_is_not_failed_prints_no_annotation(self):
-        """Warn mode, an admitted skipif leg and a run that executed a test."""
+        """An admitted skipif leg and a run that executed a test."""
         for kwargs, args in (
-            ({"warn": True}, (0, 3)),
             ({}, (0, 3, {"not supported on this runner": 3})),
             ({}, (1, 2)),
         ):
@@ -1371,6 +1375,18 @@ class TestATierRunThatExecutedNoTestFails:
             session = self._session(written, **kwargs)
             assert not sharding.fail_a_tier_run_that_executed_no_test(session, *args)
             assert not any(line.startswith("::") for line in written), written
+
+    def test_warn_mode_prints_a_warning_annotation_and_never_an_error_one(self):
+        """The run page shows a warning for each warn-mode leg that executed no test."""
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        annotations = [line for line in written if line.startswith("::")]
+        assert annotations == [self.WARNING], written
+        assert annotations[0] == (
+            f"::warning title={sharding.FAILURE_TITLE}::{self.LINE}"
+        )
+        assert not any(line.startswith("::error") for line in written), written
 
     def test_a_run_that_executed_a_test_is_left_alone(self):
         written: list[str] = []
@@ -1812,7 +1828,7 @@ class TestATierRunThatExecutedNoTestFails:
         session = self._session(written, warn=True)
         assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
         assert session.exitstatus == pytest.ExitCode.OK
-        assert written == [sharding.WARN_PREFIX + self.LINE]
+        assert written == [sharding.WARN_PREFIX + self.LINE, self.WARNING]
         assert sharding.WARN_PREFIX.startswith("warning")
 
     def test_warn_mode_through_the_plugin_leaves_the_status(self):
@@ -1823,7 +1839,7 @@ class TestATierRunThatExecutedNoTestFails:
             plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.OK
-        assert written == [sharding.WARN_PREFIX + self.LINE]
+        assert written == [sharding.WARN_PREFIX + self.LINE, self.WARNING]
 
     def test_warn_mode_says_nothing_about_a_run_that_executed_a_test(self):
         written: list[str] = []

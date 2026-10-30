@@ -90,7 +90,8 @@ The executed-test floor fails a CI tier leg that selected tests and executed non
 them. The environment variable `ASH_TEST_TIER_FLOOR` is its only trigger: the
 `run-unit-tests` action sets it to `1` on the unit and integration legs, and to `warn`
 on the e2e legs for now. In warn mode the floor prints its line with a warning prefix and
-leaves the exit status alone, and the e2e legs change to `1` once a hosted run shows each
+a `::warning` annotation, which shows on the workflow run's page, and leaves the exit
+status alone, and the e2e legs change to `1` once a hosted run shows each
 of them executing a real test with its scanners installed. Any other non-empty value of
 the variable is a usage error, so a mistyped `WARN` cannot turn the floor off without a
 word. A shard alone does not turn
