@@ -126,6 +126,7 @@ class TestCheckAction:
             ),
         ):
             assert app.check_action("quit", ()) is True
+            assert app.check_action("quit_from_table", ()) is True
             assert app.check_action("next_finding", ()) is True
 
 
