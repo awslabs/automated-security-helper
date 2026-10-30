@@ -154,11 +154,14 @@ def _profile_kept_where_a_scan_may_rewrite_it(path: Path) -> Optional[str]:
       workspace root, by the scan's own classifier
       (``sandbox.config_is_client_supplied``), which admits the profile files
       the server itself writes in a session's ``config/`` directory.
-    - A git checkout inside a granted scan root: a ``.git`` entry among the
-      profile's ancestors at or below a directory ``ASH_MCP_ALLOWED_ROOTS``
-      names. Such a tree is scanned, and the checkout's owner can rewrite the
-      profile between the server's start and the scan. A checkout outside every
-      granted root, and a plain file under a granted root, are not judged here.
+    - A git checkout a scan reaches: for a profile under a directory
+      ``ASH_MCP_ALLOWED_ROOTS`` names, a ``.git`` entry among the profile's
+      ancestors, up to the filesystem root. A checkout below the granted root
+      is scanned, and one that holds the granted root (the root is a directory
+      of a larger checkout) is the same tree: the checkout's owner can rewrite
+      the profile between the server's start and the scan either way. A
+      checkout outside every granted root, and a plain file under a granted
+      root with no checkout above it, are not judged here.
 
     The git walk reads the resolved path, so a link into a checkout counts.
     Returns None when neither applies.
@@ -178,14 +181,19 @@ def _profile_kept_where_a_scan_may_rewrite_it(path: Path) -> Optional[str]:
     for root in operator_scan_roots():
         if resolved != root and not resolved.is_relative_to(root):
             continue
+        # Past the granted root too: a root that is a directory of a checkout
+        # has its .git above it, and the tree is scanned all the same.
         for ancestor in (resolved.parent, *resolved.parent.parents):
             if (ancestor / ".git").exists():
+                where = (
+                    f"inside the scan root {root}"
+                    if ancestor == root or ancestor.is_relative_to(root)
+                    else f"which holds the scan root {root}"
+                )
                 return (
-                    f"the git checkout at {ancestor}, inside the scan root {root} "
+                    f"the git checkout at {ancestor}, {where} "
                     f"({ASH_MCP_ALLOWED_ROOTS_ENV})"
                 )
-            if ancestor == root:
-                break
     return None
 
 

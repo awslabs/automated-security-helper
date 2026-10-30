@@ -337,8 +337,9 @@ class TestAProfileKeptWhereAScanMayRewriteIt:
     registered, before its content is read: a file under a session workspace
     below the MCP workspace root (by the scan's own classifier, which admits the
     profile files the server writes in a session's ``config/`` directory), and a
-    file inside a git checkout at or below a granted scan root. A plain file
-    under a granted root, and a checkout outside every granted root, register as
+    file under a granted scan root with a git checkout among its ancestors,
+    below the root or holding it. A plain file under a granted root with no
+    checkout above it, and a checkout outside every granted root, register as
     before."""
 
     @pytest.fixture(autouse=True)
@@ -390,6 +391,29 @@ class TestAProfileKeptWhereAScanMayRewriteIt:
         message = str(exc.value)
         assert str(profile) in message
         assert str(checkout.resolve()) in message
+        assert "ASH_MCP_ALLOWED_ROOTS" in message
+
+    def test_a_checkout_that_holds_the_scan_root_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The granted root is a directory of a larger checkout: its ``.git``
+        sits above the root. The tree the server scans is that checkout, and
+        its owner can rewrite a profile kept anywhere under the root.
+
+        Red at the base: the walk stopped at the granted root and never saw
+        the ``.git`` above it, so the profile registered."""
+        (tmp_path / ".git").mkdir()
+        team = self.allowed / "team"
+        team.mkdir()
+        profile = _write_yaml(team / "ash.yaml", _valid_config_yaml("held"))
+
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"default={profile}"])
+
+        message = str(exc.value)
+        assert str(profile) in message
+        assert str(tmp_path.resolve()) in message
+        assert "holds the scan root" in message
         assert "ASH_MCP_ALLOWED_ROOTS" in message
 
     def test_the_same_profile_under_a_root_with_no_checkout_registers(self) -> None:
