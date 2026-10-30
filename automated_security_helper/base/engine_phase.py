@@ -110,12 +110,24 @@ class EnginePhase(ABC):
         return admits
 
     def _notify_phase_event(self, event: Any, **kwargs) -> None:
-        """Notify a phase's START or COMPLETE event, logging a handler that raises.
+        """Notify a phase's START event; a handler that raises ends the run.
+
+        A *_PHASE_START handler's exception propagates as itself: that is the
+        contract the engine's own tests pin (a failing start handler ends the
+        run before the phase's work, with the phase's completions read cleanly
+        on the way out), and nothing of the phase has run yet, so nothing is
+        lost. The COMPLETE event is the one guarded (``_notify_phase_complete``):
+        there a raising handler discarded a finished phase's results.
+        """
+        self.notify_event(event, **kwargs)
+
+    def _notify_phase_complete(self, event: Any, **kwargs) -> None:
+        """Notify a phase's COMPLETE event, logging a handler that raises.
 
         Every other notification site in the phases catches and logs a
-        handler's failure; these two did not, so one raising *_PHASE_START or
-        *_PHASE_COMPLETE handler aborted the scan, and at COMPLETE discarded a
-        finished phase's results.
+        handler's failure; this one did not, so one raising *_PHASE_COMPLETE
+        handler discarded a finished phase's results. The START event is not
+        guarded this way (``_notify_phase_event``).
         """
         try:
             self.notify_event(event, **kwargs)
@@ -199,7 +211,7 @@ class EnginePhase(ABC):
             )
             complete_event = complete_event_name
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {complete_event} event")
-        self._notify_phase_event(complete_event, results=results, **kwargs)
+        self._notify_phase_complete(complete_event, results=results, **kwargs)
 
         return results
 

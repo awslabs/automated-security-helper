@@ -108,19 +108,39 @@ class TestARaisingPhaseEventHandlerDoesNotAbortThePhase:
         phase = _FakePhase(plugin_context=_context())
         calls = []
 
-        def raising_notify(event_type, **kwargs):
+        def raising_at_complete(event_type, **kwargs):
             calls.append(event_type)
-            raise RuntimeError("a subscriber crashed")
+            if event_type == AshEventType.SCAN_PHASE_COMPLETE:
+                raise RuntimeError("a subscriber crashed")
 
-        phase.notify_event = raising_notify  # type: ignore[method-assign]
+        phase.notify_event = raising_at_complete  # type: ignore[method-assign]
         agg = AshAggregatedResults()
 
-        # Red at the base: the RuntimeError escaped execute().
+        # Red at the base: the RuntimeError escaped execute() and the finished
+        # phase's results were discarded with it.
         results = phase.execute(aggregated_results=agg)
 
         assert results is agg
         assert AshEventType.SCAN_PHASE_START in calls
         assert AshEventType.SCAN_PHASE_COMPLETE in calls
+
+    def test_a_raising_start_handler_still_ends_the_run_as_itself(self):
+        """The contract the engine's real-run test pins: a START handler's error
+        propagates as itself, before any of the phase's work has run."""
+        phase = _FakePhase(plugin_context=_context())
+        failure = RuntimeError("a start subscriber crashed")
+
+        def raising_at_start(event_type, **kwargs):
+            if event_type == AshEventType.SCAN_PHASE_START:
+                raise failure
+
+        phase.notify_event = raising_at_start  # type: ignore[method-assign]
+
+        # Red at the previous tip: the guard swallowed the START handler's error
+        # too, and the phase ran on.
+        with pytest.raises(RuntimeError) as ended:
+            phase.execute(aggregated_results=AshAggregatedResults())
+        assert ended.value is failure
 
 
 class TestARaisingCheckIsReportedApartFromAnExclusion:
