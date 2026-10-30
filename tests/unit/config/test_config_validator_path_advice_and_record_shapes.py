@@ -105,6 +105,13 @@ class TestPathPatternAdvice:
         assert advice is not None and BARE in advice, advice
         assert "Use '" not in advice, advice
 
+    def test_control_a_slash_the_operator_typed_keeps_the_plain_wording(self, tmp_path):
+        """'./tests/' already spells the directory, so the advice drops the
+        prefix and says "to ignore it", as before; only a slash the tree's
+        respelling adds is not read as the operator's."""
+        advice = path_pattern_advice("./tests/", _tree(tmp_path), ignore_path=True)
+        assert advice == f"Path './tests/' {PREFIX}. Use 'tests/' to ignore it."
+
     def test_the_dot_prefix_advice_takes_the_trees_spelling(self, tmp_path):
         advice = path_pattern_advice("./Tests", _tree(tmp_path), ignore_path=True)
         assert advice == (

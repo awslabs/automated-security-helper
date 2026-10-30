@@ -292,6 +292,9 @@ def path_pattern_advice(
     if form.startswith("./"):
         if not shown_form.startswith("./"):
             return f"Path '{shown}' {DOT_PREFIX_PROBLEM}. Remove the leading './'."
+        # The slash the operator typed, read before the respelling: the tree's
+        # spelling of a directory ends in one too, and that one is not theirs.
+        typed_as_directory = rest.endswith("/")
         if read_from_environment:
             shown_rest = _without_dot_prefix(shown_form).lstrip("/")
         else:
@@ -304,8 +307,8 @@ def path_pattern_advice(
         # on a case-sensitive filesystem only once respelled.
         names_directory = (
             not any(character in rest for character in _GLOB_CHARACTERS)
-            and not (ignore_path and rest.endswith("/"))
-            and _names_a_directory(project_root / rest)
+            and not (ignore_path and typed_as_directory)
+            and _names_a_directory(project_root / rest.rstrip("/"))
         )
         if names_directory:
             spelling = directory_spelling(shown_rest, ignore_path=ignore_path)
