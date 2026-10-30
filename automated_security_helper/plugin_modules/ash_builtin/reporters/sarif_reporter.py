@@ -254,26 +254,33 @@ def run_of_project(runs: List[Any], run_index: int, invocations: List[Any]) -> A
     aggregator wrote carries ``properties.workspace_project`` naming the same
     project. Trusting the index alone wrote one project's converter failures onto
     another project's run whenever the runs had been filtered, reordered or
-    merged before the reporter saw them, and nothing said so. So the run at the
-    index is used only when it carries no stamp (a document this cannot check)
-    or its stamp names the project; otherwise the run stamped for the project is
-    used wherever it sits, and when none is, nothing is attached and the log says
-    which project's shortfalls the document does not carry.
+    merged before the reporter saw them, and nothing said so. So the run stamped
+    for the project is used wherever it sits. The run at the index is used only
+    when no run of the document carries a stamp at all (a document this cannot
+    check, where the index is the only word there is): an unstamped run at a
+    stale index in a document whose other runs are stamped is some other run (the
+    default model's empty first run, or another project's run from a writer that
+    stamped the rest), and the project's own run is plainly the one stamped for
+    it, so the unstamped run was the wrong run to take. When no run is the
+    project's, nothing is attached and the log says which project's shortfalls
+    the document does not carry.
     """
     key = (
         _stamped_property(invocations[0], "workspace_project") if invocations else None
     )
     at_index = runs[run_index] if 0 <= run_index < len(runs) else None
-    stamped = _stamped_property(at_index, "workspace_project") if at_index else None
-    if at_index is not None and (stamped is None or key is None or stamped == key):
+    stamps = [_stamped_property(run, "workspace_project") for run in runs]
+    if key is not None:
+        for run, stamp in zip(runs, stamps):
+            if stamp == key:
+                if run is not at_index:
+                    ASH_LOGGER.debug(
+                        f"Converter shortfalls of project '{key}' attached to the "
+                        f"run stamped for it, not to run index {run_index}"
+                    )
+                return run
+    if at_index is not None and not any(stamp is not None for stamp in stamps):
         return at_index
-    for run in runs:
-        if key is not None and _stamped_property(run, "workspace_project") == key:
-            ASH_LOGGER.debug(
-                f"Converter shortfalls of project '{key}' attached to the run "
-                f"stamped for it, not to run index {run_index}"
-            )
-            return run
     ASH_LOGGER.warning(
         f"No run of the SARIF document is stamped for project '{key}' (its "
         f"sarif_run_index is {run_index}); its converter shortfalls are not "

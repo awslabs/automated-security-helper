@@ -226,6 +226,56 @@ def test_a_run_stamped_for_another_project_is_never_written_onto(test_plugin_con
     assert all("invocations" not in run for run in doc["runs"])
 
 
+def test_the_stamped_run_wins_over_an_unstamped_run_at_a_stale_index(
+    test_plugin_context,
+):
+    """An unstamped run at the index was taken as soon as it carried no stamp,
+    before any run stamped for the project was looked for, so a project whose
+    index had gone stale (the default model's empty first run sitting at 0)
+    wrote its converter failures onto that run while its own stamped run sat
+    untouched beside it."""
+    model = _stamped_model(
+        None,
+        "api",
+        "web",
+        projects=[
+            _project(
+                "api", sarif_run_index=0, incomplete_converters={"archive": "crashed"}
+            ),
+            _project("web", sarif_run_index=2),
+        ],
+    )
+
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+
+    first, api_run, web_run = doc["runs"]
+    assert "invocations" not in first
+    assert [i["properties"]["workspace_project"] for i in api_run["invocations"]] == [
+        "api"
+    ]
+    assert "invocations" not in web_run
+
+
+def test_an_unstamped_run_in_a_stamped_document_is_not_written_onto(
+    test_plugin_context,
+):
+    """When the document's other runs are stamped, an unstamped run is some other
+    run, not the project's: nothing is attached, as for a run stamped for
+    another project."""
+    model = _stamped_model(
+        None,
+        "api",
+        projects=[
+            _project("api", sarif_run_index=1),
+            _project("web", sarif_run_index=0, incomplete_converters={"archive": "x"}),
+        ],
+    )
+
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+
+    assert all("invocations" not in run for run in doc["runs"])
+
+
 def test_an_unstamped_run_at_the_index_is_still_the_projects_run(
     test_plugin_context,
 ):
