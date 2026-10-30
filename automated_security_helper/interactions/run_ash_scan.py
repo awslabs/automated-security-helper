@@ -6713,8 +6713,14 @@ def _compute_exit_code(
     config_fail_on_findings: Optional[bool] = None,
     config_fail_on_incomplete_scanners: Optional[bool] = None,
     report_sarif_written_this_run: Optional[bool] = None,
+    actionable_count: Optional[int] = None,
 ) -> int:
     """The exit code for *results*.
+
+    *actionable_count* is :func:`_gating_actionable_count`'s answer when the
+    caller has read it already (``run_ash_scan`` reads it once for the exit code,
+    the summary and the legend together); None reads it here, as ``ash merge``
+    has it read.
 
     *report_sarif_written_this_run* says whether ``reports/ash.sarif`` is this
     run's (see ``report_sarif_identity``). False keeps the gate off the file, so
@@ -7075,7 +7081,11 @@ def _compute_exit_code(
     if not final_fail_on_findings:
         return 0
 
-    if _gating_actionable_count(results, opts, report_sarif_written_this_run) > 0:
+    if actionable_count is None:
+        actionable_count = _gating_actionable_count(
+            results, opts, report_sarif_written_this_run
+        )
+    if actionable_count > 0:
         return 2
     return 0
 
@@ -7780,23 +7790,24 @@ def _run_with_options(
     report_sarif_written_this_run = (
         report_sarif_after is not None and report_sarif_after != report_sarif_before
     )
+    # The actionable count the exit code gates on, read ONCE (it parses the
+    # persisted SARIF report) and handed to the exit code, the summary and the
+    # legend alike, so the three name one number and cannot disagree about it.
+    actionable_findings = (
+        _gating_actionable_count(results, opts, report_sarif_written_this_run)
+        if results is not None
+        else 0
+    )
     exit_code = _compute_exit_code(
         results,
         opts,
         config_fail_on_findings,
         config_fail_on_incomplete_scanners,
         report_sarif_written_this_run=report_sarif_written_this_run,
+        actionable_count=actionable_findings,
     )
 
     if opts.show_summary:
-        # The count the exit code was derived from (_gating_actionable_count), so
-        # the summary and the legend name the number that gated, not the
-        # in-memory metrics total, which can differ from it.
-        actionable_findings = (
-            _gating_actionable_count(results, opts, report_sarif_written_this_run)
-            if results is not None
-            else 0
-        )
         _print_summary(results, opts, scan_start_time, actionable_findings)
 
         if exit_code == 2 and not opts.quiet:

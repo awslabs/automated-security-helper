@@ -760,12 +760,9 @@ def test_an_mcp_only_option_is_refused_outside_local_mode(
         )
 
 
-def test_the_legend_and_summary_name_the_count_that_gated(
-    tmp_path, monkeypatch, capsys
-):
-    """The in-memory metrics say one actionable finding; the persisted SARIF
-    report this run wrote holds two, and the exit code is derived from it. The
-    legend names the number that gated."""
+def _local_run_with_one_metric_and_two_sarif_findings(monkeypatch) -> None:
+    """A local run whose in-memory metrics say one actionable finding while the
+    SARIF report it writes holds two: the two counts differ on purpose."""
     metrics = [
         SimpleNamespace(
             actionable=1,
@@ -792,6 +789,8 @@ def test_the_legend_and_summary_name_the_count_that_gated(
 
     monkeypatch.setattr(ras, "_run_local_mode", fake_local_mode)
 
+
+def _scan_with_summary(tmp_path) -> int:
     with pytest.raises(SystemExit) as exited:
         run_ash_scan(
             source_dir=tmp_path,
@@ -801,10 +800,37 @@ def test_the_legend_and_summary_name_the_count_that_gated(
             min_severity="none",
             progress=False,
         )
+    return exited.value.code
 
-    assert exited.value.code == 2
+
+def test_the_legend_and_summary_name_the_count_that_gated(
+    tmp_path, monkeypatch, capsys
+):
+    """The in-memory metrics say one actionable finding; the persisted SARIF
+    report this run wrote holds two, and the exit code is derived from it. The
+    legend names the number that gated."""
+    _local_run_with_one_metric_and_two_sarif_findings(monkeypatch)
+
+    assert _scan_with_summary(tmp_path) == 2
     out = _plain(capsys.readouterr().out)
     assert "Exiting due to 2 actionable findings" in out, out
+
+
+def test_the_gating_count_is_read_once_per_run(tmp_path, monkeypatch):
+    """One read of the SARIF report serves the exit code, the summary and the
+    legend; a second read could only agree by luck."""
+    _local_run_with_one_metric_and_two_sarif_findings(monkeypatch)
+    reads: List[int] = []
+    real = ras._gating_actionable_count
+
+    def counting(*args, **kwargs):
+        reads.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(ras, "_gating_actionable_count", counting)
+
+    assert _scan_with_summary(tmp_path) == 2
+    assert len(reads) == 1, reads
 
 
 def test_a_positional_target_is_registered_as_the_scanned_tree(tmp_path, monkeypatch):
