@@ -1810,9 +1810,11 @@ def _custom_containerfile_stage_refusal(
         text = Path(custom_containerfile).read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None  # the build reports a file it cannot read
-    # A line continued with a trailing backslash is one instruction to the
-    # build, so it is one line here.
-    text = re.sub(r"\\\r?\n", " ", text)
+    # As the build reads the file: a comment line is dropped, wherever it is
+    # (one inside a continued instruction included), and a line continued with
+    # a backslash, blanks after it or not, is one instruction with the next.
+    text = re.sub(r"(?m)^[ \t]*#[^\n]*\n?", "", text)
+    text = re.sub(r"\\[ \t]*\r?\n", " ", text)
     if any(name.lower() == stage for name in _FROM_AS_STAGE.findall(text)):
         return None
     return (

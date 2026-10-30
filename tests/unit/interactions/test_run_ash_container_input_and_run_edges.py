@@ -275,6 +275,14 @@ def test_an_id_of_many_digits_is_read_without_int():
             chr(0xFEFF) + "FROM base AS non-root\nRUN true\n", id="byte-order-mark"
         ),
         pytest.param("FROM base \\\n    AS non-root\nRUN true\n", id="continuation"),
+        pytest.param(
+            "FROM base \\  \t\n    AS non-root\nRUN true\n",
+            id="blanks-after-the-backslash",
+        ),
+        pytest.param(
+            "FROM base \\\n# the stage that runs unprivileged\n    AS non-root\nRUN true\n",
+            id="comment-inside-the-continuation",
+        ),
     ],
 )
 def test_the_non_root_stage_is_found_past_a_bom_and_a_continuation(tmp_path, text):
