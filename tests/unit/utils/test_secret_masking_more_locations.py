@@ -323,7 +323,7 @@ class TestTheMarkdownRenderingOfASnippet:
                 "startLine": 20,
                 "snippet": {
                     "text": text,
-                    "rendered": {"markdown": "```\n" + text + "```"},
+                    "rendered": {"text": text, "markdown": "```\n" + text + "```"},
                 },
             },
         }
@@ -333,6 +333,7 @@ class TestTheMarkdownRenderingOfASnippet:
 
         rendered = _physical_of(model, 1).contextRegion.snippet.rendered
         assert rendered.markdown == "```\n" + text + "```"
+        assert rendered.text == text
 
 
 class TestTheLocalPassRunsFirst:
