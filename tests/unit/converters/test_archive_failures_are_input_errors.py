@@ -423,6 +423,7 @@ def test_a_member_pair_the_admission_check_misses_is_the_archives_own_input_erro
         archive_converter, "_written_prefix_keys", lambda member_name, kind: []
     )
     source = Path(test_plugin_context.source_dir)
+    source.mkdir(parents=True, exist_ok=True)
     archive = source / "under.zip"
     zipped = io.BytesIO()
     with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_STORED) as sound:
