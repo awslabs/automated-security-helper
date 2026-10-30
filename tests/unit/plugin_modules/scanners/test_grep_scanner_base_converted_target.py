@@ -229,6 +229,59 @@ def test_operator_exclude_patterns_stay_on_the_converted_target(
     assert CONVERTED_FILE_EXCLUDE not in excludes
 
 
+def _context_with_output_under_a_default_ignore(tmp_path: Path) -> PluginContext:
+    """A git work tree whose ASH output directory sits under ``build`` (the
+    ``--output-dir build/ash`` layout): the tools anchor ``build/`` at the
+    repository root, so the re-passed default covers the converted target whole."""
+    source = tmp_path / "repo"
+    (source / ".git").mkdir(parents=True)
+    (source / "app.py").write_text("x = 1\n", encoding="utf-8")
+    output = source / "build" / "ash"
+    work = output / "converted"
+    (work / "jupyter").mkdir(parents=True)
+    (work / "jupyter" / "notebook-converted.py").write_text(
+        "import os\n", encoding="utf-8"
+    )
+    return PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=work,
+        config=get_default_config(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_converted_target_under_a_default_ignore_drops_that_default(
+    scanner_cls, config_cls, options_cls, cache_env, tmp_path, monkeypatch
+):
+    """The converted target's command leaves out the re-passed default that names
+    one of its own directories below the repository root, and keeps the rest; the
+    source target's command keeps every default.
+
+    Fails at the base: ``--exclude build/`` reached the converted command, the tools
+    excluded every converted file, and the target graded SKIPPED with no notebook
+    scanned.
+    """
+    context = _context_with_output_under_a_default_ignore(tmp_path)
+    scanner = _online_scanner(
+        scanner_cls,
+        config_cls,
+        options_cls(offline=False),
+        context,
+        cache_env,
+        monkeypatch,
+    )
+
+    converted = _exclude_values(_command(scanner, context.work_dir, "converted"))
+    source = _exclude_values(_command(scanner, context.source_dir, "source"))
+
+    assert "build/" not in converted, converted
+    assert "tests/" in converted, converted
+    assert "build/" in source, source
+
+
 @pytest.mark.parametrize(
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )

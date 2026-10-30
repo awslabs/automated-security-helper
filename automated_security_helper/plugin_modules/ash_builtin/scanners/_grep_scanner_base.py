@@ -10,8 +10,9 @@ scanner becomes a thin shell that customises three things:
 - the cache-dir env var (`cache_dir_env_var`)
 
 Subclasses still own their own dependency-resolution path
-(`validate_plugin_dependencies`) and any non-shared options (e.g. opengrep's
-patterns mode, version-gated `--metrics`). Everything else lives here.
+(`validate_plugin_dependencies`) and any non-shared options (opengrep's
+version-gated `--metrics`, and its refusal of the removed patterns mode).
+Everything else lives here.
 """
 
 from __future__ import annotations
@@ -140,8 +141,8 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # converted-file exclude and reads git-ignored files (_resolve_scan_arguments).
     _scan_target_type: str = PrivateAttr(default="source")
     # The offline rule cache the command reads as --config, absolute, or None when
-    # the offline scan reads no cache (patterns mode, the operator's local rules,
-    # no cache found, or an online scan). content_databases_in_use and the
+    # the offline scan reads no cache (the operator's local rules, no cache found,
+    # or an online scan). content_databases_in_use and the
     # staleness probe read it, so a scan that read other rules is not graded on
     # the cache's age.
     _cache_dir_in_use: Optional[str] = PrivateAttr(default=None)
@@ -244,9 +245,9 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         """The offline ruleset, and only when the offline scan read the cache.
 
         Online, the rules come from the registry at scan time and no local copy is read,
-        so there is nothing whose age could make the result stale. Offline, patterns
-        mode and the operator's local rules read no cache either (``_cache_dir_in_use``
-        stays None), and neither does a scan that found no cache.
+        so there is nothing whose age could make the result stale. Offline, the
+        operator's local rules read no cache either (``_cache_dir_in_use`` stays
+        None), and neither does a scan that found no cache.
         """
         if not self._scanner_offline() or self._cache_dir_in_use is None:
             return []
@@ -505,12 +506,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     def _passes_through_as_written(self, configured: str) -> bool:
         """Whether a configured value is one the tool reads itself, not a path ASH
         resolves: a URL, a registry entry name (``_is_registry_name``), or a bare
-        token the tool knows (``_is_tool_spelling``: semgrep's ``policy``,
-        ``supply-chain`` and ``secrets`` products, a bare ruleset name) that names
-        no file or directory in the source tree. A bare token that does name one
-        there is a path, and goes through path trust like any other (the source
-        directory is the tool's working directory, where the tool itself would read
-        the name as that path)."""
+        token the tool knows (``_is_tool_spelling``: semgrep's reserved ``policy``,
+        ``supply-chain`` and ``secrets`` products, or a bare ruleset name that
+        names no file or directory in the source tree). An unreserved bare token
+        that does name one there is a path, and goes through path trust like any
+        other (the source directory is the tool's working directory, where the
+        tool itself would read the name as that path)."""
         if "://" in configured or _is_registry_name(configured):
             return True
         source_dir = getattr(self.context, "source_dir", None)
@@ -524,16 +525,6 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             self.args.extra_args.append(
                 ToolExtraArg(key="--metrics", value=self.metrics_value_offline())
             )
-
-        # Patterns mode (opengrep) searches for the configured patterns and drops
-        # every --config from its command, so it reads no rules and needs no rule
-        # cache; declining for a missing cache recorded it MISSING for nothing.
-        if getattr(self.config.options, "patterns", None):  # type: ignore[union-attr]
-            ASH_LOGGER.info(
-                f"{self.cache_dir_name()} offline mode: patterns mode reads no rule "
-                "configuration, so no rule cache is needed"
-            )
-            return
 
         if self._refuse_unpassable_configured_rules():
             return
@@ -564,28 +555,23 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             scanner_name=scanner_label,
         )
         if not offline_valid:
-            # RECORDED, NOT RAISED, and the difference is a scanner that exists
-            # versus one that does not.
+            # RECORDED, NOT RAISED, and the difference is which row the scan
+            # phase writes.
             #
             # This runs inside `_process_config_options`, whose only caller is
-            # `ScannerPluginBase.model_post_init` -- a constructor. pydantic 2
-            # propagates the exception unwrapped, and `ScanPhase`'s scanner-creation
-            # loop catches it, logs one line, and does not append to
-            # `scanner_instances`. The instance therefore did not exist to be asked
-            # `validate_plugin_dependencies()` or `unsupported_platform_reason()`,
-            # both of which exist so that "cannot run here" is recorded rather than
-            # dropped, and both of which are consulted only on entries in that list.
-            #
-            # What that produced: two scanners absent from `scanner_results`, five
-            # status counters summing correctly over the eight that remained, and a
-            # results file a consumer cannot tell apart from a complete scan. A
-            # false negative of exactly the shape the completeness gate exists to
-            # catch, and one it could not see because the denominator shrank with
-            # the numerator.
-            #
-            # The remediation text travels with the verdict rather than being
-            # reconstructed by the reader, because it is the only thing that tells
-            # an operator how to fix a real misconfiguration.
+            # `ScannerPluginBase.model_post_init` -- a constructor. A constructor
+            # that raises is caught by `ScanPhase`'s scanner-creation loop, which
+            # records the scanner as ERROR ("could not be constructed") when it
+            # was selected to run, and SKIPPED when it was not; before that loop
+            # recorded anything, such a scanner was absent from `scanner_results`
+            # and from every completeness counter. An ERROR row says the scanner
+            # was reached and produced no result, and carries no remedy. Recorded
+            # here instead, the instance exists to be asked
+            # `validate_plugin_dependencies()`, which reads this reason and records
+            # the scanner MISSING with the remedy below, the row that tells an
+            # operator how to fix a real misconfiguration: the remediation text
+            # travels with the answer rather than being reconstructed by the
+            # reader.
             self.dependency_unavailable_reason = (
                 f"{scanner_label} is running in offline mode but no rule cache was found. "
                 f"Set ${cache_env} to a directory containing .yaml/.yml rule files. "
@@ -755,8 +741,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     ) -> Tuple[List[str], Path, Optional[dict]]:
         """Resolve final argv + results path + subprocess env.
 
-        Subclasses may override for bespoke result-file locations (e.g.
-        opengrep patterns mode, which writes opengrep_results.json).
+        Subclasses may override for bespoke result-file locations.
         """
         # Not an assert: `python -O` strips assert statements, which would drop
         # this guard exactly where it matters and surface the failure one line
@@ -784,8 +769,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         target_results_dir.mkdir(exist_ok=True, parents=True)
 
-        # Read by _resolve_scan_arguments, which the subclass may call again for
-        # this target (opengrep's patterns mode).
+        # Read by _resolve_scan_arguments and _extra_args_for_target.
         self._scan_target_type = target_type
 
         # No --exclude for links leaving the target: semgrep 1.180.0 and opengrep
@@ -816,18 +800,16 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             ]
 
         # The scanned and skipped paths, read after the run (_post_process_sarif).
-        # Not in patterns mode, which writes its JSON results instead of SARIF.
-        if not getattr(getattr(self.config, "options", None), "patterns", None):
-            paths_file = target_results_dir.joinpath(
-                f"{self.__class__.__name__}.paths.json"
-            )
-            paths_file.unlink(missing_ok=True)
-            head = [self.command, *self.subcommands]
-            insert_at = len(head) if final_args[: len(head)] == head else 1
-            final_args[insert_at:insert_at] = [
-                f"{_PATHS_OUTPUT_FLAG}={paths_file.as_posix()}",
-                "--verbose",
-            ]
+        paths_file = target_results_dir.joinpath(
+            f"{self.__class__.__name__}.paths.json"
+        )
+        paths_file.unlink(missing_ok=True)
+        head = [self.command, *self.subcommands]
+        insert_at = len(head) if final_args[: len(head)] == head else 1
+        final_args[insert_at:insert_at] = [
+            f"{_PATHS_OUTPUT_FLAG}={paths_file.as_posix()}",
+            "--verbose",
+        ]
 
         env_vars = self.extra_subprocess_env()
         subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None
@@ -847,7 +829,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             return True
         return not honors_ignore_files(getattr(self.context, "config", None))
 
-    def _extra_args_for_target(self) -> List[ToolExtraArg]:
+    def _extra_args_for_target(self, target: Path) -> List[ToolExtraArg]:
         """The configured extra arguments, as the current target's command takes them.
 
         The converted target drops ``CONVERTED_FILE_EXCLUDE``: there the pattern
@@ -858,6 +840,18 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         documented default lists it, so a configuration ``ash config init`` wrote,
         or one copied from the reference, carries it as an operator value, and a
         drop keyed on provenance would scan nothing on every such configuration.
+
+        The converted target also drops each re-passed default ignore
+        (``SEMGREP_DEFAULT_IGNORES``, the split-form ``--exclude`` values ASH
+        itself appends) that names one of the target's own directories below the
+        project root (``_parts_of_target_below_root``): the tools anchor
+        ``build/`` at the repository root, so an output directory under ``build``
+        (``--output-dir build/ash``, say) put every converted file under a default
+        ignore, the tools excluded them all, and ``_left_out_by_ash`` graded the
+        target SKIPPED with no notebook scanned. Where ASH placed its own output
+        is not a reason to leave the converted files out. The source target keeps
+        every default: there the tools' own coverage is what ASH re-passes.
+
         Every other exclude pattern the operator wrote stays as written, on this
         target too; one that happens to match every converted file is the
         operator's choice, and the scanned-nothing refusal names it.
@@ -866,7 +860,18 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             return list(self.args.extra_args)
         # The operator's patterns travel in the joined form (_process_config_options).
         dropped = f"--exclude={CONVERTED_FILE_EXCLUDE}"
-        return [arg for arg in self.args.extra_args if arg.key != dropped]
+        covering = {
+            pattern
+            for pattern in SEMGREP_DEFAULT_IGNORES
+            if pattern.endswith("/")
+            and pattern[:-1] in _parts_of_target_below_root(target)
+        }
+        return [
+            arg
+            for arg in self.args.extra_args
+            if arg.key != dropped
+            and not (arg.key == "--exclude" and arg.value in covering)
+        ]
 
     def _resolve_scan_arguments(self, target: Path, results_file: Path) -> List[str]:
         """``_resolve_arguments`` plus an ``--exclude`` per ASH output directory,
@@ -881,7 +886,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         (_reads_git_ignored_files).
         """
         original_extra_args = list(self.args.extra_args)
-        self.args.extra_args = self._extra_args_for_target()
+        self.args.extra_args = self._extra_args_for_target(target)
         self.args.extra_args.extend(
             ToolExtraArg(key="--exclude", value=pattern)
             for pattern in self._output_dir_exclude_patterns(target)
@@ -1100,22 +1105,35 @@ def _is_registry_name(configured: str) -> bool:
 #: Suffixes that make a bare token a rule FILE name rather than a tool spelling.
 _RULE_FILE_SUFFIXES = (".yaml", ".yml")
 
+#: The product names semgrep's ``--config`` reserves. The tool resolves these
+#: before it reads a value as a local path, so a directory of the same name in
+#: the scanned tree does not make them one: ``policy/`` and ``secrets/`` are
+#: common in IAM, OPA and Kubernetes repositories, and ``config: policy`` beside
+#: one was declined as a path inside the scanned tree.
+_RESERVED_TOOL_SPELLINGS: frozenset[str] = frozenset(
+    {"policy", "supply-chain", "secrets"}
+)
+
 
 def _is_tool_spelling(configured: str, source_dir: Optional[Path]) -> bool:
     """Whether ``configured`` is a bare token the tool reads itself, not a path.
 
     semgrep's ``--config`` takes, beside paths and URLs and the registry entries
     ``_is_registry_name`` knows, product names such as ``policy``, ``supply-chain``
-    and ``secrets``, and the set grows with the tool. ASH does not keep that list:
-    a token with no path separator and no rule-file suffix is read as the tool's
-    own spelling and passed through, as the base passed every value, UNLESS a file
-    or directory of that name exists in the source tree, where the tool, run in the
-    source directory, would read the token as that path; that case is a path and
-    goes through path trust, so a repository cannot smuggle its own rules in under
-    a bare name.
+    and ``secrets``, and the set grows with the tool. The names the tool reserves
+    (``_RESERVED_TOOL_SPELLINGS``) always pass through: the tool matches them
+    before it treats a value as a path, so a same-named directory in the tree
+    changes nothing. For the rest ASH keeps no list: a token with no path separator
+    and no rule-file suffix is read as the tool's own spelling and passed through,
+    as the base passed every value, UNLESS a file or directory of that name exists
+    in the source tree, where the tool, run in the source directory, would read the
+    token as that path; that case is a path and goes through path trust, so a
+    repository cannot smuggle its own rules in under a bare name.
     """
     if not configured or "/" in configured or "\\" in configured:
         return False
+    if configured in _RESERVED_TOOL_SPELLINGS:
+        return True
     if configured.lower().endswith(_RULE_FILE_SUFFIXES):
         return False
     if source_dir is not None and Path(source_dir).joinpath(configured).exists():

@@ -614,6 +614,43 @@ def test_a_bare_name_that_exists_in_the_source_tree_is_a_path_and_is_refused(
     assert not any("rules" in value for value in _configs(scanner)), _configs(scanner)
 
 
+@pytest.mark.parametrize("spelling", ["policy", "supply-chain", "secrets"])
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_a_reserved_product_name_passes_through_beside_a_same_named_directory(
+    scanner_cls,
+    config_cls,
+    options_cls,
+    cache_env,
+    test_plugin_context,
+    monkeypatch,
+    spelling,
+):
+    """semgrep resolves its reserved product names before it reads a value as a
+    path, so a ``policy/`` or ``secrets/`` directory in the scanned tree (IAM, OPA
+    and Kubernetes repositories carry them) does not turn ``config: policy`` into
+    an in-tree path.
+
+    Fails at the tip that judged every bare token by a same-named path's
+    existence: the scanner declined with a path-trust refusal naming the
+    repository's own directory.
+    """
+    source_dir = Path(test_plugin_context.source_dir)
+    (source_dir / spelling).mkdir(parents=True, exist_ok=True)
+    (source_dir / spelling / "x.yaml").write_text(RULE, encoding="utf-8")
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(options=options_cls(offline=False, config=spelling)),
+    )
+
+    assert scanner.dependency_unavailable_reason is None
+    assert _configs(scanner) == [spelling]
+
+
 @pytest.mark.parametrize(
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )
