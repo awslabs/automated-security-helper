@@ -448,6 +448,15 @@ def test_a_refusal_inside_the_nix_shell_is_carried_past_a_kept_results_file(
     kept = out / "ash_aggregated_results.json"
     kept.write_text(AshAggregatedResults().model_dump_json(), encoding="utf-8")
     opts = _opts(tmp_path, mode=RunMode.nix, existing_results=str(kept))
+    # The venue need not have nix: the two refusals of nix mode are asked of
+    # run_ash_nix's own lookup, which answers a shell here, and the sweeps of an
+    # earlier container run touch nothing of this test's.
+    monkeypatch.setattr(
+        "automated_security_helper.interactions.run_ash_nix.nix_executable_for_this_run",
+        lambda: "/bin/nix",
+    )
+    monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
+    monkeypatch.setattr(ras, "sweep_env_dirs", list)
     monkeypatch.setattr(
         ras,
         "run_ash_nix",
@@ -502,8 +511,12 @@ def test_the_changed_files_redaction_reads_the_loaded_configs_values(
         return None
 
     monkeypatch.setattr(ras, "_changed_file_set_for", recording_changed_files)
+    opts = _opts(tmp_path)
+    # The run writes its results file into the output directory, which the logger
+    # would have made; here nothing made it, so it is made for the run.
+    opts.output_dir.mkdir()
 
-    _run_local_mode(_opts(tmp_path), _Logger())
+    _run_local_mode(opts, _Logger())
 
     assert "s3cr3t-value" in seen["values"], seen
 
