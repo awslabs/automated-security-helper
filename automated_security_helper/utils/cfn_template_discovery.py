@@ -34,6 +34,10 @@ The outcomes per file
   returned in ``unreadable`` with the reason. Not known to be CloudFormation and not
   known not to be, so the callers count it as a target that was not evaluated, the
   same answer the tool-absent check gives (only MISSING cannot hide a template);
+* a candidate neither parser reads that could still be a damaged template (a lenient
+  read finds a Resources mapping, or the text carries a CloudFormation marker):
+  returned in ``unparseable`` with the parse error, so the callers name it and count
+  it as something to scan, as cfn-nag's tool-absent check counts the same file;
 * a file the scanned-tree rule refuses: returned in ``refused`` (below).
 
 A file is read under the scanned-tree rule (``utils/scanned_tree.py``), against the
@@ -52,7 +56,11 @@ from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Tuple
 
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
+    active_global_ignore_paths,
+    describe_parse_error,
     get_model_from_template_text,
+    holds_cloudformation_template,
+    is_template_candidate,
     read_template_text,
     unevaluable_template_reason,
 )
@@ -64,8 +72,6 @@ from automated_security_helper.utils.scanned_tree import TreeInputRefused
 
 if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
-
-_TEMPLATE_SUFFIXES = (".json", ".yaml", ".yml")
 
 #: The reason cfn-lint and cfn-guard give when no tree holds a template; see
 #: :func:`cloudformation_templates_nothing_to_scan_reason`.
@@ -85,6 +91,13 @@ class TemplateDiscovery:
     #: :func:`cloudformation_templates_nothing_to_scan_reason`, since only MISSING
     #: cannot hide a template.
     unreadable: List[Tuple[str, str]] = field(default_factory=list)
+    #: Candidates neither parser could read that could be a damaged template
+    #: (``cfn_template_model.holds_cloudformation_template``: a lenient read
+    #: finds a Resources mapping, or the text carries a CloudFormation marker),
+    #: with the reason. Not a target, since the tool could not read them either,
+    #: so not counted as failed; named by the callers, where they vanished at
+    #: TRACE before, and counted as something to scan, as cfn-nag counts them.
+    unparseable: List[Tuple[str, str]] = field(default_factory=list)
 
 
 def candidate_files(
@@ -105,32 +118,28 @@ def candidate_files(
     else:
         if global_ignore_paths is None:
             # The caller did not say (nothing_to_scan_reason has no scan() call
-            # to take them from): the config's own global ignore paths, as
-            # cfn-nag's cloudformation_candidate_files reads them, so a tree
-            # whose only templates are ignored is SKIPPED, not MISSING.
-            from automated_security_helper.utils.suppression_matcher import (
-                active_ignore_paths,
-            )
-
-            global_settings = getattr(
-                getattr(context, "config", None), "global_settings", None
-            )
-            global_ignore_paths = active_ignore_paths(
-                getattr(global_settings, "ignore_paths", None) or []
-            )
+            # to take them from): the list scan() is given, read from the
+            # context as cfn-nag's cloudformation_candidate_files reads it
+            # (the config's unexpired ignore paths, none under
+            # --ignore-suppressions), so a tree whose only templates are
+            # ignored is SKIPPED, not MISSING, and the two selections agree.
+            global_ignore_paths = active_global_ignore_paths(context)
         found = drop_ignored(
             scan_set(
                 source=str(context.source_dir),
                 output=str(context.output_dir),
                 honor_ignore_files=honors_ignore_files(context.config),
                 run_id=getattr(context, "run_id", None),
+                # In a workspace scan the run's recorded scan set is keyed on
+                # this too; without it the tree was walked again.
+                workspace_output_dir=getattr(context, "workspace_output_dir", None),
             ),
             context.source_dir,
             global_ignore_paths,
         )
-    selected = {
-        Path(f) for f in found if any(str(f).endswith(s) for s in _TEMPLATE_SUFFIXES)
-    }
+    # cfn-nag's suffix test (cfn_template_model.is_template_candidate), so the
+    # two selections cannot drift: case-insensitive, and .template included.
+    selected = {Path(f) for f in found if is_template_candidate(f)}
     return sorted(selected, key=lambda p: p.as_posix())
 
 
@@ -191,6 +200,23 @@ def discover_templates(
             if reason is not None:
                 result.unmodelable.append((path, reason))
                 continue
+            # A file neither parser reads but that could be a damaged template
+            # is named, as cfn-nag names it: left at TRACE, a template with a
+            # syntax error vanished from cfn-lint's and cfn-guard's coverage and
+            # the target read SKIPPED with "no template" where cfn-nag's
+            # tool-absent check counts the same file as one. Not a failed target:
+            # the tool could not have read it either.
+            if holds_cloudformation_template([path], scan_root):
+                result.unparseable.append(
+                    (
+                        display_path(path, context.source_dir),
+                        (
+                            "it could be a CloudFormation template but could not be "
+                            f"parsed: {describe_parse_error(exc)}"
+                        ),
+                    )
+                )
+                continue
             ASH_LOGGER.trace(f"Not a CloudFormation file: {path}. Exception: {exc}")
             continue
         if model is None:
@@ -208,15 +234,21 @@ def cloudformation_templates_nothing_to_scan_reason(
     over every tree a scan hands them (``utils/scan_targets.py``). A template is
     something to scan, and so is a CloudFormation file the model rejects, which
     both scanners count as a target that failed, and so is a candidate ASH could
-    not read, since only MISSING cannot hide a template. A file that is not
-    CloudFormation and one the scanned-tree rule refuses are not: ``scan()`` skips
-    both, with its tool or without it. The selection drops the files the config's
-    global ignore paths ignore, as ``scan()`` is given them, so a tree whose only
-    templates are ignored reads SKIPPED, not MISSING.
+    not read, since only MISSING cannot hide a template, and so is a damaged
+    template neither parser reads, as cfn-nag's tool-absent check counts it. A
+    file that is not CloudFormation and one the scanned-tree rule refuses are
+    not: ``scan()`` skips both, with its tool or without it. The selection drops
+    the files the config's global ignore paths ignore, as ``scan()`` is given them,
+    so a tree whose only templates are ignored reads SKIPPED, not MISSING.
     """
     for target_type, _ in scan_targets(context):
         found = discover_templates(context, target_type)
-        if found.templates or found.unmodelable or found.unreadable:
+        if (
+            found.templates
+            or found.unmodelable
+            or found.unreadable
+            or found.unparseable
+        ):
             return None
     return NO_CLOUDFORMATION_TEMPLATE
 
