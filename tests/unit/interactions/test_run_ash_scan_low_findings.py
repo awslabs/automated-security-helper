@@ -341,21 +341,70 @@ def test_a_failed_discard_that_left_a_restoring_set_refuses_the_scan(
     assert refused.value.code == 1
 
 
-def test_use_existing_drops_the_restore_marker_and_keeps_the_results(tmp_path):
-    """The marker says the results were put back until the next scan starts here;
-    a --use-existing scan is that scan and reads them on purpose, so the marker
-    goes and the file stays, as a local --use-existing run has it."""
+def _plant_a_put_back_set(tmp_path) -> ScanOptions:
+    """A put-back results set with its marker, named by --use-existing."""
     out = tmp_path / "out"
     out.mkdir()
     results = out / "ash_aggregated_results.json"
-    results.write_text("{}", encoding="utf-8")
+    results.write_text(AshAggregatedResults().model_dump_json(), encoding="utf-8")
     (out / RESTORED_MARKER_NAME).write_text("restored\n", encoding="utf-8")
-    opts = _opts(tmp_path, existing_results=str(results))
+    return _opts(
+        tmp_path, mode=RunMode.container, build=False, existing_results=str(results)
+    )
+
+
+def test_use_existing_keeps_the_results_and_the_marker_through_the_discard(tmp_path):
+    """The marker says the results were put back; until the inner run has accepted
+    results of its own over them, that is still true, so the discard that keeps
+    the file for --use-existing keeps the marker too."""
+    opts = _plant_a_put_back_set(tmp_path)
 
     _discard_prior_run_artifacts(opts, _Logger())
 
-    assert results.exists()
-    assert not (out / RESTORED_MARKER_NAME).exists()
+    assert (opts.output_dir / "ash_aggregated_results.json").exists()
+    assert (opts.output_dir / RESTORED_MARKER_NAME).exists()
+
+
+def test_a_run_that_never_starts_under_use_existing_leaves_the_marker(
+    tmp_path, monkeypatch
+):
+    """A build that fails or a container that never starts leaves the put-back
+    set as it was, marker included, so no reader takes it for this run's."""
+    from automated_security_helper.interactions import run_ash_container as rac
+
+    opts = _plant_a_put_back_set(tmp_path)
+    monkeypatch.setattr(
+        ras,
+        "run_ash_container",
+        lambda **kwargs: rac._not_started(
+            create_completed_process(
+                args=["docker", "build"], returncode=125, stdout="", stderr="no build"
+            )
+        ),
+    )
+    _quiet_container_side_effects(monkeypatch)
+
+    with pytest.raises(SystemExit) as exited:
+        _run_container_mode(opts, _Logger())
+
+    assert exited.value.code == 125
+    assert (opts.output_dir / RESTORED_MARKER_NAME).exists()
+
+
+def test_a_completed_use_existing_run_is_read_back_and_drops_the_marker(
+    tmp_path, monkeypatch
+):
+    """Control: the inner run completed over the kept file, so the read-back is
+    accepted (the marker refuses nothing for a --use-existing run) and the
+    marker, no longer true, goes."""
+    opts = _plant_a_put_back_set(tmp_path)
+    monkeypatch.setattr(ras, "run_ash_container", _fake_completed_container_run)
+    _quiet_container_side_effects(monkeypatch)
+
+    results = _run_container_mode(opts, _Logger())
+
+    assert isinstance(results, AshAggregatedResults)
+    assert not (opts.output_dir / RESTORED_MARKER_NAME).exists()
 
 
 # ---------------------------------------------------------------------------

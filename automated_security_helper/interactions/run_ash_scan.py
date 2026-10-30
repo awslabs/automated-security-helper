@@ -4528,17 +4528,14 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
         # stale file AND leave it unread by the container -- the read-back then answers
         # from it, which is the exact failure this function closes.
         #
-        # The restore marker goes, though. It says the results here were put back
-        # by a scan that ended without its own, "until the next scan starts in
-        # that directory" (core/previous_results.py), and this is that scan: the
-        # inner run reads the file on purpose and writes its own over it, so the
-        # read-back after it is this scan's, not a put-back set's, and the
-        # refusal that reads the marker (_refuse_restored_results) must not
-        # refuse what a local --use-existing run accepts.
-        try:
-            (opts.output_dir / RESTORED_MARKER_NAME).unlink(missing_ok=True)
-        except OSError as error:
-            logger.debug(f"Could not remove {RESTORED_MARKER_NAME}: {error}")
+        # The restore marker stays with them for now. It says the results here
+        # were put back by a scan that ended without its own; this scan reads
+        # them on purpose, so _refuse_restored_results stands aside for it, and
+        # the marker is dropped only once the read-back has accepted the inner
+        # run's own results (_drop_restore_marker_after_a_completed_run). Dropped
+        # here, before the image build and the container start, a build that
+        # fails or a container that never starts would leave the put-back set
+        # looking like the last scan's to every reader of the marker.
         return
 
     # Every entry core/previous_results.py keeps or stages beside the results
@@ -4872,14 +4869,24 @@ def _sandbox_modes_requested(opts: ScanOptions) -> List[str]:
     )
 
 
-def _refuse_restored_results(output_dir: Path, where: str, logger) -> None:
+def _refuse_restored_results(
+    output_dir: Path, where: str, logger, *, kept_on_purpose: bool = False
+) -> None:
     """Exit 1 when the output directory says its results were put back.
 
     A scan that kept the previous results and ended without its own puts them back
     with a marker beside them (core/previous_results.py). The results file is then
     a complete, parseable earlier run, and reading it back would report that run as
     this one.
+
+    *kept_on_purpose* is a ``--use-existing`` run: it asked for that file and the
+    inner run read it, so the marker refuses nothing here; it is dropped once the
+    read-back accepts the inner run's results as this run's
+    (:func:`_drop_restore_marker_after_a_completed_run`), as a local
+    ``--use-existing`` run accepts them.
     """
+    if kept_on_purpose:
+        return
     if holds_restored_results(output_dir):
         _logged_refusal(
             logger,
@@ -4888,6 +4895,23 @@ def _refuse_restored_results(output_dir: Path, where: str, logger) -> None:
             "the results of an earlier scan, which ASH put back, so they are not "
             "being read back as this scan's.",
         )
+
+
+def _drop_restore_marker_after_a_completed_run(opts: ScanOptions, logger) -> None:
+    """Remove the restore marker once a ``--use-existing`` run's read-back is accepted.
+
+    The marker kept through the run (see :func:`_discard_prior_run_artifacts`)
+    said the results were an earlier scan's put back; the inner run has now
+    completed over them and the file is this run's, so the marker is no longer
+    true. Only under ``--use-existing``: without it the marker was removed with
+    the previous output before the run.
+    """
+    if not opts.existing_results:
+        return
+    try:
+        (opts.output_dir / RESTORED_MARKER_NAME).unlink(missing_ok=True)
+    except OSError as error:
+        logger.debug(f"Could not remove {RESTORED_MARKER_NAME}: {error}")
 
 
 # The statuses the in-container CLI reaches from a results file, and therefore the only
@@ -5442,7 +5466,12 @@ def _run_container_mode(
 
     _refuse_links_left_in_reports(opts)
     _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
-    _refuse_restored_results(opts.output_dir, "the container", logger)
+    _refuse_restored_results(
+        opts.output_dir,
+        "the container",
+        logger,
+        kept_on_purpose=bool(opts.existing_results),
+    )
 
     output_file = opts.output_dir / "ash_aggregated_results.json"
     if container_returncode == 2 and not output_file.exists():
@@ -5479,6 +5508,7 @@ def _run_container_mode(
         _refuse_an_inner_run_that_did_not_complete(
             results, opts, outer_run_id, "container", output_file, logger
         )
+        _drop_restore_marker_after_a_completed_run(opts, logger)
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
         return results
     else:
@@ -5775,13 +5805,19 @@ def _run_nix_mode(
 
     # The inner scan wrote to the same output directory this process was given, so unlike
     # container mode there is no path to translate back.
-    _refuse_restored_results(opts.output_dir, "the Nix shell", logger)
+    _refuse_restored_results(
+        opts.output_dir,
+        "the Nix shell",
+        logger,
+        kept_on_purpose=bool(opts.existing_results),
+    )
     output_file = opts.output_dir / "ash_aggregated_results.json"
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
             results, opts, outer_run_id, "nix", output_file, logger
         )
+        _drop_restore_marker_after_a_completed_run(opts, logger)
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
         return results
     else:
