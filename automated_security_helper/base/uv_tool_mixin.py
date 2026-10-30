@@ -709,7 +709,11 @@ class UVToolMixin:
 
             uv_runner = get_uv_tool_runner()
 
-            uv_available, probe_failure = uv_runner.uv_availability()
+            # The one availability read every gate shares (_uv_available), so
+            # an older stand-in with only ``is_uv_available`` is read through
+            # that, as the other four gates read it, instead of raising on
+            # the unpack of an answer that is not the two-valued one.
+            uv_available, probe_failure = _uv_available(uv_runner)
             if not uv_available:
                 # The failure of the probe that answered this call, when
                 # there was one: "uv is not available" alone reads as "uv is

@@ -224,6 +224,36 @@ class TestEveryGateNamesTheProbesFailure:
             assert plugin._is_uv_tool_installed() is False
         assert any(self.FAILURE in line for line in plugin.logged()), plugin.logged()
 
+    def _run(self, plugin, runner):
+        with patch(RUNNER, return_value=runner):
+            return plugin._try_uv_tool_execution(
+                command=["bandit", "-r", "src"],
+                working_dir=Path("/tmp"),  # nosec B108
+            )
+
+    def test_the_run(self):
+        """The fifth gate: the run names the probe's failure in its own record."""
+        plugin = FakePlugin()
+        assert self._run(plugin, self._failed_runner()) is None
+        assert self.FAILURE in plugin._uv_run_failure, plugin._uv_run_failure
+
+    def test_the_run_reads_an_older_stand_in_through_is_uv_available(self):
+        """A runner with only ``is_uv_available`` (a stand-in built before the
+        two-valued read) is read through the shared helper, as every other gate
+        reads it. The run gate unpacked ``uv_availability()`` itself, so such a
+        stand-in's answer, a bare mock, raised on the unpack and the run was
+        refused as "ValueError: not enough values to unpack"."""
+        plugin = FakePlugin()
+        runner = MagicMock()
+        runner.is_uv_available.return_value = True
+        runner.get_cache_info.return_value = {"cache_available": False}
+        runner.run_tool.return_value = SimpleNamespace(
+            stdout="", stderr="", returncode=0
+        )
+        assert self._run(plugin, runner) is not None
+        assert plugin._uv_run_failure is None
+        runner.run_tool.assert_called_once()
+
     def test_an_absent_uv_keeps_the_plain_words(self):
         """The control."""
         plugin = FakePlugin()
