@@ -147,6 +147,65 @@ class TestTheAggregatedResultsFileGetsTheSameGuard:
         assert "bandit" in parse_aggregated_results(out)["scanner_results"]
 
 
+class TestEachResultFileIsReadOnceThroughTheGuard:
+    """The file-based progress view read every ASH.ScanResults.json three times
+    under the registry lock: once through safe_read_json_file, which has neither
+    the regular-file check nor the size bound, and twice through the guarded
+    reader for the counts and the status. One guarded read now feeds all three."""
+
+    def test_the_progress_view_reads_each_file_once_and_never_unguarded(
+        self, tmp_path, monkeypatch
+    ):
+        import automated_security_helper.core.resource_management.scan_tracking as st
+        from automated_security_helper.core.resource_management import error_handling
+
+        out = tmp_path / "ash_output"
+        _write_result(out, "bandit", "source", {"status": "PASSED", "finding_count": 2})
+        _write_result(out, "semgrep", "converted", {"status": "FAILED"})
+        guarded = []
+        real_read = st._read_scanner_result_document
+        monkeypatch.setattr(
+            st,
+            "_read_scanner_result_document",
+            lambda path: guarded.append(path) or real_read(path),
+        )
+        unguarded = []
+        real_safe_read = error_handling.safe_read_json_file
+        monkeypatch.setattr(
+            error_handling,
+            "safe_read_json_file",
+            lambda *a, **k: unguarded.append(a) or real_safe_read(*a, **k),
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.total_scanners == 2
+        assert sorted(p.name for p in guarded) == [_RESULTS_FILE, _RESULTS_FILE]
+        assert len(guarded) == 2
+        assert unguarded == []
+
+    def test_the_per_scanner_view_reads_each_file_once_too(self, tmp_path, monkeypatch):
+        import automated_security_helper.core.resource_management.scan_tracking as st
+        from automated_security_helper.core.resource_management.scan_tracking import (
+            get_scanner_progress,
+        )
+
+        out = tmp_path / "ash_output"
+        _write_result(out, "bandit", "source", {"status": "PASSED", "finding_count": 2})
+        reads = []
+        real_read = st._read_scanner_result_document
+        monkeypatch.setattr(
+            st,
+            "_read_scanner_result_document",
+            lambda path: reads.append(path) or real_read(path),
+        )
+
+        view = get_scanner_progress(out)
+
+        assert view["bandit"]["finding_count"] == 2
+        assert len(reads) == 1
+
+
 class TestAScannerCountsOnceItHasWrittenAResult:
     def test_a_scanner_directory_with_no_result_file_is_not_listed(self, tmp_path):
         out = tmp_path / "ash_output"

@@ -521,15 +521,25 @@ def _read_scanner_result_document(result_file: Path) -> Optional[Dict[str, Any]]
     return data if isinstance(data, dict) else None
 
 
-def _recorded_scanner_status(result_file: Path) -> Optional[str]:
-    """The ``status`` a scanner wrote into its ``ASH.ScanResults.json``, or None."""
-    data = _read_scanner_result_document(result_file)
-    status = data.get("status") if data is not None else None
+def _findings_of_document(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The ``findings`` array of a scanner's result document, or an empty list.
+
+    The per-target file ASH writes carries none (its counts are the record;
+    see :func:`_counts_of_document`); a document with a findings array is read
+    as the array says.
+    """
+    findings = data.get("findings")
+    return findings if isinstance(findings, list) else []
+
+
+def _status_of_document(data: Dict[str, Any]) -> Optional[str]:
+    """The ``status`` a scanner wrote into its result document, or None."""
+    status = data.get("status")
     return status if isinstance(status, str) and status else None
 
 
-def _recorded_scanner_counts(
-    result_file: Path,
+def _counts_of_document(
+    data: Dict[str, Any],
 ) -> Tuple[Optional[int], Optional[Dict[str, int]]]:
     """The ``finding_count`` and ``severity_counts`` a scanner recorded, or Nones.
 
@@ -539,9 +549,6 @@ def _recorded_scanner_counts(
     finished scanner as 0 findings with all-zero severity counts while a scan
     ran.
     """
-    data = _read_scanner_result_document(result_file)
-    if data is None:
-        return None, None
     count = data.get("finding_count")
     counts = data.get("severity_counts")
     return (
@@ -554,6 +561,26 @@ def _recorded_scanner_counts(
         if isinstance(counts, dict)
         else None,
     )
+
+
+def _recorded_scanner_status(result_file: Path) -> Optional[str]:
+    """The ``status`` a scanner wrote into its ``ASH.ScanResults.json``, or None."""
+    data = _read_scanner_result_document(result_file)
+    return _status_of_document(data) if data is not None else None
+
+
+def _recorded_scanner_counts(
+    result_file: Path,
+) -> Tuple[Optional[int], Optional[Dict[str, int]]]:
+    """:func:`_counts_of_document` of the file at ``result_file``, or Nones.
+
+    The progress views read each file once with
+    :func:`_read_scanner_result_document` and derive findings, counts and status
+    from that one document; this file-based form is for a caller that holds only
+    the path.
+    """
+    data = _read_scanner_result_document(result_file)
+    return _counts_of_document(data) if data is not None else (None, None)
 
 
 def check_scan_completion(
@@ -716,13 +743,17 @@ def get_scanner_progress(
             "severity_counts": empty_severity_counts(),
         }
 
-        # Parse result files to extract findings
+        # One read per file, through the regular-file guard, and the findings,
+        # counts and status derived from that one document.
         for target_type, result_file in target_results.items():
             try:
-                findings = parse_scanner_result_file(result_file)
+                document = _read_scanner_result_document(result_file)
+                if document is None:
+                    continue
+                findings = _findings_of_document(document)
                 scanner_progress[scanner_name]["findings"].extend(findings)
                 recorded_count, recorded_counts = (
-                    (None, None) if findings else _recorded_scanner_counts(result_file)
+                    (None, None) if findings else _counts_of_document(document)
                 )
                 count = len(findings) if findings else (recorded_count or 0)
                 scanner_progress[scanner_name]["finding_count"] += count
@@ -1317,11 +1348,16 @@ def create_scan_progress_from_files(
         for scanner_name, target_results in scanner_results.items():
             for target_type, result_file in target_results.items():
                 try:
+                    # One read per file, through the regular-file guard (this
+                    # runs under the registry lock); the findings, counts and
+                    # status below all come from that one document.
+                    #
                     # A file that is not yet a JSON object (empty, truncated,
                     # mid-write) is a scanner that has not finished writing,
                     # not one that PASSED with 0 findings. It is reported as
                     # running until a later poll reads a document.
-                    if _read_scanner_result_document(result_file) is None:
+                    document = _read_scanner_result_document(result_file)
+                    if document is None:
                         unfinished = ScannerProgress(
                             scanner_name=scanner_name, target_type=target_type
                         )
@@ -1329,8 +1365,7 @@ def create_scan_progress_from_files(
                         scan_progress.add_scanner_progress(unfinished)
                         continue
 
-                    # Parse scanner result file
-                    findings = parse_scanner_result_file(result_file)
+                    findings = _findings_of_document(document)
 
                     # The scanner has finished: it wrote its results. How it
                     # finished is in the file's own status, which every scanner
@@ -1341,9 +1376,7 @@ def create_scan_progress_from_files(
                     # finding_count and severity_counts are the record until the
                     # aggregated file exists. Counted from the array alone, every
                     # finished scanner read as 0 findings while the scan ran.
-                    recorded_count, recorded_counts = _recorded_scanner_counts(
-                        result_file
-                    )
+                    recorded_count, recorded_counts = _counts_of_document(document)
                     scanner_progress = ScannerProgress(
                         scanner_name=scanner_name,
                         target_type=target_type,
@@ -1359,7 +1392,7 @@ def create_scan_progress_from_files(
                                 **recorded_counts,
                             }
                     scanner_progress.mark_completed()
-                    recorded = _recorded_scanner_status(result_file)
+                    recorded = _status_of_document(document)
                     if recorded is not None:
                         scanner_progress.status = scanner_status_from_results(recorded)
 
