@@ -211,6 +211,7 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.path_probe import probe_path
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -694,21 +695,6 @@ def _command_word(path: str) -> str:
     if not any(ch.isspace() or ch in '"\\' for ch in path):
         return path
     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _probe(path: Path, method: str) -> bool:
-    """``path.<method>()`` for ``is_dir``, ``is_file``, ``exists`` or
-    ``is_symlink``, read as False when the stat is refused.
-
-    Before Python 3.13 those methods raise the stat's PermissionError for a
-    path under an unsearchable directory instead of answering, and the
-    reference check walks every ancestor of a workflow, some of which the scan
-    does not own.
-    """
-    try:
-        return bool(getattr(path, method)())
-    except OSError:
-        return False
 
 
 def build_sarif(
@@ -1251,13 +1237,13 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # before resolve(), which raises on a loop before Python 3.13. The
             # probes read a refused stat as "not that", never as an error that
             # ends the selection.
-            if _probe(path, "is_symlink") and not _probe(path, "is_file"):
+            if probe_path(path, "is_symlink") and not probe_path(path, "is_file"):
                 refuse(rel, "it is a symbolic link that does not resolve to a file")
                 continue
             # A FIFO or a device named like a workflow is not one: opening it to
             # read its local references would block ASH itself, outside any scan
             # timeout, and actionlint could not lint it either.
-            if not _probe(path, "is_file"):
+            if not probe_path(path, "is_file"):
                 refuse(rel, "it is not a regular file")
                 continue
             # A symlinked workflow is followed by actionlint, which copies the
@@ -1325,7 +1311,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         bases = [
             directory
             for directory in ancestors
-            if _probe(directory / ".github" / "workflows", "is_dir")
+            if probe_path(directory / ".github" / "workflows", "is_dir")
         ]
         for base in bases:
             for spec in specs:
@@ -1338,7 +1324,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 for candidate in (named, named / "action.yml", named / "action.yaml"):
                     # Nothing there: actionlint reads no file through it.
                     if not (
-                        _probe(candidate, "is_symlink") or _probe(candidate, "exists")
+                        probe_path(candidate, "is_symlink")
+                        or probe_path(candidate, "exists")
                     ):
                         continue
                     try:

@@ -162,6 +162,7 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.path_probe import probe_path
 from automated_security_helper.utils.pre_installed_tool import (
     validate_version_constraint,
 )
@@ -374,17 +375,6 @@ def _is_a_uv_route(command: Optional[List[str]]) -> bool:
         return False
     executable = command[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
     return executable in _UV_EXECUTABLE_NAMES and command[1:3] == ["tool", "run"]
-
-
-def _probe(path: Path, method: str) -> bool:
-    """``path.<method>()`` for ``is_file``, ``is_symlink`` or ``exists``, read as
-    False when the stat is refused: before Python 3.13 those methods raise the
-    stat's PermissionError for a link whose target cannot be stat'ed instead of
-    answering, and one such input must not end the collection."""
-    try:
-        return bool(getattr(path, method)())
-    except OSError:
-        return False
 
 
 _BASE_SEVERITY: Dict[str, str] = {
@@ -1122,7 +1112,9 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             # which raises on a loop before Python 3.13. A stat the probe cannot
             # make (a link to a path this process may not stat) reads as no
             # file, never as an error that ends the collection.
-            if _probe(candidate, "is_symlink") and not _probe(candidate, "is_file"):
+            if probe_path(candidate, "is_symlink") and not probe_path(
+                candidate, "is_file"
+            ):
                 if report:
                     self._plugin_log(
                         f"Not auditing {relative.as_posix()}: it is a symbolic "
@@ -1133,7 +1125,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             # A FIFO or a device named like an input is not one: zizmor would
             # block reading it until the scan timeout, and ASH's own probe of
             # the file would block too.
-            if not _probe(candidate, "is_file"):
+            if not probe_path(candidate, "is_file"):
                 if report:
                     self._plugin_log(
                         f"Not auditing {relative.as_posix()}: it is not a regular "
