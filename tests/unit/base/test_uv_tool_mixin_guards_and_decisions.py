@@ -443,30 +443,27 @@ class TestTheRun:
     def test_the_runner_error_line_goes_through_the_uv_layer(self):
         """The plain value layer hides a value whole; the uv layer, which every
         other record of the run uses, also hides the plugin-built input that
-        holds it in the spelling uv prints. The arm's text reaches that layer."""
-        import automated_security_helper.utils.uv_tool_runner as runner_module
+        holds it in the spelling uv prints. The arm's text reaches that layer.
 
-        shown: list = []
-        original = runner_module.shown_uv_output
-
-        def _spy(text, *args, **kwargs):
-            shown.append(text)
-            return original(text, *args, **kwargs)
-
-        plugin = FakePlugin(values=(SECRET,))
+        The value is too short for the plain layer (below its length floor it
+        is replaced only where the text quotes it, and the error text does not)
+        and is pinned by the plugin's own constraint, so only the uv layer's
+        hiding of the pinned input, which prints that layer's own placeholder,
+        can keep it out of the logged line: the assertions measure the routing
+        without a spy on the layer's import.
+        """
+        pin = "9.9"
+        plugin = FakePlugin(values=(pin,), constraint=f"=={pin}")
         runner = _runner(
             run_tool=MagicMock(
-                side_effect=UVToolRunnerError(f"spawn failed: --from bandit=={SECRET}")
+                side_effect=UVToolRunnerError(f"spawn failed: --from bandit=={pin}")
             )
         )
-        with patch.object(runner_module, "shown_uv_output", _spy):
-            assert self._run(plugin, runner) is None
-        assert any(
-            text.startswith("UV tool runner error for bandit") for text in shown
-        ), shown
+        assert self._run(plugin, runner) is None
         logged = plugin.logged()
-        assert any("UV tool runner error for bandit" in line for line in logged)
-        assert not any(SECRET in line for line in logged), logged
+        (line,) = [line for line in logged if "UV tool runner error for bandit" in line]
+        assert pin not in line, line
+        assert "not shown>" in line, line
 
 
 class TestTheResponseHandler:
