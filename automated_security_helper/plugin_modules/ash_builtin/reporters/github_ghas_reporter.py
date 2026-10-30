@@ -228,16 +228,20 @@ def _string_map(value: Any) -> Dict[str, str]:
     return {str(key): str(item) for key, item in value.items() if item is not None}
 
 
-def _most_severe(results: List[Dict[str, Any]], count: int) -> List[Dict[str, Any]]:
-    """The *count* most severe of *results*, by their level as the gate grades it,
-    in their original order within a level (a stable sort)."""
-    ranked = sorted(
-        results,
-        key=lambda result: SEVERITIES.index(
-            result_severity({"level": result.get("level")})
-        ),
-    )
-    return ranked[:count]
+def _most_severe(
+    graded: List[Tuple[str, Dict[str, Any]]], count: int
+) -> List[Dict[str, Any]]:
+    """The slim results of the *count* most severe of *graded*, in their
+    original order within a severity (a stable sort).
+
+    *graded* pairs each slim result with the severity the gate grades the
+    source result at (:func:`result_severity`, which reads ``issue_severity``
+    before the level). The slim copy carries only the SARIF level, where
+    CRITICAL and HIGH are both ``error``, so ranking on the copy would tie
+    them and could drop a later CRITICAL while an earlier HIGH stays.
+    """
+    ranked = sorted(graded, key=lambda item: SEVERITIES.index(item[0]))
+    return [slim for _, slim in ranked[:count]]
 
 
 #: The base id the aggregator anchors each project's run to; the same spelling as
@@ -445,9 +449,9 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             #    result reached GitHub with no rule and no security-severity.
             #    Each run's results are located against its own project path,
             #    so a multi-run document reads against the workspace root.
-            slim_results: List[Dict[str, Any]] = []
+            graded: List[Tuple[str, Dict[str, Any]]] = []
             for index, run in enumerate(runs):
-                slim_results.extend(
+                graded.extend(
                     self._build_slim_results(
                         run.results or [],
                         rules_map,
@@ -457,6 +461,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                         qualified=qualified,
                     )
                 )
+            slim_results = [slim for _, slim in graded]
 
             # A result GitHub cannot display: none of its locations has a uri.
             # The result is still written (SARIF allows it, and dropping it
@@ -488,7 +493,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                     f"{len(slim_results) - _MAX_RESULTS_PER_RUN} least severe are "
                     "left out of the upload and are in the other reports"
                 )
-                slim_results = _most_severe(slim_results, _MAX_RESULTS_PER_RUN)
+                slim_results = _most_severe(graded, _MAX_RESULTS_PER_RUN)
 
             # 4. Ensure every rule has security-severity
             slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
@@ -926,16 +931,17 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         project_path: Optional[str] = None,
         project_root: Optional[str] = None,
         qualified: Optional[Dict[Tuple[str, str], str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Build a minimal list of result objects.
+    ) -> List[Tuple[str, Dict[str, Any]]]:
+        """Build a minimal list of result objects, each paired with the severity
+        the gate grades its source result at (:func:`result_severity`).
 
         *project_path* is the results' project's path below the workspace root
         when they come from one run of a workspace document, and None otherwise;
         *project_root* the project's absolute path when the run is anchored to
-        it; see :meth:`_build_slim_locations`. *qualified* maps (scanner, rule
-        id) to the id a colliding rule was declared under.
+        it; see :meth:`_build_slim_locations`. *qualified* maps (scanner
+        identity, rule id) to the id a colliding rule was declared under.
         """
-        slim_results = []
+        slim_results: List[Tuple[str, Dict[str, Any]]] = []
 
         for result in results:
             # Skip suppressed findings if configured
@@ -1006,7 +1012,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 if prints:
                     result_dict[key] = prints
 
-            slim_results.append(result_dict)
+            slim_results.append((result_severity(result), result_dict))
 
         return slim_results
 

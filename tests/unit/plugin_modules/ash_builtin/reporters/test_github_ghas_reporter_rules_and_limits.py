@@ -282,6 +282,31 @@ class TestUploadLimits:
 
         assert [r["ruleId"] for r in doc["results"]] == ["ERROR", "WARNING"]
 
+    def test_a_critical_past_the_cap_survives_an_earlier_high(
+        self, reporter, monkeypatch
+    ):
+        # CRITICAL and HIGH are both the SARIF level `error`; only the severity
+        # the gate grades them at (issue_severity first) tells them apart.
+        monkeypatch.setattr(github_ghas_reporter, "_MAX_RESULTS_PER_RUN", 1)
+        results = [
+            Result(
+                ruleId="HIGH-ONE",
+                level=Level.error,
+                message=Message(text="h"),
+                properties=PropertyBag(issue_severity="HIGH"),
+            ),
+            Result(
+                ruleId="CRITICAL-ONE",
+                level=Level.error,
+                message=Message(text="c"),
+                properties=PropertyBag(issue_severity="CRITICAL"),
+            ),
+        ]
+
+        doc = json.loads(reporter.report(_model(_run(results, []))))["runs"][0]
+
+        assert [r["ruleId"] for r in doc["results"]] == ["CRITICAL-ONE"]
+
     def test_rules_no_result_names_go_first_past_the_cap(self, reporter, monkeypatch):
         monkeypatch.setattr(github_ghas_reporter, "_MAX_RULES_PER_RUN", 2)
         run = _run(

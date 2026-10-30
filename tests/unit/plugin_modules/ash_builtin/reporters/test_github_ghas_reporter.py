@@ -966,7 +966,10 @@ class TestBuildSlimResults:
             [_result("UNDECLARED", level=Level.warning)], rules_map, level_map
         )
 
-        assert [r["ruleId"] for r in slim] == ["UNDECLARED"]
+        # Each slim result comes paired with the severity the gate grades it at.
+        assert [(severity, r["ruleId"]) for severity, r in slim] == [
+            ("MEDIUM", "UNDECLARED")
+        ]
         assert rules_map["UNDECLARED"] == {
             "id": "UNDECLARED",
             "component": "",
