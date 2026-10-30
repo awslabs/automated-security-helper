@@ -49,8 +49,13 @@ which are both, so the scanned tree does not configure gitleaks:
   scanned directory, ``utils/config_trust.py``), else ``GITLEAKS_CONFIG`` or ``GITLEAKS_CONFIG_TOML``
   from the operator's environment (outside the scanner sandbox, which does not
   pass them in), else a config ASH writes that extends gitleaks' default rules and
-  adds nothing. It is always passed as ``--config`` except in the environment
-  case, so gitleaks never falls through to ``<target>/.gitleaks.toml``. A
+  adds nothing. It is passed as ``--config`` in every case but one, so gitleaks
+  never falls through to ``<target>/.gitleaks.toml``: an absolute
+  ``GITLEAKS_CONFIG``, or ``GITLEAKS_CONFIG_TOML``, is left to gitleaks, which
+  reads the variable itself; a ``GITLEAKS_CONFIG`` that is not absolute as given
+  (``rules.toml``, ``~/rules.toml``) is anchored to the directory ASH runs in and
+  passed as ``--config``, because gitleaks would resolve it against its working
+  directory, the scanned tree. A
   ``config_file`` or ``baseline_path`` set by a config inside a git checkout or the
   scanned directory is ignored with a warning, and a ``.gitleaks.toml`` or ``.ash/.gitleaks.toml`` in
   the tree with a note. An operator's file that does not exist fails the scan
@@ -214,8 +219,9 @@ _monotonic = time.monotonic
 TREE_CONFIG_NAMES = (".gitleaks.toml", ".ash/.gitleaks.toml")
 
 #: Environment variables gitleaks reads a config from. When either is set, outside
-#: the scanner sandbox, ASH does not pass ``gitleaks --config`` and gitleaks
-#: resolves it.
+#: the scanner sandbox, ASH passes no ``--config`` and gitleaks reads the variable;
+#: a non-absolute ``GITLEAKS_CONFIG`` is anchored to the directory ASH runs in and
+#: passed as ``--config``, so the scanned tree cannot supply it.
 CONFIG_ENV_VARS = ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML")
 
 #: The ignore file gitleaks always reads at the root of its scan path.
@@ -630,15 +636,20 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # relative value the operator set in ASH's own working directory
             # would be read from the scanned tree: the repository would supply
             # the config file. Anchor it where the operator typed it and pass
-            # it as --config, which gitleaks reads before the variable. An
-            # absolute path, or GITLEAKS_CONFIG_TOML (the config's text, not a
-            # path), is left to gitleaks as before.
-            relative = os.environ.get("GITLEAKS_CONFIG")
-            if relative and not os.path.isabs(os.path.expanduser(relative)):
-                anchored = Path(os.path.abspath(os.path.expanduser(relative)))
+            # it as --config, which gitleaks reads before the variable. The
+            # test is on the value AS GIVEN: a leading ``~`` is not absolute
+            # either (a shell expands it only in some positions, and CI
+            # ``env:`` blocks, ``.env`` files and ``--env-file`` never do), and
+            # gitleaks does not expand it, so ``~/rules.toml`` as given would
+            # name a ``~`` directory inside the scanned tree. Only a path that
+            # is absolute as typed, or GITLEAKS_CONFIG_TOML (the config's text,
+            # not a path), is left to gitleaks as before.
+            given = os.environ.get("GITLEAKS_CONFIG")
+            if given and not os.path.isabs(given):
+                anchored = self._anchored_config_env(given)
                 ASH_LOGGER.debug(
-                    "GITLEAKS_CONFIG is a relative path; passing it to gitleaks "
-                    "resolved against the working directory ASH runs in"
+                    "GITLEAKS_CONFIG is not an absolute path; passing it to "
+                    "gitleaks resolved against the working directory ASH runs in"
                 )
                 return anchored
             ASH_LOGGER.debug(
@@ -663,6 +674,19 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             DEFAULT_RULES_CONFIG,
             context=self.context,
         ).resolve()
+
+    @staticmethod
+    def _anchored_config_env(given: str) -> Path:
+        """The absolute path a non-absolute ``GITLEAKS_CONFIG`` names, as ASH sees it.
+
+        ``~`` and ``~user`` are expanded first (the operator's home, never a
+        directory of that name in the scanned tree), then the result is
+        resolved against the working directory ASH runs in. Never against the
+        scanned source directory: that is where gitleaks would have read it,
+        and the point of anchoring is that the repository does not pick the
+        config.
+        """
+        return Path(os.path.abspath(os.path.expanduser(given)))
 
     def _empty_ignore_dir(self) -> Path:
         """A directory with no ``.gitleaksignore``, for ``--gitleaks-ignore-path``.
@@ -1416,23 +1440,27 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         return data
 
     def _rescan_env(self, final_args: List[str]) -> Optional[Dict[str, str]]:
-        """The re-scan's environment: a relative ``GITLEAKS_CONFIG`` made absolute.
+        """The re-scan's environment: a non-absolute ``GITLEAKS_CONFIG`` made absolute.
 
         Only when no ``--config`` is passed, which is the only case gitleaks reads
-        the variable in. ``_resolve_config_file`` now anchors a relative
+        the variable in. ``_resolve_config_file`` now anchors a non-absolute
         ``GITLEAKS_CONFIG`` to the directory ASH runs in and passes it as
         ``--config``, so this branch is not reached for it; it stays for a run
         that reaches gitleaks with the variable alone, where the re-scan from the
-        copies must still read the same file as the first run.
+        copies must still read the same file as the first run. The anchor is
+        the same one (``_anchored_config_env``): the directory ASH runs in, with
+        ``~`` expanded, never the scanned source directory, which an earlier
+        shape used here and which would have let the scanned repository supply
+        the re-scan's config.
         """
         if any(arg.startswith("--config=") for arg in final_args):
             return None
         value = os.environ.get("GITLEAKS_CONFIG")
-        if not value or Path(value).is_absolute():
+        if not value or os.path.isabs(value):
             return None
         return {
             **snapshot_environ(),
-            "GITLEAKS_CONFIG": (self._source_dir() / value).absolute().as_posix(),
+            "GITLEAKS_CONFIG": self._anchored_config_env(value).as_posix(),
         }
 
     @staticmethod
