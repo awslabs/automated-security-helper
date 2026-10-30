@@ -245,12 +245,15 @@ def test_the_windows_bound_counts_utf16_units():
     measured by ``len`` passed the bound and still exceeded it."""
     rest = ["bandit", "C:/src"]
     plane_two = "\U0001f600"
-    token = "--exclude=" + plane_two * 15340
+    # 15,400 of them plus the 24 other characters of the line: 15,424 code
+    # points, under the bound; 30,824 UTF-16 units, over it. (15,340 made
+    # 30,704 units, 15 short of the bound, so the row did not show the gap.)
+    token = "--exclude=" + plane_two * 15400
     line = subprocess.list2cmdline([*rest, token])
     assert len(line) < 32767 - 2048
     assert len(line.encode("utf-16-le")) // 2 > 32767 - 2048
     assert not _exclude_fits(token, rest, "nt")
-    assert _exclude_fits("--exclude=" + "x" * 15340, rest, "nt")
+    assert _exclude_fits("--exclude=" + "x" * 15400, rest, "nt")
 
 
 def test_a_lone_surrogate_in_the_line_is_measured_not_a_crash():

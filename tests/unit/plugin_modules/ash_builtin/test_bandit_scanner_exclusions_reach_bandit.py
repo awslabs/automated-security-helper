@@ -392,6 +392,121 @@ def test_an_ini_entry_holding_a_line_break_is_left_out_with_a_warning(tmp_path, 
     )
 
 
+def _covers(entries: list[str], path: str) -> bool:
+    """Whether bandit would skip ``path`` for ``entries``: an fnmatch glob or a
+    plain substring, its two readings of an --exclude entry."""
+    return any(fnmatch.fnmatchcase(path, e) or e in path for e in entries)
+
+
+def test_a_plain_name_ini_entry_is_the_exact_name_with_a_warning(tmp_path, caplog):
+    """``exclude = test``: bandit alone read it as a substring of every walked
+    path, so ``tests/`` and ``test_x.py`` were skipped too. Anchored, it names
+    the ``test`` directory or file at any depth and nothing that merely
+    contains the word, and the operator is told what the entry no longer
+    covers, with the console markup off."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = test\n", encoding="utf-8")
+    source = _tree(
+        tmp_path, ["app.py", "test/old.py", "tests/test_app.py", "test_x.py"]
+    )
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    entries = _entries(argv)
+    root = source.as_posix()
+    for entry in bandit_excluded_path_globs(root, "test"):
+        assert entry in entries, (entry, entries)
+    assert _covers(entries, f"{root}/test/old.py"), entries
+    assert not _covers(entries, f"{root}/tests/test_app.py"), entries
+    assert not _covers(entries, f"{root}/test_x.py"), entries
+    told = [r for r in caplog.records if "is a plain name" in r.getMessage()]
+    assert len(told) == 1, [r.getMessage() for r in caplog.records]
+    assert repr("test") in told[0].getMessage()
+    assert "test_x.py" in told[0].getMessage()
+    assert told[0].markup is False
+
+
+def test_an_absolute_ini_entry_is_read_below_the_target_with_a_warning(
+    tmp_path, caplog
+):
+    """``exclude = /legacy`` is read as ``legacy`` below the target, as an
+    ``excluded_paths`` entry spelled that way is, and the operator is told."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = /legacy\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "legacy/old.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    entries = _entries(argv)
+    root = source.as_posix()
+    assert _covers(entries, f"{root}/legacy/old.py"), entries
+    assert not _covers(entries, f"{root}/app.py"), entries
+    assert not any(e.startswith("/legacy") for e in entries), entries
+    told = [
+        r for r in caplog.records if "written as an absolute path" in r.getMessage()
+    ]
+    assert len(told) == 1, [r.getMessage() for r in caplog.records]
+    assert repr("/legacy") in told[0].getMessage()
+    assert repr("legacy") in told[0].getMessage()
+    assert told[0].markup is False
+
+
+def test_an_ini_warning_is_given_once_per_build_not_once_per_target(tmp_path, caplog):
+    """``_ini_excludes`` runs for every scanned target (the source and the
+    converted one); its warnings describe the operator's file, so a second
+    target repeats none of them."""
+    ini = tmp_path / ".bandit"
+    # Three entries, three warnings: a plain name, an absolute path and one with
+    # surrounding whitespace (a glob, so it is not also a plain name).
+    ini.write_text("[bandit]\nexclude = test,/legacy, vend*r\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py"])
+    converted = _tree(tmp_path, ["gen.py"], name="converted")
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        scanner._execute_scan(source, "source", [])
+        scanner._execute_scan(converted, "converted", [])
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("is a plain name" in m for m in messages) == 1, messages
+    assert sum("written as an absolute path" in m for m in messages) == 1, messages
+    assert sum("surrounding whitespace" in m for m in messages) == 1, messages
+    assert all(
+        r.markup is False
+        for r in caplog.records
+        if ".bandit exclude entry" in r.getMessage()
+    )
+
+
+def test_a_target_whose_path_holds_a_comma_gets_no_ini_entries(tmp_path, caplog):
+    """No entry anchored at such a target can be passed (bandit splits the
+    argument on commas), which the scan says once for the target; the entries
+    are not blamed one by one."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = tests,legacy/\n", encoding="utf-8")
+    plain = _tree(tmp_path, ["app.py"])
+    comma = _tree(tmp_path, ["app.py"], name="src,lab")
+    scanner = _scanner(
+        plain, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner._ini_excludes(comma) == []
+    assert not caplog.records, [r.getMessage() for r in caplog.records]
+    # The same file does yield entries under a target it can anchor at.
+    assert scanner._ini_excludes(plain), "the control target must get entries"
+
+
 def test_no_ini_adds_no_raw_entries(tmp_path):
     source = _tree(tmp_path, ["app.py"])
     scanner = _scanner(source, tmp_path)
