@@ -112,7 +112,7 @@ def _stream_codec() -> tuple[str | None, str]:
     """The encoding and error handler a reattached stream is opened with.
 
     As the interpreter chooses them for the streams it makes at start:
-    ``PYTHONIOENCODING`` (``encoding[:errors]``, unless ``-E`` ignores the
+    ``PYTHONIOENCODING`` (``encoding[:errors]``, unless ``python -E`` ignores the
     environment), UTF-8 under UTF-8 mode (``-X utf8``, ``PYTHONUTF8=1``), else the
     locale's codec, ``None`` here. A repaired channel written in a codec other
     than the one the environment asked for gave a reader of machine output
