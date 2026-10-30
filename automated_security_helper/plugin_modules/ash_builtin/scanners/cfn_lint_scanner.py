@@ -1323,8 +1323,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # never ran. A run's code is folded in by _combined_exit_code below.
         self.exit_code = None
         # self.errors too, as cdk_nag_scanner resets it: the converted target's
-        # invocation record carried the source target's error lines.
+        # invocation record carried the source target's error lines. The
+        # unevaluated targets as cfn-nag clears them, for a caller that is not
+        # the executor (which clears them before each scan).
         self.errors = []
+        self.clear_unevaluated_targets()
 
         report = self._empty_report(target)
         try:

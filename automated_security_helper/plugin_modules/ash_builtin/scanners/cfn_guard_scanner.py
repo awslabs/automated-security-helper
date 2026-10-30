@@ -883,6 +883,13 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         self.errors = []
 
         report = self._empty_report()
+        # The unevaluated targets are cleared as cfn-nag clears them, for a
+        # caller that is not the executor (which clears them before each scan);
+        # a dependency recorded unavailable before this call keeps its line, the
+        # reason the scan below does not start.
+        self.clear_unevaluated_targets()
+        if self.dependency_unavailable_reason:
+            self.errors.append(self.dependency_unavailable_reason)
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(
                 f"Target directory {target} is empty or doesn't exist. Skipping scan.",
@@ -899,13 +906,6 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         if not self.dependencies_satisfied:
             self._post_scan(target=target, target_type=target_type)
             return False
-        # Reset here, after the dependency check, as cfn-lint and cfn-nag reset
-        # theirs: the executor runs this instance over the source and then the
-        # converted target, and the converted target's invocation record
-        # (exitCodeDescription, built from self.errors) repeated the source
-        # target's lines. After the check, so an unavailable dependency's line is
-        # not lost on the returns above.
-        self.errors = []
 
         try:
             selected = self._selected_rules()

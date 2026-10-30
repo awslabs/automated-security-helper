@@ -1023,6 +1023,37 @@ class TestScan:
         self._run(scanner, clean)
         assert not any(e in scanner.errors for e in stale), scanner.errors
 
+    def test_errors_are_reset_before_the_empty_target_return(self, repo, rules_root):
+        """At the previous tip the reset sat below the empty-target, pre-scan and
+        dependency returns, so a source scan's lines were still in self.errors
+        when the converted target was empty, the shape the reset was added for."""
+        _fake_bundle(rules_root)
+        empty = repo.parent / "converted-empty"
+        empty.mkdir()
+        scanner = _scanner(repo)
+        scanner.errors = ["the source target's line"]
+        with patch.object(
+            CfnGuardScanner, "validate_plugin_dependencies", return_value=True
+        ):
+            scanner.scan(target=empty, target_type="converted")
+        assert "the source target's line" not in scanner.errors, scanner.errors
+
+    def test_a_dependency_recorded_unavailable_before_the_scan_keeps_its_line(
+        self, repo, rules_root
+    ):
+        """The reset at the top keeps the one line that explains why the scan
+        below does not start; a stale line from another target is still dropped."""
+        _fake_bundle(rules_root)
+        scanner = _scanner(repo)
+        scanner.dependency_unavailable_reason = "cfn-guard was recorded missing"
+        scanner.errors = ["the source target's line", "cfn-guard was recorded missing"]
+        with patch.object(
+            CfnGuardScanner, "validate_plugin_dependencies", return_value=False
+        ):
+            scanner.scan(target=repo, target_type="source")
+        assert "the source target's line" not in scanner.errors, scanner.errors
+        assert "cfn-guard was recorded missing" in scanner.errors, scanner.errors
+
     def test_after_a_timeout_the_remaining_templates_are_not_started(
         self, repo, rules_root
     ):
