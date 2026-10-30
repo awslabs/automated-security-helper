@@ -2357,13 +2357,53 @@ def _remove_if_still_stale(
     between two workspaces) skips this removal and is reported through the
     process-wide latch (:func:`_warn_guard_refused_once`). A guard another server
     holds for the whole bounded wait raises :class:`_PresenceLockHeld`, which the
-    sweep takes as the end of its pass.
+    sweep takes as the end of its pass; an end of this session that was refused
+    while the sweep held its change is still completed, off the sweep
+    (:func:`_complete_a_pending_end_off_the_sweep`).
     """
 
-    if _remove_stale_session_state(root, session_id, sandbox, cutoff):
-        return True
+    try:
+        if _remove_stale_session_state(root, session_id, sandbox, cutoff):
+            return True
+    except _PresenceLockHeld:
+        # An end_session refused while this sweep held the session's change is
+        # marked pending (end_session marks it before it tries the change) and
+        # would be completed by finish_ended_session below. Completing it here
+        # would take the guard with no time limit, on the sweep's thread, and
+        # undo the one-second promise this exception keeps, so it is completed
+        # on a thread of its own, which waits for the guard as the ending
+        # request would have.
+        _complete_a_pending_end_off_the_sweep(session_id)
+        raise
     finish_ended_session(session_id)
     return False
+
+
+def _complete_a_pending_end_off_the_sweep(session_id: str) -> None:
+    """Complete a pending end of ``session_id`` on a thread of its own.
+
+    For the sweep, when the presence guard another server holds ended its pass
+    before it could call :func:`finish_ended_session` for a session it had just
+    released: the end is pending in ``_ended_while_scanning``, and nothing else
+    in this process completes it before the next sweep that finds the workspace
+    stale again (a whole TTL later, if the ending request touched it). The
+    thread runs :func:`finish_ended_session`, whose ``end_session`` waits for
+    the guard for as long as the other server keeps it, as the request that
+    ended the session would have waited; the sweep itself waits for nothing. A
+    session whose end is not pending needs no thread. Daemon: a removal still
+    running when the process exits leaves what it had not removed under the
+    hidden delete name, which the TTL sweep clears.
+    """
+    with _ended_lock:
+        pending = session_id in _ended_while_scanning
+    if not pending:
+        return
+    threading.Thread(
+        target=finish_ended_session,
+        args=(session_id,),
+        name=f"ash-mcp-finish-ended-session-{session_id}",
+        daemon=True,
+    ).start()
 
 
 def _remove_stale_session_state(
