@@ -383,6 +383,28 @@ def trivy_default_misconfig_scanners(
     return listed
 
 
+def _known_scanner_names(
+    names: List[str], known: List[str]
+) -> Tuple[List[str], List[str]]:
+    """``names`` split into the ones ``known`` holds, in its spelling and without
+    repeats, and the ones it does not.
+
+    Matched case-insensitively, since a name trivy does not know (``Terraform``)
+    makes it run every misconfiguration scanner rather than none; the spelling
+    passed on is trivy's own.
+    """
+    by_lower = {name.lower(): name for name in known}
+    chosen: List[str] = []
+    unknown: List[str] = []
+    for name in names:
+        canonical = by_lower.get(name.lower())
+        if canonical is None:
+            unknown.append(name)
+        elif canonical not in chosen:
+            chosen.append(canonical)
+    return chosen, unknown
+
+
 def _same_package(entry: Any, name: str | None, version: str | None) -> bool:
     """Whether the lockfile ``entry`` is the package a result names.
 
@@ -783,12 +805,19 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         return [str(name).strip() for name in listed if str(name).strip()]
 
     def _environment_list(self, name: str) -> List[str]:
-        """``name`` in the scan's environment as trivy reads a list flag from it:
-        comma-separated, blank entries dropped; empty when unset."""
+        """``name`` in the scan's environment as trivy reads a list flag from it.
+
+        trivy reads the variable through viper, which turns a string into a list
+        by splitting it on whitespace, and then splits each field on commas, so
+        ``"terraform dockerfile"`` and ``"terraform,dockerfile"`` are two names
+        alike. Read on commas alone, the first was one name, ``"terraform
+        dockerfile"``, which trivy does not know. Blank entries are dropped; empty
+        when unset.
+        """
         value = self._scan_environment().get(name)
         if not value or not value.strip():
             return []
-        return [entry.strip() for entry in value.split(",") if entry.strip()]
+        return [entry for entry in re.split(r"[\s,]+", value) if entry]
 
     def _attach_trivy_severity(self, sarif_report: SarifReport) -> SarifReport:
         """Give each result trivy's own severity as its ASH severity.
@@ -1338,9 +1367,19 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         operator's own choice when one is set (``TRIVY_MISCONFIG_SCANNERS`` in the
         scan's environment, then ``misconfiguration.scanners`` in the config file
         the run passes, the order trivy reads them in), else trivy's own default
-        list. An operator's narrower set is kept narrow. When no list is set and
-        trivy's default cannot be read, the misconfiguration scanner is not run
-        offline at all, rather than guessed at. checkov still checks Terraform.
+        list. An operator's narrower set is kept narrow.
+
+        The operator's names are checked against the list trivy prints for the
+        flag (``_default_misconfig_scanners``) and passed in trivy's own spelling:
+        trivy given a name it does not know runs every misconfiguration scanner,
+        the Terraform checks included (measured, ``trivy_default_misconfig_scanners``),
+        so a typo, a name an older release removed, or ``Terraform`` with a capital
+        would have brought the module fetch back. A name trivy does not know is
+        dropped with a warning that names the variable or key and counts the
+        names, never their text (the environment chose them). When trivy's list
+        cannot be read, the misconfiguration scanner is not run offline at all,
+        rather than guessed at, whether or not the operator chose names. checkov
+        still checks Terraform.
 
         Shared by ``trivy-repo``, which runs ``misconfig`` by default, and ``trivy``,
         which runs it when the operator adds it to ``scanners``.
@@ -1349,12 +1388,29 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             return final_args
         command = self.command or "trivy"
         binary = find_executable(command) or command
-        operators_own = self._environment_list(
-            "TRIVY_MISCONFIG_SCANNERS"
-        ) or self._config_file_list(final_args, "misconfiguration", "scanners")
-        chosen = operators_own or self._default_misconfig_scanners(binary) or []
+        help_command = f"`{binary} {' '.join(self.subcommands)} --help`"
+        known = self._default_misconfig_scanners(binary)
+        operators_own, operators_key = self._operator_misconfig_scanners(final_args)
+        unknown: List[str] = []
+        if operators_own and known is None:
+            chosen: List[str] = []
+        elif operators_own:
+            chosen, unknown = _known_scanner_names(operators_own, known or [])
+        else:
+            chosen = list(known or [])
         kept = [name for name in chosen if name != _TERRAFORM_MISCONFIG_SCANNER]
         args = list(final_args)
+        if unknown and chosen:
+            dropped = (
+                f"{len(unknown)} of the {len(operators_own)} misconfiguration scanner "
+                f"name(s) in {operators_key} are not names this trivy knows "
+                f"({help_command}) and are not passed to it: trivy given a name it "
+                "does not know runs every misconfiguration scanner, the Terraform "
+                "checks included. The known names are passed in trivy's spelling."
+            )
+            if dropped not in self._warned_inputs:
+                self._warned_inputs.add(dropped)
+                self._plugin_log(dropped, level=logging.WARNING)
         if kept:
             message = (
                 "trivy's Terraform checks are skipped offline: trivy downloads the "
@@ -1365,7 +1421,24 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             insert_at = len(head) if args[: len(head)] == head else len(args)
             args[insert_at:insert_at] = [f"--misconfig-scanners={','.join(kept)}"]
         else:
-            if operators_own:
+            if operators_own and known is None:
+                message = (
+                    "trivy's misconfiguration checks are skipped offline: the "
+                    f"operator chose misconfiguration scanners ({operators_key}), "
+                    "and ASH could not read trivy's list of them from "
+                    f"{help_command} to check the names against, so it cannot tell "
+                    "which of them would leave out the Terraform checks, which "
+                    "download module sources."
+                )
+            elif operators_own and not chosen:
+                message = (
+                    "trivy's misconfiguration checks are skipped offline: none of "
+                    f"the {len(operators_own)} misconfiguration scanner name(s) in "
+                    f"{operators_key} is one this trivy knows ({help_command}), and "
+                    "trivy given a name it does not know runs every "
+                    "misconfiguration scanner, the Terraform checks included."
+                )
+            elif operators_own:
                 message = (
                     "trivy's misconfiguration checks are skipped offline: the "
                     "misconfiguration scanners the operator chose are only the "
@@ -1375,9 +1448,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             else:
                 message = (
                     "trivy's misconfiguration checks are skipped offline: ASH could "
-                    f"not read trivy's list of them from `{binary} "
-                    f"{' '.join(self.subcommands)} --help`, so it cannot leave out the "
-                    "Terraform checks, which download module sources."
+                    f"not read trivy's list of them from {help_command}, so it "
+                    "cannot leave out the Terraform checks, which download module "
+                    "sources."
                 )
             index = args.index("--scanners") if "--scanners" in args else -1
             if index >= 0 and index + 1 < len(args):
@@ -1395,6 +1468,23 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     def _default_misconfig_scanners(self, binary: str) -> Optional[List[str]]:
         """trivy's default misconfiguration scanners for this scanner's subcommand."""
         return trivy_default_misconfig_scanners(binary, list(self.subcommands))
+
+    def _operator_misconfig_scanners(
+        self, final_args: List[str]
+    ) -> Tuple[List[str], str]:
+        """The misconfiguration scanners the operator chose, and where.
+
+        ``TRIVY_MISCONFIG_SCANNERS`` in the scan's environment first, then
+        ``misconfiguration.scanners`` in the config file the run passes, the order
+        trivy reads them in. The second value names the source for a warning, so
+        the names themselves, which the environment or the operator's file chose,
+        are never printed.
+        """
+        from_env = self._environment_list("TRIVY_MISCONFIG_SCANNERS")
+        if from_env:
+            return from_env, "TRIVY_MISCONFIG_SCANNERS"
+        from_file = self._config_file_list(final_args, "misconfiguration", "scanners")
+        return from_file, "misconfiguration.scanners of the trivy config file"
 
     def _append_trivy_options(self) -> None:
         """Turn the configured options into trivy flags on ``self.args.extra_args``.

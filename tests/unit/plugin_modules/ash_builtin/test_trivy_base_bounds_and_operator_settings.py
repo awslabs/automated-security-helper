@@ -25,6 +25,9 @@ Each test here pins one reading that went wrong before:
 - a missing secret-rules file failed a scan that never reads one.
 - the offline Terraform-check removal ignored the operator's own
   misconfiguration-scanner list.
+- the operator's list reached trivy as written: a list variable split on commas
+  alone (trivy splits on whitespace too), and a name trivy does not know passed
+  through, which makes trivy run every misconfiguration scanner.
 - the builtin trivy scanner redacted neither ``TRIVY_IGNOREFILE`` nor
   ``TRIVY_SECRET_CONFIG``, which it reads from the environment.
 - a trivy config file that is not UTF-8 raised out of the scanner-set read.
@@ -595,8 +598,24 @@ def test_control_a_missing_secret_config_fails_a_scan_that_runs_the_secret_scann
 # --- the operator's misconfiguration-scanner list, offline ------------------------
 
 
-def _never_read(*args, **kwargs):  # pragma: no cover - must not be reached
-    raise AssertionError("trivy's default list was read although the operator set one")
+#: What this trivy prints for --misconfig-scanners: the names it knows.
+KNOWN_MISCONFIG_SCANNERS = ["azure-arm", "dockerfile", "kubernetes", "terraform"]
+
+
+def _knows(monkeypatch, names=KNOWN_MISCONFIG_SCANNERS) -> None:
+    """The ``--help`` read answers ``names``; None for a list that cannot be read."""
+    monkeypatch.setattr(
+        trivy_repo_scanner,
+        "trivy_default_misconfig_scanners",
+        lambda binary, subcommands: names,
+    )
+
+
+EMPTY_CONFIG_ARGS = ["trivy", "repository", f"--config={EMPTY_TOOL_CONFIG}", "/src"]
+
+
+def _misconfig_flags(args) -> list[str]:
+    return [a for a in args if a.startswith("--misconfig-scanners")]
 
 
 def test_offline_the_operators_misconfig_scanners_are_kept_without_terraform(
@@ -607,13 +626,10 @@ def test_offline_the_operators_misconfig_scanners_are_kept_without_terraform(
         "TRIVY_SCANNERS": "misconfig",
         "TRIVY_MISCONFIG_SCANNERS": "terraform,dockerfile",
     }
-    monkeypatch.setattr(
-        trivy_repo_scanner, "trivy_default_misconfig_scanners", _never_read
-    )
-    final_args = ["trivy", "repository", f"--config={EMPTY_TOOL_CONFIG}", "/src"]
+    _knows(monkeypatch)
 
     with patch.object(scanner, "_plugin_log"):
-        args = scanner._offline_misconfig_args(final_args)
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
 
     assert "--misconfig-scanners=dockerfile" in args, args
 
@@ -629,9 +645,7 @@ def test_offline_the_operators_config_file_misconfig_scanners_are_read(
         "  scanners: [terraform, kubernetes]\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        trivy_repo_scanner, "trivy_default_misconfig_scanners", _never_read
-    )
+    _knows(monkeypatch)
     final_args = ["trivy", "repository", f"--config={operator.as_posix()}", "/src"]
 
     with patch.object(scanner, "_plugin_log"):
@@ -648,17 +662,139 @@ def test_offline_an_operator_list_of_terraform_alone_runs_no_misconfig_checks(
         "TRIVY_SCANNERS": "misconfig",
         "TRIVY_MISCONFIG_SCANNERS": "terraform",
     }
-    monkeypatch.setattr(
-        trivy_repo_scanner, "trivy_default_misconfig_scanners", _never_read
-    )
-    final_args = ["trivy", "repository", f"--config={EMPTY_TOOL_CONFIG}", "/src"]
+    _knows(monkeypatch)
     messages, logging_patch = _logged(scanner)
 
     with logging_patch:
-        args = scanner._offline_misconfig_args(final_args)
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
 
-    assert not any(a.startswith("--misconfig-scanners") for a in args), args
+    assert not _misconfig_flags(args), args
     assert any("the operator chose" in m for m in messages), messages
+
+
+# --- the operator's names are read as trivy reads them, and checked -----------------
+
+
+def test_a_space_separated_misconfig_list_is_read_as_two_names(tmp_path, monkeypatch):
+    """viper splits a list variable on whitespace before trivy splits it on commas,
+    so "terraform dockerfile" is two names to trivy. Read as one name it would be
+    passed as written, a name trivy does not know, and trivy would then run every
+    misconfiguration scanner, the Terraform checks included."""
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    scanner.extra_env = {
+        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_MISCONFIG_SCANNERS": "terraform dockerfile",
+    }
+    _knows(monkeypatch)
+
+    with patch.object(scanner, "_plugin_log"):
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
+
+    assert _misconfig_flags(args) == ["--misconfig-scanners=dockerfile"], args
+
+
+def test_a_space_separated_scanners_variable_turns_misconfig_on(tmp_path):
+    scanner = _repo_scanner(tmp_path, scanners=[])
+    scanner.extra_env = {"TRIVY_SCANNERS": "vuln misconfig"}
+
+    assert scanner._effective_scanners(EMPTY_CONFIG_ARGS) == ["vuln", "misconfig"]
+
+
+def test_a_capitalized_terraform_is_the_terraform_scanner(tmp_path, monkeypatch):
+    """Matched by name, not by spelling: ``Terraform`` passed as written is a name
+    trivy does not know, and would have run every scanner rather than none."""
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    scanner.extra_env = {
+        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_MISCONFIG_SCANNERS": "Terraform",
+    }
+    _knows(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
+
+    assert not _misconfig_flags(args), args
+    assert any("the operator chose" in m for m in messages), messages
+
+
+def test_a_name_trivy_does_not_know_is_dropped_with_a_warning_without_its_text(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    scanner.extra_env = {
+        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_MISCONFIG_SCANNERS": "zz-typo-zz,Dockerfile,terraform",
+    }
+    _knows(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
+
+    assert _misconfig_flags(args) == ["--misconfig-scanners=dockerfile"], args
+    (dropped,) = [m for m in messages if "not names this trivy knows" in m]
+    assert "1 of the 3" in dropped
+    assert "TRIVY_MISCONFIG_SCANNERS" in dropped
+    assert "zz-typo-zz" not in dropped
+
+
+def test_an_operator_list_of_unknown_names_alone_runs_no_misconfig_checks(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    scanner.extra_env = {
+        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_MISCONFIG_SCANNERS": "zz-typo-zz",
+    }
+    _knows(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
+
+    assert not _misconfig_flags(args), args
+    (skipped,) = [m for m in messages if "skipped offline" in m]
+    assert "none of the 1" in skipped
+    assert "zz-typo-zz" not in skipped
+
+
+def test_an_operator_list_with_trivys_list_unreadable_runs_no_misconfig_checks(
+    tmp_path, monkeypatch
+):
+    """The names cannot be checked, and a name trivy does not know would run every
+    misconfiguration scanner: fail closed, as with no list at all."""
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    scanner.extra_env = {
+        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_MISCONFIG_SCANNERS": "dockerfile",
+    }
+    _knows(monkeypatch, None)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
+
+    assert not _misconfig_flags(args), args
+    (skipped,) = [m for m in messages if "skipped offline" in m]
+    assert "could not read trivy's list" in skipped
+    assert "TRIVY_MISCONFIG_SCANNERS" in skipped
+
+
+def test_control_a_known_name_repeated_in_two_spellings_is_passed_once(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    scanner.extra_env = {
+        "TRIVY_SCANNERS": "misconfig",
+        "TRIVY_MISCONFIG_SCANNERS": "dockerfile,DOCKERFILE kubernetes",
+    }
+    _knows(monkeypatch)
+
+    with patch.object(scanner, "_plugin_log"):
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
+
+    assert _misconfig_flags(args) == ["--misconfig-scanners=dockerfile,kubernetes"]
 
 
 # --- the update step is given the values to redact with ---------------------------
