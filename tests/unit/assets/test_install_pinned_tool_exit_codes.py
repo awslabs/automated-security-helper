@@ -70,10 +70,28 @@ class TestARequestThatCannotSucceedExitsUsage:
         assert "no-such-tool" in capsys.readouterr().err
 
     def test_a_platform_the_tool_has_no_asset_for(self, tmp_path, monkeypatch):
+        """A stand-in table that has no asset, so the real one can gain one safely."""
         _linux(monkeypatch, machine="aarch64", system="Windows")
+        asked = []
+
+        def no_asset(tool, platform_name, arch):
+            asked.append((tool, platform_name, arch))
+            raise LookupError(f"{tool} has no asset for {platform_name}/{arch}")
+
+        def must_not_download(url, target):
+            raise AssertionError(f"reached the network for {url}")
+
+        monkeypatch.setattr(
+            installer, "load_pins", lambda root: _pins(get_tool_asset=no_asset)
+        )
+        monkeypatch.setattr(installer, "download", must_not_download)
+
         with pytest.raises(SystemExit) as raised:
             installer.install("trivy", tmp_path / "bin", PACKAGE_ROOT)
+
         assert raised.value.code == installer._EXIT_USAGE
+        assert asked == [("trivy", "windows", "arm64")]
+        assert "windows/arm64" in str(raised.value)
 
     def test_a_machine_the_table_does_not_know(self):
         with pytest.raises(SystemExit) as raised:
