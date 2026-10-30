@@ -2670,6 +2670,7 @@ def test_the_carried_log_trims_a_cut_inside_a_glued_input(tmp_path):
     value = "qz4b"
     context = _context(tmp_path, [value])
     scanner = _scanner(context)
+    scanner.use_uv_tool = True
     scanner._uv_run_inputs_for_records = lambda: ("bandit[sarifqz4b]==1.0",)
     log = tmp_path / "Tool.stderr.log"
     head = "bandit[sarifqz4b"
@@ -2698,6 +2699,7 @@ def test_the_carried_log_trims_a_cut_inside_an_inputs_wheel_spelling(tmp_path):
     context = _context(tmp_path, [value])
     scanner = _scanner(context)
     scanner.command = "checkov"
+    scanner.use_uv_tool = True
     scanner._uv_run_inputs_for_records = lambda: ("pkg.aqz4bb==1.0",)
     log = tmp_path / "Tool.stderr.log"
     head = "pkg_aqz4b"

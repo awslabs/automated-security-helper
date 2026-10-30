@@ -223,6 +223,18 @@ _UNRENDERED_PACKAGE_MANAGERS = (
 )
 
 
+#: The package managers whose dependencies are Python packages, for
+#: ``PluginBase.is_python_only``: ``pip install`` and ``uv tool install`` both
+#: install from a Python package index.
+_PYTHON_PACKAGE_MANAGERS = frozenset({PackageManager.PIP, PackageManager.UV})
+
+
+#: What a timeout message names in place of the limit's number: the token
+#: ``error_text.timeout_limit_token`` gives when an environment value typed the
+#: limit, used when the values hook could not be read.
+_LIMIT_TOKEN_WITHOUT_A_NUMBER = "the configured scan_timeout"
+
+
 #: The most of a run's stderr log _run_subprocess reads back into a post-run
 #: response. Past it the text ends " ...[truncated]", as a failure's stderr
 #: excerpt does (scanner_plugin._STDERR_EXCERPT_LIMIT); the log keeps it all.
@@ -716,6 +728,30 @@ def _response_text(response: Dict, keys: Tuple[str, ...], default: str) -> str:
     return default
 
 
+def _error_text_read_once(error: BaseException, read: Any) -> str:
+    """``error`` as text for a record, redacted with a values read already taken.
+
+    ``read`` is a :func:`guarded_values_read` result: the handler's one read of
+    the values hook. Without values the text is not shown, and only the error's
+    class and the note say why."""
+    if read.values is not None:
+        return error_text(error, read.values)
+    return (
+        f"{type(error).__name__} (text not shown: the plugin's values hook "
+        f"{read.failure()})"
+    )
+
+
+def _log_name(plugin: Any) -> str:
+    """The name a plugin's own lines carry: its config's, else its class's.
+
+    ``config`` is optional and defaults to None, so a plugin built without one
+    has no name to read there. A function over the plugin, as
+    :func:`guarded_values_read` is, so the unbound ``PluginBase._plugin_log``
+    still runs on a stand-in."""
+    return getattr(plugin.config, "name", None) or plugin.__class__.__name__
+
+
 class CustomCommand(BaseModel):
     args: List[str]
     shell: bool = False  # Set to True only when shell expansion is absolutely necessary
@@ -872,13 +908,40 @@ class PluginBase(UVToolMixin, BaseModel):
         checked as a real boolean, and in force while the model's post-init
         hooks run, as in ``__init__``. With no declaration the provenance is
         the context's, the stricter judgment, whatever an enclosing
-        construction had set."""
+        construction had set.
+
+        It also skips the validator that gives the plugin's section its
+        context's environment values, so they are carried here, as
+        ``_give_its_section_the_environment_values`` does for a validated
+        plugin: a section handed in this way otherwise printed them in
+        clear."""
         declared = _declared_provenance(values)
         token = _CONFIG_FROM_CONTEXT.set(declared if declared is not None else True)
         try:
-            return super().model_construct(_fields_set, **values)
+            built = super().model_construct(_fields_set, **values)
         finally:
             _CONFIG_FROM_CONTEXT.reset(token)
+        carry_environment_values(
+            built.__dict__.get("config"), built._values_for_its_section()
+        )
+        return built
+
+    def model_copy(self, *, update: Any = None, deep: bool = False) -> "PluginBase":
+        """A copy whose replacement section carries the environment values.
+
+        ``model_copy`` runs neither the validators nor ``__setattr__``, the two
+        places a plugin's section is given its context's environment values,
+        so a ``config`` passed in ``update`` was put in the copy bare and
+        printed them in clear. Only a ``config`` in ``update`` is carried to:
+        it is the section that was never in a plugin. Without one the copy
+        shares the original's section, which already carries the values, and a
+        carry from the copy's own context would overwrite the original's."""
+        copied = super().model_copy(update=update, deep=deep)
+        if update and "config" in update:
+            carry_environment_values(
+                copied.__dict__.get("config"), copied._values_for_its_section()
+            )
+        return copied
 
     # Installation-related properties
     dependencies: Annotated[
@@ -999,7 +1062,7 @@ class PluginBase(UVToolMixin, BaseModel):
             target_type: Target type (e.g. source, converted)
             append_to_stream: Append to stdout or stderr stream
         """
-        name = self.config.name or self.__class__.__name__
+        name = _log_name(self)
         tt = ""
         if target_type is not None:
             tt = f" @ [magenta]{escape_markup(target_type)}[/magenta]"
@@ -1021,14 +1084,12 @@ class PluginBase(UVToolMixin, BaseModel):
         # part the call site showed already (a ShownText) is read back first, or
         # it was shown a second time there.
         written = "\n".join(as_written(part) for part in msg)
-        if level == logging.ERROR or append_to_stream == "stderr":
-            self.errors.append(
-                f"({self.config.name or self.__class__.__name__}) " + written
-            )
+        # ERROR and above: a CRITICAL message is at least as much the plugin's
+        # error as an ERROR one.
+        if level >= logging.ERROR or append_to_stream == "stderr":
+            self.errors.append(f"({name}) " + written)
         elif append_to_stream == "stdout":
-            self.output.append(
-                f"({self.config.name or self.__class__.__name__}) " + written
-            )
+            self.output.append(f"({name}) " + written)
 
     def is_python_only(self) -> bool:
         """
@@ -1036,7 +1097,8 @@ class PluginBase(UVToolMixin, BaseModel):
 
         A plugin is considered Python-only if:
         1. It has no dependencies defined in self.dependencies, or
-        2. It only has pip dependencies (Python packages)
+        2. It only has pip or uv dependencies (Python packages, installed by
+           ``pip install`` and ``uv tool install``)
         3. It has no custom installation commands
 
         Returns:
@@ -1056,11 +1118,11 @@ class PluginBase(UVToolMixin, BaseModel):
             )
             return True
 
-        # Check if all dependencies are Python packages (pip)
+        # Check if all dependencies are Python packages (pip or uv)
         for platform in self.dependencies:
             for arch in self.dependencies[platform]:
                 for dep in self.dependencies[platform][arch]:
-                    if dep.package_manager != PackageManager.PIP:
+                    if dep.package_manager not in _PYTHON_PACKAGE_MANAGERS:
                         ASH_LOGGER.debug(
                             f"Plugin {self.__class__.__name__} has non-Python dependencies with {dep.package_manager}, this is not Python-only"
                         )
@@ -1595,11 +1657,21 @@ class PluginBase(UVToolMixin, BaseModel):
         """
         # A uv run's inputs join the trim: the sinks hide them whole, so a
         # cut just after a glued extra's value is the same edge piece a value
-        # split leaves. The accessor is the best-effort one and never raises.
+        # split leaves. Only for a plugin that runs through uv, as the report
+        # lines read them (_process_command_response): for any other the
+        # accessor still answers the command's own name, and the trim would
+        # drop a cut log's last characters for starting like it. The accessor
+        # is the best-effort one and never raises, but an override can answer
+        # None (no inputs) or raise, and this runs in a handler: the trim then
+        # has the values alone, as the mixin's own fallback does.
         inputs: Tuple[str, ...] = ()
-        inputs_for_records = getattr(self, "_uv_run_inputs_for_records", None)
-        if callable(inputs_for_records):
-            inputs = tuple(inputs_for_records())
+        if getattr(self, "use_uv_tool", False):
+            inputs_for_records = getattr(self, "_uv_run_inputs_for_records", None)
+            if callable(inputs_for_records):
+                try:
+                    inputs = tuple(inputs_for_records() or ())
+                except Exception:  # noqa: BLE001 -- an overridable accessor
+                    inputs = ()
         try:
             # The one bounded read (read_log_bounded): bound + 1 so a cut is
             # known, and a cut tail trimmed past anything it could have
@@ -1624,8 +1696,16 @@ class PluginBase(UVToolMixin, BaseModel):
         """The scan_timeout limit as a timeout message prints it:
         ``error_text.timeout_limit_token`` over this plugin's environment
         values. One token for every timeout message, the executor's included,
-        so the sites cannot drift."""
-        return timeout_limit_token(limit, self._values_to_redact())
+        so the sites cannot drift.
+
+        The values hook is read once, guarded: a hook that raised or gave no
+        usable answer leaves nothing to tell whether an environment value
+        typed the limit, so the token names the option and prints no number,
+        the form it takes when one did."""
+        read = guarded_values_read(self)
+        if read.values is None:
+            return _LIMIT_TOKEN_WITHOUT_A_NUMBER
+        return timeout_limit_token(limit, read.values)
 
     def _record_timeout(self, response: Dict, timeout: float | None) -> None:
         """Name the scanner and the limit when its tool was killed at the timeout.
@@ -1749,7 +1829,19 @@ class PluginBase(UVToolMixin, BaseModel):
 
             uv_overrides = python_child.uv_child_overrides(command)
             if uv_overrides:
-                env = {**(snapshot_environ() if env is None else env), **uv_overrides}
+                child_env = snapshot_environ() if env is None else env
+                # uv_child_overrides decides from ASH's own environment whether
+                # the operator chose an interpreter, but the child gets
+                # ``env``: an interpreter the caller named there is theirs,
+                # and replacing it with ASH's would run the tool on another
+                # Python than the one the caller asked for.
+                if child_env.get("UV_PYTHON") or child_env.get("UV_SYSTEM_PYTHON"):
+                    uv_overrides = {
+                        key: value
+                        for key, value in uv_overrides.items()
+                        if key != "UV_PYTHON"
+                    }
+                env = {**child_env, **uv_overrides}
 
             # The ONE guarded read of the overridable values hook for this run
             # (_values_to_redact's guarding rule). The runner prints the command
@@ -1874,13 +1966,13 @@ class PluginBase(UVToolMixin, BaseModel):
                     f"{type(e).__name__} (text not shown: the plugin's values "
                     f"hook {read.failure()})"
                 )
-                ASH_LOGGER.debug(f"({self.config.name}) Full error details: {withheld}")
+                ASH_LOGGER.debug(f"({_log_name(self)}) Full error details: {withheld}")
             else:
                 # Show the full stack trace in debug, redacted: ``exc_info=True``
                 # would append the raw traceback, whose last line repeats the
                 # exception's message with any configured value in it.
                 ASH_LOGGER.debug(
-                    f"({self.config.name}) Full error details: "
+                    f"({_log_name(self)}) Full error details: "
                     f"{error_text(e, environment_values)}\n"
                     f"{traceback_text(e, values=environment_values)}"
                 )
@@ -1907,8 +1999,31 @@ class PluginBase(UVToolMixin, BaseModel):
                         )
                     ),
                 }
-                self._process_command_response(spawn_failure)
-                self._record_spawn_failure(spawn_failure)
+                # ASH's own handling of this response can raise too (an
+                # override of the seams it calls), and this is the handler
+                # that records the failure: each step stays inside it, as the
+                # post-run arm's recorders do. A step that raised leaves its
+                # error on the response's reason, and the spawn failure's code
+                # and state land whatever it did.
+                try:
+                    self._process_command_response(spawn_failure)
+                except Exception as again:  # noqa: BLE001 -- see above
+                    self._forget_processed(spawn_failure)
+                    self.exit_code = worse_exit_code(
+                        self.exit_code, SPAWN_FAILURE_RETURNCODE
+                    )
+                    spawn_failure["error"] = (
+                        f"{spawn_failure['error']}; "
+                        f"{_error_text_read_once(again, read)}"
+                    )
+                try:
+                    self._record_spawn_failure(spawn_failure)
+                except Exception as again:  # noqa: BLE001 -- see above
+                    self._spawn_failure_state(spawn_failure)
+                    spawn_failure["error"] = (
+                        f"{spawn_failure['error']}; "
+                        f"{_error_text_read_once(again, read)}"
+                    )
                 return spawn_failure
             # A run returned and ASH's own handling of its response raised. The
             # response already assembled is kept: its exit code (None for a tool
@@ -1931,6 +2046,11 @@ class PluginBase(UVToolMixin, BaseModel):
             if not any(response.get(flag) is True for flag in RESPONSE_FLAGS):
                 post_run["post_run_error"] = True
                 post_run["spawn_failed"] = False
+                # The post-run recorder may have run already, as a no-op on the
+                # response as it was (a later recorder raised before the flag
+                # was added). It is called for the flagged copy, or its line
+                # and errors entry are never written.
+                invoked.discard("post_run_error")
             # The tool's stderr: what the run returned, or under "write", where the
             # run returns none, its stderr log read back.
             # Not carried without the values: the log holds the tool's text in
