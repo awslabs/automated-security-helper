@@ -17,6 +17,7 @@ GitHub's upload limits.
 """
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -142,6 +143,54 @@ class TestRuleIdCollisions:
         assert rules["CVE-2024-1"]["shortDescription"]["text"] == "grype text"
         assert rules[qualified_id]["shortDescription"]["text"] == "trivy text"
         assert [r["ruleId"] for r in doc["results"]] == ["CVE-2024-1", qualified_id]
+
+    def test_a_component_stamped_with_its_scanner_name_collides_under_that_name(
+        self, reporter
+    ):
+        # ASH stamps driver.properties.scanner_details.tool_name with the name its
+        # results carry as scanner_name; the component's own name may differ.
+        run = _run(
+            [_result("CVE-2024-1", "grype"), _result("CVE-2024-1", "trivy")],
+            [
+                ToolComponent(name="grype", rules=[_rule("CVE-2024-1", "grype text")]),
+                ToolComponent(
+                    name="Trivy Scanner",
+                    rules=[_rule("CVE-2024-1", "trivy text")],
+                    properties=PropertyBag(scanner_details={"tool_name": "trivy"}),
+                ),
+            ],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        qualified_id = "Trivy Scanner/CVE-2024-1"
+        assert {rule["id"] for rule in doc["tool"]["driver"]["rules"]} == {
+            "CVE-2024-1",
+            qualified_id,
+        }
+        assert [r["ruleId"] for r in doc["results"]] == ["CVE-2024-1", qualified_id]
+
+    def test_a_qualified_rule_no_result_names_is_warned_about(
+        self, reporter, monkeypatch
+    ):
+        logger = MagicMock()
+        monkeypatch.setattr(github_ghas_reporter, "ASH_LOGGER", logger)
+        # The pack's name matches no result's scanner_name and it carries no
+        # stamp, so its results keep the bare id.
+        run = _run(
+            [_result("CVE-2024-1", "grype"), _result("CVE-2024-1", "trivy")],
+            [
+                ToolComponent(name="grype", rules=[_rule("CVE-2024-1", "grype text")]),
+                ToolComponent(
+                    name="trivy-rules", rules=[_rule("CVE-2024-1", "trivy text")]
+                ),
+            ],
+        )
+
+        reporter.report(_model(run))
+
+        warned = [call.args[0] for call in logger.warning.call_args_list]
+        assert any("trivy-rules/CVE-2024-1" in message for message in warned)
 
     def test_the_ids_do_not_depend_on_the_order_of_the_extensions(self, reporter):
         def emitted(extension_order):

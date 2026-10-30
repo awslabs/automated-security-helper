@@ -211,6 +211,27 @@ def _scanner_identity(name: Any) -> str:
     return str(name or "").strip().casefold()
 
 
+def _component_scanner(component: Any) -> str:
+    """The scanner name a tool component stands for.
+
+    ``attach_scanner_details`` stamps one string three ways: the run's driver
+    name, ``driver.properties.scanner_details.tool_name`` and each result's
+    ``properties.scanner_name``. The stamp is read first, so a component whose
+    ``name`` was later changed (a driver renamed by a merge, a rule pack folded
+    in under its own name keeps no stamp) still matches its results; with no
+    stamp the component's ``name`` is the scanner.
+    """
+    props = getattr(component, "properties", None)
+    details = getattr(props, "scanner_details", None) if props is not None else None
+    if details is None and props is not None:
+        extra = getattr(props, "model_extra", None)
+        details = extra.get("scanner_details") if isinstance(extra, dict) else None
+    stamped = details.get("tool_name") if isinstance(details, dict) else None
+    if isinstance(stamped, str) and stamped.strip():
+        return stamped
+    return str(getattr(component, "name", None) or "")
+
+
 def _result_kind(result: Any) -> str:
     """*result*'s SARIF ``kind`` as text; an absent kind is ``fail`` (3.27.9)."""
     kind = getattr(result, "kind", None)
@@ -476,6 +497,23 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                     )
                 )
             slim_results = [slim for _, slim in graded]
+
+            # A colliding rule declared under "<scanner>/<rule id>" is named by
+            # the results whose scanner_name matches that scanner. One named by
+            # no result is either a rule its scanner never fired, or a scanner
+            # whose results carry another spelling of its name and so kept the
+            # bare id (and the other scanner's text and score); the operator is
+            # told which rules to look at.
+            used_rule_ids = {result.get("ruleId") for result in slim_results}
+            for (identity, rule_id), emitted_id in sorted(qualified.items()):
+                if emitted_id not in used_rule_ids:
+                    ASH_LOGGER.warning(
+                        f"GHAS report: rule {rule_id} is declared differently by "
+                        f"two scanners and the one named '{identity}' has it as "
+                        f"{emitted_id}, but no result names {emitted_id}; results "
+                        f"of that scanner whose scanner_name is not '{identity}' "
+                        f"keep the id {rule_id}"
+                    )
 
             # A result GitHub cannot display: none of its locations has a uri.
             # The result is still written (SARIF allows it, and dropping it
@@ -758,7 +796,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             if not component or not component.rules:
                 continue
             component_name = str(getattr(component, "name", None) or "")
-            identity = _scanner_identity(component_name)
+            identity = _scanner_identity(_component_scanner(component))
             for rule in component.rules:
                 by_scanner = declared.setdefault(rule.id, {})
                 if identity not in by_scanner:
