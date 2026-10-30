@@ -1,11 +1,14 @@
 """Utility functions for downloading and installing binaries."""
 
+import errno
 import hashlib
 import http.client
 import json
 import os
 import platform
+import re
 import shutil
+import ssl
 import stat
 import sys
 import tarfile
@@ -16,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -125,18 +129,55 @@ def _download_retry_policy() -> "tuple[int, float]":
     return max(1, attempts), max(0.0, base_delay)
 
 
+#: Socket errors raised past the connection phase (while the body is read) that
+#: name the network, not the asset: the same class as ConnectionError.
+_TRANSIENT_ERRNOS = frozenset(
+    code
+    for code in (
+        getattr(errno, "ENETUNREACH", None),
+        getattr(errno, "EHOSTUNREACH", None),
+        getattr(errno, "ENETDOWN", None),
+        getattr(errno, "ENETRESET", None),
+        getattr(errno, "EHOSTDOWN", None),
+    )
+    if code is not None
+)
+
+
+def _is_certificate_failure(exc: object) -> bool:
+    """Whether ``exc`` is a TLS trust failure: the same on every attempt.
+
+    ``ssl.SSLCertVerificationError`` is the typed form; an ``ssl.SSLError`` whose
+    reason names the verification is the untyped one some stacks raise.
+    """
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return True
+    return isinstance(exc, ssl.SSLError) and "CERTIFICATE_VERIFY_FAILED" in str(exc)
+
+
 def _is_transient_download_error(exc: BaseException) -> bool:
     """Whether a failed download attempt is worth repeating.
 
     ``HTTPError`` is tested before ``URLError`` because it is a subclass of it.
     Reversing the two would classify every 4xx as transient, which is the whole
     distinction this function exists to draw.
+
+    A ``URLError`` is transient for what it wraps: a DNS failure, a refused
+    connection or a TLS reset may work on a second try, while a certificate that
+    does not verify fails the same way every time, so retrying it only delays the
+    message by the whole backoff. A TLS error raised past the connection, while
+    the body is read (``ssl.SSLError``, an unexpected EOF say), is the same blip
+    a reset is, and a socket error naming the network (``EHOSTUNREACH``) too.
     """
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code >= 500 or exc.code in _TRANSIENT_HTTP_STATUS
     if isinstance(exc, urllib.error.URLError):
-        # DNS failure, refused connection, TLS reset: no status to inspect, and
-        # every one of them is a connection that may work on a second try.
+        return not _is_certificate_failure(exc.reason)
+    if _is_certificate_failure(exc):
+        return False
+    if isinstance(exc, ssl.SSLError):
+        return True
+    if isinstance(exc, OSError) and exc.errno in _TRANSIENT_ERRNOS:
         return True
     return isinstance(
         exc,
@@ -147,6 +188,35 @@ def _is_transient_download_error(exc: BaseException) -> bool:
             http.client.RemoteDisconnected,
         ),
     )
+
+
+def _retry_delay(attempt: int, base_delay: float) -> float:
+    """The backoff before the next attempt: doubling, bounded.
+
+    The exponent is bounded as well as the result: ``2 ** (attempt - 1)`` as an
+    int converted to float raises OverflowError past 2 ** 1023, so with
+    ``ASH_DOWNLOAD_MAX_ATTEMPTS`` above that the backoff replaced the download
+    error with its own. Past the bound every delay is the maximum anyway.
+    """
+    return min(base_delay * (2.0 ** min(attempt - 1, 32)), _DOWNLOAD_MAX_DELAY)
+
+
+def _url_basename(url: str) -> str:
+    """The name a download from ``url`` is installed under when none is given.
+
+    The last segment of the URL's PATH, decoded: a query string or a fragment is
+    no part of a filename, and the raw text after the last ``/`` of the whole URL
+    was. A URL whose path ends in ``/`` names no file: refused here, where the
+    URL is named, rather than after the download as an untyped OSError from a
+    rename onto the destination directory.
+    """
+    name = urllib.parse.unquote(urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1])
+    if not name or name in (".", "..") or "/" in name or "\\" in name:
+        raise ValueError(
+            f"{url} names no file to install: its path ends in a directory, so "
+            "pass rename_to"
+        )
+    return name
 
 
 def _copy_whole_body(response, sink, url: str) -> int:
@@ -252,6 +322,8 @@ def _download_verified(
     destination: Path,
     rename_to: Optional[str] = None,
     expected_sha256: Optional[str] = None,
+    *,
+    mode: int = 0o644,
 ) -> "tuple[Path, str]":
     """``download_file``, and also the digest of the bytes that landed.
 
@@ -260,53 +332,70 @@ def _download_verified(
     whatever is at the path by then, which is the thing the post-rename check exists to
     reject. ``download_file`` keeps its plain ``Path`` return, because it is a public
     helper and a scanner plugin may be calling it.
+
+    ``mode`` is the mode the landed file gets: ``0o644`` by default, since what
+    this downloads is data (a release archive, a rules bundle); the installers
+    that land an executable make it one themselves (``make_executable``), and the
+    extraction of an archive member sets its own.
     """
-    # Create the destination directory if it doesn't exist
-    destination.mkdir(parents=True, exist_ok=True)
-
-    # Get the filename from the URL if rename_to is not specified
-    if rename_to is None:
-        rename_to = url.split("/")[-1]
-
-    # Download to a temporary file first
+    # The URL first, before anything is made for the download: a refused URL
+    # used to leave a freshly created destination directory behind.
     if not url.startswith("https://"):
         raise ValueError(f"Invalid URL: {url}")
 
-    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-        attempts, base_delay = _download_retry_policy()
-        for attempt in range(1, attempts + 1):
-            # Rewound and truncated on every attempt. A retry after a partial
-            # transfer would otherwise APPEND to the bytes the failed attempt
-            # already wrote. The digest check below would catch the result, but it
-            # would report it as an integrity failure -- which reads as a
-            # supply-chain compromise rather than as the dropped connection it is.
-            temp_file.seek(0)
-            temp_file.truncate()
-            ASH_LOGGER.info(
-                f"Downloading {url} to {temp_file.name}"
-                + (f" (attempt {attempt}/{attempts})" if attempts > 1 else "")
-            )
-            try:
-                # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-                with urllib.request.urlopen(  # nosec B310 - This url is evaluated for https scheme a few lines above
-                    url, timeout=_DOWNLOAD_SOCKET_TIMEOUT_SECONDS
-                ) as response:
-                    _copy_whole_body(response, temp_file, url)
-                break
-            except Exception as exc:
-                # Re-raised unless the error is both transient and there is an
-                # attempt left, so nothing is swallowed: a 4xx, a bad URL or an
-                # exhausted budget still leaves this function raising exactly what
-                # it raised before the retry existed.
-                if attempt == attempts or not _is_transient_download_error(exc):
-                    raise
-                delay = min(base_delay * (2 ** (attempt - 1)), _DOWNLOAD_MAX_DELAY)
-                ASH_LOGGER.warning(
-                    f"Download of {url} failed with {type(exc).__name__}: {exc}. "
-                    f"Retrying in {delay:.1f}s "
-                    f"(attempt {attempt}/{attempts} failed)"
+    # Get the filename from the URL if rename_to is not specified
+    if rename_to is None:
+        rename_to = _url_basename(url)
+
+    # Create the destination directory if it doesn't exist
+    destination.mkdir(parents=True, exist_ok=True)
+
+    # Download to a temporary file first. Removed on any failure out of the
+    # fetch: created with delete=False so the verified bytes can be moved into
+    # place below, it was left in TMPDIR by every download that ran out of
+    # attempts or hit a non-transient error.
+    temp_file = tempfile.NamedTemporaryFile(delete=False)
+    try:
+        with temp_file:
+            attempts, base_delay = _download_retry_policy()
+            for attempt in range(1, attempts + 1):
+                # Rewound and truncated on every attempt. A retry after a partial
+                # transfer would otherwise APPEND to the bytes the failed attempt
+                # already wrote. The digest check below would catch the result,
+                # but it would report it as an integrity failure -- which reads
+                # as a supply-chain compromise rather than as the dropped
+                # connection it is.
+                temp_file.seek(0)
+                temp_file.truncate()
+                ASH_LOGGER.info(
+                    f"Downloading {url} to {temp_file.name}"
+                    + (f" (attempt {attempt}/{attempts})" if attempts > 1 else "")
                 )
-                time.sleep(delay)
+                try:
+                    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+                    with urllib.request.urlopen(  # nosec B310 - This url is evaluated for https scheme a few lines above
+                        url, timeout=_DOWNLOAD_SOCKET_TIMEOUT_SECONDS
+                    ) as response:
+                        _refuse_a_non_https_landing(url, response)
+                        _copy_whole_body(response, temp_file, url)
+                    break
+                except Exception as exc:
+                    # Re-raised unless the error is both transient and there is
+                    # an attempt left, so nothing is swallowed: a 4xx, a bad URL
+                    # or an exhausted budget still leaves this function raising
+                    # exactly what it raised before the retry existed.
+                    if attempt == attempts or not _is_transient_download_error(exc):
+                        raise
+                    delay = _retry_delay(attempt, base_delay)
+                    ASH_LOGGER.warning(
+                        f"Download of {url} failed with {type(exc).__name__}: {exc}. "
+                        f"Retrying in {delay:.1f}s "
+                        f"(attempt {attempt}/{attempts} failed)"
+                    )
+                    time.sleep(delay)
+    except BaseException:
+        Path(temp_file.name).unlink(missing_ok=True)
+        raise
 
     # Verify before the bytes are allowed anywhere near the install location. On a
     # mismatch the temporary file is removed, so a failed verification cannot
@@ -339,11 +428,32 @@ def _download_verified(
     # rather than against itself -- see _replace_atomically.
     dest_path = destination.joinpath(rename_to)
     landed = _replace_atomically(
-        Path(temp_file.name), dest_path, expected_sha256=expected_sha256
+        Path(temp_file.name), dest_path, expected_sha256=expected_sha256, mode=mode
     )
 
     ASH_LOGGER.info(f"Downloaded {url} to {dest_path}")
     return dest_path, landed
+
+
+def _refuse_a_non_https_landing(url: str, response) -> None:
+    """Refuse a response that arrived at a URL other than an https one.
+
+    The scheme check above covers the URL given; ``urlopen`` follows redirects,
+    and a server can send one to plain http, where the asset arrives unverified
+    by transport. The URL the response was read from is checked before a byte of
+    the body is taken, so such a download is refused rather than installed (an
+    unpinned download would otherwise have completed over http). A response that
+    cannot say where it came from (a test's stand-in) is taken as it is.
+    """
+    get_url = getattr(response, "geturl", None)
+    if not callable(get_url):
+        return
+    landed_at = get_url()
+    if isinstance(landed_at, str) and not landed_at.startswith("https://"):
+        raise ValueError(
+            f"Refusing {url}: the server redirected the download to {landed_at}, "
+            "which is not https"
+        )
 
 
 def _open_staging(target: Path) -> "tuple[int, Path]":
@@ -369,8 +479,14 @@ def _open_staging(target: Path) -> "tuple[int, Path]":
     return fd, Path(name)
 
 
-def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
+def _finalize_staged(
+    staging: Path, target: Path, expected_sha256: str, mode: int = 0o755
+) -> str:
     """Put ``staging`` at ``target``, verify what landed, and return its digest.
+
+    ``mode`` is the mode the landed file gets on POSIX: ``0o755`` for an
+    executable, which is what the archive members and the pinned binaries are;
+    ``download_file`` passes ``0o644`` for the data files it lands.
 
     Two checks, covering two different intervals, and neither makes the other
     redundant.
@@ -431,11 +547,33 @@ def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
             # quietly differ from the 0o755 the previous umask-dependent code
             # produced. A scanner binary must be executable by whoever runs the
             # scan, which is not always whoever installed it.
-            os.fchmod(fd, 0o755)  # nosec B103 - an executable must be executable
+            os.fchmod(fd, mode)  # nosec B103 - an executable must be executable
     finally:
         os.close(fd)
     os.replace(staging, target)
-    landed = sha256_file(target)
+    # The post-rename read opens the target itself, refusing to follow a link:
+    # hashed by path, a link swapped in at the target and pointing at a file with
+    # the right bytes passed the check and was recorded as the installed binary.
+    # A target that cannot be read back is removed too: the rule is to leave
+    # nothing unverified at the install path, and an unreadable file is that.
+    try:
+        landed_fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+    except OSError as error:
+        target.unlink(missing_ok=True)
+        raise ToolDownloadIntegrityError(
+            f"{target} could not be read back after it was installed ({error}); "
+            "refusing to leave it in place."
+        ) from error
+    try:
+        landed = _sha256_of_open_file(landed_fd)
+    except OSError as error:
+        target.unlink(missing_ok=True)
+        raise ToolDownloadIntegrityError(
+            f"{target} could not be read back after it was installed ({error}); "
+            "refusing to leave it in place."
+        ) from error
+    finally:
+        os.close(landed_fd)
     if landed != expected_sha256:
         target.unlink(missing_ok=True)
         raise ToolDownloadIntegrityError(
@@ -447,7 +585,10 @@ def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
 
 
 def _replace_atomically(
-    source: Path, target: Path, expected_sha256: Optional[str] = None
+    source: Path,
+    target: Path,
+    expected_sha256: Optional[str] = None,
+    mode: int = 0o755,
 ) -> str:
     """Move ``source`` onto ``target`` without ever following or trusting a link.
 
@@ -471,25 +612,31 @@ def _replace_atomically(
     so that is what is used. opengrep is the one tool in that state: it arrives through
     ``create_url_download_command``, which passes no digest.
 
+    ``mode`` is the mode the landed file gets (``_finalize_staged``).
+
     Returns:
         The digest of the bytes now at ``target``.
     """
-    fd, staging = _open_staging(target)
     try:
-        copied = hashlib.sha256()
-        with os.fdopen(fd, "wb") as sink, open(source, "rb") as src:
-            for chunk in iter(lambda: src.read(_HASH_CHUNK_BYTES), b""):
-                copied.update(chunk)
-                sink.write(chunk)
-        expected = (
-            expected_sha256.lower()
-            if expected_sha256 is not None
-            else copied.hexdigest()
-        )
-        return _finalize_staged(staging, target, expected)
-    except BaseException:
-        staging.unlink(missing_ok=True)
-        raise
+        # Inside the try whose finally removes the source: opened before it, a
+        # staging file that could not be made (a destination this process may
+        # not write) left the verified source behind in TMPDIR.
+        fd, staging = _open_staging(target)
+        try:
+            copied = hashlib.sha256()
+            with os.fdopen(fd, "wb") as sink, open(source, "rb") as src:
+                for chunk in iter(lambda: src.read(_HASH_CHUNK_BYTES), b""):
+                    copied.update(chunk)
+                    sink.write(chunk)
+            expected = (
+                expected_sha256.lower()
+                if expected_sha256 is not None
+                else copied.hexdigest()
+            )
+            return _finalize_staged(staging, target, expected, mode)
+        except BaseException:
+            staging.unlink(missing_ok=True)
+            raise
     finally:
         source.unlink(missing_ok=True)
 
@@ -505,6 +652,10 @@ def make_executable(file_path: Path) -> None:
     arbitrary file chosen by whoever planted the link into an executable one. The
     install paths now stage and rename so a link should never be here, and refusing
     outright rather than dereferencing means a bug that reintroduces one is loud.
+
+    The mode is read and set on one open descriptor, opened without following a
+    link (``O_NOFOLLOW``): the ``is_symlink`` check alone left a window in which a
+    link swapped in after it was followed by the chmod.
     """
     if platform.system() == "Windows":
         return
@@ -515,7 +666,20 @@ def make_executable(file_path: Path) -> None:
         )
         return
     ASH_LOGGER.info(f"Making {file_path} executable")
-    file_path.chmod(file_path.stat().st_mode | 0o111)  # Add execute permission
+    try:
+        fd = os.open(file_path, os.O_RDONLY | _O_NOFOLLOW)
+    except OSError as error:
+        if error.errno in (errno.ELOOP, getattr(errno, "EMLINK", errno.ELOOP)):
+            ASH_LOGGER.warning(
+                f"Refusing to change the mode of {file_path}: it is a symlink, and "
+                "following it would make its target executable instead"
+            )
+            return
+        raise
+    try:
+        os.fchmod(fd, os.fstat(fd).st_mode | 0o111)  # Add execute permission
+    finally:
+        os.close(fd)
 
 
 def unquarantine_macos_binary(file_path: Path) -> None:
@@ -527,9 +691,25 @@ def unquarantine_macos_binary(file_path: Path) -> None:
     if platform.system() == "Darwin":
         ASH_LOGGER.info(f"Unquarantining {file_path}")
         try:
-            run_command(["xattr", "-r", "-d", "com.apple.quarantine", str(file_path)])
+            # The file itself, not a recursive walk: the installed binary is one
+            # file, and a path swapped for a directory meanwhile would have had
+            # every file under it unquarantined.
+            result = run_command(
+                ["xattr", "-d", "com.apple.quarantine", str(file_path)]
+            )
         except Exception as e:
             ASH_LOGGER.warning(f"Failed to unquarantine {file_path}: {e}")
+            return
+        # run_command raises nothing on a non-zero exit, so the exit is read here:
+        # a binary xattr could not clear stays quarantined, and the install was
+        # reported as done with nothing saying so.
+        if result.returncode != 0:
+            detail = str(result.stderr or result.stdout or "").strip()
+            ASH_LOGGER.warning(
+                f"Failed to unquarantine {file_path}: xattr exited "
+                f"{result.returncode}{': ' + detail if detail else ''}. macOS may "
+                "refuse to run it until the quarantine attribute is removed."
+            )
 
 
 def receipt_root() -> Path:
@@ -597,13 +777,27 @@ def _untrusted_reason(path: Path) -> Optional[str]:
     there and the whole location check contributes nothing on that platform. Stated
     plainly rather than implied, because a check that silently does nothing on one
     platform is exactly the kind that gets trusted everywhere.
+
+    The entry is judged as it is, without following a link (``lstat``): judged
+    through a link, a substituted link in a loose ``~/.ash`` was trusted for its
+    target's owner and mode. A link is not trusted, whatever it points at. An
+    entry that cannot be examined at all is not trusted either: a location the
+    check cannot see is not one it can vouch for.
     """
     if platform.system() == "Windows":
         return None
     try:
-        info = path.stat()
-    except OSError:
-        return None
+        info = path.lstat()
+    except OSError as error:
+        return f"{path} cannot be examined ({error})"
+    return _untrusted_stat(path, info)
+
+
+def _untrusted_stat(path: Path, info: os.stat_result) -> Optional[str]:
+    """``_untrusted_reason`` over a stat result already taken (``lstat`` or
+    ``fstat`` of an open descriptor)."""
+    if stat.S_ISLNK(info.st_mode):
+        return f"{path} is a symbolic link"
     if info.st_mode & 0o022:
         return (
             f"{path} is writable by group or other (mode {oct(info.st_mode & 0o777)})"
@@ -662,6 +856,17 @@ def _private_dir(path: Path) -> None:
     levels = [path, *[p for p in path.parents if p == root or root in p.parents]]
     for level in reversed(levels):
         level.mkdir(exist_ok=True)
+        if level.is_symlink():
+            # ``os.chmod`` follows a link, so a link substituted for a receipt
+            # level in a loose ~/.ash had its target made 0o700 and took the
+            # receipt writes. Refused as an OSError, which write_receipt reports
+            # as a receipt it could not write.
+            raise OSError(
+                errno.ELOOP,
+                f"{level} is a symbolic link; the receipt store is not written "
+                "through a link",
+                str(level),
+            )
         if platform.system() != "Windows":
             os.chmod(level, 0o700)
 
@@ -694,7 +899,10 @@ def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
         return None
     if not present:
         return None
-    for level in _receipt_trust_chain(path):
+    # The directories by path, the file on the descriptor it is read from: judged
+    # by path and then re-opened by path, a file swapped in between the check and
+    # the read was read as trusted.
+    for level in _receipt_trust_chain(path)[1:]:
         reason = _untrusted_reason(level)
         if reason is not None:
             ASH_LOGGER.warning(
@@ -703,7 +911,26 @@ def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
             )
             return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+    except OSError as e:
+        ASH_LOGGER.debug(f"Ignoring unreadable install receipt at {path} ({e})")
+        return None
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            reason = (
+                None
+                if platform.system() == "Windows"
+                else _untrusted_stat(path, info)
+                or (None if stat.S_ISREG(info.st_mode) else f"{path} is not a file")
+            )
+            if reason is not None:
+                ASH_LOGGER.warning(
+                    f"Ignoring install receipt at {path}: {reason}, so it cannot be "
+                    "trusted to say what was installed"
+                )
+                return None
+            data = json.loads(handle.read().decode("utf-8"))
     except (OSError, ValueError):
         ASH_LOGGER.debug(f"Ignoring unreadable install receipt at {path}")
         return None
@@ -798,6 +1025,12 @@ def _already_installed(
         return False
     if expected_sha256 is None:
         return False
+    if platform.system() != "Windows" and not os.access(target, os.X_OK):
+        # The bytes may match and the mode still be wrong: a binary that lost
+        # its execute bit was skipped as installed while no scan could run it.
+        # Not installed, so the install puts a runnable copy in its place.
+        ASH_LOGGER.warning(f"{target} is not executable; reinstalling")
+        return False
     receipt = read_receipt(destination, installed_as)
     if receipt is None:
         return False
@@ -866,7 +1099,7 @@ def install_binary_from_url(
             f"Refusing to install {url} without a pinned SHA256: ASH installs no "
             "binary it cannot verify."
         )
-    installed_as = rename_to if rename_to is not None else url.split("/")[-1]
+    installed_as = rename_to if rename_to is not None else _url_basename(url)
     target = destination.joinpath(installed_as)
 
     if not force and _already_installed(
@@ -1026,13 +1259,17 @@ def _extract_single_member(
         try:
             if suffixes.endswith(".zip"):
                 with zipfile.ZipFile(archive_path) as archive:
-                    # ZipFile normalizes separators to "/" on read, so splitting on "/"
-                    # is correct for archives built on Windows too.
+                    # Both separators: zipfile rewrites a backslash to "/" only
+                    # where os.sep is a backslash, so on POSIX an archive built
+                    # with backslash names keeps them, and a split on "/" alone
+                    # found no member. Regular files only, as the tar branch
+                    # requires: a zip can carry a symlink entry, whose bytes are
+                    # the link's target path, not an executable.
                     matches = [
                         info
                         for info in archive.infolist()
-                        if not info.is_dir()
-                        and info.filename.split("/")[-1] == member_name
+                        if _zip_entry_is_a_regular_file(info)
+                        and _archive_basename(info.filename) == member_name
                     ]
                     _require_one_match(matches, member_name, archive_path)
                     with archive.open(matches[0]) as source:
@@ -1042,7 +1279,8 @@ def _extract_single_member(
                     matches = [
                         member
                         for member in archive.getmembers()
-                        if member.isfile() and member.name.split("/")[-1] == member_name
+                        if member.isfile()
+                        and _archive_basename(member.name) == member_name
                     ]
                     _require_one_match(matches, member_name, archive_path)
                     extracted = archive.extractfile(matches[0])
@@ -1082,6 +1320,24 @@ def _extract_single_member(
         raise
 
 
+def _archive_basename(name: str) -> str:
+    """The last path component of an archive entry's name, either separator."""
+    return re.split(r"[\\/]", name)[-1]
+
+
+def _zip_entry_is_a_regular_file(info: zipfile.ZipInfo) -> bool:
+    """Whether a zip entry is a regular file, by the Unix mode it may carry.
+
+    A zip made on Unix stores the entry's mode in the high 16 bits of
+    ``external_attr``; one made elsewhere stores 0 there, which is read as a
+    plain file. A directory, a symlink or a device is never the executable.
+    """
+    if info.is_dir():
+        return False
+    kind = stat.S_IFMT(info.external_attr >> 16)
+    return kind in (0, stat.S_IFREG)
+
+
 def _require_one_match(matches: list, member_name: str, archive_path: Path) -> None:
     if len(matches) == 1:
         return
@@ -1114,9 +1370,32 @@ def _require_one_match(matches: list, member_name: str, archive_path: Path) -> N
 _TOOL_DOWNLOAD_CACHE_ENV = "ASH_TOOL_DOWNLOAD_CACHE"
 
 
+#: The relative cache values already warned about in this process.
+_warned_relative_cache: set = set()
+
+
 def _tool_download_cache() -> Optional[Path]:
+    """The release-asset cache directory, or None when there is none to use.
+
+    An absolute path only. The install commands run in an empty directory of
+    their own (``utils/python_child.py``), so a relative value named a directory
+    under that one: the cache never hit, and the assets stored there went with
+    the directory. Such a value is not used, and says so once.
+    """
     value = os.environ.get(_TOOL_DOWNLOAD_CACHE_ENV, "").strip()
-    return Path(value) if value else None
+    if not value:
+        return None
+    if not os.path.isabs(value):
+        if value not in _warned_relative_cache:
+            _warned_relative_cache.add(value)
+            ASH_LOGGER.warning(
+                f"{_TOOL_DOWNLOAD_CACHE_ENV}={value!r} is not an absolute path; the "
+                "install command runs in a directory of its own, where a relative "
+                "path names another place, so the tool download cache is not used. "
+                "Set it to an absolute path."
+            )
+        return None
+    return Path(value)
 
 
 # The cache directory is restored from the Actions cache, so every entry in it is
@@ -1128,6 +1407,9 @@ def _tool_download_cache() -> Optional[Path]:
 # included -- rather than writing through it.
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _O_BINARY = getattr(os, "O_BINARY", 0)
+#: So an open of a cache entry that is not a regular file (a FIFO swapped in
+#: after the lstat) returns at once instead of blocking for a writer.
+_O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 
 
 def _usable_cache_dir(cache_dir: Path) -> bool:
@@ -1148,12 +1430,25 @@ def _usable_cache_dir(cache_dir: Path) -> bool:
 
 
 def _discard_cache_entry(path: Path, why: str) -> None:
-    """Remove a cache entry without following it, whatever it is."""
+    """Remove a cache entry without following it, whatever it is.
+
+    A directory at an asset's name is removed with what it holds: ``unlink``
+    alone could not remove it, so it stayed, and every run logged this line and
+    downloaded the asset again. The cache directory is ASH's own, restored from
+    a CI cache, so nothing under an asset's name is anything but junk.
+    """
     ASH_LOGGER.warning(f"Discarding cached {path.name}: {why}. Downloading it again.")
     try:
-        os.unlink(path)  # removes a symlink itself, never its target
+        kind = os.lstat(path).st_mode
     except OSError:
-        pass
+        return
+    try:
+        if stat.S_ISDIR(kind):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)  # removes a symlink itself, never its target
+    except OSError as error:
+        ASH_LOGGER.warning(f"Could not discard cached {path.name}: {error}")
 
 
 def _restore_cached_asset(
@@ -1183,14 +1478,66 @@ def _restore_cached_asset(
     staged = staging_dir.joinpath(asset_name)
     try:
         # O_NOFOLLOW closes the gap between the lstat above and this open: a link
-        # swapped in meanwhile makes the open fail instead of being followed.
-        fd = os.open(cached, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
-        with os.fdopen(fd, "rb") as source, open(staged, "wb") as target:
-            shutil.copyfileobj(source, target)
+        # swapped in meanwhile makes the open fail instead of being followed, and
+        # O_NONBLOCK keeps a FIFO swapped in from blocking the open. What the
+        # descriptor names is checked once more on it.
+        fd = os.open(cached, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
+    except OSError as e:
+        _discard_cache_entry(cached, str(e))
+        return None
+    source = os.fdopen(fd, "rb")
+    with source:
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                _discard_cache_entry(cached, "not a regular file")
+                return None
+        except OSError as e:
+            _discard_cache_entry(cached, str(e))
+            return None
+        # The copy tells a failure on the cache side (the entry cannot be read)
+        # from one on the staging side (the private directory cannot be written,
+        # a full TMPDIR): only the first says anything about the entry. The entry
+        # used to be discarded for either, destroying the only offline install
+        # source over a local condition.
+        try:
+            target = open(staged, "wb")
+        except OSError as e:
+            ASH_LOGGER.warning(
+                f"Could not stage cached {asset_name} in {staging_dir}: {e}. The "
+                "cache entry is kept; downloading it again."
+            )
+            return None
+        with target:
+            while True:
+                try:
+                    chunk = source.read(_HASH_CHUNK_BYTES)
+                except OSError as e:
+                    staged.unlink(missing_ok=True)
+                    _discard_cache_entry(cached, str(e))
+                    return None
+                if not chunk:
+                    break
+                try:
+                    target.write(chunk)
+                except OSError as e:
+                    staged.unlink(missing_ok=True)
+                    ASH_LOGGER.warning(
+                        f"Could not stage cached {asset_name} in {staging_dir}: {e}. "
+                        "The cache entry is kept; downloading it again."
+                    )
+                    return None
+    try:
         verify_sha256(staged, expected_sha256, f"cached asset {cached}")
-    except (OSError, ToolDownloadIntegrityError) as e:
+    except ToolDownloadIntegrityError as e:
         staged.unlink(missing_ok=True)
         _discard_cache_entry(cached, str(e))
+        return None
+    except OSError as e:
+        staged.unlink(missing_ok=True)
+        ASH_LOGGER.warning(
+            f"Could not read back the staged copy of {asset_name}: {e}. The cache "
+            "entry is kept; downloading it again."
+        )
         return None
     ASH_LOGGER.info(f"Using cached {asset_name}, verified against its pinned digest")
     return staged
@@ -1288,7 +1635,7 @@ def install_pinned_tool(
 
     with tempfile.TemporaryDirectory(prefix="ash-tool-download-") as staging:
         staging_dir = Path(staging)
-        asset_name = asset.url.split("/")[-1]
+        asset_name = _url_basename(asset.url)
         # A verified cached copy, or a fresh verified download that is then cached.
         # Both are hashed against the pin in this private directory before use.
         downloaded = _restore_cached_asset(asset_name, asset.sha256, staging_dir)
@@ -1321,9 +1668,10 @@ def install_pinned_tool(
                 expected_member_sha256=asset.executable_digest,
             )
 
-    # _extract_single_member already set the mode on the staged file before renaming
-    # it into place; this covers the Windows branch, where it does not.
-    make_executable(target)
+    # The mode was set on the staged file's own descriptor before the rename
+    # (_finalize_staged), on both install paths. No make_executable here: it
+    # returns at once on Windows, where there is no execute bit to set, and on
+    # POSIX it reopened by name a file the staged rename had already finished.
     if platform.system() == "Darwin":
         unquarantine_macos_binary(target)
 
@@ -1542,9 +1890,9 @@ def create_pinned_tool_install_command(
         bin_dir = current_bin_path()
         if bin_dir is None:
             return refusing_install_command(NO_BIN_DIRECTORY)
-        destination = str(bin_dir).replace("\\", "/")
+        destination = _destination_text(bin_dir)
     else:
-        destination = str(Path(destination).absolute()).replace("\\", "/")
+        destination = _destination_text(Path(destination).absolute())
 
     return CustomCommand(
         args=[
@@ -1558,6 +1906,17 @@ def create_pinned_tool_install_command(
         ],
         shell=False,
     )
+
+
+def _destination_text(path: "Path | str") -> str:
+    """The destination as an install command's argument.
+
+    Forward slashes on Windows only, where either separator names the same
+    directory. On POSIX a backslash is an ordinary filename character, so the
+    rewrite there named another directory than ASH_BIN_PATH.
+    """
+    text = str(path)
+    return text.replace("\\", "/") if os.name == "nt" else text
 
 
 def pinned_install_already_satisfied(
@@ -1617,12 +1976,11 @@ def create_url_download_command(
             f"create_url_download_command({url!r}) needs expected_sha256, a 64-character "
             "hex SHA256: ASH installs no binary it cannot verify."
         )
-    try:
-        int(expected_sha256, 16)
-    except ValueError:
-        raise ValueError(
-            f"expected_sha256 for {url!r} is not hex: {expected_sha256!r}"
-        ) from None
+    # Plain hex digits only. int(x, 16) also accepted a 0x prefix, underscores, a
+    # sign and surrounding whitespace, so such a pin passed here and failed at
+    # install time as an integrity mismatch, which reads as a tampered asset.
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256):
+        raise ValueError(f"expected_sha256 for {url!r} is not hex: {expected_sha256!r}")
     # Use the provided destination or get the current ASH_BIN_PATH.
     #
     # Resolved from the environment rather than from the imported constant. The
@@ -1637,19 +1995,22 @@ def create_url_download_command(
         bin_dir = current_bin_path()
         if bin_dir is None:
             return refusing_install_command(NO_BIN_DIRECTORY)
-        destination = str(bin_dir).replace("\\", "/")
+        destination = _destination_text(bin_dir)
     else:
-        destination = str(Path(destination).absolute()).replace("\\", "/")
+        destination = _destination_text(Path(destination).absolute())
 
     # No directory is created here. OpengrepScanner builds this command when it is
     # constructed, during a scan, so creating current_bin_path() here made a
     # relative ASH_BIN_PATH under the scanned checkout (and raised in a read-only
     # one). install_binary_from_url creates it when the command runs.
 
+    # An absent rename_to travels as an empty argument: an empty name is no
+    # filename, so it cannot collide with a real one, where the string 'None'
+    # it used to travel as could not be told from a binary to be named None.
     script = (
         "import sys; from pathlib import Path; "
         "from automated_security_helper.utils.download_utils import install_binary_from_url; "
-        "install_binary_from_url(sys.argv[1], Path(sys.argv[2]), sys.argv[4] if sys.argv[4] != 'None' else None, expected_sha256=sys.argv[3])"
+        "install_binary_from_url(sys.argv[1], Path(sys.argv[2]), sys.argv[4] or None, expected_sha256=sys.argv[3])"
     )
     return CustomCommand(
         args=[
@@ -1659,7 +2020,7 @@ def create_url_download_command(
             url,
             str(destination),
             expected_sha256.lower(),
-            str(rename_to) if rename_to is not None else "None",
+            str(rename_to) if rename_to is not None else "",
         ],
         shell=False,
     )
@@ -1726,7 +2087,10 @@ def get_opengrep_url(
         elif arch == "arm64" or arch == "aarch64":
             return f"{base_url}/opengrep_osx_arm64"
     elif target_platform == "windows":
-        return f"{base_url}/opengrep_windows_x86.exe"
+        # opengrep publishes one Windows build, for x86-64; an arm64 request used
+        # to get that URL and install a binary the machine cannot run.
+        if arch == "amd64" or arch == "x86_64":
+            return f"{base_url}/opengrep_windows_x86.exe"
 
     # Default case
     raise ValueError(f"Unsupported platform/architecture: {target_platform}/{arch}")

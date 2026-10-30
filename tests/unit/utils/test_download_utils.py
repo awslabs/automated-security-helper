@@ -2,9 +2,10 @@
 
 import io
 import pytest
+import stat
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 
 from automated_security_helper.utils.download_utils import (
@@ -74,22 +75,20 @@ def test_download_file_invalid_url(mock_mkdir, mock_urlopen):
 
 
 @pytest.mark.unit
-@patch("pathlib.Path.chmod")
-@patch("pathlib.Path.stat")
-def test_make_executable_unix(mock_stat, mock_chmod):
-    """Test make_executable on Unix-like systems."""
-    # Mock platform.system to return non-Windows
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_make_executable_unix(tmp_path):
+    """make_executable adds the execute bits to the file's own mode.
+
+    Driven against a real file: the mode is read and set on one open descriptor
+    (``os.fstat`` / ``os.fchmod``), so a test pinned to ``Path.chmod`` and
+    ``Path.stat`` measured an implementation, not the property.
+    """
+    target = tmp_path / "file"
+    target.write_bytes(b"x")
+    target.chmod(0o644)
     with patch("platform.system", return_value="Linux"):
-        # Mock stat to return a mode
-        mock_stat_result = MagicMock()
-        mock_stat_result.st_mode = 0o644
-        mock_stat.return_value = mock_stat_result
-
-        # Call function
-        make_executable(Path("/test/file"))
-
-        # Verify chmod was called with correct permissions
-        mock_chmod.assert_called_once_with(0o755)  # 0o644 | 0o111
+        make_executable(target)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755  # 0o644 | 0o111
 
 
 @pytest.mark.unit
