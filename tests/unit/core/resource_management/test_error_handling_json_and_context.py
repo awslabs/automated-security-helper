@@ -133,6 +133,30 @@ class TestCreateErrorResponseSurvivesItsContext:
         assert "\x1b" not in shown["name"]
         assert shown["again"] == "<recursive>"
 
+    def test_a_list_that_contains_itself_is_cut(self):
+        """The cycle guard tracks every container it is inside, not dicts only:
+        a guard keyed on dict ids would recurse without end here."""
+        loop: list = ["x\x1b[0m"]
+        loop.append(loop)
+        error = MCPResourceError("x", context={"loop": loop})
+
+        response = create_error_response(error, "op")
+
+        shown = response["context"]["loop"]
+        assert shown[0] == raw_controls_on_one_line("x\x1b[0m")
+        assert shown[1] == "<recursive>"
+
+    def test_a_cycle_through_a_tuple_is_cut(self):
+        loop: list = []
+        loop.append((loop, "y\tz"))
+        error = MCPResourceError("x", context={"loop": loop})
+
+        response = create_error_response(error, "op")
+
+        assert response["context"]["loop"] == [
+            ("<recursive>", raw_controls_on_one_line("y\tz"))
+        ]
+
     def test_a_value_seen_twice_on_different_branches_is_shown_twice(self):
         """Only a cycle is cut; the same list under two keys is not one."""
         shared = ["a\tb"]
