@@ -20,14 +20,16 @@ test moves by hand, because those are the states a client polls during a scan.
 the registry on a worker thread (``scan_management.check_scan_progress``), so a
 poll made right after ``run_ash_scan`` returns yields to the loop before it reads,
 and the runner's first step, which marks the entry RUNNING, races the read. The
-start-to-finish test runs that read inline (``polls_read_before_the_runner``), so
-its first poll is the one a client makes before the runner has run, every time and
-on every worker count.
+start-to-finish test runs its FIRST poll's read inline (``polls_read_before_the_runner``,
+entered around that one call), so that poll is the one a client makes before the
+runner has run, every time and on every worker count; every later poll of the
+test reads on a worker thread, as it does in production.
 """
 
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict
 from unittest.mock import AsyncMock
@@ -127,7 +129,10 @@ class _ReadsOnTheLoop:
     from the same poll. Run inline, the read happens before the poll yields,
     which is the order a poll had before the read moved off the loop and the
     one "what a client sees first" means. Every other attribute is asyncio's
-    own, so the module's other uses of it are untouched.
+    own, so the module's other uses of it are untouched. In place for the
+    duration of the one poll it is entered around (``polls_read_before_the_runner``):
+    every ``to_thread`` in the module ran inline while the whole test ran under
+    it, the final poll and the cleanup included.
     """
 
     def __getattr__(self, name: str) -> Any:
@@ -140,8 +145,22 @@ class _ReadsOnTheLoop:
 
 @pytest.fixture
 def polls_read_before_the_runner(monkeypatch):
-    """Make the first poll deterministic: its registry read runs on the loop."""
-    monkeypatch.setattr(scan_management, "asyncio", _ReadsOnTheLoop())
+    """A context to enter around the FIRST poll: its registry read runs on the loop.
+
+    Entered around one call, not set for the test: with the module's ``asyncio``
+    replaced for the whole test, every ``to_thread`` in scan_management ran
+    inline, so the final poll and the cleanup read on the loop too, which is not
+    the production order the other snapshots are meant to record. The context
+    restores the real ``asyncio`` on exit (``monkeypatch.context``).
+    """
+
+    @contextmanager
+    def reads_on_the_loop():
+        with monkeypatch.context() as patched:
+            patched.setattr(scan_management, "asyncio", _ReadsOnTheLoop())
+            yield
+
+    return reads_on_the_loop
 
 
 async def _call(tool: str, *args, headers=None, **kwargs) -> Dict[str, Any]:
@@ -185,9 +204,11 @@ async def test_a_scan_from_start_to_its_terminal_status(
     scan_id = started["result"]["scan_id"]
     snapshot_normalizer.add_literal(scan_id, "SCAN_ID")
     # Polled before the runner has had the loop: what a client sees first. The
-    # registry read runs inline (polls_read_before_the_runner), so the runner's
-    # first step cannot land between this call and its read.
-    first_poll = await _call("get_scan_progress", scan_id)
+    # registry read runs inline for this one call (polls_read_before_the_runner),
+    # so the runner's first step cannot land between the call and its read;
+    # every later poll reads on a worker thread, as in production.
+    with polls_read_before_the_runner():
+        first_poll = await _call("get_scan_progress", scan_id)
 
     await drain_background_tasks()
 
