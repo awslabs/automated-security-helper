@@ -15,7 +15,15 @@ fails as well and nothing is at the name, the old entry is whole only in the
 publish's work directory, which used to be deleted with it. It is kept now, and its
 path is printed.
 
-Nothing here reaches the network or starts a process.
+That rule is fail-safe: the work directory is kept from the moment the old entry may
+be the only complete copy, and deleted only once the new entry is in place, the old
+one is restored, an identical entry from a concurrent publish stands, or an entry is
+confirmed at the name. Two cases the first version missed: the aside step itself
+failing twice (the EXDEV copy succeeded, the removal stopped part way and the copy
+back failed), and the check for an entry at the name raising.
+
+Nothing here reaches the network or starts a process. The failures are fakes at
+os.replace, shutil and pathlib; no real filesystem fault is produced.
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ from __future__ import annotations
 import errno
 import importlib.util
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -186,4 +195,126 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
 
         assert raised.value.errno == errno.ENOSPC
         assert (final / "LICENSE").read_bytes() == b"old\n"
+        assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+    def test_an_aside_step_that_fails_twice_keeps_the_complete_old_entry(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """EXDEV copy ok, removal part way, copy back fails: ``old`` is the only whole copy."""
+        # Red before: keep_work was assigned only inside the restore's except, so an
+        # exception out of the aside step ran ``finally: rmtree(work)`` over ``old``.
+        third_party, final = self._old_entry(tmp_path)
+        (final / "SOURCE").write_bytes(b"old source\n")
+        real_replace, real_rmtree, real_copytree = (
+            os.replace,
+            shutil.rmtree,
+            shutil.copytree,
+        )
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(src) == final:
+                raise OSError(errno.EXDEV, "Invalid cross-device link")
+            return real_replace(src, dst, *args, **kwargs)
+
+        def rmtree(path, *args, **kwargs):
+            if Path(path) == final:
+                (final / "LICENSE").unlink()
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_rmtree(path, *args, **kwargs)
+
+        def copytree(src, dst, *args, **kwargs):
+            if Path(dst) == final:
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return real_copytree(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", replace)
+        monkeypatch.setattr(shutil, "rmtree", rmtree)
+        monkeypatch.setattr(shutil, "copytree", copytree)
+
+        with pytest.raises(OSError) as raised:
+            installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert raised.value.errno == errno.ENOSPC
+        kept = [
+            p
+            for p in third_party.iterdir()
+            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
+        ]
+        assert len(kept) == 1, "the work directory holding the old entry was deleted"
+        assert {p.name: p.read_bytes() for p in (kept[0] / "old").iterdir()} == {
+            "LICENSE": b"old\n",
+            "SOURCE": b"old source\n",
+        }
+        assert str(kept[0] / "old") in capsys.readouterr().err
+
+    def test_a_check_for_the_entry_that_raises_keeps_the_old_entry(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """After a failed restore, asking whether the name holds an entry raises."""
+        # Red before: ``final.is_symlink() or final.exists()`` in the restore's
+        # except raised before ``keep_work`` was assigned, so the work directory,
+        # and the old entry in it, was deleted.
+        third_party, final = self._old_entry(tmp_path)
+        real_replace = os.replace
+        armed = {"on": False}
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(dst) == final and Path(src).name == "incoming":
+                raise OSError(errno.ENOSPC, "No space left on device")
+            if Path(dst) == final and Path(src).name == "old":
+                armed["on"] = True
+                raise OSError(errno.EACCES, "Permission denied")
+            return real_replace(src, dst, *args, **kwargs)
+
+        real_exists, real_is_symlink = Path.exists, Path.is_symlink
+
+        def exists(self, *args, **kwargs):
+            if armed["on"] and self == final:
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_exists(self, *args, **kwargs)
+
+        def is_symlink(self):
+            if armed["on"] and self == final:
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_is_symlink(self)
+
+        monkeypatch.setattr(os, "replace", replace)
+        monkeypatch.setattr(Path, "exists", exists)
+        monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+        with pytest.raises(PermissionError):
+            installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        kept = [
+            p
+            for p in third_party.iterdir()
+            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
+        ]
+        assert len(kept) == 1, "the work directory holding the old entry was deleted"
+        assert (kept[0] / "old" / "LICENSE").read_bytes() == b"old\n"
+        assert str(kept[0] / "old") in capsys.readouterr().err
+
+    def test_an_identical_entry_from_a_concurrent_publish_leaves_nothing_behind(
+        self, tmp_path, monkeypatch
+    ):
+        """Control: the old entry was moved aside, the other publish's files stand."""
+        third_party, final = self._old_entry(tmp_path)
+        _other_publish_wins(monkeypatch, final, b"new\n")
+
+        published = installer.publish_third_party(
+            _staged(tmp_path, b"new\n"), third_party
+        )
+
+        assert (published / "LICENSE").read_bytes() == b"new\n"
+        assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+    def test_a_replaced_entry_leaves_no_work_directory(self, tmp_path):
+        """Control: the ordinary replace of an old entry deletes the work directory."""
+        third_party, _ = self._old_entry(tmp_path)
+
+        published = installer.publish_third_party(
+            _staged(tmp_path, b"new\n"), third_party
+        )
+
+        assert (published / "LICENSE").read_bytes() == b"new\n"
         assert sorted(p.name for p in third_party.iterdir()) == ["demo"]

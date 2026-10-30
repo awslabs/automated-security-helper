@@ -1247,6 +1247,19 @@ def _same_files(first: Path, second: Path) -> bool:
         return False
 
 
+def _present(path: Path, unknown: bool) -> bool:
+    """Whether something (a link included) is at ``path``.
+
+    ``unknown`` is the answer when asking raises, which the caller picks to fail
+    safe: True where a missing answer must not lead to a delete, False where it
+    must not be taken as proof of an entry.
+    """
+    try:
+        return path.is_symlink() or path.exists()
+    except OSError:
+        return unknown
+
+
 def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     """Move a staged tool directory into ``third_party_dir``, world-readable.
 
@@ -1262,10 +1275,15 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     there by hand) is then renamed aside, not deleted, and the new directory is
     renamed into place; if that last rename fails, the old entry is put back.
 
-    When putting it back fails too, with nothing at the name, the work directory
-    is kept and holds the old entry as ``old``: its path is printed, and it is
-    the only copy left. A work directory is deleted only when the name holds an
-    entry (this call's or a concurrent publish's) or the old entry was restored.
+    The work directory, and the old entry in it, is deleted only once that is safe,
+    and anything unknown counts as unsafe. From the moment the old entry may be the
+    only complete copy (the aside step has started) the directory is kept, and its
+    path printed, if the call ends in an exception. It is released when the new
+    entry has been renamed into place, when the old one has been restored, when an
+    identical entry from a concurrent publish stands, or when an entry is confirmed
+    at the name after a failed restore. A check that itself raises, or an aside step
+    that fails twice (the EXDEV copy made, the removal stopped part way, the copy
+    back failed), therefore keeps it.
     """
     third_party_dir.mkdir(parents=True, exist_ok=True)
     for path in staged.iterdir():
@@ -1273,45 +1291,57 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     staged.chmod(0o755)
     final = third_party_dir / staged.name
     work = Path(tempfile.mkdtemp(prefix=_PUBLISH_WORK_PREFIX, dir=third_party_dir))
-    keep_work = False
+    old = work / "old"
+    # True while `old` may hold the only complete copy of the previous entry.
+    old_at_risk = False
     try:
         incoming = work / "incoming"
         shutil.copytree(staged, incoming)
         incoming.chmod(0o755)
-        old = work / "old"
-        if final.is_symlink() or final.exists():
+        if _present(final, unknown=True):
+            old_at_risk = True
             try:
                 _rename_or_copy(final, old)
             except FileNotFoundError:
                 # A concurrent publish of this tool moved it aside first.
-                pass
+                old_at_risk = _present(old, unknown=True)
+            except BaseException:
+                # _rename_or_copy undoes its own half-made copy, which leaves
+                # `final` whole and `old` gone. If it could not (the removal
+                # stopped part way and the copy back failed), `old` is the whole
+                # entry and `final` is not.
+                old_at_risk = _present(old, unknown=True)
+                raise
         try:
             os.replace(incoming, final)
+            old_at_risk = False
         except BaseException as exc:
             # A concurrent publish of the same tool can have put its directory at
             # the name first, and a directory cannot be renamed onto a populated
             # one. The files are the same pinned files, so what is there is what
             # this call was asked to publish and its own copy is surplus.
-            if not (isinstance(exc, OSError) and _same_files(incoming, final)):
-                if old.is_symlink() or old.exists():
+            if isinstance(exc, OSError) and _same_files(incoming, final):
+                old_at_risk = False
+            else:
+                if _present(old, unknown=True):
                     try:
                         _rename_or_copy(old, final)
                     except BaseException:
-                        # Something at the name (a concurrent publish's entry)
-                        # supersedes the old one. With nothing there, the old
-                        # entry is gone from its name and `old` is all that is
-                        # left of it, so the work directory must outlive this call.
-                        keep_work = not (final.is_symlink() or final.exists())
-                        if keep_work:
-                            print(
-                                f"could not put the previous {final.name} license "
-                                f"entry back at {final}; it is kept at {old}",
-                                file=sys.stderr,
-                            )
+                        # Something confirmed at the name (a concurrent publish's
+                        # entry) supersedes the old one. With nothing there, or no
+                        # answer, `old` is all that is left of it.
+                        old_at_risk = not _present(final, unknown=False)
                         raise
+                old_at_risk = False
                 raise
     finally:
-        if not keep_work:
+        if old_at_risk:
+            print(
+                f"the previous {final.name} license entry may exist only at {old}; "
+                f"the publish to {final} did not finish, so that directory is kept",
+                file=sys.stderr,
+            )
+        else:
             shutil.rmtree(work, ignore_errors=True)
     print(f"Installed {staged.name} license files to {final}", flush=True)
     return final
