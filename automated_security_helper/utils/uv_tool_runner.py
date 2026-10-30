@@ -1403,6 +1403,7 @@ class UVToolRunner:
         python_request: Optional[str] = None,
         offline: Optional[bool] = None,
         package: Optional[str] = None,
+        probe_outcome: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """Get version of a UV tool.
 
@@ -1410,6 +1411,14 @@ class UVToolRunner:
         when it knows it (``checked_requirement``'s own meaning): a constraint
         glued onto the name ("bandit" + "2") then refuses here instead of
         probing, and installing, ``bandit2`` from the index.
+
+        ``probe_outcome``, when a dict is given, is filled with how the answer
+        was reached, for a caller that must tell a tool that failed from a
+        probe that never ran: ``ran`` (the probe spawned and exited),
+        ``returncode`` (its exit, when it ran), ``from_memo`` (answered from the
+        memo, no probe) and ``error`` (why no probe ran, or what the spawn
+        raised). ``validate_cached_tool`` reads it: a timeout, a sandbox
+        refusal or a refused spec is not a broken tool.
 
         Memoized and serialized per ``(tool_name, package_name)``: concurrent
         callers asking about the same tool produce exactly ONE
@@ -1462,7 +1471,18 @@ class UVToolRunner:
         pick (see ``UVToolMixin._get_tool_python_request``). It is part of the
         memo key because it selects a different environment.
         """
+        outcome: Dict[str, Any] = {
+            "ran": False,
+            "returncode": None,
+            "from_memo": False,
+            "error": None,
+        }
+        if probe_outcome is not None:
+            probe_outcome.update(outcome)
+            outcome = probe_outcome
+
         if not self.is_uv_available():
+            outcome["error"] = self.unavailable_reason()
             return None
         if package_name:
             try:
@@ -1476,6 +1496,7 @@ class UVToolRunner:
                 # tool's name comes from this call's own argument, plugin
                 # code, never the spec.
                 ASH_LOGGER.warning(f"{tool_name}: {error}")
+                outcome["error"] = str(error)
                 return None
 
         cache_key = f"{tool_name}::{package_name or ''}"
@@ -1517,6 +1538,7 @@ class UVToolRunner:
                 # the first-import race the lock exists to close.
                 probe_lock = _get_or_create_probe_lock(f"version::{tool_name}")
         if found:
+            outcome["from_memo"] = True
             return _version_shown(
                 hit, values, tool_name=tool_name, package_name=package_name
             )
@@ -1539,6 +1561,7 @@ class UVToolRunner:
                 # answer from before the drop.
                 generation = _uv_tool_version_generations.setdefault(cache_key, 0)
             if found:
+                outcome["from_memo"] = True
                 return _version_shown(
                     hit, values, tool_name=tool_name, package_name=package_name
                 )
@@ -1589,6 +1612,8 @@ class UVToolRunner:
                     encoding="utf-8",
                     errors="replace",
                 )
+                outcome["ran"] = True
+                outcome["returncode"] = result.returncode
 
                 if result.returncode == 0 and result.stdout.strip():
                     # Unstripped: the strip runs in _version_shown, after the
@@ -1600,6 +1625,7 @@ class UVToolRunner:
 
             except Exception as error:  # nosec B110 - version check failure is non-critical
                 raw = None
+                outcome["error"] = f"{type(error).__name__}: {error}"
                 # A probe the active sandbox scope refused never ran, so it says
                 # nothing about the tool: not remembered for later callers.
                 refused = _refused_by_sandbox(error)
@@ -1738,10 +1764,19 @@ class UVToolRunner:
             # than run outside the sandbox the operator asked for.
             from automated_security_helper.utils.log import ASH_LOGGER
 
-            ASH_LOGGER.error(
-                f"{tool_name} is not installed, and a sandboxed scan does not install "
-                "tools. Run `ash dependencies install` first."
-            )
+            if reinstall:
+                # The tool is listed; its probe failed, and a sandboxed scan
+                # does not rebuild it either. "Is not installed" misread that.
+                ASH_LOGGER.error(
+                    f"{tool_name} is installed but its version probe failed, and a "
+                    "sandboxed scan does not reinstall tools. Run "
+                    "`ash dependencies install` first."
+                )
+            else:
+                ASH_LOGGER.error(
+                    f"{tool_name} is not installed, and a sandboxed scan does not "
+                    "install tools. Run `ash dependencies install` first."
+                )
             return False
 
         # Check if tool executable exists but is broken (e.g., broken symlink)
@@ -2723,14 +2758,25 @@ class UVToolRunner:
         plugin's values the probe answered under the no-caller-checked rule,
         which hides the plugin-built spec but not an env-read value the tool
         printed.
+
+        The answer tells a tool that failed from a probe that never ran:
+        ``probed`` is True only when the version probe spawned and exited, and
+        ``is_functional`` is True when it exited 0 (a version on stdout or not:
+        a tool that prints its version on stderr still runs). A probe that
+        timed out, that the sandbox refused, that could not spawn, or whose spec
+        the requirement check refused answers ``probed`` False with the cause in
+        ``error``; the caller decides whether that is grounds for a reinstall
+        (``UVToolMixin._install_uv_tool`` says it is not).
         """
-        validation_result = {
+        validation_result: Dict[str, Any] = {
             "tool_name": tool_name,
             "is_functional": False,
+            "probed": False,
             "version": None,
             "error": None,
         }
 
+        outcome: Dict[str, Any] = {}
         try:
             # Try to get version to validate functionality
             # refresh=True: this is the caller that decides whether a tool is
@@ -2744,12 +2790,21 @@ class UVToolRunner:
                 offline=offline,
                 package=package,
                 values=values,
+                probe_outcome=outcome,
             )
-            if version:
+            validation_result["probed"] = bool(outcome.get("ran"))
+            validation_result["version"] = version
+            if version or (outcome.get("ran") and outcome.get("returncode") == 0):
                 validation_result["is_functional"] = True
-                validation_result["version"] = version
+            elif outcome.get("ran"):
+                validation_result["error"] = (
+                    f"the version probe exited {outcome.get('returncode')}"
+                )
             else:
-                validation_result["error"] = "Could not determine tool version"
+                validation_result["error"] = (
+                    "the version probe did not run: "
+                    f"{outcome.get('error') or 'no probe was started'}"
+                )
 
         except Exception as e:
             validation_result["error"] = str(e)

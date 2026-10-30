@@ -2208,6 +2208,19 @@ class UVToolMixin:
                         level=15,
                     )
                     return True
+                elif not validation_result.get("probed", True):
+                    # The probe never exited (a timeout, a sandbox refusal, a
+                    # spawn failure, a refused spec), so it said nothing about
+                    # the installed tool: reinstalling on that answer rebuilt a
+                    # working tool over the network on every scan. Kept as
+                    # installed; the scan's own run is the next word on it.
+                    self._plugin_log(
+                        f"[INSTALLATION_SKIP] Tool '{self.command}' is installed; its "
+                        "version probe did not run, so it is kept as installed",
+                        f"Probe: {validation_result.get('error', 'unknown')}",
+                        level=logging.WARNING,
+                    )
+                    return True
                 else:
                     self._plugin_log(
                         f"[INSTALLATION_WARNING] Tool '{self.command}' is installed but not functional",

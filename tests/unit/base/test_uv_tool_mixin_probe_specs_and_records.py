@@ -392,6 +392,30 @@ class TestInstall:
         assert kwargs["reinstall"] is True
         assert kwargs["offline"] is False
 
+    def test_a_probe_that_did_not_run_does_not_reinstall(self):
+        """A timeout, a sandbox refusal or a refused spec says nothing about the
+        installed tool; reinstalling on it rebuilt a working tool every scan."""
+        plugin = FakePlugin(command="bandit")
+        runner = _install_runner()
+        runner.is_tool_installed.return_value = True
+        runner.validate_cached_tool.return_value = {
+            "is_functional": False,
+            "probed": False,
+            "version": None,
+            "error": "the version probe did not run: TimeoutExpired",
+        }
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                return_value=runner,
+            ),
+            patch(
+                "automated_security_helper.utils.subprocess_utils.clear_find_executable_cache"
+            ),
+        ):
+            assert plugin._install_uv_tool() is True
+        runner.install_tool_with_version.assert_not_called()
+
 
 class TestADeferredVersionProbeStaysOwedUntilItAnswers:
     def test_a_transient_runner_failure_does_not_lose_the_probe(self):

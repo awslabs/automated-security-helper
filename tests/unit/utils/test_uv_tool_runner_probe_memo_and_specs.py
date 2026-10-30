@@ -127,6 +127,37 @@ class TestGetUvToolCommandMemo:
         assert spawn.call_args.kwargs["env"]["UV_OFFLINE"] == "1"
 
 
+class TestValidateCachedToolTellsAProbeThatDidNotRun:
+    def test_a_timed_out_probe_is_not_a_broken_tool(self, spawn, runner):
+        spawn.side_effect = subprocess.TimeoutExpired(["uv"], 15)
+        result = runner.validate_cached_tool("bandit")
+        assert result["probed"] is False
+        assert result["is_functional"] is False
+        assert "did not run" in result["error"], result["error"]
+
+    def test_a_tool_that_exits_0_without_a_version_on_stdout_runs(self, spawn, runner):
+        """Some tools print --version on stderr; exit 0 is the tool running."""
+        spawn.return_value = subprocess.CompletedProcess([], 0, "", "bandit 1.7.9\n")
+        result = runner.validate_cached_tool("bandit")
+        assert result["probed"] is True
+        assert result["is_functional"] is True
+        assert result["version"] is None
+
+    def test_a_probe_that_exits_non_zero_is_a_broken_tool(self, spawn, runner):
+        """The control: an exited failure still reads as not functional."""
+        spawn.return_value = subprocess.CompletedProcess([], 1, "", "boom")
+        result = runner.validate_cached_tool("bandit")
+        assert result["probed"] is True
+        assert result["is_functional"] is False
+        assert "exited 1" in result["error"], result["error"]
+
+    def test_a_refused_spec_is_not_a_broken_tool(self, spawn, runner):
+        result = runner.validate_cached_tool("bandit", "bandit2", package="bandit")
+        assert result["probed"] is False
+        assert result["is_functional"] is False
+        assert spawn.call_count == 0
+
+
 class TestATimeoutUnderCheckIsAFailedRun:
     def test_the_fallback_branch_raises_under_check(self, spawn, runner):
         spawn.side_effect = subprocess.TimeoutExpired(["uv"], 5)
