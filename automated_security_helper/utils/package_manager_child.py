@@ -279,6 +279,21 @@ def _pnpm_workspace_copy(data: bytes, *, ignore_suppressions: bool) -> Optional[
     return yaml.safe_dump({"auditConfig": document["auditConfig"]}).encode("utf-8")
 
 
+def _links_into_skipped_dir(linked: Path, package_dir: Path) -> bool:
+    """Whether the linked directory resolves inside a ``node_modules`` or ``.git``.
+
+    Read on the part of the link's real path that the package directory does
+    not share, so a package that itself sits below such a directory is not
+    judged by its own ancestors: for ``deps -> node_modules`` in the package
+    that part is ``node_modules``; for a link to a sibling of a package that
+    lives under a vendored ``node_modules`` it is the sibling's own name.
+    """
+    real = os.path.realpath(linked)
+    shared = os.path.commonpath([real, os.path.realpath(package_dir)])
+    relative = Path(os.path.relpath(real, shared))
+    return bool(_SKIPPED_DIR_NAMES.intersection(relative.parts))
+
+
 def package_manager_inputs(
     binary: str,
     package_dir: Path,
@@ -309,10 +324,15 @@ def package_manager_inputs(
     ``roots`` are the trees a linked directory may be walked into (the scanned
     tree): yarn walks a linked directory for members like any other, so one that
     resolves inside a root is walked here too, and a member manifest two levels
-    below the link is listed. A linked directory that resolves outside every root
-    has only its own ``package.json`` listed, which ``input_refusal`` then refuses,
-    so nothing below it is read and a link to a large tree elsewhere is never
-    walked. With no ``roots`` no linked directory is walked.
+    below the link is listed. Two linked directories inside the roots are not
+    walked: one that resolves into a ``node_modules`` or ``.git`` (left out like
+    the real directories of those names), and one that resolves to the package
+    directory or an ancestor of it, which would walk the scanned tree again under
+    the link's name; the latter has only its own ``package.json`` listed. A
+    linked directory that resolves outside every root has only its own
+    ``package.json`` listed, which ``input_refusal`` then refuses, so nothing
+    below it is read and a link to a large tree elsewhere is never walked. With
+    no ``roots`` no linked directory is walked.
     """
     package_dir = Path(package_dir)
     manifest = package_dir / "package.json"
@@ -373,6 +393,20 @@ def package_manager_inputs(
                 if not linked.is_symlink():
                     continue
                 if bounds and any(_within(linked, bound) for bound in bounds):
+                    if _links_into_skipped_dir(linked, package_dir):
+                        # ``deps -> node_modules``: the names above prune the
+                        # real directory; a link to it was walked in full,
+                        # every installed package's manifest listed, checked
+                        # and copied, three times per package.
+                        continue
+                    if _within(package_dir, linked):
+                        # ``packages/root -> ..``: walking the ancestor would
+                        # walk the whole scanned tree, the package included,
+                        # under this name. Its own manifest is a file yarn
+                        # reads at this path; nothing below it is walked.
+                        if (linked / "package.json").exists():
+                            inputs.append(linked / "package.json")
+                        continue
                     _walk(linked)
                 elif (linked / "package.json").exists():
                     inputs.append(linked / "package.json")

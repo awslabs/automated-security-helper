@@ -251,6 +251,47 @@ class TestLinkedDirectories:
             "yarn.lock",
         ]
 
+    def test_a_link_into_node_modules_is_not_walked(self, tmp_path):
+        """``node_modules`` itself is pruned by name; a link to it was walked in
+        full, every installed package's manifest listed, refusal-checked and
+        copied (three times per yarn package). The link's target decides."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "packages" / "api", "api")
+        _manifest(package / "node_modules" / "dep", "dep")
+        _manifest(package / "node_modules" / "dep" / "node_modules" / "sub", "sub")
+        os.symlink("node_modules", package / "deps", target_is_directory=True)
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/api/package.json",
+            "yarn.lock",
+        ]
+
+    def test_a_link_to_an_ancestor_lists_its_manifest_and_is_not_walked(self, tmp_path):
+        """``packages/root -> ..`` resolves above the package: walking it would
+        walk the whole scanned tree (the package included) under the link's
+        name. Its own manifest is a file yarn reads at that path, so it is
+        listed; nothing below it is."""
+        repo = tmp_path / "repo"
+        _manifest(repo, "mono")
+        _manifest(repo / "other", "other")
+        package = _yarn_package(repo)
+        _manifest(package / "packages" / "api", "api")
+        (package / "packages").mkdir(exist_ok=True)
+        os.symlink("../..", package / "packages" / "root", target_is_directory=True)
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/api/package.json",
+            "packages/root/package.json",
+            "yarn.lock",
+        ]
+
     def test_the_copy_holds_a_member_reached_first_through_a_link(self, tmp_path):
         """The copy yarn audits from has the real member at its real path."""
         repo = tmp_path / "repo"
