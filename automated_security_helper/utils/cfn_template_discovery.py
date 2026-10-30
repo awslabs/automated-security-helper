@@ -35,8 +35,13 @@ The outcomes per file
   count it as a target that was not evaluated, the same answer the tool-absent check
   gives (only MISSING cannot hide a template);
 * a candidate that is not UTF-8 (``UnicodeDecodeError``): decoded as well as it can
-  be and judged from its text (``cfn_template_model.undecodable_candidate_is_a_template``).
-  A template ASH could not decode is returned in ``unreadable``; a file that is not
+  be and judged from its text (``cfn_template_model.judge_undecodable_candidate``),
+  with the three answers the UTF-8 route gives a file the parser rejects, so the
+  encoding never changes a file's answer. A reading whose STRUCTURE is a template is
+  a template ASH could not decode, returned in ``unreadable``; one that carries
+  only a CloudFormation marker is a damaged template, returned in ``unparseable``
+  (a Jinja-templated stack saved as cp1252 reads as its UTF-8 twin does, where the
+  first cut made it a failed target from the marker alone); a file that is not
   CloudFormation (a UTF-16 ``appsettings.json``, a Latin-1 locale file) is returned
   in ``skipped`` with the reason, so the callers name it at WARNING and count
   nothing, as cfn-nag skips it. Before this split one such file failed all three
@@ -67,14 +72,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Tuple
 
 from automated_security_helper.utils.cfn_template_model import (
+    UNDECODABLE_DAMAGED,
+    UNDECODABLE_TEMPLATE,
     CloudFormationTemplateModelError,
     active_global_ignore_paths,
     describe_parse_error,
     get_model_from_template_text,
     holds_cloudformation_template,
     is_template_candidate,
+    judge_undecodable_candidate,
     read_template_text,
-    undecodable_candidate_is_a_template,
     unevaluable_template_reason,
     unmarked_wide_template_reason,
 )
@@ -114,7 +121,9 @@ class TemplateDiscovery:
     #: Candidates neither parser could read that could be a damaged template
     #: (``cfn_template_model.holds_cloudformation_template``: a lenient read
     #: finds a Resources mapping, or the text carries a CloudFormation marker),
-    #: with the reason. Not a target, since the tool could not read them either,
+    #: and candidates that are not UTF-8 whose text carries only the marker
+    #: (``judge_undecodable_candidate``), with the reason. Not a target, since the
+    #: tool could not read them either,
     #: so not counted as failed; named by the callers, where they vanished at
     #: TRACE before, and counted as something to scan, as cfn-nag counts them.
     unparseable: List[Tuple[str, str]] = field(default_factory=list)
@@ -207,14 +216,29 @@ def discover_templates(
             # cfn-guard's coverage silently); a file that is not CloudFormation is
             # skipped and named, as cfn-nag skips it, not failed with no structure
             # read at all.
+            #
+            # Three answers, the ones the UTF-8 route gives a file the parser
+            # rejects, so a file's encoding never changes them: its STRUCTURE
+            # makes it a failed target; a marker alone makes it a damaged template,
+            # unparseable; neither makes it a skip. The judgment answers a failed
+            # second read as a template itself, so no except arm is needed here.
             shown = display_path(path, context.source_dir)
-            try:
-                is_template = undecodable_candidate_is_a_template(path, scan_root)
-            except OSError:
-                is_template = True
-            if is_template:
+            judged = judge_undecodable_candidate(path, scan_root)
+            if judged == UNDECODABLE_TEMPLATE:
                 result.unreadable.append(
                     (shown, f"the file could not be read: {type(exc).__name__}")
+                )
+            elif judged == UNDECODABLE_DAMAGED:
+                result.unparseable.append(
+                    (
+                        shown,
+                        (
+                            "it could be a CloudFormation template but could not be "
+                            "parsed: not UTF-8, and its text carries a CloudFormation "
+                            "marker with no Resources mapping: "
+                            f"{type(exc).__name__}"
+                        ),
+                    )
                 )
             else:
                 reason = (

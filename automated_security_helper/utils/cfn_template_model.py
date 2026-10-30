@@ -19,7 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import TYPE_CHECKING, Annotated, Any, Dict
 
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.scanned_tree import open_in_scanned_tree
+from automated_security_helper.utils.scanned_tree import (
+    TreeInputRefused,
+    open_in_scanned_tree,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
@@ -564,43 +567,81 @@ def _decode_leniently(data: bytes) -> list[str]:
     return readings
 
 
-def undecodable_candidate_is_a_template(
+#: The three answers of :func:`judge_undecodable_candidate`.
+UNDECODABLE_TEMPLATE = "template"
+UNDECODABLE_DAMAGED = "damaged"
+UNDECODABLE_NOT_A_TEMPLATE = "not-a-template"
+
+
+def judge_undecodable_candidate(
     template_path: Path | str, scan_root: Path | str
-) -> bool:
-    """For a candidate whose UTF-8 read raised ``UnicodeDecodeError``: is it a template?
+) -> str:
+    """For a candidate whose UTF-8 read raised ``UnicodeDecodeError``: what is it?
 
     The scanners read a candidate as UTF-8 (:func:`read_template_text`). A ``.json``
     or ``.yaml`` file that is not (a UTF-16 ``appsettings.json`` from Windows
     PowerShell's ``Out-File``, a Latin-1 locale file) raised at the read, and the
     three CloudFormation scanners counted it as a failed, unevaluated target with no
     structure read at all, so one such file in a repository failed every one of
-    them. That broke the module's own rule (:func:`_could_be_a_template`): a marker
-    never makes a file a failed target; that takes a structure read.
-
-    The file is read again, under the scanned-tree rule, and decoded as well as it
-    can be (:func:`_decode_leniently`: by its byte-order mark, else as UTF-8 with
-    replacement and, when it holds NUL bytes, as UTF-16 and UTF-32 in both byte
+    them. The file is read again, under the scanned-tree rule, and decoded as well
+    as it can be (:func:`_decode_leniently`: by its byte-order mark, else as UTF-8
+    with replacement and, when it holds NUL bytes, as UTF-16 and UTF-32 in both byte
     orders, since such a file written without a mark carries no readable marker
-    under a UTF-8 reading); :func:`_could_be_a_template` then answers from any of
-    the readings. True is a template ASH could not decode, which the scanners count
-    as a failed target and the tool-absent check as a template. False is a file that
-    is not CloudFormation, skipped and named at WARNING, as a Helm chart or a
-    tsconfig.json is. The scanners and the tool-absent check all ask here, so the
-    tool-present and tool-absent answers agree.
+    under a UTF-8 reading), and the readings are judged as the UTF-8 route judges a
+    file the parser rejected, so a file's encoding never changes its answer:
+
+    * :data:`UNDECODABLE_TEMPLATE`: a reading's STRUCTURE is a template (a mapping
+      with a ``Resources`` mapping, :func:`_structure_says_template`), or the second
+      read failed. A template ASH could not decode: the scanners count it as a
+      failed, unevaluated target, the tool-absent check as a template. The module's
+      rule holds here as on the UTF-8 route: a marker alone never makes a file a
+      failed target; that takes a structure read. The first cut answered from the
+      marker too, so a Jinja-templated stack saved as cp1252 was a failed target in
+      three scanners while its UTF-8 twin was skipped as unparseable.
+    * :data:`UNDECODABLE_DAMAGED`: no reading has that structure, but one carries a
+      CloudFormation marker (:func:`_could_be_a_template`): a damaged template, as
+      the UTF-8 route reads a rejected file with a marker. The scanners name it as
+      a template that could not be parsed, at WARNING, counted as nothing; the
+      tool-absent check counts it, since only MISSING cannot hide a template.
+    * :data:`UNDECODABLE_NOT_A_TEMPLATE`: neither. Skipped and named at WARNING, as
+      a Helm chart or a tsconfig.json is.
 
     The second open takes the same scanned-tree terms as the first
     (:func:`read_template_text`): a regular file with more than one hard link is
     read. The first cut opened with the default, which refuses a hard link, so a
     hard-linked non-UTF-8 candidate passed the first read, raised at the decode, and
     the second open raised ``TreeInputRefused`` out of the callers' except arms,
-    which catch ``OSError`` only; one hard-linked Latin-1 .yaml ended the discovery.
-
-    Raises:
-        OSError: the second read failed; the caller counts the file as unreadable.
+    which caught ``OSError`` only; one hard-linked Latin-1 .yaml ended the
+    discovery. A failure of the second read (``OSError``; ``TreeInputRefused``, a
+    plain ``Exception``, for a file swapped under the first read) is answered here,
+    not raised: the file is not known not to be a template, and the doubt counts as
+    one, so every caller reads the same answer and none needs its own except arm.
     """
-    with open_in_scanned_tree(template_path, scan_root, allow_hardlinks=True) as f:
-        data = f.read()
-    return any(_could_be_a_template(text) for text in _decode_leniently(data))
+    try:
+        with open_in_scanned_tree(template_path, scan_root, allow_hardlinks=True) as f:
+            data = f.read()
+    except (OSError, TreeInputRefused):
+        return UNDECODABLE_TEMPLATE
+    readings = _decode_leniently(data)
+    if any(_structure_says_template(text) for text in readings):
+        return UNDECODABLE_TEMPLATE
+    if any(_could_be_a_template(text) for text in readings):
+        return UNDECODABLE_DAMAGED
+    return UNDECODABLE_NOT_A_TEMPLATE
+
+
+def undecodable_candidate_is_a_template(
+    template_path: Path | str, scan_root: Path | str
+) -> bool:
+    """For a candidate whose UTF-8 read raised ``UnicodeDecodeError``: does the
+    tool-absent check count it? True for :data:`UNDECODABLE_TEMPLATE` and
+    :data:`UNDECODABLE_DAMAGED` (:func:`judge_undecodable_candidate`): a template
+    ASH could not decode and a damaged one both count, since only MISSING cannot
+    hide a template; a file that is not CloudFormation does not."""
+    return (
+        judge_undecodable_candidate(template_path, scan_root)
+        != UNDECODABLE_NOT_A_TEMPLATE
+    )
 
 
 def get_model_from_template_text(
@@ -884,22 +925,22 @@ def unmarked_wide_template_reason(text: str) -> str | None:
     text reaches the parsers NUL-interleaved and both reject it; read as what it is,
     it is a template. The scanners record it as a template ASH could not decode, a
     failed, unevaluated target named in the error record, the same answer the
-    UnicodeDecodeError route gives the marked twin (:func:`undecodable_candidate_is_a_template`).
+    UnicodeDecodeError route gives the marked twin (:func:`judge_undecodable_candidate`).
     Before this it was named as a template that could not be parsed and counted as
     nothing, and before that dropped at TRACE: a template in the repository that no
     scanner counted.
 
     Returns the reason for the record, naming the encoding found, or None when the
     text holds no NUL or no reading of it in :data:`_UNMARKED_WIDE_ENCODINGS` is a
-    template by :func:`_could_be_a_template`. A reading that still holds a NUL is
-    not text of that encoding and is not tried.
+    template by its STRUCTURE (:func:`_structure_says_template`): a failed target
+    takes a structure read here as on every other route, so a reading that carries
+    only a marker is not a reason; :func:`_could_be_a_template` still counts such a
+    reading for the tool-absent check and the unparseable record. A reading that
+    still holds a NUL is not text of that encoding and is not tried
+    (:func:`_wide_readings`).
     """
-    if "\x00" not in text:
-        return None
-    raw = text.encode("utf-8", errors="surrogatepass")
-    for encoding, label in _UNMARKED_WIDE_ENCODINGS:
-        reading = raw.decode(encoding, errors="replace")
-        if "\x00" not in reading and _could_be_a_template(reading):
+    for label, reading in _wide_readings(text):
+        if _structure_says_template(reading):
             return (
                 f"the file is {label} text without a byte-order mark, read as "
                 "UTF-8: a CloudFormation template ASH could not decode"
@@ -907,40 +948,26 @@ def unmarked_wide_template_reason(text: str) -> str | None:
     return None
 
 
-def _could_be_a_template(text: str) -> bool:
-    """For a file the template parser rejected: could it be a damaged template?
+def _wide_readings(text: str) -> list[tuple[str, str]]:
+    """Text that holds a NUL, read again as UTF-16 and UTF-32 in either byte order
+    (:data:`_UNMARKED_WIDE_ENCODINGS`): the ``(label, reading)`` pairs whose reading
+    holds no NUL. A reading that still holds one is not text of that encoding and is
+    left out; text with no NUL has no readings."""
+    if "\x00" not in text:
+        return []
+    raw = text.encode("utf-8", errors="surrogatepass")
+    readings = []
+    for encoding, label in _UNMARKED_WIDE_ENCODINGS:
+        reading = raw.decode(encoding, errors="replace")
+        if "\x00" not in reading:
+            readings.append((label, reading))
+    return readings
 
-    Parsed again, leniently: YAML with unknown tags read as plain nodes, then JSON with
-    comments removed. A document either reading yields is a template when it is a
-    mapping with a ``Resources`` mapping. A file neither reads is a template when its
-    text carries a CloudFormation marker, which a damaged template keeps and a Helm
-    chart or a tsconfig.json does not.
 
-    For a file read as UTF-8 whose parse failed, the marker answers only "could
-    this be a damaged template": the reason a SKIPPED target gives, and the
-    tool-absent check's MISSING. It does not make such a file a failed target; that
-    takes a structure read (:func:`_has_top_level_resources`). A file ASH could not
-    decode is the exception: a candidate that is not UTF-8
-    (:func:`undecodable_candidate_is_a_template`) and a UTF-16 or UTF-32 template
-    written without a byte-order mark (below) are failed targets whenever any
-    reading of them is a template by this check, marker or structure, because the
-    question there is whether a template was lost to the decode, not whether a
-    damaged one is present. A file whose root is a sequence could not be a template,
-    marker or not (:func:`_root_is_a_sequence`).
-
-    A UTF-16 or UTF-32 file written without a byte-order mark decodes as UTF-8
-    without an error (NUL is valid UTF-8), so its text arrives here NUL-interleaved
-    and carries no readable marker; such a template was skipped as not
-    CloudFormation where its marked twin was named. Text that holds a NUL is read
-    again in those encodings (:func:`unmarked_wide_template_reason`), and a reading
-    that is a template counts. The scanners ask that function first and record such
-    a file as a template they could not decode, a failed target; the answer here
-    keeps the tool-absent check (:func:`holds_cloudformation_template`) in step.
-    """
-    if unmarked_wide_template_reason(text) is not None:
-        return True
-    if _root_is_a_sequence(text):
-        return False
+def _lenient_document(text: str) -> tuple[bool, Any]:
+    """*text* parsed leniently: YAML with unknown tags read as plain nodes, then JSON
+    with comments removed. ``(True, document)`` when either reading yields a document,
+    ``(False, None)`` when neither does."""
     loader = None
     try:
         # Built inside the try: the reader refuses a non-printable character as
@@ -963,18 +990,67 @@ def _could_be_a_template(text: str) -> bool:
             f"not build the document: {type(error).__name__}; deciding it from "
             "its JSON reading or its text."
         )
-        document = None
-        parsed = False
     else:
-        parsed = True
+        return True, document
     finally:
         if loader is not None:
             loader.dispose()
+    try:
+        return True, json.loads(_without_jsonc_comments(_without_bom(text)))
+    except (ValueError, RecursionError):
+        return False, None
+
+
+def _structure_says_template(text: str) -> bool:
+    """For text the template parser rejected: is its STRUCTURE a template? True when
+    a lenient reading (:func:`_lenient_document`) yields a mapping with a ``Resources``
+    mapping; False when the root is a sequence, when neither reading yields a
+    document, or when the document is not that shape. The marker plays no part: this
+    is the read that makes an undecodable candidate a failed target
+    (:func:`judge_undecodable_candidate`, :func:`unmarked_wide_template_reason`)."""
+    if _root_is_a_sequence(text):
+        return False
+    parsed, document = _lenient_document(text)
+    return (
+        parsed
+        and isinstance(document, Mapping)
+        and isinstance(document.get("Resources"), Mapping)
+    )
+
+
+def _could_be_a_template(text: str) -> bool:
+    """For a file the template parser rejected: could it be a damaged template?
+
+    Parsed again, leniently: YAML with unknown tags read as plain nodes, then JSON with
+    comments removed. A document either reading yields is a template when it is a
+    mapping with a ``Resources`` mapping. A file neither reads is a template when its
+    text carries a CloudFormation marker, which a damaged template keeps and a Helm
+    chart or a tsconfig.json does not.
+
+    The marker answers only "could this be a damaged template": the reason a
+    SKIPPED target gives, and the tool-absent check's MISSING. It never makes a
+    file a failed target; that takes a structure read, on every route: the UTF-8
+    route's :func:`unevaluable_template_reason` and :func:`_has_top_level_resources`,
+    the non-UTF-8 route's :func:`judge_undecodable_candidate` and the unmarked
+    UTF-16/UTF-32 route's :func:`unmarked_wide_template_reason`, which both decide
+    with :func:`_structure_says_template`. A file whose root is a sequence could not
+    be a template, marker or not (:func:`_root_is_a_sequence`).
+
+    A UTF-16 or UTF-32 file written without a byte-order mark decodes as UTF-8
+    without an error (NUL is valid UTF-8), so its text arrives here NUL-interleaved
+    and carries no readable marker; such a template was skipped as not
+    CloudFormation where its marked twin was named. Text that holds a NUL is read
+    again in those encodings (:func:`_wide_readings`), and a reading that answers
+    True here counts, so the tool-absent check (:func:`holds_cloudformation_template`)
+    and the unparseable record keep in step with the failed-target route.
+    """
+    if any(_could_be_a_template(reading) for _, reading in _wide_readings(text)):
+        return True
+    if _root_is_a_sequence(text):
+        return False
+    parsed, document = _lenient_document(text)
     if not parsed:
-        try:
-            document = json.loads(_without_jsonc_comments(_without_bom(text)))
-        except (ValueError, RecursionError):
-            return bool(_CLOUDFORMATION_MARKER.search(text))
+        return bool(_CLOUDFORMATION_MARKER.search(text))
     return isinstance(document, Mapping) and isinstance(
         document.get("Resources"), Mapping
     )
@@ -1012,11 +1088,8 @@ def holds_cloudformation_template(
         except UnicodeDecodeError:
             # Not UTF-8: judged from its text, decoded as well as it can be, as
             # the scanners judge it, so the two answers agree. A second read that
-            # fails keeps the doubt, and the doubt counts as a template.
-            try:
-                if undecodable_candidate_is_a_template(candidate, scan_root):
-                    return True
-            except Exception:
+            # fails is answered inside the judgment as a template, the doubt.
+            if undecodable_candidate_is_a_template(candidate, scan_root):
                 return True
             continue
         except Exception:

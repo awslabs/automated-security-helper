@@ -133,6 +133,66 @@ def test_a_candidate_that_is_not_utf8_is_judged_from_its_text(context):
     ]
 
 
+# A Jinja-templated stack: a CloudFormation marker in text neither parser reads,
+# and no Resources mapping any reading can build. The comment's "ü" makes the
+# cp1252 copy invalid UTF-8, so that copy takes the UnicodeDecodeError arm.
+JINJA_STACK = (
+    "# Warteschlange für {{ env }}\n"
+    "{% for q in queues %}\n"
+    "Resources:\n"
+    "  {{ q }}:\n"
+    "    Type: AWS::SQS::Queue\n"
+    "{% endfor %}\n"
+)
+
+
+@pytest.mark.unit
+def test_the_encoding_of_a_damaged_template_does_not_change_its_answer(context):
+    """One Jinja-templated stack, saved as UTF-8 and as cp1252. The UTF-8 copy is
+    named as a template that could not be parsed, counted as nothing: neither
+    parser reads it and no reading of it has a Resources mapping, only the
+    marker. At the previous tip the cp1252 copy was a FAILED target, because the
+    undecodable route answered from the marker alone where the UTF-8 route takes
+    a structure read; so saving the same file in another encoding turned a
+    WARNING into an ERROR in three scanners. Both copies now read the same."""
+    source = Path(context.source_dir)
+    (source / "jinja-utf8.yaml").write_bytes(JINJA_STACK.encode("utf-8"))
+    (source / "jinja-cp1252.yaml").write_bytes(JINJA_STACK.encode("cp1252"))
+    with pytest.raises(UnicodeDecodeError):
+        JINJA_STACK.encode("cp1252").decode("utf-8")
+
+    found = discover_templates(context, "source")
+
+    assert [shown for shown, _ in found.unparseable] == [
+        "jinja-cp1252.yaml",
+        "jinja-utf8.yaml",
+    ]
+    assert found.unreadable == []
+    assert found.skipped == []
+    for _, reason in found.unparseable:
+        assert reason.startswith("it could be a CloudFormation template"), reason
+    assert "UnicodeDecodeError" in found.unparseable[0][1]
+    assert len(found.templates) == 4
+
+
+@pytest.mark.unit
+def test_a_second_read_that_fails_is_answered_as_a_template(context):
+    """The judgment reads the candidate again; a file gone or swapped under the
+    first read fails that read. At the previous tip the callers each caught OSError
+    around it and one of them (discovery) let TreeInputRefused, a plain Exception,
+    escape. The judgment answers the failure itself, as the doubt: a template."""
+    from automated_security_helper.utils.cfn_template_model import (
+        UNDECODABLE_TEMPLATE,
+        judge_undecodable_candidate,
+    )
+
+    source = Path(context.source_dir)
+    gone = source / "gone.yaml"
+    assert not gone.exists()
+
+    assert judge_undecodable_candidate(gone, source) == UNDECODABLE_TEMPLATE
+
+
 @pytest.mark.unit
 @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
 def test_a_hard_linked_non_utf8_candidate_is_judged_like_its_twin(context):

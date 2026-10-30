@@ -39,12 +39,14 @@ from automated_security_helper.utils.cfn_template_model import (
     cloudformation_candidate_files,
     NO_CLOUDFORMATION_TEMPLATE,
     NO_PARSEABLE_CLOUDFORMATION_TEMPLATE,
+    UNDECODABLE_DAMAGED,
+    UNDECODABLE_NOT_A_TEMPLATE,
     cloudformation_nothing_to_scan_reason,
     describe_parse_error,
     get_model_from_template_text,
     holds_cloudformation_template,
+    judge_undecodable_candidate,
     read_template_text,
-    undecodable_candidate_is_a_template,
     unevaluable_template_reason,
     unmarked_wide_template_reason,
 )
@@ -894,18 +896,32 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     #
                     # A file that is not UTF-8 is judged from its text first,
                     # decoded as well as it can be, as discover_templates and the
-                    # tool-absent check judge it: one that is not CloudFormation
-                    # (a UTF-16 appsettings.json, a Latin-1 locale file) is
-                    # skipped and named, not failed with no structure read, so
-                    # one such file no longer fails every CloudFormation scanner.
+                    # tool-absent check judge it (judge_undecodable_candidate,
+                    # which answers a failed second read as a template, so no
+                    # except arm here): its STRUCTURE makes it a failed target,
+                    # as on the UTF-8 route; a marker alone makes it a damaged
+                    # template, named as unparseable and counted as nothing, as
+                    # its UTF-8 twin is below; neither makes it a skip. One that
+                    # is not CloudFormation (a UTF-16 appsettings.json, a Latin-1
+                    # locale file) no longer fails every CloudFormation scanner,
+                    # and a Jinja-templated stack reads the same in any encoding.
                     if isinstance(e, UnicodeDecodeError):
-                        try:
-                            is_template = undecodable_candidate_is_a_template(
-                                cfn_file, scan_root
+                        judged = judge_undecodable_candidate(cfn_file, scan_root)
+                        if judged == UNDECODABLE_DAMAGED:
+                            self._nothing_scanned_reason = (
+                                NO_PARSEABLE_CLOUDFORMATION_TEMPLATE
                             )
-                        except OSError:
-                            is_template = True
-                        if not is_template:
+                            self._plugin_log(
+                                f"Skipped {cfn_file}: it could be a CloudFormation "
+                                "template but could not be parsed: not UTF-8, and "
+                                "its text carries a CloudFormation marker with no "
+                                f"Resources mapping: {type(e).__name__}",
+                                target_type=target_type,
+                                level=logging.WARNING,
+                                append_to_stream="stderr",
+                            )
+                            continue
+                        if judged == UNDECODABLE_NOT_A_TEMPLATE:
                             self._plugin_log(
                                 f"Skipped {cfn_file}: not UTF-8, and its text is "
                                 "not a CloudFormation template: "

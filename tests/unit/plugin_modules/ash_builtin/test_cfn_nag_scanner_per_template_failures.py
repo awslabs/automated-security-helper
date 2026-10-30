@@ -335,6 +335,47 @@ def test_a_non_utf8_file_with_no_template_in_it_is_skipped_and_named(
     assert not any("latin.yaml" in t for t in scanner.unevaluated_targets)
 
 
+def test_the_encoding_of_a_damaged_template_does_not_change_how_it_is_counted(
+    scanner, deps_available, subprocess_double
+):
+    """One Jinja-templated stack saved as UTF-8 and as cp1252. Neither parser reads
+    it and no reading has a Resources mapping, only the marker, so the UTF-8 copy is
+    skipped as a template that could not be parsed, counted as nothing. At the
+    previous tip the cp1252 copy was a FAILED target, because the undecodable route
+    answered from the marker alone; the same file in another encoding turned a
+    WARNING into an ERROR. Both copies are now counted alike."""
+    jinja = (
+        "# Warteschlange für {{ env }}\n"
+        "{% for q in queues %}\n"
+        "Resources:\n"
+        "  {{ q }}:\n"
+        "    Type: AWS::SQS::Queue\n"
+        "{% endfor %}\n"
+    )
+    (scanner.context.work_dir / "jinja-utf8.yaml").write_bytes(jinja.encode("utf-8"))
+    (scanner.context.work_dir / "jinja-cp1252.yaml").write_bytes(jinja.encode("cp1252"))
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 0
+    assert not scanner.unevaluated_targets
+    for name in ("jinja-utf8.yaml", "jinja-cp1252.yaml"):
+        skipped = [
+            e
+            for e in scanner.errors
+            if "Skipped" in e and name in e and "could not be parsed" in e
+        ]
+        assert len(skipped) == 1, (name, scanner.errors)
+        assert not any("did not evaluate" in e and name in e for e in scanner.errors)
+    assert any(
+        "jinja-cp1252.yaml" in e and "UnicodeDecodeError" in e for e in scanner.errors
+    )
+
+
 def test_errors_are_reset_for_each_scan_call(scanner, deps_available):
     """A line recorded by an earlier scan() call is not carried into the next.
 
