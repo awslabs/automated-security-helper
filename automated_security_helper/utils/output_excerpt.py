@@ -22,8 +22,30 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
+from automated_security_helper.utils.terminal_text import (
+    commands_broken,
+    controls_shown,
+)
+
 #: Share of the limit given to the start of the text; the rest goes to the end.
 _HEAD_SHARE = 4
+
+#: The text of an escape as the sinks and :func:`controls_shown` write one, with
+#: the run of backslashes before it. A cut inside one would leave half an escape
+#: on each side of the marker, or a tail that starts inside a backslash run and
+#: so reads as an escape the text did not hold.
+_ESCAPE_TEXT = re.compile(r"\\+(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})?")
+
+
+def _cut_outside_escapes(text: str, index: int) -> int:
+    """*index* moved back to the start of the escape text, or the backslash run,
+    it would otherwise fall inside of; unchanged when it falls between two
+    characters that belong to no escape."""
+    start = max(0, index - 11)
+    for match in _ESCAPE_TEXT.finditer(text, start, min(len(text), index + 11)):
+        if match.start() < index < match.end():
+            return match.start()
+    return index
 
 
 def head_and_tail(text: str, limit: int) -> str:
@@ -32,22 +54,29 @@ def head_and_tail(text: str, limit: int) -> str:
     Text within the limit is returned unchanged. Otherwise the first quarter of the
     limit and the last three quarters are kept, joined by a marker naming how many
     characters were left out. The marker itself is not counted against ``limit``.
+    Neither cut lands inside an escape's text (``\\xNN``, ``\\uNNNN``, a backslash
+    run): such a cut is moved back to the escape's start, so the head ends before it
+    and the tail begins with it whole.
     """
     if limit <= 0:
         return ""
     if len(text) <= limit:
         return text
-    head = limit // _HEAD_SHARE
-    tail = limit - head
-    omitted = len(text) - head - tail
-    return f"{text[:head]} ...[{omitted} characters omitted]... {text[-tail:]}"
+    head = _cut_outside_escapes(text, limit // _HEAD_SHARE)
+    tail_start = _cut_outside_escapes(text, len(text) - (limit - head))
+    if tail_start <= head:
+        return text
+    omitted = tail_start - head
+    return f"{text[:head]} ...[{omitted} characters omitted]... {text[tail_start:]}"
 
 
-#: ANSI escape sequences: CSI (colors, cursor moves) and OSC (titles, links).
-_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
-
-#: Control characters other than newline and tab, C0 and C1.
-_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+#: ANSI escape sequences: CSI (colors, cursor moves) and OSC (titles, links). An
+#: OSC ends at BEL, at ST (ESC followed by a backslash, or the C1 form 0x9c), and
+#: never runs past the end of its line: an OSC a tool left unterminated used to
+#: swallow every line up to the next BEL, the error reason included.
+_ANSI = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b\x9c\r\n]*(?:\x07|\x1b\\|\x9c)"
+)
 
 
 def tool_output_excerpt(text: str, limit: int, values: Iterable[str] = ()) -> str:
@@ -62,9 +91,16 @@ def tool_output_excerpt(text: str, limit: int, values: Iterable[str] = ()) -> st
 
     A tool's stderr can carry terminal escape sequences and other control
     characters, from its own coloring or from a file it echoes back, and an error
-    message is shown in terminals, logs and reports. Escape sequences are removed
-    and every other control character but newline and tab is written as ``\\xNN``,
-    so nothing in the message can move a cursor, clear a screen or rewrite a line.
+    message is shown in terminals, logs and reports. Escape sequences are removed,
+    and every character a terminal or a log viewer acts on rather than shows
+    (``terminal_text.is_shown_as_escape``: the C0 and C1 controls but newline and
+    tab, the format characters such as a bidirectional override or a zero-width
+    space, the line and paragraph separators) is written as its escape, so nothing
+    in the message can move a cursor, clear a screen, rewrite a line or reorder the
+    text around it. The CI command forms are broken too (``commands_broken``):
+    removing a color sequence at a line's start had left ``::error`` standing at
+    the start of the line, and joining the text on both sides of one could form
+    ``##[`` the output never held contiguously.
     """
     values = list(values)
     if values:
@@ -74,5 +110,5 @@ def tool_output_excerpt(text: str, limit: int, values: Iterable[str] = ()) -> st
 
         text = text_without_values(text, values)
     cleaned = _ANSI.sub("", text)
-    cleaned = _CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", cleaned)
+    cleaned = commands_broken(controls_shown(cleaned))
     return head_and_tail(cleaned, limit)
