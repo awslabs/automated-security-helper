@@ -885,3 +885,12 @@ class TestFileUriForms:
         filtered = filter_results_to_changed_files(results, changed, source_dir)
 
         assert len(filtered.sarif.runs[0].results) == 1
+
+
+class TestTheKeptConvertedCountSaid:
+    def test_it_is_a_declared_private_attribute_and_not_a_field(self):
+        """The count already said lives on the model so the two passes of the filter
+        say it once. Undeclared, pydantic would keep it in the instance dict beside
+        the fields, where a copy carries it and an older pydantic compares it."""
+        assert "_changed_files_kept_said" in AshAggregatedResults.__private_attributes__
+        assert "_changed_files_kept_said" not in AshAggregatedResults.model_fields
