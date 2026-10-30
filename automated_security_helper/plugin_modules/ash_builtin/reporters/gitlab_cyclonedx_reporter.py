@@ -435,8 +435,22 @@ def _ecosystem_of(component_dict: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _generic_manager(pm: str) -> str:
+    """The ecosystem's generic manager for a refined one (``pip`` for ``poetry``,
+    ``npm`` for ``yarn``); any other name is returned as it is."""
+    for generic, refined in _REFINEMENTS.items():
+        if pm in refined:
+            return generic
+    return pm
+
+
 def _type_key_for_manager(pm: str) -> str | None:
-    """A type key of the two tables whose manager is *pm*, PURL types first."""
+    """A type key of the two tables whose manager is *pm*, PURL types first.
+
+    A refined manager (``poetry``, ``yarn``) is looked up as its ecosystem's
+    generic one, since the tables name only the generic managers.
+    """
+    pm = _generic_manager(pm)
     for purl_type, (manager, _) in PURL_TYPE_TO_GITLAB.items():
         if manager == pm:
             return purl_type

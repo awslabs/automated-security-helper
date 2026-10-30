@@ -294,6 +294,43 @@ class TestTheReportLevelSourceIsOneEcosystem:
         assert props["gitlab:dependency_scanning:package_manager:name"] == "cargo"
         assert props["gitlab:dependency_scanning:input_file:path"] == "Cargo.lock"
 
+    @pytest.mark.parametrize(
+        ("override", "other_components", "language", "input_file"),
+        [
+            (
+                "poetry",
+                [("pkg:npm/a@1.0.0", "/package-lock.json")] * 3,
+                "Python",
+                "requirements.txt",
+            ),
+            (
+                "yarn",
+                [("pkg:pypi/a@1.0.0", "/requirements.txt")] * 3,
+                "JavaScript",
+                "package-lock.json",
+            ),
+        ],
+    )
+    def test_a_refined_manager_override_maps_to_its_ecosystem(
+        self, tmp_path, override, other_components, language, input_file
+    ):
+        """poetry is a Python manager and yarn a JavaScript one: the language and
+        the default file follow the override, not the other ecosystem that holds
+        every component."""
+        components = [
+            _component(f"c{n}", location, purl)
+            for n, (purl, location) in enumerate(other_components)
+        ]
+
+        doc = _report(
+            _reporter(tmp_path, package_manager_override=override), components
+        )
+
+        props = _metadata_props(doc)
+        assert props["gitlab:dependency_scanning:package_manager:name"] == override
+        assert props["gitlab:dependency_scanning:language:name"] == language
+        assert props["gitlab:dependency_scanning:input_file:path"] == input_file
+
     def test_a_syft_type_and_a_purl_type_of_one_ecosystem_vote_together(self, tmp_path):
         """Two Python components typed by Syft, two by PURL, three npm ones:
         Python wins four to three once the two keys are one ecosystem."""
