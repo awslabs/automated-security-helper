@@ -124,6 +124,16 @@ def validate_version(version: str) -> bool:
     return parsed.local is None and str(parsed) == version
 
 
+def _is_final(parsed: Version) -> bool:
+    """Whether ``parsed`` is a final X.Y.Z release, the only kind ``set`` writes."""
+    return (
+        parsed.local is None
+        and not parsed.is_prerelease
+        and not parsed.is_postrelease
+        and not parsed.is_devrelease
+    )
+
+
 def fix_with_set(version: str) -> str:
     """The ``set`` command that writes ``version``, or the final release nearest it.
 
@@ -132,21 +142,45 @@ def fix_with_set(version: str) -> str:
     ``set`` with that text. The advice names what ``set`` accepts: the version
     itself when it is final, its release numbers (``base_version``) when it is not,
     and a placeholder when it is not a version at all.
+
+    For a version that is not final the command CHANGES the version (2.0.0rc1 to
+    2.0.0 finalizes the release; 3.8.0.post1 to 3.8.0 moves it backwards), so the
+    advice says so and names how to keep the version instead.
     """
     try:
         parsed = _read_version(version)
     except ValueError:
         return "run 'set X.Y.Z' with a final version, such as 'set 3.1.0'"
-    if (
-        parsed.local is None
-        and not parsed.is_prerelease
-        and not parsed.is_postrelease
-        and not parsed.is_devrelease
-    ):
+    if _is_final(parsed):
         return f"run 'set {parsed}'"
+    if parsed.local is None and str(parsed) != version:
+        keep = f"spell it {parsed} in both [project] and [tool.commitizen]"
+    else:
+        keep = "edit both version fields by hand"
     return (
-        f"run 'set {parsed.base_version}' (set writes final X.Y.Z versions only, "
-        f"so {version} cannot be written)"
+        f"run 'set {parsed.base_version}' to change {version} to "
+        f"{parsed.base_version} (set writes final X.Y.Z versions only); "
+        f"to keep {version}, {keep}"
+    )
+
+
+def regenerate_pages_with(version: str) -> str:
+    """The command that regenerates the pages for ``version`` as it stands.
+
+    For a final version ``set`` does it and changes nothing else. For a version
+    that is not final ``set`` would change the version, so the advice is the
+    template manager's ``generate``, which renders the pages with the version the
+    pyproject.toml already holds.
+    """
+    try:
+        parsed = _read_version(version)
+    except ValueError:
+        return fix_with_set(version)
+    if _is_final(parsed):
+        return f"{fix_with_set(version)} to regenerate it"
+    return (
+        "run 'python scripts/version_template_manager.py generate' to render the "
+        f"pages for {version} (set would change the version to {parsed.base_version})"
     )
 
 
@@ -381,8 +415,7 @@ class VersionBumper:
             if actual != expected:
                 print(
                     f"Error: {target} is not its template rendered for "
-                    f"{current_version}; {fix_with_set(current_version)} to "
-                    "regenerate it"
+                    f"{current_version}; {regenerate_pages_with(current_version)}"
                 )
                 consistent = False
 

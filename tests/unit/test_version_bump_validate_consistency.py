@@ -343,16 +343,68 @@ class TestTheVersionItselfIsChecked:
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is True
 
-    def test_a_stale_page_under_a_pre_release_does_not_advise_setting_it(
+    def test_a_stale_page_under_a_pre_release_is_not_advised_a_set_that_finalizes(
         self, project, monkeypatch, capsys
     ):
+        # Red before: the advice was "run 'set 2.0.0' ... to regenerate it", but set
+        # does not regenerate the pages for 2.0.0rc1: it rewrites both tables to
+        # 2.0.0, which finalizes the release.
         _write_pyproject(project, "2.0.0rc1", "2.0.0rc1")
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
         assert "README.md is not its template rendered for 2.0.0rc1" in out
-        assert "run 'set 2.0.0'" in out
-        assert "set 2.0.0rc1" not in out
+        assert "run 'set" not in out
+        assert "version_template_manager.py generate" in out
+        assert "set would change the version to 2.0.0" in out
+
+    def test_a_stale_page_under_a_post_release_is_not_advised_a_set_backwards(
+        self, project, monkeypatch, capsys
+    ):
+        # 3.8.0.post1 is later than 3.8.0, which may already be published.
+        _write_pyproject(project, "3.8.0.post1", "3.8.0.post1")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "run 'set" not in out
+        assert "version_template_manager.py generate" in out
+        assert "set would change the version to 3.8.0" in out
+
+    def test_the_command_named_for_a_stale_pre_release_page_repairs_it(
+        self, project, monkeypatch
+    ):
+        # The advice is only worth giving if it works: generate renders the pages
+        # for the version the tables already hold, and validate then passes.
+        _write_pyproject(project, "2.0.0rc1", "2.0.0rc1")
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        assert bumper.validate_consistency() is False
+
+        assert bumper.template_manager.generate_all_from_templates() == 1
+
+        assert bumper.validate_consistency() is True
+        assert "2.0.0rc1" in project.joinpath("README.md").read_text(encoding="utf-8")
+
+    def test_the_set_advice_for_a_pre_release_says_it_changes_the_version(
+        self, project, monkeypatch, capsys
+    ):
+        _write_pyproject(project, "3.8.0-rc1", "3.8.0-rc1")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "run 'set 3.8.0' to change 3.8.0-rc1 to 3.8.0" in out
+        # The route that keeps the release candidate: the spelling pip prints.
+        assert "to keep 3.8.0-rc1, spell it 3.8.0rc1 in both" in out
+
+    def test_tables_that_disagree_on_a_pre_release_do_not_advise_a_silent_finalize(
+        self, project, monkeypatch, capsys
+    ):
+        _write_pyproject(project, "2.0.0rc2", "2.0.0rc1")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "run 'set 2.0.0' to change 2.0.0rc1 to 2.0.0" in out
+        assert "to keep 2.0.0rc1, edit both version fields by hand" in out
 
 
 class TestDisagreeingTablesAreReportedOnceNotAsEveryPageStale:
