@@ -343,7 +343,11 @@ def test_a_bracketed_directory_name_does_not_crash_the_scan(
     # the scan did not crash, and the finding survived.
     assert row.status == ScannerStatus.FAILED, row
     assert row.finding_count == 1, row
-    assert "[/x]/yarn.lock" in markup_console.getvalue()
+    # The refusal line names the lockfile with the platform's separator, so the
+    # expected text is built from the path's parts: "[/x]/yarn.lock" where the
+    # separator is a slash (the Rich closing-tag shape this test is named for),
+    # a backslash-joined path on Windows, where no such tag can arise.
+    assert str(Path("[") / "x]" / "yarn.lock") in markup_console.getvalue()
 
 
 def test_an_audit_naming_a_bracketed_path_keeps_its_findings(
