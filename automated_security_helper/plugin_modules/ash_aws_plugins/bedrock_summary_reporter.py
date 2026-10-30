@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import logging
 import html
 import os
@@ -929,6 +930,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._cache = {}
+        # The prompt digest each cached answer was generated for, by cache
+        # key: an answer is served again only for the prompt it answered.
+        self._cache_prompts: Dict[str, str] = {}
         self._secret_findings_exist = False
         # One report run's state (reset by report()): the control-plane client
         # the fallback walk validates candidates with, built once, the
@@ -1191,6 +1195,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         # on one instance read the first run's answers for another model's
         # findings; the cache is one run's.
         self._cache = {}
+        self._cache_prompts = {}
         self._secret_findings_exist = False
 
         all_findings, secret_findings, indexed_findings = self._extract_findings(model)
@@ -1974,10 +1979,16 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         """A model answer as the report shows it: the one way report text
         comes from the model.
 
-        The answer comes from ``_call_with_fallback``, cached under
+        The answer comes from ``_outcome_with_fallback``, cached under
         *cache_key* when one is given, and is shown here, once, after the
         cache: a cached answer is stored as the model gave it and shown each
-        time it is placed. A model response can repeat the scanned
+        time it is placed. Only an answer is cached: a failure's "*Error ...*"
+        text is not kept, so the next placement under the key asks again. A
+        cached answer is served only for the prompt it answered: the key names
+        a section, and two placements under one key (the report's executive
+        summary and the executive file) share the answer while their prompts
+        are the same and generate anew when they differ. A model response can
+        repeat the scanned
         repository's text verbatim, so the generated-analysis sections carry
         repository text one hop removed. The answer is shown with its layout
         kept: control characters become visible escapes, a line that would
@@ -1987,14 +1998,29 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         (``_markdown_as_written``).
         """
 
-        def _answer() -> str:
-            return self._call_with_fallback(client, prompt, system_prompt)
+        answered = {"ok": True}
 
-        text = (
-            self._get_cached_or_generate(cache_key, _answer)
-            if cache_key is not None
-            else _answer()
-        )
+        def _answer() -> str:
+            outcome = self._outcome_with_fallback(client, prompt, system_prompt)
+            answered["ok"] = outcome.ok
+            return outcome.text
+
+        if cache_key is None:
+            text = _answer()
+        else:
+            digest = hashlib.sha256(
+                f"{system_prompt}\x00{prompt}".encode("utf-8")
+            ).hexdigest()
+            prompts = getattr(self, "_cache_prompts", None)
+            if prompts is not None and prompts.get(cache_key) != digest:
+                # The key's cached answer, if any, answered another prompt.
+                self._cache.pop(cache_key, None)
+                prompts[cache_key] = digest
+            text = self._get_cached_or_generate(cache_key, _answer)
+            if not answered["ok"]:
+                # A failure is shown but not kept: the next placement under
+                # this key asks the model again.
+                self._cache.pop(cache_key, None)
         shown = str(shown_not_obeyed(str(text)))
         # HTML outside the answer's code is written as text, its code as the
         # model wrote it, and a fence it leaves open is closed; the costs are

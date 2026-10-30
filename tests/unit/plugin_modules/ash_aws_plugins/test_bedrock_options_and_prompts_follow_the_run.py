@@ -410,6 +410,79 @@ def test_the_walk_calls_a_candidate_by_the_listings_spelling(monkeypatch, tmp_pa
     assert reporter._run_model == LISTED
 
 
+# ---------------------------------------------------------------------------
+# The answer cache keeps answers, for the prompt they answered
+# ---------------------------------------------------------------------------
+
+
+class _RuntimeFailsThenAnswers:
+    """A runtime whose first call is refused with a model-specific error and
+    whose later calls answer with a numbered reply."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def converse(self, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "ValidationException", "Message": "too long"}},
+                "Converse",
+            )
+        return {
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"text": f"stub reply {self.calls}"}],
+                }
+            }
+        }
+
+
+def test_a_failed_answer_is_not_cached(monkeypatch, tmp_path):
+    """The first placement under a key fails (no fallback is listed, so the
+    walk exhausts); the second placement asks the model again instead of
+    serving the failure text from the cache."""
+    runtime = _RuntimeFailsThenAnswers()
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", _session_double(runtime, ControlPlaneDouble())
+    )
+    reporter = make_reporter(
+        plugin_context_in(tmp_path),
+        enable_caching=True,
+        enable_fallback_models=False,
+        max_retries=0,
+    )
+    client = reporter._make_model_client(runtime)
+
+    first = reporter._model_answer(client, "prompt", "system", cache_key="k")
+    second = reporter._model_answer(client, "prompt", "system", cache_key="k")
+
+    assert "Error" in first, first
+    assert second == "stub reply 2", second
+
+
+def test_a_cached_answer_is_served_only_for_the_prompt_it_answered(
+    monkeypatch, tmp_path
+):
+    """Two placements share a key: the same prompt is served from the cache,
+    another prompt under the same key is generated anew."""
+    runtime = RuntimeDouble()
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", _session_double(runtime, ControlPlaneDouble())
+    )
+    reporter = make_reporter(plugin_context_in(tmp_path), enable_caching=True)
+    client = reporter._make_model_client(runtime)
+
+    first = reporter._model_answer(client, "prompt one", "system", cache_key="k")
+    again = reporter._model_answer(client, "prompt one", "system", cache_key="k")
+    other = reporter._model_answer(client, "prompt two", "system", cache_key="k")
+
+    assert first == again == "stub reply 1", (first, again)
+    assert other == "stub reply 2", other
+    assert len(runtime.calls) == 2
+
+
 def test_a_reporter_built_without_init_calls_the_configured_model():
     """A reporter built with ``model_construct`` (the retry-config tests' shape)
     never ran ``__init__``, so it has no listed spelling to prefer; its client
