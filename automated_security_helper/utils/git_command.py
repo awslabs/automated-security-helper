@@ -21,6 +21,15 @@ Not covered: what the git binary on ``PATH`` is, and settings that only matter t
 commands ASH does not run (``core.sshCommand`` for a fetch, a diff driver for a
 patch). ``tests/unit/utils/test_git_command.py`` checks that every git argv in the
 package is built here.
+
+``core.fsmonitor=false`` is a boolean to a git that has the built-in file system
+monitor. A git from before it reads the value as the name of a hook command, so
+there it starts the program named ``false`` on each index read instead of turning
+the monitor off. That program is found through the ``PATH`` git is given, which
+the scan-set helpers reduce to its anchored entries (``get_scan_set._git_environ``),
+so one planted in the scanned tree is not reached; its exit status of 1 makes git
+treat every file as possibly changed, which costs time and nothing else. The
+option stays as it is: the argv tests and the MCP tool-surface golden pin it.
 """
 
 from __future__ import annotations
