@@ -687,6 +687,53 @@ def test_the_template_uses_every_install_form():
     assert used == [form for form, *_ in _install_forms()], used
 
 
+OTHER_PROJECT_URL = "https://github.com/example/other-project"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        # Two spans of one sentence: this repository's clone, then another project's.
+        (
+            f"<p>Clone <code>git clone {REPO_URL}.git</code> and "
+            f"<code>git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git</code>.</p>"
+        ),
+        # This repository's URL as visible link text, then another project's span.
+        (
+            f'<p><a href="{REPO_URL}">{REPO_URL}</a>, then '
+            f"<code>git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git</code></p>"
+        ),
+        # Another project's span, then this repository's URL as link text.
+        (
+            f"<p><code>git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git</code>, "
+            f'then see <a href="{REPO_URL}">{REPO_URL}</a></p>'
+        ),
+    ],
+)
+def test_the_readers_see_no_pin_across_two_code_spans(html):
+    """Red before: page_text deleted every tag and put nothing in its place, so the
+    spans ran together on one line and another project's --branch tag was read as
+    this repository's pin (a release build failed pins != wanted)."""
+    text = dv.page_text(html.encode())
+    assert _manager().release_pins(text) == set(), text
+    assert _manager().forms_pinning_a_release(text) == [], text
+
+
+@pytest.mark.unit
+def test_the_readers_still_see_a_pin_inside_one_code_span():
+    """The control: this repository's clone in one span, in a block and inline."""
+    inline = f"<p>Run <code>git clone --branch v3.4.0 {REPO_URL}.git</code> first.</p>"
+    block = (
+        f"<pre><span></span><code>git clone --branch v3.4.0 {REPO_URL}.git\n"
+        "</code></pre>"
+    )
+    for html in (inline, block):
+        text = dv.page_text(html.encode())
+        assert _manager().release_pins(text) == {"3.4.0"}, text
+        assert _manager().forms_pinning_a_release(text) == ["--branch"], text
+
+
 @pytest.mark.integration
 def test_a_release_build_pins_that_release(tmp_path):
     repo = _site(tmp_path)

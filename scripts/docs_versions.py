@@ -612,6 +612,7 @@ def pinned_pages(repo: Path, site: SiteConfig) -> tuple[Any, list[str]]:
     return manager, urls
 
 
+_CODE_TAG = re.compile(r"</?code\b[^>]*>")
 _TABLE = re.compile(r"<table\b.*?</table>", re.DOTALL)
 _TEXT_SAMPLE = re.compile(
     r'<div class="language-text\b[^"]*"[^>]*>.*?</div>', re.DOTALL
@@ -620,6 +621,11 @@ _TEXT_SAMPLE = re.compile(
 
 def page_text(content: bytes, *, commands_only: bool = False) -> str:
     """A built page as a reader sees it: no tags, so a highlighted token is whole.
+
+    A code element starts and ends a line, so two spans of one sentence do not run
+    together: the pin readers of scripts/version_template_manager.py end a command at
+    a line break, and an inline span written with backticks in the source has none
+    left once its tags are gone.
 
     With commands_only, without its tables and `text` samples: a template may name the
     current release there with {{RELEASE}} (scripts/docs_checks.py
@@ -630,6 +636,7 @@ def page_text(content: bytes, *, commands_only: bool = False) -> str:
     markup = content.decode("utf-8", "replace")
     if commands_only:
         markup = _TEXT_SAMPLE.sub("", _TABLE.sub("", markup))
+    markup = _CODE_TAG.sub("\n", markup)
     return html.unescape(re.sub(r"<[^>]+>", "", markup))
 
 
