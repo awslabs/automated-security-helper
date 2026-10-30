@@ -90,6 +90,24 @@ def test_naming_only_a_local_format_leaves_the_off_host_reporter_out(tmp_path, s
     ]
 
 
+def test_naming_a_local_and_an_off_host_format_runs_both_phases(tmp_path, s3_site):
+    """The case the split exists for, which no other test here reaches: with
+    ``sarif,s3`` the local phase must be handed ``sarif`` without ``s3`` and the
+    off-host phase must still run. A merge that dropped the off-host phase
+    whenever a local format was requested, or handed ``s3`` to the local phase
+    too, passed the single-format cases above."""
+    result = _merge(tmp_path, s3_site, "sarif,s3")
+
+    written = reporter_texts(result)
+    assert len(written) == 1, (result["reports"], result["output"])
+    assert DEFAULT_ENDPOINT in written[0], written
+    assert "ash.sarif" in result["reports"], result["reports"]
+    # Neither phase reported the other's format as one no reporter produces.
+    assert not any(NO_PRODUCER in warning for warning in result["warnings"]), result[
+        "warnings"
+    ]
+
+
 def test_naming_an_off_host_format_the_operator_did_not_enable_is_said(
     tmp_path, s3_site
 ):
