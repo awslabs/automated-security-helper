@@ -8,10 +8,10 @@
 local rules path to be PASSED to the tool cannot use it: ``config/path_trust``
 refuses a path inside any git checkout, so a rules file beside that source
 directory is refused wherever the checkout sits (the venue extract is a fresh git
-repository; this host's worktree is one too). The fixture below builds the scan
-tree under pytest's ``tmp_path``, which the runner keeps outside every checkout
-(``--basetemp`` on the lane dir), so a rules file beside it is a path the scanner
-may pass.
+repository; a developer's worktree is one too). The fixture below builds the scan
+tree under pytest's ``tmp_path``, the pytest base temporary directory, which the
+test runner keeps outside every checkout, so a rules file beside it is a path the
+scanner may pass.
 """
 
 from __future__ import annotations
