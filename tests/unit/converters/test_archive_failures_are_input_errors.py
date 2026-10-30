@@ -107,6 +107,61 @@ def test_a_suppression_on_the_archives_path_accepts_the_failure(
     assert waives_gate(failed)
 
 
+def test_a_failure_of_the_run_is_a_tool_error_that_no_suppression_accepts(
+    test_plugin_context, monkeypatch
+):
+    """The archive is sound; the work directory refuses the write. That is the
+    run's failure, so the record says "tool" and the suppression on the
+    archive's path does not waive the gate for it."""
+    from automated_security_helper.models.asharp_model import waives_gate
+
+    source = Path(test_plugin_context.source_dir)
+    archive = source / "lib" / "b.zip"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as sound:
+        sound.writestr("z.js", "z = 1\n")
+    archive.write_bytes(zipped.getvalue())
+    test_plugin_context.config.global_settings.suppressions = [
+        AshSuppression(
+            rule_id="ash-unconverted-input",
+            path="lib/b.zip",
+            reason="a fixture kept on purpose",
+        )
+    ]
+
+    def refusing_extractall(self, path=None, members=None, pwd=None):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(zipfile.ZipFile, "extractall", refusing_extractall)
+    converter = _converter(test_plugin_context, monkeypatch, archive)
+
+    results = converter.convert()
+
+    assert results == []
+    (failed,) = converter.failed_inputs
+    assert failed.kind == "tool"
+    assert failed.accepted is False
+    assert not waives_gate(failed)
+    assert "PermissionError" in failed.reason
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        pytest.param(zipfile.BadZipFile("bad"), "input", id="bad-zip"),
+        pytest.param(archive_converter._UnreadableArchive("cut"), "input", id="cut"),
+        pytest.param(EOFError(), "input", id="eof"),
+        pytest.param(PermissionError(13, "denied"), "tool", id="permission"),
+        pytest.param(OSError(28, "No space left on device"), "tool", id="enospc"),
+        pytest.param(MemoryError(), "tool", id="memory"),
+        pytest.param(AttributeError("defect"), "tool", id="defect"),
+    ],
+)
+def test_the_kind_of_a_failure_follows_the_error(error, kind):
+    assert archive_converter._failure_kind(error) == kind
+
+
 def test_the_record_names_the_archive_by_its_path_in_the_tree_wherever_ash_runs(
     test_plugin_context, monkeypatch
 ):

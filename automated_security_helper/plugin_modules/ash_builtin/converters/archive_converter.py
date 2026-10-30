@@ -29,6 +29,7 @@ from typing import (
     Tuple,
 )
 import zipfile
+import zlib
 
 from pydantic import Field, PositiveInt
 
@@ -126,9 +127,32 @@ SCANNABLE_MEMBER_NAMES = frozenset(
         "id_dsa",
         "id_ecdsa",
         "id_ed25519",
+        "credentials",
+        ".git-credentials",
+        ".pgpass",
+        ".htpasswd",
+        ".env",
+        "authorized_keys",
+        "known_hosts",
     }
 )
-_SCANNABLE_MEMBER_STEMS = frozenset({"Dockerfile", "Containerfile"})
+#: Compared case-folded: ``dockerfile`` and ``MAKEFILE`` are the same files.
+_SCANNABLE_MEMBER_NAMES_FOLDED = frozenset(n.casefold() for n in SCANNABLE_MEMBER_NAMES)
+#: Names admitted by their first word before a ``.``, ``-`` or ``_``: a Dockerfile,
+#: Containerfile or Makefile with a stage or variant suffix (``Dockerfile.prod``,
+#: ``Dockerfile-prod``, ``Makefile_linux``), and a key file with a backup suffix
+#: (``id_rsa.old``, ``id_ed25519-2024``). Case-folded.
+_SCANNABLE_MEMBER_STEMS = frozenset(
+    {
+        "dockerfile",
+        "containerfile",
+        "makefile",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+    }
+)
 
 #: Extensions scanners read that KNOWN_SCANNABLE_EXTENSIONS leaves out: ES module
 #: and TypeScript module spellings and component files (semgrep, opengrep), C++
@@ -796,10 +820,18 @@ def _member_is_scannable(member_name: str) -> bool:
     suffix = _archive_suffix(member_name)
     if suffix in KNOWN_SCANNABLE_EXTENSIONS or suffix in SCANNABLE_MEMBER_SUFFIXES:
         return True
-    base = _base_name(member_name)
-    if base in SCANNABLE_MEMBER_NAMES:
+    base = _base_name(member_name).casefold()
+    if base in _SCANNABLE_MEMBER_NAMES_FOLDED:
         return True
-    return base.split(".", 1)[0] in _SCANNABLE_MEMBER_STEMS
+    stem = base.split(".", 1)[0]
+    if stem in _SCANNABLE_MEMBER_STEMS:
+        return True
+    if stem.startswith("id_"):
+        # A key name carries its own underscore, so a variant is read before
+        # "-" only (id_ed25519-2024); id_rsa.old was admitted by the "." split.
+        return stem.split("-", 1)[0] in _SCANNABLE_MEMBER_STEMS
+    # Dockerfile-prod, Makefile_linux: the first word before "-" or "_".
+    return re.split(r"[-_]", stem, maxsplit=1)[0] in _SCANNABLE_MEMBER_STEMS
 
 
 def _is_archive_name(name: str) -> bool:
@@ -1042,6 +1074,38 @@ def _failure_reason(error: Exception, target: Optional[Path]) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+#: The errors that say the ARCHIVE cannot be read: a damaged or truncated zip, tar
+#: or compressed stream, or one whose names are not text. An error of any other
+#: type during extraction (no space or no permission in the work directory, a link
+#: the filesystem guard refused, a resource limit, a defect) is the run's, not the
+#: archive's.
+_ARCHIVE_UNREADABLE_ERRORS: Tuple[type, ...] = (
+    _UnreadableArchive,
+    zipfile.BadZipFile,
+    tarfile.TarError,
+    EOFError,
+    gzip.BadGzipFile,
+    zlib.error,
+    lzma.LZMAError,
+    UnicodeDecodeError,
+)
+
+
+def _failure_kind(error: Exception) -> Literal["input", "tool"]:
+    """Whether a failure to extract an archive is about the archive ("input") or
+    about the run ("tool").
+
+    The kind decides who may waive the completeness gate: an ``ash-unconverted-input``
+    suppression on the archive's path accepts an INPUT error, an archive the
+    operator has reviewed and knows cannot be read, and never a TOOL error, which
+    says this run could not do its work (the work directory full or unwritable,
+    a guard refusing a path, memory exhausted, a defect): accepting that would
+    hide a loss of coverage no review of the archive explains, and the record
+    would say the archive was at fault.
+    """
+    return "input" if isinstance(error, _ARCHIVE_UNREADABLE_ERRORS) else "tool"
+
+
 def _unused_target(results_dir: Path, name: str) -> Path:
     """``results_dir / name``, or with ``-2``, ``-3`` ... appended if that exists.
 
@@ -1261,9 +1325,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         (inspect_members): an expired entry no longer applies
         (active_ignore_paths); of the rest, only the entries the operator supplied
         skip extraction, and --ignore-suppressions lifts them all
-        (ignore_paths_that_skip_scanning). A client-supplied entry is left to the
-        SARIF step, which keeps a finding under it as a marked, suppressed result,
-        so the results show what the client's config hid.
+        (ignore_paths_that_skip_scanning). A client-supplied entry skips nothing
+        here: a delivered tree's own config must not keep its members out of the
+        scan, so the member is extracted and scanned and its findings are
+        reported. For a file in the tree the SARIF step then marks such a finding
+        suppressed under the client's entry; for an archive member it does not,
+        because the finding sits at the member's extracted path under the work
+        directory and the step has no mapping from that path back to the
+        member's source path (member_source_path), so the finding is reported as
+        an ordinary result. That is the safe side (nothing the client's config
+        names is hidden), and the mapping is a recorded gap.
         """
         return ignore_paths_that_skip_scanning(
             active_ignore_paths(self.context.config.global_settings.ignore_paths),
@@ -1374,11 +1445,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # again, would resolve against the working directory instead. An
         # archive that cannot be read whole is an INPUT error (there is no tool
         # here), which an ash-unconverted-input suppression on the archive's
-        # path may accept.
+        # path may accept. A listing stopped by the RUN's shared budget of
+        # skipped blocks is the run's doing, not the archive's: that record is
+        # a TOOL error, which no suppression accepts.
         self.record_failed_input(
             archive if archive_file is None else archive_file,
             f"it was extracted only in part: {detail}",
-            kind="input",
+            kind="tool" if (stopped and budget_spent) else "input",
         )
 
     def inspect_members(
@@ -1624,8 +1697,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # The members are filtered by the same ignore paths as the archives
         # themselves (_skipped): a client-supplied entry and, under
         # --ignore-suppressions, every entry leaves a member in, so its findings
-        # are reported, marked suppressed where an entry names them, instead of
-        # the member never reaching a scanner.
+        # are reported instead of the member never reaching a scanner (a
+        # member's finding under a client-supplied entry is reported unmarked;
+        # see _ignore_paths_skipping_scanning).
         ignore_paths = self._ignore_paths_skipping_scanning()
         # Shared by every tar this conversion lists, so many small compressed
         # tars that each decompress to one listing's limit of blocks cost what a
@@ -1915,14 +1989,19 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 # scanners do not read a partial extraction as the archive.
                 # Recorded, not only logged: the completeness gate reads
                 # failed_inputs, and an archive that could not be extracted is
-                # coverage lost. As an INPUT error: this converter runs no tool,
-                # so the default kind, "tool", told the operator to fix a tool
-                # that does not exist and let no ash-unconverted-input
-                # suppression accept the archive.
+                # coverage lost. As an INPUT error where the error says the
+                # archive cannot be read (_failure_kind): this converter runs no
+                # tool, so the default kind, "tool", told the operator to fix a
+                # tool that does not exist and let no ash-unconverted-input
+                # suppression accept the archive. An error of the run (no space
+                # or permission in the work directory, a guard's refusal, a
+                # defect) stays a TOOL error, which no suppression accepts.
                 if created_target is not None:
                     shutil.rmtree(created_target, ignore_errors=True)
                 self.record_failed_input(
-                    archive_file, _failure_reason(e, created_target), kind="input"
+                    archive_file,
+                    _failure_reason(e, created_target),
+                    kind=_failure_kind(e),
                 )
 
         return results

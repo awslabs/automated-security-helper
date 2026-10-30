@@ -131,13 +131,36 @@ def test_members_scanners_read_by_name_or_an_unlisted_extension_are_extracted(
 
 @pytest.mark.parametrize(
     "name",
-    ["Dockerfile", "Dockerfile.prod", ".npmrc", "id_rsa", "go.mod", "a.lock", "x.mjs"],
+    [
+        "Dockerfile",
+        "Dockerfile.prod",
+        "Dockerfile-prod",
+        "dockerfile",
+        "MAKEFILE",
+        "Makefile_linux",
+        ".npmrc",
+        "id_rsa",
+        "id_rsa.old",
+        "id_ed25519-2024",
+        "credentials",
+        ".git-credentials",
+        ".pgpass",
+        ".htpasswd",
+        ".env",
+        "authorized_keys",
+        "known_hosts",
+        "go.mod",
+        "a.lock",
+        "x.mjs",
+    ],
 )
 def test_the_admission_test_names_what_scanners_read(name):
     assert archive_converter._member_is_scannable(name) is True
 
 
-@pytest.mark.parametrize("name", ["logo.png", "a.woff", "README", "Dockerfiles"])
+@pytest.mark.parametrize(
+    "name", ["logo.png", "a.woff", "README", "Dockerfiles", "identity", "id_card"]
+)
 def test_the_admission_test_leaves_out_what_no_scanner_reads(name):
     assert archive_converter._member_is_scannable(name) is False
 

@@ -6,9 +6,13 @@ other input: the operator's, and none under --ignore-suppressions.
 
 ``ignore_paths_that_skip_scanning`` (models/core.py) is the contract every
 pre-scan filter reads: an entry a delivered tree's own config supplied
-(``client_supplied``) is left to the SARIF step, which keeps a finding under it
-as a marked, suppressed result, and ``--ignore-suppressions`` lifts every entry
-for every scanner. The converter read that contract for the archive itself and
+(``client_supplied``) skips nothing before the scan, and ``--ignore-suppressions``
+lifts every entry for every scanner. For a file in the tree the SARIF step marks a
+finding under a client's entry suppressed; for an archive member it has no way to
+(the finding sits at the member's extracted path under the work directory, and
+nothing maps that back to ``lib/b.zip/vendor/m.js``), so the member's finding is
+reported as an ordinary result: the safe side, and a recorded gap. The converter
+read that contract for the archive itself and
 then filtered the archive's members by every active entry, so a client's ignore
 path dropped members before any scanner saw them, and the flag that is meant to
 lift every suppression left them out all the same. A single-file .gz was
