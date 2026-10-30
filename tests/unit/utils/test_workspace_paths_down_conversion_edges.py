@@ -164,6 +164,37 @@ class TestANonUtf8NameStaysOneComponent:
         assert "\\udce9" in message
         message.encode("utf-8")
 
+    @pytest.mark.parametrize(
+        ("pattern", "prefix"),
+        [
+            # The remainder, quoted by the reason of the fnmatch-shape refusal.
+            ("*/sub\udce9/*.py", "api"),
+            # A fixed-length leading whose remainder is quoted by its reason.
+            ("???/sub\udce9/[x].py", "api"),
+            # The leading-separator refusal quotes the pattern as written.
+            ("/api/sub\udce9/x.py", "api"),
+            # The dot-component refusal quotes the pattern as written.
+            ("api/./sub\udce9/x.py", "api"),
+            # The separator count and the '..' refusals quote it too.
+            ("//api/sub\udce9/x.py", "api"),
+            ("api/../sub\udce9/x.py", "api"),
+        ],
+    )
+    def test_every_refusal_shows_the_escape_wherever_it_quotes_the_pattern(
+        self, pattern, prefix
+    ):
+        """The name as the matcher reads it holds the lone surrogate itself.
+        A refusal's reason quotes components of the pattern, and the pattern as
+        written, so each has to be shown as a report shows the name: the
+        escape, which every sink can print."""
+        with pytest.raises(WorkspacePatternError) as excinfo:
+            _down(pattern, prefix)
+
+        message = str(excinfo.value)
+        assert "\\udce9" in message, message
+        assert "\udce9" not in message, message
+        message.encode("utf-8")
+
 
 class TestALeadingSeparatorMatchesNoRelativePath:
     def test_a_rooted_workspace_pattern_is_refused(self):

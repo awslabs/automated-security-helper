@@ -363,7 +363,7 @@ def _normalise(value: PathLike, *, label: str) -> PurePosixPath:
     leading = _leading_separator_count(normalised_raw)
     if leading >= 2:
         raise WorkspacePatternError(
-            f"{label} '{raw}' starts with {leading} separators; "
+            f"{label} '{_shown(raw)}' starts with {leading} separators; "
             "that is either a UNC share or a malformed project-rooted path, and "
             "the two cannot be told apart. Use a single leading separator for a "
             "project-rooted pattern, or none for a relative one"
@@ -377,7 +377,7 @@ def _normalise(value: PathLike, *, label: str) -> PurePosixPath:
     drive = _drive_anchor(normalised_raw)
     if drive:
         raise WorkspacePatternError(
-            f"{label} '{raw}' is an absolute filesystem path "
+            f"{label} '{_shown(raw)}' is an absolute filesystem path "
             f"(drive anchor '{drive}'); "
             "patterns must be relative to a project or workspace root"
         )
@@ -385,7 +385,7 @@ def _normalise(value: PathLike, *, label: str) -> PurePosixPath:
     normalised = PurePosixPath(normalised_raw)
     if _PARENT in normalised.parts:
         raise WorkspacePatternError(
-            f"{label} '{raw}' contains a '..' component; "
+            f"{label} '{_shown(raw)}' contains a '..' component; "
             "patterns must not traverse upward out of their root"
         )
     return normalised
@@ -553,13 +553,19 @@ def _survives_double_star(rest: tuple) -> bool:
 def _unconvertible(
     pattern_parts: tuple, prefix_parts: tuple, reason: str
 ) -> WorkspacePatternError:
-    """Build the fail-closed error, naming the pattern, the project and the fix."""
-    return WorkspacePatternError(
-        f"pattern '{_shown(PurePosixPath(*pattern_parts).as_posix())}' cannot be "
+    """Build the fail-closed error, naming the pattern, the project and the fix.
+
+    The whole message goes through :func:`_shown`, the reason included: a reason
+    quotes components of the pattern, and a lone surrogate in any of them is as
+    unprintable as one in the pattern text.
+    """
+    message = (
+        f"pattern '{PurePosixPath(*pattern_parts).as_posix()}' cannot be "
         f"rewritten for project '{PurePosixPath(*prefix_parts).as_posix()}': "
         f"{reason}. Write the pattern with explicit '**' components, which mean "
         f"the same thing in both path spaces, or name the project explicitly."
     )
+    return WorkspacePatternError(_shown(message))
 
 
 def _shown(text: str) -> str:
@@ -756,7 +762,7 @@ def _refuse_dot_components(raw: str, text: str) -> None:
     for component in text.rstrip("/").split("/"):
         if component in ("", "."):
             raise WorkspacePatternError(
-                f"pattern '{raw}' has a '.' or empty component, "
+                f"pattern '{_shown(raw)}' has a '.' or empty component, "
                 "which ASH's matcher reads literally, so it matches no file; "
                 "remove the extra '.' or '/'"
             )
@@ -906,12 +912,14 @@ def _down_convert(text: str, prefix_parts: tuple) -> Optional[str]:
         # rest of the prefix in more than one way, so fail closed. ("api/**" over
         # "api/sub" holds "**" and is converted by _down_convert_components.)
         raise WorkspacePatternError(
-            f"pattern '{_shown(PurePosixPath(*pattern_parts).as_posix())}' cannot be "
-            f"rewritten for project "
-            f"'{PurePosixPath(*prefix_parts).as_posix()}': the wildcard "
-            f"'{_shown(pattern_part)}' falls inside the project path itself, so how "
-            f"much of that path it consumes is ambiguous. Anchor the pattern "
-            f"with '**/' or name the project path explicitly."
+            _shown(
+                f"pattern '{PurePosixPath(*pattern_parts).as_posix()}' cannot be "
+                f"rewritten for project "
+                f"'{PurePosixPath(*prefix_parts).as_posix()}': the wildcard "
+                f"'{pattern_part}' falls inside the project path itself, so how "
+                f"much of that path it consumes is ambiguous. Anchor the pattern "
+                f"with '**/' or name the project path explicitly."
+            )
         )
 
     remainder = pattern_parts[len(prefix_parts) :]
@@ -1043,7 +1051,7 @@ def to_project_pattern(
         # pattern matches no file at the top level. Converted, it would match
         # files project-side that it never matched workspace-side.
         raise WorkspacePatternError(
-            f"pattern '{raw}' starts with '/', which ASH's matcher reads "
+            f"pattern '{_shown(raw)}' starts with '/', which ASH's matcher reads "
             "literally, so it matches no workspace-relative path; remove the "
             "leading '/'"
         )
