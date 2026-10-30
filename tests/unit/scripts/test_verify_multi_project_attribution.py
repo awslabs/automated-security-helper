@@ -148,10 +148,11 @@ class TestGateScannersRan:
 
 
 class TestUriBase:
-    def test_percent_escapes_are_decoded(self, gate):
-        assert gate._uri_base_to_path("file:///tmp/a%20b/caf%C3%A9/") == Path(
-            "/tmp/a b/café/"
-        )
+    def test_percent_escapes_are_decoded(self, gate, tmp_path):
+        root = tmp_path / "a b" / "café"
+        uri_base = root.as_uri() + "/"
+        assert "%20" in uri_base and "%C3%A9" in uri_base
+        assert gate._uri_base_to_path(uri_base) == root
 
     def test_a_windows_drive_root_keeps_no_stray_separator(self, gate):
         assert gate._uri_base_to_path("file:///C:/ws/project-a/") == Path(
