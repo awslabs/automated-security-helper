@@ -595,6 +595,14 @@ def apply_content_filters(
     A name that is only whitespace, or a list of separators, is no filter: it
     used to become a list of empty names that matched nothing and removed every
     finding and count.
+
+    Applied after ``filter_actionable_only`` (the server's order), the recounts
+    below keep its contract: ``summary_stats.total`` stays the actionable count,
+    and ``_content_filters`` keeps its ``actionable_only`` flag beside the
+    scanner and severity lists. The recounts used to overwrite the total with a
+    count of every finding the kept scanners or buckets held, so an
+    "actionable only" view reported findings it did not list, and the metadata
+    was replaced outright, so the flag was lost.
     """
     scanner_list = _filter_names(scanners)
     severity_list = _filter_names(severities)
@@ -615,6 +623,11 @@ def apply_content_filters(
                     f"Unknown scanner name(s) {', '.join(unknown)}; the scan's "
                     f"scanners are {', '.join(sorted(known)) or 'none'}"
                 )
+
+    already_applied = results.get("_content_filters")
+    if not isinstance(already_applied, dict):
+        already_applied = {}
+    actionable_only = bool(already_applied.get("actionable_only"))
 
     filtered_results = copy.deepcopy(results)
 
@@ -756,11 +769,20 @@ def apply_content_filters(
                     ]
         filtered_results["summary_stats"] = summary_stats
 
+    # filter_actionable_only's contract, restated over the recounted stats: an
+    # actionable-only view's total is its actionable count (None when that is
+    # unknown), never a count of findings the view does not list.
+    if actionable_only and isinstance(filtered_results.get("summary_stats"), dict):
+        summary_stats = dict(filtered_results["summary_stats"])
+        if "total" in summary_stats:
+            summary_stats["total"] = summary_stats.get("actionable")
+        filtered_results["summary_stats"] = summary_stats
+
     # The producer's payload carries the same summary twice: at the top level
     # and under raw_results.metadata. The recount above replaced the top-level
     # dict with a new one, so the copy under metadata kept the whole scan's
     # figures in a response whose every other part described the filtered
-    # view.
+    # view. After the restatement above, so the copy carries the same total.
     metadata = (filtered_results.get("raw_results") or {}).get("metadata")
     if (
         isinstance(metadata, dict)
@@ -771,10 +793,7 @@ def apply_content_filters(
 
     # Recorded beside whatever filter ran before this one (the server applies
     # actionable_only first): assigned wholesale, this dropped that marker.
-    filter_metadata: Dict[str, Any] = {}
-    existing = filtered_results.get("_content_filters")
-    if isinstance(existing, dict):
-        filter_metadata.update(existing)
+    filter_metadata: Dict[str, Any] = dict(already_applied)
     if scanner_list:
         filter_metadata["scanners"] = scanner_list
     if severity_list:

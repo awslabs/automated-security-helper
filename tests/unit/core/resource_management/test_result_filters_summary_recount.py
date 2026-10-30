@@ -372,6 +372,46 @@ class TestActionableOnlyRecountsTheSeverityBuckets:
         assert filtered["summary_stats"]["severity_counts"]["low"] == 2
 
 
+class TestActionableOnlySurvivesTheContentFilters:
+    """The server applies filter_actionable_only, then apply_content_filters.
+    The recounts overwrote the total that filter_actionable_only had set to the
+    actionable count, and replaced _content_filters outright, so the flag was
+    lost and an actionable-only view again reported findings it did not list."""
+
+    def test_the_total_stays_the_actionable_count_under_a_scanners_filter(self):
+        filtered = apply_content_filters(
+            filter_actionable_only(_results()), scanners="bandit"
+        )
+
+        stats = filtered["summary_stats"]
+        assert stats["actionable"] == 1
+        assert stats["total"] == 1
+        assert filtered["actionable_findings"] == 1
+        assert filtered["_content_filters"] == {
+            "actionable_only": True,
+            "scanners": ["bandit"],
+        }
+
+    def test_the_total_stays_the_actionable_count_under_a_severities_filter(self):
+        results = TestActionableOnlyRecountsTheSeverityBuckets._with_sarif("MEDIUM")
+
+        filtered = apply_content_filters(
+            filter_actionable_only(results), severities="critical,high"
+        )
+
+        stats = filtered["summary_stats"]
+        assert stats["actionable"] == 2
+        assert stats["total"] == 2
+        assert filtered["_content_filters"]["actionable_only"] is True
+        assert filtered["_content_filters"]["severities"] == ["critical", "high"]
+
+    def test_without_actionable_only_the_total_is_the_views_findings(self):
+        filtered = apply_content_filters(_results(), scanners="bandit")
+
+        assert filtered["summary_stats"]["total"] == 3
+        assert "actionable_only" not in filtered["_content_filters"]
+
+
 class TestTotalFollowsOneRule:
     """SummaryStats.total is the non-suppressed findings and ``suppressed`` a
     count beside it. The scanners recount summed ``finding_count`` (which a
