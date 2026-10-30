@@ -33,6 +33,7 @@ Pinned here against ``CfnLintScanner`` with only ``_run_subprocess`` faked, as
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -427,6 +428,83 @@ class TestBinaryOnPathWithoutUv:
             scanner, accepted = self._check(repo, checked)
         assert accepted is True and scanner.use_uv_tool is False
         assert "could not be verified" in caplog.text
+
+
+class TestResolverOfflineMode:
+    """The consolidated resolver is asked under the scanner's own offline mode.
+
+    ``options.offline: true`` puts cfn-lint offline while the rest of the run
+    stays online (``_scanner_offline``), and the mixin hands that mode to every
+    uv call it makes. The two ``get_uv_tool_command`` calls of the dependency
+    check passed no ``offline`` at all, so the resolver read ASH's global mode
+    alone and probed PyPI online for a scanner the operator had put offline.
+    """
+
+    @staticmethod
+    def _record(calls):
+        def resolver(tool_name, **kwargs):
+            calls.append((tool_name, dict(kwargs)))
+            return None
+
+        return resolver
+
+    def _uv_absent(self, repo, **opts):
+        scanner = _scanner(repo, **opts)
+        calls: list = []
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch.object(
+                CfnLintScanner, "resolve_deferred_tool_version", return_value=None
+            ),
+            patch.object(
+                CfnLintScanner, "_validate_uv_tool_availability", return_value=False
+            ),
+            patch.object(cfn_lint_scanner, "get_uv_tool_command", self._record(calls)),
+        ):
+            os.environ.pop("ASH_OFFLINE", None)
+            assert scanner.validate_plugin_dependencies() is False
+        return calls
+
+    def _install_failed(self, repo, **opts):
+        scanner = _scanner(repo, **opts)
+        calls: list = []
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch.object(
+                CfnLintScanner, "resolve_deferred_tool_version", return_value=None
+            ),
+            patch.object(
+                CfnLintScanner, "_validate_uv_tool_availability", return_value=True
+            ),
+            patch.object(
+                CfnLintScanner,
+                "_get_tool_installation_info",
+                return_value={"available": False},
+            ),
+            patch.object(CfnLintScanner, "_install_uv_tool", return_value=False),
+            patch.object(cfn_lint_scanner, "get_uv_tool_command", self._record(calls)),
+        ):
+            os.environ.pop("ASH_OFFLINE", None)
+            assert scanner.validate_plugin_dependencies() is False
+        return calls
+
+    def test_the_uv_absent_branch_passes_the_scanners_offline_mode(self, repo):
+        ((asked, kwargs),) = self._uv_absent(repo, offline=True)
+        assert asked == "cfn-lint"
+        assert kwargs.get("offline") is True
+
+    def test_the_final_fallback_passes_the_scanners_offline_mode(self, repo):
+        ((asked, kwargs),) = self._install_failed(repo, offline=True)
+        assert asked == "cfn-lint"
+        assert kwargs.get("offline") is True
+
+    def test_a_scanner_that_follows_ash_asks_online_when_ash_is(self, repo):
+        for calls in (
+            self._uv_absent(repo, offline=False),
+            self._install_failed(repo, offline=False),
+        ):
+            ((_, kwargs),) = calls
+            assert kwargs.get("offline") is False
 
 
 def test_the_captured_fixture_is_read_by_the_fake():
