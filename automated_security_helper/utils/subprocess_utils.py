@@ -1632,47 +1632,59 @@ def discard_tool_pid_before_reap(
 ) -> None:
     """Wait for the child's exit WITHOUT reaping it, then forget its record.
 
-    The blocking form of :func:`discard_tool_pid_once_exited`, for the arms
-    that know the child is ending (a kill was just sent, or the caller wants
-    to block until the end): ``waitid`` with ``WNOWAIT`` and no ``WNOHANG``
-    sleeps until the exit and leaves the child reapable, so the caller's
-    ``wait`` right after this still reaps it, and the record never outlives
-    the reap.
+    The waiting form of :func:`discard_tool_pid_once_exited`, for the arms
+    that know the child is ending (a kill was just sent) or want to block
+    until its end: ``waitid`` with ``WNOWAIT`` leaves the child reapable, so
+    the caller's ``wait`` right after this still reaps it, and the record
+    never outlives the reap.
+
+    ``just_killed`` says which of the two callers this is. For a child that
+    was just sent a kill the exit is observed in ``WNOHANG`` slices bounded by
+    ``_REAP_POLL_BOUND_SECONDS``: a blocking ``waitid`` on a child in
+    uninterruptible sleep held the caller for as long as the child chose to
+    stay, and one still alive after the bound survived the kill, so a die-now
+    sweep can do nothing more to it. For a healthy child the caller wants to
+    block on until its end (``just_killed=False``) ``waitid`` blocks, with no
+    bound and no slices, because dropping the record while the child lives
+    leaves it out of reach of the sweep for the rest of its run.
 
     On a build without ``waitid`` (CPython leaves it out on macOS, and
     Windows has none) the exit is polled for in slices with the record still
-    registered, and the record is discarded only once the poll sees the exit.
-    ``poll`` reaps, so on those builds the discard follows the reap by one
-    step, as in :func:`discard_tool_pid_once_exited`; what the poll closes is
-    the longer window in which the child was alive and its record already
-    gone, out of reach of a concurrent die-now sweep.
-
-    ``just_killed`` says which of the two callers this is. For a child that
-    was just sent a kill the poll is bounded by ``_REAP_POLL_BOUND_SECONDS``:
-    one still alive after that survived the kill, and a die-now sweep can do
-    nothing more to it. For a healthy child the caller wants to block on until
-    its end (``just_killed=False``) there is no bound, because dropping the
-    record while the child lives leaves it out of reach of the sweep for the
-    rest of its run.
+    registered, bounded the same way, and the record is discarded only once
+    the poll sees the exit. ``poll`` reaps, so on those builds the discard
+    follows the reap by one step, as in :func:`discard_tool_pid_once_exited`;
+    what the poll closes is the longer window in which the child was alive
+    and its record already gone, out of reach of a concurrent die-now sweep.
     """
     if process.returncode is None:
         deadline = time.monotonic() + _REAP_POLL_BOUND_SECONDS if just_killed else None
         if hasattr(os, "waitid"):
-            # Observed in slices, with the bound the just-killed arm promises:
-            # a blocking waitid on a child in uninterruptible sleep held the
-            # caller for as long as the child chose to stay.
-            while True:
+            if deadline is None:
+                # The wait to the end blocks, as a wait with no bound should:
+                # a signal interrupts it as it does any blocking call. A
+                # refusal (ECHILD: reaped elsewhere) ends it as the exit would.
                 try:
-                    waited = os.waitid(
-                        os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
-                    )
+                    os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
                 except OSError:
-                    break
-                if waited is not None:
-                    break
-                if deadline is not None and time.monotonic() >= deadline:
-                    break
-                time.sleep(INTERRUPT_WAIT_SLICE_SECONDS)
+                    pass
+            else:
+                # Observed in slices, with the bound the just-killed arm
+                # promises: a blocking waitid on a child in uninterruptible
+                # sleep held the caller for as long as the child chose to stay.
+                while True:
+                    try:
+                        waited = os.waitid(
+                            os.P_PID,
+                            process.pid,
+                            os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                        )
+                    except OSError:
+                        break
+                    if waited is not None:
+                        break
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(INTERRUPT_WAIT_SLICE_SECONDS)
         else:
             while process.poll() is None and (
                 deadline is None or time.monotonic() < deadline

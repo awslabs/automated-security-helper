@@ -118,6 +118,39 @@ def test_a_wait_after_a_kill_still_gives_up_at_the_bound(no_waitid, child, at_di
     assert child.polls <= _POLLS_ALIVE
 
 
+@pytest.mark.skipif(not hasattr(os, "waitid"), reason="the blocking arm is waitid's")
+def test_a_wait_to_the_end_with_waitid_blocks_instead_of_polling(
+    monkeypatch, child, at_discard
+):
+    """With waitid the wait to the end is one blocking call, no WNOHANG and no
+    slices, as its docstring says; the just-killed wait keeps its bounded
+    slices (the control)."""
+    seen: List[Tuple[int, int, int]] = []
+
+    def waitid(idtype, pid, options):
+        seen.append((idtype, pid, options))
+        # The exit the wait saw; WNOWAIT leaves the reap to the caller.
+        child.returncode = 0
+        return SimpleNamespace(si_pid=pid)
+
+    monkeypatch.setattr(subprocess_utils.os, "waitid", waitid)
+    monkeypatch.setattr(
+        subprocess_utils.time,
+        "sleep",
+        lambda seconds: pytest.fail("the wait to the end slept between polls"),
+    )
+
+    subprocess_utils.discard_tool_pid_before_reap(child, just_killed=False)  # type: ignore[arg-type]
+
+    assert seen == [(os.P_PID, _PID, os.WEXITED | os.WNOWAIT)], seen
+    assert at_discard.seen == [(_PID, True)], at_discard.seen
+
+    seen.clear()
+    child.returncode = None
+    subprocess_utils.discard_tool_pid_before_reap(child)  # type: ignore[arg-type]
+    assert seen == [(os.P_PID, _PID, os.WEXITED | os.WNOHANG | os.WNOWAIT)], seen
+
+
 def test_the_nix_shell_without_a_cancel_event_keeps_its_record_until_it_ends(
     no_waitid, child, at_discard, monkeypatch
 ):
