@@ -287,7 +287,7 @@ def test_a_failed_pack_whose_every_violation_is_unplaceable_is_a_failure(tmp_pat
 
     assert failure is not None
     assert "AwsSolutions" in failure
-    assert "could not be read onto a resource" in failure
+    assert "none of which could be read onto a resource" in failure
     assert per_pack == {}
 
 

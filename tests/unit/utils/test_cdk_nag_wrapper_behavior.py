@@ -633,10 +633,16 @@ def test_the_parser_reads_violating_constructs_not_violating_resources(
 
     response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
 
-    assert response.results == {"AwsSolutions": []}, (
+    # No finding under any pack: the decoy's violatingResources was not read. The
+    # violation cites no construct at all, so the pack that reported failure is a failed
+    # pack (no entry, a failure naming it) rather than a compliant evaluation.
+    assert not any(response.results.values()), (
         "violatingResources must not be read; if it is, the real report's null value "
         "silently yields zero findings"
     )
+    assert response.results == {}
+    assert response.failure is not None
+    assert "AwsSolutions" in response.failure
 
 
 def test_one_violation_citing_two_constructs_becomes_two_findings(
