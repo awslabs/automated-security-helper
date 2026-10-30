@@ -48,6 +48,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     _unsatisfied_cdk_requirements,
 )
 from automated_security_helper.utils import cdk_nag_wrapper as wrapper_module
+from automated_security_helper.utils import python_installer
 from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
 from automated_security_helper.utils.cfn_template_model import (
     NO_PARSEABLE_CLOUDFORMATION_TEMPLATE,
@@ -323,6 +324,15 @@ def test_an_out_of_bounds_install_fails_the_check_and_offers_the_install(
         cdk_nag_scanner,
         "_unsatisfied_cdk_requirements",
         lambda: ["aws-cdk-lib 2.100.0 (the cdk extra needs <3.0.0,>=2.273.0)"],
+    )
+    # The install command is built by the installer that owns the running
+    # environment (pip, or uv for a uv-made one) and raises when neither can be
+    # found; this test is about WHETHER a command is offered, not which installer
+    # writes it, and the venue runs it with neither on PATH.
+    monkeypatch.setattr(
+        python_installer,
+        "python_package_install_command",
+        lambda requirements: ["python", "-m", "pip", "install", *requirements],
     )
 
     assert scanner.validate_plugin_dependencies() is False

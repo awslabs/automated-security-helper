@@ -767,19 +767,20 @@ def test_tool_type_tag_renders_the_enum_member_not_its_value(
     )
 
 
-@pytest.mark.parametrize(
-    "rule_level, expected_anchor",
-    [("Error", "#errors"), ("Warning", "#warnings")],
-)
-def test_help_uri_anchor_is_derived_from_the_rule_level(
+@pytest.mark.parametrize("rule_level", ["Error", "Warning"])
+def test_help_uri_is_the_rules_document_whatever_the_rule_level(
     scanner,
     cdk_available,
     wrapper_double,
     template_in_work_dir,
     rule_level,
-    expected_anchor,
 ):
-    """The RULES.md anchor is the lowercased, pluralized rule level."""
+    """The helpUri is cdk-nag's RULES.md with no fragment.
+
+    The ``#errors`` and ``#warnings`` anchors this test used to expect name the
+    tables of ONE pack; a rule of another pack, or of another level, was sent to a
+    table that does not list it. The document itself lists every pack's rules.
+    """
     wrapper_double.return_value = CdkNagWrapperResponse(
         results={"AwsSolutions": [nag_result(rule_level=rule_level)]}
     )
@@ -787,13 +788,15 @@ def test_help_uri_anchor_is_derived_from_the_rule_level(
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     rule = report.runs[0].tool.driver.rules[0]
-    assert str(rule.helpUri).endswith(expected_anchor), (
-        f"rule_level {rule_level!r} should give anchor {expected_anchor}; "
+    assert (
+        str(rule.helpUri) == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
+    ), (
+        f"rule_level {rule_level!r} should point at the rules document; "
         f"got {rule.helpUri}"
     )
 
 
-def test_missing_rule_level_falls_back_to_a_generic_anchor(
+def test_missing_rule_level_still_points_at_the_rules_document(
     scanner, cdk_available, wrapper_double, template_in_work_dir
 ):
     """A finding with no rule_level still produces a usable helpUri."""
@@ -810,7 +813,7 @@ def test_missing_rule_level_falls_back_to_a_generic_anchor(
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     rule = report.runs[0].tool.driver.rules[0]
-    assert str(rule.helpUri).endswith("#rules")
+    assert str(rule.helpUri) == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
     assert rule.properties.model_extra["rule_level"] == "unknown"
     assert rule.properties.model_extra["rule_info"] == "unknown"
 
