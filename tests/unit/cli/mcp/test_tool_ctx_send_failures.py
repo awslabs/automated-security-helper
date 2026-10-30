@@ -572,6 +572,23 @@ def test_a_failed_send_does_not_repeat_the_message_in_the_log(caplog) -> None:
     assert "Failed to send warning message to client" in warnings[0], warnings[0]
 
 
+def test_a_failed_send_of_a_non_str_message_still_warns(caplog) -> None:
+    """The guard is given whatever a caller hands it, and the old text-bearing
+    warning accepted any type. Sizing the message in the failure path must not
+    raise over a message that is not a str (None here): the send is still
+    named by its level and the text's length, as for any other message."""
+    ctx = _ctx()
+
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
+        asyncio.run(mcp_server._tell_client(ctx, "info", None))
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings, [r.getMessage() for r in caplog.records]
+    assert "Failed to send info message to client (4 characters)" in warnings[0], (
+        warnings[0]
+    )
+
+
 def test_control_a_working_log_send_is_awaited_once_with_the_error() -> None:
     """The cells above count one send; a context that can send gets exactly one."""
     ctx = _ctx(NOT_A_SESSION_ID)
