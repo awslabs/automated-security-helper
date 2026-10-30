@@ -799,16 +799,20 @@ class TestLinkedDirectories:
             "yarn.lock",
         ]
 
-    def test_members_below_a_directory_first_reached_through_a_link_are_listed_twice(
+    def test_members_below_a_directory_first_reached_through_a_link_are_listed_at_their_real_path(
         self, tmp_path
     ):
-        """With ``ui -> packages/ui`` the link is walked first, and a set of
-        every walked real path then cut everything below the real
-        ``packages/ui`` when os.walk reached it: ``packages/ui/plugins/x`` was
-        listed under the link's name only, and a workspace glob
-        ``packages/ui/plugins/*`` found nothing in yarn's copy. A real directory
-        is walked in full; the guard cuts only a link back to a directory whose
-        walk is in progress."""
+        """With ``ui -> packages/ui`` the link is met first (os.walk hands the
+        parent's linked directories to the walk before it descends the real
+        ones), and a set of every walked real path then cut everything below
+        the real ``packages/ui`` when os.walk reached it: ``packages/ui/plugins/x``
+        was listed under the link's name only, and a workspace glob
+        ``packages/ui/plugins/*`` found nothing in yarn's copy. A link into the
+        package is not walked at all: the real directory is listed at its own
+        path in full, and the link contributes its own manifest alone. (The
+        earlier cure walked the real directory a second time through the link;
+        with two links per level that was 2^N walks, a bound the repository
+        could remove.)"""
         repo = tmp_path / "repo"
         package = _yarn_package(repo)
         _manifest(package / "packages" / "ui", "ui")
@@ -824,9 +828,89 @@ class TestLinkedDirectories:
             "packages/ui/package.json",
             "packages/ui/plugins/x/package.json",
             "ui/package.json",
-            "ui/plugins/x/package.json",
             "yarn.lock",
         ]
+
+    @pytest.mark.parametrize("inside_the_package", [True, False], ids=["in", "out"])
+    def test_each_real_directory_is_walked_once_whatever_the_links_to_it(
+        self, tmp_path, monkeypatch, inside_the_package
+    ):
+        """Twelve real directories, each holding two links to the next. A walk
+        that re-entered a directory once per link chain made 2^12 walks here
+        (and the listing ran twice per package); each real directory is walked
+        once. With the chain inside the package no link is walked at all (the
+        real directories are reached by os.walk); with the chain beside the
+        package, inside the scanned tree, each real directory is entered once
+        through the first link that reaches it. The walk's starts are counted
+        through os.walk, which the walk calls once per directory it enters."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        base = package / "chain" if inside_the_package else repo / "chain"
+        depth = 12
+        levels = [base / f"d{i}" for i in range(depth + 1)]
+        for level in levels:
+            _manifest(level, level.name)
+        for current, following in zip(levels, levels[1:]):
+            os.symlink(following, current / "a", target_is_directory=True)
+            os.symlink(following, current / "b", target_is_directory=True)
+        os.symlink(levels[0], package / "entry", target_is_directory=True)
+        starts: list[str] = []
+        real_walk = os.walk
+
+        def counting_walk(top, *args, **kwargs):
+            starts.append(os.path.realpath(top))
+            return real_walk(top, *args, **kwargs)
+
+        monkeypatch.setattr(os, "walk", counting_walk)
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert len(starts) == len(set(starts)), starts
+        manifests = [p for p in _rel(listed, package) if p.endswith("package.json")]
+        assert len(manifests) == len(set(manifests)), manifests
+        if inside_the_package:
+            # One walk, the package's. Listed: the root manifest, the 13 real
+            # directories at their own paths, and the own manifest of every
+            # link (entry, and a and b at each of the 12 levels that have them).
+            assert len(starts) == 1, starts
+            assert len(manifests) == 1 + (depth + 1) + 1 + 2 * depth, manifests
+            assert "chain/d12/package.json" in manifests
+            assert "entry/package.json" in manifests
+        else:
+            # The package's walk plus one per real directory (13), each entered
+            # through the first link that reached it. Listed: the root
+            # manifest, d0 under entry, and at each later level one walked
+            # manifest (through a) and one alias manifest (b's own).
+            assert len(starts) == depth + 2, starts
+            assert len(manifests) == 1 + 1 + 2 * depth, manifests
+            assert "entry/" + "a/" * depth + "package.json" in manifests
+
+    def test_a_package_reaching_too_many_linked_directories_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        """The hard bound behind the once-per-directory rule: past the cap of
+        distinct linked directories entered, the package is refused with the
+        reason (the scan loop records it), not walked on. The cap is
+        monkeypatched low; the fixture is a chain of five real directories
+        beside the package, each reached through a link."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        levels = [repo / "chain" / f"d{i}" for i in range(5)]
+        for level in levels:
+            _manifest(level, level.name)
+        for current, following in zip(levels, levels[1:]):
+            os.symlink(following, current / "next", target_is_directory=True)
+        os.symlink(levels[0], package / "entry", target_is_directory=True)
+        monkeypatch.setattr(child_module, "_MAX_LINKED_DIRECTORY_WALKS", 3)
+
+        with pytest.raises(
+            child_module.TooManyLinkedDirectories, match="more than 3 linked"
+        ):
+            package_manager_inputs("yarn", package, roots=[repo])
+
+        monkeypatch.setattr(child_module, "_MAX_LINKED_DIRECTORY_WALKS", 5)
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+        assert "entry/next/next/next/next/package.json" in _rel(listed, package)
 
     def test_a_link_back_to_a_directory_being_walked_lists_its_manifest_only(
         self, tmp_path

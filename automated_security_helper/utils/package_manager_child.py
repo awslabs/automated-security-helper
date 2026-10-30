@@ -140,6 +140,13 @@ def is_no_yarnrc_name(value: object) -> bool:
 #: Directories never copied for yarn: installed packages and version control.
 _SKIPPED_DIR_NAMES = frozenset({"node_modules", ".git"})
 
+#: How many linked directories the yarn input walk will enter for one package
+#: before it refuses the package (``TooManyLinkedDirectories``). Each real
+#: directory is walked once whatever the number of links to it, so the count is
+#: of distinct linked directories reached, and a repository that chains that many
+#: is not one yarn would audit in bounded time either.
+_MAX_LINKED_DIRECTORY_WALKS = 1000
+
 #: Why a file the package manager would read is not handed to it.
 LINK_LEAVES_TREE = "link leaves the scanned tree"
 NOT_A_REGULAR_FILE = "not a regular file"
@@ -166,6 +173,18 @@ class SuppressionsNotLiftable(ValueError):
     but the package manager can (nested past the recursion limit, say) kept its
     ignore lists in the copy, and pnpm applied them under the flag; the package
     is refused instead, with this reason, which the scan loop records.
+    """
+
+
+class TooManyLinkedDirectories(ValueError):
+    """The yarn input walk entered more linked directories than
+    ``_MAX_LINKED_DIRECTORY_WALKS`` for one package.
+
+    Every real directory is walked once, so a chain of links cannot multiply the
+    walk; this is the hard bound behind that rule, for a repository (ASH scans
+    untrusted ones) laid out to reach thousands of distinct directories through
+    links. The package is refused with this reason, which the scan loop records
+    as that audit's failure, rather than walked on.
     """
 
 
@@ -603,12 +622,25 @@ def package_manager_inputs(
     ``roots`` are the trees a linked directory may be walked into (the scanned
     tree): yarn walks a linked directory for members like any other, so one that
     resolves inside a root is walked here too, and a member manifest two levels
-    below the link is listed. Two linked directories inside the roots are not
-    walked: one that resolves into a ``node_modules`` or ``.git`` (left out like
-    the real directories of those names), and one that resolves to the package
-    directory or an ancestor of it, which would walk the scanned tree again under
-    the link's name; the latter has only its own ``package.json`` listed. A
-    linked directory that resolves outside every root has only its own
+    below the link is listed. Each REAL directory is walked once, whatever the
+    number of links that reach it: a link that resolves inside the package
+    directory is never walked (os.walk reaches that directory at its own path,
+    so its members are listed there, where a workspace glob over the real path
+    finds them; the link's own ``package.json`` is listed as a file yarn reads
+    at the link's path, and the alias is logged), and a link that resolves
+    outside the package but inside a root is walked the first time it is
+    reached and listed by its own manifest alone after that. A walk that
+    re-entered a real directory once per distinct link chain cost 2^N walks on
+    a tree of N directories each holding two links to the next, a bound a
+    scanned repository could remove; ``_MAX_LINKED_DIRECTORY_WALKS`` distinct
+    linked directories is the hard cap behind the rule, past which the package
+    is refused (``TooManyLinkedDirectories``). Three linked directories inside
+    the roots are never walked: one that resolves into a ``node_modules`` or
+    ``.git`` (left out like the real directories of those names), one that
+    resolves to the package directory or an ancestor of it (which would walk
+    the scanned tree again under the link's name), and one whose real path was
+    walked already; each has only its own ``package.json`` listed. A linked
+    directory that resolves outside every root has only its own
     ``package.json`` listed, present or not, which ``input_refusal`` then refuses
     for resolving outside the tree, so the package is refused and nothing below
     the link is read: a link to a large tree elsewhere is never walked. With no
@@ -636,18 +668,20 @@ def package_manager_inputs(
         Path(os.path.realpath(p)) for p in skip if not _within(package_dir, Path(p))
     ]
     bounds = [Path(r) for r in roots]
-    # The real paths of the directories whose walk is in progress: the package
-    # directory and each linked directory entered on the way to the current
-    # one. A link whose target is one of them (``a -> b`` with ``b/back -> a``,
-    # or a link into its own subtree) would otherwise never end. Nothing else
-    # is cut: a real directory reached after a link to it was walked is walked
-    # in full. A "seen" set of every walked real path cut everything below
-    # such a directory, so with ``ui -> packages/ui`` the member
-    # ``packages/ui/plugins/x`` was listed under the link's name only, and a
-    # workspace glob ``packages/ui/plugins/*`` found nothing in yarn's copy.
-    chain: List[str] = [os.path.realpath(package_dir)]
+    # The real paths of the linked directories walked so far, each walked once.
+    # A link into the package directory itself is never walked: os.walk reaches
+    # that directory at its own path and lists its members there, which is
+    # where a workspace glob over the real path (``packages/ui/plugins/*``)
+    # looks in yarn's copy; a walk through the link listed them under the
+    # link's name only. A walk that re-entered a real directory once per link
+    # chain (no visited set, cycles cut only) was unbounded on a tree of N
+    # directories each holding two links to the next: 2^N walks, twice per
+    # package. The count of linked directories entered is capped as well.
+    visited: set[str] = set()
+    walked_links = 0
 
     def _walk(start: Path) -> None:
+        nonlocal walked_links
         for root, dirs, files in os.walk(start, followlinks=False):
             here = Path(root)
             manifest = here / "package.json"
@@ -672,22 +706,40 @@ def package_manager_inputs(
                         # and copied, three times per package.
                         continue
                     real = os.path.realpath(linked)
-                    if _within(here, linked) or real in chain:
+                    if (
+                        _within(here, linked)
+                        or _within(Path(real), package_dir)
+                        or real in visited
+                    ):
                         # ``packages/root -> ..`` (an ancestor of this
-                        # directory, the whole scanned tree included), or a
-                        # link back to a directory whose walk is in progress:
-                        # walking it would walk this directory again under
-                        # another name, without end. Its own manifest is a
-                        # file yarn reads at this path; nothing below it is
-                        # walked.
+                        # directory, the whole scanned tree included); a link
+                        # into the package (``ui -> packages/ui``), whose
+                        # target os.walk reaches at its own path; or a link to
+                        # a directory walked already. Walking any of them
+                        # would list the same directory again under another
+                        # name, and a loop without end for the first two. Its
+                        # own manifest is a file yarn reads at this path, so
+                        # that is listed; nothing below it is walked, and the
+                        # alias is logged.
                         if (linked / "package.json").exists():
                             inputs.append(linked / "package.json")
+                        ASH_LOGGER.debug(
+                            f"npm-audit: {linked} is a link to {real}, which the "
+                            "walk lists at its own path; only the link's own "
+                            "manifest is listed under the link's name",
+                            extra={"markup": False},
+                        )
                         continue
-                    chain.append(real)
-                    try:
-                        _walk(linked)
-                    finally:
-                        chain.pop()
+                    walked_links += 1
+                    if walked_links > _MAX_LINKED_DIRECTORY_WALKS:
+                        raise TooManyLinkedDirectories(
+                            f"{package_dir}: more than {_MAX_LINKED_DIRECTORY_WALKS} "
+                            "linked directories to walk for one package, so its "
+                            "inputs cannot be listed in bounded time; the package "
+                            "was not audited"
+                        )
+                    visited.add(real)
+                    _walk(linked)
                 elif bounds or (linked / "package.json").exists():
                     # Outside every root the link's own manifest is listed
                     # whether or not it exists: input_refusal refuses it for
