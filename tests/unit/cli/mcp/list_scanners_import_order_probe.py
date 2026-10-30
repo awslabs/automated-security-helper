@@ -181,16 +181,23 @@ class TestLoadedScannerClasses:
         """Guards the subtlety that makes this work.
 
         ``ASH_SCANNERS`` is declared in each package's ``__init__``, so the
-        loaders return the three vendored scanners only when handed the package
+        loaders return the five vendored scanners only when handed the package
         path. Pointing at ``ash_ferret_plugins.ferret_scanner`` imports the
         scanner but reports nothing, and the resulting list would be silently
-        short again. Measured both ways: leaf paths yield 0, package paths yield 3.
+        short again. Measured both ways: leaf paths yield 0, package paths yield 5.
         """
         leaf_paths = [
             f"{package}.{leaf}"
             for package, leaf in zip(
                 _VENDORED_SCANNER_PLUGIN_PACKAGES,
-                ("ferret_scanner", "snyk_code_scanner", "trivy_repo_scanner"),
+                (
+                    "ferret_scanner",
+                    "guarddog_scanner",
+                    "hadolint_scanner",
+                    "snyk_code_scanner",
+                    "trivy_repo_scanner",
+                ),
+                strict=True,
             )
         ]
 
@@ -204,7 +211,7 @@ class TestLoadedScannerClasses:
             "the leaf modules this guard is stale, but check the package paths "
             "still work before deleting it"
         )
-        assert len(via_packages["scanners"]) == 3
+        assert len(via_packages["scanners"]) == 5
 
 
 def test_this_child_imported_the_checkout_under_test():

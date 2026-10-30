@@ -1575,6 +1575,10 @@ jobs:
         run: |
           pip install ".[cdk]"
           ash dependencies install
+          # hadolint and GuardDog are community scanners: their names are tools only
+          # once their module is loaded, hence the community config.
+          ash dependencies install --config .ash/.ash_community_plugins.yaml \
+            --tool hadolint --tool guarddog
       # trivy-repo is a plugin scanner, so ASH knows its name only once its module is
       # loaded (`ash dependencies install --tool trivy-repo` without it exits 2,
       # "Unknown tool(s)"): the install loads it with an override, and the config
@@ -1582,7 +1586,8 @@ jobs:
       # then fetched into
       # trivy's own default cache, so that the offline pair has them: offline, ASH
       # updates nothing, and under sandbox-exec the cache is read-only, which an
-      # offline trivy-repo scan must survive.
+      # offline trivy-repo scan must survive. The hadolint and GuardDog community
+      # modules join the config so the parity runs load their scanners too.
       - name: Install trivy-repo, enable it, and seed trivy's cache
         env:
           TMPDIR: ${{ runner.temp }}
@@ -1592,6 +1597,8 @@ jobs:
           printf '%s\n' \
             'ash_plugin_modules:' \
             '  - automated_security_helper.plugin_modules.ash_trivy_plugins' \
+            '  - automated_security_helper.plugin_modules.ash_hadolint_plugins' \
+            '  - automated_security_helper.plugin_modules.ash_guarddog_plugins' \
             'scanners:' \
             '  trivy-repo:' \
             '    enabled: true' > "$PARITY_CONFIG"
@@ -1627,7 +1634,7 @@ jobs:
       # is MISSING in both runs cannot pass parity by being absent; --require-offline
       # holds trivy-repo to that in the offline pair too. The config loads the Trivy
       # community module, so trivy-repo, which shares the builtin trivy's code, is
-      # compared too.
+      # compared too, and the hadolint and GuardDog modules for their scanners.
       - name: Compare every scanner with and without the sandbox
         # The report path through the environment, not interpolated into the script,
         # which is this repository's convention for every context value a shell reads.
@@ -1640,7 +1647,7 @@ jobs:
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ash \
             --config "$PARITY_CONFIG" \
-            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo \
+            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo,hadolint,guarddog \
             --require-offline trivy-repo \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
@@ -1985,6 +1992,14 @@ jobs:
       # tell a scanner that could not run from one that should have.
       - name: Install the scanners the integration suite runs for real
         run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+      # hadolint is a community scanner, so nothing else in this job provisions it. The
+      # pinned, digest-verified release asset, through the same installer the image uses,
+      # into ~/.ash/bin, which the suite step below puts on its own PATH.
+      # ASH_REQUIRE_HADOLINT below makes a missing hadolint fail its tests.
+      - name: Install hadolint
+        run: |
+          mkdir -p "$HOME/.ash/bin"
+          python3 automated_security_helper/assets/install-pinned-tool.py hadolint -b "$HOME/.ash/bin"
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
@@ -2012,6 +2027,7 @@ jobs:
           ASH_REQUIRE_GITLEAKS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
           ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks,checkov,semgrep,zizmor
+          ASH_REQUIRE_HADOLINT: "1"
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           export ASH_CFN_GUARD_RULES_DIR="$HOME/.ash/share/cfn-guard-rules"

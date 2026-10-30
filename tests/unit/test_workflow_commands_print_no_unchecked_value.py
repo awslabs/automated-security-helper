@@ -160,6 +160,10 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
     (_SCAN_TEST, _COMPOSITE, "Validate No Plugin Errors (Python Local Windows)"): {
         "ReportExit": NUMBER
     },
+    # The same Get-Command path as "Validate ASH using Python Local (Windows)" above.
+    (_SCAN_TEST, _COMPOSITE, "Validate community hadolint (Python Local Windows)"): {
+        "AshPath": RUNNER
+    },
     (
         ".github/actions/run-unit-tests/action.yml",
         _COMPOSITE,
@@ -177,6 +181,11 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         ".github/actions/validate-container/action.yml",
         _COMPOSITE,
         "Scan with the image's CloudFormation scanners",
+    ): {"rc": NUMBER},
+    (
+        ".github/actions/validate-container/action.yml",
+        _COMPOSITE,
+        "Scan with the image's hadolint (community plugin)",
     ): {"rc": NUMBER},
     (
         ".github/actions/validate-container/action.yml",

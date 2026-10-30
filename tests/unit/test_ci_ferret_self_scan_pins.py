@@ -70,6 +70,9 @@ PLUGIN_DIR = "automated_security_helper/plugin_modules/ash_ferret_plugins"
 TEST_DIR = "tests/unit/plugin_modules/ash_ferret_plugins"
 FERRET_SCANNER = f"{PLUGIN_DIR}/ferret_scanner.py"
 DOCX_SCRIPT = "scripts/generate_test_docx.py"
+HADOLINT_BEHAVIOR_TEST = (
+    "tests/unit/plugin_modules/ash_hadolint_plugins/test_hadolint_scanner_behavior.py"
+)
 
 
 @dataclass(frozen=True)
@@ -119,6 +122,18 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     ],
     # The two lines after the "MRZ-style lines" comment.
     ("PASSPORT", DOCX_SCRIPT): [_Marker((r"Passport: P<",), every_line=True)],
+    # The block of three constants the hadolint behavior test compares the vendored
+    # license files against: the commit its tag points at and two file digests. One
+    # pin takes the three lines; the patterns name the constants, not their values.
+    ("API_KEY_OR_SECRET", HADOLINT_BEHAVIOR_TEST): [
+        _Marker(
+            (
+                r'^    COMMIT = "',
+                r'^    LICENSE_SHA256 = "',
+                r'^    NOTICES_SHA256 = "',
+            )
+        ),
+    ],
 }
 
 

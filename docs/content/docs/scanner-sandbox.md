@@ -355,12 +355,15 @@ The community scanners declare theirs:
 - trivy-repo shares the builtin trivy's declaration: a network, the database cache and
   the `TRIVY_` variables.
 - ferret-scan asks only for its `FERRET_` variables.
+- hadolint and GuardDog take the strict default. hadolint's `HADOLINT_*` variables
+  and user-level config are not passed in, and GuardDog's `verify` runs without a
+  network.
 
 A file outside the source tree that a scanner option names is not mounted (cfn-guard's
 `rules_paths` needs no mount: ASH copies those rules into the scanner run's own
 directory above): a
 `config_file` of actionlint, gitleaks, cfn-lint,
-zizmor, trivy or trivy-repo, gitleaks' `baseline_path`, trivy's `ignore_file`, a
+zizmor, trivy, trivy-repo or hadolint, gitleaks' `baseline_path`, trivy's `ignore_file`, a
 `secret_config_file` of trivy or trivy-repo, trivy-repo's `module_dir`, or a
 path-valued actionlint `shellcheck` or `pyflakes`. Nor do gitleaks' `GITLEAKS_*` variables or
 zizmor's GitHub token reach a sandbox. Grants derived from options or the environment
@@ -618,7 +621,9 @@ Out of scope:
 
 ## When a scanner cannot be sandboxed {#missing}
 
-ASH records a scanner it cannot sandbox as `MISSING`, and under the default
+Under `--sandbox auto`, ASH records a scanner it cannot sandbox because no backend
+works as `MISSING`; a backend you named that is unavailable, or a sandbox refused for
+a reason other than availability, is `ERROR`. Either way, under the default
 `fail_on_incomplete_scanners` the scan exits 1. The reason is in the scan output, in
 `ash.log`, and in the scanner's `missing_reason` in `ash_aggregated_results.json`:
 
@@ -779,15 +784,15 @@ options above. The command still exits 0, and the only sign is a warning that
 options, without `--quiet`, and requires a mount namespace other than ASH's own, since
 every sandbox firejail builds has one. When the command reports ASH's namespace, or
 firejail prints that warning, firejail is unavailable with that reason:
-`--sandbox firejail` records each scanner `MISSING`, and `--sandbox auto` moves on to
-Landlock.
+`--sandbox firejail` records each scanner `ERROR` with that reason, and `--sandbox auto`
+moves on to Landlock.
 
 ### Linux: Landlock
 
 Landlock is an unprivileged kernel LSM, so this mode needs nothing installed. It
 needs Landlock ABI 3 (Linux 6.2) or later, the first that controls truncation: on an
 older kernel a scanner could truncate files it may only read, so ASH reports
-Landlock unavailable there. `--sandbox landlock` then records each scanner `MISSING`
+Landlock unavailable there. `--sandbox landlock` then records each scanner `ERROR`
 with the ABI in the reason, and `auto` does not use it. ASH starts a small wrapper
 (`utils/sandbox/landlock_exec.py`, standard library only) that restricts itself and
 then `exec`s the scanner:
@@ -929,8 +934,9 @@ Risk to record: Apple has marked `sandbox-exec` deprecated since macOS 10.13 and
 documents SBPL as private. It still works on current macOS and is what Apple's own
 tools and several other developer tools use, but a future macOS could remove or change
 it without notice. ASH probes it at startup like every other backend, so removal would
-show up as "sandbox-exec unavailable" and `MISSING` scanners, not as an unsandboxed
-scan.
+show up as "sandbox-exec unavailable": `ERROR` scanners under `--sandbox sandbox-exec`
+and `MISSING` ones under `auto`, which has no other macOS backend, not as an
+unsandboxed scan.
 
 ### Windows
 

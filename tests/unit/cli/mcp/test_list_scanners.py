@@ -655,6 +655,11 @@ def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]
         # uv-managed like semgrep: not installed, present uv, online run.
         "cfn_lint": (None, False, True),
         "gitleaks": (None, False, False),
+        # uv-managed like semgrep: the stand-in uv lists no guarddog, uv is
+        # present and the run is online, so a scan would install it.
+        "guarddog": (None, False, True),
+        # A binary found on PATH, as for gitleaks: none here, nothing to install.
+        "hadolint": (None, False, False),
         "zizmor": (None, False, True),
         # The same trivy stand-in as trivy_repo answers both trivy scanners.
         "trivy": ("0.99.9", True, False),

@@ -775,6 +775,76 @@ def test_the_checkov_matcher_reads_skip_path_as_checkov_does(
     assert checkov_skips(pattern, f"/scan/{relative}", relative) is skipped
 
 
+def _hides(kind: Any, pattern: str, relative: str) -> bool:
+    from automated_security_helper.config.client_scanner_exclusions import (
+        ClientScannerExclusion,
+    )
+
+    exclusion = ClientScannerExclusion(
+        scanner="guarddog",
+        option="excluded_paths",
+        kind=kind,
+        pattern=pattern,
+        reason="test",
+    )
+    return exclusion.hides(
+        relative=relative, absolute=f"/scan/{relative}", rule_id=None
+    )
+
+
+@pytest.mark.parametrize(
+    ("pattern", "relative", "by_glob", "by_guarddog"),
+    [
+        # The whole path, and a ``*`` that crosses a separator: both readings agree.
+        ("src/a.py", "src/a.py", True, True),
+        ("*.py", "src/a.py", True, True),
+        ("docs/*.md", "docs/a/b.md", True, True),
+        # ``**`` stands for directories, from the start of the path.
+        ("vendor/**", "vendor/lib/a.py", True, True),
+        ("**/tests/**", "tests/test_a.py", True, True),
+        # A pattern that names only a directory, a file name or a run of
+        # directories in the path: the glob kind hides the file, and
+        # GuardDog's filter, which reads the whole path, keeps it.
+        ("vendor", "vendor/lib/a.py", True, False),
+        ("src", "src/a.py", True, False),
+        ("a/b", "a/b/c.py", True, False),
+        ("a.py", "src/a.py", True, False),
+        ("vendor/**", "src/vendor/a.py", True, False),
+        ("**/tests", "src/tests/a.py", True, False),
+        ("/vendor/**", "vendor/a.py", True, False),
+    ],
+)
+def test_a_guarddog_entry_hides_only_the_files_guarddog_leaves_out(
+    pattern: str, relative: str, by_glob: bool, by_guarddog: bool
+) -> None:
+    """The kind of ``guarddog excluded_paths`` is GuardDog's own filter, not the glob kind.
+
+    GuardDog drops a file when ``file_path_matches(<path relative to the source
+    directory>, pattern)`` is true (``GuardDogScanner._candidate_files``). The
+    kind calls the same function, so a finding is hidden exactly when GuardDog
+    would not have been given its file. The glob kind is the control: it hides
+    the second group, which GuardDog keeps.
+    """
+    from automated_security_helper.utils.suppression_matcher import (
+        file_path_matches,
+    )
+
+    assert _hides("glob", pattern, relative) is by_glob
+    assert _hides("guarddog-path", pattern, relative) is by_guarddog
+    assert file_path_matches(relative, pattern) is by_guarddog
+
+
+def test_the_guarddog_option_is_matched_the_way_guarddog_filters_it() -> None:
+    from automated_security_helper.config.client_scanner_exclusions import (
+        SCANNER_EXCLUSION_OPTIONS,
+    )
+
+    kinds = {
+        (spec.scanner, spec.option): spec.kind for spec in SCANNER_EXCLUSION_OPTIONS
+    }
+    assert kinds[("guarddog", "excluded_paths")] == "guarddog-path"
+
+
 @pytest.mark.parametrize("name", TRIVY_SCANNERS)
 def test_the_trivy_scanner_gets_no_ignore_file_from_a_delivered_config(
     tmp_path: Path, name: str
@@ -1030,6 +1100,14 @@ NON_PATH_EXCLUSIONS = [
     ("grype", "offline", True),
     ("trivy-repo", "offline", True),
     ("ferret-scan", "max_live_bytes", "1KB"),
+    ("hadolint", "config_file", "/etc/hadolint.yaml"),
+    ("hadolint", "offline", True),
+    ("guarddog", "ecosystems", ["pypi"]),
+    ("guarddog", "rules", ["threat-runtime-obfuscation-base64exec"]),
+    ("guarddog", "exclude_rules", ["threat-runtime-obfuscation-base64exec"]),
+    ("guarddog", "verify", True),
+    ("guarddog", "sandbox", "disabled"),
+    ("guarddog", "offline", True),
     ("cfn-guard", "rule_sets", []),
     ("cfn-lint", "ignore_checks", ["W2001"]),
     ("cfn-lint", "regions", ["eu-west-1"]),
@@ -1071,6 +1149,12 @@ def _option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
         FerretScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
+        GuardDogScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
+        HadolintScannerConfigOptions,
+    )
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScannerConfigOptions,
     )
@@ -1101,6 +1185,8 @@ def _option_defaults() -> Dict[tuple, Any]:
         "opengrep": OpengrepScannerConfigOptions(),
         "semgrep": SemgrepScannerConfigOptions(),
         "ferret-scan": FerretScannerConfigOptions(),
+        "guarddog": GuardDogScannerConfigOptions(),
+        "hadolint": HadolintScannerConfigOptions(),
         "trivy-repo": TrivyRepoScannerConfigOptions(),
     }
     defaults: Dict[tuple, Any] = {}
@@ -1230,6 +1316,20 @@ _REVIEWED_OPTIONS: Dict[tuple, str] = {
     ("zizmor", "persona"): (
         "regular, the default, reports the fewest; pedantic and auditor report more"
     ),
+    ("guarddog", "include_capabilities"): (
+        "adds capability matches to the output at INFO; reports more"
+    ),
+    ("guarddog", "max_hits"): (
+        "set in a tree's config or by a client it only raises GuardDog's per-rule "
+        "limits (only the operator can lower them), so it reports no fewer"
+    ),
+    ("guarddog", "verify_timeout"): (
+        "a verify run that runs out of time is a failed target, which the scanner "
+        "reports as an error"
+    ),
+    ("guarddog", "verify_parallelism"): (
+        "how many dependencies verify downloads at once; throughput, not findings"
+    ),
 }
 
 
@@ -1254,6 +1354,12 @@ def _scanner_option_models() -> Dict[str, Any]:
     )
     from automated_security_helper.plugin_modules.ash_ferret_plugins import (
         ferret_scanner,
+    )
+    from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
+        guarddog_scanner,
+    )
+    from automated_security_helper.plugin_modules.ash_hadolint_plugins import (
+        hadolint_scanner,
     )
     from automated_security_helper.plugin_modules.ash_snyk_plugins import (
         snyk_code_scanner,
@@ -1282,6 +1388,8 @@ def _scanner_option_models() -> Dict[str, Any]:
         "ferret-scan": ferret_scanner.FerretScannerConfigOptions,
         "snyk-code": snyk_code_scanner.SnykCodeScannerConfigOptions,
         "trivy-repo": trivy_repo_scanner.TrivyRepoScannerConfigOptions,
+        "guarddog": guarddog_scanner.GuardDogScannerConfigOptions,
+        "hadolint": hadolint_scanner.HadolintScannerConfigOptions,
     }
 
 
@@ -1356,6 +1464,12 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
         FerretScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
+        GuardDogScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
+        HadolintScannerConfigOptions,
+    )
     from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
         SnykCodeScannerConfigOptions,
     )
@@ -1368,6 +1482,8 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
     found: Dict[tuple, Any] = {}
     for scanner, model in (
         ("ferret-scan", FerretScannerConfigOptions()),
+        ("guarddog", GuardDogScannerConfigOptions()),
+        ("hadolint", HadolintScannerConfigOptions()),
         ("snyk-code", SnykCodeScannerConfigOptions()),
         ("trivy-repo", TrivyRepoScannerConfigOptions()),
     ):
@@ -1435,6 +1551,9 @@ def test_the_table_defaults_are_the_scanners_defaults() -> None:
     from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
         FerretScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
+        GuardDogScannerConfigOptions,
+    )
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScannerConfigOptions,
     )
@@ -1450,6 +1569,7 @@ def test_the_table_defaults_are_the_scanners_defaults() -> None:
         "semgrep": SemgrepScannerConfigOptions,
         "syft": SyftScannerConfigOptions,
         "ferret-scan": FerretScannerConfigOptions,
+        "guarddog": GuardDogScannerConfigOptions,
         "trivy-repo": TrivyRepoScannerConfigOptions,
     }
     assert {spec.scanner for spec in SCANNER_EXCLUSION_OPTIONS} == set(classes)

@@ -693,7 +693,7 @@ class TestTheDetector:
             [
                 "package.json",
                 "deploy/cdk/package.json",
-                "tests/test_data/scanners/npmaudit/fixture_repo/npm_clean/package.json",
+                "tests/test_data/scanners/guarddog/fixture_repo/npm_clean/package.json",
                 "docs/not-a-package.json",
             ]
         )

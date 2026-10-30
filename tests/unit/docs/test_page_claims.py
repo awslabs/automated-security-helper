@@ -8474,6 +8474,11 @@ def _mcp_serving_stdio(
 #: two minutes after the signal is the failure the stop tests look for.
 _MCP_CHILD_SECONDS = 300
 _MCP_STOP_SECONDS = 120
+#: How long an HTTP server may take to say it listens. On Windows a server that has
+#: not said so within a minute has not started, and waiting the full
+#: ``_MCP_CHILD_SECONDS`` only moves the same failure five minutes later in every test
+#: that starts one. Elsewhere it is ``_MCP_CHILD_SECONDS``, unchanged.
+_MCP_HTTP_LISTEN_SECONDS = 60 if os.name == "nt" else _MCP_CHILD_SECONDS
 
 
 class _Lines:
@@ -8493,10 +8498,12 @@ class _Lines:
             self._new.put(line)
         self._new.put(None)
 
-    def wait_for(self, pattern: "re.Pattern[str]") -> Optional["re.Match[str]"]:
+    def wait_for(
+        self, pattern: "re.Pattern[str]", seconds: float = _MCP_CHILD_SECONDS
+    ) -> Optional["re.Match[str]"]:
         """The first match of ``pattern`` in a new line, or None at the end of the
-        pipe or after ``_MCP_CHILD_SECONDS``."""
-        deadline = time.monotonic() + _MCP_CHILD_SECONDS
+        pipe or after ``seconds``, ``_MCP_CHILD_SECONDS`` by default."""
+        deadline = time.monotonic() + seconds
         while (remaining := deadline - time.monotonic()) > 0:
             try:
                 line = self._new.get(timeout=remaining)
@@ -8654,13 +8661,14 @@ def _mcp_http_server(
         stderr=subprocess.PIPE,
     )
     stderr = _Lines(process.stderr)
-    listening = stderr.wait_for(_UVICORN_LISTENING)
+    listening = stderr.wait_for(_UVICORN_LISTENING, _MCP_HTTP_LISTEN_SECONDS)
     if listening is None:
         if process.poll() is None:
             process.kill()
         process.wait(timeout=30)
         raise AssertionError(
-            f"the HTTP server did not say it listens within {_MCP_CHILD_SECONDS} s "
+            "the HTTP server did not say it listens within "
+            f"{_MCP_HTTP_LISTEN_SECONDS} s "
             f"(exit {process.returncode}):\n{stderr.text()[-1500:]}"
         )
     port = int(listening.group(1))

@@ -448,6 +448,12 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/scanners/gitleaks/options/config_file",
             "/scanners/zizmor/options/config_file",
             "/scanners/zizmor/options/online_audits",
+            "/scanners/hadolint/options/config_file",
+            "/scanners/guarddog/options/ecosystems",
+            "/scanners/guarddog/options/rules",
+            "/scanners/guarddog/options/exclude_rules",
+            "/scanners/guarddog/options/verify",
+            "/scanners/guarddog/options/sandbox",
             "/scanners/cfn-lint/options/honor_inline_ignores",
             "/scanners/gitleaks/options/honor_inline_ignores",
             "/scanners/zizmor/options/honor_inline_ignores",
@@ -457,13 +463,18 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 
 
 #: Defaults of the denied options of scanners that come from a plugin package
-#: (ferret-scan, snyk-code, trivy-repo). The trusted config carries a built-in
-#: scanner's defaults, so a delivered value equal to one is accepted as no
-#: change; it need not carry a plugin's section at all, so without this a
-#: delivered file that wrote such a default would be refused. Used only where
-#: the trusted config has no value of its own. snyk-code's and trivy-repo's
-#: whole sections are denied (``ALWAYS_DENIED_PATHS``), so every one of their
-#: options is listed.
+#: (ferret-scan, guarddog, hadolint, snyk-code, trivy-repo). The trusted config
+#: carries a built-in scanner's defaults, so a delivered value equal to one is
+#: accepted as no change; it need not carry a plugin's section at all, so
+#: without this a delivered file that wrote such a default would be refused.
+#: Used only where the trusted config has no value of its own. snyk-code's and
+#: trivy-repo's whole sections are denied (``ALWAYS_DENIED_PATHS``), so every
+#: one of their options is listed. For ferret-scan, guarddog and hadolint the
+#: denied options are listed: those named in the default ``denied_paths`` and
+#: the ones the ``/scanners/*/options/offline`` and ``tool_version`` globs reach
+#: (hadolint has no ``tool_version`` option). A list default is compared with
+#: ``==``, so a delivered list holding the same items in another order is not
+#: the default.
 #: ``test_the_plugin_option_defaults_are_the_plugins`` derives the list from the
 #: default ``denied_paths`` and checks each value against the plugin's model.
 PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
@@ -481,6 +492,22 @@ PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
     ("ferret-scan", "tool_version"): None,
     ("ferret-scan", "use_default_config"): True,
     ("ferret-scan", "validator_budget"): None,
+    ("guarddog", "ecosystems"): [
+        "pypi",
+        "npm",
+        "go",
+        "github_action",
+        "rubygems",
+        "crates",
+    ],
+    ("guarddog", "exclude_rules"): [],
+    ("guarddog", "offline"): False,
+    ("guarddog", "rules"): [],
+    ("guarddog", "sandbox"): "auto",
+    ("guarddog", "tool_version"): None,
+    ("guarddog", "verify"): False,
+    ("hadolint", "config_file"): None,
+    ("hadolint", "offline"): False,
     ("snyk-code", "honor_tree_exclusions"): False,
     ("snyk-code", "offline"): False,
     ("snyk-code", "scan_timeout"): 1800,

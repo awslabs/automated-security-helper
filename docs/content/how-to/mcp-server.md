@@ -564,8 +564,8 @@ client:
   suppression carries `properties.clientSupplied: true`.
 - Files under a delivered ignore path are still scanned. Their findings are kept and marked
   suppressed instead of being dropped.
-- Path exclusions in scanner options, such as bandit's `excluded_paths`, are taken out of the
-  options and handled the same way, and a delivered `scanners.trivy-repo.options.ignore_file`
+- Path exclusions in scanner options, such as bandit's and guarddog's `excluded_paths`, are
+  taken out of the options and handled the same way, and a delivered `scanners.trivy-repo.options.ignore_file`
   becomes marked suppressions instead of being passed to trivy. [Configuration trust
   model](../concepts/trust-model.md#client-supplied) says how each is matched.
 

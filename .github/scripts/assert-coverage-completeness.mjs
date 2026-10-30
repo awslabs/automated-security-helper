@@ -90,7 +90,8 @@ const SOURCE_GLOBS = ['*.ts', '*.tsx', '*.mts', '*.cts', '*.js', '*.mjs'];
  * Files that are source by extension but are not production code: type
  * declarations carry no statements, test sources are the measurer, not the
  * measured, and scanner fixtures under tests/test_data/ are input a scanner reads
- * and nothing runs.
+ * and nothing runs (GuardDog's npm fixtures carry a package.json of their own,
+ * which is the package under scan, not a harness).
  */
 const NOT_PRODUCTION =
   /\.d\.ts$|(^|\/)test\/|\.test\.|\.spec\.|^tests\/test_data\//;
