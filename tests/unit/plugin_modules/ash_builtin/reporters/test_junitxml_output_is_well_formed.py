@@ -135,3 +135,28 @@ class TestAScannerNameThatIsNotTextKeepsItsCase:
         suites = {suite.get("name"): suite for suite in root.iter("testsuite")}
         assert "ash" in suites
         assert suites["ash"].find("testcase").get("classname") == "ODDNAME"
+
+    @pytest.mark.parametrize(
+        "project", [["svc", "lib"], {"name": "svc"}, 7, ""], ids=repr
+    )
+    def test_a_workspace_project_that_is_not_text_keeps_the_case(
+        self, tmp_path, project
+    ):
+        """An imported SARIF can write anything as ``properties.workspace_project``.
+
+        The reporter looks the project up in the per-report ``{project: gate}``
+        table, a dict lookup that hashes its key, so a list or a mapping there
+        would raise TypeError and lose the whole artefact as a non-text scanner
+        name did. ``extract_workspace_project`` reads only a non-empty str and
+        answers None for anything else, so the lookup never sees such a value;
+        this pins that reading at the document.
+        """
+        result = _make_result(rule_id="ODDPROJECT", level="error")
+        result.properties.__pydantic_extra__["workspace_project"] = project
+        result.properties.tags = []
+
+        output = _render(tmp_path, [result])
+
+        root = ET.fromstring(output)  # nosec B314
+        cases = [case.get("classname") for case in root.iter("testcase")]
+        assert "ODDPROJECT" in cases, output
