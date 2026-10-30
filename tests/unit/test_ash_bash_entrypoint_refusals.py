@@ -339,6 +339,41 @@ def test_an_output_dir_that_cannot_be_created_says_why(tmp_path, run_ash, bare_p
     assert result.stderr.rstrip().endswith(" (Not a directory)"), result.stderr
     assert "mkdir:" not in result.stderr, result.stderr
     assert "\x1b" not in result.stderr, repr(result.stderr)
+    assert "--output-dir" not in result.stderr, result.stderr
+    assert calls == []
+
+
+@pytest.mark.skipif(
+    # os.geteuid does not exist on Windows, and the module is skipped there
+    # (pytestmark), but this expression is evaluated when the module is imported.
+    os.name == "nt" or os.geteuid() == 0,
+    reason="root creates a directory whatever its parent's mode says",
+)
+def test_a_default_output_dir_that_cannot_be_created_names_the_option(
+    tmp_path, run_ash, bare_path
+):
+    """The default output directory is inside the scanned directory. A scanned
+    directory that cannot take it (read-only here) refuses with the reason, as any
+    output directory does, and names --output-dir as the way to write elsewhere; the
+    refusal of an --output-dir the operator chose carries no such hint (the check
+    above), since the choice was already theirs."""
+    source = tmp_path / "src"
+    source.chmod(0o555)
+    try:
+        result, calls = run_ash(
+            "--no-build",
+            "--source-dir",
+            "src",
+            OCI_RUNNER=str(bare_path / "recording-runner"),
+        )
+    finally:
+        source.chmod(0o755)
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "Output directory cannot be created: " in result.stderr, result.stderr
+    assert "(Permission denied)" in result.stderr, result.stderr
+    assert "pass --output-dir to write elsewhere" in result.stderr, result.stderr
+    assert "mkdir:" not in result.stderr, result.stderr
     assert calls == []
 
 

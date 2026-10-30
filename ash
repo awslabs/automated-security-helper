@@ -1266,8 +1266,12 @@ if [[ "${NO_RUN}" = "NO" ]]; then
   # working directory, and a `.ash` link the repository commits at that root stood
   # outside the linked-output rule below, which covers links below the source: the
   # reports went where the link points.
+  # A refusal of the default names --output-dir as the way to write elsewhere; one
+  # of a directory the operator chose does not, as the choice is theirs already.
+  OUTPUT_HINT=""
   if [ -z "${OUTPUT_DIR}" ]; then
     OUTPUT_DIR="${SOURCE_DIR%/}/.ash/ash_output"
+    OUTPUT_HINT="; the default is inside the scanned directory, pass --output-dir to write elsewhere"
   fi
   # The refusal gives mkdir's reason (the text after its last ": ", such as "Not a
   # directory") but not mkdir's line, which quotes the path in its own way: GNU mkdir
@@ -1388,11 +1392,11 @@ create_output_dir() {
   MKDIR_ERROR="$(mkdir -p -- "${OUTPUT_PATH}" 2>&1 >/dev/null)"
   if ! resolve_dir "${OUTPUT_PATH}"; then
     if [[ -d "${OUTPUT_PATH}" ]]; then
-      refuse_usage "Output directory cannot be entered: $(shown "${OUTPUT_DIR}")"
+      refuse_usage "Output directory cannot be entered: $(shown "${OUTPUT_DIR}")${OUTPUT_HINT}"
     fi
     MKDIR_REASON="${MKDIR_ERROR##*: }"
     MKDIR_REASON="${MKDIR_REASON//[![:print:]]/}"
-    refuse_usage "Output directory cannot be created: $(shown "${OUTPUT_DIR}") (${MKDIR_REASON:-mkdir did not make it})"
+    refuse_usage "Output directory cannot be created: $(shown "${OUTPUT_DIR}") (${MKDIR_REASON:-mkdir did not make it})${OUTPUT_HINT}"
   fi
   # One that was there already must take a file, as the scan writes them: one is
   # made under a name of its own with O_EXCL (bash's noclobber) and removed. -w is
