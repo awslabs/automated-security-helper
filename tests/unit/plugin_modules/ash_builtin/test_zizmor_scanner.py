@@ -1080,14 +1080,19 @@ def test_exit_3_with_only_non_actions_attempts_nothing(tmp_path):
 
 def test_a_non_action_whose_path_holds_a_space_is_not_counted(repo):
     """zizmor quotes the path as given; a space in it must not turn an
-    inapplicable file into a failed target."""
+    inapplicable file into a failed target. The quoted file is in the tree (a
+    sixth input, another tool's action.yml), so the count it leaves is the five
+    real inputs, not one of them dropped for a file zizmor was never given."""
+    other = repo / "my tools" / "other" / "action.yml"
+    other.parent.mkdir(parents=True)
+    other.write_text("tool: some-other-tool\nsteps:\n  - build\n")
     rejected = (
         " WARN collect_inputs: zizmor::registry::input: failed to validate "
         "file://my tools/other/action.yml as action: input does not match "
         "expected validation schema\n"
     )
     scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
-    assert scanner.targets_attempted == len(EXPECTED_INPUTS) - 1
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
     assert scanner.targets_failed == 0
 
 
@@ -1099,13 +1104,17 @@ def test_a_workflow_rejected_as_not_an_action_is_a_failed_target(repo, quoted):
     """A file directly in .github/workflows is a workflow GitHub runs whatever its
     name. One named action.yml is handed to zizmor as a composite action and
     rejected as not an action: that is a target ASH meant to audit and could
-    not, never an inapplicable file to drop from the counts."""
+    not, never an inapplicable file to drop from the counts. The quoted file is
+    in the tree, a sixth input, so the counts include it."""
+    workflow = repo / quoted.removeprefix("file://")
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text("on: push\n")
     rejected = (
         " WARN collect_inputs: zizmor::registry::input: failed to validate "
         f"{quoted} as action: input does not match expected validation schema\n"
     )
     scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
-    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS) + 1
     assert scanner.targets_failed == 1
 
 
@@ -1118,6 +1127,7 @@ def test_a_rejected_workflow_is_counted_when_the_source_dir_is_the_workflows_dir
     against the source dir, and the file counts as a failed workflow rather than
     being dropped as an inapplicable action."""
     source = repo / ".github" / "workflows"
+    (source / "action.yml").write_text("on: push\n")
     rejected = (
         " WARN collect_inputs: zizmor::registry::input: failed to validate "
         "action.yml as action: input does not match expected validation schema\n"
@@ -1131,9 +1141,10 @@ def test_a_rejected_workflow_is_counted_when_the_source_dir_is_the_workflows_dir
     scanner = _scanner(source)
     _fake_run(scanner, stdout=empty_sarif, stderr=rejected)
     scanner.scan(source, "source", [])
-    # clean.yml and vulnerable.yml were collected; the rejected workflow is one
-    # of the attempted targets that failed, not a target removed from the count.
-    assert scanner.targets_attempted == 2
+    # clean.yml, vulnerable.yml and action.yml were collected; the rejected
+    # workflow is one of the three attempted targets, and it failed, rather than
+    # a target removed from the count.
+    assert scanner.targets_attempted == 3
     assert scanner.targets_failed == 1
 
 
