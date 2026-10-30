@@ -132,7 +132,37 @@ class TestOneReportFailsTheOtherIsWritten:
         captured = capsys.readouterr()
         assert "could not render the apt report: ValueError" in captured.err
         assert TOOL_REPORT_CLOSING in captured.out
-        assert APT_REPORT_HEADING not in captured.out
+
+    def test_an_apt_report_fault_leaves_a_notice_in_the_summary(
+        self, monkeypatch, capsys
+    ):
+        # Red before: the apt report became "" and the summary, which is stdout, said
+        # nothing about apt while the job exited 2.
+        _wire(monkeypatch, "unavailable", render_apt_report=_cannot("no apt table"))
+        assert checker.main(["--markdown"]) == checker.EXIT_ERROR
+        out = capsys.readouterr().out
+        assert "## Dockerfile apt pins" in out
+        assert "could not render the apt report: ValueError: no apt table" in out
+        assert APT_UNAVAILABLE_LINE not in out
+
+    def test_a_fault_in_the_tool_table_itself_is_still_exit_two(
+        self, monkeypatch, capsys
+    ):
+        # Red before: the fallback render_table raised again inside the handler, the
+        # ValueError left main (a traceback is exit 1, "a pin is behind"), and the apt
+        # report was never written.
+        _wire(
+            monkeypatch,
+            "unavailable",
+            render_report=_cannot("no bump steps"),
+            render_table=_cannot("no table"),
+        )
+        assert checker.main([]) == checker.EXIT_ERROR
+        captured = capsys.readouterr()
+        assert "could not render the report: ValueError" in captured.err
+        assert "could not render the tool table: ValueError" in captured.err
+        assert "could not render the tool report: ValueError: no table" in captured.out
+        assert APT_UNAVAILABLE_LINE in captured.out
 
     def test_both_faults_are_both_named_and_the_run_is_exit_two(
         self, monkeypatch, capsys

@@ -2064,6 +2064,16 @@ def render_report(pins: Any, results: list[Result], markdown: bool = False) -> s
     return "\n".join(out) + "\n"
 
 
+def _render_fault_notice(
+    heading: str, what: str, exc: Exception, markdown: bool
+) -> str:
+    """A short stand-in for a report that could not be rendered, for the job summary."""
+    text = f"could not render the {what}: {type(exc).__name__}: {exc}"
+    if markdown:
+        return f"## {heading}\n\n{_escape_markdown(text)}\n"
+    return f"\n{heading}\n  {text}\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         # Under python -OO there is no module docstring.
@@ -2116,8 +2126,18 @@ def main(argv: list[str] | None = None) -> int:
             f"error: could not render the report: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-        report = render_table(results, markdown=args.markdown) + "\n"
         render_failed = True
+        try:
+            report = render_table(results, markdown=args.markdown) + "\n"
+        except Exception as table_exc:  # the same fault, one level down
+            print(
+                "error: could not render the tool table: "
+                f"{type(table_exc).__name__}: {table_exc}",
+                file=sys.stderr,
+            )
+            report = _render_fault_notice(
+                "Pinned tool versions", "tool report", table_exc, args.markdown
+            )
     try:
         apt_report = render_apt_report(apt_results, markdown=args.markdown)
     except Exception as exc:  # a result the apt table cannot be built from
@@ -2125,7 +2145,10 @@ def main(argv: list[str] | None = None) -> int:
             f"error: could not render the apt report: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-        apt_report = ""
+        # stdout is the job summary: it has to say that apt was not reported.
+        apt_report = _render_fault_notice(
+            "Dockerfile apt pins", "apt report", exc, args.markdown
+        )
         render_failed = True
     sys.stdout.write(report)
     sys.stdout.write(apt_report)
