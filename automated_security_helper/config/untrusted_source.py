@@ -84,7 +84,12 @@ SHARD_RECORDED = UntrustedSource(
         "that is the config a shard recorded in its results, which ash merge holds "
         "to the rules for a repository's config"
     ),
-    remedy="To keep a setting, pass it with ash merge's --config-overrides or --config.",
+    remedy=(
+        "To keep a setting, pass it with ash merge's --config-overrides or --config. "
+        "A reporter setting that sends findings off the host is the exception: "
+        "ash merge replaces the --config file's value for it, so pass it with "
+        "--config-overrides."
+    ),
     modules_remedy=(
         "To keep a module, pass it with ash merge's --config-overrides or --config."
     ),
