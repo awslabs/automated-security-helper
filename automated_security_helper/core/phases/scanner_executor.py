@@ -1837,15 +1837,32 @@ class ScannerExecutor:
                         environment_values = self._plugin_environment_values(
                             scanner_plugin
                         )
-                        _refuse_to_grade(
-                            container,
-                            text_without_values(
-                                f"{scanner_config_name} returned a result on "
-                                f"{target_type} that could not be graded: "
-                                f"{error_text(grading_error, environment_values)}",
-                                environment_values,
-                            ),
+                        described = error_text(grading_error, environment_values)
+                        reason = text_without_values(
+                            f"{scanner_config_name} returned a result on "
+                            f"{target_type} that could not be graded: {described}",
+                            environment_values,
                         )
+                        _refuse_to_grade(container, reason)
+                        if isinstance(
+                            container.raw_results, (SarifReport, CycloneDXReport)
+                        ):
+                            # The try covers ASH's own steps on a report too (the
+                            # missing levels, the path sanitizing, the output-dir
+                            # drop, the converted marks, the suppressions). A
+                            # raise partway left the report on the row, possibly
+                            # changed in place, and the processor merged it as it
+                            # stood: suppressed findings counted as actionable,
+                            # paths never made relative. The row is ERROR; its
+                            # record is the failure, as a failed scan's is, so
+                            # none of the half-processed report reaches the
+                            # results. Written as the failure handlers write
+                            # theirs, so the processor files it the same way.
+                            container.raw_results = {
+                                "errors": [home_as_tilde(reason)],
+                                "status": "failed",
+                                "exception": home_as_tilde(described),
+                            }
 
                     # Not for a target scan() never ran on (disabled, or refused by
                     # the sandbox, where an unavailable named backend records its
