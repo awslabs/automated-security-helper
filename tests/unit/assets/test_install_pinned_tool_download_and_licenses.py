@@ -20,7 +20,8 @@ Three ways the installer could go wrong without anything reporting it:
   with a missing or incomplete license directory stayed that way and no mode
   repaired it.
 
-Nothing here reaches the network: urlopen is replaced in the loaded module.
+Nothing here reaches the network: the opener ``download`` builds is replaced in the
+loaded module.
 """
 
 from __future__ import annotations
@@ -68,23 +69,38 @@ class _Response:
         return False
 
 
+def _serve(monkeypatch, respond) -> None:
+    """Replace the opener ``download`` builds with one that answers via ``respond``.
+
+    ``respond(url, timeout)`` returns the response. ``download`` builds its opener
+    with ``urllib.request.build_opener`` so that a redirect off https is refused,
+    which is why the test stand-in sits there and not on ``urlopen``.
+    """
+
+    class _Opener:
+        def open(self, url, data=None, timeout=None):
+            return respond(url, timeout)
+
+    monkeypatch.setattr(
+        installer.urllib.request, "build_opener", lambda *handlers: _Opener()
+    )
+
+
 class TestDownload:
     def test_the_socket_has_a_timeout(self, monkeypatch, tmp_path):
         seen = {}
 
-        def urlopen(url, timeout=None):
+        def respond(url, timeout):
             seen["timeout"] = timeout
             return _Response(b"abc", 3)
 
-        monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
+        _serve(monkeypatch, respond)
         installer.download("https://example.invalid/x", tmp_path / "x")
         assert seen["timeout"] is not None and seen["timeout"] > 0
 
     def test_a_complete_body_is_hashed_as_written(self, monkeypatch, tmp_path):
         body = b"x" * 1000
-        monkeypatch.setattr(
-            installer.urllib.request, "urlopen", lambda *a, **k: _Response(body, 1000)
-        )
+        _serve(monkeypatch, lambda url, timeout: _Response(body, 1000))
         digest = installer.download("https://example.invalid/x", tmp_path / "x")
         assert digest == hashlib.sha256(body).hexdigest()
         assert tmp_path.joinpath("x").read_bytes() == body
@@ -92,18 +108,12 @@ class TestDownload:
     def test_a_short_body_is_a_network_failure_not_a_digest_mismatch(
         self, monkeypatch, tmp_path
     ):
-        monkeypatch.setattr(
-            installer.urllib.request,
-            "urlopen",
-            lambda *a, **k: _Response(b"x" * 500, 1000),
-        )
+        _serve(monkeypatch, lambda url, timeout: _Response(b"x" * 500, 1000))
         with pytest.raises(ConnectionError, match="500 of 1000"):
             installer.download("https://example.invalid/x", tmp_path / "x")
 
     def test_no_content_length_is_not_a_short_read(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(
-            installer.urllib.request, "urlopen", lambda *a, **k: _Response(b"abc", None)
-        )
+        _serve(monkeypatch, lambda url, timeout: _Response(b"abc", None))
         assert installer.download("https://example.invalid/x", tmp_path / "x") == (
             hashlib.sha256(b"abc").hexdigest()
         )

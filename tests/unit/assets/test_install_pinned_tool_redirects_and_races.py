@@ -1,0 +1,286 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Redirects, overlapping installs and overlapping table loads in install-pinned-tool.
+
+* The https requirement was checked on the URL the script was given. urllib
+  follows a redirect to ``http://`` as readily as one to ``https://``, so a pinned
+  https URL could be fetched over plain http. The opener ``download`` builds now
+  refuses a redirect that leaves https.
+* Two installs of one rules bundle into one directory raced on the last rename: the
+  loser failed with "Directory not empty" although the bundle was in place, or with
+  "No such file" when the winner had already moved the old directory aside.
+* ``load_pins`` swaps entries in ``sys.modules`` and puts them back. Two overlapping
+  calls each saved the other's path-loaded modules as the originals, and the later
+  restore left the real modules replaced for good.
+
+Nothing here reaches the network or starts a process.
+"""
+
+from __future__ import annotations
+
+import errno
+import hashlib
+import importlib.util
+import io
+import sys
+import threading
+import types
+import urllib.error
+import urllib.request
+import zipfile
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT = REPO_ROOT / "automated_security_helper" / "assets" / "install-pinned-tool.py"
+PACKAGE_ROOT = REPO_ROOT / "automated_security_helper"
+
+
+def _load_script():
+    spec = importlib.util.spec_from_file_location("_install_pinned_tool_races", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+installer = _load_script()
+
+
+class _Response:
+    headers: dict = {}
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self, size: int) -> bytes:
+        chunk, self._body = self._body[:size], self._body[size:]
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestARedirectLeavingHttpsIsRefused:
+    @staticmethod
+    def _redirect(newurl: str):
+        handler = installer._HttpsOnlyRedirects()
+        request = urllib.request.Request("https://example.invalid/asset.tar.gz")
+        return handler.redirect_request(
+            request, io.BytesIO(b""), 302, "Found", {}, newurl
+        )
+
+    def test_a_redirect_to_plain_http_raises(self):
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            self._redirect("http://example.invalid/asset.tar.gz")
+        assert "non-https" in str(raised.value.msg)
+
+    def test_a_redirect_to_another_scheme_raises(self):
+        with pytest.raises(urllib.error.HTTPError):
+            self._redirect("ftp://example.invalid/asset.tar.gz")
+
+    def test_a_redirect_to_https_is_followed(self):
+        """Control: GitHub's 302 to its object host is the redirect this exists for."""
+        followed = self._redirect("https://objects.example.invalid/asset.tar.gz")
+        assert followed.full_url == "https://objects.example.invalid/asset.tar.gz"
+
+    def test_download_opens_the_url_through_that_handler(self, monkeypatch, tmp_path):
+        built = []
+
+        class _Opener:
+            def open(self, url, data=None, timeout=None):
+                return _Response(b"abc")
+
+        def build_opener(*handlers):
+            built.extend(handlers)
+            return _Opener()
+
+        monkeypatch.setattr(installer.urllib.request, "build_opener", build_opener)
+
+        digest = installer.download("https://example.invalid/x", tmp_path / "x")
+
+        assert installer._HttpsOnlyRedirects in built
+        assert digest == hashlib.sha256(b"abc").hexdigest()
+
+
+_MEMBERS = {
+    "a.guard": b"rule A { }\n",
+    "b.guard": b"rule B { }\n",
+}
+
+
+def _contents_digest(members: dict) -> str:
+    lines = "".join(
+        f"{name}\t{hashlib.sha256(data).hexdigest()}\n"
+        for name, data in sorted(members.items())
+    )
+    return hashlib.sha256(lines.encode("ascii")).hexdigest()
+
+
+class _BundleSetup:
+    """A one-bundle fake table whose archive is served from memory."""
+
+    def __init__(self, monkeypatch, tmp_path: Path):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for name, data in _MEMBERS.items():
+                archive.writestr(f"output/{name}", data)
+        self.archive = buffer.getvalue()
+        self.bundle = types.SimpleNamespace(
+            name="demo-rules",
+            version="1.0.0",
+            url="https://example.invalid/rules.zip",
+            sha256=hashlib.sha256(self.archive).hexdigest(),
+            contents_sha256=_contents_digest(_MEMBERS),
+            member_dir="output",
+            member_suffix=".guard",
+        )
+        pins = types.SimpleNamespace(
+            ToolNotProvisionableError=LookupError,
+            get_rules_bundle=lambda name: self.bundle,
+        )
+        monkeypatch.setattr(installer, "load_pins", lambda root: pins)
+
+        def download(url, target):
+            target.write_bytes(self.archive)
+            return hashlib.sha256(self.archive).hexdigest()
+
+        monkeypatch.setattr(installer, "download", download)
+        self.rules = tmp_path / "rules"
+        self.final = self.rules / "demo-rules-1.0.0"
+
+    def install(self) -> Path:
+        return installer.install_bundle("demo-rules", self.rules, Path("unused"))
+
+    def write_winner(self, members: dict) -> None:
+        self.final.mkdir(parents=True)
+        for name, data in members.items():
+            (self.final / name).write_bytes(data)
+
+    def leftovers(self) -> list:
+        return sorted(p.name for p in self.rules.iterdir() if p.name != self.final.name)
+
+
+class TestTwoInstallsOfOneBundle:
+    def test_the_loser_of_the_final_rename_finds_the_pinned_rules_and_succeeds(
+        self, monkeypatch, tmp_path
+    ):
+        setup = _BundleSetup(monkeypatch, tmp_path)
+        real_replace = installer.os.replace
+
+        def winner_first(src, dst, *args, **kwargs):
+            if Path(dst) == setup.final and Path(src).name.startswith(
+                ".ash-rules-staging-"
+            ):
+                setup.write_winner(_MEMBERS)
+            return real_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(installer.os, "replace", winner_first)
+
+        installed = setup.install()
+
+        assert installed == setup.final
+        assert {p.name: p.read_bytes() for p in setup.final.iterdir()} == _MEMBERS
+        assert setup.leftovers() == [], "the loser left its staging directory behind"
+
+    def test_a_populated_directory_that_is_not_the_pin_is_still_an_error(
+        self, monkeypatch, tmp_path
+    ):
+        """Control: only the pinned rules count as someone else's finished install."""
+        setup = _BundleSetup(monkeypatch, tmp_path)
+        real_replace = installer.os.replace
+
+        def stranger_first(src, dst, *args, **kwargs):
+            if Path(dst) == setup.final and Path(src).name.startswith(
+                ".ash-rules-staging-"
+            ):
+                setup.write_winner({"a.guard": b"rule changed { }\n"})
+            return real_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(installer.os, "replace", stranger_first)
+
+        with pytest.raises(OSError) as raised:
+            setup.install()
+
+        assert raised.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
+        assert setup.leftovers() == []
+
+    def test_an_old_directory_moved_aside_by_the_other_install_is_not_an_error(
+        self, monkeypatch, tmp_path
+    ):
+        setup = _BundleSetup(monkeypatch, tmp_path)
+        setup.write_winner({"a.guard": b"an older release\n"})
+        real_replace = installer.os.replace
+
+        def other_install_got_there(src, dst, *args, **kwargs):
+            if Path(src) == setup.final:
+                for child in setup.final.iterdir():
+                    child.unlink()
+                setup.final.rmdir()
+                raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+            return real_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(installer.os, "replace", other_install_got_there)
+
+        installed = setup.install()
+
+        assert (installed / "a.guard").read_bytes() == _MEMBERS["a.guard"]
+        assert setup.leftovers() == []
+
+
+class TestOverlappingTableLoads:
+    def test_two_calls_do_not_swap_each_others_originals(self, monkeypatch):
+        import automated_security_helper.core.exceptions as real_exceptions
+
+        name = "automated_security_helper.core.exceptions"
+        real_load = installer._load_by_path
+        first_in, release_first = threading.Event(), threading.Event()
+        second_in, release_second = threading.Event(), threading.Event()
+
+        def gated(module_name, path):
+            module = real_load(module_name, path)
+            if module_name == name:
+                who = threading.current_thread().name
+                if who == "first":
+                    first_in.set()
+                    assert release_first.wait(30)
+                elif who == "second":
+                    second_in.set()
+                    assert release_second.wait(30)
+            return module
+
+        monkeypatch.setattr(installer, "_load_by_path", gated)
+        errors: list = []
+
+        def load():
+            try:
+                installer.load_pins(PACKAGE_ROOT)
+            except BaseException as exc:  # reported below, from the test thread
+                errors.append(exc)
+
+        first = threading.Thread(target=load, name="first")
+        second = threading.Thread(target=load, name="second")
+        first.start()
+        assert first_in.wait(30)
+        second.start()
+        # Without the lock the second call reaches its gate while the first still
+        # holds the swapped modules, and saves them as its originals. With it, this
+        # wait times out: the second call is queued behind the first.
+        second_in.wait(1.5)
+        release_first.set()
+        first.join(30)
+        release_second.set()
+        second.join(30)
+
+        assert errors == []
+        assert not first.is_alive() and not second.is_alive()
+        assert sys.modules[name] is real_exceptions, (
+            "an overlapping load_pins put a path-loaded exceptions module back as "
+            "the real one"
+        )

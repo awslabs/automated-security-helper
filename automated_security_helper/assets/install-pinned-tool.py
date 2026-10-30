@@ -108,6 +108,9 @@ import sys
 import sysconfig
 import tarfile
 import tempfile
+import threading
+import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -120,6 +123,10 @@ _EXCEPTIONS_MODULE = ("core", "exceptions.py")
 # only thing that knows a failure happened, and so an integrity failure is
 # legible as such in a build log rather than reading as another dropped
 # connection.
+#
+# _EXIT_USAGE marks a request that cannot succeed as written: a tool or bundle
+# the table does not pin, a platform it has no asset for, a table entry that is
+# half-applied. A second attempt gets the same answer.
 _EXIT_USAGE = 2
 _EXIT_INTEGRITY = 3
 # Seconds a download socket may stay silent before the attempt fails. Per read,
@@ -136,6 +143,21 @@ _ARCH_ALIASES = {
     "aarch64": "arm64",
     "arm64": "arm64",
 }
+
+
+def _refuse(message: str, code: int) -> SystemExit:
+    """Print ``message`` and return a ``SystemExit`` that leaves with ``code``.
+
+    ``raise SystemExit(message)`` prints the message but always exits 1, the same
+    status as a dropped connection, so with-retry tries again at a refusal that
+    no retry can change. ``SystemExit(code)`` exits right and prints nothing.
+    This does both, and keeps the message as the exception's text for a caller
+    that reads it.
+    """
+    print(message, file=sys.stderr)
+    request = SystemExit(message)
+    request.code = code
+    return request
 
 
 def _load_by_path(name: str, path: Path):
@@ -165,6 +187,12 @@ _BORROWED_MODULES = (
     "automated_security_helper.utils.tool_downloads",
 )
 
+# Held for the whole of load_pins. The save and restore below are a read and a
+# write of process-global state: two overlapping calls would each save the other's
+# path-loaded modules as the originals, and the later restore would put them back
+# for good.
+_LOAD_PINS_LOCK = threading.Lock()
+
 
 def load_pins(package_root: Path):
     """Load ``tool_downloads`` and the exception module it imports.
@@ -186,33 +214,42 @@ def load_pins(package_root: Path):
     The returned module keeps working after the restore: it has already executed,
     and its globals hold a direct reference to the exception class rather than
     looking it up again.
+
+    Calls are serialized by a lock, because overlapping ones corrupt each other's
+    restore (see ``_LOAD_PINS_LOCK``). The lock does not keep an unrelated thread
+    from importing one of these names while a call is running, so a program that
+    starts threads of its own should load the pins before it does.
     """
-    saved = {name: sys.modules.get(name) for name in _BORROWED_MODULES}
+    with _LOAD_PINS_LOCK:
+        saved = {name: sys.modules.get(name) for name in _BORROWED_MODULES}
 
-    try:
-        # Namespace packages for the two parents, so the dotted names
-        # tool_downloads imports under exist without executing any real
-        # __init__ -- which is the thing that needs toml.
-        for parent in ("automated_security_helper", "automated_security_helper.core"):
-            if parent not in sys.modules:
-                sys.modules[parent] = importlib.util.module_from_spec(
-                    importlib.machinery.ModuleSpec(parent, None, is_package=True)
-                )
+        try:
+            # Namespace packages for the two parents, so the dotted names
+            # tool_downloads imports under exist without executing any real
+            # __init__ -- which is the thing that needs toml.
+            for parent in (
+                "automated_security_helper",
+                "automated_security_helper.core",
+            ):
+                if parent not in sys.modules:
+                    sys.modules[parent] = importlib.util.module_from_spec(
+                        importlib.machinery.ModuleSpec(parent, None, is_package=True)
+                    )
 
-        _load_by_path(
-            "automated_security_helper.core.exceptions",
-            package_root.joinpath(*_EXCEPTIONS_MODULE),
-        )
-        return _load_by_path(
-            "automated_security_helper.utils.tool_downloads",
-            package_root.joinpath(*_PINS_MODULE),
-        )
-    finally:
-        for name, module in saved.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
+            _load_by_path(
+                "automated_security_helper.core.exceptions",
+                package_root.joinpath(*_EXCEPTIONS_MODULE),
+            )
+            return _load_by_path(
+                "automated_security_helper.utils.tool_downloads",
+                package_root.joinpath(*_PINS_MODULE),
+            )
+        finally:
+            for name, module in saved.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
 
 
 def default_package_root() -> Path:
@@ -234,10 +271,31 @@ def resolve_arch(machine: str) -> str:
     try:
         return _ARCH_ALIASES[machine.lower()]
     except KeyError:
-        raise SystemExit(
+        raise _refuse(
             f"unsupported machine {machine!r}; "
-            f"known: {', '.join(sorted(set(_ARCH_ALIASES)))}"
+            f"known: {', '.join(sorted(set(_ARCH_ALIASES)))}",
+            _EXIT_USAGE,
         )
+
+
+class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to an https URL.
+
+    Every URL this script fetches is checked for https before the request. A
+    redirect is a second request the check never saw, and urllib follows one to
+    http:// as readily as to https://.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
+            raise urllib.error.HTTPError(
+                req.full_url,
+                code,
+                f"{msg}: refusing a redirect to the non-https URL {newurl}",
+                headers,
+                fp,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def download(url: str, target: Path) -> str:
@@ -246,7 +304,8 @@ def download(url: str, target: Path) -> str:
     urllib follows redirects, which is the behaviour the vendor install script
     lacked: a GitHub release download always answers 302 to
     objects.githubusercontent.com, and treating that as an error is what left the
-    build with no tarball and a checksum failure against a missing file.
+    build with no tarball and a checksum failure against a missing file. Only
+    redirects to https are followed (``_HttpsOnlyRedirects``).
 
     Hashed while streaming rather than by re-reading the file, so the digest
     describes the bytes that were written and not whatever is at the path
@@ -262,8 +321,9 @@ def download(url: str, target: Path) -> str:
     """
     digest = hashlib.sha256()
     written = 0
+    opener = urllib.request.build_opener(_HttpsOnlyRedirects)
     # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response:  # nosec B310 - https enforced below
+    with opener.open(url, timeout=_DOWNLOAD_TIMEOUT) as response:  # nosec B310 - https enforced by the callers and on redirects
         expected = response.headers.get("Content-Length")
         with target.open("wb") as handle:
             for chunk in iter(lambda: response.read(1024 * 256), b""):
@@ -297,9 +357,15 @@ def extract_member(archive: Path, member_name: str, destination: Path) -> None:
     """
     if archive.name.endswith(".zip"):
         with zipfile.ZipFile(archive) as bundle:
-            names = [n for n in bundle.namelist() if Path(n).name == member_name]
-            _require_exactly_one(names, member_name, archive)
-            with bundle.open(names[0]) as source, destination.open("wb") as handle:
+            # Files only, as the tar branch below: a directory entry that happens
+            # to carry the member's name is not a second copy of the executable.
+            entries = [
+                i
+                for i in bundle.infolist()
+                if not i.is_dir() and Path(i.filename).name == member_name
+            ]
+            _require_exactly_one(entries, member_name, archive)
+            with bundle.open(entries[0]) as source, destination.open("wb") as handle:
                 shutil.copyfileobj(source, handle)
         return
 
@@ -336,17 +402,21 @@ def install(
     """Install ``tool`` into ``bin_dir``, and its license files if asked to.
 
     With ``third_party_dir`` set, the tool's license and notice files go to
-    ``third_party_dir/<tool>/`` before the executable is moved into place, so the
-    executable never lands without them, and a tool with no license entry is
-    refused. ``main`` sets it from ``ASH_THIRD_PARTY_DIR``, which the image's
-    core stage declares.
+    ``third_party_dir/<tool>/`` once the executable has been extracted and
+    checked, and before it is moved into place, so the executable never lands
+    without them, a failed extraction leaves no license directory behind, and a
+    tool with no license entry is refused. ``main`` sets it from
+    ``ASH_THIRD_PARTY_DIR``, which the image's core stage declares.
     """
     pins = load_pins(package_root)
     arch = resolve_arch(platform.machine())
     target_platform = {"linux": "linux", "darwin": "darwin", "windows": "windows"}.get(
         platform.system().lower(), platform.system().lower()
     )
-    asset = pins.get_tool_asset(tool, target_platform, arch)
+    try:
+        asset = pins.get_tool_asset(tool, target_platform, arch)
+    except pins.ToolNotProvisionableError as exc:
+        raise _refuse(str(exc), _EXIT_USAGE)
     # Resolved before anything is downloaded, so a tool with no license entry, or
     # one whose entry names another version, fails without fetching 80 MB first.
     entry = (
@@ -356,10 +426,18 @@ def install(
     )
 
     if not asset.url.startswith("https://"):
-        raise SystemExit(f"refusing a non-https asset URL: {asset.url}")
+        raise _refuse(f"refusing a non-https asset URL: {asset.url}", _EXIT_USAGE)
 
     bin_dir.mkdir(parents=True, exist_ok=True)
     final = bin_dir / asset.install_as
+    if final.is_dir() and not final.is_symlink():
+        # Refused before the download: nothing placed beside the name can make
+        # this a file, and moving the binary inside the directory would report
+        # success at a path nothing runs.
+        raise _refuse(
+            f"refusing to install {asset.tool} over {final}: it is a directory",
+            _EXIT_USAGE,
+        )
     # getattr: an older table has no executable digests, and then there is nothing
     # to check the extracted member against.
     executable_digest = getattr(asset, "executable_digest", None)
@@ -370,7 +448,14 @@ def install(
         and final.is_file()
         and os.access(final, os.X_OK)
     ):
-        if _sha256_file(final) == executable_digest.lower():
+        try:
+            installed_digest = _sha256_file(final)
+        except OSError:
+            # Executable but not readable (a mode such as 0111), or gone since
+            # the check. Neither is a binary this call can vouch for, and the
+            # install below replaces it.
+            installed_digest = None
+        if installed_digest == executable_digest.lower():
             # Not reinstalling is right only when everything this call would
             # install is in place. The license files come from the same archive,
             # so a matching binary with a missing or incomplete license directory
@@ -408,15 +493,17 @@ def install(
             raise SystemExit(_EXIT_INTEGRITY)
         print(f"Verified SHA256 {asset.sha256.lower()}", flush=True)
 
+        staged_licenses = None
         if entry is not None and third_party_dir is not None:
             # From the archive just verified, so license files ride on the same
             # digest as the executable. getattr: a table from before
-            # ToolAsset.archive existed holds archives only.
+            # ToolAsset.archive existed holds archives only. Only staged here;
+            # they are published below, once the executable has been extracted
+            # and checked.
             source_archive = archive if getattr(asset, "archive", True) else None
             staged_licenses = stage_third_party(
                 entry, source_archive, staging, installed_from=asset.url
             )
-            publish_third_party(staged_licenses, third_party_dir)
 
         staged = staging / asset.install_as
         # getattr, not attribute access: an image built from an older table whose
@@ -443,13 +530,41 @@ def install(
             # verified covers the exact bytes being installed, and it is also the
             # executable digest (ToolAsset.executable_digest falls back to it).
             archive.rename(staged)
-        staged.chmod(0o755)
-        # Replaced via the staging path so an interrupted run cannot leave a
-        # half-written executable at the destination for the next layer to run.
-        shutil.move(str(staged), str(final))
+
+        if staged_licenses is not None and third_party_dir is not None:
+            # After the executable is extracted and its digest checked, so a
+            # failure there leaves no license directory for a release that was not
+            # installed; before it is placed, so it never lands without them.
+            publish_third_party(staged_licenses, third_party_dir)
+        _place_executable(staged, final)
 
     print(f"Installed {asset.tool} {asset.version} to {final}", flush=True)
     return final
+
+
+def _place_executable(staged: Path, final: Path) -> None:
+    """Put the verified ``staged`` file at ``final`` with a single rename.
+
+    ``staged`` is in the system temp directory, which can be another filesystem
+    than ``final``'s. ``shutil.move`` then copies across in place: it truncates
+    and rewrites ``final``, through a symlink there onto the link's target, and an
+    interrupt leaves a half-written executable where the next layer runs it. So
+    the bytes go to a file beside ``final`` first, and only that file is renamed
+    over it. The rename replaces a symlink with the new file instead of writing
+    through it.
+    """
+    descriptor, partial_name = tempfile.mkstemp(
+        prefix=f".{final.name}.", suffix=".partial", dir=final.parent
+    )
+    os.close(descriptor)
+    partial = Path(partial_name)
+    try:
+        shutil.copyfile(staged, partial)
+        partial.chmod(0o755)
+        os.replace(partial, final)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 # Must match automated_security_helper/utils/rules_bundles.py: the image installs a
@@ -482,17 +597,24 @@ def _bundle_members(bundle_zip: zipfile.ZipFile, bundle) -> "list[tuple]":
         name = parts[1]
         if not name.endswith(bundle.member_suffix):
             continue
+        # These refusals exit _EXIT_INTEGRITY, like the in-process installer's
+        # ToolDownloadIntegrityError for the same archives. The archive already
+        # matched its pinned digest, so a bad layout is the same on every attempt
+        # and with-retry must not repeat it.
         if not _SAFE_MEMBER_NAME.match(name):
-            raise SystemExit(f"bundle member {info.filename!r} has an unsafe name")
+            raise _refuse(
+                f"bundle member {info.filename!r} has an unsafe name", _EXIT_INTEGRITY
+            )
         if name in seen:
-            raise SystemExit(f"bundle holds two members named {name}")
+            raise _refuse(f"bundle holds two members named {name}", _EXIT_INTEGRITY)
         if info.file_size > _MAX_MEMBER_BYTES:
-            raise SystemExit(f"bundle member {name} is over the size cap")
+            raise _refuse(f"bundle member {name} is over the size cap", _EXIT_INTEGRITY)
         seen.add(name)
         members.append((info, name))
     if not members:
-        raise SystemExit(
-            f"bundle holds no {bundle.member_suffix} files under {bundle.member_dir}/"
+        raise _refuse(
+            f"bundle holds no {bundle.member_suffix} files under {bundle.member_dir}/",
+            _EXIT_INTEGRITY,
         )
     return members
 
@@ -539,6 +661,14 @@ def _installed_rule_files(
     return members, None
 
 
+def _bundle_matches_pin(directory: Path, bundle) -> bool:
+    """Whether the rule files in ``directory`` are the bundle's pinned contents."""
+    members, problem = _installed_rule_files(directory, bundle.member_suffix)
+    return (
+        problem is None and contents_digest(members) == bundle.contents_sha256.lower()
+    )
+
+
 def install_bundle(
     name: str,
     rules_dir: Path,
@@ -554,26 +684,39 @@ def install_bundle(
     and install nothing.
 
     With ``third_party_dir`` set (``ASH_THIRD_PARTY_DIR``, as for a tool), the
-    bundle's license entry is resolved before anything is downloaded and its
-    URL-pinned license files are installed before the rules are, so the rules never
-    land without them.
+    bundle's license entry is resolved and its URL-pinned license files are
+    fetched and checked before the rules are downloaded, and installed once the
+    rules are checked, just before they are renamed into place. The rules never
+    land without them, and a failed download leaves no license directory for a
+    release that was not installed.
+
+    Two installs of one bundle at once both end well: the one that loses the final
+    rename finds the pinned rules already in place and reports success.
     """
     pins = load_pins(package_root)
-    bundle = pins.get_rules_bundle(name)
+    try:
+        bundle = pins.get_rules_bundle(name)
+    except pins.ToolNotProvisionableError as exc:
+        raise _refuse(str(exc), _EXIT_USAGE)
     if not bundle.url.startswith("https://"):
-        raise SystemExit(f"refusing a non-https bundle URL: {bundle.url}")
-    if third_party_dir is not None:
-        entry = _third_party_entry(pins, name, bundle.version)
-        with tempfile.TemporaryDirectory(prefix="ash-third-party-") as staging_name:
-            staged = stage_third_party(
-                entry, None, Path(staging_name), installed_from=bundle.url
-            )
-            publish_third_party(staged, third_party_dir)
+        raise _refuse(f"refusing a non-https bundle URL: {bundle.url}", _EXIT_USAGE)
+    entry = (
+        _third_party_entry(pins, name, bundle.version)
+        if third_party_dir is not None
+        else None
+    )
 
     rules_dir.mkdir(parents=True, exist_ok=True)
     final = rules_dir / f"{bundle.name}-{bundle.version}"
     staging = Path(tempfile.mkdtemp(prefix=".ash-rules-staging-", dir=rules_dir))
+    license_scratch = None
     try:
+        staged_licenses = None
+        if entry is not None:
+            license_scratch = Path(tempfile.mkdtemp(prefix="ash-third-party-"))
+            staged_licenses = stage_third_party(
+                entry, None, license_scratch, installed_from=bundle.url
+            )
         with tempfile.TemporaryDirectory(prefix="ash-rules-download-") as dl:
             archive = Path(dl) / bundle.url.rsplit("/", 1)[-1]
             print(
@@ -602,7 +745,9 @@ def install_bundle(
                             size += len(chunk)
                             total += len(chunk)
                             if size > _MAX_MEMBER_BYTES or total > _MAX_TOTAL_BYTES:
-                                raise SystemExit("bundle expands past the size cap")
+                                raise _refuse(
+                                    "bundle expands past the size cap", _EXIT_INTEGRITY
+                                )
                             digest.update(chunk)
                             handle.write(chunk)
                     files[member] = digest.hexdigest()
@@ -634,14 +779,32 @@ def install_bundle(
         os.chmod(staging, 0o755)  # nosec B103 - read-only rules directory
         for child in staging.iterdir():
             os.chmod(child, 0o644)
+        if staged_licenses is not None and third_party_dir is not None:
+            publish_third_party(staged_licenses, third_party_dir)
         if final.exists() or final.is_symlink():
             aside = Path(tempfile.mkdtemp(prefix=".ash-rules-old-", dir=rules_dir))
-            os.replace(final, aside / "old")
+            try:
+                os.replace(final, aside / "old")
+            except FileNotFoundError:
+                # A concurrent install of the same bundle moved it aside first.
+                pass
             shutil.rmtree(aside, ignore_errors=True)
-        os.replace(staging, final)
+        try:
+            os.replace(staging, final)
+        except OSError:
+            # A concurrent install of the same bundle renamed first, and a
+            # directory cannot be renamed onto a populated one. If what is there
+            # is the pinned rules, the install this call was asked for is done,
+            # and its own copy is surplus.
+            if not _bundle_matches_pin(final, bundle):
+                raise
+            shutil.rmtree(staging, ignore_errors=True)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    finally:
+        if license_scratch is not None:
+            shutil.rmtree(license_scratch, ignore_errors=True)
     print(f"Installed {bundle.name} {bundle.version} to {final}", flush=True)
     return final
 
@@ -724,12 +887,13 @@ def _third_party_entry(pins, tool: str, version: "str | None" = None):
     try:
         entry = pins.get_third_party_license(tool)
     except pins.ToolNotProvisionableError as exc:
-        raise SystemExit(str(exc))
+        raise _refuse(str(exc), _EXIT_USAGE)
     if version is not None and entry.version != version:
-        raise SystemExit(
+        raise _refuse(
             f"{tool} is pinned to {version} but its license entry records "
             f"{entry.version}. The files and source commit would describe another "
-            f"release; a version bump is half-applied."
+            f"release; a version bump is half-applied.",
+            _EXIT_USAGE,
         )
     return entry
 
@@ -911,7 +1075,18 @@ def stage_third_party(
             extract_member(archive, license_file.name, destination)
         else:
             if not license_file.url.startswith("https://"):
-                raise SystemExit(f"refusing a non-https URL: {license_file.url}")
+                raise _refuse(
+                    f"refusing a non-https URL: {license_file.url}", _EXIT_USAGE
+                )
+            if not license_file.sha256:
+                # A URL file is trusted only by its digest. Without one there is
+                # nothing to compare the download to, so it is refused before it
+                # is fetched rather than after, with a clean message.
+                raise _refuse(
+                    f"{entry.tool}'s {license_file.name} has a URL but no pinned "
+                    "SHA256, so nothing could verify what it fetches",
+                    _EXIT_USAGE,
+                )
             print(f"Fetching {entry.tool} {license_file.name} from {license_file.url}")
             actual = download(license_file.url, destination)
             if actual.lower() != license_file.sha256.lower():
@@ -937,15 +1112,34 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     final stage runs as a non-root user who must be able to read these. An
     existing directory for the tool is replaced, not merged into, so a file
     dropped from an entry does not linger from an earlier layer.
+
+    The new directory is copied beside the old one first, because ``staged`` can
+    be on another filesystem than ``third_party_dir`` and a move across is a copy
+    that can stop half way. The old entry (a directory, or a file or symlink put
+    there by hand) is then renamed aside, not deleted, and the new directory is
+    renamed into place; if that last rename fails, the old entry is put back.
     """
     third_party_dir.mkdir(parents=True, exist_ok=True)
     for path in staged.iterdir():
         path.chmod(0o644)
     staged.chmod(0o755)
     final = third_party_dir / staged.name
-    if final.exists():
-        shutil.rmtree(final)
-    shutil.move(str(staged), str(final))
+    work = Path(tempfile.mkdtemp(prefix=".ash-third-party-", dir=third_party_dir))
+    try:
+        incoming = work / "incoming"
+        shutil.copytree(staged, incoming)
+        incoming.chmod(0o755)
+        old = work / "old"
+        if final.is_symlink() or final.exists():
+            os.replace(final, old)
+        try:
+            os.replace(incoming, final)
+        except BaseException:
+            if old.is_symlink() or old.exists():
+                os.replace(old, final)
+            raise
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     print(f"Installed {staged.name} license files to {final}", flush=True)
     return final
 
@@ -999,9 +1193,13 @@ def reports_version(output: str, bare_version: str) -> bool:
     """Whether ``output`` names ``bare_version`` as a whole version number.
 
     Bounded on both sides, so 0.12.2 is not found inside 0.12.23 and 1.2 is not
-    found inside 11.2.
+    found inside 11.2. A suffix that makes it another build fails the match too:
+    0.12.2rc1, 0.12.2-1 and 3.1.2-dev are not 0.12.2 or 3.1.2.
     """
-    pattern = rf"(?<![0-9.]){re.escape(bare_version)}(?![0-9]|\.[0-9])"
+    pattern = (
+        rf"(?<![0-9.]){re.escape(bare_version)}"
+        r"(?![0-9A-Za-z_]|\.[0-9]|[-+][0-9A-Za-z])"
+    )
     return re.search(pattern, output) is not None
 
 
@@ -1014,6 +1212,10 @@ def version_output(executable: str, argv: "list[str] | None" = None) -> str:
     self-extracting bundle that unpacks 208 MB into ``$HOME/.cache/opengrep`` on
     first run; in the image build that landed in the verification layer and grew
     the image by 218 MB, measured, for a check that should add nothing.
+
+    Decoded with ``errors="replace"``: a banner that is not valid text in the
+    locale's encoding must reach ``reports_version`` as text, where it fails the
+    version match, and not raise ``UnicodeDecodeError`` out of the verification.
     """
     with tempfile.TemporaryDirectory(prefix="ash-version-probe-") as scratch:
         env = dict(
@@ -1024,6 +1226,7 @@ def version_output(executable: str, argv: "list[str] | None" = None) -> str:
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=_VERSION_TIMEOUT_SECONDS,
             check=False,
             env=env,
@@ -1090,9 +1293,25 @@ def _copies_on_path(executable: str, search_path: "str | None") -> "list[str]":
     return copies
 
 
+def _probe_program(name: str) -> "str | None":
+    """Where a version probe's program runs from, or None when it cannot be placed.
+
+    An absolute name is used as given. A bare name is looked up on PATH's absolute
+    entries only, as ``uv_tool_dir`` looks up uv: subprocess's own search would
+    also try an empty or relative PATH entry, a directory under the working
+    directory. A name with a directory part that is not absolute would be
+    resolved from the working directory too, and is refused.
+    """
+    if os.path.isabs(name):
+        return name
+    if os.path.dirname(name):
+        return None
+    return _on_absolute_path(name)
+
+
 def _uv_tool_dir() -> "str | None":
     """What ``uv tool dir`` prints, or None if uv is not there to ask."""
-    uv = shutil.which("uv")
+    uv = _on_absolute_path("uv")
     if uv is None:
         return None
     try:
@@ -1133,13 +1352,21 @@ def verify_third_party(
     directory with no entry is a problem too: it would be a license claim for
     something this table no longer describes.
 
+    Reading a file as another user also takes search permission on the
+    directories the path goes through, which a mode on the file does not give:
+    the third-party directory and each entry's directory must be searchable by
+    others. (Their parents belong to the image, not to this script, and are not
+    checked.)
+
     Copies a Python package installed are left out because they are not the
     release binary the entry describes. uv is the case: ASH depends on it from
     PyPI too, at whatever version pyproject's range resolves to on the day, and
     that copy ships its license metadata in its own dist-info.
 
     Writes ``index.json`` only when there are no problems, so the index lists
-    exactly what was verified to be present.
+    exactly what was verified to be present. A run that finds problems removes
+    the index an earlier passing run left, because it no longer describes the
+    tree.
     """
     pins = load_pins(package_root)
     problems: "list[str]" = []
@@ -1151,6 +1378,8 @@ def verify_third_party(
 
     if not third_party_dir.is_dir():
         return [f"{third_party_dir} does not exist; no license files were installed"]
+    if third_party_dir.stat().st_mode & 0o001 == 0:
+        problems.append(f"{third_party_dir} cannot be searched by other users")
 
     for unexpected in sorted(
         p.name
@@ -1165,6 +1394,8 @@ def verify_third_party(
         if not directory.is_dir():
             problems.append(f"{tool}: {directory} is missing")
             continue
+        if directory.stat().st_mode & 0o001 == 0:
+            problems.append(f"{tool}: {directory} cannot be searched by other users")
         expected = [(f.name, f.sha256) for f in entry.files] + [(_SOURCE_FILE, None)]
         for name, sha256 in expected:
             path = directory / name
@@ -1175,8 +1406,16 @@ def verify_third_party(
             elif sha256 and _sha256_of(path) != sha256.lower():
                 problems.append(f"{tool}: {path} does not match its pinned SHA256")
         source = directory / _SOURCE_FILE
-        if source.is_file() and entry.commit not in source.read_text(encoding="utf-8"):
-            problems.append(f"{tool}: {source} does not name commit {entry.commit}")
+        if source.is_file():
+            try:
+                notice = source.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                problems.append(f"{tool}: {source} could not be read as text ({exc})")
+            else:
+                if entry.commit not in notice:
+                    problems.append(
+                        f"{tool}: {source} does not name commit {entry.commit}"
+                    )
 
         bare_version = entry.version.lstrip("v")
         # getattr: a table from before version_probe existed has executables only.
@@ -1191,10 +1430,18 @@ def verify_third_party(
                     "answer"
                 )
                 continue
+            program = _probe_program(argv[0])
+            if program is None:
+                problems.append(
+                    f"{tool}: version probe program {argv[0]} is not on an "
+                    "absolute PATH entry"
+                )
+                continue
+            argv = [program, *argv[1:]]
             try:
-                output = version_output(argv[0], argv)
+                output = version_output(program, argv)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                problems.append(f"{tool}: version probe {argv[0]} failed: {exc}")
+                problems.append(f"{tool}: version probe {program} failed: {exc}")
                 continue
             if not reports_version(output, bare_version):
                 problems.append(
@@ -1228,18 +1475,23 @@ def verify_third_party(
                         f"{output.strip()[:200]!r}"
                     )
 
-    if not problems:
-        index = third_party_dir / _INDEX_FILE
-        index.write_text(
-            json.dumps(
-                {"tools": [entries[t].index_record() for t in sorted(entries)]},
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
+    index = third_party_dir / _INDEX_FILE
+    if problems:
+        try:
+            index.unlink(missing_ok=True)
+        except OSError as exc:
+            problems.append(f"{index}: a stale index could not be removed ({exc})")
+        return problems
+    index.write_text(
+        json.dumps(
+            {"tools": [entries[t].index_record() for t in sorted(entries)]},
+            indent=2,
+            sort_keys=True,
         )
-        index.chmod(0o644)
+        + "\n",
+        encoding="utf-8",
+    )
+    index.chmod(0o644)
     return problems
 
 
@@ -1298,6 +1550,8 @@ def third_party_main(argv: "list[str]") -> int:
 # ---------------------------------------------------------------------------
 
 _ASSERT_ROOT_ONLY = "--assert-root-only"
+# The kernel's own limit on symlinks followed in one lookup is 40 on Linux.
+_MAX_SYMLINK_HOPS = 40
 
 
 def root_only_problems(
@@ -1306,17 +1560,26 @@ def root_only_problems(
     """Why each of ``paths`` could be changed by a user other than its owner.
 
     A path passes when it and everything under it is owned by a trusted uid and
-    writable by neither group nor others, and when every ancestor up to "/" is
-    owned by a trusted uid and either writable by neither group nor others, or a
-    directory with the sticky bit (a user who can write it still cannot rename or
-    remove what someone else owns, which is what /tmp relies on). Symlinks are not
-    followed: each name is checked where it is.
+    writable by neither group nor others, and when every directory the lookup of
+    it goes through, up to "/", is owned by a trusted uid and either writable by
+    neither group nor others, or a directory with the sticky bit (a user who can
+    write it still cannot rename or remove what someone else owns, which is what
+    /tmp relies on).
+
+    The lookup is followed the way the kernel does it, one component at a time:
+    a symlink on the way is read, its owner must be trusted, and its text
+    continues the walk, so the directories it leads through are checked as well.
+    A symlink's own mode is not checked, because the kernel never reads it (it
+    is always 0777 on Linux), and ``..`` is applied to the directory reached,
+    not to the text of the path. The target is the directory or file the lookup
+    ends at. A symlink under the target is refused: it can be pointed at content
+    others can change, and this check does not follow it.
     """
     import stat
 
     problems: "list[str]" = []
 
-    def check(path: Path, allow_sticky: bool) -> None:
+    def check(path: Path, allow_sticky: bool, inside_target: bool = False) -> None:
         try:
             info = os.lstat(path)
         except OSError as exc:
@@ -1324,6 +1587,13 @@ def root_only_problems(
             return
         if info.st_uid not in trusted_uids:
             problems.append(f"{path}: owned by uid {info.st_uid}")
+        if stat.S_ISLNK(info.st_mode):
+            if inside_target:
+                problems.append(
+                    f"{path}: is a symlink; a link inside the tree can be pointed "
+                    "at content others can change, and is not followed"
+                )
+            return
         writable = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
         sticky_dir = stat.S_ISDIR(info.st_mode) and info.st_mode & stat.S_ISVTX
         if writable and not (allow_sticky and sticky_dir):
@@ -1332,15 +1602,60 @@ def root_only_problems(
                 "write it"
             )
 
+    def resolve(given: Path) -> "tuple[Path, list[Path], list[Path]] | None":
+        """The target ``given`` names, the directories the lookup walks through
+        on the way, and the symlinks it reads; None after recording a problem."""
+        try:
+            start = given if given.is_absolute() else Path.cwd() / given
+            parts = start.parts
+            resolved = Path(parts[0])
+            walked = [resolved]
+            links: "list[Path]" = []
+            pending = list(reversed(parts[1:]))
+            while pending:
+                name = pending.pop()
+                if name == "..":
+                    resolved = resolved.parent
+                elif name != ".":
+                    candidate = resolved / name
+                    if candidate.is_symlink():
+                        links.append(candidate)
+                        if len(links) > _MAX_SYMLINK_HOPS:
+                            problems.append(f"{given}: too many levels of symlinks")
+                            return None
+                        text = Path(os.readlink(candidate))
+                        if text.is_absolute():
+                            resolved = Path(text.anchor)
+                            walked.append(resolved)
+                            pending.extend(reversed(text.parts[1:]))
+                        else:
+                            pending.extend(reversed(text.parts))
+                        continue
+                    resolved = candidate
+                walked.append(resolved)
+        except OSError as exc:
+            problems.append(f"{given}: {exc.strerror or exc}")
+            return None
+        return resolved, walked, links
+
+    def unreadable(exc: OSError) -> None:
+        problems.append(f"{exc.filename}: {exc.strerror or exc}; not examined")
+
     for given in paths:
-        target = Path(os.path.abspath(given))
-        for ancestor in reversed(target.parents):
-            check(ancestor, allow_sticky=True)
+        found = resolve(Path(given))
+        if found is None:
+            continue
+        target, walked, links = found
+        for directory in dict.fromkeys(walked):
+            if directory != target:
+                check(directory, allow_sticky=True)
+        for link in links:
+            check(link, allow_sticky=False)
         check(target, allow_sticky=False)
         if target.is_dir() and not target.is_symlink():
-            for root, dirs, files in os.walk(target):
+            for root, dirs, files in os.walk(target, onerror=unreadable):
                 for name in sorted(dirs) + sorted(files):
-                    check(Path(root) / name, allow_sticky=False)
+                    check(Path(root) / name, allow_sticky=False, inside_target=True)
     return problems
 
 
@@ -1370,11 +1685,27 @@ def assert_root_only_main(argv: "list[str]") -> int:
     return 0
 
 
+def _names_option(argv: "list[str]", options: "tuple[str, ...]") -> bool:
+    """Whether ``argv`` carries one of ``options``, as ``--option`` or ``--option=value``.
+
+    Anywhere before a bare ``--``, so the mode flag does not have to come first.
+    """
+    for argument in argv:
+        if argument == "--":
+            return False
+        if argument.split("=", 1)[0] in options:
+            return True
+    return False
+
+
 def main(argv: "list[str] | None" = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
-    if argv and argv[0] == _ASSERT_ROOT_ONLY:
-        return assert_root_only_main(argv[1:])
-    if argv and argv[0] in _THIRD_PARTY_MODES:
+    if _names_option(argv, (_ASSERT_ROOT_ONLY,)):
+        rest = list(argv)
+        if _ASSERT_ROOT_ONLY in rest:
+            rest.remove(_ASSERT_ROOT_ONLY)
+        return assert_root_only_main(rest)
+    if _names_option(argv, _THIRD_PARTY_MODES):
         return third_party_main(argv)
     parser = argparse.ArgumentParser(
         description="Install a pinned ASH scanner binary, verified against its digest.",

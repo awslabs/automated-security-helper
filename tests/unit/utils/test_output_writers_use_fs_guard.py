@@ -218,8 +218,10 @@ _MCP_SESSION_WORKSPACE = (
 WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (_INSTALLER, "download", "Path.open"): (1, _INSTALLS),
     (_INSTALLER, "extract_member", "Path.open"): (4, _INSTALLS),
-    (_INSTALLER, "install", "shutil.move"): (1, _INSTALLS),
-    (_INSTALLER, "publish_third_party", "shutil.move"): (1, _INSTALLS),
+    (_INSTALLER, "_place_executable", "os.replace"): (1, _INSTALLS),
+    (_INSTALLER, "_place_executable", "shutil.copyfile"): (1, _INSTALLS),
+    (_INSTALLER, "publish_third_party", "os.replace"): (3, _INSTALLS),
+    (_INSTALLER, "publish_third_party", "shutil.copytree"): (1, _INSTALLS),
     (_INSTALLER, "stage_third_party", "shutil.copyfile"): (1, _INSTALLS),
     (_INSTALLER, "stage_third_party", "write_text"): (1, _INSTALLS),
     (_INSTALLER, "verify_third_party", "write_text"): (1, _INSTALLS),
