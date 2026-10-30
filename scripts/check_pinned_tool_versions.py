@@ -1311,9 +1311,9 @@ _HEREDOC_MARKER = re.compile(
 # parentheses. Its shift operator is not a here-document, so it is cut out before the
 # markers are looked for.
 _ARITHMETIC = re.compile(r"\$?\(\((?:[^()]|\([^()]*\))*\)\)")
-# Where one shell command ends on a line: ``;``, ``|``, ``&&`` and a lone ``&``, not the
-# ``&`` of ``2>&1`` or ``&>file``.
-_COMMAND_END = re.compile(r"[;|]|&&|(?<![<>&])&(?![>&])")
+# Where one shell command ends on a line: ``;``, ``|``, ``||``, ``&&`` and a lone ``&``,
+# not the ``&`` of ``2>&1`` or ``&>file``. Only a single ``|`` passes output on.
+_COMMAND_END = re.compile(r"\|\||&&|[;|]|(?<![<>&])&(?![>&])")
 # A redirection of output to a file: "> x", ">> x", "2> x", "&> x". Not a copy of a
 # descriptor (``2>&1``), and not /dev/null, which keeps nothing.
 _FILE_REDIRECT = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?!/dev/null(?![\w/.-]))[^\s<>|;&]")
@@ -1362,24 +1362,53 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     """The here-documents opened on one line, as (name, body is a file's content).
 
     A body is a file's content, and not commands run now, when the command it is given
-    to writes its output to a file (``cat > setup.sh <<'EOF'``, ``cat <<EOF >> conf``)
-    and is not a shell. A body given to a shell (``bash <<EOF > log``), or to a command
-    that does not write a file, is commands. Both are read for installs; the flag only
-    decides whether a shell expansion in an install is a package to refuse.
+    to, or a command it is piped on to, writes a file (``cat > setup.sh <<'EOF'``,
+    ``cat <<EOF >> conf``, ``tee setup.sh <<EOF``, ``cat <<EOF | tee setup.sh``,
+    ``install -D /dev/stdin x <<EOF``) and none of them is a shell. A body given to a
+    shell (``bash <<EOF > log``), or to commands that write no file, is commands. Both
+    are read for installs; the flag only decides whether a shell expansion in an
+    install is a package to refuse.
     """
     cleaned = _ARITHMETIC.sub(" ", line)
-    ends = [match.span() for match in _COMMAND_END.finditer(cleaned)]
+    segments: list[tuple[int, int, str]] = []  # (start, stop, what ended the command)
+    start = 0
+    for end in _COMMAND_END.finditer(cleaned):
+        segments.append((start, end.start(), end.group()))
+        start = end.end()
+    segments.append((start, len(cleaned), ""))
     markers: list[tuple[str, bool]] = []
     for match in _HEREDOC_MARKER.finditer(cleaned):
-        start = max([end for _, end in ends if end <= match.start()], default=0)
-        stop = min(
-            [begin for begin, _ in ends if begin >= match.end()], default=len(cleaned)
+        first = next(
+            (i for i, (_, stop, _) in enumerate(segments) if match.start() < stop),
+            len(segments) - 1,
         )
-        command = cleaned[start:stop]
-        words = _REDIRECT_WORD.sub(" ", command).split()
-        is_file = bool(_FILE_REDIRECT.search(command)) and not _runs_a_shell(words)
-        markers.append((match.group(2), is_file))
+        # The body is the input of its command, whose output goes on down the pipe.
+        sinks = [first]
+        while segments[sinks[-1]][2] == "|":
+            sinks.append(sinks[-1] + 1)
+        writes = shell = False
+        for index in sinks:
+            begin, stop, _ = segments[index]
+            command = cleaned[begin:stop]
+            words = _REDIRECT_WORD.sub(" ", command).split()
+            writes = writes or bool(_FILE_REDIRECT.search(command))
+            writes = writes or _writes_a_file(words)
+            shell = shell or _runs_a_shell(words)
+        markers.append((match.group(2), writes and not shell))
     return markers
+
+
+def _writes_a_file(words: list[str]) -> bool:
+    """Whether the words of a command write what they read to a named file."""
+    names = [word.strip("(){}").rsplit("/", 1)[-1] for word in words]
+    if "tee" in names:
+        # tee with no file argument only copies to its output.
+        return any(not w.startswith("-") for w in words[names.index("tee") + 1 :])
+    if "/dev/stdin" in words and ("install" in names or "cp" in names):
+        return True
+    return "dd" in names and any(
+        w.startswith("of=") and w != "of=/dev/null" for w in words
+    )
 
 
 def _runs_a_shell(words: list[str]) -> bool:

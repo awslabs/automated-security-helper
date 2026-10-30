@@ -245,6 +245,48 @@ class TestTheWholeCommandDecidesWhoReadsTheBody:
         assert _pins(tmp_path, body) == {}
 
 
+class TestOtherWaysToWriteAFile:
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN tee /usr/local/bin/setup.sh >/dev/null <<'EOF'",
+            "RUN tee -a /usr/local/bin/setup.sh <<'EOF'",
+            "RUN cat <<'EOF' | tee /usr/local/bin/setup.sh",
+            "RUN cat <<'EOF' | tee /usr/local/bin/setup.sh > /dev/null",
+            "RUN install -D -m 0755 /dev/stdin /usr/local/bin/setup.sh <<'EOF'",
+            "RUN dd of=/usr/local/bin/setup.sh <<'EOF'",
+        ],
+    )
+    def test_a_script_written_by_tee_install_or_dd_is_a_file(
+        self, tmp_path, first_line
+    ):
+        # Red before: only a ">" redirect made a file, so each of these was commands
+        # run now and the "$@" in the script was refused as a package.
+        body = f'{first_line}\napt-get install -y "$@"\nEOF\n'
+        assert _pins(tmp_path, body) == {}
+
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN tee <<'EOF'",
+            "RUN tee -a <<'EOF'",
+            "RUN cat <<'EOF' | tee /usr/local/bin/setup.sh | sh",
+            "RUN cat <<'EOF' | tee | sh",
+            "RUN dd of=/dev/null <<'EOF'",
+            "RUN cat <<'EOF' | cat",
+        ],
+    )
+    def test_a_body_nothing_writes_or_that_ends_in_a_shell_is_commands(
+        self, tmp_path, first_line
+    ):
+        """Control: tee with no file, a pipe on into a shell, a sink that keeps nothing."""
+        body = f'{first_line}\napt-get install -y "$@"\nEOF\n'
+        with pytest.raises(
+            checker.PinEnumerationError, match=r"Dockerfile:3 installs '\$@'"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+
 class TestAMultiLineInstallInAHereDocument:
     def test_a_continued_install_with_two_pins_is_read(self, tmp_path):
         """Control: the usual form, a package per continued line, joins correctly."""
