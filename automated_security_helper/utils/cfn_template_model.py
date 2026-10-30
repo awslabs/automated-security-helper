@@ -175,6 +175,20 @@ def _without_bom(text: str) -> str:
     return text[1:] if text.startswith(_BOM) else text
 
 
+def _starts_a_json_object(text: str) -> bool:
+    """Whether *text*, less a byte order mark and leading whitespace, opens with ``{``.
+
+    A JSON template is a JSON object; a YAML template opens with a key. The JSON
+    parser reads such a text first (:func:`get_model_from_template_text`).
+    """
+    return _without_bom(text).lstrip().startswith("{")
+
+
+#: What a text has been read as before any parser answered: a sentinel, since
+#: ``None`` is a document a parser can return.
+_NOT_READ = object()
+
+
 def _without_the_timestamp_resolver(
     resolvers: _ImplicitResolvers,
 ) -> _ImplicitResolvers:
@@ -209,9 +223,39 @@ _TemplateLoader.yaml_implicit_resolvers = _without_the_timestamp_resolver(
     CfnYamlLoader.yaml_implicit_resolvers
 )
 
+#: The YAML 1.1 types a plain, untagged mapping key resolves to, and which a
+#: template never means for a key: a logical id ``2024``, ``On``, ``No`` or ``Null``
+#: is text. Loaded as an int, a bool or None, such a key failed the model's
+#: ``Dict[str, ...]`` and the whole template counted as a failed target.
+_NON_STRING_KEY_TAGS = frozenset(
+    {
+        "tag:yaml.org,2002:int",
+        "tag:yaml.org,2002:float",
+        "tag:yaml.org,2002:bool",
+        "tag:yaml.org,2002:null",
+    }
+)
+_STR_TAG = "tag:yaml.org,2002:str"
+
+
+def _keys_as_strings(node: yaml.MappingNode) -> None:
+    """Retag the plain scalar keys of ``node`` that resolved to a non-string type.
+
+    Only a plain (unquoted, untagged) scalar is retagged: an explicit ``!!int``
+    key keeps its tag. Values are left as they resolve.
+    """
+    for key_node, _ in node.value:
+        if (
+            isinstance(key_node, yaml.ScalarNode)
+            and key_node.style is None
+            and key_node.tag in _NON_STRING_KEY_TAGS
+        ):
+            key_node.tag = _STR_TAG
+
 
 def _construct_merged_mapping(loader: _TemplateLoader, node: yaml.MappingNode) -> Any:
     loader.flatten_mapping(node)
+    _keys_as_strings(node)
     return _cfn_construct_mapping(loader, node)
 
 
@@ -434,11 +478,15 @@ def get_model_from_template_text(
 ) -> CloudFormationTemplateModel | None:
     """:func:`get_model_from_template` for text already read; ``template_path`` names it.
 
-    Parsed as YAML, and as JSON when YAML rejects the text. Every JSON document is
-    meant to be YAML, but YAML forbids a tab where JSON allows one: a JSON template
-    indented with tabs is valid JSON and a valid template, and the YAML loader raises
-    on it. The YAML loader is cfn_tools' with date-like scalars read as strings
-    (:class:`_TemplateLoader`). When JSON rejects the text too, text that does not
+    A text that opens with ``{`` (:func:`_starts_a_json_object`) is read by the
+    JSON parser first, and by YAML only when JSON rejects it. Every JSON document
+    is meant to be YAML too, but the two readings differ where it matters: YAML
+    forbids a tab where JSON allows one, and YAML decodes a ``\\uD83D\\uDE00``
+    escape pair as two lone surrogates where JSON means the one character they
+    encode, so a JSON template read as YAML could carry text no JSON writer
+    accepts. Any other text is read as YAML, and as JSON when YAML rejects it. The
+    YAML loader is cfn_tools' with date-like scalars read as strings
+    (:class:`_TemplateLoader`). When both parsers reject the text, text that does not
     parse always raises a ``YAMLError``: a syntax error as the loader raised it, and
     any value the loader could not build as :class:`TemplateConstructorError`. A
     document nested past the loader's recursion limit raises
@@ -448,36 +496,54 @@ def get_model_from_template_text(
     (on 3.12 and later it would read such a template, and cdk-nag would spend
     minutes synthesizing it before failing).
 
-    JSON that has a tab in it is decided as the same text with a space for each tab:
-    in valid JSON a raw tab can only be whitespace, so that is the same document, and
-    a template indented with tabs is answered as the one indented with spaces. So
-    indentation does not decide a template nested near the YAML loader's limits
-    (about 330 levels for mappings, about 490 for sequences), where YAML would
-    refuse the tabs before it reached the depth and leave JSON to decide. A
-    document whose root is a sequence is not a template, and is answered
-    None without a parse (:func:`_root_is_a_sequence`).
+    JSON that YAML refused and that has a tab in it is decided as the same text
+    with a space for each tab: in valid JSON a raw tab can only be whitespace, so
+    that is the same document, and a template indented with tabs is answered as the
+    one indented with spaces. So indentation does not decide a template nested near
+    the YAML loader's limits (about 330 levels for mappings, about 490 for
+    sequences), where YAML would refuse the tabs before it reached the depth and
+    leave JSON to decide. A document whose root is a sequence is not a template,
+    and is answered None without a parse (:func:`_root_is_a_sequence`).
     """
     if _root_is_a_sequence(text):
         return None
-    try:
-        template = _load_template_yaml(text)
-    except RecursionError:
-        raise TemplateDocumentError(
-            "it is nested past the YAML loader's recursion limit"
-        ) from None
-    except Exception as load_error:
-        # Broad on purpose, and not silent: every failure is raised again below as a
-        # typed YAMLError, and a constructor failure on a template is a failed target.
+    template: Any = _NOT_READ
+    if _starts_a_json_object(text):
         try:
             template = json.loads(_without_bom(text))
         except RecursionError:
             raise TemplateDocumentError(_JSON_TOO_DEEP) from None
         except ValueError:
-            raise _as_parse_failure(load_error) from None
-        if "\t" in text:
-            return get_model_from_template_text(text.replace("\t", " "), template_path)
-        if _nested_past(template, JSON_NESTING_LIMIT):
-            raise TemplateDocumentError(_JSON_TOO_DEEP) from None
+            # Not JSON after all (a comment, a trailing comma): YAML decides it,
+            # and refuses it as it did before, with the JSON reading tried again
+            # below for the tab case.
+            template = _NOT_READ
+        else:
+            if _nested_past(template, JSON_NESTING_LIMIT):
+                raise TemplateDocumentError(_JSON_TOO_DEEP) from None
+    if template is _NOT_READ:
+        try:
+            template = _load_template_yaml(text)
+        except RecursionError:
+            raise TemplateDocumentError(
+                "it is nested past the YAML loader's recursion limit"
+            ) from None
+        except Exception as load_error:
+            # Broad on purpose, and not silent: every failure is raised again below
+            # as a typed YAMLError, and a constructor failure on a template is a
+            # failed target.
+            try:
+                template = json.loads(_without_bom(text))
+            except RecursionError:
+                raise TemplateDocumentError(_JSON_TOO_DEEP) from None
+            except ValueError:
+                raise _as_parse_failure(load_error) from None
+            if "\t" in text:
+                return get_model_from_template_text(
+                    text.replace("\t", " "), template_path
+                )
+            if _nested_past(template, JSON_NESTING_LIMIT):
+                raise TemplateDocumentError(_JSON_TOO_DEEP) from None
 
     # The one question that separates "not CloudFormation" from "CloudFormation this
     # model cannot represent". cfn_tools' loader returns an ODict, which is a dict
@@ -507,7 +573,34 @@ def get_model_from_template_text(
         raise CloudFormationTemplateModelError(template_path, e) from e
 
 
-CFN_CANDIDATE_SUFFIXES = (".json", ".yaml", ".yml")
+#: The suffixes a CloudFormation template candidate carries, in lower case; a
+#: candidate's name is matched case-insensitively (``is_template_candidate``), so
+#: ``Stack.YAML`` and ``stack.JSON`` are candidates too. ``.template`` is the
+#: extension cfn_nag's own template discovery accepts beside the three others.
+CFN_CANDIDATE_SUFFIXES = (".json", ".yaml", ".yml", ".template")
+
+
+def is_template_candidate(name: str | Path) -> bool:
+    """Whether a file name carries one of :data:`CFN_CANDIDATE_SUFFIXES`, in any case."""
+    return Path(name).name.lower().endswith(CFN_CANDIDATE_SUFFIXES)
+
+
+def active_global_ignore_paths(context: "PluginContext") -> list:
+    """The global ignore paths a scan drops files for, read from the context.
+
+    For a caller that was given no list (a ``nothing_to_scan_reason``): the
+    configuration's unexpired ``global_settings.ignore_paths``, and none at all
+    under ``--ignore-suppressions``, which is how the orchestrator hands them to
+    ``scan()``. The two selections then agree on which files are scanned.
+    """
+    from automated_security_helper.utils.suppression_matcher import (
+        active_ignore_paths,
+    )
+
+    if getattr(context, "ignore_suppressions", False):
+        return []
+    global_settings = getattr(getattr(context, "config", None), "global_settings", None)
+    return active_ignore_paths(getattr(global_settings, "ignore_paths", None) or [])
 
 
 def cloudformation_candidate_files(
@@ -529,7 +622,7 @@ def cloudformation_candidate_files(
     ``--ignore-suppressions``), matched as ASH matches them when it drops
     findings (``link_exclusions.drop_ignored``). An empty list ignores nothing.
     None, from a caller that has no list (``nothing_to_scan_reason``), reads the
-    configuration's unexpired entries instead.
+    same list from the context (:func:`active_global_ignore_paths`).
     """
     if target_type == "converted":
         files = [Path(p) for p in Path(context.work_dir).glob("**/*.*")]
@@ -539,17 +632,9 @@ def cloudformation_candidate_files(
             scan_set,
         )
         from automated_security_helper.utils.link_exclusions import drop_ignored
-        from automated_security_helper.utils.suppression_matcher import (
-            active_ignore_paths,
-        )
 
         if global_ignore_paths is None:
-            global_settings = getattr(
-                getattr(context, "config", None), "global_settings", None
-            )
-            global_ignore_paths = active_ignore_paths(
-                getattr(global_settings, "ignore_paths", None) or []
-            )
+            global_ignore_paths = active_global_ignore_paths(context)
         files = [
             Path(p)
             for p in drop_ignored(
@@ -560,14 +645,15 @@ def cloudformation_candidate_files(
                         getattr(context, "config", None)
                     ),
                     run_id=getattr(context, "run_id", None),
+                    # In a workspace scan the run's recorded scan set is keyed
+                    # on this too; without it the tree was walked again.
+                    workspace_output_dir=getattr(context, "workspace_output_dir", None),
                 ),
                 context.source_dir,
                 global_ignore_paths,
             )
         ]
-    return sorted(
-        path.as_posix() for path in files if path.name.endswith(CFN_CANDIDATE_SUFFIXES)
-    )
+    return sorted(path.as_posix() for path in files if is_template_candidate(path))
 
 
 class _TagTolerantLoader(yaml.SafeLoader):
