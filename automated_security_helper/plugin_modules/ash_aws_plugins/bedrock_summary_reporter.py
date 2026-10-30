@@ -13,6 +13,7 @@ from typing import (
     Annotated,
     Any,
     Callable,
+    ClassVar,
     Dict,
     Iterable,
     List,
@@ -29,6 +30,7 @@ from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import (
     ReporterOptionsBase,
+    _warn_once,
     report_file_name,
 )
 from automated_security_helper.base.reporter_plugin import (
@@ -679,6 +681,57 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
             "reporters.bedrock-summary-reporter.options.output_technical_file"
         ),
     ] = "bedrock-technical.md"
+
+    #: The options that each name a file this reporter writes in the reports
+    #: directory, in declaration order: when two name the same file, the earlier
+    #: keeps its name.
+    _FILE_NAME_OPTIONS: ClassVar[Tuple[str, ...]] = (
+        "output_file",
+        "output_executive_file",
+        "output_technical_file",
+    )
+
+    @model_validator(mode="after")
+    def _file_options_name_distinct_files(self):
+        """Two of the file options naming one file would have the later report
+        overwrite the earlier (``_write_markdown_files`` writes them in turn) with
+        no line saying so, and the pre-write checks would count one file twice.
+        The later option, in declaration order, is replaced by its default with
+        one warning naming both keys, as ``report_file_name`` replaces a value
+        that is no file name. The keys are named, never the values, which can be
+        read from the environment. A default that names the same file as an
+        earlier option (``output_file: bedrock-executive.md`` with
+        ``output_executive_file`` left at its default) cannot be repaired without
+        guessing which report the operator meant, so that config is refused.
+
+        Names are compared as written: two spellings that one file system folds
+        to one file (a case-insensitive one) are not read as the same file here.
+        """
+        prefix = "reporters.bedrock-summary-reporter.options."
+        taken: Dict[str, str] = {}
+        for option in self._FILE_NAME_OPTIONS:
+            name = getattr(self, option)
+            earlier = taken.get(name)
+            if earlier is None:
+                taken[name] = option
+                continue
+            default = type(self).model_fields[option].default
+            if default in taken:
+                raise ValueError(
+                    f"{prefix}{option} and {prefix}{earlier} name the same file in "
+                    f"the reports directory, and the default of {prefix}{option} is "
+                    "taken too; give each report its own file name"
+                )
+            _warn_once(
+                f"{prefix}{option}",
+                str(name),
+                f"Ignoring {prefix}{option}: it names the same file as "
+                f"{prefix}{earlier}, so the later report would overwrite the "
+                "earlier one. Using the default instead.",
+            )
+            setattr(self, option, default)
+            taken[default] = option
+        return self
 
     include_code_snippets: Annotated[
         bool,
