@@ -792,9 +792,14 @@ class ScanExecutionEngine:
                     warn_unmatched_directory_suppressions,
                 )
 
+                # With the config: the warning quotes a path the config read
+                # from the environment by its reference, as every other
+                # message about a suppression does. Without it the record was
+                # never built and this one warning printed the value.
                 warn_unmatched_directory_suppressions(
                     self._context.config.global_settings.suppressions or [],
                     getattr(self._results, "used_suppressions", None) or (),
+                    config=self._context.config,
                 )
             else:
                 self._results.sarif = exclude_output_dir_results(
