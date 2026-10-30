@@ -5605,8 +5605,8 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
       the options on this side; the inner scan's own are the CLI's), and the
       container-only fields (``build``, ``run``, ``force``, ``oci_runner``,
       ``build_target``, ``container_uid``, ``container_gid``,
-      ``ash_revision_to_install``, ``custom_containerfile``,
-      ``custom_build_arg``), which no shell reads.
+      ``container_network``, ``ash_revision_to_install``,
+      ``custom_containerfile``, ``custom_build_arg``), which no shell reads.
 
     The host's own environment is kept out of the inner scan's option reading
     by ``run_ash_nix`` (``INNER_SCAN_OPTION_VARIABLES``), so what this function

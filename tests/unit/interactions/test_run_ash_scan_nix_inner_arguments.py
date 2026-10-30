@@ -432,6 +432,7 @@ _NOT_FORWARDED_ON_PURPOSE = {
     "build_target",
     "container_uid",
     "container_gid",
+    "container_network",
     "ash_revision_to_install",
     "custom_containerfile",
     "custom_build_arg",
