@@ -4801,9 +4801,14 @@ def mcp_get_config(
             delivered source stands in, or the working directory for the
             local client, whose own tree it is. A network session that
             delivered nothing names no target a scan of it could take, so
-            its answer is judged for no scanned tree (the file confined by
-            its own root, no checkout's operator-only options read), which
-            leaves out more than a scan would, never less.
+            a file of the client's (named outside every granted config
+            root) is judged for no scanned tree (the file confined by its
+            own root, no checkout's operator-only options read), which
+            leaves out more than a scan would, never less; a file the
+            operator granted keeps the working-directory judgment, under
+            which its ``ash_plugin_modules`` entries are kept and judged,
+            so a module every scan refuses refuses this answer too instead
+            of being dropped by the no-tree confinement.
             A given search_dir crosses the scan tool's own root gate, so a
             directory this session may not scan is refused as a scan of it
             is (``scan_target_not_permitted``, exit 4), before anything
@@ -5310,19 +5315,31 @@ def _answer_get_config(
             )
             if delivered is not None and delivered.is_dir():
                 scanned_root = delivered
-            elif caller_is_remote(session_id):
+            elif caller_is_remote(session_id) and client_named_config_is_untrusted(
+                path, session_id=session_id
+            ):
                 # A network session that delivered nothing has no tree a scan
                 # of it may target: run_ash_scan refuses to fall back to the
                 # server's working directory for it (_resolve_omitted_source_dir),
-                # so this answer is not judged for that directory either. It is
-                # judged for no scanned tree, the fail-closed path a deleted
-                # working directory already takes: the file is confined by its
-                # own root and the operator-only options of no checkout are
-                # read, which leaves out more, never less.
+                # so a file of the CLIENT's (named outside every granted config
+                # root) is not judged for that directory either. It is judged
+                # for no scanned tree, the fail-closed path a deleted working
+                # directory already takes: the file is confined by its own
+                # root and the operator-only options of no checkout are read,
+                # which leaves out more, never less. A file the OPERATOR granted
+                # (inside ASH_MCP_ALLOWED_CONFIG_ROOTS) is not confined that way:
+                # under the no-tree load a trusted file in any checkout joins
+                # the confinement and its unimportable plugin modules are
+                # DROPPED, so the answer would show a configuration every scan
+                # of it refuses; it keeps the working-directory judgment, under
+                # which the file sits outside the tree, its entries are kept
+                # and judged, and the refusal below answers.
                 scanned_root = None
             else:
                 # The local client's working directory is its own tree, the
-                # target run_ash_scan takes for it when none is named.
+                # target run_ash_scan takes for it when none is named; a
+                # network session's granted file keeps the same judgment, as
+                # the arm above says.
                 scanned_root = working_directory()
 
     # resolve_config starts from the ASH_CONFIG base and raises when it is

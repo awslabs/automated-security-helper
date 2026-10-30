@@ -6,11 +6,15 @@
 With a named ``config_path`` and no ``search_dir``, the answer is judged for the
 target a scan of the session would take: the session's delivered source. A
 network session that delivered nothing has no such target, and ``run_ash_scan``
-refuses to fall back to the server's working directory for it, so ``get_config``
-no longer judges the file for that directory either: it is judged for no scanned
-tree, the fail-closed path a deleted working directory already takes. The local
-client (the stdio session) keeps its working directory as its own tree, and a
-delivered source keeps standing in for the session that delivered it.
+refuses to fall back to the server's working directory for it, so a file the
+CLIENT named (outside every granted config root) is judged for no scanned tree,
+the fail-closed path a deleted working directory already takes. A file the
+OPERATOR granted (inside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``) keeps the
+working-directory judgment: under the no-tree load such a file, when it sits in
+a checkout, joined the confinement and its unimportable plugin modules were
+dropped, so the answer showed a configuration every scan of it refuses. The
+local client (the stdio session) keeps its working directory as its own tree,
+and a delivered source keeps standing in for the session that delivered it.
 
 The judgment is read where the load receives it: ``resolve_config`` is replaced
 by a recorder that keeps the ``scanned_root`` and ``no_scanned_tree`` arguments
@@ -75,9 +79,38 @@ def _judgment(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
     return seen
 
 
-def test_a_remote_session_that_delivered_nothing_is_judged_for_no_tree(
+def test_a_remote_sessions_client_named_file_is_judged_for_no_tree(
+    _server, monkeypatch, tmp_path
+) -> None:
+    """A file the client named outside every granted config root, under a
+    network session that delivered nothing: no tree a scan of it could take, so
+    the no-tree judgment."""
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    # Inside the scan root the server may scan, outside every granted config
+    # root: a file the client named, not one the operator set aside.
+    named = tmp_path / "scan-root" / "ash.yaml"
+    named.write_text("project_name: named\n", encoding="utf-8")
+    seen = _judgment(monkeypatch)
+
+    with pytest.raises(_Stop):
+        mcp_get_config(config_path=str(named), session_id=REMOTE_SESSION)
+
+    assert seen["scanned_root"] is None
+    assert seen["no_scanned_tree"] is True
+
+
+def test_a_remote_sessions_granted_file_keeps_the_working_directory(
     _server, monkeypatch
 ) -> None:
+    """The operator's file (inside ASH_MCP_ALLOWED_CONFIG_ROOTS) keeps the
+    working-directory judgment under a network session that delivered nothing.
+    Judged for no tree, a granted file sitting in a checkout joined the no-tree
+    confinement and its unimportable ``ash_plugin_modules`` entries were dropped,
+    so get_config answered a configuration every scan of it refuses (the pin in
+    test_get_config_refuses_plugin_modules_a_scan_refuses.py); under the
+    working-directory judgment the file is outside the tree, its entries are
+    kept and judged, and the refusal answers."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     seen = _judgment(monkeypatch)
@@ -85,8 +118,8 @@ def test_a_remote_session_that_delivered_nothing_is_judged_for_no_tree(
     with pytest.raises(_Stop):
         mcp_get_config(config_path=str(_server["named"]), session_id=REMOTE_SESSION)
 
-    assert seen["scanned_root"] is None
-    assert seen["no_scanned_tree"] is True
+    assert seen["scanned_root"] == working_directory()
+    assert seen["no_scanned_tree"] is False
 
 
 def test_the_local_client_keeps_its_working_directory(_server, monkeypatch) -> None:
