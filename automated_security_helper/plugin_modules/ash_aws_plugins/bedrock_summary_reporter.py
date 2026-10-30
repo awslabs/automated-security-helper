@@ -102,8 +102,9 @@ if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 
-#: The ASH_BEDROCK_* variables this reporter's options read as defaults at
-#: import time (model_id, temperature, max_tokens). Their import-time values
+#: The three variables this reporter's options read as defaults at import time:
+#: ASH_BEDROCK_MODEL_ID (model_id), ASH_BEDROCK_TEMPERATURE (temperature) and
+#: ASH_BEDROCK_MAX_TOKENS (max_tokens). Their import-time values
 #: join the redaction values whether or not the loaded config's environment
 #: values also record them, except a numeric knob's purely numeric value
 #: (``_ASH_BEDROCK_NUMERIC_KNOBS``).
@@ -491,15 +492,21 @@ def _exhaustion_text(
 _ASH_BEDROCK_DEFAULT_VALUES: Tuple[str, ...] = _read_ash_bedrock_defaults()
 
 
-def _env_number(name: str, default: str, parse: Callable[[str], Any]) -> Any:
-    """``parse`` of the environment's ``name``, or of ``default`` when the
-    variable is unset, empty or not a number ``parse`` reads.
+def _number_or_default(
+    raw: Optional[str], default: str, parse: Callable[[str], Any], name: str
+) -> Any:
+    """``parse`` of ``raw``, the value the environment's ``name`` holds, or of
+    ``default`` when it is unset, empty or not a number ``parse`` reads.
 
     The options model is built for every scan, the reporter enabled or not, so
     a value ``parse`` refuses used to make every scan fail with the model's
     error. The default is taken instead and the variable named at WARNING,
-    with no value: the value is a configured one."""
-    raw = os.environ.get(name)
+    with no value: the value is a configured one.
+
+    The caller reads the variable itself (``os.environ.get(name, default)`` in
+    the field's default factory): the environment-variable reference is
+    generated from the reads a default factory makes, so the read has to be
+    written there, not inside this helper."""
     if raw is None or raw.strip() == "":
         return parse(default)
     try:
@@ -553,8 +560,11 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     temperature: Annotated[
         float,
         Field(
-            default_factory=lambda: _env_number(
-                "ASH_BEDROCK_TEMPERATURE", "0.5", float
+            default_factory=lambda: _number_or_default(
+                os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5"),
+                "0.5",
+                float,
+                "ASH_BEDROCK_TEMPERATURE",
             ),
             description="Temperature parameter for the Bedrock model. Higher values make output more random.",
         ),
@@ -562,7 +572,12 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     max_tokens: Annotated[
         int,
         Field(
-            default_factory=lambda: _env_number("ASH_BEDROCK_MAX_TOKENS", "4000", int),
+            default_factory=lambda: _number_or_default(
+                os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000"),
+                "4000",
+                int,
+                "ASH_BEDROCK_MAX_TOKENS",
+            ),
             description="Maximum number of tokens to generate in the response.",
         ),
     ]
@@ -978,7 +993,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         """The values this reporter's lines are redacted with.
 
         The scan config's environment values (``PluginBase._environment_values``)
-        plus the ASH_BEDROCK_* defaults as the environment held them when this
+        plus the ASH_BEDROCK_MODEL_ID, ASH_BEDROCK_TEMPERATURE and
+        ASH_BEDROCK_MAX_TOKENS defaults as the environment held them when this
         module loaded (``_ASH_BEDROCK_DEFAULT_VALUES``) and as it holds them now:
         the options read their defaults when they are built, so a model id set
         after the import is what the option holds, and the snapshot alone missed
@@ -1006,7 +1022,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         self.dependencies_satisfied = False
 
         # A configured option can come from the environment (``${VAR}``, or the
-        # ASH_BEDROCK_* defaults), these lines are appended to the reporter's
+        # ASH_BEDROCK_MODEL_ID, ASH_BEDROCK_TEMPERATURE and ASH_BEDROCK_MAX_TOKENS
+        # defaults), these lines are appended to the reporter's
         # errors, which the report output persists, and ash.log is a sink; each
         # line that interpolates an option or an error's text is redacted with
         # the reporter's redaction values.
