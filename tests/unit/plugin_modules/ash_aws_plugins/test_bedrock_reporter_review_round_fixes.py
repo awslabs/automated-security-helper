@@ -31,6 +31,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline i
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
     BedrockSummaryReporterConfigOptions,
+    _inline_as_written,
     _markdown_as_written,
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
@@ -153,6 +154,27 @@ def test_a_quoted_prose_line_with_pipes_is_prose_and_its_span_stays_as_written()
     quote = "> Use `a<b | c` or x | y on the same line."
 
     assert _markdown_as_written(quote) == quote
+
+
+def test_a_content_whose_line_count_disagrees_treats_every_piped_line_as_a_row():
+    """The guard's fallback: when the parser's content does not line up with the
+    raw lines (or no content is given), the rule cannot be read, and the block
+    takes the side that rewrites a span it could have left alone. The lone
+    piped line is prose under the rule (the control), a row under the fallback."""
+    source = "Use `x | <b>y</b>` or x | y here."
+    rewritten = "Use `x \\| &lt;b>y&lt;/b>` or x | y here."
+
+    assert _inline_as_written(source, content=source) == source
+    assert _inline_as_written(source) == rewritten
+    assert _inline_as_written(source, content=f"{source}\nextra") == rewritten
+
+
+def test_the_fallback_leaves_a_line_without_a_pipe_alone():
+    """The fallback is keyed on the pipe: a span without one is written as the
+    model wrote it even when the content cannot be read."""
+    source = "Use `List<T>` here."
+
+    assert _inline_as_written(source) == source
 
 
 # ---------------------------------------------------------------------------
