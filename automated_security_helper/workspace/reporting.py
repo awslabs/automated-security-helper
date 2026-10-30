@@ -148,7 +148,10 @@ from automated_security_helper.base.reporter_plugin import (
     write_report_file,
 )
 from automated_security_helper.core.cancellation import raise_if_cancelled
-from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    WorkspaceExitCode,
+)
 from automated_security_helper.utils.error_text import error_text, traceback_text
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
@@ -366,7 +369,8 @@ def _projects_with_a_completed_run(results_path: Path) -> Optional[set]:
     return {
         entry.get("project")
         for entry in projects
-        if isinstance(entry, dict) and entry.get("status") == "completed"
+        if isinstance(entry, dict)
+        and entry.get("status") == ProjectRunStatus.COMPLETED.value
     }
 
 
