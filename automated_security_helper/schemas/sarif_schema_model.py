@@ -2856,32 +2856,17 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
 
     The merged run reorders rules, so ``ruleIndex`` is dropped from the copy and
     ``ruleId`` is what correlates a result to its rule afterwards. A result that
-    named its rule by index alone, or by a ``rule`` reference whose ``index``
-    points into the incoming driver's rules, lost the association: ``ruleId`` is
-    backfilled from that driver's rule here. The reference's own ``index`` and
-    ``toolComponent`` point into the incoming run's arrays, which the merged run
-    does not have, so they are dropped from the copy; a reference left with
-    neither id nor guid is dropped whole.
+    named its rule by index, or by a ``rule`` reference, and not by ``ruleId``
+    is given the id of the rule those name (``_rule_id_of_reference``). The
+    reference's own ``index`` and ``toolComponent`` point into the incoming
+    run's arrays, which the merged run does not have, so they are dropped from
+    the copy; a reference left with neither id nor guid is dropped whole.
     """
-    rules = report_tool.driver.rules or []
     reference = dumped.get("rule")
-    rule_index = None
-    if result.ruleIndex is not None and result.ruleIndex >= 0:
-        rule_index = result.ruleIndex
-    elif isinstance(reference, dict):
-        index = reference.get("index")
-        component = reference.get("toolComponent")
-        # Only a reference into the driver: with a toolComponent the index names a
-        # rule of an extension, whose rules are not indexed here.
-        if (
-            isinstance(index, int)
-            and index >= 0
-            and not (isinstance(component, dict) and component.get("index", -1) != -1)
-        ):
-            rule_index = index
-    if dumped.get("ruleId") is None and rule_index is not None:
-        if rule_index < len(rules) and rules[rule_index].id:
-            dumped["ruleId"] = rules[rule_index].id
+    if dumped.get("ruleId") is None:
+        rule_id = _rule_id_of_reference(reference, result.ruleIndex, report_tool)
+        if rule_id:
+            dumped["ruleId"] = rule_id
     if isinstance(reference, dict):
         kept = {
             key: value
@@ -2892,6 +2877,70 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
             dumped.pop("rule", None)
         else:
             dumped["rule"] = kept
+
+
+def _rule_id_of_reference(
+    reference: object, rule_index: Optional[int], report_tool: "Tool"
+) -> Optional[str]:
+    """The id of the rule a result names without a ``ruleId``, or None.
+
+    SARIF 2.1.0, 3.27.6 and 3.52: the reference's own ``id`` is the rule and
+    wins; otherwise ``ruleIndex`` (or the reference's ``index``) indexes the
+    ``rules`` of the component ``rule.toolComponent`` names, and the driver's
+    only when no component is named. Indexing the driver whatever the component
+    said gave a result the id, severity and help of another component's rule at
+    that position; a component this run does not have leaves the id unset
+    rather than guessed.
+    """
+    if isinstance(reference, dict) and reference.get("id"):
+        return str(reference["id"])
+    component_reference = (
+        reference.get("toolComponent") if isinstance(reference, dict) else None
+    )
+    component = _referenced_tool_component(component_reference, report_tool)
+    if component is None:
+        return None
+    index = rule_index if rule_index is not None and rule_index >= 0 else None
+    if index is None and isinstance(reference, dict):
+        candidate = reference.get("index")
+        if isinstance(candidate, int) and candidate >= 0:
+            index = candidate
+    if index is None:
+        return None
+    rules = component.rules or []
+    if index < len(rules) and rules[index].id:
+        return rules[index].id
+    return None
+
+
+def _referenced_tool_component(
+    component_reference: object, report_tool: "Tool"
+) -> Optional["ToolComponent"]:
+    """The component a ``toolComponentReference`` names in *report_tool*.
+
+    The driver when the reference is absent or names nothing; otherwise the
+    extension at its ``index``, or the one whose ``guid`` or ``name`` it gives;
+    None when it names an extension this run does not carry.
+    """
+    if component_reference is None:
+        return report_tool.driver
+    if not isinstance(component_reference, dict):
+        return None
+    index = component_reference.get("index", -1)
+    guid = component_reference.get("guid")
+    name = component_reference.get("name")
+    if not (isinstance(index, int) and index >= 0) and guid is None and name is None:
+        return report_tool.driver
+    extensions = report_tool.extensions or []
+    if isinstance(index, int) and index >= 0:
+        return extensions[index] if index < len(extensions) else None
+    for extension in extensions:
+        if guid is not None and extension.guid == guid:
+            return extension
+    for extension in extensions:
+        if name is not None and extension.name == name:
+            return extension
+    return None
 
 
 def _union_rules(

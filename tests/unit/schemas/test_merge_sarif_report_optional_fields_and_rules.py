@@ -191,6 +191,85 @@ class TestResultsKeepTheirRuleById:
         reference = merged.rule.root.model_dump(exclude_unset=True)
         assert reference == {"id": "T-0"}
 
+    def test_a_rule_index_with_a_tool_component_reads_that_components_rules(self):
+        """SARIF 3.27.6: ruleIndex indexes the component rule.toolComponent names."""
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [_finding(None, ruleIndex=1, rule={"toolComponent": {"index": 0}})],
+                    [],
+                    rules=[{"id": "D-0"}, {"id": "D-1"}],
+                    extensions=[
+                        {"name": "pack", "rules": [{"id": "P-0"}, {"id": "P-1"}]}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert aggregated.runs[0].results[0].ruleId == "P-1"
+
+    def test_a_tool_component_named_without_an_index_is_found_by_name(self):
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [
+                        _finding(
+                            None, rule={"index": 1, "toolComponent": {"name": "pack"}}
+                        )
+                    ],
+                    [],
+                    rules=[{"id": "D-0"}, {"id": "D-1"}],
+                    extensions=[
+                        {"name": "pack", "rules": [{"id": "P-0"}, {"id": "P-1"}]}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert aggregated.runs[0].results[0].ruleId == "P-1"
+
+    def test_the_references_own_id_wins_over_the_driver_index(self):
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [_finding(None, ruleIndex=0, rule={"id": "R-named"})],
+                    [],
+                    rules=[{"id": "D-0"}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert aggregated.runs[0].results[0].ruleId == "R-named"
+
+    def test_a_component_this_run_does_not_carry_leaves_the_rule_id_unset(self):
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [_finding(None, ruleIndex=0, rule={"toolComponent": {"index": 7}})],
+                    [],
+                    rules=[{"id": "D-0"}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert aggregated.runs[0].results[0].ruleId is None
+
     def test_a_result_with_a_rule_id_keeps_it(self):
         """The control: a result already named by id is left as it was."""
         aggregated = SarifReport(runs=[_run("aggregate", [], [])])
