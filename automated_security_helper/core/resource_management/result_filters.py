@@ -80,11 +80,16 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     ``severity_counts`` (the rule SummaryStats.total follows), else its
     ``finding_count``: a per-target file written before the metrics pass can
     carry a finding_count that counted suppressed findings too.
+
+    ``actionable`` is None, not 0, when no scanner records an
+    ``actionable_finding_count``: a count the entries do not carry is unknown,
+    and a zero here read as "nothing actionable" for a workspace file whose
+    scanner entries never had the field.
     """
     counts = dict.fromkeys(_SEVERITY_KEYS, 0)
     stats: Dict[str, Any] = {
         "total": 0,
-        "actionable": 0,
+        "actionable": None,
         **dict.fromkeys(_OUTCOME_COUNTERS.values(), 0),
     }
     for data in scanner_results.values():
@@ -101,7 +106,9 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
             stats["total"] += _total_of(own_counts)
         else:
             stats["total"] += _count(data.get("finding_count"))
-        stats["actionable"] += _count(data.get("actionable_finding_count"))
+        actionable = data.get("actionable_finding_count")
+        if isinstance(actionable, int) and not isinstance(actionable, bool):
+            stats["actionable"] = (stats["actionable"] or 0) + actionable
         counter = _OUTCOME_COUNTERS.get(str(data.get("status") or "").upper())
         if counter is not None:
             stats[counter] += 1
@@ -115,6 +122,12 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     The coverage fields (``coverage_complete`` and the gap lists) travel with
     ``status``: a summary that said "incomplete" and dropped them left the
     client no way to see which scanners did not run.
+
+    Every count under ``findings_summary.by_severity`` and ``scan_stats`` is an
+    int or None. None means the document records no such count (a results file
+    with no ``summary_stats`` and no scanner entries to derive one from, or
+    scanner entries that carry no ``actionable_finding_count``); it is never a
+    stand-in for 0, and a client that compares or adds these reads None first.
     """
     summary: Dict[str, Any] = {
         "success": True,

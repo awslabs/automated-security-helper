@@ -147,6 +147,45 @@ class TestFilterSummaryWithoutSummaryStats:
         assert filter_summary(results)["findings_summary"]["by_severity"]["total"] == 7
 
 
+class TestAMissingActionableCountIsUnknownNotZero:
+    """A scanner entry with no actionable_finding_count used to be counted as 0
+    actionable, which read as "nothing actionable" beside known totals."""
+
+    @staticmethod
+    def _without_actionable_counts(with_summary_stats):
+        results = _results(with_summary_stats=with_summary_stats)
+        for data in results["raw_results"]["scanner_results"].values():
+            del data["actionable_finding_count"]
+        return results
+
+    def test_the_derived_summary_reports_none(self):
+        summary = filter_summary(self._without_actionable_counts(False))
+
+        by_severity = summary["findings_summary"]["by_severity"]
+        assert by_severity["actionable"] is None
+        assert by_severity["total"] == 5
+        assert summary["findings_summary"]["scan_stats"]["passed"] == 1
+
+    def test_the_scanners_recount_reports_none_not_the_whole_scans_value(self):
+        filtered = apply_content_filters(
+            self._without_actionable_counts(True), scanners="bandit"
+        )
+
+        assert filtered["summary_stats"]["actionable"] is None
+        assert filtered["actionable_findings"] is None
+        assert filtered["summary_stats"]["total"] == 3
+
+    def test_a_count_some_scanners_carry_is_summed_over_those(self):
+        results = self._without_actionable_counts(False)
+        results["raw_results"]["scanner_results"]["semgrep"][
+            "actionable_finding_count"
+        ] = 2
+
+        by_severity = filter_summary(results)["findings_summary"]["by_severity"]
+
+        assert by_severity["actionable"] == 2
+
+
 class TestActionableOnlyRefusesAnUnlistableCount:
     def test_null_sarif_with_actionable_findings_is_refused(self):
         results = _results()
