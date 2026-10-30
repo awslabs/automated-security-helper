@@ -162,9 +162,9 @@ def test_a_global_ignore_path_with_a_nul_is_warned_about(tmp_path, caplog):
 
 
 def test_an_ini_exclude_entry_with_a_nul_is_dropped_and_counted(tmp_path, caplog):
-    """The operator's .bandit exclude entries are split on commas and passed as
-    written; one holding a NUL is left out, counted in the warning, and the
-    entry beside it stays."""
+    """The operator's .bandit exclude entries are split on commas and anchored
+    below the scanned target; one holding a NUL is left out, counted in the
+    warning, and the entry beside it stays."""
     source = _tree(tmp_path, ["app.py"])
     ini = tmp_path / ".bandit"
     ini.write_text("[bandit]\nexclude = ven\0dor,vendor\n", encoding="utf-8")
@@ -172,9 +172,10 @@ def test_an_ini_exclude_entry_with_a_nul_is_dropped_and_counted(tmp_path, caplog
     scanner._ini_file = ini
 
     with caplog.at_level(logging.WARNING):
-        entries = scanner._ini_excludes()
+        entries = scanner._ini_excludes(source)
 
-    assert entries == ["vendor"]
+    assert not any("\0" in entry for entry in entries), entries
+    assert entries == bandit_excluded_path_globs(source.as_posix(), "vendor")
     assert any(
         "1 exclude entries" in message and "NUL" in message
         for message in _warnings(caplog)

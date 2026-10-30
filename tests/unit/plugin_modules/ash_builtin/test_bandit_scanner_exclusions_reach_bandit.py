@@ -21,7 +21,9 @@ Each test here pins one way the exclusions, or the scan, used to fail:
 * The ``--exclude`` length was measured with a strict ``str.encode``, which raised
   on a path holding a byte that is not UTF-8.
 * The operator's ``.bandit`` ``exclude`` was ignored, because bandit reads it only
-  while ``--exclude`` is still its default and ASH always passes one.
+  while ``--exclude`` is still its default and ASH always passes one. Its entries
+  are anchored at the target like ``excluded_paths`` entries: passed raw, bandit
+  also read them as substrings of the directories above the scanned tree.
 * A file bandit skipped (a syntax error) kept its metrics entry and was counted
   as scanned, so a target whose every file failed to parse passed with nothing.
 * A bandit found on PATH with no uv was run with no check of its extras or
@@ -271,8 +273,60 @@ def test_the_operators_bandit_ini_exclude_reaches_bandit(tmp_path):
     argv, _, _ = scanner._execute_scan(source, "source", [])
 
     entries = _entries(argv)
-    assert "tests" in entries, entries
-    assert "legacy/" in entries, entries
+    # Anchored at the target as an excluded_paths entry is: never the raw text,
+    # which bandit would also read as a substring of the directories ABOVE the
+    # target (a scan under /home/ci/tests-lab would have skipped every file).
+    assert "tests" not in entries and "legacy/" not in entries, entries
+    for item in ("tests", "legacy/"):
+        for entry in bandit_excluded_path_globs(source.as_posix(), item):
+            assert entry in entries, (item, entry)
+    assert all(entry.startswith(source.as_posix()) for entry in entries), entries
+
+
+def test_an_ini_entry_naming_the_targets_own_path_skips_only_below_it(tmp_path, caplog):
+    """``exclude = tests`` with the tree itself under a directory named ``tests``:
+    bandit alone would skip every file; anchored, the entry skips a ``tests``
+    directory below the target, and the operator is told."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = tests\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "tests/test_app.py"], name="tests")
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    entries = _entries(argv)
+    app = f"{source.as_posix()}/app.py"
+    below = f"{source.as_posix()}/tests/test_app.py"
+    assert not any(fnmatch.fnmatchcase(app, e) or e in app for e in entries), entries
+    assert any(fnmatch.fnmatchcase(below, e) or e in below for e in entries), entries
+    assert any(
+        "scanned target's own path" in record.getMessage() for record in caplog.records
+    )
+
+
+def test_an_ini_entry_holding_a_line_break_is_left_out_with_a_warning(tmp_path, caplog):
+    """A multi-line ini value keeps its line break inside the second entry
+    (bandit splits on commas only); such an entry has no --exclude form."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = tests,\n  legacy\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "legacy/old.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    entries = _entries(argv)
+    old = f"{source.as_posix()}/legacy/old.py"
+    assert not any(fnmatch.fnmatchcase(old, e) or e in old for e in entries), entries
+    assert not any("\n" in e for e in entries)
+    assert any(
+        "has no --exclude form" in record.getMessage() for record in caplog.records
+    )
 
 
 def test_no_ini_adds_no_raw_entries(tmp_path):

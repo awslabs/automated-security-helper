@@ -1068,8 +1068,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         Anchored at the target as it appears in argv, since bandit matches each
         entry against ``os.path.join(root, name)`` while walking that string.
         ``required``: the known ignore paths and ``excluded_paths``
-        (``_configured_excludes``), and each of ASH's output directories inside
-        the target: this run's, and an earlier run's default ``.ash/ash_output``,
+        (``_configured_excludes``), the operator's ``.bandit`` ``exclude`` entries
+        anchored the same way (``_ini_excludes``), and each of ASH's output
+        directories inside the target: this run's, and an earlier run's default
+        ``.ash/ash_output``,
         the directories every other scanner that walks a directory skips
         (``_ash_output_dirs_inside``). Without them, a source tree holding
         ``.ash/ash_output`` had the converters' output scanned in the source pass
@@ -1084,7 +1086,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         walk for the two sets).
         """
         anchor = Path(target).as_posix()
-        excludes: List[str] = self._configured_excludes(target)
+        excludes: List[str] = self._configured_excludes(target) + self._ini_excludes(
+            target
+        )
         # Ignore paths are relative to the source directory, so they are anchored
         # only when bandit is scanning it. Under the converted target the same
         # pattern names different files: "archive/**" would skip everything the
@@ -1134,9 +1138,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     relative,
                 )
             )
-        ini_excludes = self._ini_excludes()
         if not excludes and not ignore_globs and not output_entries:
-            return ini_excludes, []
+            return [], []
         holding = _paths_holding_glob_characters(target)
         required = _entries_no_path_holds_as_text(
             target, excludes, output_entries, holding=holding
@@ -1146,23 +1149,32 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             if ignore_globs
             else []
         )
-        # The operator's own ini entries are passed as bandit would read them,
-        # after the filter: the operator chose bandit's substring reading.
-        return required + ini_excludes, best_effort
+        return required, best_effort
 
-    def _ini_excludes(self) -> List[str]:
-        """The ``exclude`` entries of the operator's ``.bandit`` ini, for ``--exclude``.
+    def _ini_excludes(self, target: Path) -> List[str]:
+        """``--exclude`` globs for the ``exclude`` setting of the operator's ``.bandit`` ini, anchored at ``target``.
 
         bandit 1.9.4 reads the ini's ``exclude`` only while its ``--exclude`` is
         still the default (``cli/main._log_option_source``), and ASH always
-        passes one, so the operator's setting was silently ignored. The entries
-        are passed as bandit itself would read them: split on commas, each
-        matched as an ``fnmatch`` glob or a plain substring against the walked
-        path, unanchored. Only the operator's configured ``.bandit`` is read
-        (``_process_config_options``); a file from the scanned tree never is.
-        The value is split on lines and then on commas, so no entry read here
-        holds a line break; an ini that does not parse adds nothing, with a
-        warning.
+        passes one, so the operator's setting was silently ignored. bandit itself
+        splits the value on ``,`` only, strips nothing, and tests each entry as
+        an ``fnmatch`` glob or a plain substring of the walked path, unanchored
+        (``core/manager.discover_files``). Passed that way under ASH, whose
+        targets are absolute, an entry such as ``tests`` or ``build`` also
+        matched a directory above the scanned tree and skipped every file, which
+        the scanned-file check then graded SKIPPED. So each entry is anchored at
+        the target as an ``excluded_paths`` entry is (``bandit_excluded_path_globs``):
+        it names a path anywhere below the target and nothing above it, and an
+        absolute entry is read relative to the target. An entry the builder has
+        no form for (a line break, which a multi-line ini value holds, or a ``.``
+        or empty component) is left out with a warning. An entry holding a NUL
+        character, which no command-line argument can carry, is left out and
+        counted in one warning. An entry that is text of
+        the target's own path gets a warning that bandit alone would have skipped
+        the whole tree. An entry with surrounding whitespace is passed as written,
+        as bandit reads it, with a warning. Only the operator's configured
+        ``.bandit`` is read (``_process_config_options``); a file from the scanned
+        tree never is. An ini that does not parse adds nothing, with a warning.
         """
         if self._ini_file is None:
             return []
@@ -1177,17 +1189,39 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 f"file, so bandit gets no entries from it: {type(exc).__name__}."
             )
             return []
-        entries = []
+        anchor = Path(target).as_posix()
+        entries: List[str] = []
         unpassable = 0
-        for line in raw.splitlines():
-            for part in line.split(","):
-                entry = part.strip()
-                if entry and "\0" in entry:
-                    # No argument can carry a NUL; exec would refuse the whole
-                    # command line, and bandit would not start.
-                    unpassable += 1
-                elif entry:
-                    entries.append(entry)
+        for entry in raw.split(","):
+            if not entry:
+                continue
+            if "\0" in entry:
+                # No argument can carry a NUL; exec would refuse the whole
+                # command line, and bandit would not start.
+                unpassable += 1
+                continue
+            globs = bandit_excluded_path_globs(anchor, entry)
+            if not globs:
+                ASH_LOGGER.warning(
+                    f"The .bandit exclude entry {entry!r} has no --exclude form "
+                    "bandit can be given (a line break, or a '.' or empty path "
+                    "component), so it excludes nothing."
+                )
+                continue
+            if entry != entry.strip():
+                ASH_LOGGER.warning(
+                    f"The .bandit exclude entry {entry!r} has surrounding "
+                    "whitespace, which bandit reads as part of the entry; it is "
+                    "passed as written."
+                )
+            if entry in anchor:
+                ASH_LOGGER.warning(
+                    f"The .bandit exclude entry {entry!r} is part of the scanned "
+                    f"target's own path {anchor}: bandit alone reads an entry as a "
+                    "substring of every walked path and would have skipped the "
+                    "whole tree. ASH applies it below the target only."
+                )
+            entries.extend(globs)
         if unpassable:
             ASH_LOGGER.warning(
                 f"{unpassable} exclude entries of the configured .bandit file hold "
