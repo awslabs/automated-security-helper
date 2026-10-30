@@ -258,6 +258,24 @@ def project_root_uri(project_path: str) -> str:
     return uri if uri.endswith("/") else uri + "/"
 
 
+def _slash_before_a_drive(text: str) -> bool:
+    """Whether *text* is ``/C:/...`` or ``/C:``: a drive letter behind one separator.
+
+    ``file:///C:/x`` reduces to ``/C:/x``, and that leading separator is dropped so
+    a drive is spelled one way. The test is a drive's shape, an ASCII letter at
+    [1] and a separator or the end of the text at [3], never only the colon at
+    [2]: ``/x:legacy/src/x.py`` is a rooted POSIX path whose first component holds
+    a colon, and dropping its separator made it ``x:legacy/src/x.py``, which
+    nothing read as a drive, so it was rebased under the project as if relative.
+    ``utils/workspace_paths.py`` applies the same rule on its side.
+    """
+    if len(text) < 3 or text[0] != "/" or text[2] != ":":
+        return False
+    if not (text[1].isascii() and text[1].isalpha()):
+        return False
+    return len(text) == 3 or text[3] in "/\\"
+
+
 def _strip_file_scheme(uri: str) -> str:
     """Reduce a possibly ``file://``-schemed URI to a bare path.
 
@@ -270,7 +288,7 @@ def _strip_file_scheme(uri: str) -> str:
         text = text[len("file://") :]
         # file:///C:/x -> /C:/x. Drop the separator before a drive letter, which
         # to_workspace_pattern would otherwise read as a rooted path.
-        if len(text) > 2 and text[0] == "/" and text[2] == ":":
+        if _slash_before_a_drive(text):
             text = text[1:]
     return text
 
@@ -299,7 +317,7 @@ def _posix_text(uri: str, project_path: Optional[str] = None) -> str:
     if text.lower().startswith("file:"):
         text = unquote(text)
     text = sanitized_uri_text(_strip_file_scheme(text), project_path)
-    if len(text) > 2 and text[0] == "/" and text[2] == ":":
+    if _slash_before_a_drive(text):
         text = text[1:]
     return text
 

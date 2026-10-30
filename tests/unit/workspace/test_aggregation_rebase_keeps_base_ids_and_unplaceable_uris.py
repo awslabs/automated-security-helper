@@ -430,6 +430,34 @@ def test_a_chain_rooted_in_a_relative_base_is_counted_not_placed(project):
     assert unconvertible == 1
 
 
+def test_a_rooted_posix_path_whose_first_component_holds_a_colon_stays_rooted():
+    """Red at the base: ``_posix_text`` dropped the leading separator of any
+    ``/X:...`` text, a rule meant for ``/C:/x`` (how ``file:///C:/x`` reduces), so
+    ``/x:legacy/src/x.py`` became ``x:legacy/src/x.py``, read as relative, and the
+    finding was rebased under the project though it names a path outside it."""
+    assert aggregation._posix_text("/x:legacy/src/x.py") == "/x:legacy/src/x.py"
+    assert aggregation._rooted(aggregation._posix_text("/x:legacy/src/x.py")) is True
+    assert aggregation._posix_text("file:///x:legacy/src/x.py") == "/x:legacy/src/x.py"
+    # The drive rule itself is kept: a letter at [1] and a separator or the end at [3].
+    assert aggregation._posix_text("/C:/ws/x.py") == "C:/ws/x.py"
+    assert aggregation._posix_text("file:///C:/ws/x.py") == "C:/ws/x.py"
+    assert aggregation._posix_text("/C:") == "C:"
+    assert aggregation._posix_text("/1:/x.py") == "/1:/x.py"
+
+
+def test_a_rooted_path_with_a_colon_component_outside_the_project_is_counted(project):
+    """Red at the base: the location was placed at ``api/x:legacy/src/x.py``."""
+    rebased, unconvertible = rebase_run_for_project(
+        _run({"uri": "/x:legacy/src/x.py"}), project
+    )
+
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "/x:legacy/src/x.py"
+    assert "uriBaseId" not in artifact
+    assert "workspace_uri" not in rebased["results"][0]["properties"]
+    assert unconvertible == 1
+
+
 def test_rooted_reads_a_unc_path_as_absolute_and_a_single_backslash_as_a_name():
     """Red at the base for the UNC line (``_rooted`` read only ``/`` and a drive),
     then for the ``\\x.py`` line once a single leading backslash was admitted as a
