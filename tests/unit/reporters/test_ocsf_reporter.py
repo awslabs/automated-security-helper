@@ -1534,10 +1534,19 @@ class TestOcsfReporterSeverityMapping:
 
         findings = json.loads(result_json)
 
-        # Should have one finding (second one succeeded)
+        # One finding converted (the second), and the array says it is short:
+        # a shortfall record with a fixed uid and no vulnerabilities entry
+        # follows it, so a reader can tell "one finding" from "one of two".
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
+            CONVERSION_SHORTFALL_UID,
+        )
+
         assert isinstance(findings, list)
-        assert len(findings) == 1
-        assert findings[0]["vulnerabilities"][0]["title"] == "TEST002"
+        assert len(findings) == 2
+        converted = [f for f in findings if f["vulnerabilities"]]
+        assert [f["vulnerabilities"][0]["title"] for f in converted] == ["TEST002"]
+        (shortfall,) = [f for f in findings if not f["vulnerabilities"]]
+        assert shortfall["finding_info"]["uid"] == CONVERSION_SHORTFALL_UID
 
     def test_report_unique_identifiers_across_findings(self, reporter):
         """Test that all findings in a report have unique identifiers."""

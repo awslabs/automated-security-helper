@@ -21,6 +21,7 @@ import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
+    CONVERSION_SHORTFALL_UID,
     OcsfReporter,
     _metadata_for_project,
 )
@@ -280,11 +281,13 @@ class TestVulnerabilityExtractionFaults:
         assert vuln.affected_code is None or vuln.affected_code == []
 
     def test_invalid_region_data_degrades_to_a_minimal_vulnerability(self, reporter):
-        """If Vulnerability() itself rejects the assembled data, a stub is returned.
+        """A region the schema refuses costs that one location, not the record.
 
-        A non-integer startLine survives every inner handler -- each one only
-        guards attribute access, not the model validation that happens after --
-        so it is the outermost handler that has to catch it.
+        Each affected_code entry is validated as it is built, so a non-integer
+        startLine is skipped on its own and the description, title and severity
+        read from the result are kept. Before that, the whole Vulnerability was
+        validated at once and the outermost handler replaced all of it with the
+        fixed fallback text.
         """
         result = Result(ruleId="R1", level=Level.error, message=Message(text="m"))
         location = Location(
@@ -300,9 +303,10 @@ class TestVulnerabilityExtractionFaults:
 
         vuln = reporter._create_vulnerability_from_result(result)
 
-        assert vuln.title == "R1", "the rule id is preserved in the fallback"
-        assert vuln.desc == "Error processing vulnerability details"
-        assert vuln.severity == "MEDIUM"
+        assert vuln.title == "R1", "the rule id is preserved"
+        assert vuln.desc == "m", "the message text is kept, not the fallback text"
+        assert vuln.severity == "CRITICAL", "level error, as the gate reads it"
+        assert not vuln.affected_code, "the one unreadable location is left out"
 
     def test_fallback_title_is_unknown_rule_when_the_rule_id_is_absent(self, reporter):
         result = Result(level=Level.error, message=Message(text="m"))
@@ -320,7 +324,8 @@ class TestVulnerabilityExtractionFaults:
         vuln = reporter._create_vulnerability_from_result(result)
 
         assert vuln.title == "Unknown Rule"
-        assert vuln.desc == "Error processing vulnerability details"
+        assert vuln.desc == "m", "the message text survives the skipped location"
+        assert not vuln.affected_code
 
 
 # ---------------------------------------------------------------------------
@@ -455,14 +460,20 @@ class TestVulnerabilityFindingFaults:
     def test_non_string_message_text_falls_back_to_a_truncated_title(
         self, reporter, metadata
     ):
-        """A non-string message defeats the length checks used to build the title."""
+        """A non-string message is read as no message, and the title says so.
+
+        The message reader takes only string text, markdown or id, so a number
+        where the text should be is "No description" rather than a value that
+        defeats the title's length checks and trips the whole-FindingInfo
+        fallback.
+        """
         result = good_result(text="x")
         result.message.root.text = 12345
 
         finding = reporter._create_vulnerability_finding(result, metadata, 1)
 
-        assert finding.finding_info.title == "Error creating finding title"
-        assert finding.finding_info.desc == "Error extracting finding description"
+        assert finding.finding_info.title == "R1 - No description"
+        assert finding.finding_info.desc == "No description"
         assert finding.severity_id == SeverityId.integer_5, (
             "severity comes from result.level (error is CRITICAL, as in the gate) "
             "and must survive a bad message"
@@ -615,7 +626,14 @@ class TestReportDegradation:
 
         findings = json.loads(reporter.report(model))
 
-        assert [f["vulnerabilities"][0]["title"] for f in findings] == ["GOOD"]
+        # The finding that worked is reported, and the array says one is
+        # missing: a shortfall record with no vulnerabilities entry follows it.
+        converted = [f for f in findings if f["vulnerabilities"]]
+        assert [f["vulnerabilities"][0]["title"] for f in converted] == ["GOOD"]
+        shortfalls = [f for f in findings if not f["vulnerabilities"]]
+        assert [f["finding_info"]["uid"] for f in shortfalls] == [
+            CONVERSION_SHORTFALL_UID
+        ]
 
     def test_when_every_finding_fails_to_serialize_an_error_response_is_returned(
         self, reporter, monkeypatch

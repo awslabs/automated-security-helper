@@ -146,8 +146,13 @@ class TestFileNamesAndMessages:
         assert " in app.py - " in finding.finding_info.title
 
     def test_a_message_given_by_id_is_described_by_it(self, reporter, metadata):
-        result = Result(ruleId="R1", level=Level.error)
-        result.message = Message.model_validate({"id": "default"})
+        # message is required on Result, so the id-only message is given at
+        # construction rather than assigned after.
+        result = Result(
+            ruleId="R1",
+            level=Level.error,
+            message=Message.model_validate({"id": "default"}),
+        )
 
         finding = reporter._create_vulnerability_finding(result, metadata, _now_ms())
 
