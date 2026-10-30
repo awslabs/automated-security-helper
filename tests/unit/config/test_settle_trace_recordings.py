@@ -355,6 +355,10 @@ def _publish(
         # without the warning. The property names carry the cell, so the rows
         # stay attributable without a per-testcase element. Requested here,
         # not as a parameter, so a cell that never publishes asks for nothing.
+        # On a pytest-xdist worker the fixture is a no-op (pytest builds the
+        # junit writer on the controller only; pytest issue 7767), so under
+        # xdist the rows reach the junit file from no worker; the files and
+        # terminal channels below carry them there, and junit is one of four.
         record = request.getfixturevalue("record_testsuite_property")
         for index, line in enumerate(lines, 1):
             record(f"settle-trace.{cell}.{index:03d}", line)
