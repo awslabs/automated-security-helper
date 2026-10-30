@@ -282,12 +282,28 @@ def test_a_cache_overlay_probe_that_raises_mounts_the_cache_read_only(
 
 
 def test_concurrent_plans_probe_a_filesystem_once(layout, monkeypatch):
-    """Two scanner threads meeting the same filesystem share one probe and one answer."""
+    """Two scanner threads meeting the same filesystem share one probe and one answer.
+
+    The first worker is held inside the probe; the second is released only once
+    it has looked the filesystem up in the record (or, under the lock, has been
+    waiting for it for a second), so without the lock the second look-up always
+    finds the record empty and probes again.
+    """
     cache = layout.tmp / "cache"
     cache.mkdir()
     entered = threading.Event()
+    looked_up_twice = threading.Event()
     release = threading.Event()
     probes = []
+
+    class Watched(dict):
+        looks = 0
+
+        def __contains__(self, key):
+            Watched.looks += 1
+            if Watched.looks >= 2:
+                looked_up_twice.set()
+            return super().__contains__(key)
 
     def probe_run(argv, env=None):
         probes.append(list(argv))
@@ -298,6 +314,7 @@ def test_concurrent_plans_probe_a_filesystem_once(layout, monkeypatch):
     monkeypatch.setattr(backends, "_probe_run", probe_run)
     monkeypatch.setattr(backends, "_true", lambda: "/fake/true")
     backend = _bwrap(overlay=True)
+    backend._overlay_devices = Watched()
     answers = []
     workers = [
         threading.Thread(target=lambda: answers.append(backend._overlay_over(cache)))
@@ -306,6 +323,9 @@ def test_concurrent_plans_probe_a_filesystem_once(layout, monkeypatch):
     workers[0].start()
     assert entered.wait(5)
     workers[1].start()
+    # Without the lock this returns at once with the second look-up made; with it
+    # the second worker waits at the lock and the second has not happened yet.
+    looked_up_twice.wait(1)
     release.set()
     for worker in workers:
         worker.join(5)
