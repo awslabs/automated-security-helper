@@ -2070,22 +2070,36 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ``detect-secrets scan`` writes a baseline from the directory it runs in,
         the repository's root, so its result keys and its ``should_exclude_file``
         patterns name files relative to that directory: ``service/app.py``,
-        ``^service/tests/``. A baseline whose file sits in a strict ancestor of
-        the scanned directory, read through an admitted in-tree link into the
-        enclosing checkout (a monorepo's ``service/.secrets.baseline`` pointing
-        at the checkout's own ``.secrets.baseline``) or named there by the
-        operator, was written from that ancestor. Matched relative to the
-        scanned subdirectory, no key met a finding and no pattern met a file, so
-        the admitted link read a baseline whose entries never applied. Such a
-        baseline's paths are read relative to its own directory; a baseline
-        inside the scanned directory, or anywhere else, keeps the scan root.
+        ``^service/tests/``. A baseline the scan FOUND in the tree whose file
+        resolves into a strict ancestor of the scanned directory, the admitted
+        in-tree link into the enclosing checkout (a monorepo's
+        ``service/.secrets.baseline`` pointing at the checkout's own
+        ``.secrets.baseline``), was written from that ancestor. Matched relative
+        to the scanned subdirectory, no key met a finding and no pattern met a
+        file, so the admitted link read a baseline whose entries never applied.
+        Such a baseline's paths are read relative to its own directory; a
+        baseline inside the scanned directory keeps the scan root.
+
+        A baseline the OPERATOR names (``baseline_file``) keeps the scan root
+        wherever its file sits, an ancestor directory included: the operator
+        ran ``detect-secrets scan`` from a directory this scanner cannot know,
+        and the contract pinned since the known-entries rule was written is that
+        its keys and patterns are relative to the scanned directory (the file
+        beside the scanned tree, keyed ``settings.py``, is the common shape). A
+        first cut of this rule re-anchored such a baseline too, and its known
+        candidates stopped matching.
+
         The anchor is spelled with the scan root's own prefix (the directory
         walked up, not the resolved path), so a scan root reached through a
         link keys the same way the scan set does. A converted-files scan keeps
         the work directory: the baseline's paths name source files, and the
         converted copies are keyed under the work directory as before.
         """
-        if target_type != "source" or self._baseline_real is None:
+        if (
+            target_type != "source"
+            or self._baseline_real is None
+            or self._baseline_from_option
+        ):
             return scan_root
         root = Path(os.path.abspath(scan_root))
         real_root = Path(os.path.realpath(root))
