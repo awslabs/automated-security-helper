@@ -251,23 +251,30 @@ class TestTheConfigInputs:
 
 
 class TestTheSeverityRestriction:
+    """A restriction can only tighten, and LOW is stricter than HIGH.
+
+    The threshold names the least severe finding that still fails a scan, so
+    the lower the word the more findings gate. Each test below starts from the
+    looser word (HIGH) and restricts to the stricter one (LOW).
+    """
+
     def test_the_callers_resolved_config_is_not_rewritten(self, tmp_path):
         source, output = _dirs(tmp_path)
         shared = AshConfig(project_name="shared")
-        shared.global_settings.severity_threshold = "LOW"
+        shared.global_settings.severity_threshold = "HIGH"
         orchestrator = ASHScanOrchestrator(
             source_dir=source,
             output_dir=output,
             resolved_config=shared,
-            severity_threshold_restriction="HIGH",
+            severity_threshold_restriction="LOW",
         )
 
         _initialize(orchestrator)
 
-        assert orchestrator.config.global_settings.severity_threshold == "HIGH"
+        assert orchestrator.config.global_settings.severity_threshold == "LOW"
         # Red at the base: the caller's object was the one rewritten, and a
         # workspace hands the same one to every scan.
-        assert shared.global_settings.severity_threshold == "LOW"
+        assert shared.global_settings.severity_threshold == "HIGH"
         assert orchestrator.config is not shared
 
     def test_without_a_restriction_the_config_is_adopted_as_given(self, tmp_path):
@@ -286,18 +293,18 @@ class TestTheSeverityRestriction:
         source, output = _dirs(tmp_path)
         loaded = results_of_a_scan()
         loaded.ash_config = AshConfig(project_name="recorded")
-        loaded.ash_config.global_settings.severity_threshold = "LOW"
+        loaded.ash_config.global_settings.severity_threshold = "HIGH"
         orchestrator = ASHScanOrchestrator(
             source_dir=source,
             output_dir=output,
-            severity_threshold_restriction="HIGH",
+            severity_threshold_restriction="LOW",
         )
 
         orchestrator._adopt_this_runs_values(loaded, AshConfig(project_name="now"))
 
         # Red at the base: only the run's own config was restricted, and the
         # report over saved results gates on the recorded one.
-        assert loaded.ash_config.global_settings.severity_threshold == "HIGH"
+        assert loaded.ash_config.global_settings.severity_threshold == "LOW"
 
     def test_a_word_off_the_ladder_is_refused_and_nothing_is_written(self, tmp_path):
         source, output = _dirs(tmp_path)
@@ -315,35 +322,35 @@ class TestTheSeverityRestriction:
     def test_lower_case_is_the_same_word_and_blank_is_none(self, tmp_path):
         source, output = _dirs(tmp_path)
         config = AshConfig(project_name="p")
-        config.global_settings.severity_threshold = "LOW"
+        config.global_settings.severity_threshold = "HIGH"
         orchestrator = ASHScanOrchestrator(source_dir=source, output_dir=output)
 
         orchestrator._restrict_severity_threshold(config, "  ")
-        assert config.global_settings.severity_threshold == "LOW"
-
-        orchestrator._restrict_severity_threshold(config, "high")
         assert config.global_settings.severity_threshold == "HIGH"
+
+        orchestrator._restrict_severity_threshold(config, "low")
+        assert config.global_settings.severity_threshold == "LOW"
 
     def test_the_scanners_of_the_config_it_is_given_are_the_ones_tightened(
         self, tmp_path
     ):
         source, output = _dirs(tmp_path)
         target = AshConfig(
-            scanners={"custom-scanner": {"options": {"severity_threshold": "LOW"}}}
+            scanners={"custom-scanner": {"options": {"severity_threshold": "HIGH"}}}
         )
         other = AshConfig(
-            scanners={"custom-scanner": {"options": {"severity_threshold": "LOW"}}}
+            scanners={"custom-scanner": {"options": {"severity_threshold": "HIGH"}}}
         )
         orchestrator = ASHScanOrchestrator(source_dir=source, output_dir=output)
         orchestrator.config = other
 
-        orchestrator._restrict_severity_threshold(target, "HIGH")
+        orchestrator._restrict_severity_threshold(target, "LOW")
 
         tightened = (target.scanners.model_extra or {})["custom-scanner"]["options"]
         untouched = (other.scanners.model_extra or {})["custom-scanner"]["options"]
         # Red at the base: the scanners were read from self.config.
-        assert tightened["severity_threshold"] == "HIGH"
-        assert untouched["severity_threshold"] == "LOW"
+        assert tightened["severity_threshold"] == "LOW"
+        assert untouched["severity_threshold"] == "HIGH"
 
     def test_a_threshold_read_from_the_environment_is_not_printed(self, tmp_path):
         source, output = _dirs(tmp_path)
