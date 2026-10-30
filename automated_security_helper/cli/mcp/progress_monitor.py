@@ -257,6 +257,10 @@ def _read_scanner_severity(result_path: Path) -> dict:
     scanner writes; a plain ``open()`` there followed a link to any file the
     server can read, and blocked the event loop on a FIFO.
     """
+    # The link check by name first: Windows has no O_NOFOLLOW, so the flag loop
+    # below contributes nothing there and the open followed the link.
+    if stat.S_ISLNK(os.lstat(result_path).st_mode):
+        raise OSError(f"{result_path} is a link")
     flags = os.O_RDONLY
     for name in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_BINARY"):
         flags |= getattr(os, name, 0)
