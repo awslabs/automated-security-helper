@@ -16,7 +16,6 @@ installed.
 
 from __future__ import annotations
 
-import importlib.util
 import io
 import sys
 from pathlib import Path
@@ -36,7 +35,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners import (
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
     CdkNagScanner,
 )
-from automated_security_helper.utils import uv_tool_runner
+from automated_security_helper.utils import python_installer, uv_tool_runner
 
 pytestmark = pytest.mark.unit
 
@@ -51,15 +50,12 @@ def environment(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "prefix", str(prefix))
     state = SimpleNamespace(prefix=prefix)
 
-    real_find_spec = importlib.util.find_spec
-
     def configure(*, pip: bool, uv: str | None = UV, uv_tool: bool = False):
-        def find_spec(name, *args, **kwargs):
-            if name == "pip":
-                return object() if pip else None
-            return real_find_spec(name, *args, **kwargs)
-
-        monkeypatch.setattr(importlib.util, "find_spec", find_spec)
+        # The seam the installer reads: pip_is_importable asks
+        # importlib.machinery.PathFinder over the interpreter's own path entries,
+        # not importlib.util.find_spec, so a fake find_spec answered nothing
+        # here and the test environment's pip was whatever this process had.
+        monkeypatch.setattr(python_installer, "pip_is_importable", lambda: pip)
         monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: uv)
         if uv_tool:
             prefix.joinpath("uv-receipt.toml").write_text("[tool]\n")
