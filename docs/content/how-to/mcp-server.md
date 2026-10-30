@@ -451,9 +451,11 @@ tree the same way for the whole workspace scan. The other way round, `run_ash_sc
 `run_ash_workspace_scan` are refused with the same `error_type` while one of those calls is
 changing the session's tree. Chunks are still accepted, because they land beside the tree.
 `set_source_zip_chunk` and `select_profile` are refused with `error_type`
-`session_workspace_busy` while an HTTP server removes the session's workspace for being unused
-longer than `--session-workspace-ttl`. The upload and the bound profile go with the workspace,
-so the client selects the profile again and sends the upload again from chunk 0.
+`session_workspace_busy` while an HTTP server removes the workspace of a session it does not
+hold as issued, such as a stateless server's, for being unused longer than
+`--session-workspace-ttl`. The upload and the bound profile go with the workspace, so the client
+selects the profile again and sends the upload again from chunk 0. A session the server holds as
+issued is kept until it ends; see [Clean up](#clean-up).
 ASH sets no quota on uploads per session or in total. The server's config limits how many scans run and
 for how long; see [Limit how many scans run and for how long](#limit-how-many-scans-run-and-for-how-long).
 
