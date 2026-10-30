@@ -135,18 +135,19 @@ def is_checking_only() -> bool:
 
 
 def _offline_for(offline: Optional[bool]) -> bool:
-    """The offline mode a uv call runs under: the caller's, else ASH's own.
+    """The offline mode a uv call runs under: ASH's own, or the caller's on top.
 
     A scanner's own ``options.offline: true`` puts that scanner offline while
     the rest of the run stays online (``ScannerPluginBase._scanner_offline``);
-    its uv calls pass that as ``offline``. None follows ``ASH_OFFLINE``, which
-    was the only mode uv saw before the parameter existed.
+    its uv calls pass that as ``offline``. ASH's mode (``ASH_OFFLINE``) can be
+    added to, never switched off: a caller passing False under ``ASH_OFFLINE``
+    stays offline, as ``_scanner_offline`` documents ("cannot be switched off
+    for one of them"). None, the default, is ASH's mode alone, which was the
+    only mode uv saw before the parameter existed.
     """
-    if offline is not None:
-        return bool(offline)
     from automated_security_helper.core.constants import is_offline_mode
 
-    return is_offline_mode()
+    return bool(offline) or is_offline_mode()
 
 
 @dataclass
@@ -789,6 +790,13 @@ def shown_uv_output(
         # claimed every character was dropped.
         shown = f"(first {dropped} characters not shown) " + shown[len(shown) - limit :]
     return shown
+
+
+def _canonical(name: str) -> str:
+    """``name`` as PEP 503 compares package names (case and separator folded)."""
+    from packaging.utils import canonicalize_name
+
+    return canonicalize_name(name)
 
 
 def checked_requirement(
@@ -1849,9 +1857,12 @@ class UVToolRunner:
         # Build command with offline support
         cmd = [self.uv_executable, "tool", "install"]
 
-        # Add offline flag if UV_OFFLINE environment variable is set
-        offline = os.environ.get("UV_OFFLINE") == "1"
-        if offline:
+        # UV_OFFLINE set by hand in the environment while _offline_for read
+        # online (the offline mode itself returned above): uv's own flag is
+        # passed along. Named apart from the ``offline`` parameter, which the
+        # return above has already consumed.
+        env_offline = os.environ.get("UV_OFFLINE") == "1"
+        if env_offline:
             cmd.append("--offline")
 
         if reinstall:
@@ -2320,12 +2331,18 @@ class UVToolRunner:
                 ]
             )
 
-        elif package_name:
+        elif package_name and _canonical(package_name) != _canonical(tool_name):
+            # A package named apart from its command is always a --from (the
+            # bare run would resolve a package named after the executable); one
+            # named like the command passes none, exactly as the probes'
+            # UVToolMixin._uv_from_spec reads it, so the two argvs match.
             command.extend(
                 [
                     "--from",
                     checked_requirement(
-                        package_name, f"the --from spec for {tool_name}"
+                        package_name,
+                        f"the --from spec for {tool_name}",
+                        package=package_name,
                     ),
                 ]
             )

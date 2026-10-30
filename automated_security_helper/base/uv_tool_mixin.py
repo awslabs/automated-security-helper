@@ -273,10 +273,12 @@ class UVToolMixin:
         Mirrors the construction in ``UVToolRunner.run_tool``, which builds the
         spec from the package that provides the tool (``uv_tool_package_name``,
         else ``self.command``) plus this plugin's extras and version constraint.
-        Returns ``None`` when the scan passes no ``--from`` at all, so the probe
+        Returns ``None`` when the scan passes no ``--from`` at all (no extras,
+        no constraint, and a package named like the command), so the probe
         matches that too; a package named apart from the command is always a
         ``--from`` (``uv tool run jupyter-nbconvert`` would resolve a package
-        named after the executable), so it is returned bare.
+        named after the executable), so it is returned bare. ``run_tool``
+        applies the same rule, comparing the two names as PEP 503 does.
 
         Why the probe needs this: ``uv tool run bandit`` and
         ``uv tool run --from 'bandit[sarif,toml]>=1.7.0,<2.0.0' bandit`` resolve
@@ -396,9 +398,11 @@ class UVToolMixin:
         verdict lines, the scan-failure excerpt and the sandbox records -- so
         "the same hiding arms" holds by construction: an input hidden on one
         line cannot print on the next because that site assembled a smaller
-        set. Records about an INSTALL are the one deliberate exception: the
-        installed package (``uv_tool_package_name``) can differ from the
-        run's ``--from`` base, so they share their own builder,
+        set. Records about an INSTALL are the one deliberate exception: an
+        install's inputs are the install spec and its ``--with`` entries as
+        ``uv tool install`` takes them (the same package the run's ``--from``
+        is built on, ``uv_tool_package_name`` else the command, but spelled
+        for the install), so they share their own builder,
         ``uv_tool_runner.uv_install_inputs``, instead of this one.
         """
         return (
@@ -2013,7 +2017,8 @@ class UVToolMixin:
 
         if self._is_offline_mode():
             self._plugin_log(
-                "[INSTALLATION_SKIP] Offline mode detected (ASH_OFFLINE=true)",
+                "[INSTALLATION_SKIP] Offline mode detected (ASH_OFFLINE, or this "
+                "plugin's own options.offline)",
                 f"Skipping UV tool installation for '{self.command}' and relying on pre-installed tools",
                 "Fallback strategy: Will attempt to use pre-installed version if available",
                 level=15,

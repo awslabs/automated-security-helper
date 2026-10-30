@@ -281,6 +281,22 @@ class TestReinstall:
 
 
 class TestTheCallersOfflineMode:
+    def test_a_callers_false_cannot_switch_ash_offline_off(self, monkeypatch):
+        """ASH's mode can be added to, never switched off for one scanner."""
+        monkeypatch.setenv("ASH_OFFLINE", "1")
+        assert uv_tool_runner._offline_for(False) is True
+        assert uv_tool_runner._offline_for(None) is True
+        monkeypatch.delenv("ASH_OFFLINE")
+        assert uv_tool_runner._offline_for(False) is False
+        assert uv_tool_runner._offline_for(True) is True
+
+    def test_a_package_named_like_the_command_passes_no_from(self, spawn, runner):
+        """run_tool emitted `--from bandit bandit` where the probes'
+        _uv_from_spec read None, so the two argvs resolved apart."""
+        spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
+        runner.run_tool("bandit", package_name="Bandit")
+        assert "--from" not in spawn.call_args.args[0]
+
     def test_run_tool_honors_the_callers_offline_mode(self, spawn, runner):
         spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
         runner.run_tool("bandit", offline=True)
