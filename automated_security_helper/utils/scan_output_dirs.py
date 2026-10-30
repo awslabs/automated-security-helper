@@ -1693,13 +1693,20 @@ def converted_sources_of(context: Any) -> Dict[str, str]:
             continue
         try:
             data = json.loads(file.read_bytes().decode("utf-8"))
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError):
+            # The failure's text is logged through logging's own exception
+            # rendering, once, at DEBUG; the warning names the file and what the
+            # filter does without it.
             ASH_LOGGER.warning(
                 f"Skipped {converter_dir.name}/{CONVERTED_SOURCES_FILE_NAME}: it "
-                f"could not be read as the converter's record of what it "
-                f"converted ({type(error).__name__}); the --changed-files-only "
-                "filter keeps that converter's findings rather than placing them "
-                "by their sources"
+                "could not be read as the converter's record of what it "
+                "converted; the --changed-files-only filter keeps that "
+                "converter's findings rather than placing them by their sources"
+            )
+            ASH_LOGGER.debug(
+                f"Why {converter_dir.name}/{CONVERTED_SOURCES_FILE_NAME} could not "
+                "be read",
+                exc_info=True,
             )
             continue
         if not isinstance(data, dict):
@@ -1787,8 +1794,10 @@ def committed_output_files(
     if dirs is None:
         try:
             dirs = named_output_dirs_of(context)
-        except (OSError, TypeError, ValueError) as error:
-            ASH_LOGGER.debug(f"Could not name ASH's output directories: {error}")
+        except (OSError, TypeError, ValueError):
+            # The failure's text is logged through logging's own exception
+            # rendering, once.
+            ASH_LOGGER.debug("Could not name ASH's output directories", exc_info=True)
             return set()
     if not dirs:
         return set()
@@ -1839,8 +1848,10 @@ def drop_results_in_ash_output_dirs(
         return 0
     try:
         dirs = named_output_dirs_of(context)
-    except (OSError, TypeError, ValueError) as error:
-        ASH_LOGGER.debug(f"Could not name ASH's output directories: {error}")
+    except (OSError, TypeError, ValueError):
+        # The failure's text is logged through logging's own exception
+        # rendering, once.
+        ASH_LOGGER.debug("Could not name ASH's output directories", exc_info=True)
         return 0
     if not dirs:
         return 0
