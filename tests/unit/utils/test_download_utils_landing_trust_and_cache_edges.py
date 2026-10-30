@@ -526,6 +526,66 @@ def test_a_fifo_at_the_install_path_is_refused_without_blocking(
     assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
 
 
+@POSIX_ONLY
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs os.mkfifo")
+def test_a_fifo_renamed_over_the_staging_name_is_refused_without_blocking(
+    tmp_path,
+):
+    """The staging file is created with O_EXCL, which stops a plant but not a
+    rename over its name in a directory other users can write. A FIFO renamed
+    there must be refused by the regular-file check on the open descriptor; an
+    open that honored the FIFO would block with no writer ever coming."""
+    staging = tmp_path / ".tool.staged.ash-partial"
+    os.mkfifo(staging)
+    target = tmp_path / "tool"
+    started = time.monotonic()
+    with pytest.raises(ToolDownloadIntegrityError, match="not a regular file"):
+        du._finalize_staged(staging, target, DIGEST_A)
+    assert time.monotonic() - started < 5
+    assert not target.exists()
+
+
+@POSIX_ONLY
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs os.mkfifo")
+def test_make_executable_refuses_a_fifo_without_blocking(tmp_path, caplog):
+    fifo = tmp_path / "tool"
+    os.mkfifo(fifo, 0o600)
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING):
+        du.make_executable(fifo)
+    assert time.monotonic() - started < 5
+    assert "not a regular file" in caplog.text
+    # No execute bit was set on it.
+    assert stat.S_IMODE(os.stat(fifo).st_mode) & 0o111 == 0
+
+
+@POSIX_ONLY
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs os.mkfifo")
+def test_a_fifo_swapped_in_at_the_receipt_path_is_not_read(
+    receipt_home, tmp_path, monkeypatch, caplog
+):
+    """``read_receipt`` asks ``is_file`` by path first, so a FIFO that sits there
+    is already treated as absent; the one swapped in after that answer reaches
+    the open, which must not block on it."""
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    written = du.write_receipt(destination, "tool", {"url": "u", "sha256": DIGEST_A})
+    assert written is not None
+    written.unlink()
+    os.mkfifo(written, 0o600)
+    real_is_file = Path.is_file
+
+    def answer_present(self):
+        return True if self == written else real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", answer_present)
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING):
+        assert du.read_receipt(destination, "tool") is None
+    assert time.monotonic() - started < 5
+    assert "is not a file" in caplog.text
+
+
 # --- archive members ---------------------------------------------------------------
 
 
