@@ -247,6 +247,27 @@ def delivers(logger: logging.Logger, level: int) -> bool:
 logging.setLoggerClass(ASHLogger)
 
 
+def adopt_early_ash_loggers() -> None:
+    """Make every plain logger under "ash" made before this module an ASHLogger.
+
+    logging builds a logger with the class set at the moment it is first asked
+    for, so ``logging.getLogger("ash")`` run by a module imported before this one
+    (utils.severity_ladder takes the logger by name at import, and core.constants
+    imports it first in every CLI process) made a plain ``logging.Logger`` that
+    every later ``getLogger("ash")`` returns: ``isinstance(ASH_LOGGER, ASHLogger)``
+    was False, and :meth:`ASHLogger.callHandlers`, the run-scoped last-resort
+    walk, never ran for ASH's records. ``ASHLogger`` adds methods and no state, so
+    such a logger is given this class in place, which keeps its handlers,
+    filters, level and children. A ``Logger`` subclass another library made is
+    not touched. Run at import and at every :func:`get_logger`.
+    """
+    for name, logger in list(logging.Logger.manager.loggerDict.items()):
+        if type(logger) is not logging.Logger:
+            continue
+        if name == "ash" or name.startswith("ash."):
+            logger.__class__ = ASHLogger
+
+
 # The console handler below, and the live progress panel in rich_log_handler.py,
 # print a log message as text. Markup is opt-in per call, with MARKUP.
 #
@@ -1763,6 +1784,10 @@ def get_logger(
     if root_logger.handlers and name != "":
         logging.getLogger(name).propagate = False
 
+    # A logger made before this module was imported is a plain Logger until it
+    # is adopted (adopt_early_ash_loggers); the setup below relies on ASHLogger's
+    # verbose() and callHandlers().
+    adopt_early_ash_loggers()
     logger: ASHLogger = logging.getLogger(name)  # type: ignore[assignment]
 
     # Attach the Windows-safe filter if not already present
@@ -2102,8 +2127,9 @@ class _RoutedLastResort(ShownHandlerErrors, logging.Handler):
 
     ASHLogger.callHandlers sends a record no handler took to the stand-in, but a
     logger under "ash" is an ASHLogger only if it was made after this module set
-    the logger class and before anything set another: one made before the import,
-    or after a library's setLoggerClass, would go to logging's last resort, which
+    the logger class and before anything set another (one made before the import
+    is adopted, adopt_early_ash_loggers): one made after a library's
+    setLoggerClass would reach logging's last resort, which
     writes it as given. logging's last resort is therefore this router: "ash" and
     the loggers under it go to the stand-in, shown; every other logger to the
     last resort logging had. A reload of this module replaces the
@@ -2140,6 +2166,7 @@ if logging.lastResort is not None:
     )
 
 
+adopt_early_ash_loggers()
 ASH_LOGGER: ASHLogger = logging.getLogger("ash")  # type: ignore[assignment]
 ASH_LOGGER.propagate = False
 ASH_LOGGER.addFilter(WindowsSafeFilter())
