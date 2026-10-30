@@ -48,6 +48,27 @@ class TestAClassHoldingAnUndecodableByte:
         assert not _path_pattern_matches("secrdt.py", "secr[abc]t.py")
 
 
+class TestAClassHoldingAnUndecodableByteAndOrdinaryOnes:
+    """The class is matched against the name itself only, and that match has to be
+    made for an ordinary name too: the record-form match it replaces is skipped, and
+    the name-itself match was tried only for a name that holds a surrogate."""
+
+    def test_a_negated_class_matches_a_name_without_the_byte(self):
+        assert _path_pattern_matches("app.py", "[!\udce9]*.py")
+        assert not _path_pattern_matches("\udce9app.py", "[!\udce9]*.py")
+
+    def test_a_class_of_the_byte_and_an_ordinary_character_matches_both(self):
+        pattern = "secr[\udce9e]t.py"
+        assert _path_pattern_matches("secret.py", pattern)
+        assert _path_pattern_matches("secr\udce9t.py", pattern)
+        assert not _path_pattern_matches("secrdt.py", pattern)
+
+    def test_a_recursive_pattern_with_such_a_class_matches_an_ordinary_name(self):
+        assert _path_pattern_matches("src/app.py", "**/[!\udce9]*.py")
+        assert _path_pattern_matches("src/secret.py", "**/secr[\udce9e]t.py")
+        assert not _path_pattern_matches("src/secrdt.py", "**/secr[\udce9e]t.py")
+
+
 class TestWhereTheBracketsAre:
     @pytest.mark.parametrize(
         "pattern, expected",

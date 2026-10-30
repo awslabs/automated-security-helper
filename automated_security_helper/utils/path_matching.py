@@ -236,17 +236,20 @@ def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
             finding_norm, pattern_form
         ):
             return True
-        return finding_raw != finding_norm and _recursive_glob_match(
-            finding_raw, pattern_form, record_form=False
-        )
+        return (
+            record_form_reads_it_wider or finding_raw != finding_norm
+        ) and _recursive_glob_match(finding_raw, pattern_form, record_form=False)
 
     if not record_form_reads_it_wider and fnmatch.fnmatchcase(
         finding_norm, pattern_norm
     ):
         return True
-    return finding_raw != finding_norm and fnmatch.fnmatchcase(
-        finding_raw, pattern_form
-    )
+    # The name itself is tried when it holds a surrogate or its escape, and always
+    # for a pattern whose class holds a surrogate: that pattern was not tried in the
+    # record form above, so for an ordinary name this is its only match.
+    return (
+        record_form_reads_it_wider or finding_raw != finding_norm
+    ) and fnmatch.fnmatchcase(finding_raw, pattern_form)
 
 
 def ignore_path_pattern(pattern: str) -> str:
