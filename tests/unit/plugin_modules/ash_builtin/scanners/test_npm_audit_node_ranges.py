@@ -189,6 +189,16 @@ def test_a_prerelease_copy_keeps_the_result(scanner, monkeypatch):
         ("1.0.0-post1", "<1.0.0", None),
         ("1.0.0+build.7", "<2.0.0", None),
         ("2.0.0", ">=2.0.0-0", None),
+        # Shapes the comparator grammar does not read, each answered None (keep),
+        # never False (drop): a partial version, which node's semver pads to a
+        # range of its own ("<=1.2" is "<1.3.0-0"), a bare partial version, a
+        # space between the operator and its version, and a union whose only
+        # branch that could cover the copy is the one that does not parse.
+        ("1.2.5", "<=1.2", None),
+        ("1.2.5", "1.2", None),
+        ("4.1.0", ">= 4.0.0 < 4.17.21", None),
+        ("1.5.0", "<0.2.4 || ^1.0.0", None),
+        ("0.1.0", "<0.2.4 || ^1.0.0", None),
         ("not a version", "<2.0.0", None),
         (None, "<2.0.0", None),
         ("1.0.0", None, None),
