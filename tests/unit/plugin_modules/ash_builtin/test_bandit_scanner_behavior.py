@@ -20,6 +20,7 @@ dead code.
 import logging
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -168,13 +169,26 @@ def test_uv_missing_but_bandit_on_path_falls_back_to_direct_execution(
     scanner, monkeypatch, tmp_path
 ):
     """With uv absent and bandit directly runnable, run it directly."""
+    from automated_security_helper.utils import pre_installed_tool
+
+    binary = str(tmp_path / "bandit")
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
     monkeypatch.setattr(
-        bandit_scanner,
-        "get_uv_tool_command",
-        lambda command, **kwargs: [str(tmp_path / "bandit")],
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
+    )
+    # The binary is verified before it runs; this pins the verified route, not
+    # how the verifier grades a file that does not exist.
+    monkeypatch.setattr(
+        pre_installed_tool,
+        "verify_pre_installed_tool",
+        lambda *args, **kwargs: SimpleNamespace(
+            status="satisfied",
+            executable=binary,
+            requirement="bandit[sarif,toml]>=1.7.0,<2.0.0",
+            detail="1.9.4 with the extras",
+        ),
     )
 
     assert scanner.validate_plugin_dependencies() is True

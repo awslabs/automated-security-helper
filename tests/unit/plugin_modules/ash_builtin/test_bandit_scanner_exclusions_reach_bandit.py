@@ -583,6 +583,11 @@ def test_after_a_failed_install_a_path_binary_runs_directly(tmp_path, monkeypatc
     monkeypatch.setattr(
         bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
     )
+    monkeypatch.setattr(
+        pre_installed_tool,
+        "verify_pre_installed_tool",
+        lambda *args, **kwargs: _checked("satisfied", binary, "1.9.4 with the extras"),
+    )
 
     assert scanner.validate_plugin_dependencies() is True
     assert scanner.use_uv_tool is False, "the binary on PATH is what runs now"
