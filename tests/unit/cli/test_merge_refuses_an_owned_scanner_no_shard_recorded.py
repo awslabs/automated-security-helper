@@ -51,12 +51,31 @@ def _shards_with_bandit_recorded_nowhere():
         for model in shards
         if "bandit" in read_shard_assignment(model).assigned_scanners
     )
-    # Every shard, the owner included: no skip marker is left anywhere. The
-    # owner still completed its other scanners, so the whole-shard arm of the
-    # gate does not apply.
+    # Every shard, the owner included: no skip marker is left anywhere, and no
+    # SARIF result or tool component either. A scanner that never ran leaves no
+    # findings, and the merge's metrics rebuild lists every scanner the SARIF
+    # names (ScannerStatisticsCalculator reads scanner_results, additional_reports
+    # AND the results' scanner_name), so a fixture that kept bandit's findings
+    # read as a merged report that still listed bandit. The owner still
+    # completed its other scanners, so the whole-shard arm of the gate does not
+    # apply.
     for model in shards:
         model.scanner_results.pop("bandit", None)
         model.additional_reports.pop("bandit", None)
+        for run in model.sarif.runs:
+            run.results = [
+                result
+                for result in run.results or []
+                if (result.properties.model_dump() if result.properties else {}).get(
+                    "scanner_name"
+                )
+                != "bandit"
+            ]
+            run.tool.extensions = [
+                component
+                for component in run.tool.extensions or []
+                if component.name != "bandit"
+            ]
     assert "bandit" in read_shard_assignment(owner).assigned_scanners
     assert not any("bandit" in model.scanner_results for model in shards)
     assert len(owner.scanner_results) > 0
