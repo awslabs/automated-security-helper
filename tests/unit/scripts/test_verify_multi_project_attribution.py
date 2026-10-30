@@ -223,13 +223,20 @@ class TestPathLossAccounting:
                                     "workspace_project": "project-a",
                                     "workspace_uri": "project-a/src/marker.py",
                                 },
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "src/marker.py"}
+                                        }
+                                    }
+                                ],
                             },
                             {
                                 "ruleId": "B101",
                                 "locations": [
                                     {
                                         "physicalLocation": {
-                                            "artifactLocation": {"uri": "src/marker.py"}
+                                            "artifactLocation": {"uri": "src/other.py"}
                                         }
                                     }
                                 ],
@@ -241,6 +248,7 @@ class TestPathLossAccounting:
         }
         runs = gate.collect_runs(results)
         assert runs[0].result_count == 2
+        assert runs[0].results_without_location == 0
         violations = gate.check_no_finding_lost_its_workspace_path(results, runs)
         assert any(
             "2 located finding(s) are in the SARIF but only 1" in v for v in violations
