@@ -107,7 +107,8 @@ def _run(
     the record's target. ``before_raise`` is called with the container before each
     raise. The events the executor sends are collected on ``executor.events`` as
     ``(event_type, kwargs)`` pairs. ``with_clean_scanner`` queues a second scanner,
-    ``clean-tool``, after ``shape-tool``, whose containers the processor merges: its
+    ``clean-tool``, after ``shape-tool``, over the source target only, so none of
+    its containers is a ``failing_target`` and the processor merges them all: its
     SCAN_COMPLETE shows what the remaining list holds once the first scanner's turn
     is over.
     """
@@ -138,7 +139,10 @@ def _run(
     scanner_tasks = [("shape-tool", scanner, targets)]
     if with_clean_scanner:
         clean = CleanScanner(config=_Config(), context=plugin_context)
-        scanner_tasks.append(("clean-tool", clean, targets))
+        # The source target only: the processor raises on every container of a
+        # failing target type whatever scanner it came from, and the clean
+        # scanner has to complete.
+        scanner_tasks.append(("clean-tool", clean, targets[:1]))
     executor = ScannerExecutor(
         plugin_context=plugin_context,
         progress_display=MagicMock(),
@@ -279,14 +283,16 @@ class TestAProcessingFailureLeavesTheRemainingListUnannounced:
 
         (complete,) = _scan_complete_events(executor)
         assert complete["scanner"] == "clean-tool"
-        assert complete["completed_count"] == 1
         assert complete["total_count"] == 2
         assert len(executor.completed_scanners) == 1
         if not parallel:
             # The failed scanner's turn ended before the clean one's began, so
-            # the clean scanner's SCAN_COMPLETE finds nothing left running.
+            # the clean scanner's SCAN_COMPLETE finds nothing left running and
+            # counts two turns over: a failed turn is a turn, not a completed
+            # scanner (completed_scanners holds the clean one alone).
             assert complete["remaining_scanners"] == []
             assert complete["remaining_count"] == 0
+            assert complete["completed_count"] == 2
 
     @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
     def test_a_failed_scanner_alone_sends_no_scan_complete(

@@ -79,13 +79,16 @@ class TestTheReportReaders:
         """A report filed under the scanner's key with no ``scanner_name`` (a results
         file written before the field existed, a hand-built one) is the scanner's:
         its counters feed the partial-audit claim and its unscanned inputs the
-        console summary. Only the calculator's STATUS reader refuses it."""
+        console summary. Only the calculator's STATUS reader refuses it. Both
+        counters are written: an attempt count with no failure accounting is the
+        untrustworthy pair whatever the report's name (``target_counts``)."""
         model = AshAggregatedResults()
         model.additional_reports = {
             "bandit": {
                 "source": {
                     "status": "PASSED",
                     "targets_attempted": 4,
+                    "targets_failed": 0,
                     "inputs_not_scanned": [{"path": "a.lock", "reason": "offline"}],
                 }
             }
