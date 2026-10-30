@@ -80,7 +80,11 @@ class TestGetUvToolCommandMemo:
         assert "--offline" in spawn.call_args_list[0].args[0]
         assert "--offline" not in spawn.call_args_list[1].args[0]
 
-    def test_a_probe_that_timed_out_is_not_remembered_as_absence(self, spawn):
+    def test_a_probe_that_timed_out_is_not_remembered_as_absence(
+        self, spawn, monkeypatch
+    ):
+        """With the retry window closed at once, the next call probes again."""
+        monkeypatch.setattr(uv_tool_runner, "_UV_PROBE_RETRY_SECONDS", 0.0)
         spawn.side_effect = subprocess.TimeoutExpired(["uv"], 5)
         assert get_uv_tool_command("bandit") is None
         assert get_uv_tool_command("bandit") is None
@@ -90,7 +94,8 @@ class TestGetUvToolCommandMemo:
         self, spawn, monkeypatch
     ):
         """One slow probe used to remember the PATH binary for the rest of the
-        process; this call runs it, the next call asks uv again."""
+        process; this call runs it, the next call (past the window) asks uv again."""
+        monkeypatch.setattr(uv_tool_runner, "_UV_PROBE_RETRY_SECONDS", 0.0)
         monkeypatch.setattr(
             uv_tool_runner, "find_executable", lambda name: "/usr/bin/bandit"
         )
@@ -101,6 +106,25 @@ class TestGetUvToolCommandMemo:
         spawn.side_effect = None
         spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.9", "")
         assert get_uv_tool_command("bandit") == ["uv", "tool", "run", "bandit"]
+
+    def test_a_timed_out_probe_opens_a_retry_window(self, spawn, monkeypatch):
+        """Inside the window no caller pays the probe's timeout again, and
+        nothing is remembered: the answer is the PATH binary for that call."""
+        monkeypatch.setattr(uv_tool_runner, "_UV_PROBE_RETRY_SECONDS", 3600.0)
+        monkeypatch.setattr(
+            uv_tool_runner, "find_executable", lambda name: "/usr/bin/bandit"
+        )
+        spawn.side_effect = subprocess.TimeoutExpired(["uv"], 5)
+        assert get_uv_tool_command("bandit") == ["/usr/bin/bandit"]
+        assert get_uv_tool_command("bandit") == ["/usr/bin/bandit"]
+        assert spawn.call_count == 1
+        assert uv_tool_runner._uv_command_cache == {}
+
+    def test_a_callers_own_offline_mode_reaches_the_probe(self, spawn, monkeypatch):
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+        assert get_uv_tool_command("bandit", offline=True) is None
+        assert "--offline" in spawn.call_args.args[0]
+        assert spawn.call_args.kwargs["env"]["UV_OFFLINE"] == "1"
 
 
 class TestATimeoutUnderCheckIsAFailedRun:
@@ -123,11 +147,41 @@ class TestATimeoutUnderCheckIsAFailedRun:
         assert spawn.call_count == 1
 
     def test_the_probe_runs_the_from_spec_the_scan_runs(self, spawn):
+        """The command carries the --from it was probed under: a bare
+        ``uv tool run bandit`` resolves another environment than the one
+        that answered."""
         spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.9", "")
         command = get_uv_tool_command("bandit", from_spec="bandit[sarif]>=1.7")
-        assert command == ["uv", "tool", "run", "bandit"]
+        assert command == [
+            "uv",
+            "tool",
+            "run",
+            "--from",
+            "bandit[sarif]>=1.7",
+            "bandit",
+        ]
         argv = spawn.call_args.args[0]
         assert argv[-4:] == ["--from", "bandit[sarif]>=1.7", "bandit", "--version"]
+
+    def test_a_from_spec_naming_another_package_is_refused_without_a_probe(self, spawn):
+        """A constraint glued onto the name ("bandit" + "2") used to run
+        ``uv tool run --from bandit2 bandit --version``, an index install of
+        bandit2 from the dependency check."""
+        assert (
+            get_uv_tool_command("bandit", from_spec="bandit2", package="bandit") is None
+        )
+        assert spawn.call_count == 0
+
+    def test_a_from_spec_for_the_named_package_is_probed(self, spawn):
+        """The control: the same spelling check passes a real spec."""
+        spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.9", "")
+        assert (
+            get_uv_tool_command(
+                "bandit", from_spec="Bandit[sarif]>=1.7", package="bandit"
+            )
+            is not None
+        )
+        assert spawn.call_count == 1
 
     def test_the_bare_probe_and_the_from_spec_probe_are_remembered_apart(self, spawn):
         assert get_uv_tool_command("bandit") is None
@@ -139,6 +193,15 @@ class TestCheckedRequirementNamesThePackage:
     def test_a_glued_constraint_that_renames_the_package_is_refused(self):
         with pytest.raises(UVToolRunnerError):
             checked_requirement("bandit2", "the tool spec", package="bandit")
+
+    def test_the_version_probe_holds_its_spec_to_the_package(self, spawn, runner):
+        """get_tool_version refused only url, marker and specifier faults; a
+        glued constraint went to uv as a probe of, and install from, bandit2."""
+        assert runner.get_tool_version("bandit", "bandit2", package="bandit") is None
+        assert spawn.call_count == 0
+        spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.9\n", "")
+        assert runner.get_tool_version("bandit", "bandit>=1.7", package="bandit")
+        assert spawn.call_count == 1
 
     def test_the_same_package_in_another_spelling_passes(self):
         assert (

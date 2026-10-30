@@ -149,7 +149,7 @@ class TestTheFromSpecNamesThePackage:
             get_runner.return_value = runner
             plugin._get_tool_installation_info()
         runner.get_tool_installation_info.assert_called_once_with(
-            "bandit", "bandit[sarif]"
+            "bandit", "bandit[sarif]", offline=False, package="bandit"
         )
 
     def test_the_pre_installed_copy_is_verified_against_the_package(self):
@@ -278,6 +278,50 @@ class TestTheStoredInstallCommand:
         assert plugin.uv_tool_install_commands == [
             "uv tool install --with sarif-om>=1.0 bandit"
         ]
+
+    def test_a_glued_constraint_stores_no_command(self):
+        """``bandit`` + ``2`` parses as a requirement for bandit2; the stored
+        ``ash dependencies install`` command used to be `uv tool install bandit2`."""
+        plugin = FakePlugin(command="bandit", constraint="2")
+        plugin._setup_uv_tool_install_commands()
+        assert plugin.uv_tool_install_commands == []
+
+
+class TestEveryProbeRunsInThePluginsEnvironment:
+    def _runner(self):
+        runner = MagicMock()
+        runner.is_uv_available.return_value = True
+        runner.get_tool_version.return_value = "7.16.0"
+        runner.list_available_tools.side_effect = UVToolRunnerError("listing")
+        return runner
+
+    def test_the_version_probe_carries_the_offline_mode_and_the_package(self):
+        plugin = FakePlugin(
+            command="jupyter-nbconvert", uv_tool_package_name="nbconvert", offline=True
+        )
+        runner = self._runner()
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=runner,
+        ):
+            assert plugin._get_uv_tool_version("jupyter-nbconvert") == "7.16.0"
+        kwargs = runner.get_tool_version.call_args.kwargs
+        assert kwargs["offline"] is True
+        assert kwargs["package"] == "nbconvert"
+
+    def test_the_installed_fallback_probe_carries_them_too(self):
+        plugin = FakePlugin(
+            command="jupyter-nbconvert", uv_tool_package_name="nbconvert", offline=True
+        )
+        runner = self._runner()
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=runner,
+        ):
+            assert plugin._is_uv_tool_installed() is True
+        kwargs = runner.get_tool_version.call_args.kwargs
+        assert kwargs["offline"] is True
+        assert kwargs["package"] == "nbconvert"
 
 
 def _install_runner(**overrides):

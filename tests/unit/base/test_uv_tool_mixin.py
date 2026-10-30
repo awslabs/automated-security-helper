@@ -1868,9 +1868,11 @@ class TestProbeSharesTheScansEnvironment:
 
             plugin._get_uv_tool_version("bandit")
 
-            mock_runner.get_tool_version.assert_called_once_with(
-                "bandit", "bandit[sarif,toml]>=1.7.0,<2.0.0", values=()
-            )
+            # The spec is the positional pair; the plugin's offline mode and
+            # package ride as keywords beside the values (checked apart).
+            args, kwargs = mock_runner.get_tool_version.call_args
+            assert args == ("bandit", "bandit[sarif,toml]>=1.7.0,<2.0.0")
+            assert kwargs["values"] == ()
 
     @pytest.mark.unit
     def test_an_explicit_package_name_still_wins(self):
@@ -1888,9 +1890,9 @@ class TestProbeSharesTheScansEnvironment:
 
             plugin._get_uv_tool_version("jupyter-nbconvert", "nbconvert")
 
-            mock_runner.get_tool_version.assert_called_once_with(
-                "jupyter-nbconvert", "nbconvert", values=()
-            )
+            args, kwargs = mock_runner.get_tool_version.call_args
+            assert args == ("jupyter-nbconvert", "nbconvert")
+            assert kwargs["values"] == ()
 
 
 class TestOfflineResolveMessageIsRedacted:

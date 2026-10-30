@@ -289,11 +289,19 @@ class UVToolMixin:
         """
         extras = self._get_tool_package_extras()
         constraint = self._get_tool_version_constraint()
-        package = self.uv_tool_package_name or self.command
+        package = self._uv_package()
         if not extras and not constraint:
             return package if package != self.command else None
         base = f"{package}[{','.join(extras)}]" if extras else package
         return f"{base}{constraint}" if constraint else base
+
+    def _uv_package(self) -> str:
+        """The package that provides this plugin's tool: ``uv_tool_package_name``,
+        else the command's own name. The name every uv spec of this plugin is
+        built around, and the ``package`` the runner's requirement check holds
+        each spec to, so a constraint glued onto the name cannot name another
+        package (``checked_requirement``)."""
+        return self.uv_tool_package_name or self.command
 
     def _uv_probe_from_spec(self) -> Optional[str]:
         """:meth:`_uv_from_spec` as the dependency check hands it to the probe.
@@ -491,6 +499,11 @@ class UVToolMixin:
                 tool_name,
                 package_name,
                 values=probe_values,
+                # This plugin's own offline mode and the package its spec is
+                # built around, as the run and the install pass them: the
+                # probe used to go online for a scanner offline by its options.
+                offline=self._is_offline_mode(),
+                package=self._uv_package(),
                 **self._uv_python_kwargs(),
             )
             if version:
@@ -1911,7 +1924,9 @@ class UVToolMixin:
         (``ScannerPluginBase``), which puts that scanner offline while the rest
         of the run stays online. The mixin used to read only the global mode,
         so a scanner's ``options.offline: true`` never reached uv: its
-        ``uv tool run``, version probe and install all went online.
+        ``uv tool run``, version probes and install all went online. Every uv
+        call of this mixin passes this value as the runner's ``offline``; the
+        scanners' own ``get_uv_tool_command`` calls take it as a parameter too.
 
         Returns:
             True if offline mode is enabled, False otherwise
@@ -2161,6 +2176,8 @@ class UVToolMixin:
                 validation_result = runner.validate_cached_tool(
                     self.command,
                     self._checked_uv_from_spec(),
+                    offline=self._is_offline_mode(),
+                    package=self._uv_package(),
                     values=record_values,
                 )
 
@@ -2493,11 +2510,16 @@ class UVToolMixin:
 
             runner = get_uv_tool_runner()
             # The version probe runs under the scan's own --from spec (the
-            # package, its extras and the constraint), the environment the scan
-            # runs in; a bare package name probed a different one. The spec is
-            # checked against the package first (see _checked_uv_from_spec).
+            # package, its extras and the constraint) and offline mode, the
+            # environment the scan runs in; a bare package name probed a
+            # different one, and a scanner offline by its options probed online.
+            # The spec is checked against the package first (see
+            # _checked_uv_from_spec).
             info = runner.get_tool_installation_info(
-                self.command, self._checked_uv_from_spec()
+                self.command,
+                self._checked_uv_from_spec(),
+                offline=self._is_offline_mode(),
+                package=self._uv_package(),
             )
             info["tool_name"] = self.command
 
