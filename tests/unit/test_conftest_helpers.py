@@ -3,14 +3,19 @@
 
 """The helpers ``tests/conftest.py`` offers test authors do what they say.
 
-``temp_env_vars`` deletes, on teardown, no environment variable it did not set --
-``PATH`` and ``HOME`` included -- so the next test in the same xdist worker keeps its
-environment. These tests check the environment after the fixture's teardown. That
-teardown is the shared ``monkeypatch``'s undo, and the autouse unit tool guard
-(tests/unit/conftest.py) takes ``monkeypatch`` before any test fixture is set up, so
-pytest's reverse-order teardown would undo it only AFTER ``environment_check`` has
-compared; ``environment_check`` therefore undoes the shared instance itself before it
-compares, which is the same undo, run first.
+``temp_env_vars`` puts back, on teardown, every environment variable it set, and sets
+nothing it was not asked to, so the next test in the same xdist worker keeps its
+environment. These tests check that after the fixture's teardown. That teardown is the
+shared ``monkeypatch``'s undo, and the autouse unit tool guard (tests/unit/conftest.py)
+takes ``monkeypatch`` before any test fixture is set up and patches PATH and the uv
+directories on it, so pytest's reverse-order teardown would undo it only AFTER
+``environment_check`` has compared, and an undo run by the check itself unwinds the
+guard's patches as well as the test's. ``environment_check`` therefore reads the test's
+FOOTPRINT (the variables whose value differs between its snapshot and the end of the
+test), undoes the shared instance, and asserts that each variable in the footprint is
+back to its snapshot value; the guard's variables are outside the footprint unless a
+test changes them, and the environment is left as the undo leaves it (re-applying the
+snapshot would plant the guard's values in every later test of the worker).
 """
 
 from __future__ import annotations
@@ -43,40 +48,50 @@ ADDED = "ASH_TEST_TEMP_ENV_VARS_ADDED"
 PYTEST_OWNED = {"PYTEST_CURRENT_TEST"}
 
 
+def _environment() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in PYTEST_OWNED}
+
+
 @pytest.fixture
 def environment_check(monkeypatch):
-    """Fail the test unless the environment after teardown is the one it started with.
+    """Fail the test unless every variable it changed is back after the teardown.
 
-    The sentinels are set through ``os.environ`` rather than ``monkeypatch``, because
-    ``monkeypatch`` is torn down after this fixture and the comparison would see its
-    undo still pending. For the same reason the fixture undoes ``monkeypatch`` itself
-    before comparing: the shared instance is created by the autouse unit tool guard
-    before this fixture, so pytest would undo it only after this check ran, and the
-    check read the test's own setenv as an environment ``temp_env_vars`` had not put
-    back. ``MonkeyPatch.undo`` is last-in first-out over the one instance (the test's
-    patches, then the guard's), leaves the environment the guard's finalization reads
-    its records against, and the fixture's own undo later finds nothing left to do.
+    The sentinels are set through ``os.environ`` rather than ``monkeypatch``, so they
+    are part of the snapshot and not of what the undo reverts. The shared
+    ``monkeypatch`` is created by the autouse unit tool guard before this fixture, with
+    the guard's own patches (PATH, UV_CACHE_DIR, UV_TOOL_DIR) already on it when the
+    snapshot is taken, so the fixture cannot compare the whole environment after an
+    undo: pytest's own undo would come after this check, and an undo run here reverts
+    the guard's patches too, which the snapshot holds. It reads the test's footprint
+    instead: the variables whose value differs between the snapshot and the end of the
+    test, which is what ``temp_env_vars`` set (and nothing the test did not ask for),
+    then undoes the shared instance and asserts each of them is back to its snapshot
+    value. A ``temp_env_vars`` that set variables outside ``monkeypatch`` would leave
+    them in the footprint unrestored. The environment is left as the undo leaves it:
+    the guard's later undo finds nothing to do, and re-applying the snapshot would plant
+    the guard's values in every later test of the worker.
     """
     os.environ.update({KEPT: "kept", OVERWRITTEN: "before"})
-    before = {k: v for k, v in os.environ.items() if k not in PYTEST_OWNED}
+    before = _environment()
     yield
+    during = _environment()
+    footprint = sorted(
+        key
+        for key in before.keys() | during.keys()
+        if before.get(key) != during.get(key)
+    )
     monkeypatch.undo()
-    after = {k: v for k, v in os.environ.items() if k not in PYTEST_OWNED}
-    # Put the environment back before asserting, so a failure here cannot leave the
-    # rest of this worker's tests without PATH.
-    for key in after.keys() - before.keys():
-        os.environ.pop(key, None)
-    os.environ.update(before)
+    after = _environment()
     os.environ.pop(KEPT, None)
     os.environ.pop(OVERWRITTEN, None)
 
-    deleted = sorted(before.keys() - after.keys())
-    added = sorted(after.keys() - before.keys())
-    changed = sorted(k for k in before.keys() & after.keys() if before[k] != after[k])
-    assert (deleted, added, changed) == ([], [], []), (
-        f"temp_env_vars did not restore the environment: deleted {len(deleted)} "
-        f"variables ({', '.join(deleted[:8])}{'...' if len(deleted) > 8 else ''}), "
-        f"left {added} set, left {changed} changed"
+    assert footprint, "the test changed no variable, so there was nothing to check"
+    assert KEPT not in footprint, "a variable the test did not set was changed under it"
+    unrestored = sorted(key for key in footprint if after.get(key) != before.get(key))
+    assert unrestored == [], (
+        f"temp_env_vars did not restore the environment: of the variables the test "
+        f"changed ({footprint}), these are not back to their value before the test: "
+        f"{unrestored}"
     )
 
 
