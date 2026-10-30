@@ -29,6 +29,7 @@ from automated_security_helper.utils.log import ASH_LOGGER, escape_markup
 from automated_security_helper.utils.sandbox.scope import (
     converter_run_scope,
     plugin_probe_scope,
+    scope_shown_text,
 )
 
 
@@ -981,8 +982,16 @@ class ConvertPhase(EnginePhase):
                 # Read here, before any progress row or event below says how the
                 # run went: the spawns the sandbox refused while convert() ran
                 # converted nothing, and "No files to convert" is not what a
-                # converter whose tool was refused has to report.
-                sandbox_loss = _conversion_failure(run_scope) or ""
+                # converter whose tool was refused has to report. Redacted here,
+                # once, like every other text a converter's row carries
+                # (``_failure_text``): the sandbox keeps the refusal's and the
+                # failed plan's own words, which can quote the argv it did not
+                # run, and a converter's argv can hold a value its config read
+                # from the environment. The scope is closed by now, so the
+                # values are this converter's, passed.
+                sandbox_loss = scope_shown_text(
+                    _conversion_failure(run_scope) or "", values
+                )
 
                 if len(convert_result) > 0:
                     ASH_LOGGER.debug(
