@@ -46,6 +46,7 @@ from automated_security_helper.utils.sandbox.fs_guard import (
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     SandboxUnavailable as SandboxUnavailable,
+    _broader_than_a_tool,
     _refuse_symlinked_results_dir,
     refuse_symlinked_output_dir,
     build_scanner_policy,
@@ -947,17 +948,29 @@ def reads_directory(directory: "str | Path") -> Iterator[None]:
     named, read-only and never executable (it joins the policy's ``scan_data``),
     for the spawns of this block alone. One directory per call: no pattern, no
     expansion, no parent; a path that is not an existing directory is refused
-    (``NotADirectoryError``), and a filesystem root is refused (``ValueError``).
-    Only ASH's own code names it; nothing a scanner's options say reaches this.
+    (``NotADirectoryError``).
+
+    The directory is RESOLVED here, once, and the resolved path is what is granted:
+    the backends grant real paths (bwrap binds, Landlock lists and sandbox-exec
+    allows ``os.path.realpath`` of every policy path), so a grant judged by its
+    spelling and granted by its target would let a symlink named here stand in
+    for wherever it points. The resolved directory is refused (``ValueError``) when
+    it is one the breadth rules keep out of every policy (``_broader_than_a_tool``):
+    a filesystem root, a home directory, a directory holding one, a directory
+    directly in one, or one that holds the user's keyrings. Only ASH's own code
+    names it; nothing a scanner's options say reaches this.
     """
-    path = Path(os.path.abspath(directory))
-    if path == Path(path.anchor):
-        raise ValueError(f"refusing to grant a filesystem root for reading: {path}")
-    if not path.is_dir():
-        raise NotADirectoryError(
-            f"a read grant names a directory that does not exist: {path}"
+    real = Path(os.path.realpath(directory))
+    if real == Path(real.anchor) or _broader_than_a_tool(real):
+        raise ValueError(
+            "refusing to grant a directory as broad as a filesystem root or a home "
+            f"for reading: {directory} resolves to {real}"
         )
-    token = _READ_GRANTS.set(_READ_GRANTS.get() + (path,))
+    if not real.is_dir():
+        raise NotADirectoryError(
+            f"a read grant names a directory that does not exist: {real}"
+        )
+    token = _READ_GRANTS.set(_READ_GRANTS.get() + (real,))
     try:
         yield
     finally:

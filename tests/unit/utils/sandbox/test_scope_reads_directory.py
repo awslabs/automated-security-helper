@@ -7,9 +7,11 @@ A sandbox policy grants paths for argv0 and for the programs ``also_runs`` names
 a directory ASH makes for a check (the staged Nix metadata the pre-installed tool
 check hands uv as ``--target``) is reached by neither. ``reads_directory`` is the
 one way ASH's own code adds a directory to a spawn's reads: the directory as
-named, read-only, never executable, for the spawns of the block alone. It takes
-one directory per call, with no pattern or expansion, and refuses a path that is
-not an existing directory and a filesystem root.
+resolved, read-only and, under sandbox-exec, not executable, for the spawns of the
+block alone. It takes one directory per call, with no pattern or expansion, and
+refuses a path that is not an existing directory. It judges the directory by what
+the name resolves to, because that is what every backend grants: a symlink to a
+filesystem root, a home or a directory holding one is refused, not followed.
 
 These tests plan spawns under a recording backend and read the policy it was
 handed; nothing is run.
@@ -18,10 +20,12 @@ handed; nothing is run.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
+from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -142,6 +146,60 @@ def test_a_filesystem_root_is_refused():
     with pytest.raises(ValueError):
         with scope_module.reads_directory(Path(Path.cwd().anchor)):
             pass  # pragma: no cover - the grant is refused before the block
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks and root")
+def test_a_symlink_to_the_filesystem_root_is_refused(tmp_path):
+    """The grant is judged by what the name resolves to, as the backends grant it."""
+    link = tmp_path / "staging"
+    link.symlink_to(Path(Path.cwd().anchor))
+
+    with pytest.raises(ValueError):
+        with scope_module.reads_directory(link):
+            pass  # pragma: no cover - the grant is refused before the block
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlink_to_a_home_is_refused(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    monkeypatch.setattr(policy_module, "_homes", lambda: [Path(os.path.realpath(home))])
+    link = tmp_path / "staging"
+    link.symlink_to(home)
+
+    with pytest.raises(ValueError):
+        with scope_module.reads_directory(link):
+            pass  # pragma: no cover - the grant is refused before the block
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_directory_holding_a_home_is_refused(tmp_path, monkeypatch):
+    """A link to the directory above a home would show the home with it."""
+    home = tmp_path / "homes" / "me"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(policy_module, "_homes", lambda: [Path(os.path.realpath(home))])
+    link = tmp_path / "staging"
+    link.symlink_to(tmp_path / "homes")
+
+    with pytest.raises(ValueError):
+        with scope_module.reads_directory(link):
+            pass  # pragma: no cover - the grant is refused before the block
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlink_to_an_ordinary_directory_grants_its_target(recorded, tmp_path):
+    """What the policy carries is the resolved directory, the one the backends grant."""
+    target = tmp_path / "real-staging"
+    target.mkdir()
+    link = tmp_path / "staging"
+    link.symlink_to(target)
+
+    with scope_module.reads_directory(link):
+        _plan(["/bin/true"])
+
+    policy = recorded.policies[-1]
+    assert Path(os.path.realpath(target)) in {Path(p) for p in policy.read_only}
+    assert Path(os.path.realpath(target)) in _real(policy.scan_data)
 
 
 def test_a_refused_grant_leaves_nothing_granted(recorded, tmp_path):
