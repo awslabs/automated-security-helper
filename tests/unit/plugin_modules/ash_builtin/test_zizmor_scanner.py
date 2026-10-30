@@ -1833,28 +1833,28 @@ def test_a_named_pipe_named_like_an_action_is_skipped_without_blocking(repo, cap
 def test_a_link_whose_target_cannot_be_stated_is_skipped_not_raised(
     repo, monkeypatch, caplog
 ):
-    """Before Python 3.13, Path.is_file() on a link whose target cannot be
-    stat'ed raises PermissionError instead of answering; one such input must
-    not end the collection."""
+    """A link whose target sits in a directory this user cannot search cannot be
+    stat'ed through: before Python 3.13 Path.is_file() raises PermissionError
+    there instead of answering. One such input must not end the collection.
+    The denial is real (the target directory is made unsearchable), so the
+    test holds whichever stat call the probe makes."""
+    if os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0:
+        pytest.skip("directory modes do not deny this user")
     link = repo / "linked" / "action.yml"
     link.parent.mkdir()
-    _symlink_or_skip(link, repo / "actions" / "greet" / "action.yml")
+    target_dir = repo / "actions" / "greet"
+    _symlink_or_skip(link, target_dir / "action.yml")
     kept = repo / "actions" / "clean" / "action.yaml"
     monkeypatch.setattr(
         zizmor_module, "scan_set", lambda **kwargs: [str(link), str(kept)]
     )
-    original = Path.is_file
-
-    def is_file(self, *args, **kwargs):
-        if self == link:
-            raise PermissionError(13, "Permission denied", str(self))
-        return original(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "is_file", is_file)
     scanner = _scanner(repo)
-
-    with caplog.at_level(logging.WARNING):
-        inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+    target_dir.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING):
+            inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+    finally:
+        target_dir.chmod(0o755)
 
     assert inputs == ["actions/clean/action.yaml"]
     assert "Not auditing linked/action.yml" in caplog.text
