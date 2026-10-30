@@ -82,6 +82,13 @@ def _context(source_dir: Path, output_dir: Path) -> MagicMock:
     ctx = MagicMock()
     ctx.source_dir = source_dir
     ctx.output_dir = output_dir
+    # A real PluginContext always carries work_dir, and the exclusion reads it
+    # as any os.PathLike. A bare MagicMock attribute is one too: its generated
+    # __fspath__ spells "MagicMock/mock.work_dir/<id>", a path under the
+    # process cwd, so the converted-file finding below would resolve outside
+    # that work directory and be excluded as ASH's own output. Name the
+    # directory the context would derive.
+    ctx.work_dir = output_dir / ASH_WORK_DIR_NAME
     ctx.ignore_suppressions = False
     ctx.config = MagicMock()
     ctx.config.global_settings.ignore_paths = []
