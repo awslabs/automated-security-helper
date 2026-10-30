@@ -45,7 +45,9 @@ def test_a_validated_model_refuses_such_a_name_before_the_record_form():
     is not valid unicode (``string_unicode``), so a lone surrogate never reaches a
     validated model's property bag and the record form has nothing to do there:
     the refusal is loud, not a later dump failure. The record form is reached
-    through model_construct and a field filled in after the build (the next test)."""
+    through model_construct (test_a_constructed_model_with_such_a_name_still_dumps)
+    and a field filled in after the build
+    (test_a_field_filled_in_after_the_build_dumps_in_the_record_form)."""
     with pytest.raises(ValidationError) as caught:
         _Bag.model_validate({"name": "x", RAW_NAME: 1})
 
@@ -72,6 +74,33 @@ def test_a_constructed_model_with_such_a_name_still_dumps():
     assert RECORDED_NAME in (copy.__pydantic_extra__ or {})
     # The model itself is left as it was.
     assert RAW_NAME in (bag.__pydantic_extra__ or {})
+
+
+def test_a_field_filled_in_after_the_build_dumps_in_the_record_form():
+    """The path the module docstring names: a validated model, then an extra field
+    set by name, which pydantic does not validate."""
+    bag = _Bag.model_validate({"name": "x"})
+
+    setattr(bag, RAW_NAME, 1)
+
+    assert RAW_NAME in (bag.__pydantic_extra__ or {})
+    assert bag.model_dump(mode="json") == {"name": "x", RECORDED_NAME: 1}
+    assert json.loads(bag.model_dump_json()) == {"name": "x", RECORDED_NAME: 1}
+
+
+def test_two_names_with_one_record_form_keep_the_later_value():
+    """A property bag cannot hold two equal keys, so a name that is already the
+    record form of another collides with it. The record form is applied in the
+    order the names were set and the later value stays; nothing is raised. The
+    rule is pinned so a change to it is a decision: the earlier value is lost."""
+    bag = _Bag.model_construct(name="x", **{RAW_NAME: 1, RECORDED_NAME: 2})
+
+    assert bag.model_dump(mode="json") == {"name": "x", RECORDED_NAME: 2}
+    copy = recorded(bag)
+    assert (copy.__pydantic_extra__ or {}) == {RECORDED_NAME: 2}
+
+    reversed_order = _Bag.model_construct(name="x", **{RECORDED_NAME: 2, RAW_NAME: 1})
+    assert reversed_order.model_dump(mode="json") == {"name": "x", RECORDED_NAME: 1}
 
 
 def test_a_model_whose_extra_names_are_text_is_left_alone():

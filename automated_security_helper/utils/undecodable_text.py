@@ -246,9 +246,15 @@ def _record_fields(model: BaseModel) -> None:
         # The extra fields' NAMES too: a property bag's key is a name a tool or a
         # repository chose, and a dump in JSON mode UTF-8-encodes the keys, so a
         # lone surrogate in one stops the dump as one in a value would. Renamed in
-        # place, in the same order, only when a name changed.
+        # place, in the same order, only when a name changed. Two names with one
+        # record form collapse to one key (the later value stays), which leaves
+        # ``renamed`` shorter than ``extra``; zip stops at the shorter, so a
+        # collision whose first key was already the record form compared equal and
+        # the raw name stayed in the bag.
         renamed = {texts_of_undecodable(key): value for key, value in extra.items()}
-        if any(new_key is not key for new_key, key in zip(renamed, extra)):
+        if len(renamed) != len(extra) or any(
+            new_key is not key for new_key, key in zip(renamed, extra)
+        ):
             extra.clear()
             extra.update(renamed)
 
