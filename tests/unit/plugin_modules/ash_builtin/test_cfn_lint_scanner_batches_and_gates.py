@@ -407,7 +407,7 @@ def test_a_small_batch_with_alike_failures_at_both_ends_still_runs_the_middle(
     assert scanner.targets_failed == 2
     assert not any("read as a failure of the run" in e for e in scanner.errors)
     uris = [
-        r.locations[0].physicalLocation.artifactLocation.uri
+        r.locations[0].physicalLocation.root.artifactLocation.uri
         for r in report.runs[0].results
     ]
     assert [u.rsplit("/", 1)[-1] for u in uris] == ["mmm.yaml"]
@@ -435,7 +435,7 @@ def test_a_large_batch_with_the_same_fault_at_both_ends_keeps_the_middles_findin
     assert scanner.targets_failed == 2
     assert not any("read as a failure of the run" in e for e in scanner.errors)
     uris = sorted(
-        r.locations[0].physicalLocation.artifactLocation.uri
+        r.locations[0].physicalLocation.root.artifactLocation.uri
         for r in report.runs[0].results
     )
     assert [u.rsplit("/", 1)[-1] for u in uris] == middles
@@ -456,7 +456,7 @@ def test_a_faulty_first_template_does_not_hide_the_others(ash_temp_path):
     assert scanner.targets_failed == 1
     assert not any("read as a failure of the run" in e for e in scanner.errors)
     uris = sorted(
-        r.locations[0].physicalLocation.artifactLocation.uri
+        r.locations[0].physicalLocation.root.artifactLocation.uri
         for r in report.runs[0].results
     )
     assert [u.rsplit("/", 1)[-1] for u in uris] == ["mmm.yaml", "zzz.yaml"]
