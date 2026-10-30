@@ -2072,21 +2072,9 @@ def apply_runtime_override(
     its file wrote, as a test op compares. The override's text at that place
     is therefore an op whatever it is, unless it is the reference itself, so
     an override holding the value is answered as one holding any other text.
-
-    ``extends`` and ``patch`` are left out of every dump, so no op can express
-    them: an override that sets either differently from the base is refused
-    rather than bound without them.
     """
     from automated_security_helper.config.config_validator import record_of_config
 
-    # Compared as Python values: a patch op's value can be anything its YAML
-    # loaded (a date), which json.dumps would raise on.
-    if (override.extends, override.patch) != (base.extends, base.patch):
-        raise RuntimePatchDeniedError(
-            None,
-            "the override sets extends or patch, which a whole-document override "
-            "cannot apply; write the settings themselves",
-        )
     base_doc = record_of_config(base, base.model_dump(mode="json", by_alias=False))
     override_doc = override.model_dump(mode="json", by_alias=False)
     patch_ops = json_patch_between(base_doc, override_doc)
