@@ -420,10 +420,18 @@ whether each is enabled by default; [Reporters](reporters.md) gives each one's f
 and options.
 
 A reporter's `extension` must be a file name suffix. A configured `extension` that
-contains `/`, `\`, `..`, or a NUL character is ignored with a warning, and the reporter's
-default is used. If a reporter's report file name is still not a single file name, one
-that is not empty, `.`, or `..` and contains no `/`, `\`, or NUL, the run stops with
-exit 1 before any reporter writes.
+contains `/`, `\`, `:`, `..`, or a NUL character is ignored with a warning, and the
+reporter's default is used. If a reporter's report file name is still not a single file
+name, one that is not empty, `.`, or `..`, contains no `/`, `\`, `:`, or NUL, and does
+not name a Windows device (`nul.json`, `con`, `com1.txt`), the run stops with exit 1
+before any reporter writes. The colon is refused on every platform because on NTFS
+`ash.json:stream` names an alternate data stream of `ash.json`, another reporter's file.
+A file a reporter writes beside its report through `write_report_file` follows the same
+rule, and a symbolic link at that name, or a `reports/` directory that has become a
+symbolic link or a directory junction by the time of the write, is refused and the
+refusal raised (`OutputLinkRefused` for a symbolic link, `OutputDirLinkRefused` for a
+junction), as for any other output file ([Links are refused](#links)), instead of being
+skipped with a warning.
 
 | File | Reporter | Enabled |
 |---|---|---|
