@@ -70,14 +70,16 @@ def sandbox(tmp_path, monkeypatch) -> InstallSandbox:
     yield from sandbox_env(tmp_path, monkeypatch)
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(autouse=True)
 def _the_sandbox_reaches_nothing_real():
-    """The stand-ins' environment never leaked out of a test.
+    """The stand-ins' environment never leaked out of the test that just ran.
 
-    Checked in this module-scoped fixture's teardown, so it runs after every test
-    of the module on whatever worker or shard collected it and in whatever order
-    the tests ran; a function placed last in the file would guard only the tests
-    that happened to run before it in its own tier.
+    Function-scoped and autouse: it is set up before ``sandbox`` requests
+    ``monkeypatch`` and torn down after ``monkeypatch`` has restored the
+    environment, so a leak is reported against the test that caused it. It runs
+    with every test of the module on whatever worker or shard collected it and
+    in whatever order the tests ran; a module-scoped teardown would name only
+    whichever test happened to run last.
     """
     yield
     assert "ASH_TEST_STAND_IN_LOG" not in environ_names(), (
