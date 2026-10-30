@@ -60,16 +60,33 @@ def test_a_command_line_is_shown_as_text_without_the_values():
     assert CANARY not in shown, shown
 
 
-def test_the_command_line_is_the_runners_own_form():
+def test_the_command_line_is_the_runners_own_form(monkeypatch):
     """Built with the runner's helpers: a --config-overrides value is written as
     its key, as the runner's "Running command" log line writes it, so the two
-    lines about one child read the same."""
+    lines about one child read the same. Compared with the line the runner
+    logs, not with the helper call that builds it: the runner's spawn and its
+    argv[0] resolution are stood in, so no program starts and the argv is logged
+    as given."""
     argv = ["ash", "--config-overrides", f"scanners.x.options.token={CANARY}"]
-    runners_line = " ".join(map(str, subprocess_utils.shown_arguments(argv)))
+    logged: list[str] = []
+    monkeypatch.setattr(
+        subprocess_utils.ASH_LOGGER,
+        "log",
+        lambda level, message, *args, **kwargs: logged.append(message),
+    )
+    monkeypatch.setattr(subprocess_utils, "_resolved_or_refused", lambda *_a: None)
+    monkeypatch.setattr(
+        subprocess_utils,
+        "_runner",
+        lambda sandboxed: (
+            lambda args, **kwargs: subprocess.CompletedProcess(args, 0, "", "")
+        ),
+    )
 
+    subprocess_utils.run_command(argv)
     shown = dependencies_module._shown_command(argv, ())
 
-    assert shown == runners_line, (shown, runners_line)
+    assert f"Running command: {shown}" in logged, (shown, logged)
     assert CANARY not in shown, shown
 
 
@@ -130,9 +147,18 @@ def test_a_spawn_error_is_printed_without_the_values(
     assert "Error running command curl" in printed, printed
 
 
+class _Lines(io.StringIO):
+    """The installer's panel output, plus the values the run_command stand-in
+    found set for each command it was handed."""
+
+    values_seen: list
+
+
 def _one_scanner_with(monkeypatch, tmp_path, commands):
     """One scanner whose declared install argv are ``commands``, built from a
-    configuration that read CANARY from the environment. No install runs."""
+    configuration that read CANARY from the environment. No install runs: the
+    stand-in for run_command records the values the install loop set for it
+    (``_INSTALL_VALUES``), which is the wiring the redaction rests on."""
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(dependencies_module, "load_plugins", lambda *_a, **_k: {})
@@ -149,7 +175,14 @@ def _one_scanner_with(monkeypatch, tmp_path, commands):
             )
         ),
     )
-    monkeypatch.setattr(dependencies_module, "run_command", lambda cmd, shell=False: 0)
+    lines = _Lines()
+    lines.values_seen = []
+
+    def run_command(cmd, shell=False):
+        lines.values_seen.append(dependencies_module._INSTALL_VALUES.get())
+        return 0
+
+    monkeypatch.setattr(dependencies_module, "run_command", run_command)
     real_resolve = dependencies_module.resolve_config
 
     def resolved_with_the_canary(*args, **kwargs):
@@ -158,7 +191,6 @@ def _one_scanner_with(monkeypatch, tmp_path, commands):
         return config
 
     monkeypatch.setattr(dependencies_module, "resolve_config", resolved_with_the_canary)
-    lines = io.StringIO()
     monkeypatch.setattr(
         dependencies_module,
         "console",
@@ -183,14 +215,20 @@ def test_the_running_command_line_hides_the_values(tmp_path, monkeypatch):
     printed = lines.getvalue() + result.stdout
     assert "Running command: fetch --token" in printed, printed
     assert CANARY not in printed, printed
+    # The run set the configuration's values for the runner's own lines: with
+    # the set dropped, every assertion above still held.
+    assert lines.values_seen == [(CANARY,)], lines.values_seen
 
 
 def test_the_values_are_reset_when_the_install_loop_raises(tmp_path, monkeypatch):
     """An in-process caller (this runner, an embedding host) must not find the
     previous run's values still set after an exception escaped the loop."""
     _one_scanner_with(monkeypatch, tmp_path, [["fetch", "x"]])
+    seen_in_the_loop: list = []
 
     def boom(cmd):
+        # Recorded before the raise: there was something set to reset.
+        seen_in_the_loop.append(dependencies_module._INSTALL_VALUES.get())
         raise RuntimeError("the pinned-install check failed")
 
     monkeypatch.setattr(dependencies_module, "pinned_install_already_satisfied", boom)
@@ -199,6 +237,7 @@ def test_the_values_are_reset_when_the_install_loop_raises(tmp_path, monkeypatch
     result = _install(tmp_path)
 
     assert isinstance(result.exception, RuntimeError), result.exception
+    assert seen_in_the_loop == [(CANARY,)], seen_in_the_loop
     assert dependencies_module._INSTALL_VALUES.get() == ()
 
 
