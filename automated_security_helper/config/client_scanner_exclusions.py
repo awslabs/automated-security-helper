@@ -450,12 +450,20 @@ def _checkov_pattern(pattern: str) -> Optional[re.Pattern[str]]:
     None when it is not a regular expression; it is then used as a substring
     only, as checkov does. Compiled per candidate path before, for every
     finding. The pattern is the client's and runs in ASH's own process; the
-    compile is bounded here, and the search by the scanner's ``scan_timeout``
-    (``checkov_skips``).
+    compile is cached here, and the search bounded by the scanner's
+    ``scan_timeout`` (``checkov_skips``).
+
+    ``re.compile`` refuses a malformed pattern with ``re.error``, a repetition
+    count past its limit (``a{4294967296}``) with ``OverflowError``, and a
+    nesting deeper than the parser's recursion with ``RecursionError``. Only
+    the first was caught, so the other two escaped ``checkov_skips`` into the
+    suppression pass and failed it after the scan had run; every shape the
+    compiler refuses is read as a substring, as checkov reads a pattern it
+    cannot compile.
     """
     try:
         return re.compile(pattern.replace(".terraform", r"\.terraform"))
-    except re.error:
+    except (re.error, OverflowError, RecursionError):
         return None
 
 

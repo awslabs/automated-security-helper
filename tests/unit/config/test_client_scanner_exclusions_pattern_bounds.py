@@ -133,6 +133,25 @@ def test_without_a_bound_the_search_runs_as_before():
     assert checkov_skips(STAR_PATTERN, QUICK_ABSOLUTE, QUICK_RELATIVE) is False
 
 
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "a{4294967296}",
+        "(" * 1500 + "a" + ")" * 1500,
+    ],
+)
+def test_a_pattern_the_compiler_refuses_is_read_as_a_substring(pattern):
+    """``re.compile`` raises OverflowError for a repetition count past its
+    limit and RecursionError for a nesting deeper than its parser follows;
+    only re.error was caught, and the other two failed the suppression pass.
+    Such a pattern is a substring now, as checkov reads it."""
+    assert checkov_skips(pattern, "/scan/src/x.tf", "src/x.tf", timeout=5) is False
+    assert (
+        checkov_skips(pattern, f"/scan/{pattern}/x.tf", f"{pattern}/x.tf", timeout=5)
+        is True
+    )
+
+
 def test_a_literal_skip_path_is_searched_inline(monkeypatch):
     """A literal cannot backtrack, so no thread is spent on it; a pattern with
     regular-expression syntax goes through the bound."""
