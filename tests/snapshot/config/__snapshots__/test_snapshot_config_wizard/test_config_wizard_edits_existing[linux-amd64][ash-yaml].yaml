@@ -358,6 +358,7 @@ reporters:
     enabled: true
     options:
       exclude_suppressed: true
+      emit_automation_details: false
   junitxml:
     enabled: true
     options:
