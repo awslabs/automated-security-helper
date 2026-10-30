@@ -14,8 +14,10 @@ summary say what is so.
 
 from __future__ import annotations
 
+import errno
 import io
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -46,16 +48,28 @@ from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 
 pytestmark = pytest.mark.unit
 
-runner = CliRunner()
+# Wide, so rich does not fold a refusal's long temporary path across lines: off a
+# terminal it wraps at 80 columns, and a 71-character path put "be" of "cannot be
+# created" on the next line.
+runner = CliRunner(env={"COLUMNS": "300"})
 
 
 class _Calls(list):
     panels: io.StringIO
 
 
+def _flat(output: str) -> str:
+    """The output on one line, without the colors rich adds."""
+    return " ".join(re.sub(r"\x1b\[[0-9;]*m", "", output).split())
+
+
 @pytest.fixture
 def quiet_machine(tmp_path, monkeypatch):
-    """No uv probe starts, no install command runs, the panels are captured."""
+    """No uv probe starts, no install command runs, the panels are captured.
+
+    The command exports ASH_BIN_PATH for the rest of the process (``set_environ``)
+    before any refusal; ``delenv`` of a name that was not set records nothing to
+    undo, so the value is removed here, as the other bin-path fixtures do."""
     calls = _Calls()
 
     def _spawn(argv, **_kwargs):
@@ -72,6 +86,8 @@ def quiet_machine(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("ASH_BIN_PATH", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    # With this set to "skip" an unknown --tool is skipped, not refused.
+    monkeypatch.delenv(dependencies.UNKNOWN_TOOLS_SETTING, raising=False)
     monkeypatch.chdir(tmp_path)
     panels = io.StringIO()
     monkeypatch.setattr(
@@ -79,6 +95,7 @@ def quiet_machine(tmp_path, monkeypatch):
     )
     calls.panels = panels
     yield calls
+    os.environ.pop("ASH_BIN_PATH", None)
     uv_tool_runner._reset_uv_tool_runner_caches()
     subprocess_utils.clear_find_executable_cache()
 
@@ -107,7 +124,9 @@ def test_a_differently_cased_tool_name_is_not_refused(quiet_machine, tmp_path):
         dependencies_app, ["--bin-path", str(tmp_path / "bin"), "--tool", "Sarif"]
     )
 
-    assert result.exit_code != EXIT_BAD_SELECTION, result.output
+    # Zero, as `--tool sarif` exits in the tests beside this one: "not the
+    # selection code" also admitted a traceback's exit 1.
+    assert result.exit_code == 0, result.output
     assert "Unknown tool(s)" not in quiet_machine.panels.getvalue()
 
 
@@ -161,24 +180,12 @@ def test_a_bin_path_that_is_a_file_is_a_refusal_not_a_traceback(
 
     assert result.exit_code == EXIT_INVALID_CONFIG, result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
-    assert "cannot be created" in result.output, result.output
+    assert "cannot be created" in _flat(result.output), result.output
 
 
-def test_a_tilde_bin_path_with_no_usable_home_is_refused(
-    quiet_machine, tmp_path, monkeypatch
-):
-    """expanduser read an empty HOME as the filesystem root, so `--bin-path ~/x`
-    installed into /x; the default refuses such a home and so does the option,
-    with the same words (there is no bin directory to install into)."""
-    monkeypatch.setenv("HOME", "")
-
-    result = runner.invoke(
-        dependencies_app, ["--bin-path", "~/ash-bin", "--tool", "sarif"]
-    )
-
-    assert result.exit_code == EXIT_INVALID_CONFIG, result.output
-    assert "HOME is empty or relative" in result.output, result.output
-    assert not Path("/ash-bin").exists()
+# A bin path under "~" with no usable home is refused: pinned, with both HOME and
+# USERPROFILE emptied and a mkdir guard, in
+# test_dependencies_bin_path_under_tilde_needs_a_usable_home.py.
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX reads the backslash")
@@ -199,27 +206,31 @@ def test_a_tilde_user_bin_path_posix_cannot_expand_is_refused(
 
     assert result.exit_code == EXIT_INVALID_CONFIG, result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
-    assert "cannot be expanded" in result.output, result.output
+    assert "cannot be expanded" in _flat(result.output), result.output
     assert not (tmp_path / bin_path).exists()
     assert not (tmp_path / "tools").exists()
 
 
-def test_a_deleted_working_directory_is_the_usage_refusal(quiet_machine, tmp_path):
-    gone = tmp_path / "gone"
-    gone.mkdir()
-    before = os.getcwd()
-    os.chdir(gone)
-    try:
-        gone.rmdir()
-        result = runner.invoke(
-            dependencies_app, ["--bin-path", str(tmp_path / "bin"), "--tool", "sarif"]
-        )
-    finally:
-        os.chdir(before)
+def test_a_deleted_working_directory_is_the_usage_refusal(
+    quiet_machine, tmp_path, monkeypatch
+):
+    """Path.cwd raises FileNotFoundError once the working directory is gone from
+    under the process; the command reports it as a scan does. The directory is
+    not removed for real: Windows refuses to remove a process's working directory
+    (WinError 32), and the unit tier runs there too."""
+
+    def gone(cls):
+        raise FileNotFoundError(errno.ENOENT, "the working directory was removed")
+
+    monkeypatch.setattr(Path, "cwd", classmethod(gone))
+
+    result = runner.invoke(
+        dependencies_app, ["--bin-path", str(tmp_path / "bin"), "--tool", "sarif"]
+    )
 
     assert result.exit_code == 5, result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
-    assert "deleted or unmounted" in result.output, result.output
+    assert "deleted or unmounted" in _flat(result.output), result.output
 
 
 # --- install commands ---
@@ -230,9 +241,8 @@ def test_a_command_list_that_is_none_is_a_value_error_for_that_plugin():
         _well_formed_commands(None)
 
 
-def test_a_command_with_a_non_text_element_is_a_type_error():
-    with pytest.raises(TypeError):
-        _well_formed_commands([["pip", "install", 3]])
+# An argv element that is not text (a number) is a TypeError, and a Path is read
+# as its text: pinned in test_dependencies_command_lines_hide_environment_values.py.
 
 
 def test_a_command_iterable_that_raises_raises_inside_the_check():
