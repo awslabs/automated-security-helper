@@ -2711,51 +2711,68 @@ def _run_plain(
     own_group = timeout is not None
     if own_group:
         _start_in_own_group(kwargs)
-    process = subprocess.Popen(*popenargs, **kwargs)  # nosec B603 - callers pass list argv
-    started: Optional[_StartedChild] = None
-    try:
+    # A Ctrl-C while the child is being started is held until the process is in
+    # hand (HeldInterrupt), as _run_stoppable and _run_cancellable hold theirs:
+    # a KeyboardInterrupt raised inside Popen, after the child exists and
+    # before Popen returns it, left this runner no process to stop, and a child
+    # that leads a session of its own (the timeout case above) never had the
+    # terminal's Ctrl-C, so it ran on, orphaned. Released inside the try that
+    # stops the child, once the start is noted and registered; leaving the
+    # block puts the previous handler back in any case and hands it a Ctrl-C
+    # that was held.
+    with HeldInterrupt() as held:
+        process = subprocess.Popen(*popenargs, **kwargs)  # nosec B603 - callers pass list argv
+        started: Optional[_StartedChild] = None
         try:
-            # Inside this handling: the child started when Popen returned, so a
-            # raise while noting or registering the start is a failure after
-            # it, and the child is stopped like any other.
-            started = _note_start(process)
-            if own_group:
-                _register_group(process)
-            stdout, stderr = process.communicate(input_data, timeout=timeout)
-        except subprocess.TimeoutExpired as expired:
-            # SIGKILL at once to the whole group (a timeout always has one), as
-            # subprocess.run kills its child at once; a refused stop is logged
-            # and recorded (_stop_child). The record says ASH stopped it, so its
-            # signal is never read as the tool's exit code.
-            if started is not None:
-                started.stopped = True
-            _stop_child(_argv_of(process), process, _stop_tree, 0.0, None)
-            # On POSIX communicate already put what it read in the exception;
-            # Windows reads the pipes in threads joined at the timeout, so what
-            # they read is collected after the kill.
-            expired.stdout, expired.stderr = _output_after_stop(process, expired)
-            raise
-        except BaseException as error:
-            if started is None:
-                started = _claim_started(process)
-            was_running = process.poll() is None
-            # The whole group where the child leads one (this runner's own, or
-            # a caller's start_new_session), as _run_cancellable chooses; a
-            # child in ASH's own group is killed alone, as subprocess.run does.
-            stop = (
-                _stop_tree if own_group or _leads_its_own_group(process) else _kill
-            )
-            _stop_child(_argv_of(process), process, stop, 0.0, None)
-            _note_failed_wait(started, process, was_running, error)
-            raise
-        # communicate() waited for the child, so this returns its code at once.
-        retcode = process.wait()
-        if check and retcode:
-            raise subprocess.CalledProcessError(
-                retcode, process.args, output=stdout, stderr=stderr
-            )
-    finally:
-        _reap(_argv_of(process), process)
+            try:
+                # Inside this handling: the child started when Popen returned,
+                # so a raise while noting or registering the start is a failure
+                # after it, and the child is stopped like any other.
+                started = _note_start(process)
+                if own_group:
+                    _register_group(process)
+                # A Ctrl-C held while the child was started is raised here,
+                # after the start is noted, inside the try that stops it.
+                held.release()
+                stdout, stderr = process.communicate(input_data, timeout=timeout)
+            except subprocess.TimeoutExpired as expired:
+                # SIGKILL at once to the whole group (a timeout always has one),
+                # as subprocess.run kills its child at once; a refused stop is
+                # logged and recorded (_stop_child). The record says ASH stopped
+                # it, so its signal is never read as the tool's exit code.
+                if started is not None:
+                    started.stopped = True
+                _stop_child(_argv_of(process), process, _stop_tree, 0.0, None)
+                # On POSIX communicate already put what it read in the
+                # exception; Windows reads the pipes in threads joined at the
+                # timeout, so what they read is collected after the kill.
+                expired.stdout, expired.stderr = _output_after_stop(process, expired)
+                raise
+            except BaseException as error:
+                if started is None:
+                    started = _claim_started(process)
+                was_running = process.poll() is None
+                # The whole group where the child leads one (this runner's own,
+                # or a caller's start_new_session), as _run_cancellable chooses;
+                # a child in ASH's own group is killed alone, as subprocess.run
+                # does.
+                stop = (
+                    _stop_tree
+                    if own_group or _leads_its_own_group(process)
+                    else _kill
+                )
+                _stop_child(_argv_of(process), process, stop, 0.0, None)
+                _note_failed_wait(started, process, was_running, error)
+                raise
+            # communicate() waited for the child, so this returns its code at
+            # once.
+            retcode = process.wait()
+            if check and retcode:
+                raise subprocess.CalledProcessError(
+                    retcode, process.args, output=stdout, stderr=stderr
+                )
+        finally:
+            _reap(_argv_of(process), process)
     return subprocess.CompletedProcess(process.args, retcode, stdout, stderr)
 
 
