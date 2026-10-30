@@ -2103,10 +2103,18 @@ async def mcp_scan_directory(
         elif not claimed_session.try_start_scan(limit):
             # The claim goes back as the task's finally gives it back: with the
             # end of a session that arrived while it was held completed, not
-            # left for the TTL sweep. The limit is the server's, not the
-            # request's, the config's or the target's: the code for anything
-            # else, as the registry's concurrency refusal reports.
-            _release_what_the_scan_held(None, claimed_session, session_id)
+            # left for the TTL sweep, off the event loop and without raising,
+            # so the refusal below is answered whatever the removal did. The
+            # limit is the server's, not the request's, the config's or the
+            # target's: the code for anything else, as the registry's
+            # concurrency refusal reports.
+            await _release_what_the_scan_held_off_the_loop(
+                None,
+                claimed_session,
+                session_id,
+                scan_id=None,
+                environment_values=environment_values,
+            )
             # try_start_scan turns a scan away only when a limit is reached.
             return with_exit_code(
                 session_scan_limit_refusal("scan_directory", limit),
@@ -2382,9 +2390,58 @@ async def mcp_scan_directory(
     finally:
         # The task releases the claim and the count once it has started; a scan
         # that never started releases them here, and completes the end of a
-        # session that arrived while the claim was held, as the task would.
+        # session that arrived while the claim was held, as the task would:
+        # off the event loop, and without raising, so what this tool was
+        # returning (a refusal, the exit-coded error reply) still reaches the
+        # client when the removal fails.
         if not task_started:
-            _release_what_the_scan_held(counted, claimed_session, session_id)
+            await _release_what_the_scan_held_off_the_loop(
+                counted,
+                claimed_session,
+                session_id,
+                scan_id=scan_id,
+                environment_values=environment_values,
+            )
+
+
+async def _release_what_the_scan_held_off_the_loop(
+    scan_counted: Optional[Any],
+    scan_claim: Optional[Any],
+    session_id: Optional[str],
+    *,
+    scan_id: Optional[str],
+    environment_values: Tuple[str, ...],
+) -> None:
+    """Give back what a scan took of its session, off the event loop, never raising.
+
+    :func:`_release_what_the_scan_held` for the start paths of an async tool.
+    The removal of an ended session's workspace deletes a tree, so it runs on a
+    worker thread, as :func:`_run_scan_async`'s finally runs it, and shielded:
+    a tool call cancelled while it refuses a scan still completes the end it
+    deferred. The claim and the count are given back first, on this thread, so
+    a removal that fails leaves neither held; the failure is logged, redacted
+    with the config's environment values like every failure arm, and not
+    raised: at the per-session limit a raise would replace the structured
+    refusal, and in ``mcp_scan_directory``'s outer finally it would replace
+    whatever the tool was returning, so the client would get an exception for
+    a scan that was refused.
+    """
+    _give_back_the_scans_claim(scan_counted, scan_claim)
+    if not _holds_a_session(session_id):
+        return
+    import anyio
+
+    from automated_security_helper.cli.mcp.sessions import finish_ended_session
+
+    try:
+        with anyio.CancelScope(shield=True):
+            await anyio.to_thread.run_sync(finish_ended_session, session_id)
+    except Exception as release_error:  # noqa: BLE001 -- the tool's own reply wins
+        _logger.error(
+            f"Scan {scan_id or '(not started)'}: could not complete the end of "
+            "its session after the scan was not started: "
+            f"{error_text(release_error, environment_values)}"
+        )
 
 
 def _release_what_the_scan_held(
@@ -2401,6 +2458,11 @@ def _release_what_the_scan_held(
     claim is held and leaves the removal pending for whoever releases the
     claim, so every path that releases one completes it, the runner's finally
     and the start paths that give the claim back without a scan alike.
+
+    The removal runs here, on the calling thread, and raises what it raises:
+    this is the form for a done callback, which cannot await and guards the
+    call itself (``_give_back_what_the_runner_never_took``). An async start path
+    uses :func:`_release_what_the_scan_held_off_the_loop`.
     """
     _give_back_the_scans_claim(scan_counted, scan_claim)
     if _holds_a_session(session_id):
