@@ -13,6 +13,7 @@
 """
 
 import json
+import re
 
 import pytest
 
@@ -113,6 +114,63 @@ class TestNameOnlyLicenses:
         refs = {e["licenseId"] for e in document["hasExtractedLicensingInfos"]}
         assert refs == {a["licenseDeclared"], b["licenseDeclared"]}
 
+    def test_the_same_name_on_two_packages_shares_one_ref(self, test_plugin_context):
+        """One name, one identifier: a second ``licenseId`` for the same text
+        would be a duplicate, which SPDX forbids."""
+        document = _document(
+            test_plugin_context,
+            [
+                {
+                    "type": "library",
+                    "name": "a",
+                    "licenses": [{"license": {"name": "Vendor Commercial"}}],
+                },
+                {
+                    "type": "library",
+                    "name": "b",
+                    "licenses": [{"license": {"name": "Vendor Commercial"}}],
+                },
+            ],
+        )
+
+        a, b = document["packages"][1:]
+        assert a["licenseDeclared"] == b["licenseDeclared"]
+        assert a["licenseDeclared"] == "LicenseRef-Vendor-Commercial"
+        assert [e["licenseId"] for e in document["hasExtractedLicensingInfos"]] == [
+            "LicenseRef-Vendor-Commercial"
+        ]
+
+    def test_names_that_sanitize_to_nothing_still_get_valid_distinct_refs(
+        self, test_plugin_context
+    ):
+        """Every character of these names is outside the idstring grammar, so
+        the sanitized tail is a lone separator; the identifiers stay within
+        ``LicenseRef-[A-Za-z0-9.-]+``, unique, and keep the names they stand for."""
+        document = _document(
+            test_plugin_context,
+            [
+                {
+                    "type": "library",
+                    "name": "a",
+                    "licenses": [{"license": {"name": "***"}}],
+                },
+                {
+                    "type": "library",
+                    "name": "b",
+                    "licenses": [{"license": {"name": "!!!"}}],
+                },
+            ],
+        )
+
+        infos = document["hasExtractedLicensingInfos"]
+        ids = [e["licenseId"] for e in infos]
+        assert len(ids) == len(set(ids)) == 2
+        for license_id in ids:
+            assert re.fullmatch(r"LicenseRef-[A-Za-z0-9.-]+", license_id), license_id
+        assert {e["name"] for e in infos} == {"***", "!!!"}
+        a, b = document["packages"][1:]
+        assert {a["licenseDeclared"], b["licenseDeclared"]} == set(ids)
+
     def test_no_extracted_infos_key_without_a_name_only_license(
         self, test_plugin_context
     ):
@@ -192,3 +250,20 @@ class TestNoSbom:
 
         (root,) = document["packages"]
         assert "comment" not in root
+
+    def test_a_metadata_less_empty_sbom_is_read_as_no_inventory(
+        self, test_plugin_context
+    ):
+        """An SBOM with no metadata, no serial number and no components is the
+        default model's own shape, so it is read as "no scanner produced an
+        inventory". Every SBOM a scanner writes carries metadata or a serial
+        number; this pins the rule for the one shape that cannot be told apart."""
+        document = _document(
+            test_plugin_context,
+            cyclonedx=CycloneDXReport.model_validate(
+                {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": []}
+            ),
+        )
+
+        (root,) = document["packages"]
+        assert root["comment"] == NO_SBOM_COMMENT

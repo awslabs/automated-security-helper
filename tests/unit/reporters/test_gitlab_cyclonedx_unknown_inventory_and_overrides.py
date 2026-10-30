@@ -13,7 +13,6 @@
 """
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -42,7 +41,10 @@ UNKNOWN_ECOSYSTEM = {
 
 
 def _reporter(tmp_path, **options) -> GitLabCycloneDXReporter:
-    ctx = PluginContext(source_dir=Path("."), output_dir=tmp_path)
+    # The scratch directory, never the working directory: this repository's
+    # root holds pyproject.toml and uv.lock, so a reporter that ever read
+    # source_dir would answer differently depending on where pytest ran.
+    ctx = PluginContext(source_dir=tmp_path, output_dir=tmp_path)
     config = GitLabCycloneDXReporterConfig(
         options=GitLabCycloneDXReporterConfigOptions(**options)
     )
@@ -87,6 +89,20 @@ class TestAnUnknownInventoryIsMarked:
         assert doc["components"] == []
         assert "compositions" not in doc
 
+    def test_a_metadata_less_empty_sbom_is_marked_unknown(self, tmp_path):
+        """No metadata, no serial number, no components is the default model's
+        own shape, so it reads as "no scanner produced an inventory"; every SBOM
+        a scanner writes carries metadata or a serial number."""
+        model = AshAggregatedResults()
+        model.cyclonedx = CycloneDXReport.model_validate(
+            {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": []}
+        )
+
+        doc = json.loads(_reporter(tmp_path).report(model))
+
+        assert doc["components"] == []
+        assert doc["compositions"] == [{"aggregate": "unknown"}]
+
 
 class TestOverridesReachTheMetadataWithNoDominantEcosystem:
     def test_the_category_and_overrides_are_emitted(self, tmp_path):
@@ -116,6 +132,8 @@ class TestOverridesReachTheMetadataWithNoDominantEcosystem:
         assert props["gitlab:dependency_scanning:category"] == "production"
         assert "gitlab:dependency_scanning:package_manager:name" not in props
         assert "gitlab:dependency_scanning:language:name" not in props
+        # conan is in neither GitLab table, so no default lockfile is drawn
+        assert "gitlab:dependency_scanning:input_file:path" not in props
 
 
 def _component(name: str, purl: str, location: str) -> dict:
