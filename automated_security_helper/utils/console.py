@@ -100,7 +100,9 @@ class _AshConsole(Console):
     terminal, the print is soft-wrapped: no line breaks are added and nothing
     is cropped. A table, a panel, a traceback or a Syntax keeps the layout Rich
     gives it at the width, and on a terminal nothing changes. A caller's own
-    ``soft_wrap`` wins.
+    ``soft_wrap`` wins, and so does a Text's own ``overflow`` or ``no_wrap``:
+    under a soft wrap Rich divides no line, so a Text asking to be folded at the
+    width was cropped there instead.
     """
 
     def print(
@@ -110,11 +112,19 @@ class _AshConsole(Console):
         if (
             soft_wrap is None
             and objects
-            and all(isinstance(item, (str, Text)) for item in objects)
+            and all(_takes_the_soft_wrap(item) for item in objects)
             and not _is_terminal(self.file)
         ):
             soft_wrap = True
         super().print(*objects, soft_wrap=soft_wrap, **kwargs)
+
+
+def _takes_the_soft_wrap(item: Any) -> bool:
+    """Whether printing *item* off a terminal may be soft-wrapped: a str, or a
+    Text that sets neither an overflow method nor ``no_wrap`` of its own."""
+    if isinstance(item, Text):
+        return item.overflow is None and item.no_wrap is None
+    return isinstance(item, str)
 
 
 def ash_console(
@@ -175,7 +185,11 @@ def typer_console(*, stderr: bool = True) -> Console:
     FORCE_COLOR or PY_COLORS (whose logs show color) and turned off by
     _TYPER_FORCE_DISABLE_TERMINAL, and its width (TERMINAL_WIDTH, else the
     console's). typer reads those variables once, when it is imported; here they
-    are read by the same rules each time a console is built.
+    are read by the same rules each time a console is built. TERMINAL_WIDTH is
+    read as typer reads it, with ``int()``: a value with surrounding whitespace
+    or a sign counts, and one ``int()`` refuses (``str.isdigit`` admits
+    superscript and circled digits that ``int()`` does not) leaves the width to
+    the console rather than raising.
     """
     from rich.theme import Theme
     from typer import rich_utils
@@ -187,7 +201,7 @@ def typer_console(*, stderr: bool = True) -> Console:
         force_terminal = True
     if os.environ.get("_TYPER_FORCE_DISABLE_TERMINAL"):
         force_terminal = False
-    terminal_width = os.environ.get("TERMINAL_WIDTH", "")
+    width = _typer_terminal_width(os.environ.get("TERMINAL_WIDTH", ""))
     return ash_console(
         stderr=stderr,
         theme=Theme(
@@ -204,8 +218,20 @@ def typer_console(*, stderr: bool = True) -> Console:
         highlighter=rich_utils.highlighter,
         color_system=rich_utils.COLOR_SYSTEM,
         force_terminal=force_terminal,
-        width=int(terminal_width) if terminal_width.isdigit() else None,
+        width=width,
     )
+
+
+def _typer_terminal_width(value: str) -> Optional[int]:
+    """The width TERMINAL_WIDTH's *value* names by typer's rule, ``int()``, or
+    None for an empty value, one ``int()`` refuses, or one below 1."""
+    if not value:
+        return None
+    try:
+        width = int(value)
+    except ValueError:
+        return None
+    return width if width > 0 else None
 
 
 def _shown(message: Any) -> Any:
