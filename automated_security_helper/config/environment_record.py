@@ -565,9 +565,12 @@ def environment_marker(written: str) -> str:
     marker (``<from ${VAR}>-a``), so two keys of one mapping read from one
     variable with different tails stay two keys. A string the load changed is
     marked inside, with the reference alone (``_Index._string``), and its own
-    text after the value is kept there."""
+    text after the value is kept there. Blanks at the end are not part of the
+    tail: the resolver strips them from the value, so the marker does too."""
     bare = _bare(written)
-    tail = _without_tag(written)[len(bare) :] if _reference_match(written) else ""
+    if not _reference_match(written):
+        return f"<from {bare}>"
+    tail = _without_tag(written)[len(bare) :].rstrip()
     return f"<from {bare}>{tail}"
 
 

@@ -51,6 +51,15 @@ def test_a_marker_without_a_tail_is_unchanged() -> None:
     assert environment_marker("${ASH_U35_K}") == "<from ${ASH_U35_K}>"
 
 
+def test_blanks_at_the_end_of_the_tail_are_not_shown() -> None:
+    """The resolver strips blanks around a value, so the marker does too.
+
+    Red at the base: the marker kept the trailing blanks of the written text.
+    """
+    assert environment_marker("${ASH_U35_K} ") == "<from ${ASH_U35_K}>"
+    assert environment_marker("${ASH_U35_K}-a  ") == "<from ${ASH_U35_K}>-a"
+
+
 def test_a_key_reference_renames_only_the_key_it_resolved_to(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
