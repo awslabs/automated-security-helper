@@ -1297,9 +1297,14 @@ _MEMBER_SAME_PATH = (
 #: could commit an archive could keep all of its content from being scanned by
 #: adding ``a`` and ``a/b``. inspect_members reads every name before anything is
 #: written, so the pair is known in time.
+#: Constant, like the other reasons: the refusals of one archive are listed up to
+#: MEMBER_REFUSALS_LISTED per reason and counted past it, keyed on the reason text,
+#: so a reason that carried the colliding path made every pair its own reason and
+#: an archive of N pairs produced N records and N warnings. The path goes into the
+#: per-member log line (_refuse_member's detail) instead.
 _MEMBER_UNDER_A_FILE = (
-    "its path runs through '{path}', which an earlier member of the archive is "
-    "extracted to as a file"
+    "its path runs through a path an earlier member of the archive is extracted "
+    "to as a file"
 )
 _MEMBER_OVER_A_DIRECTORY = (
     "earlier members of the archive are extracted below its path, so it cannot "
@@ -2024,15 +2029,33 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 return ignore_path
         return None
 
-    def _refuse_member(self, archive: Optional[str], member: str, reason: str) -> None:
+    def _refuse_member(
+        self,
+        archive: Optional[str],
+        member: str,
+        reason: str,
+        detail: Optional[str] = None,
+    ) -> None:
         # The member's name as read: record_refused_input shows it, and the warning
         # here is shown whole, so a surrogate tarfile read a byte as is an escape.
+        # ``detail`` is what the constant reason leaves out (the path the member
+        # runs through): logged with the member, never part of the recorded reason,
+        # which keys the per-reason listing cap.
         if archive is None:
             ASH_LOGGER.warning(
-                shown_on_one_line(f"Skipped archive member '{member}': {reason}")
+                shown_on_one_line(
+                    f"Skipped archive member '{member}': {reason}"
+                    + (f" ({detail})" if detail else "")
+                )
             )
         else:
             self.record_refused_input(TreeInputRefused(archive, reason), member=member)
+            if detail:
+                ASH_LOGGER.verbose(
+                    shown_on_one_line(
+                        f"Archive member '{member}' of '{archive}': {detail}"
+                    )
+                )
 
     def _record_trailing_bytes(self, archive: str, trailing: int) -> None:
         """Record the ``trailing`` bytes after ``archive``'s gzip data: not another
@@ -2270,6 +2293,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 continue
 
             problem = _member_name_problem(member_name)
+            detail: Optional[str] = None
             if problem is None and ignore_paths and member_name_not_utf_8(member):
                 problem = MEMBER_NOT_UTF_8
             if problem is None and target_path is not None:
@@ -2289,8 +2313,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 through = next((key for key in prefixes if key in written), None)
                 if through is not None:
                     # x.js before x.js/y.js: the later member cannot be written
-                    # under a file, and is refused alone, naming the file.
-                    problem = _MEMBER_UNDER_A_FILE.format(path=written[through])
+                    # under a file, and is refused alone; the file is named in
+                    # the log line, not in the reason (the listing cap's key).
+                    problem = _MEMBER_UNDER_A_FILE
+                    detail = f"runs through '{written[through]}'"
                 elif destination in directories:
                     # a/b.js before a: the later member cannot be written as a
                     # file where the earlier members' directory stands.
@@ -2342,7 +2368,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             if problem is not None:
                 if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:
                     listed[problem] = listed.get(problem, 0) + 1
-                    self._refuse_member(archive, member_name, problem)
+                    self._refuse_member(archive, member_name, problem, detail)
                 else:
                     unlisted[problem] = unlisted.get(problem, 0) + 1
                 continue

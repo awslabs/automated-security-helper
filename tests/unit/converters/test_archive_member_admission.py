@@ -354,7 +354,9 @@ def test_a_renamed_member_never_lands_on_a_directory_of_another_member(
     maker = _zip if kind == "zip" else _tar
     below = ("m~2/m.js/x.py", b"x = 1\n")
     duplicates = [("m.js", b"1\n"), ("m.js", b"2\n")]
-    members = [below, *duplicates] if order == "directory-first" else [*duplicates, below]
+    members = (
+        [below, *duplicates] if order == "directory-first" else [*duplicates, below]
+    )
     archive = maker(Path(test_plugin_context.source_dir) / f"a.{kind}", members)
 
     converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
@@ -362,6 +364,37 @@ def test_a_renamed_member_never_lands_on_a_directory_of_another_member(
     assert files == {"m~2/m.js/x.py": b"x = 1\n", "m.js": b"1\n", "m~3/m.js": b"2\n"}
     assert converter.failed_inputs == []
     assert converter.refused_inputs == []
+
+
+def test_members_under_a_file_are_listed_up_to_the_cap_and_counted_past_it(
+    test_plugin_context,
+):
+    """Twenty-five pairs ``xN.js`` / ``xN.js/y.js``: the later member of each is
+    refused as under a file. The reason is one constant text, so the listing cap
+    applies: 20 refusals recorded one by one, the other 5 counted in one record.
+    With the colliding path inside the reason every pair was its own reason and
+    25 records and 25 warnings were made, the shape the cap exists to prevent."""
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = []
+    for index in range(25):
+        members.append(zipfile.ZipInfo(f"x{index}.js"))
+        members.append(zipfile.ZipInfo(f"x{index}.js/y.js"))
+
+    admitted = converter.inspect_members(members, target_path=None, archive="a.zip")
+
+    assert [member.filename for member in admitted] == [
+        f"x{index}.js" for index in range(25)
+    ]
+    listed = [r for r in converter.refused_inputs if r.member is not None]
+    counted = [r for r in converter.refused_inputs if r.member is None]
+    assert len(listed) == archive_converter.MEMBER_REFUSALS_LISTED
+    assert {r.reason for r in listed} == {archive_converter._MEMBER_UNDER_A_FILE}
+    assert "x0.js" not in archive_converter._MEMBER_UNDER_A_FILE
+    (summary,) = counted
+    assert summary.unlisted_members == 25 - archive_converter.MEMBER_REFUSALS_LISTED
+    assert summary.reason == archive_converter._MEMBER_UNDER_A_FILE
 
 
 @pytest.mark.skipif(os.sep != "/", reason="a backslash separates on this host")
