@@ -17,6 +17,9 @@ at the base.
   extra, plugin-provided section is read by a reduced name, so its pin is
   recorded whether or not it is on, and a pair the plan cannot resolve records a
   pin only when every section of it, an off one included, sets the same one.
+* The pin of a disabled scanner that a workspace policy then switches on was in
+  no comparison, although the scan applies it: the policy is applied after the
+  pins are compared.
 * A remote client's containment refusal echoed the real path an entry resolved
   to.
 * A discovered project config that is the operator's own file (a link to
@@ -50,18 +53,22 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     WorkspaceDefinitionError,
 )
+from automated_security_helper.models.workspace import SkippedProjectReason
 from automated_security_helper.workspace import resolver
 from automated_security_helper.workspace.plan import ProjectPlan
 from automated_security_helper.workspace.policy import policy_for_project
 from automated_security_helper.workspace.resolver import (
     _apply_workspace_policy,
     _assign_display_labels,
+    _disabled_scanner_pins,
+    _record_pins_the_policy_turns_on,
     _refuse_config_files_that_are_not_utf8,
     _refuse_missing_default_config,
     _resolve_project_config,
     _scanner_state,
     _unresolved_pins,
     _validate_plugin_modules,
+    _validate_scanner_pins,
     resolve_workspace,
 )
 from automated_security_helper.workspace.workspace_file import WorkspaceDefinition
@@ -522,6 +529,96 @@ class TestScannerSections:
         assert "bandit" not in enabled
         assert "bandit" not in pins
         assert pins.get("semgrep") == ">=1"
+
+    def test_the_pin_of_a_disabled_scanner_is_held_for_the_policy(self):
+        config = AshConfig.model_validate(
+            {
+                "scanners": {
+                    "bandit": {"enabled": False, "options": {"tool_version": ">=2"}},
+                    "semgrep": {"enabled": True, "options": {"tool_version": ">=1"}},
+                    "detect-secrets": {"enabled": False},
+                }
+            }
+        )
+
+        assert _disabled_scanner_pins(config) == {"bandit": ">=2"}
+
+    def test_a_policy_that_switches_a_scanner_on_records_the_pin_it_keeps(
+        self, tmp_path
+    ):
+        """The policy is applied after the pins are compared, and
+        ``_enable_policy_scanners`` leaves ``options.tool_version`` as it was,
+        so the scan applies a pin the comparison never saw."""
+        api = _entry("api", policy_scanners=["bandit"])
+        web = _entry("web", scanner_pins={"bandit": ">=1,<2"})
+
+        recorded = _record_pins_the_policy_turns_on(
+            [api, web], {"api": {"bandit": ">=2"}, "web": {}}
+        )
+
+        assert recorded is True
+        assert api.scanner_pins == {"bandit": ">=2"}
+        assert web.scanner_pins == {"bandit": ">=1,<2"}
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            _validate_scanner_pins(_definition(tmp_path), [api, web])
+        message = str(excinfo.value)
+        assert "scanner 'bandit'" in message
+        assert ">=2" in message
+        assert ">=1,<2" in message
+
+    def test_a_pin_the_policy_does_not_switch_on_stays_unrecorded(self):
+        api = _entry("api", policy_scanners=["semgrep"])
+        skipped = _entry(
+            "docs",
+            policy_scanners=["bandit"],
+            skipped=True,
+            skip_reason=SkippedProjectReason.ERROR,
+            skip_detail="absent",
+        )
+
+        recorded = _record_pins_the_policy_turns_on(
+            [api, skipped],
+            {"api": {"bandit": ">=2"}, "docs": {"bandit": ">=2"}},
+        )
+
+        assert recorded is False
+        assert api.scanner_pins == {}
+        assert skipped.scanner_pins == {}
+
+    def test_the_policy_names_the_scanner_the_way_an_operator_types_it(self):
+        api = _entry("api", policy_scanners=["CDK_Nag"])
+
+        recorded = _record_pins_the_policy_turns_on([api], {"api": {"cdk-nag": ">=2"}})
+
+        assert recorded is True
+        assert api.scanner_pins == {"cdk-nag": ">=2"}
+
+    def test_a_workspace_policy_that_requires_a_disabled_scanner_records_its_pin(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        root = tmp_path / "ws"
+        root.mkdir()
+        _project(root, "api")
+        _project(root, "web")
+        workspace = _workspace(root, ["api", "web"])
+        (root / ".ash").mkdir()
+        (root / ".ash" / "ash-workspace.yaml").write_text(
+            "workspace:\n  additional_scanners: [bandit]\n", encoding="utf-8"
+        )
+        operator = tmp_path / "ops" / "ash.yaml"
+        operator.parent.mkdir()
+        operator.write_text(
+            "project_name: operator\nscanners:\n  bandit:\n    enabled: false\n"
+            '    options:\n      tool_version: ">=1.8,<2"\n',
+            encoding="utf-8",
+        )
+
+        plan = resolve_workspace(workspace, default_config=operator)
+
+        for project in plan.projects:
+            assert list(project.policy_scanners) == ["bandit"]
+            assert project.scanner_pins["bandit"] == ">=1.8,<2"
 
     def test_an_extra_section_that_is_off_still_records_its_pin(self):
         """The declared-scanner rule above does not reach an extra section.

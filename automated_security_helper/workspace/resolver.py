@@ -120,7 +120,9 @@ Failure modes and known limitations
   clash, or the whole set, not a minimal explanation of the clash.
 * Only an enabled DECLARED scanner's pin is recorded and compared: a disabled
   declared scanner's tool does not run, so its pin cannot conflict with another
-  project's. An extra,
+  project's. A workspace policy that requires a disabled scanner switches it on
+  and keeps its pin, so the policy step records it and compares the pins again
+  (``_record_pins_the_policy_turns_on``). An extra,
   plugin-provided section is read by a reduced name, and which of its spellings
   a plugin's registered name selects is unknown here, so the section the lookup
   reads records its pin whether or not it is on, and a pair the plan cannot
@@ -315,7 +317,9 @@ def _scanner_state(
         sections.append((name, on))
         pin = _scanner_pin(entry)
         # A disabled scanner's tool does not run, so its pin constrains nothing
-        # and must not refuse the workspace over a sibling's.
+        # and must not refuse the workspace over a sibling's. A policy that
+        # requires it switches it on later and its pin is recorded then
+        # (_record_pins_the_policy_turns_on).
         if pin is not None and on:
             pins[name] = pin
 
@@ -349,6 +353,52 @@ def _scanner_state(
     twins = {folded: names for folded, names in keys_of.items() if len(names) > 1}
     enabled = [name for name, on in sections if on]
     return sorted(enabled), pins, twins
+
+
+def _disabled_scanner_pins(config: AshConfig) -> Dict[str, str]:
+    """The pins of the declared scanners whose section is off, by display name.
+
+    ``_scanner_state`` leaves them out, because a scanner that is off does not run
+    and its pin constrains nothing. A workspace policy that requires the scanner
+    switches the section on and keeps the pin, so
+    :func:`_record_pins_the_policy_turns_on` takes it from here once the policy
+    is known.
+    """
+    segment = config.scanners
+    held: Dict[str, str] = {}
+    for field_name in type(segment).model_fields:
+        entry = _field(segment, field_name)
+        if entry is None or _section_is_on(entry):
+            continue
+        pin = _scanner_pin(entry)
+        if pin is not None:
+            held[_scanner_display_name(field_name, config)] = pin
+    return held
+
+
+def _record_pins_the_policy_turns_on(
+    projects: Sequence[ProjectPlan], disabled: Dict[str, Dict[str, str]]
+) -> bool:
+    """Record the pin of each disabled scanner that a project's policy switches on.
+
+    *disabled* maps a project key to ``_disabled_scanner_pins`` of its config.
+    The policy is applied after the pins are compared, so the pin of a scanner it
+    adds was not in that comparison although the scan applies it. Returns whether
+    any pin was added, so the caller compares the projects' pins again.
+    """
+    recorded = False
+    for project in projects:
+        if project.skipped or not project.policy_scanners:
+            continue
+        required = {normalise_scanner_name(name) for name in project.policy_scanners}
+        for name, pin in (disabled.get(project.key) or {}).items():
+            if (
+                normalise_scanner_name(name) in required
+                and name not in project.scanner_pins
+            ):
+                project.scanner_pins[name] = pin
+                recorded = True
+    return recorded
 
 
 class _ExtraScanners(NamedTuple):
@@ -1941,6 +1991,7 @@ def resolve_workspace(
     projects: List[ProjectPlan] = []
     scanner_twins: Dict[str, Dict[str, str]] = {}
     unresolved_pins: Dict[str, Dict[str, _PossiblePins]] = {}
+    disabled_pins: Dict[str, Dict[str, str]] = {}
     for candidate in candidates:
         if candidate.skipped:
             projects.append(
@@ -1968,6 +2019,7 @@ def resolve_workspace(
             permit_base=permit_base,
         )
         scanners, pins, twins = _scanner_state(config)
+        disabled_pins[candidate.key] = _disabled_scanner_pins(config)
         if twins:
             scanner_twins[candidate.key] = _twin_section_problems(
                 config, candidate.key, twins
@@ -2022,6 +2074,10 @@ def resolve_workspace(
         permit_base=permit_base,
         scanner_twins=scanner_twins,
     )
+    # A scanner the policy switches on keeps the pin of its off section, and the
+    # comparison above ran before the policy was known.
+    if _record_pins_the_policy_turns_on(active, disabled_pins):
+        _validate_scanner_pins(definition, active)
 
     return WorkspacePlan(
         workspace_file=definition.path.as_posix(),
