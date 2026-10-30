@@ -3301,8 +3301,11 @@ def merge_command(
                 if tuple(reference.path)[:1] != ("ash_plugin_modules",)
             ),
         )
-    write_text_atomically(merged_file, merged.model_dump_json(indent=2))
-    logger.info(f"Wrote merged results to {merged_file}")
+    # The merged results file itself is written after the report phases below,
+    # as a scan writes its own after its report phase (interactions/run_ash_scan.py):
+    # a reporter that refuses its paths, or fails, then leaves no merged results
+    # file, where one written here had to be removed again on a refusal and
+    # survived a crash recording nothing of it.
 
     # The plugins were loaded above, before anything was written.
     # A reporter that sends findings off the host runs only when the operator
@@ -3432,17 +3435,18 @@ def merge_command(
     except ReportPathRefused as exc:
         # Refused before any reporter wrote: a link at the reports directory or at
         # a report file, or a report file name outside it. Printed like the other
-        # refusals here, without a traceback. The merged results file this run
-        # wrote above is removed with it: a refused merge leaves no merged
-        # results file, as every refusal before the write leaves none, so a later
-        # ``ash report`` does not read a file that records no refusal as a
-        # completed merge.
-        merged_file.unlink(missing_ok=True)
+        # refusals here, without a traceback. The merged results file is written
+        # only below, so a refused merge leaves none, as every refusal before it
+        # leaves none, and a later ``ash report`` does not read a file that
+        # records no refusal as a completed merge.
         print(
-            f"[red]Refusing to write reports: {escape_markup(str(exc))} The merged "
-            f"{RESULTS_FILE_NAME} written by this run was removed.[/red]"
+            f"[red]Refusing to write reports: {escape_markup(str(exc))} No merged "
+            f"{RESULTS_FILE_NAME} was written.[/red]"
         )
         raise typer.Exit(1)
+
+    write_text_atomically(merged_file, merged.model_dump_json(indent=2))
+    logger.info(f"Wrote merged results to {merged_file}")
 
     report_sarif_after = report_sarif_identity(output_dir_path)
     exit_code = _merged_exit_code(

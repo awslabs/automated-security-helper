@@ -93,7 +93,11 @@ class TestAnOutputDirHoldingAShardIsRefused:
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
 class TestARefusedReportLeavesNoMergedFile:
-    def test_the_merged_results_file_is_removed_with_the_refusal(self, tmp_path):
+    def test_no_merged_results_file_is_written_when_the_reports_are_refused(
+        self, tmp_path
+    ):
+        """The results file is written after the report phases, as a scan writes
+        its own, so a refusal there leaves none rather than removing one."""
         shard_paths = write_shards(tmp_path / "artifacts", build_shards(2))
         output_dir = tmp_path / "merged"
         (output_dir / "reports").mkdir(parents=True)
@@ -106,10 +110,14 @@ class TestARefusedReportLeavesNoMergedFile:
         assert result.exit_code == 1, result.output
         assert not (output_dir / RESULTS_FILE_NAME).exists(), result.output
         console = "".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
-        assert "".join(
-            f"{RESULTS_FILE_NAME} written by this run was removed".split()
-        ) in (console), result.output
+        assert "".join(f"No merged {RESULTS_FILE_NAME} was written".split()) in (
+            console
+        ), result.output
+        assert "removed" not in console, result.output
         assert outside.read_text(encoding="utf-8") == "unchanged"
+        assert sorted(path.name for path in (output_dir / "reports").iterdir()) == [
+            "ash.sarif"
+        ]
 
 
 class TestTheRelocatedOutputDirIsCheckedAgain:
