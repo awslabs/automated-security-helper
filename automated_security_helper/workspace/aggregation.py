@@ -307,15 +307,17 @@ def _posix_text(uri: str, project_path: Optional[str] = None) -> str:
 def _rooted(text: str) -> bool:
     """Whether recorded path text is absolute on either platform's spelling.
 
-    A leading separator (POSIX, or a Windows path written with ``/`` or with
-    ``\\``, a UNC path's ``\\\\server\\share`` included) or a drive anchor (``C:\\``
-    or ``C:/``). ``PurePosixPath(text).is_absolute()`` reads a Windows absolute
-    path as relative, so a converter's or scanner's ``C:\\ws\\api\\nb.ipynb`` was
-    shown as ``api/C:\\ws\\api\\nb.ipynb``, against the fields' contract that an
-    absolute recorded path is kept as recorded; a backslash-rooted path was read
-    the same way until the leading backslash was admitted here.
+    A leading ``/`` (POSIX, or a Windows path written with ``/``), a UNC path's
+    ``\\\\server\\share``, or a drive anchor (``C:\\`` or ``C:/``).
+    ``PurePosixPath(text).is_absolute()`` reads a Windows absolute path as
+    relative, so a converter's or scanner's ``C:\\ws\\api\\nb.ipynb`` was shown
+    as ``api/C:\\ws\\api\\nb.ipynb``, against the fields' contract that an
+    absolute recorded path is kept as recorded. A single leading backslash is
+    not a root: ``uri_separators`` classes it as a file-name character on a
+    POSIX project (only a drive or a UNC spelling is Windows-only), and a
+    Windows project's separators are already ``/`` when the text reaches here.
     """
-    return text.startswith(("/", "\\")) or bool(_DRIVE_ANCHOR.match(text))
+    return text.startswith(("/", "\\\\")) or bool(_DRIVE_ANCHOR.match(text))
 
 
 def project_relative_uri(uri: str, project_path: str) -> Any:
@@ -470,8 +472,10 @@ def _artifact_location(location: Any) -> Optional[Dict[str, Any]]:
 #: project-relative, which placed it at the project root under the wrong name.
 UNRESOLVED_BASE = object()
 
-#: How many ``uriBaseId`` hops a base chain may take. SARIF puts no bound on
-#: chaining; one real-world chain is two deep (``SRCROOT`` under ``REPOROOT``).
+#: How many bases a chain may name, the location's own included: the walk gives
+#: up once it has seen this many, so seven ``uriBaseId`` hops resolve and an
+#: eighth is counted. SARIF puts no bound on chaining; one real-world chain is
+#: two deep (``SRCROOT`` under ``REPOROOT``).
 _BASE_CHAIN_LIMIT = 8
 
 

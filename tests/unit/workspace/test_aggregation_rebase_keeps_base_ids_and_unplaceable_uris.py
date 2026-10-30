@@ -37,12 +37,15 @@ The contract these cases pin:
   its root and the chain joined; a chain the run does not resolve (an undeclared
   parent, a cycle) counts the finding instead of placing it at the project root
   under another file's name;
-- ``_rooted`` reads a backslash-rooted or UNC path as absolute, and the
+- ``_rooted`` reads a UNC or drive path as absolute and a single leading
+  backslash as a file-name character (``uri_separators``' rule for a POSIX
+  project), a base chain is bounded by the bases it names, and the
   policy-origin marker and its reader have one home, ``aggregation``.
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -373,14 +376,70 @@ def test_a_chain_rooted_in_a_relative_base_is_counted_not_placed(project):
     assert unconvertible == 1
 
 
-def test_rooted_reads_a_backslash_rooted_and_a_unc_path_as_absolute():
-    """Red at the base for the first two: ``_rooted`` read only ``/`` and a drive."""
+def test_rooted_reads_a_unc_path_as_absolute_and_a_single_backslash_as_a_name():
+    """Red at the base for the UNC line (``_rooted`` read only ``/`` and a drive),
+    then for the ``\\x.py`` line once a single leading backslash was admitted as a
+    root: ``uri_separators`` classes it as a file-name character on a POSIX
+    project, and only a drive or a UNC spelling as Windows-only."""
     assert aggregation._rooted("\\\\server\\share\\nb.ipynb") is True
-    assert aggregation._rooted("\\x.py") is True
+    assert aggregation._rooted("\\x.py") is False
     assert aggregation._rooted("C:\\ws\\x.py") is True
     assert aggregation._rooted("/ws/x.py") is True
     assert aggregation._rooted("src/app.py") is False
     assert aggregation._rooted("") is False
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="under a Windows project root a backslash is a separator, so the "
+    "name is read as /x.py",
+)
+def test_a_name_with_one_leading_backslash_on_a_posix_project_is_placed(project):
+    """Red at the base: with the single backslash admitted as a root, ``\\x.py``
+    was counted unconvertible and anchored nowhere, where it had been placed
+    under the project as a file of that name."""
+    rebased, unconvertible = rebase_run_for_project(_run({"uri": "\\x.py"}), project)
+
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "\\x.py"
+    assert artifact["uriBaseId"] == PROJECT_ROOT_URI_BASE_ID
+    assert rebased["results"][0]["properties"]["workspace_uri"] == "api/\\x.py"
+    assert unconvertible == 0
+
+
+def _chain(depth: int, root_uri: str) -> dict:
+    """``%B1%`` anchored to ``%B2%`` ... to ``%B<depth>%``, which is declared at *root_uri*."""
+    base_ids = {
+        f"%B{index}%": {"uri": f"d{index}/", "uriBaseId": f"%B{index + 1}%"}
+        for index in range(1, depth)
+    }
+    base_ids[f"%B{depth}%"] = {"uri": root_uri}
+    return base_ids
+
+
+def test_a_chain_of_the_limits_depth_resolves_and_one_base_deeper_is_counted(
+    project, tmp_path
+):
+    """Pins the bound as the bytes admit it: ``_BASE_CHAIN_LIMIT`` counts the
+    bases a chain names, the location's own included, so seven hops resolve and
+    an eighth is counted (the comment once said eight hops)."""
+    root = _dir_uri(tmp_path / "ws" / "api")
+    limit = aggregation._BASE_CHAIN_LIMIT
+
+    rebased, unconvertible = rebase_run_for_project(
+        _run({"uri": "app.py", "uriBaseId": "%B1%"}, base_ids=_chain(limit, root)),
+        project,
+    )
+    placed = "api/" + "".join(f"d{index}/" for index in range(1, limit)) + "app.py"
+    assert rebased["results"][0]["properties"]["workspace_uri"] == placed
+    assert unconvertible == 0
+
+    rebased, unconvertible = rebase_run_for_project(
+        _run({"uri": "app.py", "uriBaseId": "%B1%"}, base_ids=_chain(limit + 1, root)),
+        project,
+    )
+    assert "workspace_uri" not in rebased["results"][0]["properties"]
+    assert unconvertible == 1
 
 
 def test_the_policy_origin_marker_and_its_reader_have_one_home():
