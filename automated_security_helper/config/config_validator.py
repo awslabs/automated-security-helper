@@ -4489,6 +4489,9 @@ class ConfigValidator:
             # that writes the value the file wrote is no reason to warn (the
             # value stands), one that writes another is the operator's choice
             # and the file's value is not kept, which the warning is about.
+            # Overrides apply in order, so when more than one names the place
+            # the LAST one is the value a scan sees, and it decides here.
+            decision: Optional[bool] = None
             for override in config_overrides or []:
                 key_path, _, text = override.partition("=")
                 parts = key_path.removesuffix("+").strip().split(".")
@@ -4506,13 +4509,14 @@ class ConfigValidator:
                 ):
                     continue
                 if len(parts) < len(segments):
-                    return True
+                    decision = True
+                    continue
                 try:
                     written = yaml.safe_load(text)
                 except yaml.YAMLError:
                     written = text
-                return written == value
-            return False
+                decision = written == value
+            return bool(decision)
 
         places: List[str] = []
         for key, section in reporters.items():
