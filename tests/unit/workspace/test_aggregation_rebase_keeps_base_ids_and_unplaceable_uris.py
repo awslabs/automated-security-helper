@@ -490,7 +490,10 @@ def test_a_name_with_one_leading_backslash_on_a_posix_project_is_placed(project)
 
 
 def _chain(depth: int, root_uri: str) -> dict:
-    """``%B1%`` anchored to ``%B2%`` ... to ``%B<depth>%``, which is declared at *root_uri*."""
+    """``%B1%`` anchored to ``%B2%`` ... to ``%B<depth>%``, which is declared at *root_uri*.
+
+    The outermost base is the root, so a location under ``%B1%`` resolves to
+    ``<root>/d<depth-1>/.../d2/d1/``: the segments join from the root inward."""
     base_ids = {
         f"%B{index}%": {"uri": f"d{index}/", "uriBaseId": f"%B{index + 1}%"}
         for index in range(1, depth)
@@ -512,7 +515,10 @@ def test_a_chain_of_the_limits_depth_resolves_and_one_base_deeper_is_counted(
         _run({"uri": "app.py", "uriBaseId": "%B1%"}, base_ids=_chain(limit, root)),
         project,
     )
-    placed = "api/" + "".join(f"d{index}/" for index in range(1, limit)) + "app.py"
+    # Joined from the root inward: %B7% (d7/) sits under the root, %B1% (d1/)
+    # is the innermost, so the placed path reads d7/.../d1/.
+    placed = "api/" + "".join(f"d{index}/" for index in range(limit - 1, 0, -1))
+    placed += "app.py"
     assert rebased["results"][0]["properties"]["workspace_uri"] == placed
     assert unconvertible == 0
 
