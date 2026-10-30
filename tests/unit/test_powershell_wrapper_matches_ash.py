@@ -947,7 +947,7 @@ def test_a_script_that_wraps_invoke_ash_as_the_help_shows_exits_with_its_code(
     [
         # PowerShell's own binding errors, raised before Invoke-ASH runs. A -SourceDir
         # that does not exist is not one of them: Invoke-ASH checks it itself, and it
-        # is a refusal (exit 3) in the per-site table below.
+        # is a usage error (exit 5) in the per-site table below.
         pytest.param(
             "Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out -Con x",
             "Parametercannotbeprocessedbecausetheparametername'Con'isambiguous",
@@ -970,17 +970,17 @@ def test_the_wrapped_form_does_not_exit_0_for_an_error_raised_before_invoke_ash_
     assert calls == []
 
 
-# Every refusal of Invoke-ASH, with the code it leaves: 3, the code ASH uses for input
-# it refuses, for every one but the usage errors ASH itself refuses with 5: an explicit
-# --sandbox that is not off, which ASH in a container refuses that way, and a parameter
-# given an empty or blank value, which the CLI refuses as an option that requires an
-# argument. Run as a script runs it, `pwsh -File`
+# Every refusal of Invoke-ASH, with the code it leaves. The rule: a usage error, the
+# input `ash` itself refuses with 5, exits 5 with `ash`'s text (a -SourceDir that
+# names no directory to scan, an -OutputDir that is a file or cannot be made, a path
+# outside the file system, a parameter given an empty or blank value, an explicit
+# --sandbox that is not off); every other refusal exits 3, the code ASH uses for input
+# it refuses. Run as a script runs it, `pwsh -File`
 # with the catch form the help gives, so the process exits with that code. Each cell:
 # the call, what the test directory needs first, the environment, the code, and text
 # found only in the message.
 _INVOKE = "Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out"
 _RUN = "Invoke-ASH -NoBuild -SourceDir src -OutputDir out"
-_SANDBOX_EXIT = 5
 _EMPTY_VALUE_PARAMETERS = (
     "Config",
     "OCIRunner",
@@ -1019,7 +1019,7 @@ _INVOKE_ASH_SITES = {
         f"{_INVOKE} -AshArgs '--sandbox bwrap'",
         {},
         {},
-        _SANDBOX_EXIT,
+        USAGE_ERROR_EXIT,
         "--sandboxbwrapcannotbeused",
     ),
     "image-name-dash": (
@@ -1791,7 +1791,7 @@ def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, cell)
     (tmp_path / "invoke-ash").mkdir()
     result, calls = _run_script(tmp_path / "invoke-ash", _wrapped(invocation))
 
-    assert [proc.returncode, result.returncode] == [_SANDBOX_EXIT] * 2, (
+    assert [proc.returncode, result.returncode] == [USAGE_ERROR_EXIT] * 2, (
         proc.stderr + result.stderr
     )
     assert "--sandbox bwrap cannot be used" in proc.stderr, proc.stderr
@@ -1931,7 +1931,7 @@ _TARGET_AND_MODE_LOOKALIKES = {
         )
     },
     **{
-        f"sandbox-{name}": ("--sandbox", f"off{chr(code)}", _SANDBOX_EXIT)
+        f"sandbox-{name}": ("--sandbox", f"off{chr(code)}", USAGE_ERROR_EXIT)
         for name, code in (
             ("escape", 0x1B),
             ("zero-width-space", 0x200B),

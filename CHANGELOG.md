@@ -1347,6 +1347,23 @@
   false positive if it is one. An entry audited as a false positive, or not
   audited, is still removed by an operator-named baseline.
 
+- **`./ash` and `Invoke-ASH` place the default output directory inside the scanned
+  directory (`<source>/.ash/ash_output`), as `ash scan` does, rather than under the
+  working directory.** Two consequences for a caller that relied on the old place: a
+  CI step that runs `./ash --source-dir app` (or `Invoke-ASH -SourceDir app`) from
+  the repository root and then uploads `./.ash/ash_output` still passes the scan but
+  uploads an empty directory, because the reports are now in `app/.ash/ash_output`;
+  and a scanned directory that cannot be written (a read-only checkout) is refused
+  with exit 5 unless `--output-dir` (`-OutputDir`) names a writable place.
+  `Invoke-ASH` works the default out once `-SourceDir` has passed its checks (a
+  default worked out while the parameters bound failed on an empty `-SourceDir`
+  ahead of the refusal) and takes a `-SourceDir` that is itself a link under the
+  working directory as `./ash` does. A refusal of the default output directory (a
+  file at the path, a directory that cannot be created, entered or written, or one
+  reached through a link the repository commits) gives the reason and names
+  `--output-dir`, or `-OutputDir`, as the way to write elsewhere; a refusal of an
+  output directory the operator gave does not.
+
 ### Behavior changes
 
 - `run_ash_scan()` raises `ValueError` for `severity_threshold_restriction` and
@@ -1386,16 +1403,6 @@
 - `./ash` exits 5, the usage-error code, for a value option given no value, where
   it exited 3; `Invoke-ASH` exits 5 for a parameter given an empty or blank value,
   as `./ash` does.
-- `./ash` places the default output directory under the scanned directory
-  (`<source>/.ash/ash_output`), as `ash scan` does, rather than under the working
-  directory; `Invoke-ASH` defaults `-OutputDir` the same way, once `-SourceDir` has
-  passed its checks (a default worked out while the parameters bound failed on an
-  empty `-SourceDir` ahead of the refusal), and takes a `-SourceDir` that is itself a
-  link under the working directory as `./ash` does. A refusal of the default output
-  directory (a file at the path, a directory that cannot be created, entered or
-  written, or one reached through a link the repository commits) gives the reason
-  and names `--output-dir`, or `-OutputDir`, as the way to write elsewhere; a refusal
-  of an output directory the operator gave does not.
 - `./ash` keeps the container's stdin open only for the subcommands that read it
   (`mcp`, `inspect`, `config`) and for a run given `--cli-json-input -`; a scan no
   longer consumes the caller's stdin, so `while read` loops and job scripts fed to

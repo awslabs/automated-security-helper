@@ -83,6 +83,22 @@ def _executable(path: Path, text: str) -> Path:
     return path
 
 
+#: Stands under each runner name the wrapper looks for on PATH and refuses: no test
+#: here may reach a real container runtime, whatever the wrapper decides.
+GUARD_RUNNER = """#!/bin/bash
+echo 'guard runner: ./ash looked a container runtime up on PATH; nothing runs' >&2
+exit 99
+"""
+
+
+def _guard_runners(bin_root: Path) -> Path:
+    """A directory of guard programs named finch, docker, nerdctl and podman."""
+    guards = bin_root / "guard-runners"
+    for name in ("finch", "docker", "nerdctl", "podman"):
+        _executable(guards / name, GUARD_RUNNER)
+    return guards
+
+
 @pytest.fixture
 def runner(tmp_path):
     """The recording runner and the directory its calls land in."""
@@ -112,7 +128,10 @@ def _run(
 
     With *name_the_runner* false, OCI_RUNNER is left unset and the script resolves
     its runner from PATH, as it does when no runner is named. *path_prefix* goes
-    first on PATH, ahead of the fixed ``id``.
+    first on PATH, ahead of the fixed ``id``. Guard programs under the four runner
+    names sit on PATH behind *path_prefix* and ahead of the caller's PATH, so a
+    wrapper that looks a runtime up (no runner named, or a regression that drops a
+    leading -o) meets a guard that refuses, never the developer's finch or docker.
     """
     default_program, log_dir = runner
     environment = with_fixed_ids(
@@ -122,6 +141,9 @@ def _run(
     environment["FAKE_RUNNER_LOG_DIR"] = str(log_dir)
     if name_the_runner:
         environment["OCI_RUNNER"] = str(default_program)
+    environment["PATH"] = os.pathsep.join(
+        [str(_guard_runners(log_dir.parent)), environment["PATH"]]
+    )
     if path_prefix is not None:
         environment["PATH"] = os.pathsep.join([str(path_prefix), environment["PATH"]])
     environment.update(env or {})
@@ -167,16 +189,28 @@ def source(tmp_path):
     return src
 
 
+@pytest.mark.parametrize("target", ["absolute", "relative", "two-hops"])
 def test_a_symlinked_entrypoint_builds_from_the_checkout_it_links_to(
-    runner, source, tmp_path
+    runner, source, tmp_path, target
 ):
     """ASH_ROOT_DIR was the directory of the path the script was started by, so a
     symlinked ./ash gave the build the link's directory and a Dockerfile that is not
-    there. The script file's own directory, every link followed, is the root."""
+    there. The script file's own directory, every link followed, is the root: an
+    absolute link, a relative one (`ln -s ../checkout/ash ~/bin/ash`, whose target
+    resolves against the link's own directory, not the working directory), and a
+    link to a link."""
     link_dir = tmp_path / "links"
     link_dir.mkdir()
     link = link_dir / "ash"
-    link.symlink_to(ASH_SCRIPT)
+    if target == "absolute":
+        link.symlink_to(ASH_SCRIPT)
+    elif target == "relative":
+        link.symlink_to(os.path.relpath(ASH_SCRIPT, link_dir))
+    else:
+        hop = tmp_path / "hop" / "ash"
+        hop.parent.mkdir()
+        hop.symlink_to(os.path.relpath(ASH_SCRIPT, hop.parent))
+        link.symlink_to(os.path.relpath(hop, link_dir))
 
     result, calls = _run(
         runner,
@@ -384,6 +418,8 @@ def test_a_non_numeric_container_uid_is_shown_not_written_raw(runner, source, tm
 
     assert result.returncode == 3, result.stdout + result.stderr
     assert "\x1b" not in result.stderr, repr(result.stderr)
+    # Shown, not dropped or cut: the value in bash's $'...' spelling, ESC as \E.
+    assert "$'1\\E[2J2'" in result.stderr, repr(result.stderr)
     assert "must be a numeric value" in result.stderr, result.stderr
     assert calls == []
 
@@ -463,6 +499,8 @@ def test_debug_traces_the_build_with_its_values_shown(runner, source, tmp_path):
     assert "\x1b" not in result.stderr, repr(result.stderr)
     traced = [line for line in result.stderr.splitlines() if line.startswith("+ ")]
     assert any("INSTALL_ASH_REVISION=" in line for line in traced), result.stderr
+    # Shown, not dropped or cut: the value in bash's $'...' spelling, ESC as \E.
+    assert any("rev\\E[2Jision" in line for line in traced), result.stderr
     assert any("--target" in line for line in traced), result.stderr
 
 
@@ -489,24 +527,35 @@ def test_a_config_inside_one_quoted_argument_is_mounted(runner, source, tmp_path
 
 
 @pytest.mark.parametrize(
-    "text",
+    ("text", "name"),
     [
-        pytest.param('[ash]\nash.extends = "base.yaml"\n', id="toml-dotted-key"),
-        pytest.param('"ext\\u0065nds" = "base.yaml"\n', id="toml-escaped-key"),
+        # A dotted key nests extends under a table (ash.extends is not the top-level
+        # key the scan reads); the wrapper's check is textual and fails closed, so
+        # the spelling is refused all the same rather than mounted alone.
+        pytest.param('ash.extends = "base.yaml"\n', "cfg.toml", id="toml-dotted-key"),
         pytest.param(
-            '{"ext\\u0065nds"\n  : "base.yaml"}\n', id="json-escaped-key-next-line"
+            '"ext\\u0065nds" = "base.yaml"\n', "cfg.toml", id="toml-escaped-key"
+        ),
+        pytest.param(
+            '{"ext\\u0065nds"\n  : "base.yaml"}\n',
+            "cfg.json",
+            id="json-escaped-key-next-line",
         ),
         # A byte order mark (U+FEFF) ahead of the key.
-        pytest.param(chr(0xFEFF) + "extends: base.yaml\n", id="yaml-after-bom"),
+        pytest.param(
+            chr(0xFEFF) + "extends: base.yaml\n", "cfg.yaml", id="yaml-after-bom"
+        ),
     ],
 )
 def test_an_outside_config_with_an_extends_entry_in_another_spelling_is_refused(
-    runner, source, tmp_path, text
+    runner, source, tmp_path, text, name
 ):
     """The extends check missed a TOML dotted key, an escaped key followed by '=', an
     escaped JSON key whose ':' is on the next line and a file starting with a byte
-    order mark, so such a config was mounted alone without its chain."""
-    config = tmp_path / "cfg.yaml"
+    order mark, so such a config was mounted alone without its chain. Each file is
+    named for its format, so a check that one day chose a grammar by suffix would
+    still read these as the operator writes them."""
+    config = tmp_path / name
     config.write_text(text, encoding="utf-8")
 
     result, calls = _run(

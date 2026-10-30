@@ -327,12 +327,17 @@ def test_every_re_emitted_flag_is_one_the_subcommand_takes():
 
 
 # What marks a module as reading stdin: the console helpers' confirm and prompt
-# (typer's, which read the terminal), the Textual app, or a read of the stdin stream.
+# (typer's and click's, bare or qualified, which read the terminal), rich's prompts,
+# the builtin input, the Textual app, or a read of the stdin stream in any of its
+# spellings. A bare `confirm(` alone let `typer.confirm(` through, so a new prompt
+# written qualified passed this guard.
 STDIN_READER = re.compile(
-    r"(?<![\w.])(?:confirm|prompt)\("
+    r"(?<![\w.])(?:(?:typer|click)\.)?(?:confirm|prompt)\("
+    r"|\b(?:Confirm|Prompt|IntPrompt|FloatPrompt)\.ask\("
+    r"|(?<![\w.])input\("
     r"|^\s*(?:from|import) textual\b"
-    r"|\bsys\.stdin\b"
-    r"|get_text_stream\(\"stdin\"\)",
+    r"|\bsys\.(?:stdin|__stdin__)\b"
+    r"|get_text_stream\(['\"]stdin['\"]\)",
     re.MULTILINE,
 )
 
@@ -352,10 +357,13 @@ def _callback_modules(command) -> set[Path]:
 
 
 def _defaults_its_transport_to_stdio(command) -> bool:
-    for cmd in [command, *getattr(command, "commands", {}).values()]:
-        if any(p.name == "transport" and p.default == "stdio" for p in cmd.params):
-            return True
-    return False
+    """Whether the command, or any command under it, defaults --transport to stdio."""
+    if any(p.name == "transport" and p.default == "stdio" for p in command.params):
+        return True
+    return any(
+        _defaults_its_transport_to_stdio(sub)
+        for sub in getattr(command, "commands", {}).values()
+    )
 
 
 @pytest.mark.unit
@@ -366,7 +374,11 @@ def test_stdin_is_kept_open_for_the_subcommands_that_read_it():
     Textual app, or defaults its --transport to stdio. The one reader outside the
     list is `--cli-json-input -`, which every command takes and the entrypoint reads
     by its flag; every other stdin-reading module under the CLI package belongs to a
-    listed subcommand, so a new reader fails here until the list names it."""
+    listed subcommand, so a new reader fails here until the list names it. The
+    scan covers the CLI package only (the callbacks' own modules and everything
+    under automated_security_helper/cli/): a prompt a command reaches through
+    utils/ or core/ is outside it, and a test that runs each command with stdin
+    closed would be the stronger guard."""
     import typer.main
 
     from automated_security_helper import cli as cli_package

@@ -222,8 +222,10 @@ class TestTheBashWrapperMountsTheSourceReadOnly:
 
 #: Options the wrapper passes ``<runner> run`` itself, before the image name. -i is
 #: not among them for a scan: the wrapper keeps the container's stdin open only for
-#: ``mcp`` and ``inspect``, the two subcommands that read it, and these cases run
-#: the default scan, whose stdin a container must never consume.
+#: the subcommands its ASH_READS_STDIN list names (and for a run given
+#: ``--cli-json-input -``; tests/unit/test_ash_bash_entrypoint_subcommand_args.py
+#: checks the list against the CLI's readers), and these cases run the default scan,
+#: whose stdin a container must never consume.
 _RUN_OPTIONS_WITHOUT_VALUE = {"--rm", "-t", "--network=none"}
 _RUN_ENV_KEYS = {
     "ASH_ACTUAL_SOURCE_DIR",
