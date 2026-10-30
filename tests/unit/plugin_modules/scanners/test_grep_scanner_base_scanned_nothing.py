@@ -16,9 +16,14 @@ Nothing scanned is one of three outcomes:
 - every file the tool found was left out by the operator's ``exclude`` patterns:
   a scanner error, as before, since the scan says nothing about them and the
   operator can change the patterns.
-- the tool found a file in a covered language and did not read it (too large,
-  unreadable, a parse failure): a scanner error. It used to be graded SKIPPED as
-  "no file in a covered language", which it is not.
+- the tool found a file and did not read it: a parse failure (the tool chose a
+  language, so the file is a covered one), or a size or permission skip (which
+  the tool reports before it chooses a language, measured on semgrep 1.180.0 with
+  a 2 MB .csv and .svg, so whether a rule covers the file cannot be told): a
+  scanner error either way, worded for what the report proves. It used to be
+  graded SKIPPED as "no file in a covered language", which it is not.
+- the tool skipped a file for a reason outside the 17 its own enum carries: a
+  scanner error naming the reason, never SKIPPED on a guess.
 
 The grading is driven directly, with a paths file written the way the tools write
 it; no tool starts here.
@@ -291,7 +296,7 @@ def test_an_ignore_name_below_the_target_is_ashs_own_exclusion(
     assert _grade(scanner, tmp_path, _excluded("generated/app.py")) == 0
 
     scanner._ignore_exclude_names = []
-    with pytest.raises(ScannerError, match="--exclude patterns left out"):
+    with pytest.raises(ScannerError, match="left out all"):
         _grade(scanner, tmp_path, _excluded("generated/app.py"))
 
 
@@ -305,7 +310,7 @@ def test_an_absolute_path_outside_the_target_keeps_only_its_file_name(
     target.mkdir()
 
     assert _grade(scanner, tmp_path, _excluded("/elsewhere/static/app.min.js")) == 0
-    with pytest.raises(ScannerError, match="--exclude patterns left out"):
+    with pytest.raises(ScannerError, match="left out all"):
         _grade(scanner, tmp_path, _excluded("/elsewhere/tests/test_app.py"))
 
 
@@ -329,7 +334,7 @@ def test_files_in_an_ash_output_directory_grade_skipped(
     # The control: with no output directory recorded the same paths are nobody's
     # exclusion but the operator's, so the recorded list is what admits them.
     scanner._output_dir_excluded = []
-    with pytest.raises(ScannerError, match="--exclude patterns left out"):
+    with pytest.raises(ScannerError, match="left out all"):
         _grade(scanner, tmp_path, skipped)
 
 
@@ -377,15 +382,124 @@ def test_a_directory_named_like_a_default_ignore_as_the_file_is_not_one(
 def test_a_file_the_tool_found_and_did_not_read_is_a_scanner_error(
     test_plugin_context, monkeypatch, tmp_path, reason
 ):
-    """Nothing scanned while a covered file was skipped unread is refused.
+    """Nothing scanned while a file was skipped unread or unparsed is refused.
 
     Fails at the base: ``targets_attempted`` was set to 0 and the target graded
-    SKIPPED, "none is in a language its rules cover", for a file that is.
+    SKIPPED, "none is in a language its rules cover", for a file that may be.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
 
-    with pytest.raises(ScannerError, match="did not read them"):
+    with pytest.raises(ScannerError, match="did not read|could not parse"):
         _grade(scanner, tmp_path, [{"path": "src/big.py", "reason": reason}])
+
+
+def test_a_size_skip_is_refused_without_claiming_the_language_is_covered(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """semgrep 1.180.0 reports a 2 MB .csv as ``exceeded_size_limit`` (measured),
+    so a size skip proves nothing about the file's language. The scan is still
+    refused (the result says nothing about the file) but the refusal says the
+    coverage cannot be told and names the remedies, instead of claiming the file is
+    in a covered language.
+
+    Fails at the tip that worded every unread reason as "in a language its rules
+    cover".
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+
+    with pytest.raises(ScannerError) as refused:
+        _grade(
+            scanner, tmp_path, [{"path": "big.csv", "reason": "exceeded_size_limit"}]
+        )
+    message = str(refused.value)
+    assert "cannot be told" in message, message
+    assert "max-target-bytes" in message, message
+    assert "a language its rules cover" not in message, message
+
+
+def test_a_parse_failure_is_refused_as_a_covered_file(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """A parser ran, so the tool chose a language: the file is a covered one and
+    the refusal says so."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+
+    with pytest.raises(
+        ScannerError, match="a language its rules cover and could not parse"
+    ):
+        _grade(
+            scanner,
+            tmp_path,
+            [
+                {
+                    "path": "src/odd.py",
+                    "reason": "analysis_failed_parser_or_internal_error",
+                }
+            ],
+        )
+
+
+def test_an_unknown_skip_reason_is_refused_not_graded_skipped(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """A reason outside the tool's measured enum could mean a covered file went
+    unread; nothing scanned is then refused naming the reason, never SKIPPED on a
+    guess.
+
+    Fails at the base and at every earlier tip: an unlisted reason fell into the
+    "none is in a language its rules cover" arm and graded SKIPPED.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+
+    with pytest.raises(ScannerError, match="does not know \\(some_new_reason\\)"):
+        _grade(scanner, tmp_path, [{"path": "src/app.py", "reason": "some_new_reason"}])
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "always_skipped",
+        "semgrepignore_patterns_match",
+        "cli_include_flags_do_not_match",
+        "excluded_by_config",
+        "irrelevant_rule",
+        "too_many_matches",
+        "Gitignore_patterns_match",
+        "Dotfile",
+        "Nonexistent_file",
+    ],
+)
+def test_every_other_reason_of_the_tools_enum_grades_skipped(
+    test_plugin_context, monkeypatch, tmp_path, reason
+):
+    """The control for the unknown-reason refusal: each remaining member of
+    semgrep 1.180.0's SkipReason enum, the three capitalized spellings as the
+    package writes them included, is a file the tool chose not to scan."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+
+    assert _grade(scanner, tmp_path, [{"path": "x.py", "reason": reason}]) == 0
+
+
+def test_an_exclusion_ash_does_not_recognize_is_named_when_no_operator_pattern_exists(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """With no operator ``exclude`` configured the command carries only ASH's own
+    patterns, so a ``cli_exclude_flags_match`` outside ASH's recognized
+    exclusions is one ASH added and cannot place; the refusal says so and names
+    the files, instead of blaming patterns the operator never wrote. The
+    operator's own pattern keeps the wording that names it.
+
+    Fails at the base: both cases read "its --exclude patterns left out".
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    with pytest.raises(ScannerError) as refused:
+        _grade(scanner, tmp_path, _excluded("src/app.py"))
+    assert "does not recognize as its own" in str(refused.value), str(refused.value)
+    assert "src/app.py" in str(refused.value), str(refused.value)
+
+    with_pattern = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
+    with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
+        _grade(with_pattern, tmp_path, _excluded("src/app.py"))
 
 
 def test_unread_files_beside_uncovered_ones_are_still_a_scanner_error(

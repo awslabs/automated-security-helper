@@ -79,11 +79,52 @@ NO_GIT_IGNORE_FLAG = "--no-git-ignore"
 #: Every other reason (a language the rules do not cover, a path the tool's own
 #: defaults or ASH's exclusions leave out, a minified or binary file) is a file
 #: the tool chose not to scan, which SKIPPED describes.
+#:
+#: Two kinds, told apart by what the tool's report proves about the file's
+#: language. A parse failure proves the tool chose a language for the file (a
+#: parser ran), so the file was one the rules cover (UNPARSED_SKIP_REASONS). A
+#: size or permission skip proves nothing about the language: semgrep 1.180.0
+#: reports a 2 MB .csv and a 2 MB .svg, which no rule covers, as
+#: ``exceeded_size_limit`` (measured on a Lambda MicroVM, aarch64, with
+#: --x-ignore-semgrepignore-files; opengrep 1.30.2 lists such files nowhere, and
+#: neither tool lists a small README.md), so the size test runs before, or without,
+#: the language choice. Such a file is still refused when nothing was scanned,
+#: because the result says nothing about it either way, but the refusal says that
+#: whether a rule covers the file cannot be told, and names the remedies.
+UNPARSED_SKIP_REASONS: frozenset[str] = frozenset(
+    {"analysis_failed_parser_or_internal_error"}
+)
 UNREAD_SKIP_REASONS: frozenset[str] = frozenset(
+    {"exceeded_size_limit", "too_big", "insufficient_permissions"}
+)
+
+#: Every reason semgrep 1.180.0 can write (its ``SkipReason`` enum, 17 members,
+#: measured from the installed package; three are capitalized there, so the
+#: comparison is on the lowercased spelling). A reason outside this list, when
+#: nothing was scanned, is one this version of ASH cannot grade: it may mean the
+#: file was never a candidate (SKIPPED) or that a covered file went unread (an
+#: error), so the scan is refused naming the reason, never graded SKIPPED on a
+#: guess. opengrep 1.30.2 wrote three of these in the same measurement
+#: (cli_exclude_flags_match, exceeded_size_limit, insufficient_permissions) and
+#: ships no readable list of its own.
+KNOWN_SKIP_REASONS: frozenset[str] = frozenset(
     {
+        "always_skipped",
+        "semgrepignore_patterns_match",
+        "cli_include_flags_do_not_match",
+        "cli_exclude_flags_match",
         "exceeded_size_limit",
-        "too_big",
         "analysis_failed_parser_or_internal_error",
+        "excluded_by_config",
+        "wrong_language",
+        "too_big",
+        "minified",
+        "binary",
+        "irrelevant_rule",
+        "too_many_matches",
+        "gitignore_patterns_match",
+        "dotfile",
+        "nonexistent_file",
         "insufficient_permissions",
     }
 )
@@ -1001,18 +1042,23 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         (``cli_exclude_flags_match``, and not one of ASH's own exclusions, see
         ``_left_out_by_ash``) means the patterns left out every file the tool
         found, so the scan says nothing about them: that is an error, not a PASSED
-        with no findings. The same when the tool found a file in a covered language
-        and did not read it (``UNREAD_SKIP_REASONS``: too large, unreadable, a
-        parse failure). None scanned otherwise means nothing below the target is
-        in a language the rules cover, or every such file is one the tool's own
-        defaults or ASH's exclusions leave out, which the executor grades SKIPPED
-        (``targets_attempted`` 0). An absent or unreadable paths file leaves the
-        count unset (no claim).
+        with no findings; when the operator configured no exclude, the pattern is
+        one ASH does not recognize as its own, and the refusal says so. The same
+        when the tool found a file in a covered language and could not parse it
+        (``UNPARSED_SKIP_REASONS``), when it did not read a file for its size or
+        permissions (``UNREAD_SKIP_REASONS``; the tool reports those before it
+        chooses a language, so whether a rule covers the file cannot be told, and
+        the refusal says that and names the remedies), and when it skipped a file
+        for a reason this version of ASH does not know (``KNOWN_SKIP_REASONS``). None
+        scanned otherwise means nothing below the target is in a language the rules
+        cover, or every such file is one the tool's own defaults or ASH's exclusions
+        leave out, which the executor grades SKIPPED (``targets_attempted`` 0). An
+        absent or unreadable paths file leaves the count unset (no claim).
 
         Raises:
-            ScannerError: When the operator's ``--exclude`` patterns left out every
-                file the tool found, or the tool did not read a file it found in a
-                covered language.
+            ScannerError: When ``--exclude`` patterns left out every file the tool
+                found, when the tool could not parse or did not read a file it
+                found, or when it skipped a file for an unknown reason.
         """
         paths = _read_paths_output(final_args)
         if paths is not None:
@@ -1041,28 +1087,66 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                     if not self._left_out_by_ash(str(entry.get("path", "")), target)
                 ]
                 if not_ignored:
-                    raise ScannerError(
-                        f"{self.command} scanned no file below "
-                        f"{Path(target).as_posix()}: its --exclude patterns left out "
-                        f"all {len(excluded)} files it found, so its result says "
-                        "nothing about them."
+                    where = f"{self.command} scanned no file below {Path(target).as_posix()}"
+                    if self._configured_values(
+                        getattr(self.config, "options", None), "exclude"
+                    ):
+                        raise ScannerError(
+                            f"{where}: its --exclude patterns left out all "
+                            f"{len(excluded)} files it found, so its result says "
+                            "nothing about them."
+                        )
+                    # No operator pattern on the command, so the match is against an
+                    # exclusion ASH added and does not recognize as its own here.
+                    shown = ", ".join(
+                        str(entry.get("path", "")) for entry in not_ignored[:3]
                     )
-                unread = [
-                    entry
-                    for entry in skipped
-                    if isinstance(entry, dict)
-                    and str(entry.get("reason")) in UNREAD_SKIP_REASONS
-                ]
+                    raise ScannerError(
+                        f"{where}: an --exclude pattern ASH does not recognize as its "
+                        f"own left out all {len(excluded)} files it found ({shown}"
+                        f"{', ...' if len(not_ignored) > 3 else ''}), so its result "
+                        "says nothing about them."
+                    )
+                by_reason: dict = {}
+                for entry in skipped:
+                    if isinstance(entry, dict):
+                        by_reason.setdefault(str(entry.get("reason")), []).append(entry)
+                where = (
+                    f"{self.command} scanned no file below {Path(target).as_posix()}"
+                )
+                unparsed = [r for r in by_reason if r in UNPARSED_SKIP_REASONS]
+                if unparsed:
+                    count = sum(len(by_reason[r]) for r in unparsed)
+                    raise ScannerError(
+                        f"{where}: it found {count} file(s) in a language its rules "
+                        "cover and could not parse them "
+                        f"(skipped: {', '.join(sorted(unparsed))}), so its result "
+                        "says nothing about them."
+                    )
+                unread = [r for r in by_reason if r in UNREAD_SKIP_REASONS]
                 if unread:
-                    unread_reasons = sorted(
-                        {str(entry.get("reason")) for entry in unread}
-                    )
+                    count = sum(len(by_reason[r]) for r in unread)
                     raise ScannerError(
-                        f"{self.command} scanned no file below "
-                        f"{Path(target).as_posix()}: it found {len(unread)} file(s) in "
-                        "a language its rules cover and did not read them "
-                        f"(skipped: {', '.join(unread_reasons)}), so its result says "
-                        "nothing about them."
+                        f"{where}: it did not read {count} file(s) it found "
+                        f"(skipped: {', '.join(sorted(unread))}). The tool reports a "
+                        "size or permission skip before it chooses a language, so "
+                        "whether a rule covers them cannot be told, and its result "
+                        "says nothing about them. Raise the tool's size limit "
+                        "(--max-target-bytes) or fix the permissions, or exclude the "
+                        "files on purpose."
+                    )
+                unknown = sorted(
+                    r
+                    for r in by_reason
+                    if r.lower() not in KNOWN_SKIP_REASONS and r != "None"
+                )
+                if unknown:
+                    count = sum(len(by_reason[r]) for r in unknown)
+                    raise ScannerError(
+                        f"{where}: it skipped {count} file(s) for a reason this "
+                        f"version of ASH does not know ({', '.join(unknown)}), so "
+                        "whether a rule covers them cannot be told, and its result "
+                        "says nothing about them."
                     )
                 self.targets_attempted = 0
                 if excluded:
