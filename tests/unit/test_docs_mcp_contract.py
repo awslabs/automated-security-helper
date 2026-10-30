@@ -1106,10 +1106,15 @@ def test_a_class_built_only_by_raising_again_is_not_a_complete_empty_list(
 PLANTED_EXECUTOR_SERVER = """
 import asyncio
 import functools
+from asyncio import to_thread
 
-from automated_security_helper.cli.tools import mcp_clear, mcp_clone
+from automated_security_helper.cli.tools import get_registry, mcp_clear, mcp_clone
 
 mcp = object()
+
+
+def _scoped(session):
+    return {"session_id": session}
 
 
 async def _run_on(function, kwargs):
@@ -1148,11 +1153,37 @@ async def clear():
 @mcp.tool()
 async def elsewhere():
     return _with_session(await _run_elsewhere(mcp_clear, session_id="s"), "s")
+
+
+@mcp.tool()
+async def clone_on_thread(url):
+    result = await asyncio.to_thread(mcp_clone, url)
+    return _with_session(result, "s")
+
+
+@mcp.tool()
+async def progress_on_thread(scan_id):
+    registry = get_registry()
+    return await to_thread(registry.progress, scan_id, **_scoped("s"))
 """
 
 PLANTED_EXECUTOR_TOOLS = """
 BUSY = "workspace_busy"
 TIMED_OUT = "clone_timed_out"
+
+
+class Registry:
+    def progress(self, scan_id, session_id=None):
+        try:
+            if session_id is None:
+                raise Busy("held")
+        except Busy as e:
+            return {"success": False, "error_type": e.error_type}
+        return {"success": True, "scan_id": scan_id, "status": "RUNNING"}
+
+
+def get_registry() -> Registry:
+    return Registry()
 
 
 class CloneRefused(RuntimeError):
@@ -1221,6 +1252,31 @@ def test_a_tool_that_runs_its_implementation_on_an_executor_returns_its_types(
     elsewhere = contracts["elsewhere"]
     assert elsewhere.error_types == ()
     assert any(getattr(v, "open_at", ()) for v in elsewhere.response.variants)
+
+
+@pytest.mark.unit
+def test_a_tool_that_runs_its_implementation_on_a_thread_returns_its_types(
+    planted_executor_contracts,
+):
+    """``await asyncio.to_thread(f, *args, **kw)`` is ``f(*args, **kw)``: the
+    types ``f`` returns are the tool's and its dict is read, whether ``f`` is a
+    package function called through ``asyncio.to_thread`` or a method on an
+    object the source names, called through ``to_thread`` imported by name with
+    a positional argument and a keyword spread. Before the reader followed it,
+    the call was an unread value, so a tool whose whole response came through it
+    listed no error type and no key."""
+    contracts = planted_executor_contracts
+    clone = contracts["clone_on_thread"]
+    assert clone.error_types == ("clone_refused", "clone_timed_out")
+    assert clone.error_types_unread == ()
+    assert [v for v in clone.response.variants if getattr(v, "open_at", ())] == []
+    assert {"success", "error_type", "session_id"} <= set(clone.response.keys())
+    progress = contracts["progress_on_thread"]
+    assert progress.error_types == ("workspace_busy",)
+    assert progress.error_types_unread == ()
+    assert {"success", "error_type", "scan_id", "status"} <= set(
+        progress.response.keys()
+    )
 
 
 @pytest.mark.unit

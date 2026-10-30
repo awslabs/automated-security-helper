@@ -122,6 +122,15 @@ MAX_EVALUATIONS = 20_000_000
 CALLABLE_RUNNERS = frozenset(
     {f"{SERVER_MODULE}._run_clone", f"{SERVER_MODULE}._run_delivery"}
 )
+#: Standard-library functions that run their first argument, a callable, with
+#: every argument that follows it and return what it returns: ``await
+#: asyncio.to_thread(f, a, k=v)`` is ``f(a, k=v)`` on a worker thread. The
+#: package hands a registry method's result through it (``await
+#: asyncio.to_thread(registry.check_scan_progress, scan_id, **scoped)``), so a
+#: reader that stopped at the call would list that tool's response as an unread
+#: value and miss every key the method's dict carries. Named by dotted path;
+#: both ``import asyncio`` and ``from asyncio import to_thread`` reach it.
+STDLIB_RUNNERS = frozenset({"asyncio.to_thread"})
 #: Builtin exceptions, which ``type(e).__name__`` can also name.
 BUILTIN_EXCEPTIONS = frozenset(
     name
@@ -1715,6 +1724,8 @@ class Evaluator:
 
     def _eval_Call(self, node: ast.Call, scope: _Scope) -> Shape:
         func = node.func
+        if self._is_stdlib_runner(func, scope):
+            return self._run_on_thread(node, scope)
         if isinstance(func, ast.Name) and self.lookup(scope, func.id) is None:
             return self._builtin_call(func.id, node, scope)
         if isinstance(func, ast.Attribute):
@@ -1753,6 +1764,55 @@ class Evaluator:
             ast.Call(func=node.args[0], args=[], keywords=node.keywords), node
         )
         return self.call(target, forwarded, scope)
+
+    def _is_stdlib_runner(self, func: ast.AST, scope: _Scope) -> bool:
+        """Whether ``func`` names a :data:`STDLIB_RUNNERS` function.
+
+        ``asyncio.to_thread`` reads as a module attribute whose module the
+        package does not hold; ``to_thread`` after ``from asyncio import
+        to_thread`` is an import that resolves to no package object, so it is
+        read from the import tables the way :meth:`lookup` reads them.
+        """
+        if isinstance(func, ast.Attribute):
+            ref = self._ref_of(func, scope)
+            return (
+                ref is not None
+                and ref.kind == "module"
+                and ref.dotted in STDLIB_RUNNERS
+            )
+        if not isinstance(func, ast.Name):
+            return False
+        current: Optional[_Scope] = scope
+        while current is not None:
+            local = current.locals
+            if current.func is not None and local is not None:
+                if func.id in local.params or func.id in local.assigns:
+                    return False
+                if func.id in local.imports:
+                    dotted, attr = local.imports[func.id]
+                    return attr is not None and f"{dotted}.{attr}" in STDLIB_RUNNERS
+            current = current.parent
+        if func.id in scope.module.imports:
+            dotted, attr = scope.module.imports[func.id]
+            return attr is not None and f"{dotted}.{attr}" in STDLIB_RUNNERS
+        return False
+
+    def _run_on_thread(self, node: ast.Call, scope: _Scope) -> Shape:
+        """``asyncio.to_thread(f, *args, **kw)``: what ``f(*args, **kw)`` returns.
+
+        The call is read as if ``f`` had been called in place, so ``f`` may be a
+        package function, a method on an object the source names
+        (``registry.check_scan_progress``) or a nested function, and the
+        arguments after it bind as they would on a direct call. A call with no
+        callable, or one that spreads its callable, is unread.
+        """
+        if not node.args or isinstance(node.args[0], ast.Starred):
+            return unread(scope.site(node))
+        forwarded = ast.copy_location(
+            ast.Call(func=node.args[0], args=node.args[1:], keywords=node.keywords),
+            node,
+        )
+        return self._eval_Call(forwarded, scope)
 
     def _builtin_call(self, name: str, node: ast.Call, scope: _Scope) -> Shape:
         if name == "dict":
