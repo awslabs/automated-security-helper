@@ -62,7 +62,9 @@ def _scan(scanner, target: Path):
 
     def _run(command, **kwargs):
         started.append(list(command))
-        return {"stdout": "", "stderr": ""}
+        # A completed run carries its exit code; a response without one is a
+        # tool that never ran, which the scanner refuses before grading.
+        return {"returncode": 0, "stdout": "", "stderr": ""}
 
     with (
         patch.object(scanner, "_pre_scan", return_value=True),

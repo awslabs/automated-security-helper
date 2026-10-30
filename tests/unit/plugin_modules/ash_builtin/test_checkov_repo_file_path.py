@@ -210,7 +210,7 @@ def test_ferret_scan_runs_its_subprocess_from_that_cwd(tmp_path):
     scanner.dependencies_satisfied = True
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
-        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+        patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}) as run,
     ):
         scanner.scan(target=source, target_type="source")
     assert run.call_args.kwargs["cwd"] == Path("/")
@@ -449,7 +449,7 @@ def test_relative_source_and_output_paths_are_made_absolute(
     scanner.dependencies_satisfied = True
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
-        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+        patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}) as run,
     ):
         scanner.scan(target=Path("src"), target_type="source")
     argv = run.call_args.kwargs["command"]

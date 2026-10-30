@@ -324,7 +324,9 @@ class TestTrivyRepoScannerScanning:
             patch.object(scanner, "_pre_scan", return_value=True),
             patch.object(scanner, "_post_scan"),
             patch.object(scanner, "_resolve_arguments") as mock_resolve,
-            patch.object(scanner, "_run_subprocess") as mock_subprocess,
+            patch.object(
+                scanner, "_run_subprocess", return_value={"returncode": 0}
+            ) as mock_subprocess,
             patch.object(scanner, "_plugin_log"),
             patch(
                 "builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))

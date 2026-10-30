@@ -52,7 +52,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
     OUTPUT_RESTRICTING_TRIVY_ENV,
     UNBOUNDED_TRIVY_TIMEOUT,
     TrivyScannerBase,
-    reset_trivy_default_misconfig_scanners,
     skip_dirs_value,
     trivy_default_misconfig_scanners,
     trivy_severity,
@@ -72,6 +71,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfigOptions,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 
 pytestmark = pytest.mark.unit
@@ -118,10 +118,20 @@ def _repo_scanner(tmp_path: Path, **options) -> TrivyRepoScanner:
     )
 
 
-def _builtin_scanner(tmp_path: Path, **options) -> TrivyScanner:
+def _builtin_scanner(
+    tmp_path: Path, *, operator: bool = False, **options
+) -> TrivyScanner:
+    """A builtin trivy scanner; ``operator=True`` records the config as the
+    operator's own (built from no file in the scanned tree), which a setting the
+    repository may not choose (``scanners``) needs to be kept: the scanner judges
+    the provenance as it is constructed (``_honor_scanner_set``), so it is
+    recorded before."""
     options.setdefault("offline", False)
+    context = _context(tmp_path)
+    if operator:
+        record_provenance(context.config, in_tree=[])
     return TrivyScanner(
-        context=_context(tmp_path),
+        context=context,
         config=TrivyScannerConfig(options=TrivyScannerConfigOptions(**options)),
     )
 
@@ -243,13 +253,26 @@ def _help_output(names: str):
     )
 
 
+def _own_misconfig_memo(monkeypatch) -> None:
+    """An empty memo for the test, in place of the one the unit tier installs.
+
+    The unit tier's tool guard replaces ``_DEFAULT_MISCONFIG_SCANNERS`` with a memo
+    that already holds "unknown" for every trivy, so no ``--help`` is ever run
+    (tests/utils/tool_guard.py, ``stub_tool_probes``). These tests are about the
+    memo itself and answer the ``--help`` read with their own double, so they need
+    a real, empty one; clearing the guard's memo would leave it answering for every
+    key still.
+    """
+    monkeypatch.setattr(trivy_base, "_DEFAULT_MISCONFIG_SCANNERS", {})
+
+
 def test_a_trivy_replaced_in_place_has_its_default_list_read_again(
     tmp_path, monkeypatch
 ):
     """Keyed by path alone, a long-running process would pass the old release's
     names to the new one, and a name trivy does not know makes it run every
     misconfiguration scanner, the Terraform checks included."""
-    reset_trivy_default_misconfig_scanners()
+    _own_misconfig_memo(monkeypatch)
     binary = tmp_path / "trivy"
     binary.write_text("old release\n")
     os.utime(binary, (1_600_000_000, 1_600_000_000))
@@ -273,7 +296,7 @@ def test_a_trivy_replaced_in_place_has_its_default_list_read_again(
 
 
 def test_control_an_unchanged_trivy_is_read_once(tmp_path, monkeypatch):
-    reset_trivy_default_misconfig_scanners()
+    _own_misconfig_memo(monkeypatch)
     binary = tmp_path / "trivy"
     binary.write_text("release\n")
     calls = []
@@ -556,8 +579,13 @@ def test_control_a_missing_secret_config_fails_a_scan_that_runs_the_secret_scann
     tmp_path,
 ):
     missing = tmp_path / "operator" / "trivy-secret.yaml"
+    # The operator's config: a ``scanners`` list the repository set is dropped
+    # with a warning, and a scan without ``secret`` never reads the file.
     scanner = _builtin_scanner(
-        tmp_path, secret_config_file=str(missing), scanners=["vuln", "secret"]
+        tmp_path,
+        operator=True,
+        secret_config_file=str(missing),
+        scanners=["vuln", "secret"],
     )
 
     with pytest.raises(ScannerError, match="secret_config_file"):

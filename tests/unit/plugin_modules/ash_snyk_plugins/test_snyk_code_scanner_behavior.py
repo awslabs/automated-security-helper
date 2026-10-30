@@ -472,16 +472,13 @@ def test_invocation_records_a_shell_quoted_command_line(
     assert invocation.exitCode == 0
     assert invocation.executionSuccessful is True
     assert invocation.startTimeUtc is not None
-    # endTimeUtc is None because this scanner builds the Invocation before it
-    # calls _post_scan, which is what sets self.end_time. CfnNagScanner does
-    # the two in the opposite order and does record an end time. Pinned here so
-    # that reordering the two calls surfaces as a test change rather than an
-    # unnoticed shift in report contents.
-    assert invocation.endTimeUtc is None
-    assert scanner.end_time is not None, (
-        "the scanner itself does learn its end time -- just after the "
-        "Invocation has already been constructed"
-    )
+    # The scanner records each target's end time when its run is over, before it
+    # builds the Invocation, so the record carries one. Before that it built the
+    # Invocation first and _post_scan set end_time after, which left endTimeUtc
+    # None in every report; this pin moved with the order.
+    assert invocation.endTimeUtc is not None
+    assert invocation.endTimeUtc >= invocation.startTimeUtc
+    assert scanner.end_time == invocation.endTimeUtc
 
 
 @pytest.mark.unit
