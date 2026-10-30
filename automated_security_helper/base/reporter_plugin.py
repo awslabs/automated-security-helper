@@ -204,6 +204,10 @@ def confined_report_path(report_dir: Path, filename: str) -> Optional[Path]:
         link_kind,
     )
 
+    # Refused by name: whether resolve() raises on a NUL in the directory, and
+    # as which error, is the Python version's to decide.
+    if "\x00" in str(report_dir):
+        return None
     if link_kind(Path(report_dir)) is not None:
         return None
     if not is_report_file_name(filename):
@@ -213,8 +217,6 @@ def confined_report_path(report_dir: Path, filename: str) -> Optional[Path]:
         if target.resolve().parent != Path(report_dir).resolve():
             return None
     except (OSError, RuntimeError, ValueError):
-        # ValueError: a NUL in ``report_dir``, which resolve() does not turn
-        # into an OSError.
         return None
     return target
 
