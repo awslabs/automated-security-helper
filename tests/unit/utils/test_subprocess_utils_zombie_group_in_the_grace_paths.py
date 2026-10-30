@@ -63,7 +63,9 @@ class _GroupOfZombies:
     def installed(self, stack: contextlib.ExitStack) -> None:
         """This process as PID 1 over this group, with no real signal sent."""
         for patcher in (
-            patch.object(subprocess_utils, "_signal_group", side_effect=self.signal_group),
+            patch.object(
+                subprocess_utils, "_signal_group", side_effect=self.signal_group
+            ),
             patch.object(subprocess_utils, "_this_process_is_init", return_value=True),
             patch.object(
                 subprocess_utils, "_zombie_orphans_of_group", side_effect=self.orphans

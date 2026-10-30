@@ -2776,9 +2776,7 @@ def _run_plain(
                 # a child in ASH's own group is killed alone, as subprocess.run
                 # does.
                 stop = (
-                    _stop_tree
-                    if own_group or _leads_its_own_group(process)
-                    else _kill
+                    _stop_tree if own_group or _leads_its_own_group(process) else _kill
                 )
                 _stop_child(_argv_of(process), process, stop, 0.0, None)
                 _note_failed_wait(started, process, was_running, error)
@@ -3251,9 +3249,8 @@ def _stop_tree(
     # would then read as a stranger's below while its orphans still run. Read
     # with a default, as the other reads of a child's state here go through
     # poll and wait: a stand-in child need not carry the attribute.
-    if (
-        getattr(process, "returncode", None) is not None
-        and _pid_names_a_live_process(pgid)
+    if getattr(process, "returncode", None) is not None and _pid_names_a_live_process(
+        pgid
     ):
         # The child was reaped, and a live process holds its pid. POSIX keeps a
         # pid from reuse only while it names a live group, so the child's own
