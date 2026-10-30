@@ -15,8 +15,8 @@ import io
 import pytest
 
 from automated_security_helper.cli.inspect.inspect_findings_app import (
-    _LINE_HEAD_BYTES,
     _READ_CHUNK,
+    SOURCE_LINE_NOT_SHOWN,
     _offset_of_line,
     _read_lines,
     _source_excerpt,
@@ -70,16 +70,17 @@ class TestReadLines:
 
         assert len(lines) == 2, lines
         assert lines[1] == "y"
-        # Only the head of the long line is kept.
-        assert len(lines[0]) == _LINE_HEAD_BYTES
+        # A line longer than its head is not shown at all: a cut head could show
+        # the start of a value the results mask whole.
+        assert lines[0] == SOURCE_LINE_NOT_SHOWN
 
-    def test_a_line_longer_than_a_chunk_keeps_its_head_only(self):
+    def test_a_line_longer_than_a_chunk_is_not_shown(self):
         handle = io.BytesIO(b"x" * (3 * _READ_CHUNK) + b"\ny\n")
 
         lines = _read_lines(handle, 1, 2)
 
         assert len(lines) == 2, len(lines)
-        assert len(lines[0]) == _LINE_HEAD_BYTES
+        assert lines[0] == SOURCE_LINE_NOT_SHOWN
         assert lines[1] == "y"
 
 
