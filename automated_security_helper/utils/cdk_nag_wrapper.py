@@ -142,6 +142,9 @@ def _resource_location(
 ) -> tuple[int | None, int | None]:
     """The 1-based line and 0-based column where ``resource_log_id`` is declared.
 
+    One template read for one id; the finding loop uses :class:`_TemplateLocations`,
+    which reads the template once and answers every id of it from that read.
+
     The declaration is the line that opens the resource's mapping: the logical id as a key
     at the start of a line (``  MyBucket:`` in YAML, ``"MyBucket": {`` in JSON). The first
     line anywhere in the template that merely mentions the id as a word is NOT it -- a
@@ -166,67 +169,147 @@ def _resource_location(
     declaration (unindented multi-line JSON, where every key sits at the section's own
     depth and the section reads as empty), the whole file is searched for the shallowest
     key line, the search that ran before the section bound existed, so those templates
-    keep the location they had. Only when no key line matches anywhere does the first
-    word-boundary mention stand in, so the location is never lost outright.
+    keep the location they had, with the bodies of the other top-level sections
+    (Outputs, Conditions, Parameters, Mappings, Metadata, Rules) left out of that
+    search, since a key there is not a declaration whatever its depth. Only when no key
+    line matches anywhere does the first word-boundary mention stand in, so the
+    location is never lost outright.
+
+    A section written on one line (compact JSON ``"Resources": {"MyBucket": {...}}``,
+    flow-style YAML ``Resources: {MyBucket: ...}``) has an empty body, and the
+    whole-file fallback then found the Output's key line for a resource the Output is
+    named like, the collision the section bound exists to stop. The section key line
+    itself is read first for the id, so a one-line section places the finding on
+    that line.
     """
-    key_pattern = re.compile(
-        r"^(\s*)[\"']?" + re.escape(resource_log_id) + r"[\"']?\s*:"
-    )
+    return _TemplateLocations(template_lines).of(resource_log_id)
+
+
+class _TemplateLocations:
+    """Where each logical id of one template is declared; see :func:`_resource_location`.
+
+    The template is read once: the candidate ``Resources`` key lines, each candidate's
+    body, and the lines the whole-file fallback may read are all computed when the
+    object is made, and each id's answer is kept, so a template whose one resource is
+    cited by many rules across several packs costs one read, not one per finding.
+    The per-finding search used to re-scan the whole template three times over, under
+    the environment lock and inside the worker's scan timeout.
+    """
+
     # ``{`` before the key admits JSON whose object opens on the same line as its key.
-    section_pattern = re.compile(r"^(\s*)\{?\s*[\"']?Resources[\"']?\s*:")
-    any_key_pattern = re.compile(r"^(\s*)[\"']?[A-Za-z0-9_.-]+[\"']?\s*:")
+    _SECTION = re.compile(r"^(\s*)\{?\s*[\"']?Resources[\"']?\s*:")
+    _OTHER_SECTION = re.compile(
+        r"^(\s*)\{?\s*[\"']?(?:Outputs|Conditions|Parameters|Mappings|Metadata|Rules)"
+        r"[\"']?\s*:"
+    )
+    _ANY_KEY = re.compile(r"^(\s*)[\"']?[A-Za-z0-9_.-]+[\"']?\s*:")
 
-    def shallowest_key(lines: List[tuple[int, str]]) -> tuple[int, int] | None:
-        best: tuple[int, int, int] | None = None
-        for i, line_str in lines:
-            match = key_pattern.match(line_str)
-            if match is None:
+    def __init__(self, template_lines: List[str]) -> None:
+        self._numbered: List[tuple[int, str]] = list(enumerate(template_lines, start=1))
+        self._found: Dict[str, tuple[int | None, int | None]] = {}
+        candidates: List[tuple[int, int, int]] = []
+        other_sections: List[tuple[int, int]] = []
+        for i, line_str in self._numbered:
+            section_match = self._SECTION.match(line_str)
+            if section_match is not None:
+                candidates.append((len(section_match.group(1)), i, section_match.end()))
                 continue
-            indent = len(match.group(1))
-            if best is None or indent < best[0]:
-                column = match.start() + indent
-                # Past an opening quote, so the column names the id's first character.
-                if line_str[column : column + 1] in ('"', "'"):
-                    column += 1
-                best = (indent, i, column)
-        return None if best is None else (best[1], best[2])
+            other_match = self._OTHER_SECTION.match(line_str)
+            if other_match is not None:
+                other_sections.append((len(other_match.group(1)), i))
+        # Shallowest first, each with the text after its key and its body read once.
+        self._sections: List[tuple[int, str, List[tuple[int, str]]]] = [
+            (start, template_lines[start - 1][key_end:], self._body(start, indent))
+            for indent, start, key_end in sorted(candidates)
+        ]
+        # The whole-file fallback never reads a line inside another top-level section:
+        # its keys are not declarations at any depth, and in unindented JSON every key
+        # sits at depth 0, so "shallowest" there meant "first in the file".
+        excluded: set = set()
+        for indent, start in other_sections:
+            for i, _ in self._body(start, indent, stop_at_sections=True):
+                excluded.add(i)
+        self._fallback_lines = [
+            (i, line_str) for i, line_str in self._numbered if i not in excluded
+        ]
 
-    def section_body(start: int, section_indent: int) -> List[tuple[int, str]]:
+    def _body(
+        self, start: int, section_indent: int, *, stop_at_sections: bool = False
+    ) -> List[tuple[int, str]]:
         # From the line after the key to the next key line at the same or a shallower
-        # indent (the next top-level section), or a closing bracket there (JSON).
+        # indent (the next top-level section), or a closing bracket there (JSON). With
+        # ``stop_at_sections`` only a known section key, or a bracket, ends it: in
+        # unindented JSON the body's own keys sit at the section's indent.
         body: List[tuple[int, str]] = []
-        for i, line_str in enumerate(template_lines[start:], start=start + 1):
+        for i, line_str in self._numbered[start:]:
             stripped = line_str.strip()
             if not stripped:
                 continue
             indent = len(line_str) - len(line_str.lstrip())
-            if indent <= section_indent and (
-                any_key_pattern.match(line_str) or stripped[0] in "}]"
-            ):
-                break
+            if indent <= section_indent:
+                if stripped[0] in "}]":
+                    break
+                if stop_at_sections:
+                    if self._SECTION.match(line_str) or self._OTHER_SECTION.match(
+                        line_str
+                    ):
+                        break
+                elif self._ANY_KEY.match(line_str):
+                    break
             body.append((i, line_str))
         return body
 
-    candidates: List[tuple[int, int]] = []
-    for i, line_str in enumerate(template_lines, start=1):
-        section_match = section_pattern.match(line_str)
-        if section_match is not None:
-            candidates.append((len(section_match.group(1)), i))
-    for section_indent, start in sorted(candidates):
-        found = shallowest_key(section_body(start, section_indent))
+    def of(self, resource_log_id: str) -> tuple[int | None, int | None]:
+        """The 1-based line and 0-based column of the id's declaration, or Nones."""
+        if resource_log_id not in self._found:
+            self._found[resource_log_id] = self._locate(resource_log_id)
+        return self._found[resource_log_id]
+
+    def _locate(self, resource_log_id: str) -> tuple[int | None, int | None]:
+        quoted = re.escape(resource_log_id)
+        key_pattern = re.compile(r"^(\s*)[\"']?" + quoted + r"[\"']?\s*:")
+        inline_pattern = re.compile(r"[\"']?" + quoted + r"[\"']?\s*:")
+
+        def shallowest_key(lines: List[tuple[int, str]]) -> tuple[int, int] | None:
+            best: tuple[int, int, int] | None = None
+            for i, line_str in lines:
+                match = key_pattern.match(line_str)
+                if match is None:
+                    continue
+                indent = len(match.group(1))
+                if best is None or indent < best[0]:
+                    column = match.start() + indent
+                    # Past an opening quote, so the column names the id's first
+                    # character.
+                    if line_str[column : column + 1] in ('"', "'"):
+                        column += 1
+                    best = (indent, i, column)
+            return None if best is None else (best[1], best[2])
+
+        for start, after_key, body in self._sections:
+            # The section key line itself first: a section written on one line holds
+            # its declarations there, and its body is empty.
+            inline = inline_pattern.search(after_key)
+            if inline is not None:
+                line_str = self._numbered[start - 1][1]
+                column = len(line_str) - len(after_key) + inline.start()
+                if line_str[column : column + 1] in ('"', "'"):
+                    column += 1
+                return start, column
+            found = shallowest_key(body)
+            if found is not None:
+                return found
+        found = shallowest_key(self._fallback_lines)
         if found is not None:
             return found
-    found = shallowest_key(list(enumerate(template_lines, start=1)))
-    if found is not None:
-        return found
-    mention_pattern = re.compile(
-        r"(?<![a-zA-Z0-9_])" + re.escape(resource_log_id) + r"(?![a-zA-Z0-9_])"
-    )
-    for i, line_str in enumerate(template_lines, start=1):
-        match = mention_pattern.search(line_str)
-        if match:
-            return i, match.start()
-    return None, None
+        mention_pattern = re.compile(
+            r"(?<![a-zA-Z0-9_])" + quoted + r"(?![a-zA-Z0-9_])"
+        )
+        for i, line_str in self._numbered:
+            match = mention_pattern.search(line_str)
+            if match:
+                return i, match.start()
+        return None, None
 
 
 def _sarif_columns(
@@ -1673,6 +1756,11 @@ def run_cdk_nag_against_cfn_template(
             except Exception as e:
                 ASH_LOGGER.debug(f"Could not get relative path to template: {e}")
 
+            # One read of the template for every finding of it; the per-finding
+            # search re-read the whole file per rule, under the environment lock
+            # and inside the worker's scan timeout.
+            locations = _TemplateLocations(template_lines)
+
             for pack_name, report_lines in cdk_nag_report_lines.items():
                 if pack_name not in results:
                     results[pack_name] = []
@@ -1711,9 +1799,7 @@ def run_cdk_nag_against_cfn_template(
                         )
                         continue
                     cfn_resource = cfn_resource_matches[0]
-                    resource_line, resource_column = _resource_location(
-                        template_lines, resource_log_id
-                    )
+                    resource_line, resource_column = locations.of(resource_log_id)
                     start_column, end_column = _sarif_columns(
                         resource_column, resource_log_id
                     )

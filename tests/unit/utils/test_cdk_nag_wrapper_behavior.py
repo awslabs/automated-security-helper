@@ -3348,3 +3348,135 @@ def test_a_json_output_named_like_the_resource_does_not_take_the_finding(
     )
     region = _only_finding(response).locations[0].physicalLocation.root.region
     assert region.startLine == declaration, (region, lines)
+
+
+def test_a_resources_section_written_on_one_line_places_the_finding_on_that_line(
+    cdk_doubles, tmp_path, outdir
+):
+    """Compact JSON writes the whole Resources object on its key's line, so the section
+    body is empty; the whole-file fallback then found the Output's key line (line 4), the
+    collision the section bound exists to stop, and a same-line ``ash-ignore`` on the
+    Output would have been applied to the resource's finding. The section key line
+    itself holds the declaration."""
+    template = tmp_path / "compact.json"
+    template.write_text(
+        "{\n"
+        '  "Resources": {"MyDataBucket": {"Type": "AWS::S3::Bucket", '
+        '"Properties": {"BucketName": "placeholder-name"}}},\n'
+        '  "Outputs": {\n'
+        '    "MyDataBucket": {"Value": {"Ref": "MyDataBucket"}}\n'
+        "  }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == 2, region
+    # The id's first character, past its opening quote, as a 1-based SARIF column.
+    assert region.startColumn == 18, region
+
+
+def test_a_flow_style_yaml_resources_section_places_the_finding_on_its_line(
+    cdk_doubles, tmp_path, outdir
+):
+    template = tmp_path / "flow.yaml"
+    template.write_text(
+        "Resources: {MyDataBucket: {Type: AWS::S3::Bucket, "
+        "Properties: {BucketName: placeholder-name}}}\n"
+        "Outputs:\n"
+        "  MyDataBucket:\n"
+        "    Value: !Ref MyDataBucket\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == 1, region
+    assert region.startColumn == 13, region
+
+
+def test_unindented_json_with_outputs_first_keeps_the_finding_out_of_outputs(
+    cdk_doubles, tmp_path, outdir
+):
+    """Every key at depth 0, Outputs before Resources: the section body reads as empty
+    and the whole-file fallback's "shallowest" key meant "first in the file", the
+    Output's. The fallback leaves the other top-level sections' bodies out."""
+    template = tmp_path / "flat-outputs-first.json"
+    template.write_text(
+        "{\n"
+        '"Outputs": {\n'
+        '"MyDataBucket": {"Value": {"Ref": "MyDataBucket"}}\n'
+        "},\n"
+        '"Resources": {\n'
+        '"MyDataBucket": {\n'
+        '"Type": "AWS::S3::Bucket",\n'
+        '"Properties": {"BucketName": "placeholder-name"}\n'
+        "}\n"
+        "}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 6, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_the_template_is_read_once_for_every_finding_of_it(
+    cdk_doubles, tmp_path, outdir, monkeypatch
+):
+    """The declaration search used to re-read the whole template per finding, under
+    the environment lock and inside the worker's scan timeout; one object per template
+    now answers every id of it, and a repeated id is answered from its first read."""
+    built = []
+    real = cdk_nag_wrapper._TemplateLocations
+
+    class Counting(real):
+        def __init__(self, template_lines):
+            built.append(len(template_lines))
+            super().__init__(template_lines)
+
+    monkeypatch.setattr(cdk_nag_wrapper, "_TemplateLocations", Counting)
+    template = tmp_path / "many.yaml"
+    template.write_text(TEMPLATE_WITH_EARLY_MENTIONS, encoding="utf-8")
+    cdk_doubles.report_text = _report(
+        _plugin_report(
+            violations=[
+                _violation(rule_name="AwsSolutions-S1"),
+                _violation(rule_name="AwsSolutions-S2"),
+                _violation(rule_name="AwsSolutions-S10"),
+            ]
+        )
+    )
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert len(response.results["AwsSolutions"]) == 3
+    assert built == [len(TEMPLATE_WITH_EARLY_MENTIONS.splitlines())], built
+    # Every finding of the one resource sits on the one declaration line.
+    assert {
+        finding.locations[0].physicalLocation.root.region.startLine
+        for finding in response.results["AwsSolutions"]
+    } == {7}
+
+
+def test_template_locations_answer_an_id_once_and_agree_with_the_one_shot_search():
+    lines = TEMPLATE_WITH_EARLY_MENTIONS.splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    first = locations.of("MyDataBucket")
+
+    assert first == (7, 2)
+    assert locations.of("MyDataBucket") is first
+    assert first == cdk_nag_wrapper._resource_location(lines, "MyDataBucket")
+    assert locations.of("NoSuchResource") == (None, None)
