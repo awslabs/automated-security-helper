@@ -1030,17 +1030,23 @@ class ConvertPhase(EnginePhase):
         if not converted_paths:
             # An accepted record is not "did not finish": the row's count here
             # is the gate's count, so the warning and the exit code agree.
+            # An archive refused whole over a limit is a loss the gate counts too,
+            # so the warning names it instead of the generic "nothing to convert".
             unproductive = [
                 f"{name} ({row.failure})"
                 if getattr(row, "failure", None)
+                else f"{name} ({_refused_over_limit(row)})"
+                if _refused_over_limit(row)
                 else f"{name} ({len(_unaccepted_failed_inputs(row))} could not be converted)"
                 for name, row in aggregated_results.converter_results.items()
-                if getattr(row, "failure", None) or _unaccepted_failed_inputs(row)
+                if getattr(row, "failure", None)
+                or _refused_over_limit(row)
+                or _unaccepted_failed_inputs(row)
             ]
             if unproductive:
                 ASH_LOGGER.warning(
                     "No files were converted, and at least one converter did not "
-                    f"finish: {', '.join(unproductive)}"
+                    f"finish or refused an archive: {', '.join(unproductive)}"
                 )
             else:
                 ASH_LOGGER.warning("No files were converted by any converter plugins")
