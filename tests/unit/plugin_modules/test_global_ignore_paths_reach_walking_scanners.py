@@ -444,10 +444,15 @@ def test_trivy_is_not_given_an_ignored_path_with_a_comma(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(params=["semgrep", "opengrep", "opengrep-patterns"])
+@pytest.fixture(params=["semgrep", "opengrep"])
 def grep_scanner(request, tmp_path, monkeypatch):
-    """A semgrep or opengrep scanner over the fixture tree; opengrep also in its
-    patterns mode, which resolves its arguments a second time."""
+    """A semgrep or opengrep scanner over the fixture tree.
+
+    opengrep's patterns mode is no longer a row here: the scanner refuses the
+    option at construction (opengrep runs a ``--pattern`` search only with a
+    language, which no option of the scanner supplies), so there is no second
+    argument resolution left to cover.
+    """
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     source = _tree(tmp_path)
     context = _context(source, tmp_path)
@@ -463,10 +468,7 @@ def grep_scanner(request, tmp_path, monkeypatch):
         OpengrepScannerConfig,
     )
 
-    config = OpengrepScannerConfig()
-    if request.param == "opengrep-patterns":
-        config.options.patterns = ["eval(...)"]
-    return source, OpengrepScanner(context=context, config=config)
+    return source, OpengrepScanner(context=context, config=OpengrepScannerConfig())
 
 
 @pytest.fixture(params=["semgrep", "opengrep"])
@@ -502,7 +504,11 @@ def test_a_grep_scanner_is_given_them_for_this_resolution_only(grep_scanner):
     scanner._execute_scan(source, "source", IGNORES)
     argv, _, _ = scanner._execute_scan(source, "source", [])
 
-    assert not [arg for arg in argv if str(arg).startswith("--exclude=")], argv
+    # The operator's own exclude patterns travel joined too (``--exclude=<p>``),
+    # so the check is for the ignore names given to the first resolution, not
+    # for the joined form as such.
+    assert "--exclude=thirdparty" not in argv, argv
+    assert "--exclude=gen_a.py" not in argv, argv
     assert [(a.key, a.value) for a in scanner.args.extra_args] == before
 
 
