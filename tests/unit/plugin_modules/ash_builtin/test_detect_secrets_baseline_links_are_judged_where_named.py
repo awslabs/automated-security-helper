@@ -268,6 +268,47 @@ def test_an_in_tree_link_elsewhere_in_the_checkout_is_read(
     )
 
 
+def test_a_source_directory_reached_through_a_link_keeps_its_own_baseline(
+    tmp_path, monkeypatch, caplog
+):
+    """A scanned directory spelled through a symlink (a linked workspace, or a
+    platform whose temporary directory is a link), with no enclosing checkout,
+    keeps its own regular ``.secrets.baseline``: the admitted link root is the
+    scanned directory itself, resolved before the containment test as every
+    other root the scanner hands ``is_within``. The test compares by file
+    identity, so the answer was the same with the root unresolved; this pins
+    the shape against a later reader that compares the paths as spelled, where
+    the unresolved root would refuse the tree's own file with the misleading
+    "a link to a file outside" warning."""
+    monkeypatch.chdir(tmp_path)
+    real_src = tmp_path / "real" / "src"
+    real_src.mkdir(parents=True)
+    (real_src / ".secrets.baseline").write_text(_baseline_text(), encoding="utf-8")
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(tmp_path / "real", target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlinks unavailable on this platform: {exc}")
+    context = PluginContext(
+        source_dir=linked / "src",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    context.output_dir.mkdir(parents=True)
+
+    with caplog.at_level(logging.WARNING):
+        scanner = DetectSecretsScanner(
+            context=context, config=DetectSecretsScannerConfig()
+        )
+
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_named == linked / "src" / ".secrets.baseline"
+    assert not any(
+        "a link to a file outside" in record.message for record in caplog.records
+    ), [record.message for record in caplog.records]
+
+
 def test_an_in_tree_link_into_an_outer_checkout_is_refused(
     tmp_path, monkeypatch, caplog
 ):
