@@ -97,7 +97,12 @@ MAX_RETRY_DELAY_SECONDS = 60
 #: both ends: a pydantic ``pattern`` is a search, not a whole-value match, so an
 #: unanchored pattern admitted any value that merely holds a region name
 #: ("us-east-1.attacker.example", "us-east-1/x", a trailing newline), and the
-#: value ends up in an endpoint hostname.
+#: value ends up in an endpoint hostname. The engine of record is pydantic-core's
+#: (rust-regex): there a non-multiline "$" matches at the end of the value only,
+#: so the trailing newline is refused, and "$" is the one end anchor rust-regex
+#: and Python's ``re`` both read (rust-regex has "\z", ``re`` has "\Z", neither
+#: has the other's). Compiled with ``re``, "$" would also match before a final
+#: newline; no site does that today, and a site that did would need ``re.fullmatch``.
 AWS_REGION_PATTERN = (
     r"^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)"
     r"(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)"
