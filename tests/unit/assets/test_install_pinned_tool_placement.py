@@ -326,6 +326,7 @@ class TestPublishingTheLicenseDirectory:
         )
         assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
     def test_the_modes_are_world_readable(self, tmp_path):
         """Control: the copy keeps the modes the image's non-root user needs."""
         third_party = tmp_path / "third-party"

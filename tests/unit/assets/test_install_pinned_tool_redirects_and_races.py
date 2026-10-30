@@ -23,6 +23,7 @@ import errno
 import hashlib
 import importlib.util
 import io
+import os
 import sys
 import threading
 import types
@@ -208,7 +209,14 @@ class TestTwoInstallsOfOneBundle:
         with pytest.raises(OSError) as raised:
             setup.install()
 
-        assert raised.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
+        # Windows reports a directory renamed onto a populated one as a permission
+        # error. The product catches every OSError there and decides by comparing
+        # the directory with the pin, so it holds the same way; only the errno of
+        # the error that is re-raised differs.
+        accepted = (errno.ENOTEMPTY, errno.EEXIST)
+        if os.name == "nt":
+            accepted += (errno.EACCES,)
+        assert raised.value.errno in accepted
         assert setup.leftovers() == []
 
     def test_an_old_directory_moved_aside_by_the_other_install_is_not_an_error(

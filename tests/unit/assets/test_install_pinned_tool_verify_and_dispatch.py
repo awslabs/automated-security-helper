@@ -124,6 +124,10 @@ class _Verify:
         return installer.verify_third_party(self.tmp_path, self.third_party, None, [])
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="runs only in the Linux image build; the fixtures are POSIX executables and modes",
+)
 @pytest.mark.unit
 class TestVerifyThirdParty:
     def test_a_clean_tree_passes_and_gets_an_index(self, monkeypatch, tmp_path):
