@@ -428,11 +428,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         clean audit. The reason is recorded for the MISSING row; with no lockfile to
         audit ScanPhase records the scanner SKIPPED instead.
 
-        Online, True when a package manager that one of the source tree's
-        lockfiles needs is installed (npm when the tree names none): a yarn- or
-        pnpm-only project was reported MISSING when npm alone was absent, though
-        yarn or pnpm could audit it. A lockfile whose own manager is absent is
-        then a failed target in ``scan()``, as it was for yarn and pnpm.
+        Online, True when npm is installed, or when a package manager that one
+        of the source tree's lockfiles needs is: a yarn- or pnpm-only project
+        was reported MISSING when npm alone was absent, though yarn or pnpm
+        could audit it. With npm present, a lockfile whose own manager is absent
+        is a failed target in ``scan()``, named with the manager it needed, as
+        it always was; the check refuses only when nothing installed could
+        audit anything, and its reason names the managers the tree needs.
 
         The version probe (``npm --version``) is bounded like every other
         subprocess here, runs in a fresh empty directory under the results
@@ -461,7 +463,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             return False
         needed = self._package_managers_needed() or {self.command}
         available = {binary for binary in needed if find_executable(binary)}
-        if not available:
+        if not available and not find_executable(self.command):
             names = ", ".join(sorted(needed))
             self.dependency_unavailable_reason = (
                 f"{names} not found on PATH; the lockfiles in the scanned tree are "

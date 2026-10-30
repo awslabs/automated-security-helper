@@ -244,17 +244,33 @@ class TestWhichPackageManagersTheCheckNeeds:
         assert satisfied is True
         assert scanner.tool_version is None, "yarn's version is not npm's"
 
-    def test_with_no_needed_manager_installed_the_reason_names_them(
+    def test_with_no_manager_installed_the_reason_names_the_needed_ones(
         self, context, monkeypatch
     ):
         _package(context.source_dir / "web", "yarn.lock")
         _package(context.source_dir / "api", "pnpm-lock.yaml")
 
-        scanner, satisfied = self._check(context, monkeypatch, present={"npm"})
+        scanner, satisfied = self._check(context, monkeypatch, present=set())
 
         assert satisfied is False
         reason = scanner.dependency_unavailable_reason or ""
         assert "yarn" in reason and "pnpm" in reason, reason
+
+    def test_with_npm_installed_a_lockfile_whose_manager_is_absent_is_scanned(
+        self, context, monkeypatch
+    ):
+        """npm present and the tree's own managers absent: the check passes and
+        scan() records each such lockfile as a failed target naming its
+        manager (the absent-package-manager tests), as it did before the check
+        learned about yarn and pnpm. Refusing here reported the whole scanner
+        MISSING instead."""
+        _package(context.source_dir / "web", "yarn.lock")
+        _package(context.source_dir / "api", "pnpm-lock.yaml")
+
+        scanner, satisfied = self._check(context, monkeypatch, present={"npm"})
+
+        assert satisfied is True
+        assert scanner.dependency_unavailable_reason is None
 
     def test_a_tree_with_no_lockfile_still_asks_for_npm(self, context, monkeypatch):
         scanner, satisfied = self._check(context, monkeypatch, present=set())
