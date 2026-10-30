@@ -3,6 +3,7 @@
 
 """Utility functions for matching findings against suppression rules."""
 
+import bisect
 import codecs
 import fnmatch
 import re
@@ -51,10 +52,62 @@ _SLASH_NEXT_LINE_PATTERN = re.compile(
 _INLINE_PATTERNS = [_HASH_INLINE_PATTERN, _SLASH_INLINE_PATTERN]
 _NEXT_LINE_PATTERNS = [_HASH_NEXT_LINE_PATTERN, _SLASH_NEXT_LINE_PATTERN]
 
-# A quoted string that opens and closes on one line: double, single or backtick
-# quotes, a backslash escaping the next character. A quote that never closes on
-# its line (an apostrophe in prose, say) is no string, so it hides nothing.
-_QUOTED_STRING = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`")
+# The characters that open and close a quoted string on one line: double, single
+# or backtick quotes, a backslash escaping the next character. A quote that never
+# closes on its line (an apostrophe in prose, say) is no string, so it hides
+# nothing.
+_QUOTE_CHARACTERS = ('"', "'", "`")
+
+
+def _quoted_spans(line: str) -> List[Tuple[int, int]]:
+    """The ``[start, end)`` spans of the quoted strings in ``line``, left to right.
+
+    A string opens at a quote character and closes at the next quote character
+    of the same kind that no odd run of backslashes precedes; a quote with no
+    such closer on the line opens nothing, and the scan goes on from the next
+    character. That is what the regular expression this replaced found, but the
+    expression was tried afresh at every quote in the line, and each attempt
+    from a quote that never closes ran to the end of the line: a line of many
+    escaped quotes (a scanned tree holds whatever its author wrote, and under
+    the line-feed count a CR-only or minified file is one line) took time
+    quadratic in its length. Here the closers of each kind are listed in one
+    pass and the opener's scan consumes each one at most once, so the work is
+    linear in the line.
+    """
+    # The positions at which a string of each kind can close: a quote that an
+    # even run of backslashes precedes (within the string, a backslash escapes
+    # the character after it, and the run cannot reach back past the opener,
+    # which is a quote and not a backslash).
+    closers: Dict[str, List[int]] = {quote: [] for quote in _QUOTE_CHARACTERS}
+    backslashes = 0
+    for index, character in enumerate(line):
+        if character == "\\":
+            backslashes += 1
+            continue
+        if character in closers and backslashes % 2 == 0:
+            closers[character].append(index)
+        backslashes = 0
+    spans: List[Tuple[int, int]] = []
+    next_closer = dict.fromkeys(_QUOTE_CHARACTERS, 0)
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if character not in closers:
+            index += 1
+            continue
+        candidates = closers[character]
+        pointer = next_closer[character]
+        while pointer < len(candidates) and candidates[pointer] <= index:
+            pointer += 1
+        next_closer[character] = pointer
+        if pointer == len(candidates):
+            # No closer of this kind follows: the quote opens nothing.
+            index += 1
+            continue
+        end = candidates[pointer] + 1
+        spans.append((index, end))
+        index = end
+    return spans
 
 
 def _search_comment(pattern: "re.Pattern[str]", line: str) -> Optional["re.Match[str]"]:
@@ -64,19 +117,42 @@ def _search_comment(pattern: "re.Pattern[str]", line: str) -> Optional["re.Match
     inside a string literal is text that looks like a directive, not a comment:
     ``x = "# ash-ignore: B101"`` suppresses nothing. A marker inside a string
     never ends the search: the next match, if there is one, is looked at in turn.
+    The spans are found once per line (``_quoted_spans``) and each candidate is
+    placed among them by bisection, so a line of many markers inside many
+    strings costs one pass and a logarithm per marker.
     """
-    spans: Optional[List[Tuple[int, int]]] = None
+    starts: Optional[List[int]] = None
+    ends: List[int] = []
     position = 0
     while True:
         match = pattern.search(line, position)
         if match is None:
             return None
-        if spans is None:
-            spans = [found.span() for found in _QUOTED_STRING.finditer(line)]
+        if starts is None:
+            spans = _quoted_spans(line)
+            starts = [begin for begin, _ in spans]
+            ends = [end for _, end in spans]
         start = match.start()
-        if not any(begin <= start < end for begin, end in spans):
+        # The spans are in order and do not overlap, so the only span that can
+        # hold ``start`` is the last one that begins at or before it.
+        within = bisect.bisect_right(starts, start) - 1
+        if within < 0 or start >= ends[within]:
             return match
         position = start + 1
+
+
+def _reason(match: "re.Match[str]") -> str:
+    """The directive's reason: the text after its rule id, up to the line's end
+    or the first carriage return, whichever comes first.
+
+    Lines are split at line feeds alone (``find_inline_suppressions``), so a
+    lone CR is inside a line, and the reason group (``(.*)?$``) ran past it: on
+    a CR-only file the reason was the rest of the file, and the reason is copied
+    into the SARIF justification of every finding the directive suppresses, so
+    source text (a secret among it, say) landed in the results. The reason is
+    cut at the first CR whatever the line numbering decides about it.
+    """
+    return (match.group(2) or "").split("\r", 1)[0].strip()
 
 
 def _decode_source(data: bytes) -> str:
@@ -723,7 +799,7 @@ def find_inline_suppressions(
             match = _search_comment(pattern, line)
             if match:
                 rule_id = match.group(1)
-                reason = (match.group(2) or "").strip()
+                reason = _reason(match)
                 suppressions.append(
                     InlineSuppression(
                         line_number=line_num,
@@ -740,7 +816,7 @@ def find_inline_suppressions(
             match = _search_comment(pattern, line)
             if match:
                 rule_id = match.group(1)
-                reason = (match.group(2) or "").strip()
+                reason = _reason(match)
                 suppressions.append(
                     InlineSuppression(
                         line_number=line_num + 1,

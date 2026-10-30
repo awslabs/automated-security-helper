@@ -17,14 +17,25 @@ The same function caught ``OSError`` and ``UnicodeDecodeError`` around the
 read. A path with an embedded NUL is refused by the OS layer with a
 ``ValueError`` before the file is opened, and that one path aborted the whole
 SARIF suppression pass.
+
+Two later findings on the same function. A directive's reason group ran past a
+lone carriage return to the end of the line, so on a CR-only file the rest of
+the file (secrets included) was copied into the SARIF justification; the reason
+now stops at the first CR. And the quoted-string scan that keeps a marker inside
+a string literal from counting as a directive was a regular expression tried at
+every quote, quadratic on a line of escaped quotes; it is one linear pass now,
+with the same answer on every line.
 """
 
+import re
+import time
 from pathlib import Path
 
 import pytest
 
 from automated_security_helper.utils.suppression_matcher import (
     InlineSuppression,
+    _quoted_spans,
     find_inline_suppressions,
 )
 
@@ -95,10 +106,11 @@ def test_a_cr_only_file_is_one_line_with_at_most_one_directive(
 ):
     """The contract the docstring states: a file with no line feed (classic Mac
     CR-only endings) is one line to the line-feed count, so of its two
-    directives only the first on the line is found, it names line 1, and its
-    reason runs to the end of the file (the rest of that one line). An earlier
-    form of this test expected the reason to stop at the CR; the venue read it
-    red, which is the contract, not a defect."""
+    directives only the first on the line is found and it names line 1. Its
+    reason stops at the CR: it once ran to the end of the file (the rest of
+    that one line), and the reason is copied into the SARIF justification of
+    every finding the directive suppresses, so the source after the directive
+    landed in the results."""
     source = _write(
         tmp_path,
         "x = 1\r# ash-ignore: R1 first\ry = 2\r# ash-ignore: R2 second\rz = 3\r",
@@ -106,9 +118,88 @@ def test_a_cr_only_file_is_one_line_with_at_most_one_directive(
 
     found = find_inline_suppressions(source, tmp_path if with_scan_root else None)
 
+    assert found == [InlineSuppression(line_number=1, rule_id="R1", reason="first")]
+
+
+@pytest.mark.parametrize(
+    "directive",
+    ["# ash-ignore: R1 why", "# ash-ignore-next-line: R1 why"],
+    ids=["inline", "next-line"],
+)
+def test_a_lone_cr_ends_the_reason(tmp_path, directive):
+    """Red at the base: the reason group matched the CR and everything after it
+    on the line, here a secret, which then reached the SARIF justification."""
+    source = _write(tmp_path, f"x = 1  {directive}\rtoken = 'hunter2'\ny = 2\n")
+
+    found = find_inline_suppressions(source)
+
     assert len(found) == 1
-    assert (found[0].line_number, found[0].rule_id) == (1, "R1")
-    assert found[0].reason == "first\ry = 2\r# ash-ignore: R2 second\rz = 3"
+    assert found[0].rule_id == "R1"
+    assert found[0].reason == "why"
+
+
+def test_a_cr_alone_after_the_rule_id_leaves_the_default_reason(tmp_path):
+    """Cut at the CR, an empty reason is the default one, as for a bare
+    directive."""
+    source = _write(tmp_path, "x = 1  # ash-ignore: R1\rrest\n")
+
+    found = find_inline_suppressions(source)
+
+    assert found == [
+        InlineSuppression(line_number=1, rule_id="R1", reason="Inline suppression")
+    ]
+
+
+# --- the quoted-string scan is linear in the line ---
+
+# The expression the scan replaced, kept here as the reference for what a
+# quoted string is: the same spans on every line it finishes on.
+_REFERENCE_QUOTED_STRING = re.compile(
+    r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`"
+)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "",
+        "x = 1",
+        'x = "# ash-ignore: B101"',
+        "it's # ash-ignore: X",
+        "'it\\'s' # ash-ignore: X",
+        '\\"abc" # ash-ignore: X',
+        "s = \"oops  'a # ash-ignore: X b'",
+        "a = 'x\\\\' # ash-ignore: X 'y'",
+        "`t ${x}` + '\"' + \"'\" # ash-ignore: X",
+        'ends with a backslash "abc\\',
+        "\"\" '' `` # ash-ignore: X",
+        '"a\\\\\\"b" # ash-ignore: X',
+        "`a 'b` c' # ash-ignore: X",
+    ],
+)
+def test_the_quoted_spans_are_the_reference_expressions(line):
+    """The one-pass scan and the expression it replaced agree, escape rules and
+    the quote-that-never-closes rule included."""
+    expected = [found.span() for found in _REFERENCE_QUOTED_STRING.finditer(line)]
+
+    assert _quoted_spans(line) == expected
+
+
+def test_a_line_of_escaped_quotes_is_scanned_once(tmp_path):
+    """Red at the base: each escaped quote started an attempt that ran to the end
+    of the line, so this one line took time quadratic in its length (hours for
+    the length here, where a pass that reads each character once takes well
+    under the bound asserted). The directive after the quotes is still found,
+    and nothing in the line is taken for a string."""
+    tail = '\\"' * 200_000
+    source = _write(tmp_path, f"x = {tail}  # ash-ignore: R1 why\n")
+
+    started = time.perf_counter()
+    found = find_inline_suppressions(source)
+    elapsed = time.perf_counter() - started
+
+    assert found == [InlineSuppression(line_number=1, rule_id="R1", reason="why")]
+    assert elapsed < 10, elapsed
 
 
 def test_a_path_the_os_layer_refuses_yields_no_suppressions_and_no_error(tmp_path):
