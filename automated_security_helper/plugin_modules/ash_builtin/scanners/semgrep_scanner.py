@@ -29,7 +29,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.process_env import hold_environ, release_environ
-from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
+from automated_security_helper.utils.uv_tool_runner import (
+    find_executable,
+    get_uv_tool_command,
+)
 
 #: semgrep's own switch for its version check: the variable its
 #: ``semgrep --enable-version-check`` / ``semgrep --disable-version-check`` option
@@ -211,28 +214,44 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         uv form is told by the first word's file name (``_is_uv_form``), so a uv
         named by its full path counts as uv too.
 
-        With ``direct_only`` the uv form is not an answer: after uv's own install
-        of the tool failed, ``uv tool run`` would repeat that install at scan time
-        (offline, it fails again), so only a semgrep binary on PATH satisfies the
-        dependency, and the check reports MISSING otherwise.
+        With ``direct_only`` the resolver is not consulted at all: after uv's own
+        install of the tool failed, ``uv tool run`` would repeat that install at
+        scan time (offline, it fails again), so only a semgrep binary on PATH
+        satisfies the dependency. The binary is looked up directly
+        (``find_executable``) rather than read off the resolver's answer, because
+        the resolver probes ``uv tool run semgrep --version`` first and answers the
+        uv form whenever that probe succeeds (``utils/uv_tool_runner.py``,
+        ``get_uv_tool_command``: uv run, then the binary, then None), and it
+        remembers its answer per process, so a uv form from an earlier probe would
+        hide a binary that is on PATH now. The check reports MISSING when no binary
+        is found.
 
-        A binary on PATH is verified against the scan's requirement before it is
-        taken (``_direct_binary_satisfies``), as ``_select_tool_execution``
-        verifies a pre-installed tool before running it directly.
+        A binary on PATH, however it was found, is verified against the scan's
+        requirement before it is taken (``_direct_binary_satisfies``), as
+        ``_select_tool_execution`` verifies a pre-installed tool before running it
+        directly.
         """
+        if direct_only:
+            found = find_executable(self.command)
+            if found is None:
+                self._plugin_log(
+                    "uv's install of semgrep failed and no semgrep binary is on PATH; "
+                    "the scan would repeat that install through uv tool run, so "
+                    "semgrep is missing.",
+                    level=logging.WARNING,
+                )
+                return False
+            if not self._direct_binary_satisfies(found):
+                return False
+            self.use_uv_tool = False
+            self.dependencies_satisfied = True
+            return True
         command = get_uv_tool_command(
             self.command, from_spec=self._uv_probe_from_spec()
         )
         if command is None:
             return False
         uses_uv = _is_uv_form(command)
-        if uses_uv and direct_only:
-            self._plugin_log(
-                "uv tool run is the only route to semgrep, and uv's install of it "
-                "failed; the scan would repeat that install, so semgrep is missing.",
-                level=logging.WARNING,
-            )
-            return False
         if not uses_uv and not self._direct_binary_satisfies(
             _command_words(command)[0]
         ):

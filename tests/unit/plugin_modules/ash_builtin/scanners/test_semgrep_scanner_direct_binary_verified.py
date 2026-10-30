@@ -56,7 +56,9 @@ def _scanner(test_plugin_context, monkeypatch) -> SemgrepScanner:
     monkeypatch.setattr(
         SemgrepScanner, "_validate_uv_tool_availability", lambda self: False
     )
-    monkeypatch.setattr(semgrep_scanner, "get_uv_tool_command", lambda name: [BINARY])
+    monkeypatch.setattr(
+        semgrep_scanner, "get_uv_tool_command", lambda name, **kwargs: [BINARY]
+    )
     return scanner
 
 
@@ -130,11 +132,14 @@ def test_the_last_resort_after_a_failed_install_is_verified_too(
     test_plugin_context, monkeypatch
 ):
     """After uv's install of semgrep failed, the binary on PATH is the last resort,
-    and an unsatisfying one is refused there as well.
+    and an unsatisfying one is refused there as well. The last resort looks the
+    binary up on PATH directly (``find_executable``), so that lookup is stood in
+    for here; the resolver stub ``_scanner`` sets is not consulted on this route.
 
     Fails at the base: the last-resort binary was taken unverified.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
+    monkeypatch.setattr(semgrep_scanner, "find_executable", lambda name: BINARY)
     monkeypatch.setattr(
         SemgrepScanner, "_validate_uv_tool_availability", lambda self: True
     )

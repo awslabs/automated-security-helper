@@ -68,18 +68,23 @@ def test_the_install_fallback_runs_a_semgrep_binary_on_path(
     test_plugin_context, monkeypatch
 ):
     """After uv's install of semgrep failed, a semgrep binary on PATH is the
-    fallback, run directly.
+    fallback, run directly, found by a direct PATH lookup.
 
-    Fails at the base: the binary was found, and ``use_uv_tool`` stayed as it
-    was, so the scan went through uv to a tool uv had just failed to install.
+    The resolver is not the lookup: it probes ``uv tool run semgrep --version``
+    first and answers the uv form whenever that probe succeeds, and it remembers
+    the answer per process, so its answer here is the uv form while a binary sits
+    on PATH. This test models exactly that: the resolver says uv, PATH has the
+    binary. Red at the tip that read the resolver (the uv form was refused and
+    semgrep reported MISSING with a binary on PATH); green with the direct lookup.
+    At the base the resolver's answer was taken as the binary either way, so this
+    is not a red-at-base test.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     _install_fails(monkeypatch)
     monkeypatch.setattr(
-        semgrep_module,
-        "get_uv_tool_command",
-        lambda name, **kwargs: list(DIRECT_FORM),
+        semgrep_module, "get_uv_tool_command", lambda name, **kwargs: list(UV_FORM)
     )
+    monkeypatch.setattr(semgrep_module, "find_executable", lambda name: DIRECT_FORM[0])
 
     assert scanner._validate_tool_dependencies() is True
     assert scanner.dependencies_satisfied is True
@@ -97,8 +102,9 @@ def test_the_install_fallback_does_not_accept_the_uv_form(
     test_plugin_context, monkeypatch, found
 ):
     """After the explicit install failed, ``uv tool run semgrep`` is no answer: the
-    scan would repeat the install that just failed (offline, it fails again). The
-    dependency is MISSING, as it was before the resolver fallback existed.
+    scan would repeat the install that just failed (offline, it fails again). With
+    no semgrep binary on PATH the dependency is MISSING, as it was before the
+    resolver fallback existed, whatever the resolver answers.
 
     Fails at the base: the uv form was accepted and the scanner recorded the
     dependency as satisfied.
@@ -108,6 +114,7 @@ def test_the_install_fallback_does_not_accept_the_uv_form(
     monkeypatch.setattr(
         semgrep_module, "get_uv_tool_command", lambda name, **kwargs: list(found)
     )
+    monkeypatch.setattr(semgrep_module, "find_executable", lambda name: None)
 
     assert scanner._validate_tool_dependencies() is False
     assert scanner.dependencies_satisfied is not True
@@ -140,11 +147,13 @@ def test_the_uv_unavailable_fallback_runs_the_tool_as_the_resolver_found_it(
 
 
 def test_no_route_at_all_is_still_a_failed_check(test_plugin_context, monkeypatch):
-    """The control: a None answer leaves the dependency unsatisfied, as before."""
+    """The control: no binary on PATH and a None resolver answer leave the
+    dependency unsatisfied, as before."""
     scanner = _scanner(test_plugin_context, monkeypatch)
     _install_fails(monkeypatch)
     monkeypatch.setattr(
         semgrep_module, "get_uv_tool_command", lambda name, **kwargs: None
     )
+    monkeypatch.setattr(semgrep_module, "find_executable", lambda name: None)
 
     assert scanner._validate_tool_dependencies() is False
