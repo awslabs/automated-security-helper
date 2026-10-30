@@ -36,7 +36,6 @@ from automated_security_helper.cli.merge import (
     _adopt_owning_shard_results,
     apply_aggregated_suppressions,
     _merge_converter_rows,
-    _parse_instant,
     merge_shard_results,
     read_shard_assignment,
     stamp_shard_assignment,
@@ -229,6 +228,11 @@ class TestTimingIsOrderedByInstant:
         assert merged.metadata.summary_stats.end == "2026-08-28T10:30:00.25Z"
 
     def test_the_parse_reads_the_three_spellings_as_one_instant(self):
+        # Imported here, not at module scope: a tree without the helper then
+        # fails this test alone and still collects the rest of the file, so the
+        # other tests' own red-first reads are not hidden behind an ImportError.
+        from automated_security_helper.cli.merge import _parse_instant
+
         zulu = _parse_instant("2026-08-28T08:00:00Z")
         assert _parse_instant("2026-08-28T08:00:00.000Z") == zulu
         assert _parse_instant("2026-08-28T08:00:00.0Z") == zulu
