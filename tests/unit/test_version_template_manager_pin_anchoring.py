@@ -25,13 +25,25 @@ several inline code spans and links, so a link to this repository followed by a 
 another project's clone (or the reverse) was read as one command. A backtick, ``)`` or
 ``]`` now ends it as well.
 
+The anchoring covered only ``find_version_references``. The two readers of a built page's
+pins, ``release_pins`` and ``forms_pinning_a_release`` (read by
+``scripts/docs_versions.py check``), were built from the bare prefixes of
+``INSTALL_REF_FORMS`` and still took another project's ``rev: v4.6.0``,
+``--branch v2.0.0`` or ``actions/checkout@v4.1.2`` for a pin of this repository. A page
+that keeps such a tag as ``convert`` leaves it then failed the check: on a release build
+(``pins != wanted``), on the main build (a pin where none is allowed), and by requiring a
+``rev: main`` command the page never had. All three now take their patterns from
+``ASH_PIN_PATTERNS``.
+
 What is asserted
 ----------------
 ``convert``, run in memory over example pages, rewrites the pin of this repository and
 leaves every other project's pin as written: a ``rev:`` under another ``repo:``, a clone
 of another URL before or after the flag, chained commands, prose that mentions this
 repository and another project's clone on one line, and a repository name that only
-begins with this one's.
+begins with this one's. ``release_pins`` and ``forms_pinning_a_release`` read no pin from
+the same texts, read this repository's pin in each form of ``INSTALL_REF_FORMS``, and
+agree with ``convert`` on whether a text holds one.
 """
 
 from __future__ import annotations
@@ -52,7 +64,7 @@ ASH_URL = f"https://github.com/awslabs/{REPO}"
 OTHER_URL = "https://github.com/example/other-project"
 
 
-def _load_manager_class():
+def _load_module():
     spec = importlib.util.spec_from_file_location(
         "version_template_manager_pin_anchoring", SCRIPT_PATH
     )
@@ -60,10 +72,11 @@ def _load_manager_class():
     assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module.VersionTemplateManager
+    return module
 
 
-VersionTemplateManager = _load_manager_class()
+MODULE = _load_module()
+VersionTemplateManager = MODULE.VersionTemplateManager
 
 
 def _convert(text: str) -> str:
@@ -225,3 +238,112 @@ class TestBranchPins:
     def test_a_url_without_a_git_suffix_is_still_templatized(self, text, expected):
         """The control for the boundary: the name ends the URL or a slash follows."""
         assert _convert(text) == expected
+
+
+#: Text that pins another project's release, in each form the readers look for.
+OTHER_PROJECTS_PINS = {
+    "a rev: under another repo": (
+        "repos:\n"
+        "  - repo: https://github.com/example/pre-commit-hooks\n"
+        "    rev: v4.6.0\n"
+    ),
+    "a clone of another project": f"git clone --branch v2.0.0 {OTHER_URL}.git\n",
+    "a third-party action": "      - uses: actions/checkout@v4.1.2\n",
+    "another project's reusable workflow": (
+        "      uses: example/other-project/.github/workflows/x.yml@v1.0.0\n"
+    ),
+    "another project's tag lookup": f"git ls-remote {OTHER_URL} refs/tags/v1.0.0\n",
+    "a sibling of this repository": f"git clone --branch v1.0.0 {ASH_URL}-plugins.git\n",
+    "prose naming this repository and cloning another": (
+        f"Clone [ASH]({ASH_URL}), then the rules: "
+        f"`git clone --branch v2.0.0 {OTHER_URL}.git`\n"
+    ),
+}
+
+#: This repository's pin in each form of INSTALL_REF_FORMS, and the form's name.
+ASH_PINS = {
+    "@ (git URL, uses:)": f"uv tool install git+{ASH_URL}.git@v3.4.0\n",
+    "--branch": f"git clone --branch v3.4.0 {ASH_URL}.git\n",
+    "rev:": f"repos:\n  - repo: {ASH_URL}\n    rev: v3.4.0\n",
+    "refs/tags/ (git ls-remote)": f"git ls-remote {ASH_URL} refs/tags/v3.4.0\n",
+    "flake ref": f"nix run github:awslabs/{REPO}/v3.4.0\n",
+    "--ash-revision-to-install": "ash build-image --ash-revision-to-install v3.4.0\n",
+    "ash-version:": "with:\n  ash-version: v3.4.0\n",
+}
+
+
+class TestTheReadersOfAPageSeeOnlyAshPins:
+    """release_pins and forms_pinning_a_release read what `convert` templatizes.
+
+    scripts/docs_versions.py check requires every release pin on a built page to be the
+    release's own and the main version's install commands to pin none. A page that keeps
+    another project's tag as written, as `convert` rightly leaves it, failed that check
+    when the readers took the bare prefixes (`--branch `, `rev: `, `@`) for ASH's.
+    """
+
+    @pytest.mark.parametrize(
+        "text", list(OTHER_PROJECTS_PINS.values()), ids=list(OTHER_PROJECTS_PINS)
+    )
+    def test_another_project_s_pin_is_not_a_release_pin(self, text):
+        """Red before: each prefix alone matched, so the tag was read as ASH's."""
+        manager = VersionTemplateManager(REPO_ROOT)
+        assert manager.release_pins(text) == set()
+        assert manager.forms_pinning_a_release(text) == []
+
+    @pytest.mark.parametrize("form, text", list(ASH_PINS.items()), ids=list(ASH_PINS))
+    def test_ash_s_pin_is_read_in_every_form(self, form, text):
+        """The control: each form's own pin is still read, and only as that form."""
+        manager = VersionTemplateManager(REPO_ROOT)
+        assert manager.release_pins(text) == {"3.4.0"}
+        assert manager.forms_pinning_a_release(text) == [form]
+
+    def test_only_ash_s_entry_of_a_mixed_configuration_is_read(self):
+        text = (
+            "repos:\n"
+            "  - repo: https://github.com/example/pre-commit-hooks\n"
+            "    rev: v4.6.0\n"
+            f"  - repo: {ASH_URL}\n"
+            "    rev: v3.4.0\n"
+            f"  - repo: {OTHER_URL}\n"
+            "    rev: v1.2.3\n"
+        )
+        manager = VersionTemplateManager(REPO_ROOT)
+        assert manager.release_pins(text) == {"3.4.0"}
+        assert manager.forms_pinning_a_release(text) == ["rev:"]
+
+    def test_the_forms_come_back_in_the_order_the_manager_lists_them(self):
+        text = ASH_PINS["rev:"] + ASH_PINS["--branch"]
+        assert VersionTemplateManager(REPO_ROOT).forms_pinning_a_release(text) == [
+            "--branch",
+            "rev:",
+        ]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            *OTHER_PROJECTS_PINS.values(),
+            ASH_PINS["@ (git URL, uses:)"],
+            ASH_PINS["--branch"],
+            ASH_PINS["rev:"],
+            ASH_PINS["flake ref"],
+            f"uses: awslabs/{REPO}/.github/workflows/run.yml@v3.4.0\n",
+            "Pin (`@v3.4.0`) for repeatable installs\n",
+            f"Run `git clone --branch v3.4.0 {ASH_URL}.git` first.\n",
+        ],
+    )
+    def test_a_text_is_converted_exactly_when_it_holds_a_release_pin(self, text):
+        """The two readers and `convert` share one definition of an ASH pin.
+
+        Only the forms `convert` handles are listed: it has no pattern for the
+        refs/tags/, build-flag and action-input forms, which a template carries by hand.
+        """
+        converted = _convert(text) != text
+        assert converted == bool(VersionTemplateManager(REPO_ROOT).release_pins(text))
+
+    def test_every_form_has_patterns_with_one_group(self):
+        """A form added to INSTALL_REF_FORMS needs its ASH anchor in ASH_PIN_PATTERNS."""
+        forms = [name for name, *_ in MODULE.INSTALL_REF_FORMS]
+        assert sorted(MODULE.ASH_PIN_PATTERNS) == sorted(forms)
+        for patterns in MODULE.ASH_PIN_PATTERNS.values():
+            for pattern in patterns:
+                assert re.compile(pattern).groups == 1, pattern

@@ -23,7 +23,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # One list for three readers: scripts/docs_versions.py check reads which release a built
 # page pins (release_pins) and requires the main version to name main in every form a
 # release page uses (branch_ref_pattern); scripts/docs_checks.py refuses {{RELEASE}} in
-# any of these forms in a template (release_in_install_ref).
+# any of these forms in a template (release_in_install_ref). Whether a `v<version>` after
+# one of these prefixes is ASH's pin is decided once, by ASH_PIN_PATTERNS below, which
+# `convert` and the two readers of a built page's pins (release_pins and
+# forms_pinning_a_release) all use: a prefix such as `--branch ` or `rev: ` is written by
+# every project, and read alone it called another project's tag an ASH pin.
 _REPO_NAME = "automated-security-" + "helper"
 INSTALL_REF_FORMS = (
     # (name, the text before `v<version>`, the form naming a branch, with {branch})
@@ -43,17 +47,78 @@ INSTALL_REF_FORMS = (
     ),
     ("ash-version:", r"ash-version: ", r"ash-version: {branch}"),
 )
-_RELEASE_PIN = re.compile(
-    "(?:" + "|".join(prefix for _name, prefix, _branch in INSTALL_REF_FORMS) + r")"
-    r"v(\d+\.\d+\.\d+)"
-)
+_SEMVER = r"\d+\.\d+\.\d+"
 # The rest of one shell command: any text up to a newline that is not escaped, or to a
 # separator that starts another command. A backtick, `)` or `]` ends it too: in prose,
 # several inline code spans and links share a line, and a command in one span is not
-# the command of the repository named in the next. `convert` uses it to tell a
+# the command of the repository named in the next. ASH_PIN_PATTERNS uses it to tell a
 # `--branch v<version>` that belongs to a clone of this repository from one that
 # belongs to another project.
 _SAME_COMMAND = r"(?:\\\n|[^\n;&|`)\]])*"
+# This repository as a URL names it, up to where its name ends: a sibling such as
+# `<name>-plugins` is another project.
+_ASH_REPOSITORY = rf"[/:]{_REPO_NAME}(?:\.git)?(?![\w.-])"
+
+
+def _in_an_ash_command(prefix: str) -> Tuple[str, str]:
+    """The two shapes of `<prefix>v<version>` that belong to a command naming ASH.
+
+    The repository can come before the prefix or after it, in the same command (see
+    _SAME_COMMAND). Each pattern has one group, the text up to and including the `v`;
+    the version number is the rest of the match.
+    """
+    return (
+        rf"({_ASH_REPOSITORY}{_SAME_COMMAND}{prefix}v){_SEMVER}",
+        rf"({prefix}v){_SEMVER}(?={_SAME_COMMAND}{_ASH_REPOSITORY})",
+    )
+
+
+_FORM_PREFIX = {name: prefix for name, prefix, _branch in INSTALL_REF_FORMS}
+
+# For every form of INSTALL_REF_FORMS, the patterns that match a release pin of ASH in
+# it, and no other project's. Each pattern has one group, the text up to and including
+# the `v` that starts the version, and ends with the version number, so `convert`
+# replaces the number with a placeholder (`\g<1>{{VERSION}}`) and the readers of a
+# built page read it (`_ash_pins`) from the same match.
+#
+# The forms that name ASH by themselves (a flake ref, the build flag, the action input)
+# need no more than their prefix. The others are written by every project and are
+# anchored on ASH: `@` bare, or after this repository's name and an optional path (the
+# reusable-workflow form); `--branch` and `refs/tags/` in a command that names this
+# repository; `rev:` in the pre-commit entry whose `repo:` is this repository. Only
+# blank and comment lines may sit between the `repo:` line and its `rev:` line, so the
+# match cannot reach into the next entry. The reasons for each anchor are with the
+# `convert` patterns in find_version_references.
+ASH_PIN_PATTERNS = {
+    "@ (git URL, uses:)": (
+        rf"((?<![\w./-])@v|{_REPO_NAME}(?:\.git)?(?:/[\w./-]+)?@v){_SEMVER}",
+    ),
+    "--branch": _in_an_ash_command(_FORM_PREFIX["--branch"]),
+    "rev:": (
+        (
+            rf"(repo:[ \t]*\S*[/:]{_REPO_NAME}(?:\.git)?/?[\"']?[ \t]*(?:#[^\n]*)?\n"
+            rf"(?:[ \t]*(?:#[^\n]*)?\n)*[ \t]*rev:[ \t]+v){_SEMVER}"
+        ),
+    ),
+    "refs/tags/ (git ls-remote)": _in_an_ash_command(
+        _FORM_PREFIX["refs/tags/ (git ls-remote)"]
+    ),
+    "flake ref": (rf"({_FORM_PREFIX['flake ref']}v){_SEMVER}",),
+    "--ash-revision-to-install": (
+        rf"({_FORM_PREFIX['--ash-revision-to-install']}v){_SEMVER}",
+    ),
+    "ash-version:": (rf"({_FORM_PREFIX['ash-version:']}v){_SEMVER}",),
+}
+
+
+def _ash_pins(text: str) -> List[Tuple[str, str]]:
+    """(form name, release number) of every release pin of ASH in text."""
+    found = []
+    for form, patterns in ASH_PIN_PATTERNS.items():
+        for pattern in patterns:
+            for match in re.finditer(pattern, text):
+                found.append((form, match.string[match.end(1) : match.end()]))
+    return found
 
 
 class VersionTemplateManager:
@@ -125,13 +190,10 @@ class VersionTemplateManager:
         # then stamped ASH's version into that command. The repository can come before
         # the flag or after it, in the same command. The name must end where the
         # repository's does: a sibling such as `<this repository>-plugins` is another
-        # project.
+        # project. The patterns are ASH_PIN_PATTERNS', which the readers of a built
+        # page's pins use too, so what `convert` leaves alone is not read as a pin.
         branch_replacement = rf"\g<1>{self.version_placeholder}"
-        branch_patterns = (
-            rf"([/:]{_REPO_NAME}(?:\.git)?(?![\w.-]){_SAME_COMMAND}--branch v){semver}",
-            rf"(--branch v){semver}(?={_SAME_COMMAND}[/:]{_REPO_NAME}(?:\.git)?(?![\w.-]))",
-        )
-        for branch_pattern in branch_patterns:
+        for branch_pattern in ASH_PIN_PATTERNS["--branch"]:
             if re.search(branch_pattern, content):
                 patterns.append((branch_pattern, branch_replacement))
 
@@ -154,9 +216,7 @@ class VersionTemplateManager:
         # never moved it again. The optional path after the repository name
         # admits that form; a third-party workflow has another repository name
         # in front of its path and is still left alone.
-        at_version_pattern = (
-            rf"((?<![\w./-])@v|{_REPO_NAME}(?:\.git)?(?:/[\w./-]+)?@v){semver}"
-        )
+        (at_version_pattern,) = ASH_PIN_PATTERNS["@ (git URL, uses:)"]
         at_version_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(at_version_pattern, content):
             patterns.append((at_version_pattern, at_version_replacement))
@@ -166,10 +226,7 @@ class VersionTemplateManager:
         # unanchored the pattern also templatized the pin of each other repository a
         # page's example lists. Only blank and comment lines may sit between the
         # `repo:` line and its `rev:` line, so the match cannot reach into the next entry.
-        rev_pattern = (
-            rf"(repo:[ \t]*\S*[/:]{_REPO_NAME}(?:\.git)?/?[\"']?[ \t]*(?:#[^\n]*)?\n"
-            r"(?:[ \t]*(?:#[^\n]*)?\n)*[ \t]*rev:[ \t]+v)" + semver
-        )
+        (rev_pattern,) = ASH_PIN_PATTERNS["rev:"]
         rev_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(rev_pattern, content):
             patterns.append((rev_pattern, rev_replacement))
@@ -202,8 +259,7 @@ class VersionTemplateManager:
         # `ASH_REPO_URL`, so a fork's docs carry a fork's owner. The repository NAME is
         # anchored, because without it a flake ref to an unrelated project -- nixpkgs,
         # say -- would be rewritten to ASH's version.
-        repo = "automated-security-" + "helper"
-        flake_pattern = rf"(github:[\w.-]+/{repo}/v){semver}"
+        (flake_pattern,) = ASH_PIN_PATTERNS["flake ref"]
         flake_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(flake_pattern, content):
             patterns.append((flake_pattern, flake_replacement))
@@ -253,17 +309,18 @@ class VersionTemplateManager:
 
     @staticmethod
     def release_pins(text: str) -> set:
-        """The release numbers that install commands in text pin, in any form."""
-        return set(_RELEASE_PIN.findall(text))
+        """The release numbers that ASH install commands in text pin, in any form.
+
+        Another project's `rev:`, `--branch` or `@v` pin is not one: a pin counts when
+        ASH_PIN_PATTERNS matches it, the same test `convert` applies.
+        """
+        return {version for _form, version in _ash_pins(text)}
 
     @staticmethod
     def forms_pinning_a_release(text: str) -> List[str]:
-        """The names of the install-command forms that pin a release in text."""
-        return [
-            name
-            for name, prefix, _branch in INSTALL_REF_FORMS
-            if re.search(prefix + r"v\d+\.\d+\.\d+", text)
-        ]
+        """The names of the install-command forms that pin an ASH release in text."""
+        pinned = {form for form, _version in _ash_pins(text)}
+        return [name for name, _prefix, _branch in INSTALL_REF_FORMS if name in pinned]
 
     @staticmethod
     def branch_ref_pattern(form: str, branch: str) -> "re.Pattern[str]":
