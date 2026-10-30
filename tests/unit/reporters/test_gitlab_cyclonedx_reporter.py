@@ -73,7 +73,10 @@ def test_components_have_package_manager(reporter, model):
         if p["name"] == "gitlab:dependency_scanning:package_manager:name"
     ]
     assert len(pms) == 1
-    assert pms[0]["value"] == "npm"
+    # The lockfile names the manager: the component's input file is yarn.lock
+    # (test_components_have_input_file_path), so the generic "npm" of its
+    # ecosystem is refined to "yarn".
+    assert pms[0]["value"] == "yarn"
 
 
 def test_components_have_input_file_path(reporter, model):

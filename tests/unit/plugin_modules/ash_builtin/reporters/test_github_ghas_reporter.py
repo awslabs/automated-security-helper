@@ -960,6 +960,7 @@ class TestBuildSlimResults:
         assert [r["ruleId"] for r in slim] == ["UNDECLARED"]
         assert rules_map["UNDECLARED"] == {
             "id": "UNDECLARED",
+            "component": "",
             "security_severity": None,
             "default_level": None,
             "short_description": None,
