@@ -733,9 +733,13 @@ def strip_client_scanner_exclusions(
     )
     warnings: List[str] = list(getattr(config, "_resolution_warnings", None) or [])
     for spec in SCANNER_EXCLUSION_OPTIONS:
-        operator_entries = _operator_entries(spec, operator_documents, base)
         sections = _scanner_sections(config, spec.scanner)
         read_key = _section_the_scanner_reads(sections, spec.scanner)
+        # The operator's values are read from the one section spelling the
+        # scanner reads in the merged config, as the client's are below.
+        operator_entries = _operator_entries(
+            spec, operator_documents, base, read_key=read_key
+        )
         for key, section in sections:
             options = _options_of(section)
             if options is None:
@@ -768,7 +772,9 @@ def strip_client_scanner_exclusions(
                             f"{operator_spelling!r}."
                         )
                 elif value:
-                    trusted = _operator_ignore_file(spec, operator_documents, base)
+                    trusted = _operator_ignore_file(
+                        spec, operator_documents, base, read_key=read_key
+                    )
                     _set(options, spec.option, trusted)
                     if not is_read:
                         warnings.append(
@@ -1138,6 +1144,7 @@ def _operator_entries(
     spec: ScannerExclusionOption,
     operator_documents: List[Tuple[Path, Any]],
     base: Any,
+    read_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The entries the operator supplied for ``spec``, by pattern: defaults, the trusted config, operator files.
 
@@ -1174,24 +1181,42 @@ def _operator_entries(
     if isinstance(read, dict):
         take(_get(read.get("options") or {}, spec.option), None)
     for path, document in operator_documents:
-        for value in _document_values(document, spec):
+        for value in _document_values(document, spec, read_key):
             take(value, Path(path).parent)
     return found
 
 
-def _document_values(document: Any, spec: ScannerExclusionOption) -> List[Any]:
+def _document_values(
+    document: Any, spec: ScannerExclusionOption, read_key: Optional[str] = None
+) -> List[Any]:
     """The values one chain file writes at ``spec``'s option, in the file's order.
 
-    Each value under a ``scanners`` section the scanner reads, then each value a
-    ``patch`` operation of the file writes there (``config_sources.PATCH_KEY``):
-    a file of the chain may carry its changes as JSON-patch operations, and
-    ``documents`` holds the file as written. Read from ``scanners`` alone
-    before, an operator file's patched-in entries were nobody's: a client entry
-    repeating one was moved out and marked, and a client copy of one the
-    operator let expire revived it. An operation that appends one entry (its
-    pointer ends in ``-`` or an index) is returned as a one-entry list.
+    Each value under the one ``scanners`` section the scanner reads, then each
+    value a ``patch`` operation of the file writes there
+    (``config_sources.PATCH_KEY``): a file of the chain may carry its changes as
+    JSON-patch operations, and ``documents`` holds the file as written. Read
+    from ``scanners`` alone before, an operator file's patched-in entries were
+    nobody's: a client entry repeating one was moved out and marked, and a
+    client copy of one the operator let expire revived it. An operation that
+    appends one entry (its pointer ends in ``-`` or an index) is returned as a
+    one-entry list.
+
+    ``read_key`` is the section key the scanner reads in the merged config
+    (``_section_the_scanner_reads``); with none given, it is chosen among the
+    file's own spellings by the same rule. Every other spelling of the scanner's
+    name is a section the scanner never reads, so a value written there is not
+    the operator's exclusion: collected from every spelling before, an
+    ``ignore_file`` under a section trivy never reads was restored as the
+    operator's, while a client value under such a spelling counts as nothing.
+
+    An operation may also write the option from above: the whole ``options``
+    object, the whole scanner section, or the whole ``scanners`` map. Only an
+    operation at the option itself, or at one of its entries, was read before,
+    so an operator's entries written by such an operation were credited to no
+    one, which is the shape this reader exists to credit.
     """
     from automated_security_helper.config.ash_config import (
+        _lookup_spelling,
         plugin_key_lookup_names,
         reduced_plugin_name,
     )
@@ -1200,15 +1225,12 @@ def _document_values(document: Any, spec: ScannerExclusionOption) -> List[Any]:
     if not isinstance(document, dict):
         return []
     wanted = reduced_plugin_name(spec.scanner)
-    values: List[Any] = []
+
+    def names_the_scanner(key: Any) -> bool:
+        return key == spec.scanner or wanted in plugin_key_lookup_names(str(key))
+
     scanners = document.get("scanners")
-    if isinstance(scanners, dict):
-        for key, section in scanners.items():
-            if key != spec.scanner and wanted not in plugin_key_lookup_names(str(key)):
-                continue
-            options = _options_of(section) if isinstance(section, dict) else None
-            if isinstance(options, dict):
-                values.append(_get(options, spec.option))
+    operations: List[Tuple[List[str], Any]] = []
     ops = document.get(PATCH_KEY)
     for op in ops if isinstance(ops, list) else []:
         if not isinstance(op, dict) or "value" not in op:
@@ -1222,10 +1244,57 @@ def _document_values(document: Any, spec: ScannerExclusionOption) -> List[Any]:
             part.replace("~1", "/").replace("~0", "~")
             for part in pointer[1:].split("/")
         ]
+        operations.append((segments, op["value"]))
+
+    if read_key is None:
+        spellings: List[str] = []
+        if isinstance(scanners, dict):
+            spellings.extend(str(key) for key in scanners)
+        for segments, value in operations:
+            if segments == ["scanners"] and isinstance(value, dict):
+                spellings.extend(str(key) for key in value)
+            elif len(segments) >= 2 and segments[0] == "scanners":
+                spellings.append(segments[1])
+        candidates = [
+            (key, None) for key in dict.fromkeys(spellings) if names_the_scanner(key)
+        ]
+        read_key = _section_the_scanner_reads(candidates, spec.scanner)
+    if read_key is None:
+        return []
+
+    def is_read(key: Any) -> bool:
+        return key == read_key or _lookup_spelling(str(key)) == _lookup_spelling(
+            read_key
+        )
+
+    def option_of_section(section: Any) -> List[Any]:
+        options = _options_of(section) if isinstance(section, dict) else None
+        return [_get(options, spec.option)] if isinstance(options, dict) else []
+
+    values: List[Any] = []
+    if isinstance(scanners, dict):
+        for key, section in scanners.items():
+            if is_read(key):
+                values.extend(option_of_section(section))
+    for segments, value in operations:
+        if segments == ["scanners"]:
+            if isinstance(value, dict):
+                for key, section in value.items():
+                    if is_read(key):
+                        values.extend(option_of_section(section))
+            continue
+        if len(segments) < 2 or segments[0] != "scanners" or not is_read(segments[1]):
+            continue
+        if len(segments) == 2:
+            values.extend(option_of_section(value))
+            continue
+        if len(segments) == 3 and segments[2] == "options":
+            if isinstance(value, dict):
+                values.append(_get(value, spec.option))
+            continue
         located = exclusion_option_at(segments)
         if located is None or located[0] != spec:
             continue
-        value = op["value"]
         values.append([value] if located[1] and not isinstance(value, list) else value)
     return values
 
@@ -1256,6 +1325,7 @@ def _operator_ignore_file(
     spec: ScannerExclusionOption,
     operator_documents: List[Tuple[Path, Any]],
     base: Any,
+    read_key: Optional[str] = None,
 ) -> Optional[str]:
     """The ``ignore_file`` the option holds once a delivered value is taken out of it.
 
@@ -1270,7 +1340,7 @@ def _operator_ignore_file(
 
     found: Optional[str] = None
     for path, document in operator_documents:
-        for value in _document_values(document, spec):
+        for value in _document_values(document, spec, read_key):
             text = _path_text(value)
             if text:
                 found = anchored_path(text, Path(path).parent, expands_variables=False)

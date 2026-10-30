@@ -248,6 +248,67 @@ def test_a_client_copy_of_an_operator_entry_takes_the_operators_expiration(tmp_p
     assert config._client_scanner_exclusions == []
 
 
+_SHARED_OPERATOR_ENTRY = {"path": "shared", "reason": "op", "expiration": "2000-01-01"}
+
+
+@pytest.mark.parametrize(
+    ("pointer", "value"),
+    [
+        ("/scanners/bandit/options", {"excluded_paths": [_SHARED_OPERATOR_ENTRY]}),
+        ("/scanners/bandit", {"options": {"excluded_paths": [_SHARED_OPERATOR_ENTRY]}}),
+        (
+            "/scanners",
+            {"bandit": {"options": {"excluded_paths": [_SHARED_OPERATOR_ENTRY]}}},
+        ),
+    ],
+    ids=["options", "section", "scanners"],
+)
+def test_an_operator_entry_patched_in_above_the_option_is_the_operators(
+    tmp_path, pointer, value
+):
+    """An operator file may write its exclusions as a patch operation at the
+    options object, the scanner section or the whole scanners map. Only an
+    operation at the option itself was read, so such an entry was credited to
+    no one: a client copy of it was moved out and recorded as the client's,
+    and the operator's expiration was lost."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="shared", reason="client says"),
+    ]
+    operator = {"patch": [{"op": "add", "path": pointer, "value": value}]}
+
+    _strip(config, {}, operator, tmp_path)
+
+    kept = config.scanners.bandit.options.excluded_paths
+    assert [entry.path for entry in kept] == ["shared"]
+    assert kept[0].expiration == "2000-01-01"
+    assert kept[0].reason == "op"
+    assert config._client_scanner_exclusions == []
+
+
+def test_an_operator_entry_under_a_spelling_the_scanner_never_reads_is_not_the_operators(
+    tmp_path,
+):
+    """The merged config reads ``bandit``; a ``bandit-scanner`` section is one
+    the scanner never reads. An operator entry written there was still
+    collected as the operator's, so a client copy of it stayed in the option
+    with the operator's expiration instead of being moved out and recorded."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="shared", reason="client says"),
+    ]
+    operator = {
+        "scanners": {
+            "bandit-scanner": {"options": {"excluded_paths": [_SHARED_OPERATOR_ENTRY]}}
+        }
+    }
+
+    _strip(config, {}, operator, tmp_path)
+
+    assert _bandit_paths(config) == []
+    assert [item.pattern for item in config._client_scanner_exclusions] == ["shared"]
+
+
 def test_an_entry_under_a_spelling_the_scanner_never_reads_is_not_recorded(tmp_path):
     config = AshConfig()
     extra = config.scanners.__pydantic_extra__
