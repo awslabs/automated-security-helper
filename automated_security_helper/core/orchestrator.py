@@ -4,12 +4,14 @@
 import json
 import shutil
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     Annotated,
     Any,
     Callable,
     Dict,
+    Iterator,
     List,
     Literal,
     Optional,
@@ -80,8 +82,13 @@ from automated_security_helper.utils.error_text import (
     carry_environment_values,
     config_environment_values,
     error_text,
+    text_without_values,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import (
+    hold_environ,
+    release_environ,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 from automated_security_helper.utils.output_dir_links import (
@@ -546,6 +553,7 @@ class ASHScanOrchestrator(BaseModel):
             for name, value in (
                 ("config_path", self.config_path),
                 ("config_overrides", self.config_overrides),
+                ("config_base_gate", self.config_base_gate),
                 ("untrusted_config", self.untrusted_config),
                 ("client_overrides", self.client_overrides),
                 ("remote_client", self.remote_client),
@@ -579,6 +587,40 @@ class ASHScanOrchestrator(BaseModel):
         elif not isinstance(self.output_dir, Path):
             self.output_dir = Path(self.output_dir)
 
+        if self.config is not None:
+            # initialize() assigns the configuration it resolves, or adopts
+            # resolved_config, over this field, so a config given here was read
+            # by nothing. A caller that built one wants resolved_config.
+            ASH_LOGGER.warning(
+                "The config passed to the constructor is not used: initialize() "
+                "resolves its own configuration, or adopts resolved_config when "
+                "one is given. Pass the configuration as resolved_config."
+            )
+
+    def __copy__(self) -> "ASHScanOrchestrator":
+        return self._with_its_own_run_id(super().__copy__())
+
+    def __deepcopy__(
+        self, memo: Optional[Dict[int, Any]] = None
+    ) -> "ASHScanOrchestrator":
+        return self._with_its_own_run_id(super().__deepcopy__(memo))
+
+    @staticmethod
+    def _with_its_own_run_id(
+        copied: "ASHScanOrchestrator",
+    ) -> "ASHScanOrchestrator":
+        """A copy of an orchestrator that has not been initialized gets a run id
+        of its own.
+
+        ``model_copy`` copies the private attributes, so two copies of one
+        template shared a run id, wrote their scan sets to the same file under
+        it and read each other's list back. An initialized orchestrator holds
+        the engine and the context built under its id, so its copy keeps it.
+        """
+        if not copied._initialized:
+            copied._run_id = new_run_id()
+        return copied
+
     def initialize(self) -> None:
         """Perform all filesystem I/O and engine setup.
 
@@ -591,8 +633,29 @@ class ASHScanOrchestrator(BaseModel):
         # tree for this as well as for execute_scan; see
         # utils/subprocess_utils.scanning_tree. Scoped to the call, so nothing is
         # left registered if it raises.
-        with scanning_tree(self.source_dir):
+        with scanning_tree(self.source_dir), self._offline_scope():
             self._initialize()
+
+    @contextmanager
+    def _offline_scope(self) -> Iterator[None]:
+        """Hold ``ASH_OFFLINE=YES`` for the body when this run is offline.
+
+        ``offline`` was a declared field that nothing read: the environment
+        variable is the one thing the plugins read (core/constants.is_offline_mode),
+        so a caller that built the orchestrator with ``offline=True`` and set no
+        variable of its own ran every scanner online. The hold is counted
+        (utils/process_env.hold_environ), so it nests with the CLI's and the
+        workspace's own, and the variable returns to what it was when the last
+        holder leaves.
+        """
+        if not self.offline:
+            yield
+            return
+        hold_environ("ASH_OFFLINE", "YES")
+        try:
+            yield
+        finally:
+            release_environ("ASH_OFFLINE")
 
     def _initialize(self) -> None:
         ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
@@ -602,6 +665,11 @@ class ASHScanOrchestrator(BaseModel):
                 "Using the configuration supplied by the caller; skipping resolution"
             )
             config = self.resolved_config
+            if self.severity_threshold_restriction is not None:
+                # The restriction below rewrites thresholds in place. The caller
+                # keeps this object, and a workspace hands the same one to more
+                # than one scan, so the scan works on a copy of its own.
+                config = config.model_copy(deep=True)
         else:
             # Before resolution: resolve_config answers a missing named file
             # with the default config, and this scan must not run on it.
@@ -675,11 +743,10 @@ class ASHScanOrchestrator(BaseModel):
         # settles them otherwise.
         try:
             self._prepare_output_dir()
+            self._apply_metadata()
         except BaseException:
             self.settle_previous_results(restore=True)
             raise
-
-        self._apply_metadata()
 
         self._initialized = True
         ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
@@ -753,13 +820,23 @@ class ASHScanOrchestrator(BaseModel):
             # encoding read it as cp1252 on Windows and failed, or re-saved it as
             # mojibake, on non-ASCII text in the findings.
             with warning_of_dropped_keys(self.existing_results_path) as context:
+                try:
+                    existing_text = Path(self.existing_results_path).read_text(
+                        encoding="utf-8"
+                    )
+                except (OSError, UnicodeDecodeError) as e:
+                    # The same refusal execute_scan gives for a file that goes
+                    # away or cannot be read after this point, not a bare OSError
+                    # that no entry point reads as one.
+                    values = config_environment_values(config)
+                    raise ASHValidationError(
+                        f"Failed to load existing results: {error_text(e, values)}"
+                    ) from e
                 asharp_model = AshAggregatedResults.model_validate_json(
-                    Path(self.existing_results_path).read_text(encoding="utf-8"),
+                    existing_text,
                     context=context,
                 )
-            # A field the record holds as an environment reference it cannot
-            # hold takes this run's own value (config/recorded_config.py).
-            take_own_values(asharp_model.ash_config, config)
+            self._adopt_this_runs_values(asharp_model, config)
             exec_engine_params = {"asharp_model": asharp_model}
 
         # Under this scan's run id, so the context records its directories on
@@ -799,6 +876,9 @@ class ASHScanOrchestrator(BaseModel):
                 verbose=self.verbose,
                 debug=self.debug,
                 python_based_plugins_only=self.python_based_plugins_only,
+                # Declared on this class, documented as the pre-commit and CI
+                # mode, and read by the engine, which was never told.
+                simple_mode=self.simple_mode,
                 ash_plugin_modules=self.ash_plugin_modules,
                 plugin_module_names=self.plugin_module_names,
                 output_formats=[f.value for f in self.output_formats] or None,
@@ -990,9 +1070,31 @@ class ASHScanOrchestrator(BaseModel):
         except OutputDirLinkRefused as refusal:
             raise ASHValidationError(str(refusal)) from refusal
 
-    def _restrict_severity_threshold(self, config: AshConfig, restriction: str) -> None:
+    def _adopt_this_runs_values(
+        self, loaded: AshAggregatedResults, config: AshConfig
+    ) -> None:
+        """Make the config recorded in loaded results this run's own.
+
+        A field the record holds as an environment reference it cannot hold
+        takes this run's value (config/recorded_config.py), and the severity
+        restriction the caller asked for applies to the recorded thresholds as it
+        does to *config*: the report over saved results gates on what the saved
+        config says, so a restriction that reached only ``self.config`` did not
+        change whether the run it was asked for passed.
+        """
+        take_own_values(loaded.ash_config, config)
+        restriction = self.severity_threshold_restriction
+        if restriction is not None and loaded.ash_config is not None:
+            self._restrict_severity_threshold(
+                loaded.ash_config, restriction, announce=False
+            )
+
+    def _restrict_severity_threshold(
+        self, config: AshConfig, restriction: str, announce: bool = True
+    ) -> None:
         """Run at the stricter of ``restriction`` and every configured threshold
-        of *config*, the run's resolved configuration (``self.config``).
+        of *config*, the run's resolved configuration (``self.config``) or the
+        one saved results record.
 
         The global threshold and each scanner's own one, which decides that
         scanner's verdict when it is set (the executor's determine_status and
@@ -1000,31 +1102,60 @@ class ASHScanOrchestrator(BaseModel):
         Tightening only the global one left a repository's bandit CRITICAL in
         charge of bandit when the client asked for HIGH. A scanner with no
         threshold of its own follows the global one, so it is left unset.
-        """
-        from automated_security_helper.utils.severity_ladder import stricter_of
 
-        requested = restriction.upper()
+        A restriction that is not a ladder value is refused: ``stricter_of`` ranks
+        an unknown string after CRITICAL, so it won every comparison and was
+        written into the configuration as the threshold. Blank means none.
+        ``announce`` False leaves the log lines to the first application.
+
+        Raises:
+            ASHValidationError: *restriction* names no threshold.
+        """
+        from automated_security_helper.utils.severity_ladder import (
+            normalize_threshold,
+            stricter_of,
+        )
+
+        if not restriction.strip():
+            return
+        requested = normalize_threshold(restriction)
+        if requested is None:
+            raise ASHValidationError(
+                f"The severity threshold {restriction!r} is not one of ALL, LOW, "
+                "MEDIUM, HIGH or CRITICAL."
+            )
+        values = config_environment_values(config)
+
+        def shown(text: object) -> str:
+            # A ladder word prints as it is. Anything else in a threshold field
+            # can be a value the configuration read from the environment.
+            if normalize_threshold(text) is not None:
+                return str(text)
+            return text_without_values(str(text), values)
+
         settings = config.global_settings
         configured = settings.severity_threshold
         effective = stricter_of(configured, requested)
         if effective != configured:
-            ASH_LOGGER.info(
-                f"Severity threshold {effective} requested, stricter than the "
-                f"configured {configured}; the scan uses {effective}"
-            )
+            if announce:
+                ASH_LOGGER.info(
+                    f"Severity threshold {shown(effective)} requested, stricter "
+                    f"than the configured {shown(configured)}; the scan uses "
+                    f"{shown(effective)}"
+                )
             # The configured threshold is a ladder value, and stricter_of ranks
             # every value that is not one after CRITICAL, so it is replaced only
             # by a stricter ladder value: the cast names that and checks nothing.
             settings.severity_threshold = cast(
                 Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"], effective
             )
-        elif requested != configured:
+        elif requested != configured and announce:
             ASH_LOGGER.info(
                 f"Severity threshold {requested} requested, looser than "
-                f"the configured {configured}; the configured threshold stands"
+                f"the configured {shown(configured)}; the configured threshold stands"
             )
 
-        for name, options in self._scanner_options():
+        for name, options in self._scanner_options(config):
             own = (
                 options.get("severity_threshold")
                 if isinstance(options, dict)
@@ -1036,11 +1167,12 @@ class ASHScanOrchestrator(BaseModel):
                 # Not a threshold the ladder can rank (False, 0, a list): left
                 # as the scanner's own setting for its validation to refuse,
                 # never handed to stricter_of, which reads strings.
-                ASH_LOGGER.warning(
-                    f"{name}'s severity_threshold is not a ladder value "
-                    f"({type(own).__name__}); the requested {requested} is not "
-                    f"applied to it"
-                )
+                if announce:
+                    ASH_LOGGER.warning(
+                        f"{name}'s severity_threshold is not a ladder value "
+                        f"({type(own).__name__}); the requested {requested} is not "
+                        f"applied to it"
+                    )
                 continue
             if not own.strip():
                 # An empty string is set, not unset: the executor reads it as
@@ -1053,14 +1185,54 @@ class ASHScanOrchestrator(BaseModel):
                 tightened = stricter_of(own, requested)
             if tightened == own:
                 continue
-            ASH_LOGGER.info(
-                f"Severity threshold {requested} requested, stricter than "
-                f"{name}'s configured {own}; {name} uses {tightened}"
-            )
+            if announce:
+                ASH_LOGGER.info(
+                    f"Severity threshold {requested} requested, stricter than "
+                    f"{name}'s configured {shown(own)}; {name} uses "
+                    f"{shown(tightened)}"
+                )
             if isinstance(options, dict):
                 options["severity_threshold"] = tightened
             else:
                 options.severity_threshold = tightened
+
+    def _record_config_warnings(self, results: Any) -> None:
+        """Add this run's config resolution warnings to *results*' validation
+        checkpoints, each once.
+
+        Over saved results the checkpoints already hold the warnings the saved
+        run recorded, so an unconditional append doubled every one that this
+        run's resolution also gave, and a warning that repeated in the list was
+        appended each time. A checkpoint is the same one when its type and
+        message are.
+        """
+        if self.config is None or not self.config._resolution_warnings:
+            return
+        checkpoints = results.validation_checkpoints
+        recorded = {
+            str(checkpoint.get("message"))
+            for checkpoint in checkpoints
+            if isinstance(checkpoint, dict)
+            and checkpoint.get("type") == "config_warning"
+        }
+        for warning in self.config._resolution_warnings:
+            if str(warning) in recorded:
+                continue
+            recorded.add(str(warning))
+            checkpoints.append(
+                {
+                    "type": "config_warning",
+                    "severity": "warning",
+                    "message": warning,
+                    "metadata": {
+                        "source": "config_resolution",
+                        "impact": (
+                            "A configuration input was not applied as "
+                            "written; the message says which and how."
+                        ),
+                    },
+                }
+            )
 
     def _writes_results_file(self, phases: List[str]) -> bool:
         """Whether this run owns the results file: a scan ran (not a report over
@@ -1108,9 +1280,15 @@ class ASHScanOrchestrator(BaseModel):
                 f"Could not save the scan's results after the failure: {error_text(e)}"
             )
 
-    def _scanner_options(self) -> List[Tuple[str, Any]]:
-        """Each configured scanner's ``options``: declared scanners and extra ones."""
-        segment = getattr(self.config, "scanners", None)
+    def _scanner_options(self, config: Any) -> List[Tuple[str, Any]]:
+        """Each scanner's ``options`` in *config*: declared scanners and extra ones.
+
+        Of the configuration it is given, not ``self.config``: the severity
+        restriction is applied to the saved results' recorded config as well, and
+        read ``self.config`` (None in a caller that passes its own) whatever it
+        was handed.
+        """
+        segment = getattr(config, "scanners", None)
         if segment is None:
             return []
         entries: List[Tuple[str, Any]] = [
@@ -1221,7 +1399,12 @@ class ASHScanOrchestrator(BaseModel):
             # If we're using existing results, only ensure the reports directory
             # exists. A plain mkdir: a link there was refused at the top of this
             # method, and the existing-results load refuses one made since.
-            if self.existing_results_path and self.existing_results_path.exists():
+            #
+            # By whether a path was given, not whether the file is there: a file
+            # that has gone fails to load with that said, instead of the scan
+            # falling through to the branch that clears the working directories
+            # and then reporting a scan that never ran.
+            if self.existing_results_path is not None:
                 self.output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories. initialize has made
@@ -1310,7 +1493,11 @@ class ASHScanOrchestrator(BaseModel):
             # (_build_engine), in this thread and in the scanner pool's copies
             # of its context. source_dir is the scanned tree for the phases' tool
             # lookups too (utils/subprocess_utils.scanning_tree).
-            with scanning_tree(self.source_dir), derived_roots_scope(self._run_id):
+            with (
+                scanning_tree(self.source_dir),
+                derived_roots_scope(self._run_id),
+                self._offline_scope(),
+            ):
                 results = self._execute_scan(phases)
             raise_if_cancelled()
         except BaseException:
@@ -1370,8 +1557,11 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
-            # If existing results path is provided, load the model from it
-            if self.existing_results_path and self.existing_results_path.exists():
+            # If existing results path is provided, load the model from it. By
+            # whether a path was given: a file that has gone fails below as
+            # results that could not be loaded, where a scan would otherwise
+            # start and the phases would find no model.
+            if self.existing_results_path is not None:
                 if "inspect" in phases:
                     # The inspect phase writes analysis/, which initialize did not
                     # check for a report over existing results.
@@ -1401,10 +1591,9 @@ class ASHScanOrchestrator(BaseModel):
                     asharp_model.validation_checkpoints = without_run_records(
                         asharp_model.validation_checkpoints
                     )
-                    # A field the record holds as an environment reference it
-                    # cannot hold takes this run's own value
-                    # (config/recorded_config.py).
-                    take_own_values(asharp_model.ash_config, self.config)
+                    # This run's own values and severity restriction over the
+                    # recorded config (config/recorded_config.py).
+                    self._adopt_this_runs_values(asharp_model, self.config)
 
                     # Update the execution engine's model
                     if self.execution_engine is not None and hasattr(
@@ -1450,6 +1639,13 @@ class ASHScanOrchestrator(BaseModel):
                 ensure_reports_dir(self.output_dir.joinpath("reports"))
             # Only identify files to scan if we're not using existing results
             elif "convert" in phases or "scan" in phases:
+                # Before the walk: a scan with no engine walked the whole tree and
+                # wrote its scan set before the check below said it had nothing to
+                # run the phases with.
+                if self.execution_engine is None:
+                    raise RuntimeError(
+                        "Execution engine was never initialized; cannot execute scan phases."
+                    )
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
                 exclusions: Dict[str, Any] = {}
                 links_not_scanned: List[Dict[str, str]] = []
@@ -1489,6 +1685,13 @@ class ASHScanOrchestrator(BaseModel):
                     f"Found {len(self.source_scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified."
                 )
 
+            # Before the phases, so the report phase writes them: they were added
+            # to the returned model after the reports were out, so no report said
+            # that a configuration input had not been applied as written.
+            held_model = getattr(self.execution_engine, "_asharp_model", None)
+            if isinstance(held_model, AshAggregatedResults):
+                self._record_config_warnings(held_model)
+
             try:
                 # Execute all phases.
                 #
@@ -1519,23 +1722,10 @@ class ASHScanOrchestrator(BaseModel):
                 self._write_results_after_failure(phases)
                 raise
 
-            # Add config resolution warnings to validation checkpoints
-            if self.config is not None and self.config._resolution_warnings:
-                for warning in self.config._resolution_warnings:
-                    asharp_model_results.validation_checkpoints.append(
-                        {
-                            "type": "config_warning",
-                            "severity": "warning",
-                            "message": warning,
-                            "metadata": {
-                                "source": "config_resolution",
-                                "impact": (
-                                    "A configuration input was not applied as "
-                                    "written; the message says which and how."
-                                ),
-                            },
-                        }
-                    )
+            # Again on what the phases returned: a model the engine replaced
+            # while it ran did not get the first pass, and one that did is not
+            # given its warnings twice.
+            self._record_config_warnings(asharp_model_results)
 
             # The results file, once, after every phase: the scan phase used to
             # write it at its own end, before the engine's changed-files
@@ -1545,7 +1735,14 @@ class ASHScanOrchestrator(BaseModel):
             # returns; a direct caller of the orchestrator keeps this one as the
             # final file. Not for a report over existing results, which rewrites
             # nothing of the scan it reports on.
+            #
+            # A cancel that arrived while the last phase ran is acted on before
+            # the write, not after: execute_scan checks once more when this
+            # returns, and a file written in between stayed behind for a later
+            # --use-existing to take for a finished scan when no previous results
+            # were set aside to be put back.
             if self._writes_results_file(phases):
+                raise_if_cancelled()
                 if isinstance(asharp_model_results, AshAggregatedResults):
                     ASH_LOGGER.debug(
                         f"Saving AshAggregatedResults to {self.output_dir}"
