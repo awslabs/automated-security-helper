@@ -7,7 +7,8 @@ Each test here was red before its fix:
 - a message is prose: its cap is on the whole text, written after its escapes,
   so a long paragraph is shown whole and a message of controls stays bounded;
 - a read excerpt's line numbers are the view's own layout, right-aligned, and do
-  not count toward the cap on the source;
+  not count toward the cap on the source; their width is measured before the
+  excerpt is masked, since a masked line has no number;
 - a file name recorded in its record form is read back before the file is opened;
 - a missing rule id is shown as N/A, a message given by id alone as nothing, a null
   justification as "Not specified", never the word None;
@@ -41,6 +42,7 @@ from automated_security_helper.cli.inspect import inspect_findings_app as tui
 from automated_security_helper.cli.inspect.inspect_findings_app import (
     MESSAGE_CHARS,
     SNIPPET_LINE_CHARS,
+    SNIPPET_LINE_CHARS_KEY,
     SNIPPET_TRUNCATED,
     FindingsExplorerApp,
     extract_findings,
@@ -446,3 +448,34 @@ async def test_the_view_says_which_file_read_lines_came_from(tmp_path):
 
     read_from = str(Path(root) / "src" / "a.py")
     assert any(n.startswith("Read from ") and read_from in n for n in notices), notices
+
+
+@pytest.mark.asyncio
+async def test_the_shown_line_width_is_measured_before_the_lines_are_masked(tmp_path):
+    """A masker replaces a line whole, its number and marker included; measured
+    after it, the first line's missing prefix read as a prefix of its whole
+    length and widened every line of the excerpt."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "a.py").write_text(
+        "".join(f"v{n} = {n}\n" for n in range(1, 13)), encoding="utf-8"
+    )
+    finding = _finding(file="a.py", line=10)
+
+    def mask_first_line(_file, _first, excerpt):
+        return "\n".join(["(masked)"] + excerpt.split("\n")[1:])
+
+    app = FindingsExplorerApp(
+        [finding],
+        config_path=tmp_path / ASH_DEFAULT_CONFIG_FILE_NAME,
+        scan_root=root,
+        mask_source=mask_first_line,
+    )
+    async with app.run_test(size=(160, 50)) as pilot:
+        await _settle(pilot)
+        await pilot.press("v")
+        await _settle(pilot)
+
+    # Lines 5 to 12 are shown, so every number is two wide: "   5: " is six.
+    assert finding["code_snippet"].startswith("(masked)\n")
+    assert finding[SNIPPET_LINE_CHARS_KEY] == SNIPPET_LINE_CHARS + len("   5: ")

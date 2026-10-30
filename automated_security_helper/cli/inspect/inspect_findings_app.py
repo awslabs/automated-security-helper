@@ -1727,10 +1727,16 @@ class FindingsExplorerApp(App):
         a line a secret finding reports is replaced whole, its display prefix
         included. The finding records where the lines came from
         (SNIPPET_READ_FROM) and the width of each shown line (SNIPPET_LINE_CHARS_KEY)
-        for the detail view."""
+        for the detail view.
+
+        The width is read from the excerpt as read, before the masking: measured
+        after it, a masked first line, which has no number or marker, read as a
+        prefix of its whole length, and every line of the excerpt was allowed
+        that many characters more than the cap."""
         if not finding.get("code_snippet"):
             excerpt = _source_excerpt(finding, self.scan_root)
             if excerpt is not None:
+                line_chars = _excerpt_line_chars(excerpt)
                 if self.mask_source is not None:
                     try:
                         first = max(1, int(finding["line"]) - _CONTEXT_LINES)
@@ -1740,7 +1746,7 @@ class FindingsExplorerApp(App):
                 # Cut after the masking, so a value that straddles the cap is
                 # masked whole (_line_text).
                 finding["code_snippet"] = _cut_excerpt_lines(excerpt)
-                finding[SNIPPET_LINE_CHARS_KEY] = _excerpt_line_chars(excerpt)
+                finding[SNIPPET_LINE_CHARS_KEY] = line_chars
                 finding[SNIPPET_READ_FROM] = str(
                     _source_path(finding.get("file"), self.scan_root)
                 )
