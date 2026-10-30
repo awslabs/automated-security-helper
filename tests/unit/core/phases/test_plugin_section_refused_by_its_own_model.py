@@ -236,8 +236,10 @@ def test_a_converter_section_its_model_refuses_fails_that_converter(tmp_path):
         for name, row in results.converter_results.items()
         if row.failure is not None
     }
-    assert list(failures) == ["JupyterConverter"], failures
-    assert "ValidationError" in failures["JupyterConverter"], failures
-    assert "install_timeout" in failures["JupyterConverter"], failures
+    # Keyed by the name the operator wrote in the config, as a converter that
+    # was built is, not by the class name.
+    assert list(failures) == ["jupyter"], failures
+    assert "ValidationError" in failures["jupyter"], failures
+    assert "install_timeout" in failures["jupyter"], failures
     assert results.converter_results["archive"].failure is None
-    assert [row.name for row in incomplete_converters(results)] == ["JupyterConverter"]
+    assert [row.name for row in incomplete_converters(results)] == ["jupyter"]
