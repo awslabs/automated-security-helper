@@ -9,6 +9,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -30,12 +31,64 @@ def _repoints(current: Any, value: Any) -> bool:
     Compared as paths rather than by ``!=`` because an assignment may spell the
     current value as a ``str`` while the stored value is a ``Path``, and those never
     compare equal; a plugin writing the same directory back would otherwise look
-    like a move.
+    like a move. Two spellings that resolve to one directory (a relative and an
+    absolute one, or one through a symlink) are not a move either.
     """
     try:
-        return Path(current) != Path(value)
+        current_path, value_path = Path(current), Path(value)
     except TypeError:
         return True
+    if current_path == value_path:
+        return False
+    try:
+        return current_path.resolve() != value_path.resolve()
+    except (OSError, RuntimeError):
+        return True
+
+
+def _shown(value: Any) -> str:
+    """``value`` as a POSIX path for a message, or its type when it is no path."""
+    try:
+        return Path(value).as_posix()
+    except TypeError:
+        return f"a value of type {type(value).__name__}"
+
+
+def _register_output_dir(holder: Any, output_dir: Any) -> None:
+    """Register ``output_dir`` with fs_guard for as long as ``holder`` lives.
+
+    ASH's own writes below the output directory never follow a symlink, with
+    or without a sandbox: the default output directory is inside the scanned
+    tree. See utils/sandbox/fs_guard.py:open_for_write. Released when the holder
+    is collected, or when the scan that made it ends (fs_guard.run_roots), so a
+    process that runs many scans does not keep every output directory it ever
+    had registered. Raises OutputLinkRefused for a directory that is a link.
+    """
+    if output_dir is None:
+        return
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        register_writable_root,
+        release_with_holder,
+    )
+
+    release_with_holder(holder, register_writable_root(output_dir))
+
+
+def _raise_link_refusal(error: ValidationError) -> None:
+    """Raise the output-directory link refusal ``error`` wraps, if that is all it holds.
+
+    A validator that raises OutputLinkRefused, a ValueError, reaches the caller of
+    ``PluginContext(...)`` as a pydantic ValidationError, which a caller handling
+    OutputDirLinkRefused (the exit-3 refusal) never sees.
+    """
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+
+    errors = error.errors()
+    if len(errors) != 1:
+        return
+    refused = (errors[0].get("ctx") or {}).get("error")
+    if isinstance(refused, OutputDirLinkRefused):
+        raise refused from error
 
 
 # One PluginContext is built per run and handed to every converter, scanner and
@@ -126,17 +179,29 @@ class PluginContext(BaseModel):
     # _resolve_forward_refs at the bottom of this module.
     def __init__(self, /, **data: Any) -> None:
         _resolve_forward_refs()
-        super().__init__(**data)
+        try:
+            super().__init__(**data)
+        except ValidationError as error:
+            _raise_link_refusal(error)
+            raise
 
     @classmethod
     def model_validate(cls, *args: Any, **kwargs: Any) -> "PluginContext":
         _resolve_forward_refs()
-        return super().model_validate(*args, **kwargs)
+        try:
+            return super().model_validate(*args, **kwargs)
+        except ValidationError as error:
+            _raise_link_refusal(error)
+            raise
 
     @classmethod
     def model_validate_json(cls, *args: Any, **kwargs: Any) -> "PluginContext":
         _resolve_forward_refs()
-        return super().model_validate_json(*args, **kwargs)
+        try:
+            return super().model_validate_json(*args, **kwargs)
+        except ValidationError as error:
+            _raise_link_refusal(error)
+            raise
 
     @classmethod
     def model_rebuild(cls, *args: Any, **kwargs: Any) -> bool | None:
@@ -202,16 +267,24 @@ class PluginContext(BaseModel):
         if name == "work_dir":
             current = getattr(self, name, None)
             if current is not None and _repoints(current, value):
-                warnings.warn(
-                    f"Assigning to PluginContext.work_dir replaces {Path(current).as_posix()} "
-                    f"with {Path(value).as_posix()} for every plugin in this run, not "
+                message = (
+                    f"Assigning to PluginContext.work_dir replaces {_shown(current)} "
+                    f"with {_shown(value)} for every plugin in this run, not "
                     f"just for the one making the assignment. A plugin that needs its "
                     f"own directory should read the results_dir its base class derives "
                     f"under the shared work_dir. This assignment is deprecated and "
-                    f"will be refused in a future release.",
-                    DeprecationWarning,
-                    stacklevel=2,
+                    f"will be refused in a future release."
                 )
+                warnings.warn(message, DeprecationWarning, stacklevel=2)
+                # Python hides a DeprecationWarning raised for code outside
+                # __main__ unless a filter turns it on, and a plugin is such code,
+                # so the warning alone leaves an ordinary run silent.
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.warning(message, extra={"markup": False})
+        if name == "output_dir" and isinstance(value, Path):
+            # Before the store: a directory that is a link is refused, not kept.
+            _register_output_dir(self, value)
         super().__setattr__(name, value)
         if name in ("work_dir", "output_dir", "workspace_output_dir", "config"):
             _record_derived_roots_on_config(self)
@@ -222,8 +295,11 @@ class PluginContext(BaseModel):
         ``model_copy`` runs neither the validators nor ``__setattr__``, the two
         places a built context records its output, work and workspace output
         directories (``_record_derived_roots_on_config``), so a copy that
-        moves one of them would leave it unrecorded."""
+        moves one of them would leave it unrecorded. The copy registers its own
+        output directory with fs_guard as well, so it stays guarded when the
+        original is collected or the copy moves the directory."""
         copied = super().model_copy(update=update, deep=deep)
+        _register_output_dir(copied, getattr(copied, "output_dir", None))
         _record_derived_roots_on_config(copied)
         return copied
 
@@ -235,28 +311,17 @@ class PluginContext(BaseModel):
     ) -> "PluginContext":
         """A context built without validation, its directories recorded on its
         configuration as a validated one's are (``model_construct`` skips the
-        validators that record them)."""
+        validators that record them), and its output directory registered with
+        fs_guard."""
         built = super().model_construct(_fields_set, **values)
+        _register_output_dir(built, getattr(built, "output_dir", None))
         _record_derived_roots_on_config(built)
         return built
 
     @model_validator(mode="after")
     def _guard_output_dir(self) -> "PluginContext":
-        # ASH's own writes below the output directory never follow a symlink, with
-        # or without a sandbox: the default output directory is inside the
-        # scanned tree. See utils/sandbox/fs_guard.py:open_for_write.
-        # Registered for as long as this context exists: released when it is
-        # collected, or when the scan that made it ends (fs_guard.run_roots), so a
-        # process that runs many scans does not keep every output directory it ever
-        # had registered.
-        output_dir = getattr(self, "output_dir", None)
-        if output_dir is not None:
-            from automated_security_helper.utils.sandbox.fs_guard import (
-                register_writable_root,
-                release_with_holder,
-            )
-
-            release_with_holder(self, register_writable_root(output_dir))
+        # Registered for as long as this context exists; see _register_output_dir.
+        _register_output_dir(self, getattr(self, "output_dir", None))
         return self
 
     @model_validator(mode="after")
