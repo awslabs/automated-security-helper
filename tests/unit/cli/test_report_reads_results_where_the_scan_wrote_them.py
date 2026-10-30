@@ -317,3 +317,25 @@ def test_a_closed_stdout_pipe_is_not_a_render_error(tmp_path, monkeypatch):
 
     assert result.exit_code == 1, result.output
     assert "Error generating report" not in result.output, result.output
+
+
+def test_a_broken_pipe_inside_the_reporter_is_a_failed_run(tmp_path, monkeypatch):
+    """The closed-stdout handler wrapped the reporter too, so a BrokenPipeError
+    raised inside a reporter (a subprocess pipe, a socket the remote end closed)
+    exited 1 in silence, as if the reader had closed stdout; it is a failed run,
+    with its cause on stderr."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+        text_reporter,
+    )
+
+    results = _write_results(tmp_path / "out")
+
+    def closed(self, model):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(text_reporter.TextReporter, "report", closed)
+
+    result = _report("--format", "text", "--output-dir", str(results.parent))
+
+    assert result.exit_code == 1, result.output
+    assert "Error generating report" in result.output, result.output

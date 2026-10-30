@@ -1081,27 +1081,36 @@ def report_command(
                     _non_json_report_text(report_content, exc),
                 )
                 raise typer.Exit(1)
-        _write_report(
-            report_content,
-            report_format,
-            pretty=(color and not os.environ.get("NO_COLOR")),
-        )
+        try:
+            _write_report(
+                report_content,
+                report_format,
+                pretty=(color and not os.environ.get("NO_COLOR")),
+            )
+        except BrokenPipeError:
+            # The reader closed stdout (`ash report | head`): the report was
+            # rendered, nobody is reading, and nothing is wrong with it. No
+            # error line, and stdout is pointed at the null device so the
+            # interpreter's own flush at exit does not report the pipe again;
+            # the descriptor opened for it is closed once dup2 has copied it.
+            # Exit 1, as Python's own guidance for a closed pipe: the output did
+            # not all arrive. Only the write is read this way: a BrokenPipeError
+            # from inside a reporter (a subprocess pipe, a socket the remote end
+            # closed) is a failed run, reported by the handler below.
+            try:
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                try:
+                    os.dup2(devnull, sys.stdout.fileno())
+                finally:
+                    os.close(devnull)
+            except (OSError, ValueError, AttributeError):
+                pass
+            raise typer.Exit(1)
     except typer.Exit:
         # click.exceptions.Exit subclasses RuntimeError, so the handler below
         # would otherwise catch the deliberate exit above and relabel it
         # "Error generating report: 1".
         raise
-    except BrokenPipeError:
-        # The reader closed stdout (`ash report | head`): the report was
-        # rendered, nobody is reading, and nothing is wrong with it. No error
-        # line, and stdout is pointed at the null device so the interpreter's
-        # own flush at exit does not report the pipe again. Exit 1, as Python's
-        # own guidance for a closed pipe: the output did not all arrive.
-        try:
-            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-        except (OSError, ValueError, AttributeError):
-            pass
-        raise typer.Exit(1)
     except Exception as e:
         _print_error("[red]Error generating report: {}[/red]", e)
         if debug:
