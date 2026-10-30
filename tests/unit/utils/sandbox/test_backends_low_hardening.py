@@ -727,6 +727,7 @@ def test_an_operators_ssl_cert_file_is_readable(layout, monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
     pem = layout.home / "certs.pem"
     pem.write_text("")
+    monkeypatch.setenv("SSL_CERT_FILE", str(pem))
     policy = _policy(layout, system_trust_roots=True)
 
     plan = SandboxExecBackend().plan(["/bin/true"], {"SSL_CERT_FILE": str(pem)}, policy)
@@ -734,6 +735,25 @@ def test_an_operators_ssl_cert_file_is_readable(layout, monkeypatch):
         profile = plan.argv[plan.argv.index("-p") + 1]
         assert plan.env["SSL_CERT_FILE"] == str(pem)
         assert f'(allow file-read* (literal "{_real(pem).as_posix()}"))' in profile
+    finally:
+        plan.run_cleanup()
+
+
+def test_an_ssl_cert_file_that_is_not_the_operators_opens_nothing(layout, monkeypatch):
+    """A value the spawn's environment carries from elsewhere is passed through,
+    and the profile grants no read for it where it denies reads."""
+    monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
+    pem = layout.home / ".ssh" / "id_rsa"
+    pem.parent.mkdir()
+    pem.write_text("")
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    policy = _policy(layout, system_trust_roots=True)
+
+    plan = SandboxExecBackend().plan(["/bin/true"], {"SSL_CERT_FILE": str(pem)}, policy)
+    try:
+        profile = plan.argv[plan.argv.index("-p") + 1]
+        assert plan.env["SSL_CERT_FILE"] == str(pem)
+        assert f'(allow file-read* (literal "{_real(pem).as_posix()}"))' not in profile
     finally:
         plan.run_cleanup()
 
