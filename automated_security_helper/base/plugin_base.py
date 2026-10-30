@@ -1198,14 +1198,14 @@ class PluginBase(UVToolMixin, BaseModel):
                     )
 
                     shown = shown_uv_output(
-                        response["stderr"],
+                        stderr_text,
                         values,
                         plugin_inputs=plugin_inputs,
                         tool_name=self.command,
                         limit=None,
                     )
                 else:
-                    shown = shown_tool_stderr(response["stderr"], values)
+                    shown = shown_tool_stderr(stderr_text, values)
                 self.errors.extend(shown.splitlines())
 
         # Accumulate worst exit code across multiple subprocess calls.
