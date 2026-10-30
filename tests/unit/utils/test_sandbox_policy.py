@@ -3558,6 +3558,11 @@ def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
         # launch started no child).
         _uv_python_kwargs=dict,
         _uv_failure_after_the_start=lambda *a, **k: None,
+        # The dispatch passes the plugin's --with dependencies to the run (None:
+        # none) and, in its error arms, redacts its own lines through the run's
+        # text layer; a real plugin inherits both from the mixin.
+        _get_tool_with_dependencies=lambda: None,
+        _shown_run_text=lambda text, record_values, record_inputs: text,
     )
 
     with mock_patch(
