@@ -3146,6 +3146,145 @@ def test_an_output_named_like_the_resource_does_not_take_the_finding(
     assert region.startLine == 5, region
 
 
+def _declaration_line(template, resource_log_id, response):
+    lines = template.read_text(encoding="utf-8").splitlines()
+    declaration = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if line.strip().startswith(f"{resource_log_id}:")
+        or line.strip().startswith(f'"{resource_log_id}":')
+    )
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    return declaration, region.startLine, lines
+
+
+def test_a_folded_description_reading_resources_does_not_open_the_section_early(
+    cdk_doubles, tmp_path, outdir
+):
+    """``Description: >`` folds its text over indented lines, one of which reads
+    ``Resources: ...``. That line matches the section key's shape at indent 2 and the
+    next top-level key ends the section at once, so a reader that stops at the first
+    candidate finds no key line and falls to the first mention, the Output's line.
+    The real section, shallower and later, is where the declaration is."""
+    template = tmp_path / "folded.yaml"
+    template.write_text(
+        "Description: >\n"
+        "  Resources: one bucket, one queue.\n"
+        "Outputs:\n"
+        "  MyDataBucket:\n"
+        "    Value: !Ref MyDataBucket\n"
+        "Resources:\n"
+        "  MyDataBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: placeholder-name\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 7, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_a_resources_key_nested_under_metadata_does_not_open_the_section_early(
+    cdk_doubles, tmp_path, outdir
+):
+    """The same shape with a real nested key: ``Metadata: {Resources: {...}}`` is legal,
+    and its section holds no logical id; the top-level section after it does."""
+    template = tmp_path / "nested.yaml"
+    template.write_text(
+        "Metadata:\n"
+        "  Resources:\n"
+        "    Note: a nested key named like the section\n"
+        "Outputs:\n"
+        "  MyDataBucket:\n"
+        "    Value: !Ref MyDataBucket\n"
+        "Resources:\n"
+        "  MyDataBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: placeholder-name\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 8, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_json_whose_object_opens_on_the_resources_line_is_read_as_a_section(
+    cdk_doubles, tmp_path, outdir
+):
+    """``{"Resources": {`` on line 1: the brace before the key hid the section, and the
+    finding went to an earlier ``Ref`` of the id inside another resource."""
+    template = tmp_path / "brace-first.json"
+    template.write_text(
+        '{"Resources": {\n'
+        '  "MyDataBucketPolicy": {\n'
+        '    "Type": "AWS::S3::BucketPolicy",\n'
+        '    "Properties": {"Bucket": {"Ref": "MyDataBucket"}}\n'
+        "  },\n"
+        '  "MyDataBucket": {\n'
+        '    "Type": "AWS::S3::Bucket",\n'
+        '    "Properties": {"BucketName": "placeholder-name"}\n'
+        "  }\n"
+        "}}\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 6, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_unindented_json_falls_back_to_the_whole_file_key_search_not_the_first_mention(
+    cdk_doubles, tmp_path, outdir
+):
+    """Every key sits at the section's own depth, so the section reads as empty; the
+    whole-file shallowest-key search that ran before the section bound existed is what
+    places the finding, not the first mention (the ``Ref`` on line 5)."""
+    template = tmp_path / "flat.json"
+    template.write_text(
+        "{\n"
+        '"Resources": {\n'
+        '"MyDataBucketPolicy": {\n'
+        '"Type": "AWS::S3::BucketPolicy",\n'
+        '"Properties": {"Bucket": {"Ref": "MyDataBucket"}}\n'
+        "},\n"
+        '"MyDataBucket": {\n'
+        '"Type": "AWS::S3::Bucket",\n'
+        '"Properties": {"BucketName": "placeholder-name"}\n'
+        "}\n"
+        "}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 7, lines
+    assert start_line == declaration, (start_line, lines)
+
+
 def test_a_json_output_named_like_the_resource_does_not_take_the_finding(
     cdk_doubles, tmp_path, outdir
 ):

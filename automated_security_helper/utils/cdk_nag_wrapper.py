@@ -155,48 +155,70 @@ def _resource_location(
     the section key itself. Within the section, when several key lines match (a property
     with the same spelling nested under another resource), the shallowest one is the
     declaration, since resources sit at the shallowest depth of the section and
-    CloudFormation forbids two logical ids spelling the same. A template whose Resources
-    section cannot be found, or has no key line for the id, falls back to the first
-    word-boundary mention, as before, so the location is never lost outright.
+    CloudFormation forbids two logical ids spelling the same.
+
+    The section is found by its key line, and a template can hold more than one line
+    that looks like it: a folded ``Description: >`` whose text reads ``Resources: ...``, a
+    ``Resources`` key nested under ``Mappings`` or ``Metadata``. The shallowest such key
+    is tried first, and a candidate whose section holds no key line for the id does not
+    end the search; the next candidate is tried. A JSON template that opens with
+    ``{"Resources": {`` on its first line is a section too. When no section yields the
+    declaration (unindented multi-line JSON, where every key sits at the section's own
+    depth and the section reads as empty), the whole file is searched for the shallowest
+    key line, the search that ran before the section bound existed, so those templates
+    keep the location they had. Only when no key line matches anywhere does the first
+    word-boundary mention stand in, so the location is never lost outright.
     """
     key_pattern = re.compile(
         r"^(\s*)[\"']?" + re.escape(resource_log_id) + r"[\"']?\s*:"
     )
-    section_pattern = re.compile(r"^(\s*)[\"']?Resources[\"']?\s*:")
+    # ``{`` before the key admits JSON whose object opens on the same line as its key.
+    section_pattern = re.compile(r"^(\s*)\{?\s*[\"']?Resources[\"']?\s*:")
     any_key_pattern = re.compile(r"^(\s*)[\"']?[A-Za-z0-9_.-]+[\"']?\s*:")
-    # The Resources section: from its key line to the next key line at the same or a
-    # shallower indent (the next top-level section, or JSON's closing brace).
-    section_indent: int | None = None
-    section_lines: List[tuple[int, str]] = []
+
+    def shallowest_key(lines: List[tuple[int, str]]) -> tuple[int, int] | None:
+        best: tuple[int, int, int] | None = None
+        for i, line_str in lines:
+            match = key_pattern.match(line_str)
+            if match is None:
+                continue
+            indent = len(match.group(1))
+            if best is None or indent < best[0]:
+                column = match.start() + indent
+                # Past an opening quote, so the column names the id's first character.
+                if line_str[column : column + 1] in ('"', "'"):
+                    column += 1
+                best = (indent, i, column)
+        return None if best is None else (best[1], best[2])
+
+    def section_body(start: int, section_indent: int) -> List[tuple[int, str]]:
+        # From the line after the key to the next key line at the same or a shallower
+        # indent (the next top-level section), or a closing bracket there (JSON).
+        body: List[tuple[int, str]] = []
+        for i, line_str in enumerate(template_lines[start:], start=start + 1):
+            stripped = line_str.strip()
+            if not stripped:
+                continue
+            indent = len(line_str) - len(line_str.lstrip())
+            if indent <= section_indent and (
+                any_key_pattern.match(line_str) or stripped[0] in "}]"
+            ):
+                break
+            body.append((i, line_str))
+        return body
+
+    candidates: List[tuple[int, int]] = []
     for i, line_str in enumerate(template_lines, start=1):
-        if section_indent is None:
-            section_match = section_pattern.match(line_str)
-            if section_match is not None:
-                section_indent = len(section_match.group(1))
-            continue
-        stripped = line_str.strip()
-        if not stripped:
-            continue
-        indent = len(line_str) - len(line_str.lstrip())
-        if indent <= section_indent and (
-            any_key_pattern.match(line_str) or stripped[0] in "}]"
-        ):
-            break
-        section_lines.append((i, line_str))
-    best: tuple[int, int, int] | None = None
-    for i, line_str in section_lines:
-        match = key_pattern.match(line_str)
-        if match is None:
-            continue
-        indent = len(match.group(1))
-        if best is None or indent < best[0]:
-            column = match.start() + indent
-            # Past an opening quote, so the column names the id's first character.
-            if line_str[column : column + 1] in ('"', "'"):
-                column += 1
-            best = (indent, i, column)
-    if best is not None:
-        return best[1], best[2]
+        section_match = section_pattern.match(line_str)
+        if section_match is not None:
+            candidates.append((len(section_match.group(1)), i))
+    for section_indent, start in sorted(candidates):
+        found = shallowest_key(section_body(start, section_indent))
+        if found is not None:
+            return found
+    found = shallowest_key(list(enumerate(template_lines, start=1)))
+    if found is not None:
+        return found
     mention_pattern = re.compile(
         r"(?<![a-zA-Z0-9_])" + re.escape(resource_log_id) + r"(?![a-zA-Z0-9_])"
     )
