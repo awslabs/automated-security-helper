@@ -10,6 +10,10 @@ with no runs.
 * A converter's refusals are added to the first run. A log with no runs had
   nowhere to put them, so they were left out and nothing said so; such a log
   now carries one run of ASH's own with the invocations.
+* That run carried ``results: []``, which SARIF 2.1.0 3.14.23 reads as "the
+  tool ran and found nothing"; a consumer that closes open alerts on a
+  zero-result analysis would act on it. The run exists because no scan produced
+  a run, so it carries no ``results`` array at all.
 """
 
 import json
@@ -68,7 +72,8 @@ def test_refusals_get_a_run_of_ashs_own_when_the_log_has_none(reporter):
     doc = json.loads(reporter.report(model))
 
     (run,) = doc["runs"]
-    assert run["results"] == []
+    # No results array: an empty one would say the scan ran and found nothing.
+    assert "results" not in run
     assert "Automated Security Helper" in run["tool"]["driver"]["name"]
     (invocation,) = run["invocations"]
     assert invocation["executionSuccessful"] is False

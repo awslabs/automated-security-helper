@@ -130,11 +130,18 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
 
 
 def _run_carrying(invocations: List[Any]) -> Run:
-    """A run of ASH's own, with no results, carrying *invocations*.
+    """A run of ASH's own, with no ``results`` array, carrying *invocations*.
 
     For a log that has no run to attach a converter's refusals to. The driver is
     ASH, which is what ran the converters; a reader sees which inputs were not
     scanned without a scanner's run to find them on.
+
+    ``results`` is left unset, so the ``exclude_unset`` dump omits it. SARIF
+    2.1.0 3.14.23 reads an empty ``results`` array as "the tool ran and found
+    nothing", and a consumer that closes a tool's open alerts on a zero-result
+    analysis would act on that; this run exists because no scan produced a run,
+    so an absent array, which the standard reads as "no results were
+    produced", is the true statement.
     """
     return Run(
         tool=Tool(
@@ -144,7 +151,6 @@ def _run_carrying(invocations: List[Any]) -> Run:
                 organization="Amazon Web Services",
             )
         ),
-        results=[],
         invocations=list(invocations),
     )
 
