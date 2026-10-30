@@ -50,9 +50,14 @@ def root(tmp_path, monkeypatch) -> Iterator[Path]:
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     sessions.reset_default_registry_for_tests()
     sessions._ended_while_scanning.clear()
+    # The sweep warns once per session id until a pass removes it, and the
+    # latch is module state: a failure this test leaves behind would silence
+    # the next test's warning for the same id.
+    sessions._sweep_failures_warned.clear()
     yield workspace
     sessions.reset_default_registry_for_tests()
     sessions._ended_while_scanning.clear()
+    sessions._sweep_failures_warned.clear()
 
 
 @pytest.fixture
