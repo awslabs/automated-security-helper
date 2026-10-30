@@ -916,11 +916,17 @@ def _could_be_a_template(text: str) -> bool:
     text carries a CloudFormation marker, which a damaged template keeps and a Helm
     chart or a tsconfig.json does not.
 
-    The marker answers only "could this be a damaged template": the reason a
-    SKIPPED target gives, and the tool-absent check's MISSING. It never makes a file
-    a failed target; that takes a structure read (:func:`_has_top_level_resources`).
-    A file whose root is a sequence could not be one, marker or not
-    (:func:`_root_is_a_sequence`).
+    For a file read as UTF-8 whose parse failed, the marker answers only "could
+    this be a damaged template": the reason a SKIPPED target gives, and the
+    tool-absent check's MISSING. It does not make such a file a failed target; that
+    takes a structure read (:func:`_has_top_level_resources`). A file ASH could not
+    decode is the exception: a candidate that is not UTF-8
+    (:func:`undecodable_candidate_is_a_template`) and a UTF-16 or UTF-32 template
+    written without a byte-order mark (below) are failed targets whenever any
+    reading of them is a template by this check, marker or structure, because the
+    question there is whether a template was lost to the decode, not whether a
+    damaged one is present. A file whose root is a sequence could not be a template,
+    marker or not (:func:`_root_is_a_sequence`).
 
     A UTF-16 or UTF-32 file written without a byte-order mark decodes as UTF-8
     without an error (NUL is valid UTF-8), so its text arrives here NUL-interleaved
