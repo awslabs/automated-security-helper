@@ -6,6 +6,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Literal, TYPE_CHECKING
 
+from pydantic import field_validator
+
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -26,6 +28,7 @@ from automated_security_helper.utils.converter_refusals import (
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
     coverage_shortfall_text,
+    refuse_negative_limit,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
     markdown_workspace_section,
@@ -38,6 +41,24 @@ from automated_security_helper.utils.terminal_text import (
 from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 
 
+#: What GitHub acts on without Markdown syntax: an ``@name`` (or ``@org/team``)
+#: notifies that user or team, and a bare URL becomes a link. Neither is
+#: preceded by a word character, so an e-mail address is left alone. A URL
+#: stops at whitespace, ``<``, ``>``, a backtick or a pipe, and does not end on
+#: the punctuation that closes the sentence or bracket it sits in.
+_AUTO_REFERENCE = re.compile(
+    r"(?<![\w.+-])@[A-Za-z0-9][A-Za-z0-9_-]*(?:/[A-Za-z0-9_.-]+)?"
+    r"|(?:https?|ftp)://[^\s<>|`]*[^\s<>|`.,;:!?)\]}'\"]"
+    r"|www\.[^\s<>|`]*[^\s<>|`.,;:!?)\]}'\"]"
+)
+
+
+def _markdown_escaped(text: str) -> str:
+    """*text* with ``<``, ``>`` and ``&`` as entities and each Markdown syntax
+    character backslash-escaped."""
+    return re.sub(r"([\\`*_\[\]{}#|~])", r"\\\1", html.escape(text, quote=False))
+
+
 def _text(value) -> str:
     """Keep project and scanner-controlled text literal in GitHub Markdown.
 
@@ -47,9 +68,67 @@ def _text(value) -> str:
     as the numeric entity ``&#x27;``, and the backslash pass would turn its
     ``#`` into ``\\#``, which Markdown does not read as an entity, so a reader
     would see the characters ``&#x27;``.
+
+    An ``@name`` and a bare URL are Markdown-neutral text that GitHub still
+    acts on where a summary is posted as a comment (it notifies the user and
+    links the URL), so each is put in a code span, as the converter refusals
+    already are.
     """
-    return re.sub(
-        r"([\\`*_\[\]{}#|~])", r"\\\1", html.escape(str(value or ""), quote=False)
+    text = str(value or "")
+    parts = []
+    end = 0
+    for match in _AUTO_REFERENCE.finditer(text):
+        parts.append(_markdown_escaped(text[end : match.start()]))
+        parts.append(markdown_code_span(match.group()))
+        end = match.end()
+    parts.append(_markdown_escaped(text[end:]))
+    return "".join(parts)
+
+
+def _html_literal(value) -> str:
+    """*value* as HTML text, with an ``@name`` and a bare URL in ``<code>``.
+
+    For a line that Markdown does not parse (the collapsible ``<summary>``),
+    where GitHub still turns an ``@name`` into a mention and a URL into a link.
+    """
+    text = str(value or "")
+    parts = []
+    end = 0
+    for match in _AUTO_REFERENCE.finditer(text):
+        parts.append(html.escape(text[end : match.start()]))
+        parts.append(f"<code>{html.escape(match.group())}</code>")
+        end = match.end()
+    parts.append(html.escape(text[end:]))
+    return "".join(parts)
+
+
+#: Leading blanks of a line, and a line's first character when that starts a
+#: list item, a rule or a setext underline once the blanks are gone.
+_LINE_INDENT = re.compile(r"^[ \t]+", re.MULTILINE)
+_LINE_BLOCK_MARKER = re.compile(r"^(?:([-+=])|(\d+)([.)]))", re.MULTILINE)
+
+
+def _block_text(value) -> str:
+    """Multi-line scanner text kept literal, line starts included.
+
+    :func:`_text` leaves a line break alone, so each line of a multi-line
+    description began a Markdown block of its own: four blanks made a code
+    block that showed the inserted backslashes, ``-`` or ``1.`` made a list,
+    and a ``---`` or ``===`` line made a rule or turned the line above it into
+    a heading. Indentation is kept as non-breaking spaces and the marker
+    character is backslash-escaped.
+    """
+    escaped = _text(value)
+    escaped = _LINE_INDENT.sub(
+        lambda match: "&nbsp;" * len(match.group().expandtabs(4)), escaped
+    )
+    return _LINE_BLOCK_MARKER.sub(
+        lambda match: (
+            f"\\{match.group(1)}"
+            if match.group(1)
+            else f"{match.group(2)}\\{match.group(3)}"
+        ),
+        escaped,
     )
 
 
@@ -173,6 +252,58 @@ def coverage_markdown(summary: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _inputs_not_scanned_markdown(model: "AshAggregatedResults") -> list[str]:
+    """The "Inputs not scanned" section as lines, or ``[]`` when there is none."""
+    not_scanned = inputs_not_scanned(model)
+    if not not_scanned:
+        return []
+    lines = [
+        "### Inputs not scanned",
+        "",
+        (
+            "These scanners found these inputs and did not scan them. That "
+            "no finding is reported for one says nothing about it:"
+        ),
+        "",
+    ]
+    # The path is the scanned repository's: shown in a code span its own
+    # backticks cannot close, with its newlines and other control
+    # characters escaped, so it cannot start a line of its own.
+    # The scanner's name and the reason are the results file's text
+    # too: shown on one line, then kept literal in Markdown.
+    for scanner_name, path, reason in not_scanned:
+        lines.append(
+            f"- **{_text(shown_on_one_line(scanner_name))}**: "
+            f"{markdown_code_span(path)}: {_text(shown_on_one_line(reason))}"
+        )
+    lines.append("")
+    return lines
+
+
+def _converter_refusals_markdown(model: "AshAggregatedResults") -> list[str]:
+    """The "Converter inputs not scanned" section as lines, or ``[]``.
+
+    An archive refused for an extraction limit is marked, because it is what
+    failed the completeness gate; the rest are reported only.
+    """
+    refusals = converter_refusals(model)
+    if not refusals:
+        return []
+    return [
+        "### Converter inputs not scanned",
+        "",
+        (
+            "These inputs were not read by their converter, so their contents "
+            "were not scanned:"
+        ),
+        "",
+        # Each in a code span: a name such as @someone or a URL would
+        # otherwise become a mention or a link where the summary is posted.
+        *markdown_summary_lines(refusals),
+        "",
+    ]
+
+
 class MarkdownReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Markdown reporter."""
 
@@ -183,6 +314,11 @@ class MarkdownReporterConfigOptions(ReporterOptionsBase):
     top_hotspots_limit: int = 10
     use_collapsible_details: bool = True
     compact: bool = False
+
+    @field_validator("max_detailed_findings", "top_hotspots_limit")
+    @classmethod
+    def _limits_are_not_negative(cls, value: int) -> int:
+        return refuse_negative_limit(value)
 
 
 class MarkdownReporterConfig(ReporterPluginConfigBase):
@@ -276,6 +412,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
 
         parts.append(coverage_markdown(summary))
 
+        # Inputs no scanner or converter read are coverage facts, as the notices
+        # above are: they stay in the report whatever its detail options say.
+        # With the summary on they follow the summary's own sections.
+        not_scanned_lines = _inputs_not_scanned_markdown(model)
+        refusal_lines = _converter_refusals_markdown(model)
+
         if options.include_summary:
             hotspots = emitter.get_top_hotspots(options.top_hotspots_limit)
             if hotspots:
@@ -302,28 +444,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 )
                 parts.append("")
 
-            # Same placement and reasoning: a SKIPPED or PASSED row cannot say which input
-            # went unexamined (npm-audit's lockfiles offline, for one).
-            not_scanned = inputs_not_scanned(model)
-            if not_scanned:
-                parts.append("### Inputs not scanned")
-                parts.append("")
-                parts.append(
-                    "These scanners found these inputs and did not scan them. That "
-                    "no finding is reported for one says nothing about it:"
-                )
-                parts.append("")
-                # The path is the scanned repository's: shown in a code span its own
-                # backticks cannot close, with its newlines and other control
-                # characters escaped, so it cannot start a line of its own.
-                # The scanner's name and the reason are the results file's text
-                # too: shown on one line, then kept literal in Markdown.
-                for scanner_name, path, reason in not_scanned:
-                    parts.append(
-                        f"- **{_text(shown_on_one_line(scanner_name))}**: "
-                        f"{markdown_code_span(path)}: {_text(shown_on_one_line(reason))}"
-                    )
-                parts.append("")
+            # A SKIPPED or PASSED row cannot say which input went unexamined
+            # (npm-audit's lockfiles offline, for one).
+            parts.extend(not_scanned_lines)
 
             # The stale-content-database section is written once, by
             # coverage_markdown above, which every report carries whatever its
@@ -331,23 +454,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             # message as literal text. A second copy here wrote the same records
             # again, raw.
 
-            # Same placement and reasoning again: a converter input that was not read
-            # never reaches a scanner, so no scanner row can say it went unscanned.
-            # An archive refused for an extraction limit is marked, because it is
-            # what failed the completeness gate; the rest are reported only.
-            refusals = converter_refusals(model)
-            if refusals:
-                parts.append("### Converter inputs not scanned")
-                parts.append("")
-                parts.append(
-                    "These inputs were not read by their converter, so their contents "
-                    "were not scanned:"
-                )
-                parts.append("")
-                # Each in a code span: a name such as @someone or a URL would
-                # otherwise become a mention or a link where the summary is posted.
-                parts.extend(markdown_summary_lines(refusals))
-                parts.append("")
+            # Same reasoning again: a converter input that was not read never
+            # reaches a scanner, so no scanner row can say it went unscanned.
+            parts.extend(refusal_lines)
+        else:
+            parts.extend(not_scanned_lines)
+            parts.extend(refusal_lines)
 
         if options.include_findings_table:
             findings = emitter.get_findings_overview()
@@ -396,17 +508,17 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     # The one-line values stay on their line; the message and
                     # the snippet keep their own lines.
                     if options.use_collapsible_details:
-                        rule_id = html.escape(
-                            str(shown_on_one_line(finding["rule_id"]))
-                        )
-                        location = html.escape(
-                            str(shown_on_one_line(finding["location"]))
-                        )
+                        # Each is one shown line: a blank line in the summary
+                        # would end the HTML block and spill the rest into the
+                        # document. A name such as @someone or a URL stays literal.
+                        severity = _html_literal(shown_on_one_line(finding["severity"]))
+                        rule_id = _html_literal(shown_on_one_line(finding["rule_id"]))
+                        location = _html_literal(shown_on_one_line(finding["location"]))
                         parts.extend(
                             [
                                 "<details>",
                                 (
-                                    f"<summary>{index}. {html.escape(finding['severity'])} · "
+                                    f"<summary>{index}. {severity} · "
                                     f"{rule_id} · {location}</summary>\n"
                                 ),
                             ]
@@ -427,7 +539,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                                 f"- {label}: {_text(shown_on_one_line(finding[key]))}"
                             )
                     parts.append(
-                        f"\n{_text(shown_not_obeyed(finding['description']))}\n"
+                        f"\n{_block_text(shown_not_obeyed(finding['description']))}\n"
                     )
                     if finding.get("code_snippet"):
                         parts.extend(

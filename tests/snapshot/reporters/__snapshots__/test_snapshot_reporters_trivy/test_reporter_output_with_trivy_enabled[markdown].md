@@ -63,7 +63,7 @@ Installed Version: 4.17.20
 Vulnerability CVE-2021-23337
 Severity: HIGH
 Fixed Version: 4.17.21
-Link: \[CVE-2021-23337\](https://avd.aquasec.com/nvd/cve-2021-23337)
+Link: \[CVE-2021-23337\](`https://avd.aquasec.com/nvd/cve-2021-23337`)
 
 </details>
 
@@ -82,7 +82,7 @@ Installed Version: 4.17.20
 Vulnerability CVE-2026-4800
 Severity: HIGH
 Fixed Version: 4.18.0
-Link: \[CVE-2026-4800\](https://avd.aquasec.com/nvd/cve-2026-4800)
+Link: \[CVE-2026-4800\](`https://avd.aquasec.com/nvd/cve-2026-4800`)
 
 </details>
 
@@ -101,7 +101,7 @@ Installed Version: 2.19.1
 Vulnerability CVE-2018-18074
 Severity: HIGH
 Fixed Version: 2.20.0
-Link: \[CVE-2018-18074\](https://avd.aquasec.com/nvd/cve-2018-18074)
+Link: \[CVE-2018-18074\](`https://avd.aquasec.com/nvd/cve-2018-18074`)
 
 </details>
 
@@ -120,7 +120,7 @@ Installed Version: 4.17.20
 Vulnerability CVE-2020-28500
 Severity: MEDIUM
 Fixed Version: 4.17.21
-Link: \[CVE-2020-28500\](https://avd.aquasec.com/nvd/cve-2020-28500)
+Link: \[CVE-2020-28500\](`https://avd.aquasec.com/nvd/cve-2020-28500`)
 
 </details>
 
@@ -139,7 +139,7 @@ Installed Version: 4.17.20
 Vulnerability CVE-2025-13465
 Severity: MEDIUM
 Fixed Version: 4.17.23
-Link: \[CVE-2025-13465\](https://avd.aquasec.com/nvd/cve-2025-13465)
+Link: \[CVE-2025-13465\](`https://avd.aquasec.com/nvd/cve-2025-13465`)
 
 </details>
 
@@ -158,7 +158,7 @@ Installed Version: 4.17.20
 Vulnerability CVE-2026-2950
 Severity: MEDIUM
 Fixed Version: 4.18.0
-Link: \[CVE-2026-2950\](https://avd.aquasec.com/nvd/cve-2026-2950)
+Link: \[CVE-2026-2950\](`https://avd.aquasec.com/nvd/cve-2026-2950`)
 
 </details>
 
@@ -177,7 +177,7 @@ Installed Version: 2.19.1
 Vulnerability CVE-2023-32681
 Severity: MEDIUM
 Fixed Version: 2.31.0
-Link: \[CVE-2023-32681\](https://avd.aquasec.com/nvd/cve-2023-32681)
+Link: \[CVE-2023-32681\](`https://avd.aquasec.com/nvd/cve-2023-32681`)
 
 </details>
 
@@ -196,7 +196,7 @@ Installed Version: 2.19.1
 Vulnerability CVE-2024-35195
 Severity: MEDIUM
 Fixed Version: 2.32.0
-Link: \[CVE-2024-35195\](https://avd.aquasec.com/nvd/cve-2024-35195)
+Link: \[CVE-2024-35195\](`https://avd.aquasec.com/nvd/cve-2024-35195`)
 
 </details>
 
@@ -215,7 +215,7 @@ Installed Version: 2.19.1
 Vulnerability CVE-2024-47081
 Severity: MEDIUM
 Fixed Version: 2.32.4
-Link: \[CVE-2024-47081\](https://avd.aquasec.com/nvd/cve-2024-47081)
+Link: \[CVE-2024-47081\](`https://avd.aquasec.com/nvd/cve-2024-47081`)
 
 </details>
 
@@ -234,7 +234,7 @@ Installed Version: 2.19.1
 Vulnerability CVE-2026-25645
 Severity: MEDIUM
 Fixed Version: 2.33.0
-Link: \[CVE-2026-25645\](https://avd.aquasec.com/nvd/cve-2026-25645)
+Link: \[CVE-2026-25645\](`https://avd.aquasec.com/nvd/cve-2026-25645`)
 
 </details>
 

@@ -71,7 +71,7 @@ Showing 4 of 4 actionable findings, highest severity first.
 - Rule ID: expression
 - Location: .github/workflows/vulnerable.yml:20
 
-"github.event.issue.title" is potentially untrusted. avoid using it directly in inline scripts. instead, pass it through an environment variable. see https://docs.github.com/en/actions/reference/security/secure-use\#good-practices-for-mitigating-script-injection-attacks for more details
+"github.event.issue.title" is potentially untrusted. avoid using it directly in inline scripts. instead, pass it through an environment variable. see `https://docs.github.com/en/actions/reference/security/secure-use#good-practices-for-mitigating-script-injection-attacks` for more details
 
 Code snippet:
 
@@ -92,7 +92,7 @@ run: echo "${{ github.event.issue.title }}"
 - Rule ID: deprecated-commands
 - Location: .github/workflows/vulnerable.yml:24
 
-workflow command "set-env" was deprecated. use \`echo "\{name\}=\{value\}" &gt;&gt; $GITHUB\_ENV\` instead: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
+workflow command "set-env" was deprecated. use \`echo "\{name\}=\{value\}" &gt;&gt; $GITHUB\_ENV\` instead: `https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions`
 
 Code snippet:
 
