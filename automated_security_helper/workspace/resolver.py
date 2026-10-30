@@ -839,6 +839,55 @@ def _same_directory(
     return identity is not None and identity == _directory_identity(second, cache)
 
 
+def same_config_file(
+    first: PathLike, second: PathLike, cache: Optional[Dict[Path, _Identity]] = None
+) -> bool:
+    """Whether two paths name one config file, by any reading either side used.
+
+    The same text, one file by identity (:func:`_directory_identity`, which joins
+    ``/ops/ash.yaml`` and ``/ops/ASH.yaml`` on a case-insensitive filesystem), or
+    one file once both are resolved (a link, on a filesystem that reports no
+    inode). The planner and the scan both ask this question of a project's config
+    and the operator's, and they have to get one answer: a reading either side
+    alone admitted made the plan layer the operator's file where the scan
+    expected none, or the reverse, and the project was refused at scan time. A
+    path that cannot be examined is judged by the readings that can be made.
+    """
+    left, right = Path(first), Path(second)
+    if _same_directory(left, right, cache):
+        return True
+    try:
+        return left.resolve() == right.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def config_is_the_operators(
+    config_path: Optional[PathLike],
+    default_config: Optional[PathLike],
+    trusted_config: Optional[PathLike] = None,
+) -> bool:
+    """Whether *config_path* is a file the operator named, not a project's own.
+
+    The operator names two: ``default_config`` (``--config``, or under the MCP
+    server the session's copy of the profile) and ``trusted_config`` (the
+    profile as it was registered). A project config that is either of them is
+    not a config of the project's own, so the operator's file is not layered over
+    it and the policy resolver does not treat it as "a project's own config". The
+    planner (:func:`_resolve_project_config`, :func:`_apply_workspace_policy`) and
+    the scan (``execution._check_the_plans_operator_config``) both decide "own
+    config" by this one call, with the same two arguments.
+    """
+    if config_path is None:
+        return False
+    cache: Dict[Path, _Identity] = {}
+    return any(
+        same_config_file(config_path, named, cache)
+        for named in (default_config, trusted_config)
+        if named is not None and named != ""
+    )
+
+
 def _is_inside(
     inner: Path,
     outer: Path,
@@ -1148,14 +1197,13 @@ def _resolve_project_config(
         # look for its table; a caller's gate covers every source before any is
         # opened (config_sources.check_discovery_candidates).
         config_path = find_config_file(candidate.resolved, permit=permit_base)
-        # A discovered config that is the operator's own file (a link to the
-        # --config file) is not a config of the project's own: execution decides
-        # "own config" by comparing the two files, and a plan that layered the
-        # operator's file over itself was refused at scan time.
-        if (
-            config_path is not None
-            and operator is not None
-            and _same_directory(Path(config_path), Path(operator))
+        # A discovered config that is a file the operator named (a link to the
+        # --config file, or to the registered profile) is not a config of the
+        # project's own: execution decides "own config" by this same call, and a
+        # plan that layered the operator's file over itself, or over the other
+        # file the operator named, was refused at scan time.
+        if config_path is not None and config_is_the_operators(
+            config_path, default_config, trusted_config
         ):
             overlay = None
         else:
@@ -1523,15 +1571,14 @@ def _apply_workspace_policy(
     # The configs the projects declared themselves. A project with none records
     # the operator's --config file as its config_source, and that file is the
     # operator's, not a project's, so a policy path that is the same file is not
-    # refused as "a project's own ASH config" on its account.
-    operators_file = Path(default_config) if default_config else None
+    # refused as "a project's own ASH config" on its account. The registered
+    # profile is the operator's too, and so is a link to either.
     own_configs = [
         Path(project.config_source)
         for project in projects
         if project.config_source
-        and not (
-            operators_file is not None
-            and _same_directory(Path(project.config_source), operators_file)
+        and not config_is_the_operators(
+            project.config_source, default_config, trusted_config
         )
     ]
     policy, source = resolve_workspace_policy(

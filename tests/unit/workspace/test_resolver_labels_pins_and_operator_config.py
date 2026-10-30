@@ -21,6 +21,11 @@ at the base.
   to.
 * A discovered project config that is the operator's own file (a link to
   ``--config``) was layered over itself, which execution then refused.
+* The planner and the scan each decided "a project's own config" by a reading of
+  their own, so a file one admitted as the operator's and the other did not (the
+  MCP session's copy of the profile, the registered profile, a case-spelled
+  link) was layered over itself or left bare, and the project was refused at
+  scan time.
 * The differing-plugin-modules refusal named modules raw, not by the mask the
   plan carries for exactly that message.
 * A decorated display label could equal another project's plain one.
@@ -33,6 +38,7 @@ at the base.
   instead of a definition error.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -262,6 +268,185 @@ class TestTheOperatorsConfig:
         )
 
         assert seen["project_config_paths"] == [own]
+
+    def test_the_registered_profile_is_not_a_projects_config_to_the_policy_resolver(
+        self, tmp_path, monkeypatch
+    ):
+        """Under the MCP server ``--config`` is the client's copy of the profile
+        and ``trusted_config`` the profile as registered: a project whose config
+        is the registered file has no config of its own either."""
+        client_copy = tmp_path / "client-copy.yaml"
+        client_copy.write_text("project_name: copy\n", encoding="utf-8")
+        registered = tmp_path / "registered.yaml"
+        registered.write_text("project_name: registered\n", encoding="utf-8")
+        own = tmp_path / "api" / ".ash" / "ash.yaml"
+        own.parent.mkdir(parents=True)
+        own.write_text("project_name: api\n", encoding="utf-8")
+        seen = {}
+
+        def fake_resolve_workspace_policy(root, **kwargs):
+            seen.update(kwargs)
+            return None, None
+
+        monkeypatch.setattr(
+            resolver, "resolve_workspace_policy", fake_resolve_workspace_policy
+        )
+        projects = [
+            _entry("api", config_source=own.as_posix()),
+            _entry("web", config_source=registered.as_posix()),
+            _entry("docs", config_source=client_copy.as_posix()),
+        ]
+
+        _apply_workspace_policy(
+            _definition(tmp_path),
+            projects,
+            None,
+            default_config=client_copy,
+            trusted_config=registered,
+        )
+
+        assert seen["project_config_paths"] == [own]
+
+
+class TestOneAnswerForWhetherAConfigIsTheOperators:
+    """The planner and the scan both decide "a project's own config" by
+    ``config_is_the_operators``; each used a reading of its own before, and a
+    file one admitted and the other refused failed the project at scan time."""
+
+    def _candidate(self, tmp_path):
+        project_dir = tmp_path / "api"
+        project_dir.mkdir()
+        return resolver._Candidate("api", project_dir, Path("api"), "api")
+
+    def _plan_config(self, tmp_path, monkeypatch, discovered, **named):
+        captured = {}
+
+        def fake_resolve_config(**kwargs):
+            captured.update(kwargs)
+            return AshConfig()
+
+        monkeypatch.setattr(
+            resolver, "find_config_file", lambda directory, permit=None: discovered
+        )
+        monkeypatch.setattr(resolver, "resolve_config", fake_resolve_config)
+        _, config_path, overlay = _resolve_project_config(
+            self._candidate(tmp_path), **named
+        )
+        return captured, config_path, overlay
+
+    def test_a_link_to_the_clients_copy_of_the_profile_is_not_layered(
+        self, tmp_path, monkeypatch
+    ):
+        """A project config that is the session's copy (``default_config``) is
+        the project's config alone: the scan reads it as the operator's file and
+        expects nothing layered, so a plan that layered the registered profile
+        over it was refused at scan time."""
+        client_copy = tmp_path / "client-copy.yaml"
+        client_copy.write_text("project_name: copy\n", encoding="utf-8")
+        registered = tmp_path / "registered.yaml"
+        registered.write_text("project_name: registered\n", encoding="utf-8")
+
+        captured, config_path, overlay = self._plan_config(
+            tmp_path,
+            monkeypatch,
+            client_copy,
+            default_config=client_copy,
+            trusted_config=registered,
+        )
+
+        assert config_path == client_copy
+        assert overlay is None
+        assert captured["overlay_config_path"] is None
+
+    def test_a_link_to_the_registered_profile_is_not_layered_over_itself(
+        self, tmp_path, monkeypatch
+    ):
+        client_copy = tmp_path / "client-copy.yaml"
+        client_copy.write_text("project_name: copy\n", encoding="utf-8")
+        registered = tmp_path / "registered.yaml"
+        registered.write_text("project_name: registered\n", encoding="utf-8")
+
+        _captured, _config_path, overlay = self._plan_config(
+            tmp_path,
+            monkeypatch,
+            registered,
+            default_config=client_copy,
+            trusted_config=registered,
+        )
+
+        assert overlay is None
+
+    def test_a_config_of_the_projects_own_still_gets_the_operators_layered(
+        self, tmp_path, monkeypatch
+    ):
+        """Control: only a file the operator named is exempt."""
+        operator = tmp_path / "operator.yaml"
+        operator.write_text("project_name: operator\n", encoding="utf-8")
+        own = tmp_path / "own.yaml"
+        own.write_text("project_name: own\n", encoding="utf-8")
+
+        captured, config_path, overlay = self._plan_config(
+            tmp_path, monkeypatch, own, default_config=operator
+        )
+
+        assert config_path == own
+        assert overlay == operator
+        assert captured["overlay_config_path"] == operator
+
+    def test_two_spellings_of_one_file_are_one_file(self, tmp_path, monkeypatch):
+        """macOS: ``--config /ops/ash.yaml`` and a link spelled ``/ops/ASH.yaml``.
+        The scan compared resolved paths, which keep each spelling."""
+        operator = tmp_path / "ash.yaml"
+        operator.write_text("project_name: operator\n", encoding="utf-8")
+        spelled = tmp_path / "ASH.yaml"
+        real = resolver._directory_identity
+
+        def folding(path, cache):
+            if path not in cache:
+                found = real(path, {})
+                cache[path] = (
+                    (1, hash(str(path).casefold()) % 1_000_000_007 + 1)
+                    if found is not None or path == spelled
+                    else None
+                )
+            return cache[path]
+
+        monkeypatch.setattr(resolver, "_directory_identity", folding)
+
+        assert resolver.config_is_the_operators(spelled, operator) is True
+
+    def test_a_link_is_the_file_it_reaches_on_a_volume_with_no_inodes(
+        self, tmp_path, monkeypatch
+    ):
+        """Identity says nothing on a filesystem that reports ``st_ino == 0``;
+        the resolved paths still do, as the scan always read them."""
+        operator = tmp_path / "operator.yaml"
+        operator.write_text("project_name: operator\n", encoding="utf-8")
+        link = tmp_path / "link.yaml"
+        _symlink_or_skip(link, operator)
+        real_stat = os.stat
+
+        def stat_without_inodes(path, *args, **kwargs):
+            result = real_stat(path, *args, **kwargs)
+            fields = list(result)
+            fields[1] = 0  # st_ino
+            return os.stat_result(tuple(fields))
+
+        monkeypatch.setattr(resolver.os, "stat", stat_without_inodes)
+
+        assert resolver.config_is_the_operators(link, operator) is True
+
+    def test_another_file_or_no_file_is_not_the_operators(self, tmp_path):
+        operator = tmp_path / "operator.yaml"
+        operator.write_text("project_name: operator\n", encoding="utf-8")
+        other = tmp_path / "other.yaml"
+        other.write_text("project_name: other\n", encoding="utf-8")
+
+        assert resolver.config_is_the_operators(other, operator) is False
+        assert resolver.config_is_the_operators(other, None) is False
+        assert resolver.config_is_the_operators(None, operator) is False
+        assert resolver.config_is_the_operators(other, operator, operator) is False
+        assert resolver.config_is_the_operators(operator, None, operator) is True
 
 
 class TestScannerSections:
