@@ -376,11 +376,10 @@ def _download_verified(
     reject. ``download_file`` keeps its plain ``Path`` return, because it is a public
     helper and a scanner plugin may be calling it.
 
-    ``mode`` is the mode the landed file gets: ``0o755`` by default, the mode
-    every download landed with before the parameter existed, which a public
-    caller may rely on for a binary it fetches; the callers here that fetch data
-    (a release archive, a rules bundle) pass ``0o644``, and the extraction of an
-    archive member sets its own.
+    ``mode`` is the mode the landed file gets: ``0o644`` by default, since what
+    this downloads is data (a release archive, a rules bundle);
+    ``install_binary_from_url`` passes ``0o755`` for the executable it lands, and
+    the extraction of an archive member sets its own.
     """
     # The URL first, before anything is made for the download: a refused URL
     # used to leave a freshly created destination directory behind.
@@ -528,11 +527,10 @@ def _finalize_staged(
 ) -> str:
     """Put ``staging`` at ``target``, verify what landed, and return its digest.
 
-    ``mode`` is the mode the landed file gets on POSIX: ``0o755``, the default,
-    for an executable, which is what the archive members, the pinned binaries
-    and every download whose caller names no mode are; the callers that fetch
-    data (a rules bundle, a release archive) pass ``0o644`` through
-    ``download_file``.
+    ``mode`` is the mode the landed file gets on POSIX: ``0o755`` for an
+    executable, which is what the archive members and the pinned binaries are;
+    ``download_file`` passes its caller's mode, ``0o644`` for the data files it
+    lands by default.
 
     Two checks, covering two different intervals, and neither makes the other
     redundant.
@@ -1260,17 +1258,16 @@ def install_binary_from_url(
         )
 
     # Download the file, keeping the digest that was verified as the bytes landed.
-    # Landed executable (0o755), the download's default mode, as a binary: a
-    # make_executable that refuses below (a link or a non-regular file at the
-    # path) would otherwise leave a receipted install that cannot run. The
-    # default is relied on here rather than repeated: the data callers are the
-    # ones that say their mode.
+    # It lands executable: the mode is set on the staged file's own descriptor
+    # before the rename (_finalize_staged), as install_pinned_tool's binaries
+    # are. A make_executable afterwards reopened the landed file by name, and
+    # once _download_verified defaulted to 0o644 it was the only thing making
+    # the binary runnable, with the install reported as done when it bailed.
+    # The mode is named here, not left to a default: the binary's mode is this
+    # installer's choice, whatever the download helpers' defaults read.
     binary_path, installed_digest = _download_verified(
-        url, destination, rename_to, expected_sha256=expected_sha256
+        url, destination, rename_to, expected_sha256=expected_sha256, mode=0o755
     )
-
-    # Make it executable
-    make_executable(binary_path)
 
     # Platform-specific post-installation steps
     if platform.system() == "Darwin":

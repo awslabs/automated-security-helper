@@ -238,6 +238,30 @@ def test_install_binary_from_url_lands_an_executable(monkeypatch, tmp_path):
 
 
 @POSIX_ONLY
+def test_install_binary_from_url_lands_the_mode_on_the_staged_file(
+    monkeypatch, tmp_path
+):
+    """The execute bit is set on the staged file's own descriptor before the
+    rename, as the pinned-tool install sets it: no by-name make_executable after
+    the landing, which reopened the file by name and, bailing, left a 0o644 binary
+    behind a successful receipt."""
+    import hashlib
+
+    def never(path):
+        raise AssertionError(f"make_executable reopened {path} by name")
+
+    monkeypatch.setattr(du, "make_executable", never)
+    payload = b"#!/bin/sh\nexit 0\n"
+    _fetch(monkeypatch, payload)
+    installed = du.install_binary_from_url(
+        "https://example.com/tool",
+        tmp_path / "bin",
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    assert stat.S_IMODE(installed.stat().st_mode) == 0o755
+
+
+@POSIX_ONLY
 def test_a_link_swapped_in_at_the_target_after_the_rename_is_refused(
     monkeypatch, tmp_path
 ):
