@@ -101,6 +101,55 @@ def test_missing_ruby_headers_on_linux_declare_no_install_command(context):
     )
 
 
+def _headers_probe(tmp_path: Path, layout: str) -> bool:
+    """``_ruby_headers_present`` against a fake ruby under ``tmp_path/prefix``.
+
+    ``layout``: ``versioned`` (Debian: include/ruby-3.3.0/ruby.h), ``flat``
+    (Fedora, RHEL, Amazon Linux: include/ruby.h), ``no-header`` (an include
+    directory with no ruby.h: the dev package is missing) or ``shim`` (no include
+    directory at all: a version manager's shim on PATH).
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cfn_nag_scanner,
+    )
+
+    prefix = tmp_path / "prefix"
+    (prefix / "bin").mkdir(parents=True)
+    ruby = prefix / "bin" / "ruby"
+    ruby.write_text("#!/bin/sh\n", encoding="utf-8")
+    if layout == "versioned":
+        (prefix / "include" / "ruby-3.3.0").mkdir(parents=True)
+        (prefix / "include" / "ruby-3.3.0" / "ruby.h").write_text("", encoding="utf-8")
+    elif layout == "flat":
+        (prefix / "include").mkdir()
+        (prefix / "include" / "ruby.h").write_text("", encoding="utf-8")
+    elif layout == "no-header":
+        (prefix / "include").mkdir()
+    # A system include directory that holds nothing, so only the prefix decides.
+    system_include = tmp_path / "system-include"
+    system_include.mkdir()
+    with patch(GEM_PROBE, return_value=str(ruby)):
+        return cfn_nag_scanner._ruby_headers_present(system_include=system_include)
+
+
+@pytest.mark.parametrize(
+    "layout, present",
+    [
+        pytest.param("versioned", True, id="debian-versioned-dir"),
+        pytest.param("flat", True, id="fedora-flat-ruby-h"),
+        pytest.param("no-header", False, id="dev-package-missing"),
+        pytest.param("shim", True, id="version-manager-shim-undecided"),
+    ],
+)
+def test_the_headers_probe_reads_both_layouts_and_is_undecided_for_a_shim(
+    tmp_path, layout, present
+):
+    """At the base only ``include/ruby-*/ruby.h`` counted, so a Fedora-style
+    ``include/ruby.h`` and an rbenv shim both read as headers missing and cfn-nag
+    as having no install path on hosts where the install succeeds."""
+    assert _headers_probe(tmp_path, layout) is present
+
+
 def test_no_gem_means_no_install_command(context):
     """Absent RubyGems must yield zero commands, not a command that fails.
 

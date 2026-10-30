@@ -50,9 +50,12 @@ SPCM_DIAGNOSTIC = (
     "Unable to parse policy. Please verify the policy document is valid: AccessDenied\n"
 )
 
+# What cfn_nag --isolate-custom-rule-exceptions printed for the arity defect: the
+# rescued exception handed to puts, so Ruby prints its MESSAGE with no class name
+# (measured by tests/integration/scanners/test_cfn_nag_custom_rules.py).
 ISOLATED_RULE_STDERR = (
-    "#<ArgumentError: wrong number of arguments (given 1, expected 2)>\n"
-    "#<ArgumentError: wrong number of arguments (given 1, expected 2)>\n"
+    "wrong number of arguments (given 1, expected 2)\n"
+    "wrong number of arguments (given 1, expected 2)\n"
 )
 
 
@@ -148,13 +151,34 @@ def test_findings_survive_a_diagnostic_line_on_stdout(
     assert scanner.targets_failed == 0
 
 
-def test_rule_exception_lines_name_a_ruby_exception():
+def test_rule_exception_lines_read_the_message_form_cfn_nag_prints():
+    """cfn_nag hands the rescued exception to puts, so the line is the bare message
+    with no class name (the measured form); at the base only a class name matched,
+    so a real isolated raise read as a fully evaluated template."""
     # Read through the module so a base without the helper fails this test alone
     # instead of failing the whole file's collection.
     lines = cfn_nag_scanner._rule_exception_lines
     assert len(lines(ISOLATED_RULE_STDERR)) == 2
-    assert lines("warning: constant ::Fixnum is deprecated\n") == []
+    assert lines("undefined method `[]' for nil:NilClass\n") == [
+        "undefined method `[]' for nil:NilClass"
+    ]
     assert lines("") == []
+
+
+def test_rule_exception_lines_read_the_inspect_and_uncaught_forms_too():
+    lines = cfn_nag_scanner._rule_exception_lines
+    assert lines("#<ArgumentError: wrong number of arguments (given 1, expected 2)>\n")
+    assert lines("rule.rb:9:in 'parse': boom (ArgumentError)\n")
+    assert lines("#<CfnNag::RuleRepoError: no such repo>\n")
+
+
+def test_rule_exception_lines_ignore_warnings_and_bare_class_names():
+    """A gem's deprecation warning naming an exception class is not a raise."""
+    lines = cfn_nag_scanner._rule_exception_lines
+    assert lines("warning: constant ::Fixnum is deprecated\n") == []
+    assert lines("/gems/x.rb:3: warning: ArgumentError will be raised in 4.0\n") == []
+    assert lines("Loaded RuntimeError-safe rule set\n") == []
+    assert lines("\n   \n") == []
 
 
 def test_a_rule_that_raised_marks_the_template_unevaluated_and_keeps_findings(

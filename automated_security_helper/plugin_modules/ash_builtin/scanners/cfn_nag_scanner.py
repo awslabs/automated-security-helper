@@ -145,33 +145,79 @@ def _cfn_nag_sarif_text(stdout: str) -> tuple[str, int]:
 
 
 #: What a rule that raised under --isolate-custom-rule-exceptions leaves on stderr:
-#: cfn_nag prints the exception and goes on, so the template exits 0 with no record
-#: of the rule that did not run. A Ruby exception class name is the marker.
-_RUBY_EXCEPTION = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Error|Exception)\b")
+#: cfn_nag rescues the rule's exception, prints it and goes on, so the template
+#: exits 0 with no record of the rule that did not run. Ruby prints an exception
+#: handed to ``puts`` as its MESSAGE, with no class name: "wrong number of
+#: arguments (given 1, expected 2)" was the whole line the arity defect left
+#: (tests/integration/scanners/test_cfn_nag_custom_rules.py measured it). A class
+#: name appears only in the inspect form (``#<ArgumentError: ...>``) or the
+#: uncaught form (``... (ArgumentError)``). All three are read; a bare class name
+#: elsewhere in a line (a gem's deprecation warning naming one) is not, and a Ruby
+#: ``warning:`` line never is.
+_RUBY_EXCEPTION_FORMS = re.compile(
+    r"#<[A-Z][A-Za-z0-9:]*(?:Error|Exception)\b|\([A-Z][A-Za-z0-9:]*(?:Error|Exception)\)\s*$"
+)
+#: How Ruby's standard exceptions begin their messages, lowercased.
+_RUBY_EXCEPTION_MESSAGES = (
+    "wrong number of arguments",
+    "undefined method",
+    "undefined local variable or method",
+    "uninitialized constant",
+    "no implicit conversion of",
+    "can't convert",
+    "comparison of ",
+    "divided by 0",
+    "stack level too deep",
+    "invalid byte sequence",
+    "key not found:",
+    "can't be coerced",
+    "wrong argument type",
+    "unknown keyword",
+    "missing keyword",
+)
 
 
 def _rule_exception_lines(stderr: str) -> List[str]:
-    """The stderr lines naming a Ruby exception, which is a rule that raised."""
-    return [line for line in stderr.splitlines() if _RUBY_EXCEPTION.search(line)]
+    """The stderr lines that are a Ruby exception, which is a rule that raised."""
+    raised: List[str] = []
+    for line in stderr.splitlines():
+        stripped = line.strip()
+        if not stripped or "warning:" in stripped:
+            continue
+        lowered = stripped.lower()
+        if _RUBY_EXCEPTION_FORMS.search(stripped) or any(
+            opening in lowered for opening in _RUBY_EXCEPTION_MESSAGES
+        ):
+            raised.append(stripped)
+    return raised
 
 
-def _ruby_headers_present() -> bool:
-    """Whether ``ruby.h`` is installed beside the ``ruby`` on PATH.
+def _ruby_headers_present(system_include: Path = Path("/usr/include")) -> bool:
+    """Whether ``ruby.h`` is installed beside the ``ruby`` on PATH, or cannot be told.
 
     Linux distributions split the headers into a development package, and psych's
     native extension needs them; ``gem`` and a C compiler alone pass the probe
-    and the build then fails on the missing header. Found under the interpreter's
-    prefix (``<prefix>/include/ruby-<version>/ruby.h``) or the system include
-    directory. True when no ``ruby`` is on PATH: the RubyGems probe reports that.
+    and the build then fails on the missing header. Looked for under the
+    interpreter's prefix and the system include directory, in both layouts: Debian
+    and Ubuntu put it at ``include/ruby-<version>/ruby.h``, Fedora, RHEL and Amazon
+    Linux (``ruby-devel``) at ``include/ruby.h``.
+
+    False only when the interpreter's own ``include`` directory exists and holds
+    neither: that is a ruby whose headers are a package not installed. When that
+    directory does not exist the probe cannot tell: a version manager's shim (rbenv,
+    asdf, mise) is a script on PATH whose prefix has no include directory, while the
+    headers sit under the version it selects. Then, and when no ``ruby`` is on PATH
+    (the RubyGems probe reports that), the answer is True and the gem install
+    reports a missing header itself.
     """
     ruby = find_executable("ruby")
     if ruby is None:
         return True
-    prefix = Path(os.path.realpath(ruby)).parent.parent
-    for include in (prefix / "include", Path("/usr/include")):
-        if any(include.glob("ruby-*/ruby.h")):
+    own_include = Path(os.path.realpath(ruby)).parent.parent / "include"
+    for include in (own_include, system_include):
+        if (include / "ruby.h").is_file() or any(include.glob("ruby-*/ruby.h")):
             return True
-    return False
+    return not own_include.is_dir()
 
 
 def _restore_cfn_nag_uris(
@@ -694,6 +740,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 else self.context.source_dir
             )
             for cfn_file in scannable:
+                # Whether this template was already counted as a failed target, so
+                # the except arm below does not count it a second time.
+                failed_counted = False
                 # This file's text once it is read, for the except arm below. Reset
                 # each time, so a file that cannot be read is never judged by the
                 # text of the file before it.
@@ -908,7 +957,12 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         self.targets_failed += 1
                         self.errors.append(f"{cfn_file}: {reason}")
                         self.record_unevaluated_target(cfn_file)
-                    if self._evaluated_no_rule(file_sarif, proc_resp.get("returncode")):
+                        failed_counted = True
+                    # Counted once: a template whose rules raised is already a
+                    # failed target above, whatever its exit code and result set.
+                    if not raised and self._evaluated_no_rule(
+                        file_sarif, proc_resp.get("returncode")
+                    ):
                         reason = (
                             "cfn_nag reported a failure it could not render "
                             f"(exit code {proc_resp.get('returncode', '?')} with an "
@@ -939,9 +993,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     ASH_LOGGER.warning(
                         f"Failed to parse CFN Nag results as SARIF: {str(e)}"
                     )
-                    self.targets_failed += 1
                     self.errors.append(f"{cfn_file}: {type(e).__name__}: {e}")
-                    self.record_unevaluated_target(cfn_file)
+                    if not failed_counted:
+                        self.targets_failed += 1
+                        self.record_unevaluated_target(cfn_file)
                     continue
 
             # Every template failed. This is the one line that separates "your templates are
