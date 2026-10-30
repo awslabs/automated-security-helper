@@ -31,6 +31,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Tool,
     ToolComponent,
+    _relative_text,
     _resolved_relative_text,
 )
 
@@ -240,6 +241,26 @@ class TestUnresolvedSourceDir:
         report.filter_results_by_files({"src/a.py"}, Path("proj"))
 
         assert _lines(report) == [1]
+
+    def test_an_absolute_uri_matches_a_dot_source_dir(self, tmp_path, monkeypatch):
+        """``.`` has no path segments, so the lexical compare used to accept every
+        rooted candidate as already relative and the resolve fallback never ran."""
+        (tmp_path / "src").mkdir()
+        monkeypatch.chdir(tmp_path)
+        report = _report(
+            (tmp_path / "src" / "x.py").as_posix(),
+            (tmp_path / "src" / "other.py").as_posix(),
+        )
+
+        report.filter_results_by_files({"src/x.py"}, Path("."))
+
+        assert _lines(report) == [1]
+
+    def test_a_root_without_segments_is_under_nothing_lexically(self):
+        assert _relative_text("/work/src/a.py", ".", False) is None
+        assert _relative_text("/work/src/a.py", "", False) is None
+        # The control: a root with segments still makes the candidate relative.
+        assert _relative_text("/work/src/a.py", "/work", False) == "src/a.py"
 
     def test_a_uri_outside_the_source_dir_is_still_dropped(self, tmp_path):
         """The control: resolving must not make an unrelated path match."""

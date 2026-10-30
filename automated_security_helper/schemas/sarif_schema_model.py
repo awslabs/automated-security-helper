@@ -2465,10 +2465,16 @@ def _file_uri_path_text(uri: str) -> str:
 def _relative_text(candidate: str, root: str, fold_case: bool) -> Optional[str]:
     """*candidate* made relative to *root*, both ``/``-separated; None when it is
     not under *root*. With *fold_case* the segments are compared without regard
-    to case and the candidate's own spelling of the tail is returned."""
+    to case and the candidate's own spelling of the tail is returned.
+
+    A *root* with no segments (``.`` or ``""``, the current directory given
+    relative) is under nothing lexically: every rooted candidate would pass an
+    empty prefix check and come back unchanged, which skipped the resolve
+    fallback this comparison is the first half of and dropped every absolute URI
+    under a ``.`` source directory. None, so the fallback runs."""
     candidate_parts = PurePosixPath(candidate).parts
     root_parts = PurePosixPath(root).parts
-    if len(candidate_parts) <= len(root_parts):
+    if not root_parts or len(candidate_parts) <= len(root_parts):
         return None
 
     def key(segment: str) -> str:
