@@ -921,8 +921,26 @@ def _writes_a_tightening(document: Any, denial: Any) -> bool:
     for (scanner, name), values in TIGHTENING_VALUES.items():
         if name == option and reduced_plugin_name(scanner) in names:
             present, value = _walk(document, segments)
-            return present and value in values
+            # Each listed value is compared as JSON: ``value in values`` is
+            # Python equality, under which ``1`` and ``1.0`` are ``True``.
+            return present and any(_equals_as_json(value, member) for member in values)
     return False
+
+
+def _equals_as_json(value: Any, expected: Any) -> bool:
+    """Whether ``value`` is the JSON value ``expected``, not merely equal in Python.
+
+    ``1 == True`` and ``0 == False`` in Python, so a comparison that decides what a
+    delivered file may write has to go through the JSON comparison the denial
+    check uses. A value that is not JSON data at all (a YAML date, a cycle) is
+    not ``expected``; the comparison does not raise.
+    """
+    from automated_security_helper.config.runtime_patch import _same_json_value
+
+    try:
+        return _same_json_value(value, expected)
+    except (TypeError, ValueError):
+        return False
 
 
 def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
@@ -936,11 +954,7 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
         reduced_plugin_name,
     )
     from automated_security_helper.config.config_sources import _resolve_dict_key
-    from automated_security_helper.config.runtime_patch import (
-        _path_segments,
-        _same_json_value,
-        _walk,
-    )
+    from automated_security_helper.config.runtime_patch import _path_segments, _walk
 
     if denial.from_patch:
         return False
@@ -964,15 +978,9 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
         if _resolve_dict_key(options, option) in options:
             return False
         present, value = _walk(document, segments)
-        if not present:
-            return False
-        # As JSON values, not as Python ones: ``1 == True`` and ``0 == False``
-        # in Python, so ``enable_preprocessors: 1`` is not the default ``true``.
-        # A value that is not JSON data at all (a YAML date) is not a default.
-        try:
-            return _same_json_value(value, default)
-        except (TypeError, ValueError):
-            return False
+        # As JSON values, not as Python ones: ``enable_preprocessors: 1`` is not
+        # the default ``true``.
+        return present and _equals_as_json(value, default)
     return False
 
 
