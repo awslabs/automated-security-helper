@@ -29,6 +29,7 @@ test reads on a worker thread, as it does in production.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict
@@ -156,6 +157,14 @@ def polls_read_before_the_runner(monkeypatch):
 
     @contextmanager
     def reads_on_the_loop():
+        # The patch replaces the module's ``asyncio`` name, so it reaches the
+        # read only while check_scan_progress calls ``asyncio.to_thread(``
+        # through it. A refactor to ``from asyncio import to_thread`` would
+        # leave this patch a silent no-op and the first poll racing the runner
+        # again; this fails by name instead.
+        assert "asyncio.to_thread(" in inspect.getsource(
+            scan_management.check_scan_progress
+        )
         with monkeypatch.context() as patched:
             patched.setattr(scan_management, "asyncio", _ReadsOnTheLoop())
             yield
@@ -206,7 +215,12 @@ async def test_a_scan_from_start_to_its_terminal_status(
     # Polled before the runner has had the loop: what a client sees first. The
     # registry read runs inline for this one call (polls_read_before_the_runner),
     # so the runner's first step cannot land between the call and its read;
-    # every later poll reads on a worker thread, as in production.
+    # every later poll reads on a worker thread, as in production. Nothing
+    # else yields before the read: the only await ahead of the registry read
+    # in get_scan_progress is ``_tell_client(ctx, "info", ...)``, which ends
+    # in ``await send(message)`` on the snapshot's ctx (a MagicMock(spec=Context)
+    # whose methods are AsyncMocks, mcp_snapshot_support.make_ctx), and an
+    # AsyncMock completes without suspending.
     with polls_read_before_the_runner():
         first_poll = await _call("get_scan_progress", scan_id)
 
