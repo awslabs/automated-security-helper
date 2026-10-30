@@ -19,6 +19,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import socket
+import ssl
 import urllib.error
 import zipfile
 from contextlib import contextmanager
@@ -429,6 +431,41 @@ class TestOffline:
         calls = []
         assert _install(tmp_path, bundle, archive, calls, download=_offline(calls))
         assert calls == [] and (final / "wa-Security-Pillar.guard").is_file()
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ssl.SSLEOFError(8, "EOF occurred in violation of protocol"),
+            ssl.SSLError(1, "tlsv1 alert internal error"),
+            socket.gaierror(-2, "Name or service not known"),
+            ConnectionResetError(104, "Connection reset by peer"),
+            TimeoutError("timed out"),
+        ],
+        ids=["tls eof", "tls alert", "name resolution", "reset", "timeout"],
+    )
+    def test_a_failure_on_the_wire_is_the_networks(self, tmp_path, bundle_zip, error):
+        """A TLS error raised while the body downloads, or a name that does not
+        resolve, is an OSError but neither a URLError nor a ConnectionError; it
+        was told as a local failure, with the free-space remedy."""
+        archive, bundle = bundle_zip
+
+        def dropped(url, destination, rename_to=None, expected_sha256=None):
+            raise error
+
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, [], download=dropped)
+        message = str(refused.value)
+        assert "network access" in message and "ASH container image" in message
+        assert "free space" not in message, message
+        assert rules_bundles._is_network_failure(error) is True
+
+    def test_a_local_failure_writing_the_archive_is_not_the_networks(self):
+        """The control: a full disk or a refused write is still local."""
+        for error in (
+            PermissionError(errno.EACCES, "Permission denied"),
+            OSError(errno.ENOSPC, "No space left on device"),
+        ):
+            assert rules_bundles._is_network_failure(error) is False, error
 
 
 class _OsWithoutRename:

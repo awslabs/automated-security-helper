@@ -95,6 +95,8 @@ import json
 import os
 import re
 import shutil
+import socket
+import ssl
 import tempfile
 import urllib.error
 import zipfile
@@ -653,9 +655,11 @@ def _is_network_failure(error: BaseException) -> bool:
     """Whether ``error`` from the download is the network's, not this host's.
 
     urllib's URLError and HTTPError, an HTTP protocol error, a connection reset
-    or refused, and a socket timeout are the network's. Any other OSError (a
-    PermissionError or a full disk writing the archive) is local, and telling the
-    operator to find network access for it sends them the wrong way.
+    or refused, a socket timeout, a TLS failure while the body is read (an
+    ``ssl.SSLEOFError`` from a proxy that drops the connection) and a name that
+    does not resolve are the network's. Any other OSError (a PermissionError or
+    a full disk writing the archive) is local, and telling the operator to find
+    network access for it sends them the wrong way.
     """
     return isinstance(
         error,
@@ -664,6 +668,9 @@ def _is_network_failure(error: BaseException) -> bool:
             http.client.HTTPException,
             ConnectionError,
             TimeoutError,
+            ssl.SSLError,
+            socket.gaierror,
+            socket.herror,
         ),
     )
 
