@@ -213,10 +213,12 @@ class ScannerStatisticsCalculator:
             )
 
             # Calculate duration from additional_reports (where container data is
-            # stored). None, not 0.0, when nothing recorded one: a scanner that
-            # did not run (excluded, or its dependencies missing) has no
-            # duration, and 0.0 rendered as "<1ms" in every table where
-            # ScannerMetrics documents None and format_duration prints "N/A".
+            # stored). None, not 0.0, for a scanner that did not run (excluded,
+            # or its dependencies missing) and recorded none: 0.0 rendered as
+            # "<1ms" in every table where ScannerMetrics documents None and
+            # format_duration prints "N/A". A scanner that ran and recorded no
+            # number (a null, a non-number) reads 0.0 below, the value its
+            # formatting readers have always been given.
             duration: Optional[float] = None
 
             # First from the per-target reports, summed over every target the
@@ -295,6 +297,13 @@ class ScannerStatisticsCalculator:
                         scanner_status_info
                     )
 
+            if duration is None and not (excluded or dependencies_missing):
+                # The scanner ran and recorded no duration (a report with a null
+                # duration, a row holding text): the readers that format it
+                # expect a number, so it reads 0.0 as it always has. Only a
+                # scanner that did not run keeps None.
+                duration = 0.0
+
             # Store statistics for this scanner
             scanner_stats[scanner_name] = {
                 "suppressed": suppressed,
@@ -347,14 +356,15 @@ class ScannerStatisticsCalculator:
     ) -> Dict[Any, Dict[str, Any]]:
         """The per-target reports filed under *scanner_name* that are this scanner's.
 
-        A mapping that names another scanner is not one of them: ``additional_reports``
-        is keyed by name, and a results file merged from another, or written by
-        hand, can file a report under the wrong key. A report that names no scanner
-        at all (one written before the field existed) is kept, as the counters'
-        readers in ``core.unified_metrics`` keep it. The key and the recorded name
-        are matched in any case (``reports_for``, ``_same_scanner``): the name a
-        row is read under is the union's first spelling, and the reports can sit
-        under another.
+        A mapping that names another scanner, or none, is not one of them:
+        ``additional_reports`` is keyed by name, and a results file merged from
+        another, or written by hand, can file a report under the wrong key, while
+        a scan writes every report under the name it carries, so an entry without
+        one is no report of this version's (``get_scanner_status_info`` reads it as
+        no recorded status). The counters' readers in ``core.unified_metrics``
+        refuse the same entries. The key and the recorded name are matched in any
+        case (``reports_for``, ``_same_scanner``): the name a row is read under is
+        the union's first spelling, and the reports can sit under another.
         """
         reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
         if not isinstance(reports, dict):
@@ -363,11 +373,8 @@ class ScannerStatisticsCalculator:
             key: report
             for key, report in reports.items()
             if isinstance(report, dict)
-            and (
-                report.get("scanner_name") is None
-                or ScannerStatisticsCalculator._same_scanner(
-                    report.get("scanner_name"), scanner_name
-                )
+            and ScannerStatisticsCalculator._same_scanner(
+                report.get("scanner_name"), scanner_name
             )
         }
 
@@ -887,24 +894,6 @@ class ScannerStatisticsCalculator:
                     )
                     threshold_from_env = shown_threshold is not None
 
-        # An external plugin's options model can default its own threshold, and
-        # the executor grades at that default (resolve_scanner_threshold over
-        # options.severity_threshold); the recorded config holds only the file's
-        # section, so the default is not in it, and the summary graded at the
-        # global threshold while the row was graded at the plugin's. The executor
-        # writes the option it graded by on every per-target report
-        # (``scanner_severity_threshold``), so when the config names none, that
-        # record is the scanner's own threshold.
-        if scanner_threshold is None:
-            recorded_threshold = (
-                ScannerStatisticsCalculator._recorded_scanner_threshold(
-                    asharp_model, scanner_name
-                )
-            )
-            if recorded_threshold is not None:
-                scanner_threshold = recorded_threshold
-                scanner_threshold_def = "config"
-
         # The scanner's own threshold when it has one, otherwise the global one: the
         # rule ScannerExecutor grades each target's report by, from the same helper.
         evaluation_threshold, scanner_threshold_def = resolve_scanner_threshold(
@@ -991,20 +980,6 @@ class ScannerStatisticsCalculator:
             scanner_threshold_def,
             threshold_from_env,
         )
-
-    @staticmethod
-    def _recorded_scanner_threshold(
-        asharp_model: AshAggregatedResults, scanner_name: str
-    ) -> Optional[str]:
-        """The ``scanner_severity_threshold`` the executor recorded on this scanner's
-        per-target reports, or None. Only text counts; the first report in
-        ``sorted`` key order is read."""
-        reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
-        for key in sorted(reports, key=str):
-            value = reports[key].get("scanner_severity_threshold")
-            if isinstance(value, str) and value.strip():
-                return value
-        return None
 
     @staticmethod
     def _recorded_reference_shown(

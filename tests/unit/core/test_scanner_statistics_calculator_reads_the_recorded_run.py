@@ -3,7 +3,8 @@
 
 """ScannerStatisticsCalculator reads what the run recorded, and only that.
 
-- A scanner that did not run has no duration (None, rendered N/A), not 0.0.
+- A scanner that did not run has no duration (None, rendered N/A), not 0.0; one
+  that ran and recorded no number reads 0.0, as its formatting readers expect.
 - The legacy two-target row's durations are read off dicts and objects alike,
   and a None duration is not float()ed.
 - The scanner name falls back to ``scanner_details.tool_name`` when the details
@@ -11,11 +12,11 @@
 - A suppression a reviewer rejected, or one under review, does not hide a result.
 - A recorded ERROR row is not explained away by one tree's partial loss when
   another tree's run raised.
-- The per-target walks read only this scanner's own reports.
+- The per-target walks read only this scanner's own reports: one naming another
+  scanner, or none, is not read.
 - get_scanner_status grades unusable counters ERROR, as the unified metrics do.
 - The scanner-level report is found under the Python None key too.
 - A scanner recorded only under a converted-tree report reads that report.
-- An external plugin's own recorded threshold grades the summary.
 """
 
 from __future__ import annotations
@@ -143,15 +144,18 @@ class TestDuration:
 
         assert stats["old"]["duration"] == 2.5
 
-    def test_a_non_numeric_row_duration_is_no_record(self):
-        model = _model()
+    def test_a_scanner_that_ran_and_recorded_no_number_reads_zero(self):
+        """A row holding text, or a report with a null duration, is a scanner
+        that ran and recorded no duration: it reads 0.0, the value its
+        formatting readers have always been given (never None, which only a
+        scanner that did not run carries)."""
+        model = _model({"nulled": {"source": _report("nulled", duration=None)}})
         model.scanner_results["odd"] = SimpleNamespace(status="PASSED", duration="fast")
 
         stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
 
-        assert stats["odd"]["duration"] is None
-        (metrics,) = get_unified_scanner_metrics(model)
-        assert metrics.duration is None
+        assert stats["odd"]["duration"] == 0.0
+        assert stats["nulled"]["duration"] == 0.0
 
     @pytest.mark.parametrize("value", [math.nan, math.inf])
     def test_a_non_finite_duration_renders_as_not_available(self, value):
@@ -274,20 +278,14 @@ class TestTheRecordedRun:
             "PASSED"
         )
 
-    def test_an_external_plugins_recorded_threshold_grades_the_summary(self):
-        """The config names no section for the plugin, whose options model
-        defaulted its own threshold; the executor graded at that default and
-        recorded it on the report, and the summary now grades the same way."""
-        model = _model(
-            {
-                "ext-tool": {
-                    "source": _report("ext-tool", scanner_severity_threshold="HIGH")
-                }
-            }
-        )
+    def test_a_report_that_names_no_scanner_is_not_this_scanners(self):
+        """A scan writes every report under the name it carries, so an entry
+        without one is no report of this version's: the scanner has no recorded
+        status and reads as errored, as one with nothing recorded always has."""
+        model = _model({"bandit": {"source": {"status": "PASSED"}}})
 
-        threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
-            model, "ext-tool"
+        assert ScannerStatisticsCalculator.get_scanner_status_info(model, "bandit") == (
+            False,
+            False,
+            True,
         )
-
-        assert (threshold, source) == ("HIGH", "config")
