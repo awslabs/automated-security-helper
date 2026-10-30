@@ -184,18 +184,46 @@ def _selection_key(name: str) -> str:
     return name.lower().strip()
 
 
+def _canonical_tool_name(resolved_name: str, available: Iterable[str]) -> str:
+    """The name in ``available`` that ``resolved_name`` selects.
+
+    The name itself when it is there as typed, so a plugin whose name differs
+    from another's only in case or blanks is still selected by its exact
+    spelling; else the first name with the same selection key
+    (:func:`_selection_key`), the scan's match; else ``resolved_name`` as it is,
+    for the caller to refuse as unknown.
+    """
+    names = list(available)
+    if resolved_name in names:
+        return resolved_name
+    key = _selection_key(resolved_name)
+    for name in names:
+        if _selection_key(name) == key:
+            return name
+    return resolved_name
+
+
+#: The deprecated aliases by their selection key, so an alias is matched as a
+#: plugin name is: ``archiveconverter`` and ``" ArchiveConverter"`` resolve too.
+_DEPRECATED_ALIASES_BY_KEY: dict[str, str] = {
+    _selection_key(alias): replacement
+    for alias, replacement in DEPRECATED_TOOL_ALIASES.items()
+}
+
+
 def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
     """Map each requested `--tool` name to the plugin name to select it by.
 
-    A deprecated alias maps to its replacement and prints one warning to stderr per
-    alias, however many times it was passed. Every other name maps to itself, so an
-    unknown name is still refused by the caller exactly as before.
+    A deprecated alias, in any case or with blanks around it, maps to its
+    replacement and prints one warning to stderr per alias, however many times it
+    was passed. Every other name maps to itself, so an unknown name is still
+    refused by the caller exactly as before.
     """
     resolved: dict[str, str] = {}
     for tool in tools:
         if tool in resolved:
             continue
-        replacement = DEPRECATED_TOOL_ALIASES.get(tool)
+        replacement = _DEPRECATED_ALIASES_BY_KEY.get(_selection_key(tool))
         if replacement is None:
             resolved[tool] = tool
             continue
@@ -1136,13 +1164,14 @@ def install_dependencies(
             {candidate[3] for candidate in candidates if candidate[3]}
             | {name for _, name, _ in discovered}
         )
-        # Matched by the key the scan selects scanners with (_selection_key), so
-        # a name typed in another case, or with blanks around it, selects the
-        # plugin it names and is installed under the plugin's own spelling. An
-        # unknown name is still reported in the spelling the caller typed.
-        by_key = {_selection_key(name): name for name in available}
+        # Matched as typed first, then by the key the scan selects scanners with
+        # (_selection_key, _canonical_tool_name), so a name typed in another
+        # case, or with blanks around it, selects the plugin it names and is
+        # installed under the plugin's own spelling, while a plugin whose name
+        # differs from another's only in case is still selected by its exact
+        # spelling. An unknown name is still reported as the caller typed it.
         tool_resolution = {
-            typed: by_key.get(_selection_key(resolved_name), resolved_name)
+            typed: _canonical_tool_name(resolved_name, available)
             for typed, resolved_name in tool_resolution.items()
         }
         requested_names = list(dict.fromkeys(tool_resolution.values()))

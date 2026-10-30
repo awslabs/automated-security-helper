@@ -91,7 +91,48 @@ class TestWithTheRealRegistry:
         assert "Unknown tool(s): Not-A-Real-Tool" in output, output
         assert self.selected == []
 
+    @pytest.mark.parametrize("typed", ["archiveconverter", " ArchiveConverter"])
+    def test_a_deprecated_alias_matches_by_the_same_key(self, typed):
+        """`ArchiveConverter` is the alias; its other spellings resolve too."""
+        result = self._invoke("--tool", typed)
+        output = self._output(result)
+        assert result.exit_code == EXIT_OK, output
+        assert self.selected == [(["archive"], ["archive"])], self.selected
+        assert "Unknown tool" not in output, output
+
 
 def test_the_selection_key_is_the_scans():
     assert dependencies_module._selection_key(" Bandit ") == "bandit"
     assert dependencies_module._selection_key("cfn-nag") == "cfn-nag"
+
+
+class TestCanonicalToolName:
+    """Two plugins whose names differ only in case: the exact spelling wins."""
+
+    AVAILABLE = ["Semgrep", "bandit", "semgrep"]
+
+    def test_an_exact_spelling_selects_itself(self):
+        assert (
+            dependencies_module._canonical_tool_name("Semgrep", self.AVAILABLE)
+            == "Semgrep"
+        )
+        assert (
+            dependencies_module._canonical_tool_name("semgrep", self.AVAILABLE)
+            == "semgrep"
+        )
+
+    def test_another_spelling_falls_back_to_the_key(self):
+        assert (
+            dependencies_module._canonical_tool_name("Bandit", self.AVAILABLE)
+            == "bandit"
+        )
+        assert (
+            dependencies_module._canonical_tool_name(" bandit ", self.AVAILABLE)
+            == "bandit"
+        )
+
+    def test_an_unknown_name_is_kept_as_typed(self):
+        assert (
+            dependencies_module._canonical_tool_name("Not-A-Tool", self.AVAILABLE)
+            == "Not-A-Tool"
+        )
