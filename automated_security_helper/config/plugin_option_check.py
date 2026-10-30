@@ -24,7 +24,7 @@ from __future__ import annotations
 import typing
 from typing import Any, Callable, Iterable, Mapping
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -59,8 +59,33 @@ def _options_class(config_class: type[BaseModel]) -> type[BaseModel] | None:
     return None
 
 
+def _enabled_problems(
+    config_class: type[BaseModel], section: Any, where: str, plugin: str
+) -> list[str]:
+    """The refusal of a section's ``enabled`` value its config class cannot hold.
+
+    A built-in plugin's section is typed, so ``enabled: maybe`` is refused when
+    the config loads. A loaded plugin's section is a plain mapping until the
+    plugin is built, so the declared type of ``enabled`` is checked here, with
+    the same message the model gives, and the key is named by its location.
+    """
+    if not isinstance(section, dict) or "enabled" not in section:
+        return []
+    field = config_class.model_fields.get("enabled")
+    if field is None:
+        return []
+    try:
+        TypeAdapter(field.annotation).validate_python(section["enabled"])
+    except ValidationError as error:
+        return [
+            f"{where}.enabled ({plugin}): {item.get('msg', '')}"
+            for item in error.errors()
+        ]
+    return []
+
+
 def _option_problems(
-    options_class: type[BaseModel], options: dict[str, Any], where: str, plugin: str
+    options_class: type[BaseModel], options: Any, where: str, plugin: str
 ) -> list[str]:
     """The plugin's own validation errors for ``options``, located at ``where``.
 
@@ -68,7 +93,8 @@ def _option_problems(
     the plugin's own messages: ferret-scan refuses ``debug`` with "Use
     'ferret_debug: true' instead", which its model's validator raises before
     the generic unknown-key check runs. It also refuses a value of the wrong
-    type at load, as the config model does for a built-in plugin.
+    type at load, as the config model does for a built-in plugin, and so does
+    an ``options`` value that is not a mapping at all.
     """
     try:
         options_class.model_validate(options)
@@ -215,8 +241,11 @@ def refuse_unknown_plugin_options(
         plugin_config_key,
         section_key_problems,
     )
-    from automated_security_helper.config.ash_config import plugin_key_lookup_names
-    from automated_security_helper.config.ash_config import reduced_plugin_name
+    from automated_security_helper.config.ash_config import (
+        plugin_section_claims,
+        plugin_section_key,
+        reduced_plugin_name,
+    )
     from automated_security_helper.config.config_validator import redact_values
     from automated_security_helper.utils.error_text import carry_environment_values
 
@@ -234,6 +263,11 @@ def refuse_unknown_plugin_options(
         sections = dict(getattr(segment, "model_extra", None) or {})
         if not sections:
             continue
+        # The keys get_plugin_config indexes, declared sections first (it reads
+        # the segment's model_dump(by_alias=True)), so the check reads the one
+        # section the lookup reads for a plugin and no other spelling of it.
+        dumped = segment.model_dump(by_alias=True)
+        claims = plugin_section_claims(dumped)
         for plugin_class in plugins.get(plugin_type, ()) or ():
             config_class = _config_class(plugin_class)
             if config_class is None:
@@ -246,26 +280,41 @@ def refuse_unknown_plugin_options(
                 if builds is None or builds(plugin_type, plugin_class)
                 else not_built
             )
-            for key, section in sections.items():
-                if key != name and wanted not in plugin_key_lookup_names(key):
-                    continue
-                checked.add((segment_name, key))
-                # A key beside "enabled" that the plugin's config does not
-                # declare, as the config model refuses one for a built-in.
-                found.extend(
-                    section_key_problems(config_class, section, f"{segment_name}.{key}")
+            # The lookup takes the plugin's own name when it is a key, else the
+            # first key that claims the reduced name (plugin_section_key). A
+            # section that lookup does not return is never read by the plugin,
+            # and is warned of as a shared name where the lookup runs.
+            key = name if name in dumped else plugin_section_key(dumped, wanted, claims)
+            if key is None or key not in sections:
+                continue
+            section = sections[key]
+            checked.add((segment_name, key))
+            # A key beside "enabled" that the plugin's config does not
+            # declare, as the config model refuses one for a built-in.
+            found.extend(
+                section_key_problems(config_class, section, f"{segment_name}.{key}")
+            )
+            found.extend(
+                _enabled_problems(
+                    config_class,
+                    section,
+                    f"{segment_name}.{key}",
+                    f"{plugin_type} '{key}'",
                 )
-                options = section.get("options") if isinstance(section, dict) else None
-                if options_class is None or not isinstance(options, dict):
-                    continue
-                found.extend(
-                    _option_problems(
-                        options_class,
-                        options,
-                        f"{segment_name}.{key}.options",
-                        f"{plugin_type} '{key}'",
-                    )
+            )
+            options = section.get("options") if isinstance(section, dict) else None
+            # None is no options. Any other value that is not a mapping is
+            # refused by the options model, as a built-in plugin's is at load.
+            if options_class is None or options is None:
+                continue
+            found.extend(
+                _option_problems(
+                    options_class,
+                    options,
+                    f"{segment_name}.{key}.options",
+                    f"{plugin_type} '{key}'",
                 )
+            )
         for key in sections:
             if (segment_name, key) not in checked:
                 # NO_MARKUP: the key is data the file wrote.
