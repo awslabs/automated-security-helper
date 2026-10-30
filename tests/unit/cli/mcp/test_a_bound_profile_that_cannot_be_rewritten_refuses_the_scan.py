@@ -8,8 +8,12 @@ gone, and raises when it cannot (the profile is no longer registered, or the
 workspace cannot be written). Every caller has to turn that raise into the
 tool's own refusal:
 
-* ``run_ash_scan`` (``cli/mcp_server.py``) answers a config refusal, exit 3,
-  with a stable ``error_type``, not the catch-all's internal error.
+* ``run_ash_scan`` (``cli/mcp_server.py``) answers with a stable
+  ``error_type``, not the catch-all's internal error: a config refusal, exit 3,
+  when the profile is no longer registered; the server's own failure, exit 1
+  with the cause logged, when the session's workspace could not be written
+  (the two are told apart by the error's chained cause; before, both were a
+  config refusal and nothing was logged for the operator).
 * the scan runner (``_run_scan`` in ``cli/mcp_tools.py``) records the entry
   FAILED with the reason; the runner's own ``try`` begins later, so a raise
   there would otherwise leave the entry PENDING, which reads as running.
@@ -21,6 +25,7 @@ tool's own refusal:
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -30,6 +35,7 @@ import yaml
 from mcp.server.mcpserver import Context
 from typing_extensions import Self
 
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.cli.mcp.profile_registry import (
     DEFAULT_SESSION_ID,
     BoundProfileUnavailableError,
@@ -189,6 +195,39 @@ async def test_run_ash_scan_answers_a_config_refusal_not_an_internal_error(
     assert response["error_type"] == "bound_profile_unavailable", response
     assert response["exit_code"] == 3, response
     assert "select_profile" in response["error"], response
+
+
+@pytest.mark.asyncio
+async def test_run_ash_scan_reports_an_unwritable_workspace_as_the_servers_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """Red at the base: a workspace that could not be written was answered as a
+    config refusal, exit 3, the caller's own fault, and nothing was logged for
+    the operator, who is the one that can act on a workspace permission."""
+    from automated_security_helper.cli import mcp_server
+    from automated_security_helper.cli.mcp import profile_registry
+
+    _bind_then_remove_the_copy(DEFAULT_SESSION_ID)
+    source = _project(tmp_path)
+    monkeypatch.setattr(mcp_server, "monitor_scan_progress", AsyncMock())
+
+    def cannot_write(sid, config, patched):
+        raise PermissionError(13, "Permission denied", "config")
+
+    monkeypatch.setattr(profile_registry, "materialize_session_binding", cannot_write)
+    ctx = MagicMock(spec=Context)
+    ctx.headers = {}
+
+    with caplog.at_level(logging.WARNING, logger=ASH_LOGGER.name):
+        response = await mcp_server.run_ash_scan(ctx, source_dir=str(source))
+
+    assert response["success"] is False, response
+    assert response["error_type"] == "bound_profile_unavailable", response
+    assert response["exit_code"] == 1, response
+    assert response["error_category"] == "permission_denied", response
+    assert "Permission denied" in response["error"], response
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("could not be written" in text for text in warnings), warnings
 
 
 def _bind_then_remove_the_copy(session_id: str | None) -> Path:

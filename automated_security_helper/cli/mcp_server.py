@@ -800,20 +800,44 @@ async def run_ash_scan(
             try:
                 config_path = resolve_session_config_path(session_id)
             except ProfileRegistryError as exc:
-                # The bound profile's file is gone and cannot be written again
-                # (the profile is no longer registered, or the session's
-                # workspace cannot be written). A config refusal, exit 3, as a
-                # named config that cannot be used is; not the catch-all's
-                # internal error, which would log it as an ASH bug.
+                # The bound profile's file is gone and cannot be written again.
+                # Two causes, told apart by the chained error: none when the
+                # profile is no longer registered, which is a config refusal,
+                # exit 3, as a named config that cannot be used is; the writer's
+                # error (OSError, or the sandbox's RuntimeError) when the
+                # session's workspace cannot be written, which is the server's
+                # failure, not the caller's config: exit 1, and the cause is
+                # logged for the operator, who is the one that can act on it.
+                # Neither is the catch-all's internal error, which would log an
+                # ASH bug with a traceback.
+                cause = exc.__cause__
                 await _tell_client_error(ctx, raw_controls_on_one_line(str(exc)))
+                if cause is None:
+                    return with_exit_code(
+                        {
+                            "success": False,
+                            "error": raw_controls_on_one_line(str(exc)),
+                            "error_type": "bound_profile_unavailable",
+                            "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                        },
+                        REFUSED_CONFIG_EXIT_CODE,
+                    )
+                logger.warning(
+                    "The session's bound profile could not be written to its "
+                    f"workspace, so the scan was refused: {exc}"
+                )
                 return with_exit_code(
                     {
                         "success": False,
                         "error": raw_controls_on_one_line(str(exc)),
                         "error_type": "bound_profile_unavailable",
-                        "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                        "error_category": (
+                            ErrorCategory.PERMISSION_DENIED.value
+                            if isinstance(cause, PermissionError)
+                            else ErrorCategory.UNEXPECTED_ERROR.value
+                        ),
                     },
-                    REFUSED_CONFIG_EXIT_CODE,
+                    REFUSED_INTERNAL_EXIT_CODE,
                 )
             except SessionWorkspaceBusyError as exc:
                 # The bound profile's file is gone and another request holds
