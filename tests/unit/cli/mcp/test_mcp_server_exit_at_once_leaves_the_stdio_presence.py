@@ -56,6 +56,20 @@ def test_exit_at_once_leaves_the_presence_entry(monkeypatch, exits) -> None:
     assert exits == [0]
 
 
+def test_leaving_the_presence_twice_leaves_the_entry_once(monkeypatch) -> None:
+    """Red at the base: the entry stayed on the module after it was left, so a
+    second signal in the shutdown window (SIGTERM, then SIGHUP or Ctrl-C) left
+    it again, a second ``__exit__`` on a presence already gone."""
+    presence = _Presence()
+    monkeypatch.setattr(mcp_server, "_stdio_presence", presence, raising=False)
+
+    mcp_server._leave_stdio_presence()
+    mcp_server._leave_stdio_presence()
+
+    assert presence.exits == [(None, None, None)], presence.exits
+    assert mcp_server._stdio_presence is None
+
+
 def test_exit_at_once_with_no_presence_still_exits(monkeypatch, exits) -> None:
     monkeypatch.setattr(mcp_server, "_stdio_presence", None, raising=False)
 

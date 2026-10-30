@@ -3404,13 +3404,17 @@ def _leave_stdio_presence() -> None:
     """Drop this server's presence entry, and the default workspace if it is the last.
 
     What run_mcp_server's finally does on a return; called by exit_at_once,
-    which never returns there. Idempotent, so the finally after a recorded exit
-    (tests replace os._exit) finds nothing left to do. A failure to leave does
-    not keep the process from exiting: the entry's lock is released with the
-    process either way, and the next stdio server drops the dead entry when it
+    which never returns there. Idempotent: the entry is taken off the module
+    before it is left, so the finally after a recorded exit (tests replace
+    os._exit), or a second signal, finds nothing left to do; before that the
+    entry stayed on the module and a second call left it again (a second
+    ``__exit__`` on a presence already gone). A failure to leave does not keep
+    the process from exiting: the entry's lock is released with the process
+    either way, and the next stdio server drops the dead entry when it
     registers.
     """
-    presence = _stdio_presence
+    global _stdio_presence
+    presence, _stdio_presence = _stdio_presence, None
     if presence is None:
         return
     try:
