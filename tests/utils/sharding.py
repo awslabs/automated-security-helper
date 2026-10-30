@@ -567,7 +567,7 @@ WORKEROUTPUT_KEY = "ash_shard_deselected"
 #: marker and that case drops out of both counts; an id equal to ``skipif`` or ``skip``
 #: misleads :func:`skipif_reason` the same way. tests/conftest.py draws the same line
 #: between markers and ``item.keywords`` for the tier markers (the comment above
-#: ``_TEST_TIERS``, about :1168-:1172), but its collection hook only checks the tier
+#: ``_TEST_TIERS`` in tests/conftest.py), but its collection hook only checks the tier
 #: markers and does not reject a marker-named id, so nothing enforces it here: do not
 #: give a parametrize id one of these names. The effect is small, since a leg has to
 #: hinge on that one test. The fuller shape, not taken, has each xdist worker send the

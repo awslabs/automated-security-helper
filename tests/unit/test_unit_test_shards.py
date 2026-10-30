@@ -348,9 +348,8 @@ class TestTheShardFilter:
         run collects. The check is on module counts only. It does not measure how
         long any shard runs, so it cannot catch a split that makes one integration
         leg slower than the others; a check weighted by runtime would be a different
-        test. Measured on the tree of 2026-10-29 (2,176 modules, 4 shards):
-        544 / 588 / 512 / 532, the largest 1.08 times the mean and the smallest 0.94;
-        the bound leaves room for growth."""
+        test. The bounds are 0.75 and 1.25 times the mean module count per shard, so
+        they leave room for growth; the failure message prints the current sizes."""
         count = sharding.parse_shard(_shard_axis()[0])[1]
         patterns = _pytest_ini_patterns("python_files")
         modules = sorted(
@@ -363,8 +362,9 @@ class TestTheShardFilter:
         for module in modules:
             sizes[sharding.owner(module, count) - 1] += 1
         mean = len(modules) / count
-        assert max(sizes) <= 1.25 * mean, (sizes, mean)
-        assert min(sizes) >= 0.75 * mean, (sizes, mean)
+        detail = f"shard sizes {sizes} of {len(modules)} modules, mean {mean:.1f}"
+        assert max(sizes) <= 1.25 * mean, detail
+        assert min(sizes) >= 0.75 * mean, detail
 
     def test_a_file_pytest_does_not_take_as_a_test_module_is_left_alone(self):
         """The filter reads python_files from pytest.ini, so it never ignores data files."""
