@@ -193,8 +193,11 @@ class TestFileNamesAndMessages:
 
     @staticmethod
     def _report_with_rule(reporter, rule: ReportingDescriptor) -> dict:
-        result = Result(ruleId="R1", level=Level.error)
-        result.message = Message.model_validate({"id": "default"})
+        result = Result(
+            ruleId="R1",
+            level=Level.error,
+            message=Message.model_validate({"id": "default"}),
+        )
         model = AshAggregatedResults()
         model.sarif = SarifReport(
             version="2.1.0",
@@ -398,7 +401,10 @@ class TestShortfalls:
         real = ocsf_module.FindingInfo
 
         def picky(**kwargs):
-            if kwargs.get("title") != "Error creating finding title":
+            # Reject the finding's own FindingInfo only; the fallback's and
+            # the shortfall record's are built by the same class and must
+            # pass, or the whole report degrades to its error response.
+            if str(kwargs.get("title", "")).startswith("R1 - "):
                 raise ValueError("rejected by the schema")
             return real(**kwargs)
 

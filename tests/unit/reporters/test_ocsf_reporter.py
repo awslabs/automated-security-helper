@@ -1824,5 +1824,8 @@ class TestOcsfReporterSeverityMapping:
         assert len(findings) == 1
         assert "error" in findings[0]
         assert "processing_statistics" in findings[0]
-        assert findings[0]["processing_statistics"]["processed_results_count"] == 2
-        assert findings[0]["processing_statistics"]["failed_results_count"] == 0
+        # Nothing reached the file, so the report counts every result as a
+        # failure of this report rather than stating a success rate for an
+        # array that was never written.
+        assert findings[0]["processing_statistics"]["processed_results_count"] == 0
+        assert findings[0]["processing_statistics"]["failed_results_count"] == 2
