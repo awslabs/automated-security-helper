@@ -45,9 +45,11 @@ from tests.unit.test_committed_output_when_git_cannot_answer import (
     _no_orchestrator,
 )
 
-# Marked per test: every test here drives the CLI and the MCP tool in-process
-# except test_files_in_the_way_of_the_output, whose _repo and _broken_repo helpers
-# run git init and git add in a child process, which makes that one integration.
+# Marked per test. A test that hands run_ash_scan a scan (through _cli, or through
+# _mcp with no `ended`) is integration: the scan path starts scanners on any outcome
+# the refusal or the patched orchestrator leaves open, and _repo and _broken_repo
+# also run git in a child process. A test that hands _mcp an `ended` exit replaces
+# run_ash_scan with a raise and stays in-process, so it is unit.
 
 #: Rich markup, a terminal control and a CI command, in text the scan quotes.
 #: The control is a lone ESC plus "c" (reset), not a complete CSI or OSC
@@ -144,7 +146,7 @@ def _reason(progress: Dict[str, Any], code: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_a_config_that_does_not_validate(tree, registry, monkeypatch, capsys) -> None:
     config = tree["source"] / "bad.ash.yaml"
     config.write_text("global_settings:\n  severity_threshold: LOUD\n", "utf-8")
@@ -166,7 +168,7 @@ def test_a_config_that_does_not_validate(tree, registry, monkeypatch, capsys) ->
     assert f"ERROR (3) {_flat(reason)}" in printed, (reason, printed)
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_an_exception_during_the_scan(tree, registry, monkeypatch, capsys) -> None:
     def _broken(cls, **_kwargs: Any) -> None:
         raise RuntimeError(QUOTED)
@@ -213,7 +215,7 @@ def test_files_in_the_way_of_the_output(
     assert f"ERROR (3) {_flat(reason)}" in printed, (reason, printed)
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_a_scanner_selection_that_names_nothing(
     tree, registry, monkeypatch, capsys
 ) -> None:
@@ -330,7 +332,7 @@ def test_a_bare_exit_keeps_its_code_with_no_reason(tree, registry, monkeypatch):
     assert progress["exit_code_meaning"] == ASH_EXIT_CODES[4], progress
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_a_reason_over_several_lines_reaches_the_client_on_one(
     tree, registry, monkeypatch, capsys
 ) -> None:
