@@ -49,7 +49,9 @@ def write_text_atomically(
     than with ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain
     write of a new file would: ``mkstemp`` creates 0600, which would stop a host
     user reading results a container wrote. A regular file already at ``path``
-    keeps its permission bits: the staging file is given them before the rename.
+    keeps its read, write and execute bits (never a setuid, setgid or sticky
+    bit): the staging file is given them before the rename; a file another name
+    refers to lends nothing, and the new file keeps its umask-derived mode.
 
     ``newline`` is open()'s: by default a ``\\n`` in ``content`` is written as the
     platform's line ending, as a plain text write writes it, so content that

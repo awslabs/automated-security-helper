@@ -1325,9 +1325,11 @@ def open_for_atomic_write(
     Outside every root the rename replaces whatever entry is at the name, a link
     included, without following it.
 
-    A regular file already at the name keeps its permission bits: the staging
-    file is given them before the rename, where a fresh file would otherwise have
-    replaced a 0o600 file with a 0o644 one.
+    A regular file already at the name keeps its read, write and execute bits:
+    the staging file is given them before the rename, where a fresh file would
+    otherwise have replaced a 0o600 file with a 0o644 one. Its setuid, setgid and
+    sticky bits are not carried over, and a file another name refers to lends
+    nothing: the new file keeps its umask-derived mode.
 
     On a platform without directory descriptors (Windows) the components below a
     root are checked by name before the staging file is created and again before
@@ -1389,9 +1391,16 @@ def open_for_atomic_write(
                 if (
                     existing is not None
                     and stat.S_ISREG(existing.st_mode)
+                    and existing.st_nlink == 1
                     and hasattr(os, "fchmod")
                 ):
-                    os.fchmod(fd, stat.S_IMODE(existing.st_mode))
+                    # The read, write and execute bits of the file being
+                    # replaced, and only those: a setuid, setgid or sticky bit
+                    # on an entry a scanner put at the name is not carried onto
+                    # the results file. A file another name refers to (a hard
+                    # link a scanner planted) lends it nothing either: the new
+                    # file keeps the umask-derived mode it was created with.
+                    os.fchmod(fd, stat.S_IMODE(existing.st_mode) & 0o777)
                 handle = os.fdopen(fd, open_mode, **text)
             except BaseException:
                 os.close(fd)
