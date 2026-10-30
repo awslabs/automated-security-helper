@@ -1525,6 +1525,43 @@ def test_a_template_no_rule_evaluated_still_reads_as_failed_on_all_in_the_summar
     assert not any("every requested pack on" in r.message for r in caplog.records)
 
 
+def test_a_pack_that_ran_clean_beside_one_that_threw_is_a_partly_evaluated_target(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """AwsSolutions evaluated the template and found nothing; HIPAA threw. Partial
+    evaluation used to be decided by whether a finding was kept, so this template was
+    logged as not evaluated at all and the summary said no rules were evaluated of it,
+    the false statement the partly-evaluated path exists to avoid. The wrapper's mapping
+    holds an entry for each pack that evaluated the template, so an entry decides it."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": []},
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "HIPAA.Security)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == []
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 1
+    assert any(
+        "did not evaluate every requested pack against" in r.message
+        and "1 pack(s) evaluated it" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert any(
+        "did not evaluate every requested pack on 1 of 1 template(s)" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any("No rules were evaluated" in r.message for r in caplog.records), [
+        r.message for r in caplog.records
+    ]
+
+
 def test_the_missing_dependency_reason_offers_no_install_hint_for_a_wrapper_import_failure(
     scanner, monkeypatch
 ):

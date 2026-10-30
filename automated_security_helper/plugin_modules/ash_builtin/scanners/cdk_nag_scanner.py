@@ -1614,24 +1614,27 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         failure = text_without_values(
                             str(nag_result_dict.failure), self._environment_values()
                         )
-                        # A failure can come with findings: one requested pack threw
-                        # while another evaluated the template and found a violation.
-                        # Those findings are facts about the template and are kept;
-                        # the target still counts as failed, because the rules of the
-                        # pack that threw were never evaluated. Dropping them read a
-                        # violating template as empty, and "did not evaluate" was false.
+                        # A failure can come with an evaluation: one requested pack
+                        # threw while another evaluated the template. The wrapper's
+                        # mapping holds an entry for each pack that evaluated it (an
+                        # empty list for a pack that found nothing), so an entry is what
+                        # makes the target partly evaluated; its findings are facts
+                        # about the template and are kept. The target still counts as
+                        # failed, because the rules of the pack that threw were never
+                        # evaluated. Deciding this by the kept findings instead read a
+                        # template one pack evaluated cleanly as not evaluated at all,
+                        # and the summary then said no rules were evaluated of it.
+                        ran = nag_result_dict.results or {}
                         kept = [
-                            finding
-                            for findings in (nag_result_dict.results or {}).values()
-                            for finding in findings
+                            finding for findings in ran.values() for finding in findings
                         ]
-                        if kept:
+                        if ran:
                             sarif_results.extend(kept)
                             self.targets_partly_evaluated += 1
                             ASH_LOGGER.error(
                                 f"cdk-nag did not evaluate every requested pack against "
-                                f"{cfn_file} ({len(kept)} finding(s) from the packs that "
-                                f"ran are kept): {failure}"
+                                f"{cfn_file} ({len(ran)} pack(s) evaluated it; their "
+                                f"{len(kept)} finding(s) are kept): {failure}"
                             )
                         else:
                             ASH_LOGGER.error(
