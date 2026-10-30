@@ -641,10 +641,15 @@ def page_text(content: bytes, *, commands_only: bool = False) -> str:
 
 
 #: Pins of other projects that a version-pinned page keeps as written. Each entry is a
-#: text of the line that holds the pin (the project's name and tag, say). The pin
-#: readers count only the pins of this repository, so a pin they reject is either one of
-#: these or a pin of this repository in a shape scripts/version_template_manager.py does
-#: not know, which no template or check would ever move. None exists today.
+#: text found in the entry or command that holds the pin, not only on its own line: a
+#: block-style pre-commit entry is its `- repo:` line through its last key, and a
+#: `\`-continued clone is all its lines (see _entry_around in
+#: scripts/version_template_manager.py). So the project's URL excuses a `rev:` that sits
+#: on the line below it, and a bare tag would excuse every pin of that tag, ASH's
+#: included, so name the project. The pin readers count only the pins of this
+#: repository, so a pin they reject is either one of these or a pin of this repository
+#: in a shape scripts/version_template_manager.py does not know, which no template or
+#: check would ever move. None exists today.
 KNOWN_THIRD_PARTY_PINS: tuple[str, ...] = ()
 
 
@@ -660,17 +665,18 @@ def unrecognized_pin_problems(
     pin of this repository in a shape they miss (a `rev:` before its `repo:`, a
     flow-style entry, a clone of a URL held in a variable); the pages would render it
     stale on every build and pass the pins check. So a rejected pin fails the check
-    unless the line holding it names an entry of allowed (KNOWN_THIRD_PARTY_PINS).
+    unless the entry or command holding it names an entry of allowed
+    (KNOWN_THIRD_PARTY_PINS).
     """
     if allowed is None:
         allowed = KNOWN_THIRD_PARTY_PINS
     problems = []
-    for form, version, line in manager.unrecognized_pins(text):
-        if any(entry in line for entry in allowed):
+    for pin in manager.unrecognized_pins(text):
+        if any(entry in pin.entry for entry in allowed):
             continue
         problems.append(
-            f"{where} has a {form} pin of {version} that no pattern of "
-            f"ASH_PIN_PATTERNS accepts: {line!r}; if it is another project's, add it "
+            f"{where} has a {pin.form} pin of {pin.version} that no pattern of "
+            f"ASH_PIN_PATTERNS accepts: {pin.line!r}; if it is another project's, add it "
             "to KNOWN_THIRD_PARTY_PINS in scripts/docs_versions.py, otherwise add its "
             "shape to scripts/version_template_manager.py"
         )

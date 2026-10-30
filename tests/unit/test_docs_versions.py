@@ -764,6 +764,62 @@ def test_a_third_party_pin_passes_only_when_its_line_is_allowed():
     assert len(dv.unrecognized_pin_problems(manager, other, "page/", allowed)) == 1
 
 
+# Another project's pins, each written so that its name is NOT on the line of the pin.
+THIRD_PARTY_ENTRIES = {
+    "a block-style rev: under its repo:": (
+        f"repos:\n  - repo: {OTHER_PROJECT_URL}\n    rev: v4.6.0\n    hooks:\n"
+        "      - id: check-yaml\n"
+    ),
+    "a rev: written before its repo:": f"- rev: v4.6.0\n  repo: {OTHER_PROJECT_URL}\n",
+    "a clone continued over lines": (
+        f"git clone \\\n  --branch v2.0.0 \\\n  {OTHER_PROJECT_URL}.git\n"
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text", list(THIRD_PARTY_ENTRIES.values()), ids=list(THIRD_PARTY_ENTRIES)
+)
+def test_an_allowance_names_the_project_of_the_whole_entry(text):
+    """Red before: the allowance was matched against the one line that holds the tag,
+    which is `rev: v4.6.0` or `--branch v2.0.0` with no project on it, so the only
+    entry that could excuse the pin was the bare tag, and that excuses every pin of
+    that tag on every page, this repository's included."""
+    manager = _manager()
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    allowed = ("example/other-project",)
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+
+
+@pytest.mark.unit
+def test_an_allowance_does_not_excuse_the_next_entry():
+    """The control: the entry that holds the allowance's project is excused and the
+    entry beside it, in the same list, is not."""
+    manager = _manager()
+    text = (
+        f"- repo: {OTHER_PROJECT_URL}\n"
+        "  rev: v4.6.0\n"
+        "- rev: v3.3.0\n"
+        f"  repo: {REPO_URL}\n"
+    )
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+@pytest.mark.unit
+def test_a_bare_tag_in_the_allowance_excuses_a_pin_of_this_repository():
+    """The reason the entry must carry the project: a tag alone matches ASH's own
+    entry as well, so the check would pass the stale pin it exists to catch."""
+    manager = _manager()
+    text = f"- rev: v3.3.0\n  repo: {REPO_URL}\n"
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    assert dv.unrecognized_pin_problems(manager, text, "page/", ("rev: v3.3.0",)) == []
+
+
 @pytest.mark.unit
 def test_a_recognized_pin_is_not_reported():
     """The control: every form's own pin, and the ellipsis prose, are counted, not listed."""

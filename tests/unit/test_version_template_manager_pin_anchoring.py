@@ -413,7 +413,7 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
         manager = VersionTemplateManager(REPO_ROOT)
         assert manager.release_pins(text) == set()
         found = manager.unrecognized_pins(text)
-        assert [(name, version) for name, version, _line in found] == [(form, "3.3.0")]
+        assert [(pin.form, pin.version) for pin in found] == [(form, "3.3.0")]
         assert _convert(text) == text  # convert misses it too: the gap is real
 
     @pytest.mark.parametrize("text", list(ASH_PINS.values()))
@@ -436,7 +436,46 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
     def test_another_project_s_pin_is_listed_for_an_explicit_allowance(self, text):
         found = VersionTemplateManager(REPO_ROOT).unrecognized_pins(text)
         assert len(found) == 1, found
-        assert found[0][2] in text
+        assert found[0].line in text
+        assert found[0].line in found[0].entry
+
+    @pytest.mark.parametrize(
+        "text, entry",
+        [
+            # A block-style entry: the pin's line comes with the repo: line above it.
+            (
+                (
+                    f"repos:\n  - repo: {OTHER_URL}\n    rev: v4.6.0\n    hooks:\n"
+                    "      - id: x\n  - repo: https://github.com/example/next\n"
+                    "    rev: v1.0.0\n"
+                ),
+                f"  - repo: {OTHER_URL}\n    rev: v4.6.0\n    hooks:\n      - id: x",
+            ),
+            # A rev: written first: the entry runs down to its repo: line.
+            (
+                f"- rev: v4.6.0\n  repo: {OTHER_URL}\n- repo: https://github.com/e/n\n",
+                f"- rev: v4.6.0\n  repo: {OTHER_URL}",
+            ),
+            # A clone continued with backslashes is one command.
+            (
+                f"echo hi\ngit clone \\\n  --branch v2.0.0 \\\n  {OTHER_URL}.git\n",
+                f"git clone \\\n  --branch v2.0.0 \\\n  {OTHER_URL}.git",
+            ),
+            # Prose stays one line.
+            (
+                f"Intro line.\nRun `git clone --branch v2.0.0 {OTHER_URL}.git`.\nOutro.\n",
+                f"Run `git clone --branch v2.0.0 {OTHER_URL}.git`.",
+            ),
+        ],
+        ids=["block", "rev-first", "continued", "prose"],
+    )
+    def test_the_entry_around_a_listed_pin_is_the_whole_entry_or_command(
+        self, text, entry
+    ):
+        """Red before: only the physical line was returned, so an allowance could not
+        name the project that sits on the repo: line or in the continued URL."""
+        found = VersionTemplateManager(REPO_ROOT).unrecognized_pins(text)
+        assert found[0].entry == entry, found
 
     def test_every_form_has_patterns_with_one_group(self):
         """A form added to INSTALL_REF_FORMS needs its ASH anchor in ASH_PIN_PATTERNS."""

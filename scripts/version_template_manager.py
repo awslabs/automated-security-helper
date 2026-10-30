@@ -10,7 +10,7 @@ import enum
 import re
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 import argparse
 
 # Add the project root to the path so we can import our version management
@@ -137,6 +137,55 @@ def _ash_pins(text: str) -> List[Tuple[str, str, int]]:
                     (form, match.string[match.end(1) : match.end()], match.end(1))
                 )
     return found
+
+
+class UnrecognizedPin(NamedTuple):
+    """A pin ASH_PIN_PATTERNS rejects: the form, the version, and where it sits."""
+
+    form: str
+    version: str
+    line: str  # the line that holds the version
+    entry: str  # the entry or command around it (see _entry_around)
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _entry_around(lines: List[str], index: int) -> str:
+    """The YAML list entry or the shell command that holds lines[index].
+
+    A command continued with a trailing backslash is whole. A line of a YAML list entry
+    is read up to the `- ` line that starts the entry and down through the lines
+    indented deeper than it, so a pre-commit `rev:` comes with the `repo:` line above
+    it, and a `- rev:` with the `repo:` below it. Prose and other text stay one line.
+    """
+    start = index
+    while start > 0 and lines[start - 1].rstrip().endswith("\\"):
+        start -= 1
+    if not lines[start].lstrip().startswith("- "):
+        base = _indent(lines[start])
+        above = start - 1
+        while above >= 0 and lines[above].strip():
+            if lines[above].lstrip().startswith("- "):
+                if _indent(lines[above]) < base:
+                    start = above
+                break
+            if _indent(lines[above]) < base:
+                break
+            above -= 1
+    end = index
+    while end + 1 < len(lines) and lines[end].rstrip().endswith("\\"):
+        end += 1
+    if lines[start].lstrip().startswith("- "):
+        entry_indent = _indent(lines[start])
+        while (
+            end + 1 < len(lines)
+            and lines[end + 1].strip()
+            and _indent(lines[end + 1]) > entry_indent
+        ):
+            end += 1
+    return "\n".join(lines[start : end + 1])
 
 
 class FileResult(enum.Enum):
@@ -374,8 +423,8 @@ class VersionTemplateManager:
         return [name for name, _prefix, _branch in INSTALL_REF_FORMS if name in pinned]
 
     @staticmethod
-    def unrecognized_pins(text: str) -> List[Tuple[str, str, str]]:
-        """(form name, release number, line) of every pin ASH_PIN_PATTERNS rejects.
+    def unrecognized_pins(text: str) -> List[UnrecognizedPin]:
+        """Every pin ASH_PIN_PATTERNS rejects, with the line and entry that hold it.
 
         The readers above take only what ASH_PIN_PATTERNS anchors on this repository,
         so another project's tag is not counted as ASH's. The same rule hides a pin of
@@ -384,19 +433,28 @@ class VersionTemplateManager:
         which then renders stale on every build and passes the checks that read pins.
         This lists every `<install-ref prefix>v<version>` that no pattern accepted, so
         a check can name it: the pin is either another project's, to be allowed
-        explicitly, or ASH's, and needs its shape added to ASH_PIN_PATTERNS.
+        explicitly, or ASH's, and needs its shape added to ASH_PIN_PATTERNS. The entry
+        is what an allowance is matched against: the project's name sits on the `repo:`
+        line above a block-style `rev:` or in the URL of a clone, not always on the line
+        of the pin.
         """
         recognized = {start for _form, _version, start in _ash_pins(text)}
+        lines = text.split("\n")
         found = []
         for name, install_prefix, _branch in INSTALL_REF_FORMS:
             prefix = _LOOSE_PREFIX.get(name, install_prefix)
             for match in re.finditer(rf"(?:{prefix})v(?P<version>{_SEMVER})", text):
                 if match.start("version") in recognized:
                     continue
-                line_start = text.rfind("\n", 0, match.start()) + 1
-                line_end = text.find("\n", match.end())
-                line = text[line_start : line_end if line_end >= 0 else len(text)]
-                found.append((name, match.group("version"), line.strip()))
+                index = text.count("\n", 0, match.start())
+                found.append(
+                    UnrecognizedPin(
+                        name,
+                        match.group("version"),
+                        lines[index].strip(),
+                        _entry_around(lines, index),
+                    )
+                )
         return found
 
     @staticmethod
