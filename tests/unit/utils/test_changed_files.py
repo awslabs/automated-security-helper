@@ -696,3 +696,60 @@ class TestTheKeptCountIsSaidOnce:
 
         said = [m for m in ash_warnings() if "located in converted files" in m]
         assert len(said) == 2, ash_warnings()
+
+
+@pytest.mark.unit
+class TestFileUriForms:
+    """A ``file://`` URI is reduced to its path as the SARIF reader reduces it: no
+    host segment, no slash before a drive letter, percent-decoded."""
+
+    def test_a_file_uri_with_a_host_names_the_path_after_the_host(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        target = (source_dir / "a.py").resolve()
+        uri = target.as_uri().replace("file://", "file://localhost", 1)
+        results = _make_results_with_sarif([_make_result(uri)])
+
+        filtered = filter_results_to_changed_files(results, {target}, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_a_file_uri_drops_the_slash_before_a_drive_letter(self):
+        from automated_security_helper.utils.changed_files import _location_readings
+
+        assert _location_readings("file:///C:/proj/a.py") == ["C:/proj/a.py"]
+        assert _location_readings("file:///srv/proj/a.py") == ["/srv/proj/a.py"]
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "file:///C:/proj/src/config.py",
+            "file:///srv/my%20proj/src/a.py",
+            "file://hostname/project/app.py",
+            "file:///C:/My%20Proj/src/a.py",
+        ],
+    )
+    def test_the_reduction_agrees_with_the_sarif_readers(self, uri):
+        """One reduction in two places drifts; this keeps them together."""
+        from urllib.parse import unquote
+
+        from automated_security_helper.utils.changed_files import _file_uri_path
+        from automated_security_helper.utils.sarif_utils import _file_uri_to_path_text
+
+        assert unquote(_file_uri_path(uri), errors="surrogateescape") == (
+            _file_uri_to_path_text(uri)
+        )
+
+    @pytest.mark.parametrize("uri", ["", "file://"])
+    def test_a_uri_naming_no_file_keeps_the_finding(self, tmp_path, uri):
+        """Read as a path it was the source directory itself, which is in the changed
+        set only when every file is; the filter's own rule keeps a result it cannot
+        place."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        results = _make_results_with_sarif([_make_result(uri)])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1

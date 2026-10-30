@@ -15,7 +15,7 @@ out the same findings.
 
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Mapping, Optional, Set
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from automated_security_helper.utils.finding_identity import CONVERTED_PATH_PROPERTY
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -26,6 +26,23 @@ from automated_security_helper.utils.undecodable_text import (
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+
+def _file_uri_path(uri: str) -> str:
+    """The path a ``file://`` *uri* names, still percent-encoded.
+
+    The reduction ``sarif_utils._file_uri_to_path_text`` makes, less its decoding,
+    which :func:`_location_readings` does itself so that it can also keep the
+    encoded text as a reading. A host segment is not part of the path
+    (``file://host/p`` names ``/p``), and the slash before a drive letter is not
+    either (``file:///C:/proj`` names ``C:/proj``). Slicing the scheme off left the
+    host as a directory of the path and the slash on the drive, so such a URI
+    never matched the changed file it names. A test compares the two readers.
+    """
+    path = urlparse(uri).path
+    if len(path) > 2 and path[0] == "/" and path[2] == ":":
+        path = path[1:]
+    return path
 
 
 def _location_readings(uri: str) -> List[str]:
@@ -46,9 +63,7 @@ def _location_readings(uri: str) -> List[str]:
     the file, so the reading resolves to it.
     """
     if uri.startswith("file://"):
-        uri = uri[7:]
-        if uri.startswith("///"):
-            uri = uri[2:]
+        uri = _file_uri_path(uri)
     readings = [uri]
     decoded = unquote(uri, errors="surrogateescape")
     if decoded != uri:
@@ -103,8 +118,9 @@ def filter_results_to_changed_files(
     *changed_files* holds resolved absolute paths; a result's location is
     resolved against *source_dir* to compare. A result with no location is kept,
     since it cannot be placed outside the changed files; so is one whose location
-    cannot be resolved to a path at all (:func:`resolve_uri_reading`), rather
-    than that one location raising out of the filter and failing the scan.
+    names no file (an empty URI) and one whose location cannot be resolved to a
+    path at all (:func:`resolve_uri_reading`), rather than that one location
+    raising out of the filter and failing the scan.
     Mutates and returns *results*.
 
     A result located in a converted file (its ``converted_path`` property is
@@ -155,9 +171,20 @@ def filter_results_to_changed_files(
                     continue
                 readings = [source]
             else:
-                readings = _location_readings(
-                    loc.physicalLocation.root.artifactLocation.uri or ""
-                )
+                # A URI that names no file (empty, or ``file://`` with no path) places
+                # the result nowhere, so it is kept like a result with no location;
+                # read as a path it was the source directory itself, which is in the
+                # changed set only when every file is.
+                readings = [
+                    reading
+                    for reading in _location_readings(
+                        loc.physicalLocation.root.artifactLocation.uri or ""
+                    )
+                    if reading
+                ]
+                if not readings:
+                    filtered.append(result)
+                    continue
             placed = [
                 path_in_record_form(resolved)
                 for resolved in (
