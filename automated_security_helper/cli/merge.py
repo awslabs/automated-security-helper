@@ -512,15 +512,19 @@ def resolve_results_file(target: str | Path) -> Path:
     path = Path(target)
     if path.is_file():
         return path
+    # Shown as the operator typed it, not as the Path object spells it: on
+    # Windows a Path writes "\" for every "/" the operator gave, and a trailing
+    # separator is dropped on every host, so the refusal named a path the
+    # operator never typed.
     if not path.exists():
         raise ResultsPathError(
-            f"--results path does not exist: {_shown(path)}. Refusing to merge, "
+            f"--results path does not exist: {_shown(target)}. Refusing to merge, "
             f"because skipping an unreadable shard would produce a partial report "
             f"that reads as complete."
         )
     if not path.is_dir():
         raise ResultsPathError(
-            f"--results path is neither a file nor a directory: {_shown(path)}."
+            f"--results path is neither a file nor a directory: {_shown(target)}."
         )
 
     # Not through a symlink at any level beneath the directory, here or in the
