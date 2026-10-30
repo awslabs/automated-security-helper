@@ -30,6 +30,7 @@ Each test pins one behavior the scanner lacked:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -143,6 +144,47 @@ def test_a_colon_rule_id_entry_is_re_scanned(tmp_path, monkeypatch):
         ("app/x.py", "my:rule", 4, 3)
     ]
     assert [call["files"] for call in calls] == [["app/x.py"]]
+
+
+# --------------------------------------------------------------------------- #
+# The on-disk spelling lookup reads each directory once and indexes it
+# --------------------------------------------------------------------------- #
+
+
+def test_each_directory_is_listed_once_and_indexed_over_many_entries(
+    tmp_path, monkeypatch
+):
+    """An ignore file can name thousands of entries under one directory; each
+    lookup reads the directory's listing from the cache, as a set of names
+    and a casefold index, never as a list to scan."""
+    for index in range(200):
+        _write(tmp_path, f"app/f{index}.py")
+    _write(tmp_path, "top.py")
+    scanned = []
+    real_scandir = os.scandir
+
+    def counting_scandir(path):
+        scanned.append(Path(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(module.os, "scandir", counting_scandir)
+    listings: dict = {}
+    spelled = [
+        GitleaksScanner._on_disk_spelling(tmp_path, f"app/f{index}.py", listings)
+        for index in range(200)
+    ]
+    spelled.append(GitleaksScanner._on_disk_spelling(tmp_path, "top.py", listings))
+    spelled.append(
+        GitleaksScanner._on_disk_spelling(tmp_path, "app/missing.py", listings)
+    )
+
+    assert spelled[:200] == [f"app/f{index}.py" for index in range(200)]
+    assert spelled[200:] == ["top.py", None]
+    # One listing per directory touched: the root and app.
+    assert sorted(scanned) == sorted([tmp_path, tmp_path / "app"])
+    names, folded = listings[tmp_path / "app"]
+    assert isinstance(names, set) and len(names) == 200
+    assert isinstance(folded, dict) and folded["f7.py"] == ["f7.py"]
 
 
 # --------------------------------------------------------------------------- #

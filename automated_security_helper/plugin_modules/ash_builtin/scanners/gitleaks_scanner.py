@@ -1159,7 +1159,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         itself = False
         not_checked = 0
         copied_bytes = 0
-        listings: Dict[Path, List[str]] = {}
+        listings: Dict[Path, Tuple[Set[str], Dict[str, List[str]]]] = {}
         spellings_seen: Set[str] = set()
         for index, relative in enumerate(relatives):
             if in_tree + int(itself) >= MAX_RESCAN_FILES:
@@ -1241,7 +1241,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
     @staticmethod
     def _on_disk_spelling(
-        root: Path, relative: str, listings: Dict[Path, List[str]]
+        root: Path,
+        relative: str,
+        listings: Dict[Path, Tuple[Set[str], Dict[str, List[str]]]],
     ) -> Optional[str]:
         """``relative`` spelled as the directories under ``root`` list it, or None.
 
@@ -1261,27 +1263,36 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         entry's spelling (``os.path.samefile``) is taken. On a case-sensitive
         filesystem that comparison fails, so a wrong-case entry gives None, as
         the open did before. ``listings`` caches each directory's entries
-        across the entries of one ignore file.
+        across the entries of one ignore file, read once per directory and
+        held as a set of its names beside an index from each name's casefold
+        to the listed names that fold to it. Both lookups are then constant
+        in the directory's size: a list made ``part in names`` and the
+        casefold fallback a scan of the whole listing for every path part of
+        every entry, and the ignore file can hold up to ``MAX_IGNORE_FILE_BYTES``
+        of entries, with the ones that name no file or repeat one not
+        counting toward ``MAX_RESCAN_FILES``.
         """
         parts: List[str] = []
         current = root
         for part in PurePosixPath(relative).parts:
-            names = listings.get(current)
-            if names is None:
+            listing = listings.get(current)
+            if listing is None:
                 try:
                     with os.scandir(current) as entries:
-                        names = [entry.name for entry in entries]
+                        names = {entry.name for entry in entries}
                 except OSError:
                     return None
-                listings[current] = names
+                folded_index: Dict[str, List[str]] = {}
+                for name in names:
+                    folded_index.setdefault(name.casefold(), []).append(name)
+                listing = (names, folded_index)
+                listings[current] = listing
+            names, folded_index = listing
             chosen: Optional[str] = None
             if part in names:
                 chosen = part
             else:
-                folded = part.casefold()
-                for name in names:
-                    if name.casefold() != folded:
-                        continue
+                for name in folded_index.get(part.casefold(), ()):
                     try:
                         if os.path.samefile(current / name, current / part):
                             chosen = name
