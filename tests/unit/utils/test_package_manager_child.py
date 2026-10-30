@@ -23,10 +23,13 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import tempfile
 from pathlib import Path
 
 import pytest
 
+from automated_security_helper.utils import package_manager_child as child_module
 from automated_security_helper.utils.package_manager_child import (
     LINK_LEAVES_TREE,
     package_manager_child,
@@ -38,6 +41,25 @@ pytestmark = [
     pytest.mark.unit,
     pytest.mark.skipif(os.name == "nt", reason="symlinks and POSIX paths"),
 ]
+
+
+@pytest.fixture
+def trusted_copy_dirs(monkeypatch, tmp_path):
+    """Stand down the two shared-directory checks on yarn's copy placement.
+
+    tmp_path, and the HOME the run gives each test, sit under the system
+    temporary directory, whose ancestors every account can write, so the
+    placement would pass over every directory a test offers it. A test about
+    where the copy goes for another reason uses this; the checks themselves are
+    read in ``TestWhereYarnsCopyGoes`` without it.
+    """
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
+    monkeypatch.setattr(child_module, "_untrusted_ancestor", lambda path: None)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    return system_tmp
+
 
 AUDIT_CONFIG = {"ignoreCves": ["CVE-2026-0001"], "ignoreGhsas": ["GHSA-aaaa-bbbb-cccc"]}
 
@@ -145,7 +167,9 @@ class TestSkipHoldingThePackage:
 
 
 class TestWhereYarnsCopyGoes:
-    def test_with_no_scan_root_the_copy_leaves_the_package(self, tmp_path, monkeypatch):
+    def test_with_no_scan_root_the_copy_leaves_the_package(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
         """A caller that passes only ``parent`` (a results directory under the
         package) and no scan_root got the copy under the package, where yarn
         read the package's own .npmrc and .yarnrc as parent-directory files.
@@ -166,6 +190,99 @@ class TestWhereYarnsCopyGoes:
         assert not cwd.is_relative_to(package), cwd
         assert cwd.is_relative_to(cache_home / "ash"), cwd
         assert child.leading_args == ()
+
+    def test_a_candidate_under_the_system_temporary_directory_is_passed_over(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """``--output-dir /tmp/ash-out`` is outside the scanned tree and was
+        taken, which put ``/tmp``, writable by every account, back among yarn's
+        parent directories. The operator's cache directory is used instead."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        parent = trusted_copy_dirs / "ash-out"
+        parent.mkdir()
+        cache_home = tmp_path / "cache-home"
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+
+        with package_manager_child(
+            "yarn", package, parent=parent, scan_root=repo, yarn_major=1
+        ) as child:
+            cwd = child.cwd
+
+        assert not cwd.is_relative_to(trusted_copy_dirs), cwd
+        assert cwd.is_relative_to(cache_home / "ash"), cwd
+
+    def test_a_candidate_below_a_directory_another_account_can_write_is_passed_over(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """An output directory inside a larger checkout above the scanned tree
+        (``--source-dir mono/sub --output-dir mono/out``) puts that checkout's
+        .npmrc and .yarnrc on yarn's path. The ancestor check names such a
+        directory; here it names the output directory's parent, and the cache
+        directory is used instead."""
+        repo = tmp_path / "mono" / "sub"
+        _yarn_package(repo)
+        parent = tmp_path / "mono" / "out"
+        parent.mkdir()
+        cache_home = tmp_path / "cache-home"
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+        monkeypatch.setattr(
+            child_module,
+            "_untrusted_ancestor",
+            lambda path: tmp_path / "mono" if path == parent else None,
+        )
+
+        chosen, passed_over = child_module._yarn_copy_parent(parent, repo)
+
+        assert chosen == cache_home / "ash", (chosen, passed_over)
+        assert len(passed_over) == 1 and str(tmp_path / "mono") in passed_over[0]
+
+    def test_the_ancestor_check_names_a_world_writable_directory(self, tmp_path):
+        """Read with the real check: a directory any account can write, planted
+        above the candidate, is named; the nearest such directory is returned,
+        which is why the planted one is found before ``/tmp`` is."""
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        shared.chmod(0o777)
+        candidate = shared / "ash" / "copies"
+
+        assert child_module._untrusted_ancestor(candidate) == shared
+
+    def test_the_ancestor_check_passes_an_owner_only_chain_up_to_the_temp_root(
+        self, tmp_path
+    ):
+        """Control: a 0700 chain below tmp_path names nothing of its own; what
+        the check returns, if anything, lies at or above tmp_path (the run's
+        temporary root), never inside the chain."""
+        own = tmp_path / "own" / "ash"
+        own.mkdir(parents=True)
+        (tmp_path / "own").chmod(0o700)
+        own.chmod(0o700)
+
+        named = child_module._untrusted_ancestor(own / "copies")
+
+        assert named is None or not named.is_relative_to(tmp_path / "own"), named
+        if named is not None:
+            mode = os.stat(named).st_mode
+            assert mode & (stat.S_IWGRP | stat.S_IWOTH) or os.stat(
+                named
+            ).st_uid not in (os.getuid(), 0)
+
+    def test_a_relative_xdg_cache_home_is_ignored(self, tmp_path, monkeypatch):
+        """The specification and the tools that read it ignore a relative value,
+        which would name a directory under whatever the current directory is.
+        A leading ``~`` is expanded first, as the tools do."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+
+        monkeypatch.setenv("XDG_CACHE_HOME", "rel-cache")
+        assert child_module._operator_cache_dir() == home / ".cache" / "ash"
+        monkeypatch.setenv("XDG_CACHE_HOME", "~/caches")
+        assert child_module._operator_cache_dir() == home / "caches" / "ash"
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+        assert child_module._operator_cache_dir() == tmp_path / "xdg" / "ash"
 
 
 class TestLinkedDirectories:
@@ -343,7 +460,9 @@ class TestLinkedDirectories:
             "yarn.lock",
         ]
 
-    def test_the_copy_holds_a_member_reached_first_through_a_link(self, tmp_path):
+    def test_the_copy_holds_a_member_reached_first_through_a_link(
+        self, tmp_path, trusted_copy_dirs
+    ):
         """The copy yarn audits from has the real member at its real path."""
         repo = tmp_path / "repo"
         package = _yarn_package(repo)
@@ -385,7 +504,9 @@ class TestLinkedDirectories:
             "yarn.lock",
         ]
 
-    def test_the_copy_holds_the_members_below_a_linked_directory(self, tmp_path):
+    def test_the_copy_holds_the_members_below_a_linked_directory(
+        self, tmp_path, trusted_copy_dirs
+    ):
         repo = tmp_path / "repo"
         package = _yarn_package(repo)
         shared = repo / "shared"

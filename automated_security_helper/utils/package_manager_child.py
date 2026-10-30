@@ -28,10 +28,11 @@ names in place of itself, ``yarn --version`` included.
   reads, so the copy goes under the scan's own output directory when that is
   outside the tree (where npm's and pnpm's copies go), else under the operator's
   cache directory (``$XDG_CACHE_HOME/ash``, or ``~/.cache/ash``), and never under
-  the system temporary directory: on a shared host its ancestors (``/tmp``) are
-  writable by every user, and a ``.npmrc`` or ``.yarnrc`` planted there would
-  redirect the audit (``_yarn_copy_parent``). ``--no-default-rc`` would also drop
-  the operator's files,
+  the system temporary directory or below any directory another account owns or
+  can write: on a shared host ``/tmp``'s ancestors are writable by every user,
+  and a ``.npmrc`` or ``.yarnrc`` planted there would redirect the audit
+  (``_yarn_copy_parent``, ``_untrusted_ancestor``). ``--no-default-rc`` would
+  also drop the operator's files,
   ``~/.npmrc`` with no way to add it back (measured: it ignores
   ``npm_config_userconfig``).
 * Under a sandbox the tool's home is private, so the operator's files were never
@@ -172,40 +173,110 @@ def _within(path: Path, root: Optional[Path]) -> bool:
 
 
 def _operator_cache_dir() -> Optional[Path]:
-    """``$XDG_CACHE_HOME/ash``, else ``~/.cache/ash``; None with no home."""
-    xdg = os.environ.get("XDG_CACHE_HOME")
+    """``$XDG_CACHE_HOME/ash``, else ``~/.cache/ash``; None with no home.
+
+    A relative ``XDG_CACHE_HOME`` is ignored, as the specification says and as
+    the tools reading it do (``content_db_refresh.default_cache_dir``): it would
+    name a directory under whatever the current directory is. A leading ``~`` is
+    expanded first, as the tools do.
+    """
+    xdg = os.environ.get("XDG_CACHE_HOME", "")
     if xdg:
-        return Path(xdg).expanduser() / "ash"
+        expanded = os.path.expanduser(xdg) if xdg.startswith("~") else xdg
+        if os.path.isabs(expanded):
+            return Path(expanded) / "ash"
     try:
         return Path.home() / ".cache" / "ash"
     except (KeyError, RuntimeError):
         return None
 
 
-def _yarn_copy_parent(parent: Path, scan_root: Optional[Path]) -> Optional[Path]:
-    """Where yarn's unsandboxed copy goes, or None when no directory will do.
+def _untrusted_ancestor(path: Path) -> Optional[Path]:
+    """The nearest directory at or above ``path`` another account could write, or None.
+
+    yarn reads ``.npmrc``, ``.yarnrc`` and ``.yarnrc.yml`` from every parent of
+    its directory, so a copy below a directory any other account can write to
+    (``/tmp`` with its sticky bit, a group- or world-writable directory, one
+    owned by another account) can be redirected by a settings file planted
+    beside it. The check is sshd's StrictModes one: from the nearest existing
+    directory up to the root, each has to be owned by this account or root and
+    writable by its owner only. Where ownership and the mode bits mean nothing
+    of the kind (Windows) every directory passes.
+    """
+    if os.name == "nt":
+        return None
+    current = Path(os.path.abspath(path))
+    while not current.exists():
+        if current.parent == current:
+            return None
+        current = current.parent
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    for directory in (current, *current.parents):
+        try:
+            status = os.stat(directory)
+        except OSError:
+            return directory
+        if uid is not None and status.st_uid not in (uid, 0):
+            return directory
+        if status.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            return directory
+    return None
+
+
+def _yarn_copy_parent(
+    parent: Path, scan_root: Optional[Path]
+) -> Tuple[Optional[Path], Tuple[str, ...]]:
+    """Where yarn's unsandboxed copy goes, and why each candidate before it failed.
 
     yarn reads ``.yarnrc``, ``.npmrc`` and ``.yarnrc.yml`` from the copy's
     directory and every parent, so the copy's ancestors decide which settings
     files it reads besides the operator's own. The scan's output directory
-    (``parent``, where npm's and pnpm's copies go) is first, when it is outside
-    the scanned tree: its ancestors are the operator's. When it is inside the
-    tree (the default output directory is) the operator's cache directory is
-    used instead. The system temporary directory is never used: on a shared
-    host its ancestors (``/tmp``) are writable by every user, and a ``.npmrc``
-    planted there would redirect the audit and its dependency list. None when
-    both are inside the tree or cannot be made: yarn then runs in place with
-    every settings file dropped.
+    (``parent``, where npm's and pnpm's copies go) is first, then the operator's
+    cache directory (the default output directory is inside the tree). A
+    candidate is passed over when it is inside the scanned tree (the repository's
+    own files would be on yarn's path), when it is under the system temporary
+    directory (``--output-dir /tmp/ash-out`` or ``XDG_CACHE_HOME=/tmp/cache`` put
+    ``/tmp``, which every account can write, back on it), when any directory at
+    or above it is writable by, or owned by, another account
+    (``_untrusted_ancestor``; an output directory inside a larger checkout above
+    the scanned tree puts that checkout's ``.npmrc`` and ``.yarnrc`` on the path,
+    and those files are the repository's), or when it cannot be made. None, with
+    every reason, when no candidate will do: yarn then runs in place with every
+    settings file dropped.
     """
-    for candidate in (Path(parent), _operator_cache_dir()):
-        if candidate is None or _within(candidate, scan_root):
+    passed_over: List[str] = []
+    temp_root = Path(tempfile.gettempdir())
+    candidates = (
+        ("the output directory", Path(parent)),
+        ("the operator's cache directory", _operator_cache_dir()),
+    )
+    for what, candidate in candidates:
+        if candidate is None:
+            passed_over.append(f"{what} is not known")
+            continue
+        if _within(candidate, scan_root):
+            passed_over.append(f"{what} {candidate} is inside the scanned tree")
+            continue
+        if _within(candidate, temp_root):
+            passed_over.append(
+                f"{what} {candidate} is under the system temporary directory "
+                f"{temp_root}, which every account can write"
+            )
+            continue
+        shared = _untrusted_ancestor(candidate)
+        if shared is not None:
+            passed_over.append(
+                f"{what} {candidate} is below {shared}, which another account "
+                "owns or can write"
+            )
             continue
         try:
             candidate.mkdir(parents=True, exist_ok=True)
-        except OSError:
+        except OSError as error:
+            passed_over.append(f"{what} {candidate} cannot be made ({error})")
             continue
-        return candidate
-    return None
+        return candidate, tuple(passed_over)
+    return None, tuple(passed_over)
 
 
 def _write_copy(target: Path, data: bytes, private: Path) -> None:
@@ -596,7 +667,7 @@ def package_manager_child(
         # output directory was accepted wherever it was, so a results directory
         # under the package put the copy inside it, and yarn read the
         # package's own .npmrc and .yarnrc as parent-directory files.
-        copy_parent = _yarn_copy_parent(
+        copy_parent, _passed_over = _yarn_copy_parent(
             Path(parent), Path(scan_root) if scan_root is not None else package_dir
         )
     in_place_yarn = binary == "yarn" and (sandboxed or copy_parent is None)

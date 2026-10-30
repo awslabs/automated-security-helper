@@ -30,6 +30,7 @@ tool.
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -44,6 +45,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
+from automated_security_helper.utils import package_manager_child
 from automated_security_helper.utils.package_manager_child import (
     NO_YARNRC_PREFIX,
     is_no_yarnrc_name,
@@ -113,8 +115,17 @@ def online(monkeypatch, tmp_path):
     isolate_from_aws(monkeypatch, tmp_path)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     # An inherited value would satisfy the cells that expect ASH to set these.
-    for name in ("YARN_IGNORE_PATH", "YARN_RC_FILENAME"):
+    for name in ("YARN_IGNORE_PATH", "YARN_RC_FILENAME", "XDG_RUNTIME_DIR"):
         monkeypatch.delenv(name, raising=False)
+    # tmp_path (and the test's HOME) sit under the system temporary directory,
+    # whose ancestors every account can write, so yarn's copy placement would
+    # pass over every directory this module offers it. The tests here are about
+    # which directory is chosen for which reason, not about that check, which
+    # tests/unit/utils/test_package_manager_child.py reads on its own.
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
+    monkeypatch.setattr(package_manager_child, "_untrusted_ancestor", lambda path: None)
     return monkeypatch
 
 
