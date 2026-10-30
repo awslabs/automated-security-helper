@@ -744,6 +744,58 @@ def test_a_link_below_the_working_directory_on_the_way_to_the_output_is_refused(
 
 
 @pytest.mark.integration
+@_POSIX_ONLY
+@pytest.mark.parametrize("output", ["the-default", "given-through-the-source"])
+def test_a_linked_source_directory_is_the_operators_own_spelling(
+    output, pwsh, recording_docker, tmp_path
+):
+    """-SourceDir is a link below the working directory, as `Invoke-ASH -SourceDir
+    linked` from a checkout root spells it. The default output directory sits inside
+    the source, so its path runs through that link; the link is the operator's own
+    spelling of the source, as `./ash --source-dir linked` takes it, and is not
+    refused. Before, the walk counted it as a link below the working directory and
+    refused the default with 3. A link below the source still counts (the tests
+    above)."""
+    (tmp_path / "real").mkdir()
+    (tmp_path / "linked").symlink_to(tmp_path / "real", target_is_directory=True)
+    arguments = "-SourceDir linked"
+    if output == "given-through-the-source":
+        arguments += " -OutputDir linked/.ash/ash_output"
+
+    result = _invoke(pwsh, tmp_path, recording_docker, arguments)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "real" / ".ash" / "ash_output").is_dir()
+    assert (tmp_path / "docker-args.txt").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("output", ["the-default", "given"])
+def test_a_refused_default_output_directory_names_the_parameter(
+    output, pwsh, recording_docker, tmp_path
+):
+    """A file sits where the output directory would be. The refusal of the default
+    names -OutputDir as the way to write elsewhere, as ./ash names --output-dir
+    (tests/unit/test_ash_bash_entrypoint_refusals.py); the refusal of an -OutputDir
+    that was given does not, since the choice was already made."""
+    (tmp_path / "src" / ".ash").mkdir(parents=True)
+    (tmp_path / "src" / ".ash" / "ash_output").write_text("", encoding="utf-8")
+    (tmp_path / "a-file").write_text("", encoding="utf-8")
+    arguments = "-SourceDir src"
+    if output == "given":
+        arguments += " -OutputDir a-file"
+
+    result = _invoke(pwsh, tmp_path, recording_docker, arguments)
+
+    stderr = " ".join(result.stderr.split())
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "Output directory is not a directory:" in stderr, result.stderr
+    hinted = "pass -OutputDir to write elsewhere" in stderr
+    assert hinted == (output == "the-default"), result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt",
     reason="the recording runner is a POSIX shell script; Windows gets a .cmd stub",

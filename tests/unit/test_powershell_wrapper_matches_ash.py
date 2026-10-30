@@ -1178,6 +1178,29 @@ _INVOKE_ASH_SITES = {
         USAGE_ERROR_EXIT,
         "-SourceDirneedsavalue",
     ),
+    # The same two -SourceDir refusals with -OutputDir left to its default. The
+    # default was worked out while the parameters bound, from -SourceDir, and
+    # Join-Path failed there on an empty -SourceDir ("Cannot bind argument to
+    # parameter 'Path'"), ahead of the refusal: the call ended with 1 and the
+    # binding error, not with 5 and "-SourceDir needs a value".
+    "source-dir-empty-default-output": (
+        _INVOKE.replace("-SourceDir src", "-SourceDir ''").replace(
+            " -OutputDir out", ""
+        ),
+        {},
+        {},
+        USAGE_ERROR_EXIT,
+        "-SourceDirneedsavalue",
+    ),
+    "source-dir-missing-default-output": (
+        _INVOKE.replace("-SourceDir src", "-SourceDir not-there").replace(
+            " -OutputDir out", ""
+        ),
+        {},
+        {},
+        USAGE_ERROR_EXIT,
+        "Sourcedirectorydoesnotexist",
+    ),
     "output-dir-blank": (
         _INVOKE.replace("-OutputDir out", "-OutputDir '  '"),
         {},
@@ -2697,6 +2720,10 @@ def test_an_output_directory_reached_through_a_link_is_refused(tmp_path, linked)
     # The refusal names the linked component, and says to pass the resolved path.
     assert _unwrapped(f"('{component}')") in _unwrapped(result.stdout), result.stdout
     assert "resolved path" in result.stdout, result.stdout
+    # A refusal of the default output directory names -OutputDir as the way to
+    # write elsewhere, as ./ash names --output-dir; one of a given -OutputDir does not.
+    hinted = "pass -OutputDir to write elsewhere" in " ".join(result.stdout.split())
+    assert hinted == (explicit == ""), result.stdout
     assert result.returncode == REFUSAL_EXIT, result.stdout + result.stderr
     assert calls == []
     assert list(target.iterdir()) == [], list(target.iterdir())

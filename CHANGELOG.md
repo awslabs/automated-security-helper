@@ -1388,11 +1388,14 @@
   as `./ash` does.
 - `./ash` places the default output directory under the scanned directory
   (`<source>/.ash/ash_output`), as `ash scan` does, rather than under the working
-  directory; `Invoke-ASH` defaults `-OutputDir` the same way. A refusal of the
-  default output directory (a file at the path, a directory that cannot be created,
-  entered or written, or one reached through a link the repository commits) gives
-  the reason and names `--output-dir` as the way to write elsewhere; a refusal of an
-  `--output-dir` the operator gave does not.
+  directory; `Invoke-ASH` defaults `-OutputDir` the same way, once `-SourceDir` has
+  passed its checks (a default worked out while the parameters bound failed on an
+  empty `-SourceDir` ahead of the refusal), and takes a `-SourceDir` that is itself a
+  link under the working directory as `./ash` does. A refusal of the default output
+  directory (a file at the path, a directory that cannot be created, entered or
+  written, or one reached through a link the repository commits) gives the reason
+  and names `--output-dir`, or `-OutputDir`, as the way to write elsewhere; a refusal
+  of an output directory the operator gave does not.
 - `./ash` keeps the container's stdin open only for the subcommands that read it
   (`mcp`, `inspect`, `config`) and for a run given `--cli-json-input -`; a scan no
   longer consumes the caller's stdin, so `while read` loops and job scripts fed to

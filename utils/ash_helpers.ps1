@@ -65,16 +65,20 @@ function Invoke-ASH {
     .PARAMETER OutputDir
     The output directory for ASH results to be stored in.
 
-    Defaults to `.ash/ash_output` inside -SourceDir, where `./ash` and `ash scan` default it.
-    Created when it does not exist. Refused with 5, as `ash scan` refuses it, when a
-    file is at the path, when a directory cannot be created there (a file on the way
-    to it, for one), and when it is there but cannot be entered or written (a file is
-    made there and deleted to find out).
+    Defaults to `.ash/ash_output` inside -SourceDir, where `./ash` and `ash scan` default it,
+    once -SourceDir has been checked. Created when it does not exist. Refused with 5, as
+    `ash scan` refuses it, when a file is at the path, when a directory cannot be created
+    there (a file on the way to it, for one), and when it is there but cannot be entered
+    or written (a file is made there and deleted to find out).
     Refused when it is a link, or is reached through a link below the working directory
     or inside -SourceDir, where the scanned repository could have placed one. In CI the
-    working directory is the scanned checkout, so a link anywhere under it counts,
-    including a linked directory passed as -SourceDir. The refusal names the link; pass
-    the resolved path instead, with no link in it.
+    working directory is the scanned checkout, so a link anywhere under it counts. The
+    one exception is -SourceDir itself: a linked directory passed as -SourceDir is the
+    operator's own spelling of the source, as `./ash` takes it, so the default output
+    inside it is not refused for that link. The refusal names the link; pass the
+    resolved path instead, with no link in it.
+    A refusal of the default names -OutputDir as the way to write elsewhere; a refusal
+    of an -OutputDir that was given does not.
 
     .PARAMETER Config
     Path to the ASH configuration file, passed to ASH in the container as `--config`,
@@ -252,13 +256,13 @@ function Invoke-ASH {
         $SourceDir = (Get-Location).Path,
         [parameter()]
         [string]
-        # Inside -SourceDir, where ./ash and `ash scan` default it. Taken from the
-        # working directory, as it was, `Invoke-ASH -SourceDir sub` from a checkout
-        # root wrote its reports beside the working directory, and a `.ash` link the
-        # repository commits at that root took them wherever it pointed. A default
-        # may read a parameter declared before it, bound or defaulted. Two
-        # Join-Paths: one with a third path binds only from PowerShell 6.
-        $OutputDir = $(Join-Path (Join-Path $SourceDir '.ash') 'ash_output'),
+        # No default here: the default is .ash/ash_output inside -SourceDir, set below
+        # once -SourceDir has passed its checks. A default in param is worked out while
+        # the parameters bind, before any check, and Join-Path failed there on an empty
+        # -SourceDir ("Cannot bind argument to parameter 'Path'") and on one naming a
+        # drive that is not there ("Cannot find drive"), ending the call with 1 ahead
+        # of the refusal with 5 the checks give.
+        $OutputDir,
         [parameter()]
         [string]
         $Config,
@@ -455,6 +459,20 @@ function Invoke-ASH {
         }
         catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] {
             # The name is not there, so the directory can be searched.
+        }
+        # The default output directory is inside -SourceDir, where ./ash and `ash scan`
+        # default it: taken from the working directory, as it was, `Invoke-ASH -SourceDir
+        # sub` from a checkout root wrote its reports beside the working directory, and
+        # a `.ash` link the repository commits at that root took them wherever it
+        # pointed. Set here, once -SourceDir names a directory, not in param (see
+        # there); Combine takes the three parts on every PowerShell, where Join-Path
+        # takes a third path only from PowerShell 6. A refusal of the default names
+        # -OutputDir as the way to write elsewhere, as ./ash names --output-dir; one
+        # of an -OutputDir that was given does not, as the choice was already made.
+        $outputHint = ''
+        if (-not $PSBoundParameters.ContainsKey('OutputDir')) {
+            $OutputDir = [System.IO.Path]::Combine($sourceItem.FullName, '.ash', 'ash_output')
+            $outputHint = '; the default is inside the scanned directory, pass -OutputDir to write elsewhere'
         }
         # -OutputDir names a place in the file system as well, refused here, before the
         # output directory is resolved, created or checked for links: a drive that does
@@ -1723,8 +1741,11 @@ function Invoke-ASH {
         # or -SourceDir, where the scanned repository could have put them. Get-Item
         # -Force also finds a dangling link, which New-Item would create the target of.
         # The working directory is checked as well as -SourceDir, and fails closed: in CI
-        # the working directory is the scanned checkout, so a link there (a linked
-        # directory passed as -SourceDir included) may be one the repository committed.
+        # the working directory is the scanned checkout, so a link there may be one the
+        # repository committed. -SourceDir itself is the one component left out when it
+        # is a link: it is the operator's own spelling of the source, as ./ash takes it
+        # (links at or above the source are its operator's there), and the default
+        # output directory is spelled through it; a link below it still counts.
         # Case is ignored on Windows and macOS, whose volumes usually ignore it, so an
         # -OutputDir typed in another case is still found to be below them.
         $outputDirAbsolute = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
@@ -1749,12 +1770,14 @@ function Invoke-ASH {
         $pathComparison = if ($onWindows -or $IsMacOS) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
         $separator = [System.IO.Path]::DirectorySeparatorChar
         $repositoryRoots = @((Get-Location).Path, $sourceDirFull) | ForEach-Object { $_.TrimEnd($separator) + $separator }
+        $sourceDirItself = $sourceDirFull.TrimEnd($separator)
         $candidate = $outputDirAbsolute
         while ($candidate) {
             $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
-            if ($null -ne $item -and $item.LinkType) {
+            $isTheSource = [string]::Equals($candidate.TrimEnd($separator), $sourceDirItself, $pathComparison)
+            if ($null -ne $item -and $item.LinkType -and -not $isTheSource) {
                 $global:LASTEXITCODE = $refusalExitCode
-                throw "The output directory '$(Format-AshShownValue $OutputDir)' is reached through a link ('$(Format-AshShownValue $candidate)'). ASH does not write through a link below the working directory or inside -SourceDir, where the scanned repository could have placed it. Remove the link, or pass -OutputDir as the resolved path, with no link in it."
+                throw "The output directory '$(Format-AshShownValue $OutputDir)' is reached through a link ('$(Format-AshShownValue $candidate)'). ASH does not write through a link below the working directory or inside -SourceDir, where the scanned repository could have placed it. Remove the link, or pass -OutputDir as the resolved path, with no link in it$outputHint."
             }
             $parent = Split-Path -Parent $candidate
             $insideRepository = @($repositoryRoots | Where-Object { $parent -and $parent.StartsWith($_, $pathComparison) }).Count -gt 0
@@ -1790,7 +1813,7 @@ function Invoke-ASH {
         # gives mkdir's.
         if (Test-Path -LiteralPath $outputDirAbsolute -PathType Leaf) {
             $global:LASTEXITCODE = $usageErrorExitCode
-            throw "Output directory is not a directory: $(Format-AshShownValue $OutputDir)"
+            throw "Output directory is not a directory: $(Format-AshShownValue $OutputDir)$outputHint"
         }
         $outputDirExisted = Test-Path -LiteralPath $outputDirAbsolute -PathType Container
         if (-not (Test-Path -LiteralPath $outputDirAbsolute)) {
@@ -1814,7 +1837,7 @@ function Invoke-ASH {
             }
             if ($createReason) {
                 $global:LASTEXITCODE = $usageErrorExitCode
-                throw "Output directory cannot be created: $(Format-AshShownValue $OutputDir) ($createReason)"
+                throw "Output directory cannot be created: $(Format-AshShownValue $OutputDir) ($createReason)$outputHint"
             }
         }
         # A name looked up in it is "not found" when it can be entered, and "denied"
@@ -1824,7 +1847,7 @@ function Invoke-ASH {
         }
         catch [System.UnauthorizedAccessException] {
             $global:LASTEXITCODE = $usageErrorExitCode
-            throw "Output directory cannot be entered: $(Format-AshShownValue $OutputDir)"
+            throw "Output directory cannot be entered: $(Format-AshShownValue $OutputDir)$outputHint"
         }
         catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] {
             # The name is not there, so the directory can be entered.
@@ -1854,7 +1877,7 @@ function Invoke-ASH {
             }
             if ($writeReason) {
                 $global:LASTEXITCODE = $usageErrorExitCode
-                throw "Output directory cannot be written: $(Format-AshShownValue $OutputDir) ($writeReason)"
+                throw "Output directory cannot be written: $(Format-AshShownValue $OutputDir) ($writeReason)$outputHint"
             }
         }
         $outputDirFull = Get-Item -LiteralPath $outputDirAbsolute | Select-Object -ExpandProperty FullName
