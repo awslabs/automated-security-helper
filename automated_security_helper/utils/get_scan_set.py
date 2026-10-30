@@ -724,20 +724,32 @@ def _count_templates(directory: str, source: Optional[str] = None) -> int:
 
     With *source*, the scan root, the bundled aws-cdk tree is judged by the path
     below it (:func:`_is_bundled_cdk_below`); without, by the whole path.
+
+    A directory named ``*.template.json`` below the scan root (below *directory*
+    without *source*) is not entered: the forced inclusion does not name a file
+    below one (:func:`_forced_in`), so the scan set leaves those out and so does this.
     """
     root_absolute = None if source is None else os.path.abspath(source)
+    reference = os.path.abspath(directory if source is None else source)
 
     def bundled(full: str) -> bool:
         if root_absolute is None:
             return _is_bundled_cdk_path(full)
         return _is_bundled_cdk_below(full, root_absolute)
 
-    return sum(
-        1
-        for root, _dirs, files in _walk_unless_link(directory)
-        for name in files
-        if name.endswith(".template.json") and not bundled(os.path.join(root, name))
-    )
+    count = 0
+    for root, dirs, files in _walk_unless_link(directory):
+        if any(
+            part.endswith(".template.json") for part in _relative_parts(root, reference)
+        ):
+            dirs[:] = []
+            continue
+        count += sum(
+            1
+            for name in files
+            if name.endswith(".template.json") and not bundled(os.path.join(root, name))
+        )
+    return count
 
 
 def _count_files_ash_would_scan(

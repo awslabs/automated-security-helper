@@ -323,6 +323,22 @@ class TestAPrunedLinkIsNotFollowed:
         ] == outside
         assert gss._count_templates(str(outside)) == 1
 
+    def test_a_template_under_a_template_named_directory_is_not_counted(self, tmp_path):
+        """The scan set does not force in a template below a directory that is itself
+        named ``*.template.json`` (``_forced_in``), so a count of what a pruned
+        ``.git`` or asset directory gives back leaves it out too."""
+        root = _build(
+            tmp_path / "src",
+            {
+                "build/.git/ok.template.json": "{}\n",
+                "build/.git/dir.template.json/inner.template.json": "{}\n",
+                "build/.git/dir.template.json/deeper/more.template.json": "{}\n",
+            },
+        )
+
+        assert gss._count_templates(str(root / "build" / ".git"), str(root)) == 1
+        assert gss._count_templates(str(root / "build" / ".git")) == 1
+
     def test_a_link_inside_the_tree_is_not_counted_twice(self, tmp_path):
         root = _build(
             tmp_path / "src",
