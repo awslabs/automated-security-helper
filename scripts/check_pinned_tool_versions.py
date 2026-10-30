@@ -1296,9 +1296,10 @@ _IMAGE_VARIANTS = frozenset({"slim", "alpine"})
 # The NodeSource major the Dockerfile sets: NODE_MAJOR=22, NODE_MAJOR="22" or
 # ENV NODE_MAJOR 22.
 _NODE_MAJOR = re.compile(r"\bNODE_MAJOR(?:=|\s+)[\"']?(?P<major>\d+)\b")
-# The same major written into the repository URL apt reads, which is where apt gets it.
+# The same major written into the repository URL apt reads, which is where apt gets it,
+# or into the URL of NodeSource's setup script (setup_22.x), which sets that repository up.
 _NODESOURCE_URL_MAJOR = re.compile(
-    r"deb\.nodesource\.com/node_(?P<major>\d+)\.x(?![\w.])"
+    r"deb\.nodesource\.com/(?:node|setup)_(?P<major>\d+)\.x(?![\w.])"
 )
 # Docker reads instruction names without regard to case.
 _RUN_INSTRUCTION = re.compile(r"^RUN\s", re.IGNORECASE)
@@ -1710,8 +1711,8 @@ def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
         raise PinEnumerationError(
             f"{dockerfile.name} configures the NodeSource repository, but neither "
             "NODE_MAJOR=<digits> (or ENV NODE_MAJOR <digits>) nor a node_<digits>.x "
-            "URL names its major version, so the nodejs pin cannot be looked up in "
-            "the right index."
+            "or setup_<digits>.x URL names its major version, so the nodejs pin "
+            "cannot be looked up in the right index."
         )
     if majors:
         major = majors[0]

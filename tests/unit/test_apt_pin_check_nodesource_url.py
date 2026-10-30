@@ -74,6 +74,23 @@ class TestTheMajorInTheUrl:
         body = "RUN curl -fsSL https://deb.nodesource.com/node_20.x/dists/x\n"
         assert _nodesource_labels(_labels(tmp_path, body)) == ["nodesource node_20.x"]
 
+    def test_the_setup_script_url_names_the_major(self, tmp_path):
+        # Red before: only node_<n>.x was read, and NodeSource's own recipe, which
+        # fetches setup_<n>.x, was refused as naming no major.
+        body = "RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\n"
+        assert _nodesource_labels(_labels(tmp_path, body)) == ["nodesource node_22.x"]
+
+    def test_a_setup_url_and_a_drifted_variable_are_ambiguous(self, tmp_path):
+        body = "RUN NODE_MAJOR=20 && curl -fsSL https://deb.nodesource.com/setup_22.x | bash\n"
+        with pytest.raises(checker.PinEnumerationError, match="ambiguous"):
+            _labels(tmp_path, body)
+
+    def test_a_setup_script_that_names_no_number_is_still_refused(self, tmp_path):
+        """Control: setup_lts.x carries no major to look the nodejs pin up under."""
+        body = "RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -\n"
+        with pytest.raises(checker.PinEnumerationError, match="NODE_MAJOR"):
+            _labels(tmp_path, body)
+
     def test_a_url_and_the_variable_that_agree_are_one_index(self, tmp_path):
         """Control: naming the major twice is not an ambiguity."""
         body = f"RUN NODE_MAJOR=22 && echo 'deb {URL_22}'\n"
