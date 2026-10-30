@@ -174,7 +174,10 @@ class TestVendoredComponentsDoNotVote:
 
         props = _props(json.loads(_reporter(tmp_path).report(model)))
 
-        assert props["gitlab:dependency_scanning:package_manager:name"] == "npm"
+        # The vendored components still vote, and their lockfile, yarn.lock,
+        # names the manager that declared them.
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "yarn"
+        assert props["gitlab:dependency_scanning:input_file:path"] == "yarn.lock"
 
     @pytest.mark.parametrize(
         "location",

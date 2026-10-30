@@ -87,9 +87,10 @@ class TestMetadataLevelProperties:
         assert len(pm_props) == 1
         # The fixture is ASH's own scan: 289 pypi components declared by
         # poetry.lock and 1,705 npm components that sit inside .venv (the docs
-        # toolchain). Only the declared components vote, so the source is pip;
-        # the old count over every component called it npm.
-        assert pm_props[0]["value"] == "pip"
+        # toolchain). Only the declared components vote, so the source is
+        # Python's; the old count over every component called it npm. The
+        # lockfile names the manager: poetry.lock is poetry's, not pip's.
+        assert pm_props[0]["value"] == "poetry"
 
     def test_dependency_scanning_language_present(self, report_doc):
         """gitlab:dependency_scanning:language:name must be at metadata.properties."""

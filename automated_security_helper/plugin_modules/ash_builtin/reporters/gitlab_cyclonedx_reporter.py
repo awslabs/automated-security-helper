@@ -85,21 +85,90 @@ PURL_TYPE_TO_GITLAB: dict[str, tuple[str, str]] = {
 
 # Default lockfile/manifest names per ecosystem, used as a last-resort fallback
 # for the metadata-level ``input_file:path`` when Syft doesn't report a location.
+# Every type key of the two tables above has an entry: a type without one left
+# the report with no ``input_file:path``, the one property GitLab requires. The
+# OS package types name the database Syft reads for them.
 _DEFAULT_LOCKFILES: dict[str, str] = {
     "npm": "package-lock.json",
     "pypi": "requirements.txt",
     "gem": "Gemfile.lock",
     "golang": "go.sum",
     "maven": "pom.xml",
+    "java-archive": "pom.xml",
+    "gradle": "build.gradle",
     "cargo": "Cargo.lock",
     "composer": "composer.lock",
     "nuget": "packages.lock.json",
     "pub": "pubspec.lock",
     "cocoapods": "Podfile.lock",
     "hex": "mix.lock",
+    "hackage": "cabal.project",
     "python": "requirements.txt",
     "go-module": "go.sum",
+    "apk": "lib/apk/db/installed",
+    "deb": "var/lib/dpkg/status",
+    "rpm": "var/lib/rpm/Packages",
 }
+
+# The package manager a lockfile's name says declared a component, where the
+# ecosystem tables can only say the ecosystem's generic manager. GitLab's
+# taxonomy gives ``package_manager:name`` by example (npm, bundler, go) and
+# fixes no list, and its own analyzers name yarn, pnpm, poetry and pipenv. Keyed
+# by basename; a component whose location is one of these gets that manager.
+_LOCKFILE_PACKAGE_MANAGERS: dict[str, str] = {
+    "yarn.lock": "yarn",
+    "pnpm-lock.yaml": "pnpm",
+    "poetry.lock": "poetry",
+    "Pipfile": "pipenv",
+    "Pipfile.lock": "pipenv",
+    "uv.lock": "uv",
+    "pdm.lock": "pdm",
+}
+
+# The managers the ecosystem tables name that a lockfile can refine.
+_GENERIC_MANAGERS = frozenset({"npm", "pip"})
+
+# The basenames of the manifests and lockfiles a declared dependency comes from.
+# A location inside a vendored tree is reported by its basename only when it is
+# one of these: the basename of any other file there (a wheel's METADATA, an
+# installed package's own package.json, a binary) is not an input file GitLab
+# can show a reader, and was shown as one.
+_MANIFEST_NAMES = frozenset(
+    {
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "requirements.txt",
+        "Pipfile",
+        "Pipfile.lock",
+        "poetry.lock",
+        "uv.lock",
+        "pdm.lock",
+        "pyproject.toml",
+        "setup.py",
+        "Gemfile",
+        "Gemfile.lock",
+        "go.mod",
+        "go.sum",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "gradle.lockfile",
+        "Cargo.toml",
+        "Cargo.lock",
+        "composer.json",
+        "composer.lock",
+        "packages.lock.json",
+        "pubspec.yaml",
+        "pubspec.lock",
+        "Podfile",
+        "Podfile.lock",
+        "mix.exs",
+        "mix.lock",
+        "cabal.project",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -254,13 +323,54 @@ def _normalize_input_file_path(raw_path: str | None) -> str | None:
     # or vendor directory, show just the filename (the lockfile/manifest).
     # This is a heuristic — better than showing a container-internal path.
     # The test is on whole directory names, the same as _is_vendored: a
-    # repository's own "src/myvendor/" keeps its path.
+    # repository's own "src/myvendor/" keeps its path. Only a manifest or
+    # lockfile name is shown: a wheel's METADATA or an installed dependency's
+    # own package.json is where Syft found the component, not a file that
+    # declares it, and naming it as the input file told a reader to edit it.
     parts = path.split("/")
     if any(directory in _VENDORED_DIRECTORY_NAMES for directory in parts[:-1]):
         # e.g. "yarn.lock", "package-lock.json", "go.sum", "requirements.txt"
-        return parts[-1] or None
+        return parts[-1] if parts[-1] in _MANIFEST_NAMES else None
 
     return path
+
+
+def _lockfile_package_manager(path: str | None) -> str | None:
+    """The package manager the lockfile at *path* names, or None."""
+    if not path:
+        return None
+    return _LOCKFILE_PACKAGE_MANAGERS.get(path.rsplit("/", 1)[-1])
+
+
+def _refined_package_manager(pm: str | None, path: str | None) -> str | None:
+    """*pm*, or the manager the lockfile at *path* names when *pm* is only the
+    ecosystem's generic one (``npm`` for a yarn.lock, ``pip`` for a poetry.lock).
+
+    The tables map an ecosystem to one manager, so every JavaScript component
+    was labelled ``npm`` and every Python one ``pip`` whatever lockfile
+    declared it; the lockfile's name says which manager did.
+    """
+    if pm in _GENERIC_MANAGERS:
+        return _lockfile_package_manager(path) or pm
+    return pm
+
+
+def _walk_components(components: list[dict]) -> list[dict]:
+    """*components* and every component nested under them, depth first.
+
+    A CycloneDX component can carry its own ``components`` (an assembly, a
+    bundled dependency's dependencies); they are part of the inventory and vote
+    for the report-level source with the rest.
+    """
+    out: list[dict] = []
+    pending = [c for c in components if isinstance(c, dict)]
+    while pending:
+        component = pending.pop(0)
+        out.append(component)
+        nested = component.get("components")
+        if isinstance(nested, list):
+            pending = [c for c in nested if isinstance(c, dict)] + pending
+    return out
 
 
 def _resolve_package_manager_and_language(
@@ -274,30 +384,47 @@ def _resolve_package_manager_and_language(
     2. ``syft:package:type`` property → SYFT_TYPE_TO_GITLAB mapping
     3. PURL type → PURL_TYPE_TO_GITLAB mapping
     4. None (omit the property)
+
+    The manager an ecosystem table gives is refined by the component's lockfile
+    (:func:`_refined_package_manager`): a component declared by a yarn.lock is
+    ``yarn``, not ``npm``.
     """
     # Config overrides win unconditionally
     if options.package_manager_override and options.language_override:
         return options.package_manager_override, options.language_override
 
-    # Try syft:package:type first
-    syft_type = _get_component_property(component_dict, "syft:package:type")
-    if syft_type and syft_type in SYFT_TYPE_TO_GITLAB:
-        pm, lang = SYFT_TYPE_TO_GITLAB[syft_type]
+    location = _get_component_property(component_dict, "syft:location:0:path")
+    pm, lang = _ecosystem_of(component_dict)
+    if pm is not None:
         return (
-            options.package_manager_override or pm,
-            options.language_override or lang,
-        )
-
-    # Fallback to PURL type
-    purl_type = _extract_purl_type(component_dict.get("purl"))
-    if purl_type and purl_type in PURL_TYPE_TO_GITLAB:
-        pm, lang = PURL_TYPE_TO_GITLAB[purl_type]
-        return (
-            options.package_manager_override or pm,
+            options.package_manager_override or _refined_package_manager(pm, location),
             options.language_override or lang,
         )
 
     return options.package_manager_override, options.language_override
+
+
+def _ecosystem_of(component_dict: dict) -> tuple[str | None, str | None]:
+    """The (package_manager, language) the tables give for a component, from its
+    ``syft:package:type`` first and its PURL type second, else (None, None)."""
+    syft_type = _get_component_property(component_dict, "syft:package:type")
+    if syft_type and syft_type in SYFT_TYPE_TO_GITLAB:
+        return SYFT_TYPE_TO_GITLAB[syft_type]
+    purl_type = _extract_purl_type(component_dict.get("purl"))
+    if purl_type and purl_type in PURL_TYPE_TO_GITLAB:
+        return PURL_TYPE_TO_GITLAB[purl_type]
+    return None, None
+
+
+def _type_key_for_manager(pm: str) -> str | None:
+    """A type key of the two tables whose manager is *pm*, PURL types first."""
+    for purl_type, (manager, _) in PURL_TYPE_TO_GITLAB.items():
+        if manager == pm:
+            return purl_type
+    for syft_type, (manager, _) in SYFT_TYPE_TO_GITLAB.items():
+        if manager == pm:
+            return syft_type
+    return None
 
 
 def _resolve_input_file_path(
@@ -391,47 +518,76 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
     ) -> str | None:
         """Determine the dominant ecosystem type across all components.
 
-        Uses config override if set, otherwise counts PURL types and
-        syft:package:type values to find the most common one.
+        Uses config override if set, otherwise counts the ecosystem of every
+        declared component, nested ones included, to find the most common one.
+        The vote is by the (package_manager, language) pair the tables give,
+        not by the raw type key: a Syft type and a PURL type that name one
+        ecosystem (``python`` and ``pypi``, ``go-module`` and ``golang``) were
+        counted apart, so one ecosystem's components split across two keys and
+        a smaller ecosystem could win. The winning pair is returned as one of
+        the table keys, which is what the callers look up.
         """
         if options.package_manager_override:
-            # Find the matching type key for the override
-            for purl_type, (pm, _) in PURL_TYPE_TO_GITLAB.items():
-                if pm == options.package_manager_override:
-                    return purl_type
-            for syft_type, (pm, _) in SYFT_TYPE_TO_GITLAB.items():
-                if pm == options.package_manager_override:
-                    return syft_type
+            override_type = _type_key_for_manager(options.package_manager_override)
+            if override_type is not None:
+                return override_type
 
         from collections import Counter
 
-        types: Counter[str] = Counter()
-        for component in _declared_components(components):
-            # Try syft:package:type first
-            syft_type = _get_component_property(component, "syft:package:type")
-            if syft_type and syft_type in SYFT_TYPE_TO_GITLAB:
-                types[syft_type] += 1
-                continue
-            # Fallback to PURL type
-            purl_type = _extract_purl_type(component.get("purl"))
-            if purl_type and purl_type in PURL_TYPE_TO_GITLAB:
-                types[purl_type] += 1
+        pairs: Counter[tuple[str, str]] = Counter()
+        for component in _declared_components(_walk_components(components)):
+            pm, lang = _ecosystem_of(component)
+            if pm is not None:
+                pairs[(pm, lang or "")] += 1
 
-        return types.most_common(1)[0][0] if types else None
+        if not pairs:
+            return None
+        pm, _ = pairs.most_common(1)[0][0]
+        return _type_key_for_manager(pm)
 
-    def _dominant_input_file(self, components: list[dict]) -> str | None:
-        """Find the most common input file path across components."""
+    def _dominant_input_file(
+        self, components: list[dict], dominant_type: str | None = None
+    ) -> str | None:
+        """Find the most common input file path across components.
+
+        Counted over the components of the dominant ecosystem when there is
+        one, so the report-level ``input_file:path`` names a file of the same
+        ecosystem as the report-level package manager. Counted over every
+        declared component, as it was, the metadata could pair ``pip`` with
+        ``package-lock.json`` when a Python project vendored more JavaScript
+        files than it declared Python ones. Every component votes when none of
+        the dominant ecosystem has a location.
+        """
         from collections import Counter
 
-        files: Counter[str] = Counter()
-        for component in _declared_components(components):
-            raw_path = _get_component_property(component, "syft:location:0:path")
-            normalized = _normalize_input_file_path(raw_path)
-            if normalized:
-                files[normalized] += 1
-        return files.most_common(1)[0][0] if files else None
+        dominant_pm = None
+        if dominant_type in PURL_TYPE_TO_GITLAB:
+            dominant_pm = PURL_TYPE_TO_GITLAB[dominant_type][0]
+        elif dominant_type in SYFT_TYPE_TO_GITLAB:
+            dominant_pm = SYFT_TYPE_TO_GITLAB[dominant_type][0]
 
-    def _build_minimal_empty_sbom(self, inventory_known: bool = False) -> dict:
+        declared = _declared_components(_walk_components(components))
+        if dominant_pm is not None:
+            same_ecosystem = [c for c in declared if _ecosystem_of(c)[0] == dominant_pm]
+        else:
+            same_ecosystem = []
+
+        for group in (same_ecosystem, declared):
+            files: Counter[str] = Counter()
+            for component in group:
+                raw_path = _get_component_property(component, "syft:location:0:path")
+                normalized = _normalize_input_file_path(raw_path)
+                if normalized:
+                    files[normalized] += 1
+            if files:
+                return files.most_common(1)[0][0]
+        return None
+
+    def _build_minimal_empty_sbom(
+        self,
+        inventory_known: bool = False,
+        options: GitLabCycloneDXReporterConfigOptions | None = None,
+    ) -> dict:
         """Build a minimal valid GitLab-flavored CycloneDX document.
 
         Used when no components are detected (e.g., infrastructure-only repos).
@@ -449,19 +605,38 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         statement that the project has no dependencies, and without the marker
         this document was byte-identical to the one a dependency-free repository
         gets.
+
+        With *options* the document also carries the report-level source
+        properties the full document carries: the category, which is always
+        known, and the package manager, language and input file an operator
+        set as overrides. The minimal document carried the schema version alone,
+        so an operator who had told the reporter the repository's source saw it
+        say nothing about the source whenever the inventory came back empty.
         """
+        properties: list[dict[str, str]] = [
+            {"name": "gitlab:meta:schema_version", "value": GITLAB_SCHEMA_VERSION}
+        ]
+        if options is not None:
+            properties.append(
+                {
+                    "name": "gitlab:dependency_scanning:category",
+                    "value": options.category,
+                }
+            )
+            for name, value in (
+                ("package_manager:name", options.package_manager_override),
+                ("language:name", options.language_override),
+                ("input_file:path", options.input_file_path_override),
+            ):
+                if value:
+                    properties.append(
+                        {"name": f"gitlab:dependency_scanning:{name}", "value": value}
+                    )
         document: dict = {
             "bomFormat": "CycloneDX",
             "specVersion": "1.4",
             "version": 1,
-            "metadata": {
-                "properties": [
-                    {
-                        "name": "gitlab:meta:schema_version",
-                        "value": GITLAB_SCHEMA_VERSION,
-                    }
-                ],
-            },
+            "metadata": {"properties": properties},
             "components": [],
         }
         if not inventory_known:
@@ -486,7 +661,9 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
                 "emitting minimal empty SBOM."
             )
             return json.dumps(
-                self._build_minimal_empty_sbom(inventory_known=False),
+                self._build_minimal_empty_sbom(
+                    inventory_known=False, options=self.config.options
+                ),
                 separators=(",", ":"),
             )
 
@@ -509,7 +686,9 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
             # neither (the ``cyclonedx`` reporter's test for the same case).
             inventory_known = bool(doc.get("metadata") or doc.get("serialNumber"))
             return json.dumps(
-                self._build_minimal_empty_sbom(inventory_known=inventory_known),
+                self._build_minimal_empty_sbom(
+                    inventory_known=inventory_known, options=self.config.options
+                ),
                 separators=(",", ":"),
             )
 
@@ -541,9 +720,20 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
 
         input_file = (
             options.input_file_path_override
-            or self._dominant_input_file(components)
+            or self._dominant_input_file(components, dominant_type)
             or (_DEFAULT_LOCKFILES.get(dominant_type) if dominant_type else None)
         )
+        # The lockfile the report names says which manager declared it: a
+        # poetry.lock is poetry's, where the ecosystem table could only say pip.
+        pm = _refined_package_manager(pm, input_file)
+
+        if pm is None and not options.package_manager_override:
+            ASH_LOGGER.warning(
+                "gitlab-cyclonedx: no component maps to a known ecosystem, so the "
+                "report names no package manager or language; set the reporter's "
+                "package_manager_override, language_override and "
+                "input_file_path_override options for this repository."
+            )
 
         metadata_props.append(
             {
@@ -574,6 +764,10 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
             )
 
         # --- Inject per-component properties ---
+        # Top-level components only: GitLab's taxonomy says of components that
+        # nest that properties "may only have properties applied to the
+        # top-level object", so a nested component is described by its parent's.
+        # Nested components still vote for the report-level source above.
         enriched_count = 0
 
         for component in components:
