@@ -92,6 +92,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -1063,32 +1068,68 @@
       "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
       "properties": {
         "max_compression_ratio": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 100,
           "description": "The most times its own size on disk that an archive's members may declare added up. An archive that declares more is not extracted. Checked only once the members declare more than 512 KiB in all.",
-          "exclusiveMinimum": 0,
-          "title": "Max Compression Ratio",
-          "type": "integer"
+          "title": "Max Compression Ratio"
         },
         "max_member_bytes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 268435456,
           "description": "The largest size in bytes one member of an archive may declare. An archive with a larger member is not extracted. Default 256 MiB.",
-          "exclusiveMinimum": 0,
-          "title": "Max Member Bytes",
-          "type": "integer"
+          "title": "Max Member Bytes"
         },
         "max_members": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 100000,
           "description": "The most members an archive may have, directories included. An archive with more is not extracted. All the archives one scan extracts may hold four times this many together.",
-          "exclusiveMinimum": 0,
-          "title": "Max Members",
-          "type": "integer"
+          "title": "Max Members"
         },
         "max_total_bytes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 1073741824,
           "description": "The most bytes an archive's members may declare added up, each counted as at least 512. An archive whose members declare more is not extracted. All the archives one scan extracts may declare four times this together. Default 1 GiB.",
-          "exclusiveMinimum": 0,
-          "title": "Max Total Bytes",
-          "type": "integer"
+          "title": "Max Total Bytes"
         }
       },
       "title": "ArchiveConverterConfigOptions",
@@ -1749,6 +1790,7 @@
               "extension": "ghas.sarif",
               "name": "github-ghas",
               "options": {
+                "emit_automation_details": false,
                 "exclude_suppressed": true
               }
             },
@@ -1885,7 +1927,7 @@
                 "offline": false,
                 "scan_timeout": 1800,
                 "severity_threshold": null,
-                "tool_version": ">=1.7.0,<2.0.0"
+                "tool_version": ">=1.7.8,<2.0.0"
               }
             },
             "cdk-nag": {
@@ -2430,6 +2472,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -2441,6 +2488,11 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -2687,7 +2739,7 @@
             "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null,
-            "tool_version": ">=1.7.0,<2.0.0"
+            "tool_version": ">=1.7.8,<2.0.0"
           },
           "description": "Configure Bandit scanner"
         }
@@ -2747,10 +2799,19 @@
           "type": "boolean"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation (default: 300)",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "offline": {
           "default": false,
@@ -2763,6 +2824,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -2806,8 +2872,8 @@
               "type": "null"
             }
           ],
-          "default": ">=1.7.0,<2.0.0",
-          "description": "Version constraint for bandit tool installation (e.g., '>=1.7.0'). If not specified, uses '>=1.7.0,<2.0.0' for stability.",
+          "default": ">=1.7.8,<2.0.0",
+          "description": "Version constraint for bandit tool installation (e.g., '>=1.7.8'). If not specified, uses '>=1.7.8,<2.0.0' for stability.",
           "title": "Tool Version"
         }
       },
@@ -3074,6 +3140,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3349,6 +3420,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3473,10 +3549,19 @@
           "type": "array"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "offline": {
           "default": false,
@@ -3498,6 +3583,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3599,6 +3689,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3734,7 +3829,7 @@
             }
           ],
           "default": null,
-          "description": "Path to Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+          "description": "Path to a Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Only a file the operator names and that lies outside the scanned tree is passed to Checkov; a `.checkov.yaml` or `.checkov.yml` found in the scanned tree is not read, and the scan tells Checkov to read none from its working directory either, because such a file can change what is reported.",
           "title": "Config File"
         },
         "frameworks": {
@@ -3796,10 +3891,19 @@
           "type": "array"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "offline": {
           "default": false,
@@ -3812,6 +3916,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3910,7 +4019,7 @@
         },
         "skip_path": {
           "default": [],
-          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "description": "Path (file or directory) to skip, as a regular expression Checkov searches for in each path it walks, and also as a substring of that path. The paths Checkov walks start with the absolute path of the scanned directory. Word boundaries are not implicit: \"dir1\" skips any directory or subdirectory whose path holds \"dir1\". An entry whose path is empty is ignored (it would skip every file). Can be specified multiple times.",
           "items": {
             "$ref": "#/$defs/IgnorePathWithReason"
           },
@@ -6931,12 +7040,21 @@
           "title": "Baseline File"
         },
         "max_worker_output_mib": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 4096,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 256,
           "description": "The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Honored only from --config-overrides or a config file outside the scanned tree.",
-          "exclusiveMinimum": 0,
-          "maximum": 4096,
-          "title": "Max Worker Output Mib",
-          "type": "integer"
+          "title": "Max Worker Output Mib"
         },
         "offline": {
           "default": false,
@@ -6960,6 +7078,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -8935,6 +9058,7 @@
         "options": {
           "$ref": "#/$defs/GHASReporterConfigOptions",
           "default": {
+            "emit_automation_details": false,
             "exclude_suppressed": true
           }
         }
@@ -8945,6 +9069,12 @@
     "GHASReporterConfigOptions": {
       "additionalProperties": true,
       "properties": {
+        "emit_automation_details": {
+          "default": false,
+          "description": "When true, a workspace project's own report carries runAutomationDetails.id ash/<project key>/, the category GitHub files the upload under, so the per-project reports of one repository are kept apart. Off by default: an id in the file takes precedence over the category the upload-sarif action is given, so an upload that already names its category would be moved to a new one, leaving the old analysis's alerts open.",
+          "title": "Emit Automation Details",
+          "type": "boolean"
+        },
         "exclude_suppressed": {
           "default": true,
           "description": "When true (default), suppressed findings are excluded from the GHAS report. GitHub has its own dismissal workflow so suppressed findings are typically not needed.",
@@ -9190,6 +9320,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -9208,6 +9343,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -9666,6 +9806,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -11169,10 +11314,19 @@
       "additionalProperties": true,
       "properties": {
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation (default: 300)",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "tool_version": {
           "anyOf": [
@@ -12386,12 +12540,21 @@
           "type": "boolean"
         },
         "health_check_interval_seconds": {
+          "anyOf": [
+            {
+              "maximum": 300,
+              "minimum": 10,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 60,
           "description": "Not enforced: nothing reads this setting. Interval between health checks in seconds",
-          "maximum": 300,
-          "minimum": 10,
-          "title": "Health Check Interval Seconds",
-          "type": "integer"
+          "title": "Health Check Interval Seconds"
         },
         "log_resource_operations": {
           "default": false,
@@ -12407,6 +12570,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -12415,68 +12583,140 @@
           "title": "Max Concurrent Scans"
         },
         "max_concurrent_scans_per_session": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 2,
           "description": "Maximum number of scans one session of a network transport (streamable-http, sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts once. Read from the operator's config (ASH_CONFIG) only, never from a scanned or delivered one. stdio's single session is not limited.",
-          "maximum": 100,
-          "minimum": 0,
-          "title": "Max Concurrent Scans Per Session",
-          "type": "integer"
+          "title": "Max Concurrent Scans Per Session"
         },
         "max_concurrent_tasks": {
+          "anyOf": [
+            {
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 20,
           "description": "Not enforced: nothing reads this setting. Maximum number of concurrent async tasks allowed",
-          "maximum": 50,
-          "minimum": 1,
-          "title": "Max Concurrent Tasks",
-          "type": "integer"
+          "title": "Max Concurrent Tasks"
         },
         "max_directory_size_mb": {
+          "anyOf": [
+            {
+              "maximum": 10240,
+              "minimum": 10,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 1000,
           "description": "Not enforced: nothing reads this setting. Maximum directory size in MB that can be scanned",
-          "maximum": 10240,
-          "minimum": 10,
-          "title": "Max Directory Size Mb",
-          "type": "integer"
+          "title": "Max Directory Size Mb"
         },
         "max_message_size_bytes": {
+          "anyOf": [
+            {
+              "maximum": 104857600,
+              "minimum": 1024,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 10485760,
           "description": "Not enforced: nothing reads this setting. Maximum size of MCP messages in bytes",
-          "maximum": 104857600,
-          "minimum": 1024,
-          "title": "Max Message Size Bytes",
-          "type": "integer"
+          "title": "Max Message Size Bytes"
         },
         "max_path_length": {
+          "anyOf": [
+            {
+              "maximum": 8192,
+              "minimum": 256,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 4096,
           "description": "Not enforced: nothing reads this setting. Maximum allowed path length for security validation",
-          "maximum": 8192,
-          "minimum": 256,
-          "title": "Max Path Length",
-          "type": "integer"
+          "title": "Max Path Length"
         },
         "memory_critical_threshold_mb": {
+          "anyOf": [
+            {
+              "maximum": 16384,
+              "minimum": 200,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 2048,
           "description": "Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers protective actions",
-          "maximum": 16384,
-          "minimum": 200,
-          "title": "Memory Critical Threshold Mb",
-          "type": "integer"
+          "title": "Memory Critical Threshold Mb"
         },
         "memory_warning_threshold_mb": {
+          "anyOf": [
+            {
+              "maximum": 8192,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 1024,
           "description": "Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers warnings",
-          "maximum": 8192,
-          "minimum": 100,
-          "title": "Memory Warning Threshold Mb",
-          "type": "integer"
+          "title": "Memory Warning Threshold Mb"
         },
         "operation_timeout_seconds": {
+          "anyOf": [
+            {
+              "maximum": 600,
+              "minimum": 30,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 180,
           "description": "Not enforced: nothing reads this setting. Default timeout for general operations in seconds",
-          "maximum": 600,
-          "minimum": 30,
-          "title": "Operation Timeout Seconds",
-          "type": "integer"
+          "title": "Operation Timeout Seconds"
         },
         "scan_timeout_seconds": {
           "anyOf": [
@@ -12484,6 +12724,11 @@
               "maximum": 86400,
               "minimum": 0,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -12494,28 +12739,55 @@
           "title": "Scan Timeout Seconds"
         },
         "shutdown_timeout_seconds": {
+          "anyOf": [
+            {
+              "maximum": 300,
+              "minimum": 5,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 30,
           "description": "Not enforced: nothing reads this setting. Maximum time to wait for graceful shutdown in seconds",
-          "maximum": 300,
-          "minimum": 5,
-          "title": "Shutdown Timeout Seconds",
-          "type": "integer"
+          "title": "Shutdown Timeout Seconds"
         },
         "task_count_warning_threshold": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 5,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 15,
           "description": "Not enforced: nothing reads this setting. Active task count that triggers warnings",
-          "maximum": 100,
-          "minimum": 5,
-          "title": "Task Count Warning Threshold",
-          "type": "integer"
+          "title": "Task Count Warning Threshold"
         },
         "thread_pool_max_workers": {
+          "anyOf": [
+            {
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 4,
           "description": "Not enforced: nothing reads this setting. Maximum number of worker threads in the shared thread pool",
-          "maximum": 20,
-          "minimum": 1,
-          "title": "Thread Pool Max Workers",
-          "type": "integer"
+          "title": "Thread Pool Max Workers"
         }
       },
       "title": "MCPResourceManagementConfig",
@@ -12668,14 +12940,32 @@
           "type": "boolean"
         },
         "max_detailed_findings": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 20,
-          "title": "Max Detailed Findings",
-          "type": "integer"
+          "title": "Max Detailed Findings"
         },
         "top_hotspots_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 10,
-          "title": "Top Hotspots Limit",
-          "type": "integer"
+          "title": "Top Hotspots Limit"
         },
         "use_collapsible_details": {
           "default": true,
@@ -13550,6 +13840,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -13827,6 +14122,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -16548,6 +16848,7 @@
             "extension": "ghas.sarif",
             "name": "github-ghas",
             "options": {
+              "emit_automation_details": false,
               "exclude_suppressed": true
             }
           },
@@ -18920,7 +19221,7 @@
               "offline": false,
               "scan_timeout": 1800,
               "severity_threshold": null,
-              "tool_version": ">=1.7.0,<2.0.0"
+              "tool_version": ">=1.7.8,<2.0.0"
             }
           },
           "description": "Configure the options for Bandit"
@@ -19213,6 +19514,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -20620,10 +20926,19 @@
           "type": "array"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "metrics": {
           "anyOf": [
@@ -20656,6 +20971,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -22259,6 +22579,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -22677,14 +23002,32 @@
           "type": "boolean"
         },
         "max_detailed_findings": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 20,
-          "title": "Max Detailed Findings",
-          "type": "integer"
+          "title": "Max Detailed Findings"
         },
         "top_hotspots_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 20,
-          "title": "Top Hotspots Limit",
-          "type": "integer"
+          "title": "Top Hotspots Limit"
         }
       },
       "title": "TextReporterConfigOptions",
@@ -23946,6 +24289,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -25613,6 +25961,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -25625,6 +25978,11 @@
             {
               "exclusiveMinimum": 0,
               "type": "number"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -26144,10 +26502,19 @@
           "type": "boolean"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "offline": {
           "default": false,
@@ -26186,6 +26553,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"

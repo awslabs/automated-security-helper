@@ -115,13 +115,57 @@ def test_an_output_formats_entry_admits_a_reference(results_schema):
     assert enum is None or "anyOf" not in enum, enum
 
 
-def test_control_a_true_false_or_number_field_keeps_refusing_a_reference(
-    results_schema,
-):
-    """The load refuses a reference in a bool or number field as any wrong value."""
+def test_control_a_true_false_field_keeps_refusing_a_reference(results_schema):
+    """The record never writes a reference in a true/false field
+    (config_validator.typed_from is never true for a bool, so the typed value is
+    recorded), and the load refuses one as any other wrong value
+    (recorded_config._a_choice_refused admits no bool refusal)."""
     validator = _validator_for(results_schema, "AshConfig")
     assert not validator.is_valid({"fail_on_findings": "${ASH_FAIL}"})
     assert validator.is_valid({"fail_on_findings": False})
+
+
+def test_a_number_field_with_a_default_admits_a_reference(results_schema):
+    """The record writes a reference in a number field's place
+    (config_validator.record_of_config, typed_from: a timeout read from the
+    environment is never written in clear), and the load reads such a field as
+    its default (recorded_config._NUMBER_REFUSALS), so the schema admits it."""
+    validator = _validator_for(results_schema, "BanditScannerConfigOptions")
+    assert validator.is_valid({"install_timeout": "${ASH_INSTALL_TIMEOUT}"})
+    assert validator.is_valid({"install_timeout": 600})
+    assert not validator.is_valid({"install_timeout": "ten minutes"})
+
+
+def test_the_shape_keeping_serializers_are_exactly_the_models_any_typed_ones():
+    """The generator describes a field by its own schema only for the serializers
+    named in SHAPE_KEEPING_SERIALIZERS. A serializer added to the results model
+    with no return type, or ``Any``, must be listed there when it keeps the
+    field's shape, or the field reads as "anything"; a reshaping one must not be.
+    This test fails on either omission so the choice is made on purpose."""
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.schemas.generate_schemas import (
+        SHAPE_KEEPING_SERIALIZERS,
+        StoredResultsJsonSchema,
+        _serializer_name,
+    )
+
+    any_typed: set[str] = set()
+
+    class Recording(StoredResultsJsonSchema):
+        def ser_schema(self, schema):
+            if schema.get("type") in ("function-plain", "function-wrap"):
+                name = _serializer_name(schema)
+                return_schema = schema.get("return_schema")
+                if name.startswith("AshAggregatedResults.") and (
+                    return_schema is None or return_schema.get("type") == "any"
+                ):
+                    any_typed.add(name)
+            return super().ser_schema(schema)
+
+    AshAggregatedResults.model_json_schema(
+        schema_generator=Recording, mode="serialization"
+    )
+    assert any_typed == set(SHAPE_KEEPING_SERIALIZERS)
 
 
 @pytest.mark.parametrize(

@@ -9,7 +9,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -24,7 +24,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -70,7 +70,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -99,7 +99,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -124,7 +124,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -163,7 +163,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -178,7 +178,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -211,7 +211,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -227,7 +227,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -243,7 +243,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -259,7 +259,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -306,7 +306,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -321,7 +321,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -397,7 +397,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -412,7 +412,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -548,7 +548,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -652,6 +652,7 @@
               "extension": "ghas.sarif",
               "name": "github-ghas",
               "options": {
+                "emit_automation_details": false,
                 "exclude_suppressed": true
               }
             },
@@ -788,7 +789,7 @@
                 "offline": false,
                 "scan_timeout": 1800,
                 "severity_threshold": null,
-                "tool_version": ">=1.7.0,<2.0.0"
+                "tool_version": ">=1.7.8,<2.0.0"
               }
             },
             "cdk-nag": {
@@ -1160,7 +1161,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1314,7 +1315,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1342,7 +1343,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -1360,7 +1361,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -1465,7 +1466,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1480,7 +1481,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1500,7 +1501,7 @@
             "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null,
-            "tool_version": ">=1.7.0,<2.0.0"
+            "tool_version": ">=1.7.8,<2.0.0"
           },
           "description": "Configure Bandit scanner"
         }
@@ -1521,11 +1522,20 @@
           "type": "array"
         },
         "confidence_level": {
+          "anyOf": [
+            {
+              "pattern": "^(all|low|medium|high)$",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "all",
           "description": "Confidence level for bandit scan (all, low, medium, high)",
-          "pattern": "^(all|low|medium|high)$",
-          "title": "Confidence Level",
-          "type": "string"
+          "title": "Confidence Level"
         },
         "config_file": {
           "anyOf": [
@@ -1559,7 +1569,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1574,7 +1584,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1589,7 +1599,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1605,7 +1615,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -1630,7 +1640,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -1651,8 +1661,8 @@
               "type": "null"
             }
           ],
-          "default": ">=1.7.0,<2.0.0",
-          "description": "Version constraint for bandit tool installation (e.g., '>=1.7.0'). If not specified, uses '>=1.7.0,<2.0.0' for stability.",
+          "default": ">=1.7.8,<2.0.0",
+          "description": "Version constraint for bandit tool installation (e.g., '>=1.7.8'). If not specified, uses '>=1.7.8,<2.0.0' for stability.",
           "title": "Tool Version"
         }
       },
@@ -1673,7 +1683,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1717,7 +1727,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1737,7 +1747,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1768,7 +1778,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1783,7 +1793,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1798,7 +1808,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1813,7 +1823,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1828,7 +1838,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1850,7 +1860,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1865,7 +1875,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1904,7 +1914,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1930,7 +1940,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1946,7 +1956,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -1971,7 +1981,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -1996,7 +2006,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2011,7 +2021,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2045,7 +2055,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2081,7 +2091,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2106,7 +2116,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2131,7 +2141,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2146,7 +2156,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2200,7 +2210,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2233,7 +2243,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2248,7 +2258,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2273,7 +2283,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2298,7 +2308,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2336,7 +2346,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2351,7 +2361,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2381,7 +2391,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2397,7 +2407,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2422,7 +2432,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2447,7 +2457,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2462,7 +2472,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2521,7 +2531,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -2544,7 +2554,7 @@
             }
           ],
           "default": null,
-          "description": "Path to Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+          "description": "Path to a Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Only a file the operator names and that lies outside the scanned tree is passed to Checkov; a `.checkov.yaml` or `.checkov.yml` found in the scanned tree is not read, and the scan tells Checkov to read none from its working directory either, because such a file can change what is reported.",
           "title": "Config File"
         },
         "frameworks": {
@@ -2596,7 +2606,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -2611,7 +2621,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2626,7 +2636,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2642,7 +2652,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2667,7 +2677,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2685,7 +2695,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2741,7 +2751,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -2752,7 +2762,7 @@
         },
         "skip_path": {
           "default": [],
-          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "description": "Path (file or directory) to skip, as a regular expression Checkov searches for in each path it walks, and also as a substring of that path. The paths Checkov walks start with the absolute path of the scanned directory. Word boundaries are not implicit: \"dir1\" skips any directory or subdirectory whose path holds \"dir1\". An entry whose path is empty is ignored (it would skip every file). Can be specified multiple times.",
           "items": {
             "$ref": "#/$defs/IgnorePathWithReason"
           },
@@ -2800,7 +2810,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2809,10 +2819,19 @@
           "title": "Policy"
         },
         "reason": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "description": "Required. Why this database is held differently.",
-          "minLength": 1,
-          "title": "Reason",
-          "type": "string"
+          "title": "Reason"
         }
       },
       "required": [
@@ -2880,7 +2899,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2890,12 +2909,21 @@
           "title": "Enabled"
         },
         "name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-zA-Z][\\w-]+$",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": null,
           "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]+$",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ConverterOptionsBase",
@@ -2921,7 +2949,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2945,7 +2973,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2965,7 +2993,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3059,7 +3087,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3107,7 +3135,7 @@
               "type": "number"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3152,7 +3180,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3167,7 +3195,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3226,7 +3254,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3241,7 +3269,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3268,7 +3296,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3293,7 +3321,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3311,7 +3339,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3357,7 +3385,7 @@
           "type": "string"
         },
         {
-          "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
           "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
           "type": "string"
         }
@@ -3375,7 +3403,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3395,7 +3423,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3425,7 +3453,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3439,7 +3467,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3453,7 +3481,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3474,7 +3502,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3494,7 +3522,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3505,6 +3533,7 @@
         "options": {
           "$ref": "#/$defs/GHASReporterConfigOptions",
           "default": {
+            "emit_automation_details": false,
             "exclude_suppressed": true
           }
         }
@@ -3515,13 +3544,28 @@
     "GHASReporterConfigOptions": {
       "additionalProperties": false,
       "properties": {
+        "emit_automation_details": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": false,
+          "description": "When true, a workspace project's own report carries runAutomationDetails.id ash/<project key>/, the category GitHub files the upload under, so the per-project reports of one repository are kept apart. Off by default: an id in the file takes precedence over the category the upload-sarif action is given, so an upload that already names its category would be moved to a new one, leaving the old analysis's alerts open.",
+          "title": "Emit Automation Details"
+        },
         "exclude_suppressed": {
           "anyOf": [
             {
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3543,7 +3587,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3563,7 +3607,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3646,7 +3690,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3666,7 +3710,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3693,7 +3737,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3715,7 +3759,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3730,7 +3774,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3798,7 +3842,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3814,7 +3858,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3832,7 +3876,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3848,7 +3892,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3873,7 +3917,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3898,7 +3942,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3913,7 +3957,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3961,7 +4005,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3977,7 +4021,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4002,7 +4046,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4026,7 +4070,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4046,7 +4090,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4078,7 +4122,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4127,7 +4171,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4147,7 +4191,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4174,7 +4218,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4196,7 +4240,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4211,7 +4255,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4240,7 +4284,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4276,7 +4320,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4291,7 +4335,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4308,7 +4352,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4323,7 +4367,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4340,7 +4384,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4360,7 +4404,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4377,7 +4421,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4394,7 +4438,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4411,7 +4455,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4428,7 +4472,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4445,7 +4489,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4462,7 +4506,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4479,7 +4523,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4496,7 +4540,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4516,7 +4560,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4533,7 +4577,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4550,7 +4594,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4572,7 +4616,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4592,7 +4636,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4626,7 +4670,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4640,7 +4684,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4654,7 +4698,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4668,7 +4712,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4682,7 +4726,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4696,7 +4740,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4710,7 +4754,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4731,7 +4775,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4746,7 +4790,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4776,7 +4820,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4792,7 +4836,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4817,7 +4861,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4842,7 +4886,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4862,7 +4906,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4893,7 +4937,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4908,7 +4952,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4981,7 +5025,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4996,7 +5040,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5021,7 +5065,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -5047,7 +5091,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -5069,7 +5113,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -5083,8 +5127,17 @@
         },
         "sha256": {
           "additionalProperties": {
-            "pattern": "^[0-9a-fA-F]{64}$",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "default": {},
           "description": "SHA256 of the OpenGrep release asset for a custom `version`, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset.",
@@ -5120,7 +5173,7 @@
           "type": "string"
         },
         {
-          "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
           "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
           "type": "string"
         }
@@ -5142,7 +5195,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5278,6 +5331,7 @@
             "extension": "ghas.sarif",
             "name": "github-ghas",
             "options": {
+              "emit_automation_details": false,
               "exclude_suppressed": true
             }
           },
@@ -5438,7 +5492,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5460,12 +5514,21 @@
           "title": "Extension"
         },
         "name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-zA-Z][\\w-]+$",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": null,
           "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]+$",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ReporterOptionsBase",
@@ -5616,7 +5679,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5631,7 +5694,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5653,7 +5716,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5673,7 +5736,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5704,7 +5767,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5724,7 +5787,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5782,7 +5845,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -5861,7 +5924,7 @@
               "offline": false,
               "scan_timeout": 1800,
               "severity_threshold": null,
-              "tool_version": ">=1.7.0,<2.0.0"
+              "tool_version": ">=1.7.8,<2.0.0"
             }
           },
           "description": "Configure the options for Bandit"
@@ -6149,7 +6212,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6165,7 +6228,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -6190,7 +6253,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -6293,7 +6356,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6341,7 +6404,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -6443,7 +6506,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6486,7 +6549,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6496,12 +6559,21 @@
           "title": "Enabled"
         },
         "name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-zA-Z][\\w-]+$",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": null,
           "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]+$",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
@@ -6535,7 +6607,7 @@
           "type": "string"
         },
         {
-          "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
           "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
           "type": "string"
         }
@@ -6552,7 +6624,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6567,7 +6639,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6634,7 +6706,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6654,7 +6726,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6669,7 +6741,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6685,7 +6757,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -6711,7 +6783,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -6733,7 +6805,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -6771,7 +6843,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6786,7 +6858,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6836,7 +6908,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -6877,7 +6949,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6893,7 +6965,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -6918,7 +6990,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -6944,7 +7016,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6964,7 +7036,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -6996,7 +7068,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7010,7 +7082,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7024,7 +7096,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7038,7 +7110,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7052,7 +7124,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7144,7 +7216,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -7177,7 +7249,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7192,7 +7264,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7248,7 +7320,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7280,7 +7352,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7295,7 +7367,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7310,7 +7382,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7326,7 +7398,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -7355,7 +7427,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -7395,7 +7467,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -7421,7 +7493,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7441,7 +7513,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7484,7 +7556,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -7503,7 +7575,7 @@
               "type": "number"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -7528,7 +7600,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7548,7 +7620,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7579,7 +7651,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7594,7 +7666,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7647,7 +7719,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7662,7 +7734,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7677,7 +7749,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7692,7 +7764,7 @@
               "type": "boolean"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7712,7 +7784,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7728,7 +7800,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -7753,7 +7825,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },

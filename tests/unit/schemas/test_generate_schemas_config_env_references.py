@@ -79,3 +79,41 @@ def test_control_the_workspace_policy_schema_keeps_its_choices_alone(schemas):
     assert not validator.is_valid(
         {"workspace": {"max_severity_threshold": "${ASH_MAX_SEVERITY}"}}
     )
+
+
+def test_a_reference_in_a_constrained_string_field_is_valid(config_validator):
+    """A string field with a pattern (bandit's ``confidence_level``) described
+    the pattern alone, so a reference the loader resolves read as invalid, the
+    same defect as a fixed-choice field's. The reference is admitted beside the
+    constrained string; a literal outside the pattern is still refused."""
+    document = {
+        "project_name": "x",
+        "scanners": {
+            "bandit": {"options": {"confidence_level": "${ASH_BANDIT_CONFIDENCE}"}}
+        },
+    }
+    assert _messages(config_validator, document) == []
+    literal = {
+        "project_name": "x",
+        "scanners": {"bandit": {"options": {"confidence_level": "high"}}},
+    }
+    assert _messages(config_validator, literal) == []
+    outside = {
+        "project_name": "x",
+        "scanners": {"bandit": {"options": {"confidence_level": "bogus"}}},
+    }
+    assert _messages(config_validator, outside) != []
+
+
+def test_the_reference_branch_says_the_loader_resolves_it(schemas):
+    """The configuration file's branch describes what happens to a reference
+    there: the loader resolves it. The results schema's branch says the field is
+    read with its default, which is true of a stored results file and false of a
+    configuration file, so the two schemas carry different descriptions."""
+    import json
+
+    config_text = json.dumps(schemas["AshConfig"])
+    results_text = json.dumps(schemas["AshAggregatedResults"])
+    assert "resolved to the variable's value when the file is loaded" in config_text
+    assert "read with its default" not in config_text
+    assert "read with its default" in results_text

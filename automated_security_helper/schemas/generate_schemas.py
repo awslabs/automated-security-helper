@@ -10,29 +10,46 @@ from typing import Any, List, Literal
 
 from pydantic.json_schema import GenerateJsonSchema
 
-#: What a results file holds where its stored configuration read a value from
-#: the environment: the reference as the configuration file wrote it (``${VAR}``,
-#: ``${VAR:default}``, ``!ENV ${VAR}``), never the value
-#: (config_validator.record_of_config). A fixed-choice field such as
-#: ``global_settings.severity_threshold`` cannot hold one, so the load reads the
-#: field with its default and warns (AshAggregatedResults.validate_ash_config,
-#: config/recorded_config.py). The pattern is written for every JSON Schema regex
+#: An environment reference as a configuration file writes it: ``${VAR}``,
+#: ``${VAR:default}``, ``!ENV ${VAR}``. Written for every JSON Schema regex
 #: engine, not only Python's, so it is not ash_config.ENV_REFERENCE_PATTERN; it
 #: also ends at the closing brace, where the load's pattern reads a prefix, so a
 #: string that merely starts like a reference is not admitted.
+ENV_REFERENCE_JSON_PATTERN = r"^(!ENV )?\$\{\w+(:.*)?\}$"
+
+#: What a results file holds where its stored configuration read a value from
+#: the environment: the reference as the configuration file wrote it, never the
+#: value (config_validator.record_of_config). A fixed-choice or a number field
+#: such as ``global_settings.severity_threshold`` cannot hold one, so the load
+#: reads the field with its default and warns (AshAggregatedResults
+#: .validate_ash_config, config/recorded_config.py).
 ENV_REFERENCE_JSON_SCHEMA = {
     "type": "string",
-    "pattern": r"^(!ENV )?\$\{\w+(:.*)?\}$",
+    "pattern": ENV_REFERENCE_JSON_PATTERN,
     "description": (
         "An environment reference, kept as the configuration file wrote it. "
         "The field is read with its default."
     ),
 }
 
+#: The same reference in a configuration file, where the loader resolves it to
+#: the variable's value before the field is validated (ash_config
+#: .load_yaml_config; config_sources for TOML): the value, not a default, is
+#: what the field reads.
+CONFIG_FILE_REFERENCE_JSON_SCHEMA = {
+    "type": "string",
+    "pattern": ENV_REFERENCE_JSON_PATTERN,
+    "description": (
+        "An environment reference, resolved to the variable's value when the "
+        "file is loaded."
+    ),
+}
+
 
 def _with_env_reference(json_schema: Any) -> Any:
-    """``json_schema`` with the environment reference admitted beside it."""
-    return {"anyOf": [json_schema, dict(ENV_REFERENCE_JSON_SCHEMA)]}
+    """``json_schema`` with the configuration file's environment reference
+    admitted beside it."""
+    return {"anyOf": [json_schema, dict(CONFIG_FILE_REFERENCE_JSON_SCHEMA)]}
 
 
 class ConfigFileJsonSchema(GenerateJsonSchema):
@@ -47,11 +64,20 @@ class ConfigFileJsonSchema(GenerateJsonSchema):
     ``AshConfig.json`` (``config_writer.SCHEMA_COMMENT`` points every saved file
     at it) called invalid a file ASH itself reads and writes. Each such field
     admits the reference (:data:`ENV_REFERENCE_JSON_SCHEMA`) beside its own
-    schema. A string field admits it already.
+    schema. A free string field admits it already; a string field with a
+    constraint (a pattern, a length) does not, because the reference is not the
+    value the constraint describes, so it admits the reference beside the
+    constrained string.
 
     The workspace policy file resolves no reference (``ash_workspace_config``),
     so its schema is pydantic's own.
     """
+
+    def str_schema(self, schema: Any) -> Any:
+        json_schema = super().str_schema(schema)
+        if any(key in schema for key in ("pattern", "min_length", "max_length")):
+            return _with_env_reference(json_schema)
+        return json_schema
 
     def literal_schema(self, schema: Any) -> Any:
         return _with_env_reference(super().literal_schema(schema))
@@ -95,47 +121,31 @@ def _is_stored_config_model(cls: type) -> bool:
     )
 
 
-def _fixed_choice(branch: Any) -> bool:
-    """Whether ``branch`` is a fixed-choice schema: an Enum reference or an enum."""
-    return isinstance(branch, dict) and ("$ref" in branch or "enum" in branch)
+#: The serializers of the results model that are declared ``-> Any`` because
+#: their output has the shape of the field they serialize: the record of the
+#: configuration and of the metadata with each environment value as its
+#: reference, and the used suppressions in a stable order. In serialization
+#: mode pydantic would describe each of these fields as "anything"; the
+#: generator describes them by the field's own schema instead. A serializer
+#: added to this model that reshapes its field must NOT be listed here, and one
+#: that keeps the shape must be, or the field reads as "anything"
+#: (tests/unit/schemas/test_generate_schemas_stored_config_references.py keeps
+#: the list and the model in step).
+SHAPE_KEEPING_SERIALIZERS = frozenset(
+    {
+        "AshAggregatedResults._record_ash_config",
+        "AshAggregatedResults._record_metadata",
+        "AshAggregatedResults._used_suppressions_in_order",
+    }
+)
 
 
-def _with_reference_entries(branch: Any) -> Any:
-    """``branch`` of the ``output_formats`` schema with the reference admitted.
-
-    A branch that already reads as a plain string admits a reference as it is.
-    """
-    if isinstance(branch, dict) and _fixed_choice(branch.get("items")):
-        return {
-            **branch,
-            "items": {"anyOf": [branch["items"], dict(ENV_REFERENCE_JSON_SCHEMA)]},
-        }
-    if _fixed_choice(branch):
-        return {"anyOf": [branch, dict(ENV_REFERENCE_JSON_SCHEMA)]}
-    return branch
-
-
-def _admit_reference_in_output_formats(json_schema: Any) -> None:
-    """Admit a reference as an ``output_formats`` entry, beside the format names.
-
-    The entries are an Enum shared with other parts of the results through one
-    schema definition, so the definition itself stays as it is and the branch is
-    added on this field: on each list entry and on the single-value form. The
-    load admits exactly that location (recorded_config._a_choice_refused) and
-    reads the whole list as its default. In serialization mode the entries are
-    rendered as the strings a dump writes (the Enum is serialized as its value),
-    which admit a reference already, so nothing is added there.
-    """
-    prop = (json_schema.get("properties") or {}).get("output_formats")
-    if not isinstance(prop, dict):
-        return
-    if isinstance(prop.get("anyOf"), list):
-        prop["anyOf"] = [_with_reference_entries(b) for b in prop["anyOf"]]
-    else:
-        admitted = _with_reference_entries(prop)
-        if admitted is not prop:
-            prop.clear()
-            prop.update(admitted)
+def _serializer_name(schema: Any) -> str:
+    """The qualified name of a function serializer's function, or ``""``."""
+    function = schema.get("function")
+    if isinstance(function, dict):
+        function = function.get("function")
+    return getattr(function, "__qualname__", "")
 
 
 class StoredResultsJsonSchema(GenerateJsonSchema):
@@ -153,20 +163,22 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
 
     The stored configuration also keeps each value its files read from the
     environment as the reference the file wrote (``${VAR}``). A fixed-choice
-    field (a ``Literal``, or an ``output_formats`` entry) cannot hold one, so the
-    load drops the field and reads it with its default, with a warning
-    (recorded_config.without_unreadable_references). The schema admits the
-    reference where the load does, and only there:
+    field (a ``Literal``) or a number field cannot hold one, so the load drops
+    the field and reads it with its default, with a warning
+    (recorded_config.without_unreadable_references, _a_choice_refused). The
+    schema admits the reference where the load does, and only there:
 
-    - a ``Literal`` field of a configuration model that HAS a default (a
-      required one has nothing to fall back to: the load fails it as missing and
-      refuses the file, so the schema refuses the reference too), the entries of
-      a list under such a field included;
-    - each ``output_formats`` entry, on that field alone, because its Enum is a
-      definition shared with other parts of the results;
-    - never a true/false or number field, which the load refuses as it refuses
-      any other wrong value, and never a fixed-choice field of another model (a
-      SARIF level, the CycloneDX ``bomFormat``).
+    - a ``Literal``, ``int`` or ``float`` field of a configuration model that
+      HAS a default (a required one has nothing to fall back to: the load fails
+      it as missing and refuses the file, so the schema refuses the reference
+      too), the entries of a list under such a field included;
+    - never a true/false field: the record never writes a reference there
+      (config_validator.typed_from is never true for a bool, so the typed
+      value is recorded) and the load refuses one as any other wrong value;
+      never a fixed-choice field of another model (a SARIF level, the CycloneDX
+      ``bomFormat``);
+    - an ``output_formats`` entry needs nothing: in serialization mode its Enum
+      renders as the string a dump writes, which admits a reference already.
 
     The schema is generated in serialization mode, because a results file is
     what ``model_dump_json`` writes: it carries every computed field (the
@@ -180,16 +192,19 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
     serializer annotated ``Any`` (``AshAggregatedResults._record_ash_config``:
     the record of the configuration, the same shape with each environment
     value as its reference), so the stored configuration would be described
-    as "anything" and every rule above would describe nothing. A serializer
-    with no return type, or ``Any``, therefore falls back to the field's own
-    schema (``ser_schema``); a serializer with a real return type keeps it.
+    as "anything" and every rule above would describe nothing. The serializers
+    named in :data:`SHAPE_KEEPING_SERIALIZERS` therefore fall back to the
+    field's own schema (``ser_schema``); every other serializer is described as
+    pydantic describes it, so a reshaping serializer added later is never
+    described by a schema its output does not match.
     """
 
     def ser_schema(self, schema: Any) -> Any:
-        if schema.get("type") in ("function-plain", "function-wrap"):
-            return_schema = schema.get("return_schema")
-            if return_schema is None or return_schema.get("type") == "any":
-                return None
+        if (
+            schema.get("type") in ("function-plain", "function-wrap")
+            and _serializer_name(schema) in SHAPE_KEEPING_SERIALIZERS
+        ):
+            return None
         return super().ser_schema(schema)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -205,8 +220,6 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
         self._under_default: List[bool] = []
 
     def model_schema(self, schema: Any) -> Any:
-        from automated_security_helper.config.ash_config import AshConfig
-
         cls = schema.get("cls")
         is_model = isinstance(cls, type)
         self._in_stored_config.append(is_model and _is_stored_config_model(cls))
@@ -218,9 +231,29 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
             self._under_default.pop()
         if is_model and issubclass(cls, _stored_config_bases()):
             json_schema["additionalProperties"] = True
-        if is_model and cls is AshConfig:
-            _admit_reference_in_output_formats(json_schema)
         return json_schema
+
+    def _admits_reference(self) -> bool:
+        """Whether the field being generated is a defaulted field of a stored
+        configuration model: where the load reads a refused reference as the
+        default."""
+        return bool(
+            self._in_stored_config
+            and self._in_stored_config[-1]
+            and self._under_default
+            and self._under_default[-1]
+        )
+
+    def _beside_reference(self, json_schema: Any) -> Any:
+        if self._admits_reference():
+            return {"anyOf": [json_schema, dict(ENV_REFERENCE_JSON_SCHEMA)]}
+        return json_schema
+
+    def int_schema(self, schema: Any) -> Any:
+        return self._beside_reference(super().int_schema(schema))
+
+    def float_schema(self, schema: Any) -> Any:
+        return self._beside_reference(super().float_schema(schema))
 
     def default_schema(self, schema: Any) -> Any:
         if not self._under_default:
@@ -233,15 +266,7 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
             self._under_default[-1] = was
 
     def literal_schema(self, schema: Any) -> Any:
-        json_schema = super().literal_schema(schema)
-        if (
-            self._in_stored_config
-            and self._in_stored_config[-1]
-            and self._under_default
-            and self._under_default[-1]
-        ):
-            return {"anyOf": [json_schema, dict(ENV_REFERENCE_JSON_SCHEMA)]}
-        return json_schema
+        return self._beside_reference(super().literal_schema(schema))
 
 
 def _write_if_changed(path: Path, content: str) -> bool:
