@@ -62,13 +62,16 @@ from tests.utils.tool_guard import (
     reset_tool_lookup_caches,
 )
 
-# integration, not e2e: the module-scoped fixture and the vendored-scanner test run
-# a child Python on a driver this file writes, with stub probes answering for every
-# scanner, so no real tool runs. By tests/NAMING_CONVENTIONS.md a child Python
-# running a test-written script is integration; e2e is the ash CLI or the MCP
-# server itself, driven with real scanners. The 900- and 600-second timeouts are
-# the scans' walls, not a tier.
-pytestmark = pytest.mark.integration
+# e2e, for the CI budget rather than for what the tests reach: the module-scoped
+# fixture runs two whole child scans (api and mcp, 900 s each) and the
+# vendored-scanner test a third (600 s), with stub probes answering for every
+# scanner. By tests/NAMING_CONVENTIONS.md a child Python running a test-written
+# script is integration, and the integration job runs every Python on every OS in
+# four shards (25 legs), where the e2e job runs once per runner (5 legs). Without a
+# measured wall time under a minute for this module, moving it would put three
+# child scans on whichever integration shard it hashes to, five times as often.
+# The tier owner decides once the wall is measured.
+pytestmark = pytest.mark.e2e
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
