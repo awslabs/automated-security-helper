@@ -1518,7 +1518,7 @@ def install_dependencies(
             for failure in failures_by_name.get(name, []):
                 # Recorded on the outcome itself: it is named by its class
                 # (``CfnNagScanner``) and the request by the declared name
-                # (``cfn-nag``), so the verdict's name match never found it, and a
+                # (``cfn-nag``), so the tally's name match never found it, and a
                 # requested plugin its section disables read as not counted, exit
                 # 0, "Installation Complete".
                 failure.requested = True

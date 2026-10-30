@@ -415,7 +415,7 @@ def test_a_requested_construction_failure_counts_by_the_request_it_carries(
     monkeypatch,
 ):
     """The outcome is named by its class and the request by the declared name;
-    the verdict read the name only, so a disabled plugin's failure was listed as
+    the tally read the name only, so a disabled plugin's failure was listed as
     not counted and the run passed."""
     panels = io.StringIO()
     monkeypatch.setattr(

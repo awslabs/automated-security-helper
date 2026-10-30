@@ -285,7 +285,7 @@ def test_a_requested_plugin_that_is_disabled_and_will_not_build_fails_the_run(
 ):
     """--tool names it, so its failure is this run's whatever its section says.
 
-    A plugin that fails to construct is named by its class, and the verdict
+    A plugin that fails to construct is named by its class, and the tally
     matched requested names against declared ones, so the failure was listed as
     disabled and not counted and the run exited 0, "Installation Complete".
     """
