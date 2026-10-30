@@ -176,33 +176,90 @@ def effective_sarif_level(result: object) -> str:
     return normalized if normalized in _SARIF_LEVEL_TO_SEVERITY else MISSING_SARIF_LEVEL
 
 
+def _rule_default_level(rule: object) -> Optional[str]:
+    """The level a rule's ``defaultConfiguration`` states, or None when it states
+    none."""
+    configuration = getattr(rule, "defaultConfiguration", None)
+    if configuration is None or "level" not in getattr(
+        configuration, "model_fields_set", ()
+    ):
+        return None
+    return effective_sarif_level(configuration)
+
+
+def _rule_of(result: object, components: list, by_id: Dict[Any, object]) -> object:
+    """The rule *result* names, read as SARIF 3.27.5 lets a result name one.
+
+    In order: the ``rule`` reference (its ``toolComponent.index`` picks an
+    extension, else the driver; its ``index`` picks the rule there; else its
+    ``id``), ``ruleIndex`` into the driver's rules, then ``ruleId``. An indexed
+    rule whose id disagrees with the id the result also states is passed over
+    for the id. A hierarchical id (``CA1001/sub``) falls back to each shorter
+    prefix at a ``/``, so the rule ``CA1001`` grades its sub-results.
+    """
+    reference = getattr(result, "rule", None)
+    body = getattr(reference, "root", reference)
+    stated_id = getattr(result, "ruleId", None) or getattr(body, "id", None)
+
+    def by_stated_id():
+        candidate = stated_id
+        while candidate:
+            found = by_id.get(candidate)
+            if found is not None:
+                return found
+            if "/" not in candidate:
+                return None
+            candidate = candidate.rsplit("/", 1)[0]
+        return None
+
+    if body is not None:
+        component_ref = getattr(body, "toolComponent", None)
+        component_index = getattr(component_ref, "index", -1)
+        if component_index is None or component_index < 0:
+            rules = components[0]
+        elif component_index + 1 < len(components):
+            rules = components[component_index + 1]
+        else:
+            rules = []
+        index = getattr(body, "index", -1)
+        if index is not None and 0 <= index < len(rules):
+            rule = rules[index]
+            if not stated_id or getattr(rule, "id", None) == stated_id:
+                return rule
+        return by_stated_id()
+    rule_index = getattr(result, "ruleIndex", None)
+    if rule_index is not None and 0 <= rule_index < len(components[0]):
+        rule = components[0][rule_index]
+        if not stated_id or getattr(rule, "id", None) == stated_id:
+            return rule
+    return by_stated_id()
+
+
 def resolve_missing_levels(sarif_report: object) -> None:
     """Give every result of *sarif_report* that states no level an explicit one.
 
     SARIF 2.1.0 3.27.10: with ``kind`` other than "fail", a missing level "SHALL
     default to "none""; with "fail" (the default) it is the rule's
     ``defaultConfiguration.level`` when the rule gives one, else "warning". The
-    rule is looked up by ``ruleId`` (or ``rule.id``) in the run's driver and
-    extensions; invocation-level rule overrides are not consulted. Results that
+    rule is the one the result names (:func:`_rule_of`): through its ``rule``
+    reference, its ``ruleIndex`` or its ``ruleId``, in the run's driver and
+    extensions. Reading ``ruleId`` and ``rule.id`` alone gave a result that
+    names its rule by index the missing level, "warning", in place of the
+    rule's own. Invocation-level rule overrides are not consulted. Results that
     state a level keep it. Run where a scanner's report enters the results, so
     the level is explicit in memory, in ``ash.sarif`` and in the saved results.
     """
     for run in getattr(sarif_report, "runs", None) or []:
         tool = getattr(run, "tool", None)
-        components = [getattr(tool, "driver", None)] + list(
-            getattr(tool, "extensions", None) or []
-        )
-        rule_levels: Dict[Any, str] = {}
-        for component in components:
-            for rule in getattr(component, "rules", None) or []:
-                configuration = getattr(rule, "defaultConfiguration", None)
-                if configuration is None or "level" not in getattr(
-                    configuration, "model_fields_set", ()
-                ):
-                    continue
-                rule_levels.setdefault(
-                    getattr(rule, "id", None), effective_sarif_level(configuration)
-                )
+        components = [
+            list(getattr(component, "rules", None) or [])
+            for component in [getattr(tool, "driver", None)]
+            + list(getattr(tool, "extensions", None) or [])
+        ]
+        by_id: Dict[Any, object] = {}
+        for rules in components:
+            for rule in rules:
+                by_id.setdefault(getattr(rule, "id", None), rule)
         for result in getattr(run, "results", None) or []:
             if "level" in getattr(result, "model_fields_set", ("level",)):
                 continue
@@ -211,11 +268,9 @@ def resolve_missing_levels(sarif_report: object) -> None:
             if kind != "fail":
                 result.level = "none"
                 continue
-            rule = getattr(result, "rule", None)
-            rule_id = getattr(result, "ruleId", None) or getattr(
-                getattr(rule, "root", rule), "id", None
-            )
-            result.level = rule_levels.get(rule_id, MISSING_SARIF_LEVEL)
+            rule = _rule_of(result, components, by_id)
+            level = _rule_default_level(rule) if rule is not None else None
+            result.level = level or MISSING_SARIF_LEVEL
 
 
 def result_severity(result: object) -> str:
