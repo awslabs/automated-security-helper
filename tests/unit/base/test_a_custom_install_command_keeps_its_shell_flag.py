@@ -83,6 +83,27 @@ def test_the_installer_reads_the_shell_flag_off_the_returned_command(plugin_cont
     assert checked == [(["echo", "$HOME"], True), (["echo", "ready"], False)]
 
 
+def test_a_returned_custom_command_still_reads_as_its_argv(plugin_context):
+    """Readers that take each entry as an argv (the install-gate tests index and
+    slice it, the docs oracle iterates it) keep reading the words; the shell
+    flag rides beside, by name."""
+    plugin = _plugin(plugin_context)
+    plugin.custom_install_commands = {
+        "linux": {
+            "amd64": [CustomCommand(args=["gem", "install", "cfn-nag", "-v", "1"])]
+        }
+    }
+
+    (command,) = plugin.get_installation_commands("linux", "amd64")
+
+    assert command[:3] == ["gem", "install", "cfn-nag"]
+    assert command[2] == "cfn-nag"
+    assert len(command) == 5
+    assert list(command) == ["gem", "install", "cfn-nag", "-v", "1"]
+    assert "-v" in command
+    assert command.shell is False
+
+
 def test_a_dependency_still_renders_as_an_argv_without_a_shell(plugin_context):
     """The control: a declared dependency is an array of arguments, run without
     a shell, as before."""

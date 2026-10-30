@@ -833,8 +833,26 @@ def _log_name(plugin: Any) -> str:
 
 
 class CustomCommand(BaseModel):
+    """An install command a plugin declares, with its argv and a shell flag.
+
+    ``get_installation_commands`` returns a custom command as this object, so
+    the installer reads ``shell`` beside the argv. A reader that indexes,
+    slices, iterates or searches the entry reads its ``args``, as it read the
+    bare argv list the method used to return in its place; the flag rides
+    beside and is read by name.
+    """
+
     args: List[str]
     shell: bool = False  # Set to True only when shell expansion is absolutely necessary
+
+    def __getitem__(self, index):
+        return self.args[index]
+
+    def __len__(self) -> int:
+        return len(self.args)
+
+    def __iter__(self):
+        return iter(self.args)
 
 
 #: Whether the plugin being constructed was handed a configuration read from its
