@@ -447,3 +447,40 @@ class TestWorkspaceProjectsFollowTheSameRule:
         entry = self._close(tmp_path, scanners={"bandit": "PASSED"})
 
         assert entry.status.value == "completed"
+
+    def test_a_project_failing_only_on_an_unevaluated_rule_names_it(self, tmp_path):
+        """The arm no setting silences reaches the client in the single-scan shape.
+
+        Every scanner ran and the gate is irrelevant; the project is incomplete
+        on the rule alone, and the coverage says which rule, as a single scan's
+        ``unevaluated_rules`` does. It used to say nothing: the projection
+        hardcoded the list empty.
+        """
+        entry = self._close(
+            tmp_path,
+            scanners={"cdk-nag": "PASSED"},
+            unevaluated_rules=["AwsSolutions-S1"],
+            scan_incomplete=True,
+        )
+
+        assert entry.status.value == "incomplete"
+        assert entry.coverage["incomplete_scanners"] == []
+        assert entry.coverage["unevaluated_rules"] == ["AwsSolutions-S1"]
+        assert entry.coverage["could_not_stop"] == []
+
+    def test_a_tool_ash_could_not_stop_is_named_in_the_single_scans_shape(
+        self, tmp_path
+    ):
+        reason = "bandit's tool was still running after the stop (pid 7)"
+        entry = self._close(
+            tmp_path,
+            scanners={"bandit": "PASSED"},
+            unstoppable_tools={"bandit": reason},
+            scan_incomplete=True,
+        )
+
+        assert entry.status.value == "incomplete"
+        assert entry.coverage["could_not_stop"] == [
+            {"scanner": "bandit", "reason": reason}
+        ]
+        assert entry.coverage["unevaluated_rules"] == []

@@ -1609,10 +1609,11 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
     Built from the facts the project's outcome already carries, so a client
     polling a workspace project and one polling a single scan read the same keys.
     ``incomplete_converters`` has the shape ``ScanIncompleteness.to_payload``
-    gives it. ``unevaluated_rules`` is empty because a project's outcome does not
-    record it, and it does not feed ``scan_incomplete``. A stale content database
-    is in ``stale_content_databases`` and only there, as in a single scan's
-    payload: the outcome leaves a scanner listed only for it out of
+    gives it, and so do ``unevaluated_rules`` and ``could_not_stop``: the two
+    exit-1 arms no setting silences, read off the outcome's ``unevaluated_rules``
+    and ``unstoppable_tools``, both of which feed ``scan_incomplete``. A stale
+    content database is in ``stale_content_databases`` and only there, as in a
+    single scan's payload: the outcome leaves a scanner listed only for it out of
     ``incomplete_scanners``.
     """
     statuses = outcome.scanners or {}
@@ -1638,8 +1639,15 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
             {"converter": name, "reason": reason}
             for name, reason in (outcome.incomplete_converters or {}).items()
         ],
-        "unevaluated_rules": [],
+        # Both default empty on an outcome a pre-field ASH wrote.
+        "unevaluated_rules": list(getattr(outcome, "unevaluated_rules", None) or []),
         "stale_content_databases": list(outcome.stale_content_databases or []),
+        "could_not_stop": [
+            {"scanner": name, "reason": reason}
+            for name, reason in (
+                getattr(outcome, "unstoppable_tools", None) or {}
+            ).items()
+        ],
     }
 
 
