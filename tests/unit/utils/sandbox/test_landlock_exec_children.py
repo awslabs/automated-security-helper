@@ -333,13 +333,24 @@ def test_the_first_reap_pass_walks_the_whole_tree_when_the_deadline_is_behind(
 ):
     """A stop that left the scanner's exit past the deadline still gets one
     complete pass: the walk is not given the deadline, and what it finds is
-    killed; no second pass follows, and what that pass found is reported as the
-    survivors of the deadline."""
-    walks, kills, _deadline, survivors = reap_calls(5.0, [[11, 21, 31]])
+    killed; no second pass follows. The survivors reported are what one more
+    deadline-bounded read still finds after that kill pass, here nothing, not
+    the pids the pass already ended."""
+    walks, kills, deadline, survivors = reap_calls(5.0, [[11, 21, 31]])
 
-    assert walks == [None]
+    assert walks == [None, deadline]
     assert kills == [11, 21, 31]
-    assert survivors == [11, 21, 31]
+    assert survivors == []
+
+
+def test_pids_still_present_after_the_last_kill_pass_are_the_survivors(reap_calls):
+    """When the re-read after the deadline still finds a pid, that one is
+    reported, the ones the pass ended are not."""
+    walks, kills, deadline, survivors = reap_calls(5.0, [[11, 21], [21]])
+
+    assert walks == [None, deadline]
+    assert kills == [11, 21]
+    assert survivors == [21]
 
 
 def test_later_reap_passes_carry_the_deadline(reap_calls):

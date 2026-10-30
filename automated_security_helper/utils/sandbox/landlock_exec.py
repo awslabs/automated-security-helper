@@ -807,6 +807,12 @@ def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
                 break
             if reaped == 0:
                 break
+    if leftovers:
+        # The deadline ended the loop right after a kill pass, so every pid in
+        # the last list has been signalled and most are gone: read once more,
+        # bounded by the deadline (the direct children are always read), and
+        # report only what is still there, not what that pass already ended.
+        leftovers = _descendants(until=deadline)
     return leftovers
 
 
