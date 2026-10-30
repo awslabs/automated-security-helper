@@ -109,7 +109,12 @@ def test_a_check_that_raises_describes_the_error(monkeypatch, caplog) -> None:
 
     assert response is not None and response["success"] is False, response
     assert response["error_type"] == "scan_start_failure", response
-    assert "ValidationError" in response["error"], response
+    # The described error names the model it refused ("1 validation error for
+    # <title>"), not the exception's class name: the stand-in's own title is
+    # the proof that the arm described this error and no other.
+    assert "validation error for _ConfigThatQuotesItsInput" in response["error"], (
+        response
+    )
     assert QUOTED_INPUT not in response["error"], response
     # The log line the module docstring names: described, never quoting.
     assert QUOTED_INPUT not in caplog.text, caplog.text
@@ -136,6 +141,11 @@ def test_rules_that_cannot_be_read_describe_the_error(monkeypatch, caplog) -> No
     assert response is not None and response["success"] is False, response
     assert response["error_type"] == mcp_tools.CONFIG_POLICY_UNREADABLE, response
     # The arm was reached: the error it describes is the stand-in's own kind.
-    assert "ValidationError" in response["error"], response
+    # The described error names the model it refused ("1 validation error for
+    # <title>"), not the exception's class name: the stand-in's own title is
+    # the proof that the arm described this error and no other.
+    assert "validation error for _ConfigThatQuotesItsInput" in response["error"], (
+        response
+    )
     assert QUOTED_INPUT not in response["error"], response
     assert QUOTED_INPUT not in caplog.text, caplog.text
