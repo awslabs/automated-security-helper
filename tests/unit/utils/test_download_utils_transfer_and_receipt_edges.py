@@ -54,10 +54,14 @@ class _Response:
     http.client's ``chunked`` flag (True when Transfer-Encoding: chunked framed the
     body, in which case http.client ignores any Content-Length)."""
 
-    def __init__(self, body: bytes, declared, chunked: bool = False):
+    def __init__(self, body: bytes, declared, chunked: bool = False, length=None):
         self._body = io.BytesIO(body)
         self.headers = {"Content-Length": str(declared)}
         self.chunked = chunked
+        # http.client's parsed length, set only when a test gives one: a fake
+        # without it stands for a response object that carries no such field.
+        if length is not None:
+            self.length = length
 
     def read(self, amount=-1):
         return self._body.read(amount)
@@ -284,6 +288,50 @@ def test_a_content_length_that_is_not_an_ascii_number_carries_no_length(
         download_utils.urllib.request,
         "urlopen",
         lambda url, **kwargs: _Response(_BODY, declared="3²"),
+    )
+    installed = download_utils.download_file(
+        _URL, tmp_path / "bin", expected_sha256=_DIGEST
+    )
+    assert installed.read_bytes() == _BODY
+
+
+def test_the_parsed_length_of_an_http_response_outranks_the_raw_header(
+    monkeypatch, tmp_path, quick_retry
+):
+    """http.client has read the headers already: its ``length`` is the length of
+    record, so a header it rejected or did not use cannot fail a whole body."""
+    attempts = []
+
+    def urlopen(url, **kwargs):
+        attempts.append(url)
+        return _Response(_BODY, declared=99, length=len(_BODY))
+
+    monkeypatch.setattr(download_utils.urllib.request, "urlopen", urlopen)
+    installed = download_utils.download_file(
+        _URL, tmp_path / "bin", expected_sha256=_DIGEST
+    )
+    assert installed.read_bytes() == _BODY
+    assert len(attempts) == 1
+
+
+def test_a_short_body_is_still_refused_against_the_parsed_length(monkeypatch, tmp_path):
+    monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", "1")
+    monkeypatch.setattr(
+        download_utils.urllib.request,
+        "urlopen",
+        lambda url, **kwargs: _Response(_BODY[:5], declared=5, length=len(_BODY)),
+    )
+    with pytest.raises(ConnectionError, match="closed after 5 of"):
+        download_utils.download_file(_URL, tmp_path / "bin", expected_sha256=_DIGEST)
+
+
+def test_a_negative_content_length_is_no_length(monkeypatch, tmp_path, quick_retry):
+    """http.client reads a negative Content-Length as unknown and reads to the
+    close; so does this check, so the whole body lands on the first attempt."""
+    monkeypatch.setattr(
+        download_utils.urllib.request,
+        "urlopen",
+        lambda url, **kwargs: _Response(_BODY, declared=-1),
     )
     installed = download_utils.download_file(
         _URL, tmp_path / "bin", expected_sha256=_DIGEST

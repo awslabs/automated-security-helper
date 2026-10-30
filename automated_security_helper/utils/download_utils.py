@@ -238,22 +238,46 @@ def _copy_whole_body(response, sink, url: str) -> int:
     header of any other shape (a non-ASCII digit that ``str.isdigit`` accepts
     and ``int`` refuses, say) carries no usable length, so nothing is compared.
 
+    An ``http.client.HTTPResponse`` has already parsed the header into ``length``
+    (None for a chunked or unusable value, else the bytes still to read), so that
+    is the length of record where it exists, read before the first read moves
+    it; the header is parsed here only for a response object without it.
+
     Returns the number of bytes copied.
     """
+    expected = _declared_body_length(response)
     copied = 0
     for chunk in iter(lambda: response.read(_HASH_CHUNK_BYTES), b""):
         sink.write(chunk)
         copied += len(chunk)
-    if getattr(response, "chunked", False):
-        return copied
-    declared = response.headers.get("Content-Length") if response.headers else None
-    if declared is not None and re.fullmatch(r"[0-9]+", declared.strip()):
-        expected = int(declared.strip())
-        if copied != expected:
-            raise ConnectionError(
-                f"the connection closed after {copied} of {expected} bytes of {url}"
-            )
+    if expected is not None and copied != expected:
+        raise ConnectionError(
+            f"the connection closed after {copied} of {expected} bytes of {url}"
+        )
     return copied
+
+
+def _declared_body_length(response) -> Optional[int]:
+    """The body length the response declares, or None when it declares none usable.
+
+    ``HTTPResponse.length`` is http.client's own reading of the headers: None for
+    a chunked body, a missing header or a value it rejects, and otherwise the
+    byte count, which it counts down as the body is read, so it is taken before
+    any read. Where the object carries no such attribute (a fake, another
+    client), the raw header is read: skipped for a chunked body, and only an
+    ASCII decimal counts, so a negative or non-ASCII value is no length rather
+    than a wrong one.
+    """
+    length = getattr(response, "length", None)
+    if isinstance(length, int) and not isinstance(length, bool):
+        return length if length >= 0 else None
+    if getattr(response, "chunked", False):
+        return None
+    headers = getattr(response, "headers", None)
+    declared = headers.get("Content-Length") if headers else None
+    if declared is not None and re.fullmatch(r"[0-9]+", declared.strip()):
+        return int(declared.strip())
+    return None
 
 
 def _sha256_of_open_file(fd: int) -> str:
