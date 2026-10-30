@@ -2674,8 +2674,11 @@ def test_the_password_line_is_dropped_from_every_finding_on_it():
     redacted = module.redact_credentials(payload)
     assert "hunter2" not in json.dumps(redacted)
     assert redacted["errors"][2]["snippet"] == "safe line"
+    # The redaction is a copy, so the builder below gets input the password is
+    # still in and its own redaction is what the second half measures.
+    assert "hunter2" in json.dumps(payload)
 
-    sarif = build_sarif(payload, exit_code=1)
+    sarif = build_sarif(copy.deepcopy(payload), exit_code=1)
     assert "hunter2" not in json.dumps(sarif)
     regions = [
         result["locations"][0]["physicalLocation"]["region"]
