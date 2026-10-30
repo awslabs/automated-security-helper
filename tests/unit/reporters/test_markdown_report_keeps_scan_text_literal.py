@@ -147,7 +147,11 @@ class TestTheSummaryLineIsOneLine:
     def test_a_blank_line_in_a_severity_cannot_end_the_html_block(
         self, test_plugin_context
     ):
-        """An additional report's severity is the results file's text."""
+        """An additional report's severity is read as the gate reads it.
+
+        Text that is not a severity name is graded as a result with no level, so
+        none of it reaches the summary line.
+        """
         model = _model()
         model.sarif.runs[0].results = []
         model.additional_reports["custom-plugin"] = [
@@ -168,7 +172,7 @@ class TestTheSummaryLineIsOneLine:
         summary = [
             line
             for line in document.split("\n")
-            if "<summary>" in line and "INJECTED HEADING" in line.upper()
+            if "<summary>" in line and "Odd severity" in line
         ]
         # The control: the finding is in the report, with its summary line.
         assert len(summary) == 1, summary
