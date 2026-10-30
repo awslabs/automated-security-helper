@@ -293,9 +293,17 @@ class TestTheProbeSpecAndItsMemo:
         assert spawn.call_count == 1
 
     def test_the_bare_probe_and_the_from_spec_probe_are_remembered_apart(self, spawn):
+        """Each form is asked twice: the count shows both that the bare answer
+        is not served to the spec lookup and that each answer IS remembered.
+        Asked once each, the test passed with the spec form never memoized,
+        which would re-spawn `uv tool run --from ... --version` (seconds for
+        checkov or semgrep) on every dependency check."""
         assert get_uv_tool_command("bandit") is None
         assert get_uv_tool_command("bandit", from_spec="bandit[sarif]") is None
         assert spawn.call_count == 2
+        assert get_uv_tool_command("bandit") is None
+        assert get_uv_tool_command("bandit", from_spec="bandit[sarif]") is None
+        assert spawn.call_count == 2, "both answers are remembered under their keys"
 
 
 class TestCheckedRequirementNamesThePackage:
