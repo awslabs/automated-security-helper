@@ -59,3 +59,20 @@ def test_a_field_whose_name_merely_starts_like_an_entry_is_still_reported(
     missing = compare_result_fields({}, {})
 
     assert [field["path"] for field in missing] == ["properties.tagsets"]
+
+
+@patch(
+    "automated_security_helper.cli.inspect.compare_result_fields.is_expected_transformation"
+)
+@patch(EXTRACT)
+def test_the_expected_transformations_are_decided_by_the_meta_analysis_predicate(
+    mock_extract, mock_is_expected
+):
+    """The loop asks the meta-analysis module's own predicate, so the two never
+    read EXPECTED_TRANSFORMATIONS two different ways: a path the predicate calls
+    expected is not reported, whatever the list says."""
+    mock_extract.side_effect = [{"locations[0].physicalLocation": {}}, {}]
+    mock_is_expected.return_value = True
+
+    assert compare_result_fields({}, {}) == []
+    mock_is_expected.assert_called_once_with("locations[0].physicalLocation")
