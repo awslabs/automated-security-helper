@@ -199,7 +199,7 @@ def test_a_sarif_result_built_with_the_name_is_written_and_read_back():
     assert back.model_dump_json(exclude_none=True) == written
 
 
-def test_a_model_that_strips_whitespace_holds_the_name():
+def test_a_record_model_holds_the_name_in_its_record_form_and_reads_it_back():
     rows = {
         "converter": ConverterStatusInfo(
             converted_paths=[ODD], failure=f"OSError: {ODD}"
