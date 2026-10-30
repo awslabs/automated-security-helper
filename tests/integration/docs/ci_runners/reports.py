@@ -1296,7 +1296,15 @@ def results_to_judge(
 #: second as a POSIX time. Without it a member has only the zip's own date_time: a
 #: calendar time with 2-second resolution and no zone, which upload-artifact's zip
 #: writer (the archiver stack of @actions/artifact) records as UTC and without this
-#: field (the reviewer's reading of that stack, not measured on a stored zip here).
+#: field. Measured on the zips act's artifact server stored for two hosted legs
+#: (upload-artifact v4.6.2 under act 0.2.89, 2026-10-29): every member carries
+#: date_time only, and that date_time is the FILE's own mtime, not the time the writer
+#: added it: the results of a single-job run read 23:51:06Z, the second its scan step
+#: ended, while its upload step started 23:51:09Z; each shard's members read the second
+#: its scan ended, 2 to 4 s before its upload step; the merged results read 23:49:36Z
+#: and the reports 23:49:38Z, under the merge job's own upload step. So a written-after
+#: check on an unpacked member reads when ASH wrote the file, to 2 s, and a stale file
+#: the merge left in place would carry its earlier mtime and fail it.
 _EXTENDED_TIMESTAMP = 0x5455
 
 
