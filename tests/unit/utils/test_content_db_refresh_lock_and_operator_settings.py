@@ -112,7 +112,10 @@ def test_the_real_lock_is_taken_under_a_cache_whose_parents_do_not_exist(
     cache three levels deep runs with the lock inside the cache it created."""
     cache = tmp_path / "a" / "b" / "c"
     _prepare("grype", cache, tmp_path)
-    assert [what for _argv, _env, what in captured] == ["database"]
+    # ``_run`` is told what it updates as "<tool> <what>" (the label the refresh
+    # logs), not the bare ``_commands`` key; the auto-update tests in this file
+    # read the same label.
+    assert [what for _argv, _env, what in captured] == ["grype database"]
     assert (cache / ".ash-grype-update.lock").is_file()
 
 
