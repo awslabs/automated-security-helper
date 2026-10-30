@@ -25,6 +25,7 @@ from automated_security_helper.config.config_linter import (
     LintIssue,
     LintResult,
     LintSeverity,
+    UnusedSuppressionsNotEditable,
 )
 from automated_security_helper.config.config_validator import ConfigValidator
 from automated_security_helper.config.environment_record import EnvironmentReference
@@ -347,9 +348,14 @@ class TestCommentedOutEntries:
         assert "    #     first line\n" in fixed
         assert "    #       deeper line\n" in fixed
 
-    def test_an_anchored_list_is_left_as_it_is(self):
+    def test_an_anchored_list_is_refused_not_rewritten(self):
         """An edit of a list another key aliases would change every use of the
-        anchor; the list is not found, and nothing is reported commented out."""
+        anchor, and a rewrite of the key line would turn ``suppressions: &a``
+        into ``suppressions: [] &a``, which does not parse. The sequence of an
+        anchored list starts at the anchor, so its dashes are not found at that
+        column; the fixer refuses the file, naming why, and writes nothing.
+        (Before the refusal it returned the text unchanged and reported nothing
+        commented out.)"""
         text = (
             "global_settings:\n"
             "  suppressions: &shared\n"
@@ -357,12 +363,8 @@ class TestCommentedOutEntries:
             "    rule_id: B101\n"
         )
 
-        fixed, commented = ConfigLinter._comment_out_suppressions(
-            text, {0}, "2026-01-01"
-        )
-
-        assert fixed == text
-        assert commented == set()
+        with pytest.raises(UnusedSuppressionsNotEditable, match="list dashes"):
+            ConfigLinter._comment_out_suppressions(text, {0}, "2026-01-01")
 
 
 class TestPluginSectionSpellings:
