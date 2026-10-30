@@ -838,9 +838,16 @@ def run_command(args: List[str], shell: bool = False):
                     timeout=INSTALL_COMMAND_TIMEOUT_SECONDS,
                 )
         else:
+            # A CustomCommand declared shell=True is one shell command line: its
+            # arguments are its words, joined by spaces exactly as the "Running
+            # command" line shows them, so what the shell expands is what was
+            # printed (an argument the shell must read as given carries its own
+            # quoting). Handed to Popen as a list with shell=True, POSIX runs
+            # `sh -c` on the first word alone and passes the rest as $0, $1, ...
+            command = " ".join(args) if shell and isinstance(args, list) else args
             with empty_directory() as start:
                 result = run_cmd(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
-                    args=args,
+                    args=command,
                     cwd=start,
                     env=env,
                     shell=shell,

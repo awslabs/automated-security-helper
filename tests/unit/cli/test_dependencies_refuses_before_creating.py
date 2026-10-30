@@ -263,6 +263,30 @@ def test_a_custom_command_keeps_its_shell_flag():
     assert commands == [(["echo", "$HOME"], True), (["pip", "install", "x"], False)]
 
 
+def test_a_shell_command_reaches_the_runner_as_one_command_line(monkeypatch):
+    """With the flag carried (the base returns the CustomCommand itself), the
+    installer handed the runner the argv LIST with shell=True; on POSIX, Popen
+    then runs `sh -c` on the first word alone and the rest become $0, $1, ...,
+    so `echo $HOME` printed an empty line. The words are joined into the one
+    command line the "Running command" line shows."""
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess_utils, "run_command", fake_run)
+    monkeypatch.setattr(subprocess_utils, "run_succeeded", lambda result: True)
+
+    code = dependencies.run_command(["echo", "$HOME"], shell=True)
+
+    assert code == 0
+    assert seen["args"] == "echo $HOME", seen["args"]
+    assert seen["shell"] is True
+    assert seen["timeout"] == INSTALL_COMMAND_TIMEOUT_SECONDS
+
+
 def test_the_opengrep_fix_keeps_the_scripts_arguments():
     """The rewrite rebuilt the command from its first three elements, dropping
     sys.argv, and joined the import with ';', which broke a script that starts
