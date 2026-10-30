@@ -615,6 +615,10 @@ class TestScan:
         self._run(scanner, fake)
         assert fake.calls == []
         assert scanner.targets_attempted == 0
+        # No cfn-lint ran, so there is no exit code: None, as cfn-guard records it,
+        # not the 0 an earlier tip's reset wrote and the executor read for a tool
+        # that never ran.
+        assert scanner.exit_code is None
 
     @pytest.mark.parametrize(
         "environment",
