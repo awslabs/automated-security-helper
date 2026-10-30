@@ -1349,6 +1349,24 @@
 
 ### Behavior changes
 
+- `run_ash_scan()` raises `ValueError` for `severity_threshold_restriction` and
+  `keep_previous_results` in container and nix mode, as it does for the other
+  options only the local orchestrator applies (`untrusted_config`,
+  `client_config_policy`, `remote_client`). A caller that set one of them there
+  was scanning with it silently dropped; the MCP server, the two options' only
+  caller, sets them in local and workspace mode only.
+- In nix mode an exit code of ASH's own that no results file decides (3 for a
+  refused input or config, 4 for a workspace error, 5 for a usage error) is
+  carried out of the shell before any read-back, as container mode carries the
+  container's. A `--use-existing` run kept the earlier results file, read it back
+  and reported such a refusal as exit 1, "did not complete".
+- The scan summary's actionable count and the exit-code legend name the number the
+  exit code gates on: the persisted SARIF report this run wrote, each result under
+  its own scanner's threshold, with `--min-severity` applied. They printed the
+  in-memory metrics total, which can differ from it. One consequence: with
+  `--min-severity` above every finding the summary omits its "Actionable findings
+  detected" block, as the exit code is 0 for them, while every report still lists
+  them.
 - `./ash scan -v` and `./ash report -v` now reach the subcommand as its `--verbose`,
   as the CLI defines `-v`; the wrapper read `-v` anywhere on the line as its own
   `--version` and exited without scanning. `./ash -v` with no subcommand before it
