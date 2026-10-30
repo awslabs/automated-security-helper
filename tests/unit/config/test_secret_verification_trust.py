@@ -79,6 +79,9 @@ def _record(config):
         VERIFICATION_FILTER,
         "file:///opt/tools/filters.py::is_ignored_due_to_verification_policies",
         "file:///opt/tools/filters.py:: is_ignored_due_to_verification_policies ",
+        # The scheme is read as is_file_entry reads it: case and padding ignored.
+        "FILE:///opt/tools/filters.py::is_ignored_due_to_verification_policies",
+        "  file:///opt/tools/filters.py::is_ignored_due_to_verification_policies",
     ],
 )
 def test_both_spellings_of_the_filter_are_recognized(path):
@@ -91,6 +94,7 @@ def test_both_spellings_of_the_filter_are_recognized(path):
         "detect_secrets.filters.heuristic.is_likely_id_string",
         "file:///opt/tools/filters.py::is_ignored_due_to_verification",
         "file:///opt/is_ignored_due_to_verification_policies.py",
+        "FILE:///opt/tools/filters.py::is_likely_id_string",
         None,
     ],
 )
