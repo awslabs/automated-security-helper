@@ -51,6 +51,10 @@ UNREADABLE_EXPIRATION_NOTE = "an expiration that is not a YYYY-MM-DD date"
 #: environment reference the config wrote (``${VAR}``), which the scan read and the
 #: record stores as written. The entry is kept, and never applied.
 UNREADABLE_SYMBOL_NOTE = "a symbol that is a reference to the environment"
+#: The note a results file's kept suppression gets when its ``rule_id`` is blank,
+#: which a scan of an earlier version accepted and recorded. The entry is kept, and
+#: never applied: a blank rule id once covered every rule in the entry's path.
+BLANK_RULE_ID_NOTE = "a rule_id that is blank"
 
 
 def _is_environment_reference(value: Any) -> bool:
@@ -724,7 +728,7 @@ class AshSuppression(IgnorePathWithReason):
 
     @field_validator("rule_id")
     @classmethod
-    def validate_rule_id_not_blank(cls, v):
+    def validate_rule_id_not_blank(cls, v, info: ValidationInfo):
         """Reject a blank rule_id.
 
         An omitted ``rule_id`` matches every rule in the suppression's path, as the
@@ -733,8 +737,18 @@ class AshSuppression(IgnorePathWithReason):
         rule id was left empty by mistake silently covered every rule in its
         path; a whitespace-only one matched nothing at all. Both are refused
         with what to write, as the package fields are.
+
+        Under the TOLERATE_STORED_CONFIG context (utils/unknown_keys.py) a blank
+        rule id a results file recorded, written before this check, is kept and
+        noted rather than refused: refusing it made the whole results file
+        unreadable to ``ash report``, ``ash merge`` and ``--existing-results``.
+        ``matches`` never applies such an entry.
         """
         if v is not None and not v.strip():
+            notes = tolerated_notes(info)
+            if notes is not None:
+                notes.append(BLANK_RULE_ID_NOTE)
+                return v
             raise ValueError(
                 "rule_id must be omitted rather than left blank: a suppression "
                 "with no rule_id covers every rule in its path"
@@ -823,6 +837,11 @@ class AshSuppression(IgnorePathWithReason):
         # config wrote (validate_symbol under the tolerance) names no definition,
         # so the entry does not apply, as the load warning says.
         if self.symbol is not None and not is_valid_symbol(self.symbol):
+            return False
+        # A blank rule id kept from a results file (validate_rule_id_not_blank
+        # under the tolerance) names no rule and is not "any rule" either: the
+        # entry does not apply, as the load warning says.
+        if self.rule_id is not None and not self.rule_id.strip():
             return False
 
         if self.rule_id:
