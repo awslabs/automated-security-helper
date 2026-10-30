@@ -468,9 +468,11 @@ def display_metrics_table(
                     )
                     break
                 except Exception as notice_error:
+                    # The raw text: the console handler shows every record once
+                    # (utils/log.py console_text), so a value shown here was
+                    # shown twice and its escapes printed doubled.
                     ASH_LOGGER.warning(
-                        f"Could not print the {printer.__name__} notice: "
-                        f"{shown_not_obeyed(str(notice_error))}"
+                        f"Could not print the {printer.__name__} notice: {notice_error}"
                     )
 
     except Exception as e:
