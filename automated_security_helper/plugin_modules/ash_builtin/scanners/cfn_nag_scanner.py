@@ -880,21 +880,24 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     )
                     continue
                 except (OSError, UnicodeDecodeError) as e:
-                    # The file could not be opened or decoded, so it is not known to
-                    # be CloudFormation. Named at WARNING on the scanner's error
-                    # stream, as a refused file is, instead of passing through the
-                    # arm below at TRACE: a template ASH could not read vanished
-                    # from the scan uncounted and unnamed. The tool-absent check
-                    # counts an unreadable candidate as a template, so the
-                    # SKIPPED reason says the same here.
+                    # The file could not be opened or decoded, so it is not known
+                    # to be CloudFormation, and not known not to be. The
+                    # tool-absent check counts an unreadable candidate as a
+                    # template (only MISSING cannot hide one), and cfn-lint and
+                    # cfn-guard count it as a failed, unevaluated target, so it
+                    # is counted here the same way: a template saved as UTF-16
+                    # beside good ones graded the cfn_nag scan PASSED while the
+                    # other two scanners reported ERROR. ERROR puts the line in
+                    # self.errors too, so it is not appended.
+                    self.targets_attempted += 1
+                    self.targets_failed += 1
+                    self.record_unevaluated_target(cfn_file)
                     self._plugin_log(
-                        f"Skipped {cfn_file}: the file could not be read: "
-                        f"{type(e).__name__}",
+                        f"cfn_nag did not evaluate {cfn_file}: the file could not "
+                        f"be read: {type(e).__name__}",
                         target_type=target_type,
-                        level=logging.WARNING,
-                        append_to_stream="stderr",
+                        level=logging.ERROR,
                     )
-                    self._nothing_scanned_reason = NO_PARSEABLE_CLOUDFORMATION_TEMPLATE
                     continue
                 except Exception as e:
                     # Everything else here comes out of the template parser: the file

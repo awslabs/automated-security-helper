@@ -262,10 +262,13 @@ def test_an_unwritable_results_directory_fails_only_that_template(
     assert any("could not be written" in line for line in scanner.errors)
 
 
-def test_a_template_that_cannot_be_decoded_is_named_not_dropped(
+def test_a_template_that_cannot_be_decoded_is_a_failed_unevaluated_target(
     scanner, deps_available, subprocess_double
 ):
-    """At the base the non-UTF-8 file fell into the parser's except at TRACE."""
+    """At the base the non-UTF-8 file fell into the parser's except at TRACE; at
+    the previous tip it was named but skipped uncounted, so a template saved as
+    UTF-16 beside good ones graded the scan PASSED while cfn-lint and cfn-guard
+    reported ERROR for the same file. The three scanners now count it alike."""
     (scanner.context.work_dir / "latin.yaml").write_bytes(
         b"Resources:\n  caf\xe9:\n    Type: AWS::SQS::Queue\n"
     )
@@ -275,12 +278,13 @@ def test_a_template_that_cannot_be_decoded_is_named_not_dropped(
 
     assert subprocess_double.call_count == 1
     assert [r.ruleId for r in report.runs[0].results] == ["F38"]
-    assert scanner.targets_attempted == 1
-    assert scanner.targets_failed == 0
+    assert scanner.targets_attempted == 2
+    assert scanner.targets_failed == 1
     named = [
         e for e in scanner.errors if "latin.yaml" in e and "could not be read" in e
     ]
     assert named, scanner.errors
+    assert any("latin.yaml" in t for t in scanner.unevaluated_targets)
     assert "UnicodeDecodeError" in named[0]
 
 
