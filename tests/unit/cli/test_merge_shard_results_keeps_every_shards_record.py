@@ -44,13 +44,15 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
+from tests.unit.cli import test_merge as _merge_tests
 from tests.unit.cli.test_merge import as_loaded, build_shards
 
-# pytest registers a fixture under the name it was declared with, so the shared
-# ``capture`` fixture is available to this module under its own name.
-from tests.unit.cli.test_merge import capture as _shared_capture  # noqa: F401
-
 pytestmark = pytest.mark.unit
+
+# pytest registers a fixture under the module attribute that holds it, so the
+# shared fixture is bound here under its own name (imported under an alias it was
+# registered as the alias, and ``capture`` was "not found").
+capture = _merge_tests.capture
 
 
 class TestAShardWithoutASelectionRecordIntendedWhatItOwned:
