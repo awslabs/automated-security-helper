@@ -53,6 +53,23 @@ class TestTheDieNowFallbackKillsOnlyALiveChild:
         # Red at the base: the fallback killed whatever held the pid.
         assert killed == []
 
+    def test_a_child_the_probe_reaped_is_not_killed(self, monkeypatch):
+        """``waitpid`` answering ``(pid, status)``: the child had exited and the
+        probe reaped it. Its pid is free for reuse from that moment, so the
+        fallback kill must not follow."""
+        killed = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: (_ for _ in ()).throw(ProcessLookupError())
+        )
+        monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
+        monkeypatch.setattr(os, "waitpid", lambda pid, flags: (pid, 0))
+        monkeypatch.setattr(cancellation, "_TOOL_GROUPS", (424242,))
+        monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
+
+        cancellation._kill_recorded_groups()
+
+        assert killed == []
+
     def test_a_live_child_that_leads_no_group_is_still_killed(self, monkeypatch):
         """The control: the fallback the launcher child relies on still fires."""
         killed = []
@@ -90,6 +107,37 @@ class TestAFirstCtrlCDuringAGraceWaitLatchesWithoutInterrupting:
         assert chained == []
         assert cancellation._SIGINT_SEEN is True
         assert cancellation._GRACE_WAITS == 0
+
+    def test_a_second_ctrl_c_inside_a_grace_wait_dies_now(self, monkeypatch):
+        """The second interrupt is the operator's "gone now": the recorded tool
+        groups are killed and the process re-raises SIGINT under the default
+        disposition, grace wait or not. No signal is raised here: the two
+        signal calls are recorded."""
+        killed = []
+        dispositions = []
+        raised = []
+        monkeypatch.setattr(cancellation, "_SIGINT_SEEN", True)
+        monkeypatch.setattr(cancellation, "_SIGTERM_SEEN", False)
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_REQUESTED", True)
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_SCOPES", ())
+        monkeypatch.setattr(cancellation, "_TOOL_GROUPS", (424242,))
+        monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
+        monkeypatch.setattr(cancellation, "_remove_die_now_cleanups", lambda: None)
+        monkeypatch.setattr(os, "killpg", lambda pgid, sig: killed.append((pgid, sig)))
+        monkeypatch.setattr(
+            signal, "signal", lambda signum, handler: dispositions.append(handler)
+        )
+        monkeypatch.setattr(
+            signal, "raise_signal", lambda signum: raised.append(signum)
+        )
+        monkeypatch.setattr(cancellation, "_GRACE_WAITS", 0)
+
+        with cancellation.stop_grace_in_progress():
+            cancellation._handle_sigint(signal.SIGINT, None)
+
+        assert killed == [(424242, signal.SIGKILL)]
+        assert dispositions == [signal.SIG_DFL]
+        assert raised == [signal.SIGINT]
 
     def test_outside_a_grace_wait_the_first_ctrl_c_still_interrupts(self, monkeypatch):
         """The control: the interrupt arm of a command still runs."""

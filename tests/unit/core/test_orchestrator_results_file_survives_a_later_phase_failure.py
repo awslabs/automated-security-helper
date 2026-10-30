@@ -167,6 +167,42 @@ def test_a_report_over_existing_results_writes_nothing_on_failure(
     assert not (orchestrator.output_dir / RESULTS_FILE).exists()
 
 
+def test_a_report_over_loaded_results_leaves_the_saved_file_on_failure(
+    tmp_path, monkeypatch
+):
+    """The --use-existing case: a report over a saved results file that fails
+    writes nothing, and the saved file, the user's own results, is unchanged.
+
+    The loaded model carries the earlier scan's completion checkpoint, so the
+    write-after-failure would see a finished scan; what keeps it from writing is
+    that a run over existing results does not own the results file.
+    """
+    saved_model = AshAggregatedResults()
+    _scan_phase_ran_to_its_end(saved_model)
+    saved = tmp_path / "saved-results.json"
+    saved.write_text(saved_model.model_dump_json(by_alias=True), encoding="utf-8")
+    saved_bytes = saved.read_bytes()
+    # The saved model holds no scanner results, which --use-existing refuses as
+    # "no scan"; that refusal is another test's, so it is stood down here.
+    monkeypatch.setattr(
+        orchestrator_module, "existing_results_problem", lambda results: None
+    )
+
+    orchestrator = _orchestrator(
+        tmp_path,
+        monkeypatch,
+        _scan_phase_ran_to_its_end,
+        RuntimeError("reporter raised"),
+    )
+    orchestrator.existing_results_path = saved
+
+    with pytest.raises(ASHValidationError, match="reporter raised"):
+        orchestrator._execute_scan(phases=["report"])
+
+    assert not (orchestrator.output_dir / RESULTS_FILE).exists()
+    assert saved.read_bytes() == saved_bytes
+
+
 def test_the_completion_record_is_the_checkpoint_the_validation_manager_names():
     """The fact the orchestrator reads is the one the scan phase's last step writes.
 
