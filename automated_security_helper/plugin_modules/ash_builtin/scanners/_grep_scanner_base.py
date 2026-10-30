@@ -439,6 +439,8 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             )
             return
 
+        if self._refuse_unpassable_configured_rules():
+            return
         local_rules = self._local_rules_configured()
         if local_rules is not None:
             # The operator's own rules, as online. The registry cache is not
@@ -516,14 +518,50 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             ToolExtraArg(key="--config", value=self._cache_dir_in_use)
         )
 
+    def _refuse_unpassable_configured_rules(self) -> bool:
+        """Decline the scanner when ``options.config`` names rules ASH cannot hand
+        the tool, and say so; True when it declined.
+
+        A configured value that is neither a registry entry nor a URL is meant as a
+        rule file or directory. When it resolves to nothing ASH may pass (a path that
+        does not exist, a typo, or a file inside the scanned tree or a git checkout,
+        which ``_local_rules_configured`` refuses), the scan is not run under other
+        rules in its place: the operator asked for those rules, and a scan under the
+        default rulesets or the offline cache would be a different scan reported as
+        the one that was asked for. The reason is RECORDED, not raised, the way the
+        missing offline cache is (see ``_configure_offline_mode``): the scanner then
+        exists and reports itself declined, where a raise would drop it from the
+        results with nothing in its place. Both modes call this before they choose
+        their rules, so a bad value fails the same way online and offline.
+        """
+        configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
+        if not configured or not isinstance(configured, str):
+            return False
+        if self._configured_registry_entry() is not None:
+            return False
+        if self._local_rules_configured() is not None:
+            return False
+        self.dependency_unavailable_reason = (
+            f"{self._config_option_key()} names a rules file or directory that ASH "
+            "cannot pass to the tool: it does not exist, or it sits inside the scanned "
+            "tree or a git checkout. The scan does not run under other rules in its "
+            "place. Name a rules file outside the scanned tree, a registry ruleset "
+            "(auto, p/<ruleset>, r/<rule>, s/<snippet>) or a URL."
+        )
+        ASH_LOGGER.warning(self.dependency_unavailable_reason)
+        return True
+
     def _configure_online_mode(self) -> None:
         opts = self.config.options  # type: ignore[union-attr]
         # The configured rules: a registry entry or URL as written; a local rule
         # file or directory through the same resolver offline uses
         # (_local_rules_configured), so the two modes hand the tool one file and a
         # path the scanned repository chose is refused in both. A configured value
-        # that names nothing ASH may pass falls back to the default rulesets, and
-        # the refusal, when there was one, has already been logged.
+        # that names nothing ASH may pass declines the scanner
+        # (_refuse_unpassable_configured_rules); the default rulesets run only
+        # when nothing was configured.
+        if self._refuse_unpassable_configured_rules():
+            return
         configured = getattr(opts, "config", None)
         registry = self._configured_registry_entry()
         local_rules = self._local_rules_configured() if configured else None
@@ -532,12 +570,6 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         elif local_rules is not None:
             self.args.extra_args.append(ToolExtraArg(key="--config", value=local_rules))
         else:
-            if configured:
-                self._plugin_log(
-                    f"{self._config_option_key()} names no rule file or directory "
-                    "ASH may pass to the tool; using the default rulesets.",
-                    level=logging.WARNING,
-                )
             for rs in self.default_rulesets():
                 self.args.extra_args.append(ToolExtraArg(key="--config", value=rs))
 
