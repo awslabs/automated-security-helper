@@ -37,8 +37,13 @@ import, starting from terminal_text's escapers:
   rule for text whose values are shown already, double nothing, and neither does a
   wrapper over them.
 - Within a function, locals are followed in line order, so a name rebound to raw
-  text is raw again; a handler's variable is shown when the handler catches an
-  exception some site raises with shown text.
+  text is raw again. A handler's variable is shown when the handler catches an
+  exception class the package defines that some site raises with shown text,
+  wherever that site is; or a kind the package does not define (a builtin, a
+  library's) that the handler's try body raises with shown text, or reaches by
+  calling a function of the package that does, up to _REACH_DEPTH calls down. One
+  ``raise ValueError(<shown>)`` therefore makes no ``except ValueError`` elsewhere
+  a handler of shown text.
 
 Refused: a doubling sink given shown text. Allowed: the one-pass form (a log
 call's whole message one shown_not_obeyed or shown_on_one_line call), the values
@@ -53,8 +58,10 @@ its row in the same commit.
 
 Not seen: text that reaches a sink through an attribute (``self.text =
 shown_not_obeyed(v)`` in one method, logged in another), a container, another
-function's argument or a return value of a function outside the package; a logger
-or a log method handed in as an argument, kept in an attribute or a container, or
+function's argument or a return value of a function outside the package; an
+exception of a builtin or library kind that reaches its handler through a call the
+check cannot resolve (a method of an object) or through more than _REACH_DEPTH
+calls of the package; a logger or a log method handed in as an argument, kept in an attribute or a container, or
 returned by a function that is no maker; a log method wrapped (functools.partial)
 or looked up by getattr; repr() and ascii() of
 a value; and the TUI's widgets (cli/inspect), which have their own guard.
@@ -132,6 +139,12 @@ _LOGGER_MAKERS = frozenset({"getLogger", "get_logger", "LoggerAdapter", "getChil
 
 Site = Tuple[str, str, str]
 Function = Tuple[str, str]
+
+#: How many calls below a try body's own calls a raise of shown text may sit and
+#: still count for its handler: the body calls a function of the package (depth 0),
+#: which calls another (1), and so on up to this many levels. Past it the raise is
+#: not seen, which is the cost of not counting every handler of a kind as shown.
+_REACH_DEPTH = 3
 
 #: The open sites, each (file, function, a fragment of the sink call's text) ->
 #: the part of ASH whose fix it waits on. A row matches the one offending call in
@@ -375,6 +388,10 @@ def _derived_from(function: ast.AST, seeds: Set[str]) -> Set[str]:
     return derived
 
 
+#: The try statements of the syntax tree (``try/except*`` too, where it exists).
+_TRY = (ast.Try, getattr(ast, "TryStar", ast.Try))
+
+
 class _Analysis:
     """Which functions return shown text, which show their argument, which
     exceptions carry shown text."""
@@ -396,7 +413,20 @@ class _Analysis:
         # (with *args) to map a call's arguments onto them.
         self.doubling: Dict[Function, Set[str]] = {}
         self.positional: Dict[Function, Tuple[List[str], Optional[str]]] = {}
+        # Exception classes the package defines and raises with shown text: a
+        # handler that catches one holds shown text wherever it is. A kind the
+        # package does not define (a builtin, a library's: resolved to ("", name))
+        # is not package-wide, since `raise ValueError(<shown>)` in one place says
+        # nothing of an `except ValueError` elsewhere. Those are kept by function
+        # instead (``shown_raises``: the lines of its raises of shown text, and
+        # ``reach``: the kinds a function raises, or a function it calls, to
+        # _REACH_DEPTH calls down), and a handler counts through its try body.
         self.exceptions: Set[Function] = set()
+        self.shown_raises: Dict[Function, Set[Tuple[int, Function]]] = {}
+        self.reach: List[Dict[Function, Set[Function]]] = [
+            {} for _ in range(_REACH_DEPTH + 1)
+        ]
+        self.callees: Dict[Function, Set[Function]] = {}
         derived: Dict[Function, Dict[str, Set[str]]] = {}
         for path, module in self._checked():
             for function in _functions(module.tree):
@@ -406,6 +436,14 @@ class _Analysis:
                     parameter: _derived_from(function, {parameter})
                     for parameter in _parameters(function)
                 }
+        for path, module in self._checked():
+            for function in _functions(module.tree):
+                called = self.callees.setdefault((path, function.name), set())
+                for node in ast.walk(function):
+                    if isinstance(node, ast.Call):
+                        target = module.resolve(node.func)
+                        if target in self.positional:
+                            called.add(target)
         changed = True
         while changed:
             changed = False
@@ -424,15 +462,20 @@ class _Analysis:
                             node.exc, ast.Call
                         ):
                             kind = module.resolve(node.exc.func)
-                            if (
-                                kind is not None
-                                and kind not in self.exceptions
-                                and self.shown_in(
+                            if kind is not None and kind[0]:
+                                if kind not in self.exceptions and self.shown_in(
                                     node.exc, module, names.at(node.lineno)
-                                )
-                            ):
-                                self.exceptions.add(kind)
-                                changed = True
+                                ):
+                                    self.exceptions.add(kind)
+                                    changed = True
+                            elif kind is not None:
+                                mark = (node.lineno, kind)
+                                raised = self.shown_raises.setdefault(key, set())
+                                if mark not in raised and self.shown_in(
+                                    node.exc, module, names.at(node.lineno)
+                                ):
+                                    raised.add(mark)
+                                    changed = True
                         if not isinstance(node, ast.Call):
                             continue
                         arguments = self.sink_arguments(node, module)
@@ -447,6 +490,75 @@ class _Analysis:
                             ):
                                 self.doubling.setdefault(key, set()).add(parameter)
                                 changed = True
+            if self._update_reach():
+                changed = True
+
+    def _update_reach(self) -> bool:
+        """Grow ``reach``: level 0 holds the kinds a function raises with shown
+        text itself, level n those and every kind the functions it calls hold at
+        level n - 1. True when anything grew."""
+        grew = False
+        for depth in range(_REACH_DEPTH + 1):
+            for key, called in self.callees.items():
+                kinds = {kind for _, kind in self.shown_raises.get(key, ())}
+                if depth:
+                    for callee in called:
+                        kinds |= self.reach[depth - 1].get(callee, set())
+                if kinds != self.reach[depth].get(key, set()):
+                    self.reach[depth][key] = kinds
+                    grew = True
+        return grew
+
+    def raised_in_body(
+        self, body: List[ast.stmt], key: Function, module: _Module
+    ) -> Set[Function]:
+        """The kinds of shown text raised in the statements *body* of a function
+        *key*: raised in them, or by a function of the package they call (to
+        _REACH_DEPTH calls down)."""
+        first, last = body[0].lineno, max(s.end_lineno or s.lineno for s in body)
+        kinds = {
+            kind
+            for line, kind in self.shown_raises.get(key, ())
+            if first <= line <= last
+        }
+        for statement in body:
+            for node in ast.walk(statement):
+                if isinstance(node, ast.Call):
+                    target = module.resolve(node.func)
+                    if target is not None:
+                        kinds |= self.reach[_REACH_DEPTH].get(target, set())
+        return kinds
+
+    def handler_holds_shown_text(
+        self,
+        handler: ast.ExceptHandler,
+        body: List[ast.stmt],
+        key: Function,
+        module: _Module,
+    ) -> bool:
+        """Whether the variable of *handler*, of a try whose statements are
+        *body*, holds shown text: it catches an exception class of the package
+        raised with shown text anywhere, or a kind the package does not define
+        that the try body raises with shown text or reaches a function that does."""
+        if handler.type is None:
+            return False
+        caught = (
+            handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+        )
+        raised: Optional[Set[Function]] = None
+        for element in caught:
+            kind = module.resolve(element)
+            if kind is None:
+                continue
+            if kind[0]:
+                if kind in self.exceptions:
+                    return True
+                continue
+            if raised is None:
+                raised = self.raised_in_body(body, key, module)
+            if kind in raised:
+                return True
+        return False
 
     def _checked(self) -> Iterable[Tuple[str, _Module]]:
         return ((p, m) for p, m in self.modules.items() if p != _TERMINAL_TEXT)
@@ -571,25 +683,24 @@ class _Bindings:
                     self._events.append(
                         (node.end_lineno or node.lineno, target.id, is_shown)
                     )
-        for handler in ast.walk(function):
-            if isinstance(handler, ast.ExceptHandler) and handler.name and handler.type:
-                caught = (
-                    handler.type.elts
-                    if isinstance(handler.type, ast.Tuple)
-                    else [handler.type]
-                )
-                # Bound by every handler that names it: shown when it catches a
-                # shown exception, raw otherwise, whatever an earlier one caught.
-                self._events.append(
-                    (
-                        handler.lineno,
-                        handler.name,
-                        any(
-                            module.resolve(element) in analysis.exceptions
-                            for element in caught
-                        ),
+        key = (module.path, function.name)
+        for statement in ast.walk(function):
+            if not isinstance(statement, _TRY):
+                continue
+            for handler in statement.handlers:
+                if handler.name and handler.type:
+                    # Bound by every handler that names it: shown when it catches
+                    # a shown exception, raw otherwise, whatever an earlier one
+                    # caught.
+                    self._events.append(
+                        (
+                            handler.lineno,
+                            handler.name,
+                            analysis.handler_holds_shown_text(
+                                handler, statement.body, key, module
+                            ),
+                        )
                     )
-                )
         self._events.sort()
 
     def at(self, lineno: int) -> Set[str]:
@@ -889,6 +1000,129 @@ def test_an_exception_raised_with_shown_text_is_followed_into_its_handler():
 
     assert [site[:2] for site in new] == [("automated_security_helper/x.py", "site")]
     assert len(new) == 1
+
+
+def _sites(sources: Dict[str, str]) -> List[Tuple[str, str]]:
+    """(file, function) of each new site of *sources*, with the library."""
+    new, _ = _check(_with_library(sources), {})
+    return [site[:2] for site in new]
+
+
+#: A raise of shown text of a kind the package does not define, and a handler of
+#: that kind that logs its variable.
+_RAISE_VALUE_ERROR = "def refuse(name):\n    raise ValueError(f'no: {_shown(name)}')\n"
+
+
+def test_a_builtin_kind_raised_with_shown_text_elsewhere_makes_no_handler_shown():
+    """`raise ValueError(<shown>)` in one function says nothing of an `except
+    ValueError` in another: only a try body that raises it, or reaches a raise of
+    it, holds shown text in its handler's variable."""
+    raiser = _HELPERS + _RAISE_VALUE_ERROR
+    handler = (
+        "from automated_security_helper.utils.log import ASH_LOGGER\n"
+        "def raw(path):\n    return path\n"
+        "def site(path):\n"
+        "    try:\n        raw(path)\n"
+        "    except ValueError as exc:\n"
+        "        ASH_LOGGER.debug(f'cannot read {path} ({exc})')\n"
+        "def unresolved(path, reader):\n"
+        "    try:\n        reader.read(path)\n"
+        "    except ValueError as exc:\n"
+        "        ASH_LOGGER.debug(f'cannot read {path} ({exc})')\n"
+    )
+
+    assert not _sites(
+        {
+            "automated_security_helper/x.py": raiser,
+            "automated_security_helper/y.py": handler,
+        }
+    )
+
+
+def test_a_try_body_that_raises_the_kind_with_shown_text_holds_it_in_its_handler():
+    source = _HELPERS + (
+        "def site(name):\n"
+        "    try:\n        raise ValueError(f'no: {_shown(name)}')\n"
+        "    except ValueError as exc:\n        echo(str(exc))\n"
+    )
+
+    assert _sites({"automated_security_helper/x.py": source}) == [
+        ("automated_security_helper/x.py", "site")
+    ]
+
+
+def test_a_try_body_that_calls_a_function_raising_it_holds_it_in_its_handler():
+    handler = (
+        "from automated_security_helper.utils.console import echo\n"
+        "from automated_security_helper.x import refuse\n"
+        "def site(name):\n"
+        "    try:\n        refuse(name)\n"
+        "    except (KeyError, ValueError) as exc:\n        echo(str(exc))\n"
+    )
+
+    assert _sites(
+        {
+            "automated_security_helper/x.py": _HELPERS + _RAISE_VALUE_ERROR,
+            "automated_security_helper/y.py": handler,
+        }
+    ) == [("automated_security_helper/y.py", "site")]
+
+
+@pytest.mark.parametrize(
+    "depth, offends", [(_REACH_DEPTH, True), (_REACH_DEPTH + 1, False)]
+)
+def test_a_raise_is_followed_down_the_calls_of_the_package_to_the_bound(depth, offends):
+    """The raise sits *depth* calls below the function the try body calls."""
+    chain = "".join(f"def g{n}(name):\n    g{n + 1}(name)\n" for n in range(depth))
+    chain += f"def g{depth}(name):\n    raise ValueError(f'no: {{_shown(name)}}')\n"
+    source = (
+        _HELPERS
+        + chain
+        + "def site(name):\n"
+        + "    try:\n        g0(name)\n"
+        + "    except ValueError as exc:\n        echo(str(exc))\n"
+    )
+
+    assert _sites({"automated_security_helper/x.py": source}) == (
+        [("automated_security_helper/x.py", "site")] if offends else []
+    )
+
+
+def test_a_helper_that_logs_its_message_when_a_send_fails_shows_shown_text_twice():
+    """The shape of mcp_server's `_tell_client` before it stopped logging the
+    message: a helper that logs its message argument in the failed-send branch
+    shows twice the shown text a caller hands it, and not the raw text."""
+    source = _HELPERS + (
+        "async def tell(ctx, level, message):\n"
+        "    try:\n        await ctx.send(message)\n"
+        "    except Exception:\n"
+        "        ASH_LOGGER.warning(f'Failed to send {level} message: {message}')\n"
+        "async def site(ctx, name):\n"
+        "    await tell(ctx, 'error', raw_controls_shown(f'Refusing: {name}'))\n"
+        "async def raw_site(ctx, name):\n"
+        "    await tell(ctx, 'error', f'Refusing: {name}')\n"
+    )
+
+    assert _sites({"automated_security_helper/x.py": source}) == [
+        ("automated_security_helper/x.py", "site")
+    ]
+
+
+def test_a_method_named_shown_that_escapes_nothing_makes_no_text_shown():
+    """config_sources' `_ChainState.shown(path)` writes a path as the placeholder
+    or as posix text and shows nothing: a method of an object resolves to its
+    attribute name alone, which is no escaper and no producer of the check's, so
+    an exception raised with it, and a handler logging that exception, offend
+    nothing."""
+    source = _HELPERS + (
+        "class Refused(Exception):\n    pass\n"
+        "def check(state, name):\n    raise Refused(f'no: {state.shown(name)}')\n"
+        "def site(state, name):\n"
+        "    try:\n        check(state, name)\n"
+        "    except Refused as exc:\n        echo(str(exc))\n"
+    )
+
+    assert not _sites({"automated_security_helper/x.py": source})
 
 
 def test_a_listed_site_that_no_longer_offends_fails():
