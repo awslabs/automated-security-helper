@@ -50,6 +50,7 @@ from automated_security_helper.config.environment_record import (
 )
 from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
+    folded_section_name,
 )
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
@@ -129,6 +130,56 @@ def _without_dot_prefix(pattern: str) -> str:
     while pattern.startswith("./"):
         pattern = pattern[2:]
     return pattern
+
+
+def _match_spelling(pattern: str) -> str:
+    """``pattern`` as the matcher reads it: each backslash a separator
+    (``path_matching._match_form``), so ``.\\src`` is ``./src`` and ``src\\lib``
+    is ``src/lib``. The checks below read this spelling, and the advice spells
+    its replacement with ``/``; a message still names the pattern as written."""
+    return pattern.replace("\\", "/")
+
+
+def _with_tree_spelling(pattern: str, project_root: Path) -> str:
+    """``pattern`` with its leading names respelled as the tree spells them
+    (``_case_only_spelling``) and the rest kept, or ``pattern`` itself when the
+    tree holds the names as written, or not at all."""
+    spelled = _case_only_spelling(pattern, project_root)
+    if spelled is None:
+        return pattern
+    parts = pattern.split("/")
+    index = 0
+    while index < len(parts) and not any(
+        character in parts[index] for character in _GLOB_CHARACTERS
+    ):
+        index += 1
+    tail = parts[index:]
+    if not tail:
+        return spelled
+    return "/".join([spelled.rstrip("/"), *tail])
+
+
+#: Directories a walk for one pattern's directory reads before it gives up:
+#: a tree larger than this is not read whole for one warning.
+_DIRECTORY_WALK_LIMIT = 20000
+
+
+def _names_a_directory_below(name: str, project_root: Path) -> bool:
+    """Whether a directory named ``name`` is anywhere below the root, found
+    by a walk that follows no link and stops at _DIRECTORY_WALK_LIMIT
+    directories. For a ``**/<name>`` pattern, which names a path exactly: a
+    file of that name, never the files inside a directory of that name."""
+    seen = 0
+    try:
+        for _parent, directories, _files in os.walk(project_root, followlinks=False):
+            if name in directories:
+                return True
+            seen += len(directories)
+            if seen > _DIRECTORY_WALK_LIMIT:
+                return False
+    except (OSError, ValueError):
+        return False
+    return False
 
 
 def _case_only_spelling(pattern: str, project_root: Path) -> Optional[str]:
@@ -214,9 +265,21 @@ def path_pattern_advice(
     """
     shown = path_pattern if shown_pattern is None else shown_pattern
     read_from_environment = shown != path_pattern
-    rest = _without_dot_prefix(path_pattern)
-    if path_pattern in _PATTERNS_THAT_NAME_NO_PATH or (
-        path_pattern.startswith("./") and not rest
+    # Read as the matcher reads it, a backslash a separator: a pattern spelled
+    # '.\\src' or 'src\\lib' got no warning here while it matched nothing.
+    form = _match_spelling(path_pattern)
+    shown_form = form if not read_from_environment else _match_spelling(shown)
+    # './/x' strips to '/x', which joined to the root is the host's '/x' and,
+    # advised, an absolute pattern: the slashes the prefix leaves come off too.
+    rest = _without_dot_prefix(form).lstrip("/")
+    # A '.' or '..' component names no path under the root: a path relative to
+    # the scan root holds neither, so './.', './..', '../x' and 'dir/.' match
+    # nothing, and so would a directory spelling made of them ('dir/./').
+    components = rest.split("/")
+    if (
+        path_pattern in _PATTERNS_THAT_NAME_NO_PATH
+        or (form.startswith("./") and not rest)
+        or _DOT_COMPONENTS & set(components)
     ):
         target = "to ignore" if ignore_path else "whose findings to suppress"
         example = "build/" if ignore_path else "tests/**/*"
@@ -225,15 +288,22 @@ def path_pattern_advice(
             f"such as '{example}'."
         )
 
-    if path_pattern.startswith("./"):
-        if not shown.startswith("./"):
+    if form.startswith("./"):
+        if not shown_form.startswith("./"):
             return f"Path '{shown}' {DOT_PREFIX_PROBLEM}. Remove the leading './'."
-        shown_rest = _without_dot_prefix(shown)
         names_directory = (
             not any(character in rest for character in _GLOB_CHARACTERS)
-            and not (ignore_path and rest.endswith(("/", "\\")))
+            and not (ignore_path and rest.endswith("/"))
             and _names_a_directory(project_root / rest)
         )
+        if read_from_environment:
+            shown_rest = _without_dot_prefix(shown_form).lstrip("/")
+        else:
+            # The tree's spelling of the names: './Tests/' was advised as
+            # 'Tests/' where the tree spells it 'tests', a pattern that
+            # matches nothing either.
+            rest = _with_tree_spelling(rest, project_root)
+            shown_rest = rest
         if names_directory:
             spelling = directory_spelling(shown_rest, ignore_path=ignore_path)
             action = (
@@ -246,7 +316,7 @@ def path_pattern_advice(
             action = "to ignore it" if ignore_path else "to suppress its findings"
         return f"Path '{shown}' {DOT_PREFIX_PROBLEM}. Use '{spelling}' {action}."
 
-    spelled = _case_only_spelling(path_pattern, project_root)
+    spelled = _case_only_spelling(form, project_root)
     if spelled is not None:
         if read_from_environment:
             return (
@@ -255,18 +325,23 @@ def path_pattern_advice(
             )
         return f"Path '{shown}' matches '{spelled}' {CASE_ONLY_PROBLEM}."
 
-    # Patterns with ** already match recursively, and an ignore path ending in /
-    # names the directory and what is in it.
-    if "**" in path_pattern:
+    # An ignore path ending in / names the directory and what is in it.
+    if ignore_path and form.endswith("/"):
         return None
-    if ignore_path and path_pattern.endswith(("/", "\\")):
-        return None
-    clean_path = path_pattern.rstrip("/")
+    clean_path = form.rstrip("/")
     # A glob in the last component matches files.
     from pathlib import PurePosixPath
 
     basename = PurePosixPath(clean_path).name
     if any(character in basename for character in _GLOB_CHARACTERS):
+        return None
+    if "**" in form:
+        # '**' matches any run of directories, and the last component then
+        # names a path exactly: '**/node_modules' is a file of that name, and
+        # the files inside a directory of that name do not match. Advised only
+        # for a directory the tree holds somewhere, by a bounded walk.
+        if basename != "**" and _names_a_directory_below(basename, project_root):
+            return directory_path_advice(shown, ignore_path=ignore_path)
         return None
     if _names_a_directory(project_root / clean_path):
         return directory_path_advice(shown, ignore_path=ignore_path)
@@ -2305,17 +2380,20 @@ def _letters_and_digits(text: str) -> str:
 def shows_a_changed_input(text: str, inputs: Iterable[str]) -> bool:
     """Whether ``text`` still holds one of ``inputs`` once both are compared as
     their letters and digits alone, case-folded: a validator wrote it back
-    changed. The markers redaction put in are not part of the text compared.
-    Only a whole input of MIN_CHANGED_LENGTH or more is looked for; see there
-    for what that misses."""
+    changed. The markers redaction put in are not part of the text compared,
+    and neither is a run of letters that crosses one: the text on each side of
+    a marker is compared on its own, since letters either side of a hidden
+    value spliced together read as the value in a changed form, and an
+    unrelated message was withheld. Only a whole input of MIN_CHANGED_LENGTH
+    or more is looked for; see there for what that misses."""
     names = {_letters_and_digits(name) for name in _schema_names()}
-    compared = _letters_and_digits(_MARKER_PATTERN.sub(" ", text))
+    compared = [_letters_and_digits(piece) for piece in _MARKER_PATTERN.split(text)]
     for value in inputs:
         letters = _letters_and_digits(value)
         if (
             len(letters) >= MIN_CHANGED_LENGTH
             and letters not in names
-            and letters in compared
+            and any(letters in piece for piece in compared)
         ):
             return True
     return False
@@ -2367,12 +2445,18 @@ def _reference_variable_is_set(written: str) -> bool:
 
     For ``${VAR:default}`` with ``VAR`` unset the value is the default, the
     file's own text: not read from the environment, so neither redacted nor
-    recorded as the reference. A string with no reference at its start, which
-    resolution does not read, counts as set: what differs there is not a
-    default.
+    recorded as the reference. A variable set to an empty or blank value gave
+    nothing either (environment_record._value_read reads it so): what the
+    string then holds is the text after the reference, the file's own, which
+    is not listed for redaction. A string with no reference at its start,
+    which resolution does not read, counts as set: what differs there is not
+    a default.
     """
     reference = ENV_REFERENCE_PATTERN.match(_without_env_tag(written))
-    return reference is None or os.environ.get(reference.group(1)) is not None
+    if reference is None:
+        return True
+    value = os.environ.get(reference.group(1))
+    return value is not None and bool(value.strip())
 
 
 def _has_reference_key(key: Any) -> bool:
@@ -2560,12 +2644,21 @@ def describe_validation_error(error: Any, values: Iterable[str] = ()) -> str:
     scan nor a config command prints it. ``values`` are the values and keys the
     config read from the environment (ResolvedConfigDocument.environment_values,
     AshConfig._environment_values): an error's location names a key, which no
-    input redaction reaches, so they are redacted from the whole text.
+    input redaction reaches, so they are redacted from the whole text. The
+    location alone is redacted with ``min_length`` 1 as well: a key shorter
+    than the free-text band is unquoted there (``'a.<key>.b'``), so the band
+    left it in print, while by its place it is known to be one.
     """
-    return redact_values(
-        "; ".join(ConfigValidator.format_model_error(item) for item in error.errors()),
-        values,
-    )
+    messages = []
+    for item in error.errors():
+        text = ConfigValidator.format_model_error(item)
+        location = ConfigValidator.model_error_location(text)
+        if location is not None:
+            prefix = ConfigValidator.MODEL_ERROR_PREFIX
+            hidden = redact_values(location, values, min_length=1)
+            text = f"{prefix}{hidden}{text[len(prefix) + len(location) :]}"
+        messages.append(text)
+    return redact_values("; ".join(messages), values)
 
 
 class EnvironmentRewrite(typing.NamedTuple):
@@ -2697,7 +2790,12 @@ def _placed_rewrites(
         segments: List[Any] = []
         for segment in ops[index]["path"].split("/")[1:]:
             segment = segment.replace("~1", "/").replace("~0", "~")
-            segments.append(int(segment) if segment.isdigit() else segment)
+            # ASCII digits only: str.isdigit admits a superscript or another
+            # script's digit, which int() refuses with a ValueError that
+            # escaped the record's read.
+            segments.append(
+                int(segment) if segment.isascii() and segment.isdigit() else segment
+            )
         placed.append(rewrite._replace(path=(*segments, *rewrite.path[3:])))
     return placed
 
@@ -2708,7 +2806,9 @@ def placed_at_appends(
     """``rewrites`` with each patch append (``-``) in a path given the index the
     value has in ``config``: the last entry of that list that holds it, as the
     operation appended it. A rewrite whose list holds the value nowhere (a later
-    file or an override replaced it) names no place and is left out."""
+    file or an override replaced it) names no place and is left out. A ``-``
+    whose container is a mapping is that mapping's own key, not an append, and
+    the rewrite is kept as it is."""
     if not any(_APPENDED in rewrite.path for rewrite in rewrites):
         return rewrites
     dumped = config.model_dump(mode="json", by_alias=True)
@@ -2719,6 +2819,9 @@ def placed_at_appends(
             continue
         at = rewrite.path.index(_APPENDED)
         listed = recorded_value_at(config, dumped, rewrite.path[:at])
+        if isinstance(listed, dict):
+            found.append(rewrite)
+            continue
         if not isinstance(listed, list):
             continue
         for index in reversed(range(len(listed))):
@@ -3013,7 +3116,16 @@ def record_of_config(
             and rewrite.environment_part
             and rewrite.environment_part in current
         ):
-            replaced = current.replace(rewrite.environment_part, rewrite.reference)
+            # The one place the variable's part has in the string: at its
+            # start, where the reference stands in the file's text, else the
+            # first place it is found. Replacing every occurrence turned a
+            # short value's other occurrences into references the file never
+            # wrote, and garbled the record.
+            part = rewrite.environment_part
+            if current.startswith(part):
+                replaced = rewrite.reference + current[len(part) :]
+            else:
+                replaced = current.replace(part, rewrite.reference, 1)
             if mark is None:
                 container[key] = replaced
             elif _resolves_back_to(replaced, current):
@@ -3037,8 +3149,14 @@ def record_of_config(
         container, _ = _record_container(config, record, rewrite.path)
         if not isinstance(container, dict) or rewrite.resolved not in container:
             continue
+        written_key = marked(rewrite.written)
+        if written_key != rewrite.resolved and written_key in container:
+            # The mapping already holds an entry under the written key: the
+            # rename would overwrite it, and the record would lose that
+            # entry. The resolved key stays.
+            continue
         renamed = {
-            (marked(rewrite.written) if key == rewrite.resolved else key): value
+            (written_key if key == rewrite.resolved else key): value
             for key, value in container.items()
         }
         container.clear()
@@ -3483,6 +3601,33 @@ def _is_directory_under(relative: str, project_root: Path) -> bool:
         return False
 
 
+_REPEATED_SLASHES = re.compile(r"/{2,}")
+
+
+def _relative_through_links(form: str, project_root: Path) -> str:
+    """The rest of the absolute ``form`` under the root when its literal part
+    (before any glob) reaches the root through a symbolic link: the pattern
+    spelled through a linked path to the scanned tree, where the root is
+    resolved (``source_dir.resolve()``). Empty when it does not."""
+    literal: List[str] = []
+    tail: List[str] = []
+    for part in form.split("/"):
+        if tail or (part and _GLOB_CHARACTERS & set(part)):
+            tail.append(part)
+        else:
+            literal.append(part)
+    if len(literal) < 2 or _DOT_COMPONENTS & set(literal):
+        return ""
+    try:
+        real = Path(os.path.realpath("/".join(literal))).as_posix()
+    except (OSError, ValueError):
+        return ""
+    root = project_root.as_posix().rstrip("/") + "/"
+    if not real.startswith(root):
+        return ""
+    return "/".join([real[len(root) :], *tail]) if tail else real[len(root) :]
+
+
 def absolute_path_warning(
     path_pattern: Any,
     project_root: Path,
@@ -3536,16 +3681,24 @@ def absolute_path_warning(
     if read_from_environment:
         relative = ""
     elif under_root:
-        relative = form[len(root) :]
+        # The rest after the root, with the slashes a doubled separator leaves
+        # ('/root//build') taken out: left in, the rest was '/build', which
+        # joined to the root is the host's '/build', and the advice another
+        # absolute pattern.
+        relative = _REPEATED_SLASHES.sub("/", form[len(root) :]).lstrip("/")
     elif drive or form.startswith("//"):
         # A drive, or a UNC share, outside the root.
         relative = ""
     elif _names_something_under(form.lstrip("/"), project_root):
         relative = form.lstrip("/")
     else:
-        relative = ""
+        relative = _relative_through_links(form, project_root)
     if _DOT_COMPONENTS & set(relative.split("/")):
         relative = ""
+    if relative and windows:
+        # The root was compared as Windows compares it; the matcher compares
+        # case-sensitively, so the rest is spelled as the tree spells it.
+        relative = _with_tree_spelling(relative, project_root)
     if relative.endswith("/") or _is_directory_under(relative, project_root):
         relative = directory_spelling(relative, ignore_path=ignore_path)
     advice = (
@@ -3748,6 +3901,10 @@ class ConfigValidator:
         """
         result = ConfigCheck()
         config_path = Path(config_path)
+        # A caller's str source_dir: the path checks call .resolve() on it,
+        # and an AttributeError there escaped the structural checks' guard.
+        if source_dir is not None:
+            source_dir = Path(source_dir)
         is_toml = is_toml_file(config_path)
         if expect is None:
             # Every read below opens the file this one names, whichever name
@@ -3876,6 +4033,9 @@ class ConfigValidator:
         from automated_security_helper.config.operator_only_options import (
             repository_settings_for_root,
         )
+        from automated_security_helper.config.operator_paths import (
+            the_operators_files,
+        )
         from automated_security_helper.config.resolve_config import (
             ConfigFileRefused,
             load_config_file,
@@ -3931,6 +4091,12 @@ class ConfigValidator:
                 confine=repository.confine,
                 repository_file=repository.is_repository_file,
                 refuse_env=refuse_env,
+                # As the scan reads the chain (resolve_config): an operator
+                # file's relative tool paths are taken from its own directory,
+                # so the documents checked here hold what the scan holds.
+                anchor_relative_paths=(
+                    None if untrusted_config else the_operators_files(repository.trees)
+                ),
                 expect=expect,
             )
         except ConfigFileRefused as refusal:
@@ -3986,9 +4152,12 @@ class ConfigValidator:
         if refused is not None:
             # The model names each internal-only field it refuses, read from
             # the messages with each key as it is; the structural checks below
-            # warn only about the ones it accepts.
+            # warn only about the ones it accepts. Read from the model's own
+            # messages, before any redaction: a section value equal to a word
+            # of the refusal sentence was replaced in the formatted message,
+            # and the field was then both an error and a tolerated warning.
             refused_fields = cls._internal_fields_refused(
-                cls._refusal_messages(refused), config_data
+                cls._unredacted_refusal_messages(refused), config_data
             )
             result.errors.extend(
                 cls._refusal_messages(refused, data=resolved_data, shown=shown_resolved)
@@ -4042,6 +4211,16 @@ class ConfigValidator:
             if module_check_failure is not None:
                 result.warnings.append(module_check_failure)
 
+        # The checks that read the merged result read it as the scan builds
+        # it: with --config-overrides applied. A missing project_name an
+        # override supplies is not missing, and the ignore and suppression
+        # paths an override replaced or added are the scan's, not the file's.
+        checked_data = cls._with_override_lists(resolved_data, built, config_overrides)
+        shown_checked = (
+            shown_resolved
+            if checked_data is resolved_data
+            else with_environment_values_shown(checked_data, result.references)
+        )
         # A file that is not a mapping has no keys to check; the model's
         # refusal above says so, in the words a scan uses.
         if isinstance(config_data, dict):
@@ -4050,17 +4229,18 @@ class ConfigValidator:
                     cls._structure_warnings(
                         config_path,
                         config_data,
-                        resolved_data,
+                        checked_data,
                         chain_resolved,
                         is_toml,
                         source_dir,
                         reported_as_errors=refused_fields,
+                        override_keys=cls._override_keys(config_overrides),
                         layers=[
                             (path, reads.get(Path(path).resolve()))
                             for path in result.chain
                         ],
                         shown_config=shown_config,
-                        shown_resolved=shown_resolved,
+                        shown_resolved=shown_checked,
                         environment_paths=result.environment_paths,
                         raw_content=config_text,
                         path_patterns=result.path_patterns,
@@ -4278,6 +4458,78 @@ class ConfigValidator:
             prefix = cls.EXTENDS_ERROR_PREFIX
         return f"{prefix}{error}"
 
+    #: The global_settings lists an override can replace or add to, which the
+    #: path checks then read from the configuration the scan builds.
+    _OVERRIDDEN_LISTS = ("ignore_paths", "suppressions")
+
+    #: The byte order mark a text may start with, which is not part of its
+    #: first key.
+    _BYTE_ORDER_MARK = chr(0xFEFF)
+
+    @staticmethod
+    def _override_keys(config_overrides: Optional[Sequence[str]]) -> FrozenSet[str]:
+        """The dotted key of each ``--config-overrides`` entry, as written
+        (``+`` for an append dropped, '-' read as '_'), for the checks that
+        ask whether an override supplies a field."""
+        keys = set()
+        for override in config_overrides or ():
+            key = str(override).partition("=")[0].removesuffix("+").strip()
+            if key:
+                keys.add(key.replace("-", "_"))
+        return frozenset(keys)
+
+    @classmethod
+    def _with_override_lists(
+        cls, resolved_data: Any, built: Any, config_overrides: Optional[Sequence[str]]
+    ) -> Any:
+        """``resolved_data`` with its ``global_settings`` ignore and suppression
+        lists taken from ``built``, the configuration the scan builds with the
+        overrides applied, when an override names one of them; else as it is.
+        The path checks then describe the scan's lists, not the lists an
+        override replaced or added to."""
+        if built is None or not isinstance(resolved_data, dict):
+            return resolved_data
+        keys = cls._override_keys(config_overrides)
+        touched = [
+            name
+            for name in cls._OVERRIDDEN_LISTS
+            if any(
+                key == f"global_settings.{name}"
+                or key.startswith(f"global_settings.{name}.")
+                for key in keys
+            )
+        ]
+        if not touched:
+            return resolved_data
+        try:
+            dumped = built.model_dump(mode="json", by_alias=True)
+        except (TypeError, ValueError):
+            return resolved_data
+        built_settings = dumped.get("global_settings")
+        if not isinstance(built_settings, dict):
+            return resolved_data
+        settings = resolved_data.get("global_settings")
+        checked = dict(resolved_data)
+        checked["global_settings"] = (
+            dict(settings) if isinstance(settings, dict) else {}
+        )
+        for name in touched:
+            checked["global_settings"][name] = copy.deepcopy(built_settings.get(name))
+        return checked
+
+    @classmethod
+    def _unredacted_refusal_messages(cls, refusal: Any) -> List[str]:
+        """The refusal's messages with the model's own text, before any
+        redaction, for reading which fields it refused (internal_fields_refused):
+        never shown. A refusal with no model error has one message, its own."""
+        if refusal.validation_error is None:
+            return [str(refusal)]
+        return [
+            f"{cls.MODEL_ERROR_PREFIX}{location_text(error.get('loc', ())) or '(top level)'}"
+            f"': {error.get('msg', '')}"
+            for error in refusal.validation_error.errors()
+        ]
+
     @classmethod
     def _refusal_messages(
         cls, refusal: Any, data: Any = None, shown: Any = None
@@ -4460,6 +4712,13 @@ class ConfigValidator:
         for key in file_segment:
             if wanted is not None and classes.get(key) is wanted:
                 return key
+        # The loader folds a case or separator spelling of a known plugin's
+        # section onto the declared one (plugin_section_names), so the file
+        # may spell it 'Bandit' or 'CDK_NAG': found by the same fold.
+        folded = folded_section_name(section)
+        for key in file_segment:
+            if isinstance(key, str) and folded_section_name(key) == folded:
+                return key
         return section
 
     @classmethod
@@ -4522,11 +4781,14 @@ class ConfigValidator:
         environment_paths: Collection[Path] = frozenset(),
         raw_content: Optional[str] = None,
         path_patterns: Optional[List[Tuple[str, str]]] = None,
+        override_keys: Collection[str] = frozenset(),
     ) -> List[str]:
         """The structural checks: problems a scan tolerates. ``raw_content`` is
         the file's text, as check_config_file read it; read here without it.
         ``path_patterns`` gets each path warning with its path as the config
-        holds it (``ConfigCheck.path_patterns``).
+        holds it (``ConfigCheck.path_patterns``). ``override_keys`` are the
+        keys ``--config-overrides`` set (``_override_keys``): a project_name
+        one supplies is not missing.
 
         ``reported_as_errors`` are internal-only fields a scan refuses, which
         check_config_file reports as errors instead. A message names a key or
@@ -4550,7 +4812,11 @@ class ConfigValidator:
         if shown_resolved is None:
             shown_resolved = resolved_data
 
-        if chain_resolved and "project_name" not in resolved_data:
+        if (
+            chain_resolved
+            and "project_name" not in resolved_data
+            and "project_name" not in override_keys
+        ):
             warnings.append(cls.MISSING_PROJECT_NAME_MESSAGE)
 
         # Check for invalid top-level fields
@@ -4602,23 +4868,10 @@ class ConfigValidator:
             raw_content = ""
         elif raw_content is None:
             raw_content = config_path.read_text(encoding="utf-8")
-        top_level_fields = {}
-        for line in raw_content.split("\n"):
-            stripped = line.strip()
-            # Only consider lines with no leading whitespace (true top-level fields)
-            if (
-                stripped
-                and not stripped.startswith("#")
-                and ":" in stripped
-                and not line[0].isspace()
-            ):
-                field_name = stripped.split(":")[0].strip()
-                if field_name in cls.VALID_TOP_LEVEL_FIELDS:
-                    if field_name in top_level_fields:
-                        warnings.append(
-                            f"Duplicate top-level field '{field_name}' found at multiple locations"
-                        )
-                    top_level_fields[field_name] = True
+        for field_name in cls._duplicate_top_level_fields(config_path, raw_content):
+            warnings.append(
+                f"Duplicate top-level field '{field_name}' found at multiple locations"
+            )
 
         # Internal-only fields in scanner, reporter and converter sections. The
         # ones a scan refuses are errors, reported by check_config_file.
@@ -4639,6 +4892,63 @@ class ConfigValidator:
             )
         )
         return warnings
+
+    @classmethod
+    def _duplicate_top_level_fields(
+        cls, config_path: Path, raw_content: str
+    ) -> List[str]:
+        """The declared top-level fields ``raw_content`` writes more than once,
+        each once, in the order of their first repeat.
+
+        A YAML file is read line by line: a line with no leading blank and a
+        ``:`` names a top-level key, written bare or in quotes (the quotes come
+        off: a quoted spelling matched no declared field and was never
+        counted), and a byte order mark before the first key is not part of it.
+        A JSON file's keys are indented inside its braces, so its lines never
+        matched; its root object's keys are read from the text instead, every
+        pair kept (the parser keeps the last). A text that does not parse
+        counts nothing: the parse refusal is the check's answer.
+        """
+        found: List[str] = []
+        seen: Set[str] = set()
+
+        def count(field_name: str) -> None:
+            if field_name in cls.VALID_TOP_LEVEL_FIELDS:
+                if field_name in seen and field_name not in found:
+                    found.append(field_name)
+                seen.add(field_name)
+
+        if is_json_file(config_path):
+            pairs: List[List[Tuple[str, Any]]] = []
+
+            def keep(items: List[Tuple[str, Any]]) -> Dict[str, Any]:
+                pairs.append(items)
+                return dict(items)
+
+            try:
+                json.loads(
+                    raw_content.lstrip(cls._BYTE_ORDER_MARK), object_pairs_hook=keep
+                )
+            except (ValueError, RecursionError):
+                return []
+            # The hook is called innermost first, so the root object's pairs
+            # are the last ones kept.
+            for key, _value in pairs[-1] if pairs else []:
+                if isinstance(key, str):
+                    count(key)
+            return found
+
+        for line in raw_content.lstrip(cls._BYTE_ORDER_MARK).split("\n"):
+            stripped = line.strip()
+            # Only consider lines with no leading whitespace (true top-level fields)
+            if (
+                stripped
+                and not stripped.startswith("#")
+                and ":" in stripped
+                and not line[0].isspace()
+            ):
+                count(stripped.split(":")[0].strip().strip("'\""))
+        return found
 
     @classmethod
     def validate_config_file(
@@ -4838,11 +5148,14 @@ class ConfigValidator:
         except PluginModuleNamespaceError as e:
             # In the check's own closing words: str(e) carries the scan's,
             # which say nothing was scanned and name options no check has
-            # (--ash-plugin-modules, ASH_PLUGIN_MODULES).
+            # (--ash-plugin-modules, ASH_PLUGIN_MODULES). The entry can come
+            # from --config-overrides as well as the file, as the import
+            # closing says. The MCP validate_config tool types the refusal by
+            # its opening, the field's name (cli/mcp_tools.py).
             closing = (
                 "Nothing was imported. Rename the package or name the "
                 "packages inside it, or remove the entry from the "
-                "config file"
+                "config file or --config-overrides"
             )
             return (
                 [
@@ -5070,9 +5383,13 @@ class ConfigValidator:
             config_path: Path to the configuration file
 
         Raises:
-            ConfigValidationError: If the configuration is invalid
+            ConfigValidationError: If the configuration is invalid. The message
+                numbers the errors alone: a warning is a problem a scan
+                tolerates, not one of the failures (validate_config_file lists
+                both, warnings after errors, for ``ash config validate``).
         """
-        is_valid, errors = cls.validate_config_file(config_path)
+        check = cls.check_config_file(config_path)
+        is_valid, errors = check.scan_accepts, check.errors
 
         if not is_valid:
             error_msg = f"Configuration validation failed for {config_path}:\n"
