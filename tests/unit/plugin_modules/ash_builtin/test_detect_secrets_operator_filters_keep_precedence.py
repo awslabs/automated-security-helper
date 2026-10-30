@@ -114,6 +114,34 @@ def test_the_operators_entry_wins_over_the_baselines_for_one_path(
     assert filters[0].model_dump(exclude_none=True)["pattern"] == ["^operator/"]
 
 
+def test_an_operator_filter_file_under_a_derived_directory_stays_the_operators(
+    tmp_path, monkeypatch
+):
+    """Authorship is judged per entry, not per option. The operator's
+    ``file://`` filter under the scan's own output directory, a path the
+    operator's configuration may name (a derived directory is refused only
+    when the writer was not the operator), is kept beside the baseline's
+    filters. Judged per option, the baseline having any filter made every
+    retained operator ``file://`` entry read as the baseline's, and this one
+    was refused with a warning."""
+    monkeypatch.chdir(tmp_path)
+    context = _context_with_baseline(tmp_path, [{"path": SEQUENTIAL}])
+    filter_file = context.output_dir / "filters" / "mine.py"
+    filter_file.parent.mkdir(parents=True)
+    filter_file.write_text("def allow(secret):\n    return False\n", encoding="utf-8")
+    operator = DetectSecretsScanSettingsFiltersUsed(
+        path=f"file://{filter_file.as_posix()}::allow"
+    )
+
+    scanner = _scanner(context, [operator])
+
+    paths = [item.path for item in scanner.config.options.scan_settings.filters_used]
+    assert SEQUENTIAL in paths
+    kept = [p for p in paths if p.startswith("file://") and p.endswith("::allow")]
+    assert len(kept) == 1, paths
+    assert kept[0].endswith("/filters/mine.py::allow"), kept
+
+
 def test_without_operator_filters_the_baselines_are_the_scans(tmp_path, monkeypatch):
     """Control: the baseline's filters still load when the operator set none."""
     monkeypatch.chdir(tmp_path)
