@@ -264,8 +264,14 @@ def test_an_env_dir_record_under_an_unsearched_parent_is_forgotten_by_age(
 ):
     searched = tmp_path / "tmpdir"
     searched.mkdir()
+    # The sweep stays inside tmp_path: TMPDIR is the one searched parent, the
+    # fixed places are emptied, and the other temp variables and tempfile's
+    # cached answer are cleared, so no real directory is listed or deleted.
     monkeypatch.setenv("TMPDIR", str(searched))
+    monkeypatch.delenv("TEMP", raising=False)
+    monkeypatch.delenv("TMP", raising=False)
     monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setattr(leftovers, "_ENV_DIR_PARENTS", ())
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     aged = _env_dir_record(

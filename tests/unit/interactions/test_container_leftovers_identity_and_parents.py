@@ -38,6 +38,22 @@ pytestmark = [
 # creator that is gone, which no live process can hold.
 _GONE_PID = 2**30 + 91
 
+
+@pytest.fixture(autouse=True)
+def _tempfile_reads_this_tests_tmpdir(monkeypatch):
+    """The sweep searches TEMP, TMP and tempfile's own answer beside TMPDIR.
+
+    A test here stays inside ``tmp_path`` by setting TMPDIR and emptying the
+    listed parents, so the other two variables are unset and tempfile's cached
+    answer is dropped for the test: a cached real temp directory would be searched
+    too, and a stale private directory of this user there could be deleted by a
+    test.
+    """
+    monkeypatch.delenv("TEMP", raising=False)
+    monkeypatch.delenv("TMP", raising=False)
+    monkeypatch.setattr(tempfile, "tempdir", None)
+
+
 _DAEMON_SELECTORS = (
     "DOCKER_HOST",
     "DOCKER_CONTEXT",
@@ -247,19 +263,13 @@ def test_a_tmpdir_with_a_trailing_separator_is_the_normalized_parent(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv("TMPDIR", str(tmp_path) + os.sep)
-    # The other places tempfile reads are unset, and its cached answer dropped,
+    # TEMP, TMP and tempfile's cache are cleared by the module's autouse fixture,
     # so the one parent is TMPDIR's, spelled once.
-    monkeypatch.delenv("TEMP", raising=False)
-    monkeypatch.delenv("TMP", raising=False)
-    monkeypatch.setattr(tempfile, "tempdir", None)
     monkeypatch.setattr(container_leftovers, "_ENV_DIR_PARENTS", ())
 
-    try:
-        assert container_leftovers._env_dir_parents() == [
-            os.path.normcase(os.path.abspath(str(tmp_path)))
-        ]
-    finally:
-        monkeypatch.setattr(tempfile, "tempdir", None)
+    assert container_leftovers._env_dir_parents() == [
+        os.path.normcase(os.path.abspath(str(tmp_path)))
+    ]
 
 
 def _env_dir_record(state: Path, directory: Path, pid: int) -> Path:
