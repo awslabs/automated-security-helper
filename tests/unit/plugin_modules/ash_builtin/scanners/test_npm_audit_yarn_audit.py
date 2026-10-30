@@ -627,7 +627,7 @@ def test_a_multi_line_value_in_a_yarn_1_stdout_error_event_is_hidden(sep):
         assert part not in (reason or ""), (part, reason)
 
 
-@pytest.mark.parametrize("sep", [" ", "\u0085", "\x0c"])
+@pytest.mark.parametrize("sep", ["\N{LINE SEPARATOR}", "\u0085", "\x0c"])
 def test_an_error_event_holding_a_unicode_line_separator_keeps_its_message(sep):
     """The detail reader splits the stream as the parse loops do, at line feeds
     only. A yarn 1 error event whose data holds a separator str.splitlines
