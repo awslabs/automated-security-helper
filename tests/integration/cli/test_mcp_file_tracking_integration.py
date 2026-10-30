@@ -66,9 +66,18 @@ async def test_file_based_tracking_workflow(test_directory, mock_scan_process):
     test_file = source_dir / "test.py"
     test_file.write_text('password = "hardcoded_password"')  # pragma: allowlist secret
 
-    # Start a scan
+    # Start a scan. The runner is replaced by a stand-in that takes the
+    # runner's first step, marking the ``ran`` flag the start passes it, and
+    # does nothing else: the entry stays PENDING, as this workflow assumes. A
+    # bare AsyncMock returns without marking it, and the start's done callback
+    # then reads a task that never ran and closes the entry as a scan that did
+    # not start (``_give_back_a_scan_that_did_not_start``).
+    def _runner_that_only_starts(**kwargs):
+        kwargs["ran"]["value"] = True
+
     with patch(
-        "automated_security_helper.cli.mcp_tools._run_scan_async", AsyncMock()
+        "automated_security_helper.cli.mcp_tools._run_scan_async",
+        AsyncMock(side_effect=_runner_that_only_starts),
     ) as mock_run_scan:
         result = await mcp_scan_directory(
             directory_path=str(source_dir),
