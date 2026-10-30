@@ -535,6 +535,18 @@ class _EvaluationWorker:
     that ends without answering (killed from outside, or an answer that could
     not be sent) fails the evaluation too, named as such, so the scan never
     guesses at a match it did not see.
+
+    The request crosses the pipe by pickle on every platform (a process per
+    search handed it to a forked child in memory), so ``function`` and ``args``
+    must be picklable: a module-level function with plain arguments is, and the
+    three handed in here are. An argument that cannot be pickled raises in the
+    caller before anything is sent, with the worker idle and in step.
+
+    Under the ``fork`` start method the child begins with a copy of every open
+    descriptor, the parent's end of its own pipe included; the child closes that
+    copy first thing, so a parent that dies without ``close()`` (SIGKILL,
+    ``os._exit``) leaves the worker reading end-of-file on its next ``recv`` and
+    exiting, instead of blocking on a pipe whose other end it holds itself.
     """
 
     def __init__(self) -> None:
@@ -613,9 +625,16 @@ class _EvaluationWorker:
         self.close()
         context = _process_context()
         parent_end, child_end = context.Pipe(duplex=True)
+        # A forked child inherits the parent's end too and must close its copy
+        # (see _serve_evaluations). A spawned child inherits nothing, and handing
+        # it the parent's end would duplicate that end into it instead.
+        if context.get_start_method() == "fork":
+            arguments: Tuple[Any, ...] = (child_end, parent_end)
+        else:
+            arguments = (child_end,)
         process = context.Process(
             target=_serve_evaluations,
-            args=(child_end,),
+            args=arguments,
             name="ash-pattern-evaluation",
             daemon=True,
         )
@@ -625,12 +644,18 @@ class _EvaluationWorker:
         return parent_end
 
 
-def _serve_evaluations(connection: Any) -> None:
+def _serve_evaluations(connection: Any, inherited_parent_end: Any = None) -> None:
     """In the worker: answer each ``(function, args)`` job until None or the pipe ends.
 
-    A result or an error that cannot be pickled is replaced by a ScannerError
-    that names its type, so the parent always reads one answer per job.
+    ``inherited_parent_end`` is the parent's end of this pipe as a forked child
+    inherited it; it is closed first, so the pipe's only open parent end is the
+    parent's own and its closing (a ``close()``, or the parent's death) reaches
+    this loop as end-of-file. A result or an error that cannot be pickled is
+    replaced by a ScannerError that names its type, so the parent always reads
+    one answer per job.
     """
+    if inherited_parent_end is not None:
+        inherited_parent_end.close()
     try:
         while True:
             try:

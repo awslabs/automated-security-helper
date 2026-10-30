@@ -469,6 +469,27 @@ def test_a_budget_used_as_a_context_manager_closes_on_exit():
     assert budget.worker_pid is None
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="the fork start method is Linux's"
+)
+def test_a_forked_worker_exits_when_the_parent_end_closes_without_a_farewell():
+    """A forked child inherits the parent's end of its own pipe. Unless the child
+    closes that copy, a parent that dies without ``close()`` leaves the worker
+    reading a pipe it holds open itself, forever. With the copy closed, the parent
+    end's closing alone is end-of-file to the worker, and it exits."""
+    budget = EvaluationBudget()
+    assert budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid) != os.getpid()
+    worker = budget._worker
+    process = worker._process
+
+    # The parent's end goes away with no None sent, as a dead parent's would.
+    worker._connection.close()
+    process.join(5.0)
+
+    assert not process.is_alive()
+    budget.close()
+
+
 def test_a_pass_starts_one_process_on_the_spawn_path(monkeypatch):
     """Where the start method is ``spawn`` (Windows, macOS) every process start is a
     fresh interpreter importing this module, so a pass must start ONE worker and
@@ -479,6 +500,7 @@ def test_a_pass_starts_one_process_on_the_spawn_path(monkeypatch):
 
     class _CountingContext:
         Pipe = staticmethod(spawn.Pipe)
+        get_start_method = staticmethod(spawn.get_start_method)
 
         @staticmethod
         def Process(*args, **kwargs):
