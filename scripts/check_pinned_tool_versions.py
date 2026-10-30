@@ -58,7 +58,13 @@ Dockerfile configures. Each pin is reported as
   broken. Always exits 1, and the report names the version to pin instead.
 
 An ``apt-get install`` of a package with no ``=version`` is refused (exit 2) rather
-than skipped, and so is one package pinned to two versions in different stages.
+than skipped, and so is one package pinned to two versions in different stages. The
+install is found in a ``RUN`` of any case, whether written in shell form, as an exec
+form array or as a here-document, and whether spelled ``apt-get`` or ``apt``. An
+option that takes its value as a separate word (``-t suite``, ``-o Name=value``) and a
+redirection are not packages. A Dockerfile that configures NodeSource without a
+``NODE_MAJOR`` this script can read is refused too, because the nodejs pin would be
+looked up in Debian's own nodejs.
 
 What was rejected
 -----------------
@@ -1202,10 +1208,28 @@ _DEBIAN_SECURITY_INDEX = "https://deb.debian.org/debian-security/dists/{suite}/m
 _NODESOURCE_INDEX = "https://deb.nodesource.com/node_{major}.x/dists/nodistro/main/binary-{arch}/Packages"
 
 _APT_INSTALL = re.compile(
-    r"(?<![\w-])apt-get\s[^;&|]*?(?<![\w-])install(?![\w-])(?P<args>[^;&|]*)"
+    r"(?<![\w-])apt(?:-get)?\s[^;&|]*?(?<![\w-])install(?![\w-])(?P<args>[^;&|]*)"
 )
 _APT_PIN = re.compile(
     r"^(?P<package>[a-z0-9][a-z0-9+.-]+)=(?P<version>[A-Za-z0-9.+~:-]+)$"
+)
+
+# Tag parts of a base image that name a variant of the image, not a Debian suite.
+_IMAGE_VARIANTS = frozenset({"slim", "alpine"})
+# The NodeSource major the Dockerfile sets: NODE_MAJOR=22, NODE_MAJOR="22" or
+# ENV NODE_MAJOR 22.
+_NODE_MAJOR = re.compile(r"\bNODE_MAJOR(?:=|\s+)[\"']?(?P<major>\d+)\b")
+# Docker reads instruction names without regard to case.
+_RUN_INSTRUCTION = re.compile(r"^RUN\s", re.IGNORECASE)
+# A here-document marker on a RUN line: <<EOF, <<-EOF, <<"EOF". Not a here-string (<<<).
+_HEREDOC_MARKER = re.compile(r"(?<!<)<<-?\s*([\"']?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# A shell redirection among the arguments of the install: "> /dev/null", "2>".
+_REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
+# The options of apt-get that take their value as the next word. A short option takes
+# it as the next word only when it is the last letter of its cluster: -yt suite, but
+# -tsuite.
+_APT_OPTIONS_WITH_VALUE = frozenset(
+    {"-o", "--option", "-t", "--target-release", "-c", "--config-file"}
 )
 
 
@@ -1232,24 +1256,107 @@ class AptResult:
 
 
 def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
-    """Each RUN instruction as its (line number, text) lines, comments dropped."""
+    """Each RUN instruction as its (line number, text) lines, comments dropped.
+
+    The instruction name is read without regard to case. Inside a continued
+    instruction a blank line and a comment line are skipped, as Docker skips them.
+    The body of a here-document belongs to the instruction, each of its lines ended
+    with ``;`` as the shell ends a command at a newline. An instruction still open at
+    the end of the file is kept.
+    """
     blocks: list[list[tuple[int, str]]] = []
     current: list[tuple[int, str]] | None = None
+    markers: list[str] = []  # here-document names found on the instruction's lines
+    terminators: list[str] = []  # here-document names whose body is being read
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
+        if current is not None and terminators:
+            if line == terminators[0]:
+                terminators.pop(0)
+                if not terminators:
+                    blocks.append(current)
+                    current = None
+            elif line and not line.startswith("#"):
+                current.append((number, f"{line} ;"))
+            continue
         if current is None:
-            if not re.match(r"^RUN\s", line):
+            if not _RUN_INSTRUCTION.match(line):
                 continue
             current = []
             line = line[3:].strip()
-        elif line.startswith("#"):
+        elif not line or line.startswith("#"):
             continue
         continued = line.endswith("\\")
-        current.append((number, line[:-1] if continued else line))
-        if not continued:
-            blocks.append(current)
-            current = None
+        body = line[:-1] if continued else line
+        current.append((number, body))
+        markers += [match.group(2) for match in _HEREDOC_MARKER.finditer(body)]
+        if continued:
+            continue
+        if markers:
+            terminators, markers = markers, []
+            continue
+        blocks.append(current)
+        current = None
+    if current:
+        blocks.append(current)
     return blocks
+
+
+def _block_text(block: list[tuple[int, str]]) -> str:
+    """The shell text of a RUN instruction: its lines joined, an exec form unpacked.
+
+    ``RUN ["apt-get", "install", "-y", "curl=1.2"]`` is a JSON array of the words of
+    one command, which is the command the shell form spells with spaces.
+    """
+    joined = " ".join(text for _, text in block)
+    if joined.lstrip().startswith("["):
+        try:
+            words = json.loads(joined)
+        except ValueError:
+            return joined
+        if isinstance(words, list) and all(isinstance(word, str) for word in words):
+            return " ".join(words)
+    return joined
+
+
+def _line_words(text: str) -> set[str]:
+    """The words of one Dockerfile line, without quotes, commas and brackets."""
+    return {word.strip("'\"") for word in re.split(r"[\s;&|,\[\]]+", text)}
+
+
+def _takes_separate_value(option: str) -> bool:
+    """Whether an apt-get option word takes the next word as its value."""
+    if option in _APT_OPTIONS_WITH_VALUE:
+        return True
+    if option.startswith("--") or "=" in option:
+        return False
+    for position, flag in enumerate(option[1:], start=1):
+        if flag in "otc":
+            return position == len(option) - 1
+    return False
+
+
+def _install_words(args: str) -> list[str]:
+    """The package words of the arguments after ``install``.
+
+    Options are not packages, and neither are the value an option takes as the next
+    word (``-t bookworm-backports``, ``-o Name=value``) or a redirection. The quotes
+    of a command given to a wrapper (``with-retry 'apt-get install -y curl=1.2'``) are
+    not part of a word.
+    """
+    words: list[str] = []
+    value_next = False
+    for raw in _REDIRECTION.sub(" ", args).split():
+        word = raw.strip("'\"")
+        if value_next:
+            value_next = False
+        elif not word:
+            continue
+        elif word.startswith("-"):
+            value_next = _takes_separate_value(word)
+        else:
+            words.append(word)
+    return words
 
 
 def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
@@ -1263,11 +1370,8 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
     versions: dict[str, str] = {}
     lines: dict[str, list[int]] = {}
     for block in _run_blocks(dockerfile.read_text(encoding="utf-8")):
-        joined = " ".join(text for _, text in block)
-        for match in _APT_INSTALL.finditer(joined):
-            for word in match.group("args").split():
-                if word.startswith("-"):
-                    continue
+        for match in _APT_INSTALL.finditer(_block_text(block)):
+            for word in _install_words(match.group("args")):
                 pin = _APT_PIN.match(word)
                 if pin is None:
                     raise PinEnumerationError(
@@ -1282,9 +1386,8 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
                         f"in {dockerfile.name}; every stage has to install the same one."
                     )
                 lines.setdefault(package, []).extend(
-                    number
-                    for number, text in block
-                    if word in re.split(r"[\s;&|]+", text)
+                    [number for number, text in block if word in _line_words(text)]
+                    or [block[0][0]]
                 )
     return [
         AptPin(package, versions[package], tuple(sorted(set(lines[package]))))
@@ -1325,12 +1428,25 @@ def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
     """The indexes apt reads in the image the Dockerfile builds.
 
     The Debian codename is the last ``-`` part of the ``BASE_IMAGE`` default's tag
-    (``python:3.12-slim-bookworm``), and the NodeSource repository is the one
+    that is not an image variant (``python:3.12-slim-bookworm``,
+    ``debian:bookworm-slim``), and the NodeSource repository is the one
     ``NODE_MAJOR`` names, so a base-image or Node bump moves the lookup with it.
+
+    Raises:
+        PinEnumerationError: when the tag holds no codename, when the Dockerfile
+            configures NodeSource without a ``NODE_MAJOR`` this can read, or when it
+            sets ``NODE_MAJOR`` to more than one value. The nodejs pin would
+            otherwise be looked up in Debian's own nodejs, reported unavailable, and
+            the report would name an older version to pin.
     """
     text = dockerfile.read_text(encoding="utf-8")
     base = re.search(r"^ARG BASE_IMAGE=\S+:(?P<tag>\S+)$", text, re.MULTILINE)
-    codename = base.group("tag").rsplit("-", 1)[-1] if base else ""
+    tag_parts = (
+        [part for part in base.group("tag").split("-") if part not in _IMAGE_VARIANTS]
+        if base
+        else []
+    )
+    codename = tag_parts[-1] if tag_parts else ""
     if not re.fullmatch(r"[a-z]+", codename):
         raise PinEnumerationError(
             f"cannot read a Debian codename from {dockerfile.name}'s ARG BASE_IMAGE; "
@@ -1347,9 +1463,23 @@ def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
             _DEBIAN_SECURITY_INDEX.format(suite=f"{codename}-security", arch="{arch}"),
         ),
     ]
-    node = re.search(r"\bNODE_MAJOR=(?P<major>\d+)\b", text)
-    if node is not None:
-        major = node.group("major")
+    code = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    majors = sorted({m.group("major") for m in _NODE_MAJOR.finditer(code)})
+    if len(majors) > 1:
+        raise PinEnumerationError(
+            f"{dockerfile.name} sets NODE_MAJOR to {', '.join(majors)}; the NodeSource "
+            "index to look the nodejs pin up in is ambiguous."
+        )
+    if not majors and "deb.nodesource.com" in code:
+        raise PinEnumerationError(
+            f"{dockerfile.name} configures the NodeSource repository, but no "
+            "NODE_MAJOR=<digits> (or ENV NODE_MAJOR <digits>) names its major "
+            "version, so the nodejs pin cannot be looked up in the right index."
+        )
+    if majors:
+        major = majors[0]
         indexes.append(
             AptIndex(
                 f"nodesource node_{major}.x",
@@ -1414,7 +1544,8 @@ def _dpkg_compare_part(a: str, b: str) -> int:
 
 
 def _split_debian_version(version: str) -> tuple[int, str, str]:
-    epoch, _, rest = version.rpartition(":") if ":" in version else ("0", "", version)
+    # dpkg ends the epoch at the first colon: an upstream version may hold more.
+    epoch, _, rest = version.partition(":") if ":" in version else ("0", "", version)
     upstream, _, revision = rest.rpartition("-") if "-" in rest else (rest, "", "")
     return int(epoch or 0), upstream, revision
 
@@ -1460,33 +1591,41 @@ def check_apt(
             url = index.url.format(arch=arch)
             try:
                 listed = parse_packages_index(fetch(url))
+                if not listed:
+                    # A 200 answer that holds no package stanza is not an index. Read
+                    # as one, it would make every pin look retired.
+                    raise ValueError("the index lists no packages")
             except Exception as exc:  # reported per pin, and it fails the run
                 failed.append(f"{index.label} ({url}): {type(exc).__name__}: {exc}")
                 continue
             for package, versions in listed.items():
                 available.setdefault(package, set()).update(versions)
         for pin in pins:
-            versions = available.get(pin.package, set())
-            candidate = _newest(versions)
-            if failed:
-                results.append(
-                    AptResult(pin, arch, candidate, "error", "; ".join(failed))
-                )
-            elif candidate is None:
-                # Gone altogether, not merely moved on: apt cannot install it at any
-                # version, so the build is as broken as for a retired version.
-                results.append(
-                    AptResult(
-                        pin, arch, None, "unavailable", "no index lists the package"
-                    )
-                )
-            elif pin.version not in versions:
-                results.append(AptResult(pin, arch, candidate, "unavailable"))
-            elif compare_debian_versions(candidate, pin.version) > 0:
-                results.append(AptResult(pin, arch, candidate, "outdated"))
-            else:
-                results.append(AptResult(pin, arch, candidate, "current"))
+            try:
+                results.append(_judge_apt_pin(pin, arch, available, failed))
+            except Exception as exc:  # a version dpkg cannot order; reported per pin
+                detail = f"{type(exc).__name__}: {exc}"
+                results.append(AptResult(pin, arch, None, "error", detail))
     return results
+
+
+def _judge_apt_pin(
+    pin: AptPin, arch: str, available: dict[str, set[str]], failed: list[str]
+) -> AptResult:
+    """One pin against the versions the indexes list for its package."""
+    versions = available.get(pin.package, set())
+    candidate = _newest(versions)
+    if failed:
+        return AptResult(pin, arch, candidate, "error", "; ".join(failed))
+    if candidate is None:
+        # Gone altogether, not merely moved on: apt cannot install it at any
+        # version, so the build is as broken as for a retired version.
+        return AptResult(pin, arch, None, "unavailable", "no index lists the package")
+    if pin.version not in versions:
+        return AptResult(pin, arch, candidate, "unavailable")
+    if compare_debian_versions(candidate, pin.version) > 0:
+        return AptResult(pin, arch, candidate, "outdated")
+    return AptResult(pin, arch, candidate, "current")
 
 
 def render_apt_report(results: list[AptResult], markdown: bool = False) -> str:
