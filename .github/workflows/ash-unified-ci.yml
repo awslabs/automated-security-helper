@@ -414,7 +414,7 @@ jobs:
       matrix:
         # The runner images the other jobs set up uv on through setup-ash. The unit-test
         # jobs use all five, and no job that calls setup-ash uses an image outside them.
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15, windows-latest]
         # THE PULL REQUEST COVER
         #
         # On a pull_request event the `exclude` entries below evaluate to the saturated
@@ -431,22 +431,22 @@ jobs:
         # ubuntu-latest leg queued 3660 s and its macos-latest leg 4557 s while the arm64 and
         # Windows legs started in 26 s and 8 s. The tier legs then queued again on the same
         # labels (ubuntu-latest median 2605 s over 56 jobs in that run, macos-latest 5022 s
-        # over 7, macos-14 1982 s over 14; arm64 786 s over 42 and Windows 29 s over 36). A
+        # over 7, macOS 14 1982 s over 14; arm64 786 s over 42 and Windows 29 s over 36). A
         # pull request now runs ensure-cache on the two labels with headroom and starts its
-        # tier legs within a minute; the macOS legs it keeps (macos-14) read the uv cache
+        # tier legs within a minute; the macOS legs it keeps (macos-15) read the uv cache
         # main's pushes write, since a pull request falls back to its base branch's entries
         # (see the note on `lint`), and fetch from the index only when the pull request
         # changed the lock file.
         #
-        # Which macOS image a pull request keeps: macos-14, the pinned image, not the
+        # Which macOS image a pull request keeps: macos-15, the pinned image, not the
         # macos-latest alias. Both are Apple silicon (the notes under unit-test-macos), so the
         # cover loses no architecture; the alias is the label every repository's default
         # macOS job asks for, and on the first pull-request run of the cover (2026-10-29) the
-        # seven jobs still queued after 66 minutes were all macos-latest legs, while macos-14
+        # seven jobs still queued after 66 minutes were all macos-latest legs, while macOS 14
         # had read a median queue of 1982 s against macos-latest's 5022 s in run 40939758029.
         # The cost is one gate: unit-coverage's axis names macos-latest and no pinned image,
         # so a pull request runs no macOS coverage gate; the merge_group entry and the push
-        # to main run it. GitHub retires pinned images, and when macos-14 goes the five
+        # to main run it. GitHub retires pinned images, and when macos-15 goes the five
         # `exclude` entries below that name macos-latest (the three macOS tier jobs,
         # unit-coverage and install-validation) flip back to it, one value each;
         # tests/unit/test_unified_ci_job_counts.py pins which image the cover keeps, so the
@@ -471,7 +471,7 @@ jobs:
         exclude:
           - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
           - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
-          - os: ${{ github.event_name == 'pull_request' && 'macos-14' || '' }}
+          - os: ${{ github.event_name == 'pull_request' && 'macos-15' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -676,7 +676,7 @@ jobs:
   # instead of 200.
   #
   # The first tiered run of main (40939758029, 2026-10-29) measured that reading wrong. The
-  # unsharded unit legs ran 1837 to 1972 s of wall on ubuntu-latest, macos-14 and
+  # unsharded unit legs ran 1837 to 1972 s of wall on ubuntu-latest, macOS 14 and
   # windows-latest and 13 of those 20 legs were cancelled at the 30-minute timeout with
   # "Run PyTest" still running (the x86_64 py3.12 leg at 1798 s of pytest when it was cut);
   # only the arm64 legs finished, in 838 to 1710 s. The sums of the earlier eight-shard
@@ -757,12 +757,12 @@ jobs:
           - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
           - python-version: ${{ github.event_name == 'pull_request' && '3.11' || '' }}
           - python-version: ${{ github.event_name == 'pull_request' && '3.13' || '' }}
-        # No static exclusions. macos-14 was excluded from 3.10 and 3.11 on the stated
+        # No static exclusions. macOS 14 was excluded from 3.10 and 3.11 on the stated
         # grounds that arm64 macOS "only has 3.12 and 3.13". That is not true, and
         # this job disproves it itself: macos-latest resolves to an arm64 image
         # (macos-26-arm64), and its 3.10 leg installs CPython 3.10.11 from
         # actions/python-versions as python-3.10.11-darwin-arm64.tar.gz, then runs
-        # the whole suite green. macos-14 is the same architecture -- macos-14-arm64
+        # the whole suite green. macOS 14 is the same architecture -- macOS 14 arm64
         # -- and install-validation already sets up 3.10 and 3.11 on it. So the two
         # cells were excluded for a reason that never applied.
         #
@@ -772,7 +772,7 @@ jobs:
         # advance.
         #
         # 3.14 needs no exclusion either, and that is measured rather than argued:
-        # `unit-test (macos-14, py3.14)` ran green in run 35350532714, alongside
+        # `unit-test (macOS 14, py3.14)` ran green in run 35350532714, alongside
         # macos-latest, ubuntu-latest, ubuntu-24.04-arm and windows-latest. The
         # actions/python-versions manifest carries a darwin/arm64 build for 3.14.7,
         # the newest stable 3.14, which is what makes that resolvable.
@@ -823,7 +823,7 @@ jobs:
       # cap the macOS unit-test fan-out because the macOS runner pool is the smallest
       max-parallel: 10
       matrix:
-        os: [macos-latest, macos-14]
+        os: [macos-latest, macos-15]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         # Four shards, as on unit-test-linux.
         shard: [1of4, 2of4, 3of4, 4of4]
@@ -940,7 +940,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
         # The pull-request cover (the note on ensure-cache): the unit tier runs no
         # ubuntu-latest and no macos-latest leg on a pull request (its macOS legs run on
-        # macos-14, which this axis does not name), so there is no x86_64 Linux and no
+        # macos-15, which this axis does not name), so there is no x86_64 Linux and no
         # macOS coverage data to combine there; both legs drop out on a pull_request event
         # only, and the merge_group entry and the push to main run all four.
         exclude:
@@ -1071,7 +1071,7 @@ jobs:
       # cap the macOS integration-test fan-out because the macOS runner pool is the smallest
       max-parallel: 10
       matrix:
-        os: [macos-latest, macos-14]
+        os: [macos-latest, macos-15]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         shard: [1of4, 2of4, 3of4, 4of4]
         # The pull-request cover (the note on ensure-cache); the same entries as the unit
@@ -1189,7 +1189,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, macos-14]
+        os: [macos-latest, macos-15]
         # The pull-request cover (the note on ensure-cache): macos-latest drops out on a
         # pull_request event only.
         exclude:
@@ -2371,17 +2371,17 @@ jobs:
   # Keep the `python-version` axes of the two identical, deliberately: a version
   # added to one and not the other leaves a supported interpreter untested on
   # whichever surface was missed. The two still agree on which (os, python-version)
-  # cells pip, pipx, pre-commit and mcp cover, including macos-14 x {3.10, 3.11} --
+  # cells pip, pipx, pre-commit and mcp cover, including macOS 14 x {3.10, 3.11} --
   # they just no longer agree on the SHAPE. ash-install-methods.yml keeps one leg
   # per method; this job runs those four, plus uvx, as steps inside one `bundle`
   # leg per cell (see the note above the job). So the thing to keep aligned is the
   # cell coverage, not the leg names, and `method: [bundle, ...]` here against
   # `method: [pip, pipx, ...]` there is not a drift to reconcile.
   #
-  # `unit-test` above excludes macos-14 x {3.10, 3.11} on the grounds that macOS
+  # `unit-test` above excludes macOS 14 x {3.10, 3.11} on the grounds that macOS
   # ARM only has 3.12 and later. THAT REASON IS FALSE, measured two ways:
   #
-  # 1. This job runs macos-14 x {3.10, 3.11} for pip, pipx, pre-commit and mcp on
+  # 1. This job runs macOS 14 x {3.10, 3.11} for pip, pipx, pre-commit and mcp on
   #    every pull request, and they pass. Sampled runs 35350532730 and
   #    35351617775: 8 of 8 success in each -- 8 legs then, the same 8 method-on-cell
   #    runs inside 2 `bundle` legs now.
@@ -2390,7 +2390,7 @@ jobs:
   #
   # Deliberately NOT un-excluded here. The evidence proves those versions run on
   # that platform for *installs*; it does not prove the unit-test suite passes
-  # there, and no unit-test leg has ever executed on macos-14 below 3.12, so
+  # there, and no unit-test leg has ever executed on macOS 14 below 3.12, so
   # dropping the exclusion would run them for the first time inside an unrelated
   # change. Un-excluding is its own change, with its own verdict to read.
   #
@@ -2461,7 +2461,7 @@ jobs:
       # cap the install-validation fan-out so one run leaves room on the shared runner pool
       max-parallel: 20
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         # `bundle` is pip + pipx + uvx + pre-commit + mcp, as steps. homebrew and
         # the three container runtimes stay their own legs: they are already
@@ -2473,7 +2473,7 @@ jobs:
         exclude:
           # The pull-request cover (the note on ensure-cache). On a pull_request event the
           # bundle and homebrew legs leave the ubuntu-latest image, every leg leaves
-          # macos-latest (the bundle and the Homebrew formula run on macos-14 there), and
+          # macos-latest (the bundle and the Homebrew formula run on macos-15 there), and
           # Python 3.11 and 3.13 leave the bundle (the other methods already run on 3.12
           # only). The podman, finch and nerdctl legs are container runtimes pinned to
           # x86_64 images and keep their ubuntu-latest legs on every event. Homebrew on
@@ -2506,7 +2506,7 @@ jobs:
           # nerdctl on macOS needs a Linux VM, and hosted macOS has no nested
           # virtualization -- same reason as podman and finch below.
           - { os: macos-latest, method: nerdctl }
-          - { os: macos-14, method: nerdctl }
+          - { os: macos-15, method: nerdctl }
           # nerdctl only needs Python 3.12
           - { os: ubuntu-latest, python-version: "3.10", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.11", method: nerdctl }
@@ -2524,13 +2524,13 @@ jobs:
           - { os: ubuntu-24.04-arm, python-version: "3.14", method: podman }
           # Podman/Finch not on macOS (no nested virtualization on hosted runners)
           - { os: macos-latest, method: podman }
-          - { os: macos-14, method: podman }
+          - { os: macos-15, method: podman }
           - { os: ubuntu-latest, python-version: "3.10", method: finch }
           - { os: ubuntu-latest, python-version: "3.11", method: finch }
           - { os: ubuntu-latest, python-version: "3.13", method: finch }
           - { os: ubuntu-latest, python-version: "3.14", method: finch }
           - { os: macos-latest, method: finch }
-          - { os: macos-14, method: finch }
+          - { os: macos-15, method: finch }
 
           # Homebrew only needs Python 3.12 (the formula brings its own python@3.12)
           - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
@@ -2541,10 +2541,10 @@ jobs:
           - { os: macos-latest, python-version: "3.11", method: homebrew }
           - { os: macos-latest, python-version: "3.13", method: homebrew }
           - { os: macos-latest, python-version: "3.14", method: homebrew }
-          - { os: macos-14, python-version: "3.10", method: homebrew }
-          - { os: macos-14, python-version: "3.11", method: homebrew }
-          - { os: macos-14, python-version: "3.13", method: homebrew }
-          - { os: macos-14, python-version: "3.14", method: homebrew }
+          - { os: macos-15, python-version: "3.10", method: homebrew }
+          - { os: macos-15, python-version: "3.11", method: homebrew }
+          - { os: macos-15, python-version: "3.13", method: homebrew }
+          - { os: macos-15, python-version: "3.14", method: homebrew }
 
           # uvx used to need 20 exclude entries of its own to stay at 3.12, because
           # it bundles its own interpreter and so does identical work on every
@@ -2728,7 +2728,7 @@ jobs:
   # ---------------------------------------------------------------------------
   #
   # install-validation's matrix carries Homebrew legs too (ubuntu-latest, macos-latest,
-  # macos-14), and this job does not replace them. It exists so Homebrew on macOS stays
+  # macos-15), and this job does not replace them. It exists so Homebrew on macOS stays
   # tested whatever happens to that matrix: one exclude entry drops a matrix cell, and
   # nobody has to decide to stop testing macOS for that to happen.
   # tests/unit/test_homebrew_macos_ci_job.py holds what it runs.
@@ -2741,13 +2741,13 @@ jobs:
   # the committed formula builds the release tag on its `url` line, so it would test the
   # last release instead of this commit.
   #
-  # macos-14 is a pinned image, so what `macos-latest` names can move without changing
+  # macos-15 is a pinned image, so what `macos-latest` names can move without changing
   # what this job tests. No secrets: the install and the scans read only public package
   # indexes. nektos act cannot run a macOS job, so off GitHub this job is checked only by
   # that test and by actionlint.
   homebrew-macos:
-    name: "homebrew (macos-14, in-repo formula)"
-    runs-on: macos-14
+    name: "homebrew (macos-15, in-repo formula)"
+    runs-on: macos-15
     # The same budget as install-validation's Homebrew legs, which run the same script.
     timeout-minutes: 20
     permissions:
@@ -2823,7 +2823,7 @@ jobs:
   # ran 110, derived by the same test from the overlay rather than counted. Then the unit
   # tier was cut into four shards (25 legs to 100, +75): 291 on a push, 289 on a merge-queue
   # run, and a pull request ran 137. Then the cover's macOS image moved from macos-latest to
-  # macos-14, and unit-coverage, whose axis names no pinned image, lost its macOS leg on a
+  # macOS 14, and unit-coverage, whose axis names no pinned image, lost its macOS leg on a
   # pull request (-1): 136 there, the push and merge-queue figures unchanged.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 205 `PyTest - ...`
@@ -2851,7 +2851,7 @@ jobs:
   # same test expands the overlay for the pull_request event and holds this list to it.
   #
   # unit-test reached 25 combinations from three independent changes that all had to land:
-  # adding 3.14 to the axis (18 -> 23), removing the macos-14 exclusion for 3.10 and 3.11
+  # adding 3.14 to the axis (18 -> 23), removing the macOS 14 exclusion for 3.10 and 3.11
   # (#599), and nothing in #601, which relabels `macos-latest` as arm64 and moves no count.
   # Either matrix change alone gives 23 or 20, so a merge or rebase that keeps one side's
   # intent would look clean and be wrong by two combinations. The integration families

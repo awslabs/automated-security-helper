@@ -16870,7 +16870,7 @@ def test_ci_installs_ash_on_the_pythons_and_runners_the_page_names() -> None:
     The install-methods workflow's matrix, with its excludes applied, must run pip and
     pipx on every Python requires-python allows and uvx on the one version the sentence
     names, each on Ubuntu x86-64 and arm64, Windows and a macOS runner, and on no Intel
-    macOS runner. macos-14 and macos-latest are GitHub's Apple silicon labels. The
+    macOS runner. macos-15 and macos-latest are GitHub's Apple silicon labels. The
     control is that the matrix holds all three methods.
     """
     sentence = (
@@ -16898,7 +16898,7 @@ def test_ci_installs_ash_on_the_pythons_and_runners_the_page_names() -> None:
     for method, method_rows in by_method.items():
         oses = {r["os"] for r in method_rows}
         assert {"ubuntu-latest", "ubuntu-24.04-arm", "windows-latest"} <= oses, oses
-        assert oses & {"macos-latest", "macos-14"}, (method, oses)
+        assert oses & {"macos-latest", "macos-15"}, (method, oses)
         assert not {o for o in oses if re.search(r"intel|large|macos-1[0-3]$", o)}, oses
 
 

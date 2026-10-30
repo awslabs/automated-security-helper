@@ -628,7 +628,7 @@ runs:
         # macOS ships bash 3.2.57 and is not going to ship anything newer -- Apple stopped
         # at the last GPLv2 release -- so an unguarded `${wrapper[*]}` is fatal there while
         # being fine on the ubuntu runners and on any current development machine. Measured
-        # on #672: all ten `PyTest - macos-*` legs, 3.10 through 3.14 on both macos-14 and
+        # on #672: all ten `PyTest - macos-*` legs, 3.10 through 3.14 on both macOS 14 and
         # macos-latest, died on the first such expansion with
         #
         #     step.sh: line 93: wrapper[*]: unbound variable
