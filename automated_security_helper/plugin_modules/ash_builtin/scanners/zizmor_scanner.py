@@ -286,6 +286,27 @@ def _declares_a_github_action(path: Path) -> bool:
     return isinstance(document, dict) and "runs" in document
 
 
+#: How uv's executable is named, in any directory: the resolver returns uv by
+#: the name it found it under, which can be a bare word or a full path.
+_UV_EXECUTABLE_NAMES = frozenset({"uv", "uv.exe"})
+
+
+def _is_a_uv_route(command: Optional[List[str]]) -> bool:
+    """Whether *command*, as ``get_uv_tool_command`` returns it, runs the tool
+    through ``uv tool run`` rather than naming an executable found on PATH.
+
+    The resolver's fallback is a tool found by name, a bare path with no uv in
+    front of it. The uv route is read from the first word's own file name, so
+    uv given by an absolute path, or as ``uv.exe``, is the same route as a bare
+    ``uv``; comparing the argv text with the bare word would have refused those
+    and read a release uv can supply from its cache as missing.
+    """
+    if not command or len(command) < 3:
+        return False
+    executable = command[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return executable in _UV_EXECUTABLE_NAMES and command[1:3] == ["tool", "run"]
+
+
 def _probe(path: Path, method: str) -> bool:
     """``path.<method>()`` for ``is_file``, ``is_symlink`` or ``exists``, read as
     False when the stat is refused: before Python 3.13 those methods raise the
@@ -829,7 +850,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         resolved = get_uv_tool_command(
             self.command or "zizmor", from_spec=self._uv_probe_from_spec()
         )
-        if resolved is not None and resolved[:3] == ["uv", "tool", "run"]:
+        if _is_a_uv_route(resolved):
             self.dependencies_satisfied = True
             return True
         return False

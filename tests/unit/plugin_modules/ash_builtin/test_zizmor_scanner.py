@@ -1573,9 +1573,18 @@ def test_a_failed_install_does_not_fall_back_to_a_zizmor_the_probe_rejected(
     assert "could not provide" in scanner.dependency_unavailable_reason
 
 
-def test_a_uv_route_the_constrained_probe_resolves_still_satisfies(repo, monkeypatch):
+@pytest.mark.parametrize(
+    "uv",
+    ["uv", "/opt/uv/bin/uv", "C:\\Users\\me\\.local\\bin\\uv.exe", "UV.EXE"],
+    ids=["bare", "absolute", "windows", "upper-case"],
+)
+def test_a_uv_route_the_constrained_probe_resolves_still_satisfies(
+    repo, monkeypatch, uv
+):
     """The same probe answering with uv's own route (the release resolved from
-    uv's cache) is the one answer that still counts after a failed install."""
+    uv's cache) is the one answer that still counts after a failed install,
+    whatever name the resolver found uv under: a bare word, an absolute path,
+    or uv.exe. Comparing the argv text with the bare word refused the others."""
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     _with_executable(monkeypatch, "zizmor 1.28.0\n")
     scanner = _scanner(repo)
@@ -1589,11 +1598,27 @@ def test_a_uv_route_the_constrained_probe_resolves_still_satisfies(repo, monkeyp
     monkeypatch.setattr(
         zizmor_module,
         "get_uv_tool_command",
-        lambda *args, **kwargs: ["uv", "tool", "run", "zizmor"],
+        lambda *args, **kwargs: [uv, "tool", "run", "zizmor"],
     )
 
     assert scanner.validate_plugin_dependencies() is True
     assert scanner.dependencies_satisfied is True
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["/opt/bin/zizmor"],
+        ["/opt/uv/bin/uv", "tool", "install", "zizmor"],
+        ["/opt/uv/bin/uv", "tool"],
+        ["/opt/tools/uv-wrapper", "tool", "run", "zizmor"],
+        [],
+        None,
+    ],
+    ids=["bare-binary", "other-verb", "short", "other-name", "empty", "none"],
+)
+def test_a_command_that_is_not_a_uv_route_is_read_as_none(command):
+    assert zizmor_module._is_a_uv_route(command) is False
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX named pipes")
