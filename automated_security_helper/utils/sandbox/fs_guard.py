@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import (
     IO,
     Any,
+    Callable,
     Dict,
     FrozenSet,
     Iterable,
@@ -342,132 +343,290 @@ def _guard_root(
 
 def _sweep_warning(
     text: str, value_free: str, values: Iterable[str], values_unread: bool
-) -> None:
-    """Log a sweep failure, redacted with the sweep's values.
+) -> str:
+    """Log a sweep failure, redacted with the sweep's values; return the line logged.
 
     ``text`` names the entry or root and the OS error; ``value_free`` says the
     same with nothing a tool or an option chose. When the caller could not read
     its redaction values (``values_unread``) nothing in ``text`` can be hidden, so
-    the value-free line is logged instead.
+    the value-free line is logged instead. The returned line is the one a caller
+    may put in an exception: it carries nothing the log does not.
     """
     if values_unread:
         # The values to hide could not be read, so nothing here can be redacted:
         # no entry name, root or OS error.
         ASH_LOGGER.warning(value_free)
-        return
+        return value_free
     # The entry's name and the root are paths a tool or an option chose, so
     # either can hold an env-read value: redacted with the sweep's values, and
     # the scope's, before it is logged.
     from automated_security_helper.utils.sandbox.scope import scope_shown_text
 
-    ASH_LOGGER.warning(scope_shown_text(text, tuple(values)))
+    shown = scope_shown_text(text, tuple(values))
+    ASH_LOGGER.warning(shown)
+    return shown
+
+
+#: What the walks report through their ``refuse`` callback for a directory they
+#: could not open or list, an entry they could not examine, and a directory they
+#: did not enter because of the depth limit.
+_REFUSE_LIST = "list"
+_REFUSE_EXAMINE = "examine"
+_REFUSE_DESCEND = "sweep below"
+
+
+def _below(relative: str, name: str) -> str:
+    """``name``'s path relative to the root, given its directory's."""
+    return name if relative == "." else f"{relative}/{name}"
+
+
+def _walk_descriptors(
+    root: Path, refuse: "Callable[[str, str, OSError], None]"
+) -> Iterator[Tuple[str, int, Dict[str, os.stat_result], List[str]]]:
+    """Walk ``root`` top-down through directory descriptors, never following a link.
+
+    For each directory reached this yields ``(relative, dir_fd, statuses,
+    dirnames)``: its path relative to ``root`` (``"."`` for the root itself), its
+    open descriptor, the lstat of every entry in it by name, and the names of its
+    subdirectories, which the caller may remove from the list to keep the walk
+    out of them. Entries are examined and subdirectories opened relative to the
+    descriptor, so a component replaced by a link while the walk runs is not
+    followed.
+
+    Nothing here raises for what the tree holds. A directory that cannot be
+    opened or listed (the root included), an entry whose lstat fails with
+    anything but ENOENT, and a directory with more directories below it at
+    _SWEEP_DEPTH_LIMIT (``_too_deep``) are each reported once through
+    ``refuse(what, relative, error)``, with ``what`` one of _REFUSE_LIST,
+    _REFUSE_EXAMINE and _REFUSE_DESCEND and ``relative`` the full path below
+    the root, and the walk goes on with the next entry or sibling. An entry or
+    directory that vanished between the listing and its examination is passed
+    over. A missing root yields nothing.
+
+    Written here rather than over os.fwalk because fwalk reports an unopenable
+    subdirectory to ``onerror`` by its bare name, with no parent to tell ``a/cache``
+    from ``b/cache``, raises for the root itself without calling ``onerror`` at all,
+    and ends the whole walk when ``onerror`` raises, siblings unvisited.
+    """
+    try:
+        fd = os.open(root, _DIR_WALK_FLAGS)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        refuse(_REFUSE_LIST, ".", error)
+        return
+    try:
+        yield from _walk_descriptor(root, fd, (), refuse)
+    finally:
+        os.close(fd)
+
+
+def _walk_descriptor(
+    root: Path,
+    fd: int,
+    parts: Tuple[str, ...],
+    refuse: "Callable[[str, str, OSError], None]",
+) -> Iterator[Tuple[str, int, Dict[str, os.stat_result], List[str]]]:
+    """One directory of ``_walk_descriptors``: its entries, then its subdirectories."""
+    relative = "/".join(parts) if parts else "."
+    try:
+        names = os.listdir(fd)
+    except OSError as error:
+        refuse(_REFUSE_LIST, relative, error)
+        return
+    statuses: Dict[str, os.stat_result] = {}
+    dirnames: List[str] = []
+    for name in names:
+        try:
+            status = os.lstat(name, dir_fd=fd)
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            # A directory the process can read but not search lists its entries
+            # and refuses their lstat (EACCES): a link there would otherwise be
+            # passed over, the hole the sweep and the pre-check exist to close.
+            refuse(_REFUSE_EXAMINE, _below(relative, name), error)
+            continue
+        statuses[name] = status
+        if stat.S_ISDIR(status.st_mode):
+            dirnames.append(name)
+    yield relative, fd, statuses, dirnames
+    if not dirnames:
+        return
+    try:
+        _too_deep(root, os.path.join(root, *parts), dirnames)
+    except OSError as error:
+        refuse(_REFUSE_DESCEND, relative, error)
+        return
+    for name in dirnames:
+        try:
+            child = os.open(name, _DIR_WALK_FLAGS, dir_fd=fd)
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            # EACCES for a mode the scanner set; ELOOP or ENOTDIR for a directory
+            # replaced by a link since its lstat, which O_NOFOLLOW refuses to
+            # follow and this walk does not remove.
+            refuse(_REFUSE_LIST, _below(relative, name), error)
+            continue
+        try:
+            yield from _walk_descriptor(root, child, parts + (name,), refuse)
+        finally:
+            os.close(child)
 
 
 def _sweep_tree(
-    root: Path, values: Iterable[str] = (), values_unread: bool = False
+    root: Path,
+    values: Iterable[str] = (),
+    values_unread: bool = False,
+    refusals: Optional[List[OSError]] = None,
 ) -> int:
-    """Remove non-regular, non-directory entries under ``root``.
+    """Remove non-regular, non-directory entries under ``root``; return how many.
 
-    os.fwalk descends through directory file descriptors and never follows a
-    symlink, so a directory replaced by a link while the walk runs is not entered.
-    Entries are removed relative to their directory's descriptor for the same
-    reason. Platforms without fwalk (Windows, where no sandbox backend exists)
-    fall back to os.walk.
+    The walk (``_walk_descriptors``) descends through directory file descriptors
+    and never follows a symlink, so a directory replaced by a link while it runs
+    is not entered, and entries are removed relative to their directory's
+    descriptor for the same reason. Platforms without directory descriptors
+    (Windows, where no sandbox backend exists) fall back to os.walk, with the
+    same decisions made by name.
 
-    A directory the walk cannot open for listing (a mode the scanner set, a
-    descriptor limit) is refused rather than skipped: both walks would otherwise
-    pass over it without a word, and every link below it would survive for a
-    reader that opens paths by name to follow. The refusal is logged as a removal
-    failure is, and raised as the OSError the walk met, so the post-scan sweep
-    fails the scanner and the spawn cleanup records it. A tree nested deeper than
-    _SWEEP_DEPTH_LIMIT is refused the same way (``_too_deep``): fwalk recurses
-    once per level, so a chain a scanner left a thousand directories deep ended
-    the sweep in RecursionError, or at the descriptor limit, with nothing said.
+    What the walk cannot do is refused, never skipped: a directory it cannot open
+    or list (a mode the scanner set, a descriptor limit), an entry it cannot
+    examine (a directory readable but not searchable), a tree nested past
+    _SWEEP_DEPTH_LIMIT. Skipped, every link below the spot would survive for a
+    reader that opens paths by name to follow. Each refusal is logged as a removal
+    failure is (``_sweep_warning``: redacted with the sweep's values, value-free
+    when they could not be read) and the sweep GOES ON: the siblings of a refused
+    directory are still swept, and so is the rest of the tree, so a scanner cannot
+    shield one link with one unlistable directory. The refusals are collected as
+    OSErrors whose text is the logged line and nothing more, so the exception that
+    reaches the executor's failure handler (which can only redact with the plugin's
+    own values, the ones that could not be read) names no tool-chosen path when
+    the warning did not. With ``refusals`` given they are appended there for the
+    caller to raise once over every root (sweep_writable); without it, the first is
+    raised when this tree is done, with the others counted.
+
+    A missing root has nothing below it and sweeps as empty: a sandboxed scanner
+    that wrote nothing never created its results directory.
     """
-    removed = 0
+    values = tuple(values)
+    collected: List[OSError] = [] if refusals is None else refusals
 
-    def unlistable(error: OSError) -> None:
-        if error.errno == errno.ENOENT:
-            # Removed while the walk ran: nothing is below it any more.
-            return
-        _sweep_warning(
-            f"Could not list {error.filename} under {root}: {error}",
-            "Could not list a directory a scanner left in its results directory; "
-            "it is not named because the plugin's redaction values could not be "
-            "read",
+    def refuse(what: str, relative: str, error: OSError) -> None:
+        shown = _sweep_warning(
+            f"Could not {what} {relative} under {root}: {error}",
+            f"Could not {what} an entry of a scanner's results directory; it is not "
+            "named because the plugin's redaction values could not be read",
             values,
             values_unread,
         )
-        raise OSError(
-            error.errno,
-            f"could not list {error.filename} under {root}, so the links a "
-            "scanner may have left below it could not be removed",
-        ) from error
+        collected.append(OSError(_errno_of(error), shown))
 
-    try:
-        os.lstat(root)
-    except FileNotFoundError:
-        # A sandboxed scanner that wrote nothing created no results directory:
-        # nothing is below it to remove. Both walks would raise at the root
-        # (fwalk) or pass over it in silence (walk); the sweep reads it as empty,
-        # as refuse_links_below reads a missing root.
-        return removed
+    def remove(name: str, dir_fd: Optional[int], path: Union[str, Path]) -> int:
+        # A removal that fails is recorded and the sweep goes on to the next
+        # entry; the entry stays for the operator, named in the warning.
+        try:
+            if dir_fd is None:
+                os.unlink(path)
+            else:
+                os.unlink(name, dir_fd=dir_fd)
+        except OSError as e:
+            _sweep_warning(
+                f"Could not remove {name} under {root}: {e}",
+                "Could not remove an entry a scanner left in its results "
+                "directory; it is not named because the plugin's redaction "
+                "values could not be read",
+                values,
+                values_unread,
+            )
+            return 0
+        return 1
+
+    removed = 0
     if not hasattr(os, "fwalk"):
-        for dirpath, dirnames, filenames in os.walk(
-            root, onerror=unlistable, followlinks=False
-        ):
-            _too_deep(root, dirpath, dirnames)
-            for name in list(dirnames) + filenames:
-                path = os.path.join(dirpath, name)
-                try:
-                    mode = os.lstat(path).st_mode
-                except OSError:
-                    continue
-                if not _is_special(mode):
-                    continue
-                # The same shape as the descriptor walk below: a removal that
-                # fails is recorded and the sweep goes on to the next entry.
-                try:
-                    os.unlink(path)
-                    removed += 1
-                except OSError as e:
-                    _sweep_warning(
-                        f"Could not remove {name} under {root}: {e}",
-                        "Could not remove an entry a scanner left in its results "
-                        "directory; it is not named because the plugin's redaction "
-                        "values could not be read",
-                        values,
-                        values_unread,
-                    )
-                if name in dirnames:
-                    dirnames.remove(name)
-        return removed
-    for dirpath, dirnames, filenames, dir_fd in os.fwalk(
-        root, onerror=unlistable, follow_symlinks=False
+        removed = _sweep_by_name(root, refuse, remove)
+    else:
+        for _relative, dir_fd, statuses, _dirnames in _walk_descriptors(root, refuse):
+            for name, status in statuses.items():
+                if _is_special(status.st_mode):
+                    removed += remove(name, dir_fd, name)
+    if refusals is None and collected:
+        raise _sweep_refused(collected) from None
+    return removed
+
+
+def _sweep_by_name(
+    root: Path,
+    refuse: "Callable[[str, str, OSError], None]",
+    remove: "Callable[[str, Optional[int], Union[str, Path]], int]",
+) -> int:
+    """``_sweep_tree`` over os.walk, for a platform without directory descriptors.
+
+    The same refusals as the descriptor walk, reported through ``refuse`` with the
+    directory's path relative to ``root``: os.walk hands ``onerror`` the full path
+    of the directory it could not list, the root included, and goes on with the
+    siblings when ``onerror`` returns.
+    """
+    removed = 0
+
+    def relative_to_root(path: Union[str, bytes, None]) -> str:
+        if path is None:
+            return "."
+        return os.path.relpath(os.fsdecode(path), root).replace(os.sep, "/")
+
+    def unlistable(error: OSError) -> None:
+        if error.errno == errno.ENOENT:
+            # Removed while the walk ran, or never created: nothing is below it.
+            return
+        refuse(_REFUSE_LIST, relative_to_root(error.filename), error)
+
+    for dirpath, dirnames, filenames in os.walk(
+        root, onerror=unlistable, followlinks=False
     ):
-        _too_deep(root, dirpath, dirnames)
+        relative = relative_to_root(dirpath)
         for name in list(dirnames) + filenames:
+            path = os.path.join(dirpath, name)
             try:
-                mode = os.lstat(name, dir_fd=dir_fd).st_mode
-            except OSError:
+                mode = os.lstat(path).st_mode
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                refuse(_REFUSE_EXAMINE, _below(relative, name), error)
                 continue
             if not _is_special(mode):
                 continue
-            try:
-                os.unlink(name, dir_fd=dir_fd)
-                removed += 1
-            except OSError as e:
-                _sweep_warning(
-                    f"Could not remove {name} under {root}: {e}",
-                    "Could not remove an entry a scanner left in its results "
-                    "directory; it is not named because the plugin's redaction "
-                    "values could not be read",
-                    values,
-                    values_unread,
-                )
+            removed += remove(name, None, path)
             if name in dirnames:
                 dirnames.remove(name)
+        try:
+            _too_deep(root, dirpath, dirnames)
+        except OSError as error:
+            refuse(_REFUSE_DESCEND, relative, error)
+            dirnames.clear()
     return removed
+
+
+def _errno_of(error: OSError) -> int:
+    """``error``'s errno, or EIO for an OSError raised without one."""
+    return error.errno if error.errno is not None else errno.EIO
+
+
+def _sweep_refused(refusals: List[OSError]) -> OSError:
+    """One OSError for a sweep's refusals, saying no more than their warnings did.
+
+    The first refusal's errno (so EACCES is a PermissionError, as before) and its
+    logged line, with the others counted: each was logged in full as it was met,
+    so the exception, which travels into ash.log, the scanner's row and its
+    results file, repeats nothing and names nothing the warnings kept back. The
+    caller raises it ``from None``: the OSErrors the walk met carry the raw paths.
+    """
+    first = refusals[0]
+    more = (
+        ""
+        if len(refusals) == 1
+        else f"; and {len(refusals) - 1} more, each logged as a warning"
+    )
+    return OSError(first.errno, f"{first.strerror}{more}")
 
 
 def _is_special(mode: int) -> bool:
@@ -509,38 +668,48 @@ def refuse_links_below(root: Union[str, Path]) -> None:
     regular file with more than one name is refused too (OutputHardLinkRefused):
     the scanner can write the results directory, and a write to that file changes
     every name it has. The walk never follows a link. A missing ``root`` has nothing
-    below it. A directory below ``root`` that cannot be opened for listing is
-    refused too, as the OSError the walk met: skipped, the links below it would be
-    neither refused here nor removed by the sweep.
+    below it; a root that is itself a link is refused as a link at it (the sweep
+    after the spawn would remove it without a word), and one that is not a
+    directory raises NotADirectoryError. The root is read with os.lstat, not
+    ``Path.is_dir``, which since Python 3.14 reads every OSError as False and would
+    pass a root the process cannot check over in silence. A directory below
+    ``root`` that cannot be opened or listed, and an entry that cannot be examined
+    (a directory readable but not searchable), are refused too, as the OSError
+    the walk met: skipped, a link there would be neither refused here nor removed
+    by the sweep.
     """
     root = Path(os.path.abspath(root))
-    if not hasattr(os, "fwalk") or not root.is_dir():
+    if not hasattr(os, "fwalk"):
         return
+    try:
+        status = os.lstat(root)
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(status.st_mode):
+        raise OutputLinkRefused(root, root, where="at a directory it writes below")
+    if not stat.S_ISDIR(status.st_mode):
+        raise NotADirectoryError(
+            errno.ENOTDIR,
+            f"{root} is not a directory, so what a scanner would write below it "
+            "cannot be checked",
+        )
 
-    def unlistable(error: OSError) -> None:
-        if error.errno == errno.ENOENT:
-            # Removed while the walk ran: nothing is below it any more.
-            return
+    def refuse(what: str, relative: str, error: OSError) -> None:
         raise OSError(
-            error.errno,
-            f"could not list {error.filename} under {root}, so a link below it "
-            "could not be refused",
+            _errno_of(error),
+            f"could not {what} {relative} under {root} ({error}), so a link below "
+            "it could not be refused",
         ) from error
 
-    for dirpath, dirnames, filenames, dir_fd in os.fwalk(
-        root, onerror=unlistable, follow_symlinks=False
-    ):
-        _too_deep(root, dirpath, dirnames)
-        for name in sorted(list(dirnames) + filenames):
-            try:
-                status = os.lstat(name, dir_fd=dir_fd)
-            except OSError:
-                continue
+    for relative, _dir_fd, statuses, _dirnames in _walk_descriptors(root, refuse):
+        where = root if relative == "." else root / relative
+        for name in sorted(statuses):
+            status = statuses[name]
             if stat.S_ISLNK(status.st_mode):
-                link = Path(dirpath) / name
+                link = where / name
                 raise OutputLinkRefused(link, link)
             if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
-                raise OutputHardLinkRefused(Path(dirpath) / name, status.st_nlink)
+                raise OutputHardLinkRefused(where / name, status.st_nlink)
 
 
 def sweep_writable(
@@ -556,9 +725,19 @@ def sweep_writable(
     says the caller could not read them (the plugin's hook raised or gave no
     value set): ``values`` is then empty without meaning "none", and the
     warning is value-free instead.
+
+    Every root is swept whatever happened at the others, and the whole of each
+    tree whatever a directory in it refused (``_sweep_tree``): a refusal is logged
+    where it is met and the sweep goes on, the count of removals is logged as
+    usual, and then one OSError is raised for all the refusals, its text the first
+    refusal's logged line (so it names no tool-chosen path the warning did not)
+    with the others counted, chained to nothing. The post-scan sweep fails the
+    scanner on it; the spawn cleanup records it at DEBUG and runs its release step
+    regardless (SpawnPlan.run_cleanup).
     """
     removed = 0
     values = tuple(values)
+    refusals: List[OSError] = []
     for root in roots:
         root = Path(root)
         try:
@@ -570,14 +749,17 @@ def sweep_writable(
                 removed += 1
                 continue
         except FileNotFoundError:
-            # Removed since the check: nothing is there to sweep.
+            # A sandboxed scanner that wrote nothing created no results
+            # directory, the common case; or the root went since it was planned.
+            # Nothing is below it to remove, and the sweep creates nothing.
             continue
         except OSError as e:
             # The root could not be checked (a parent the process cannot search,
             # a link loop) or a link at the root could not be removed. Passing it
             # over would leave whatever is there for a reader that opens paths by
-            # name to follow, so it is refused as an unlistable directory is.
-            _sweep_warning(
+            # name to follow, so it is refused as an unlistable directory is; the
+            # other roots are still swept.
+            shown = _sweep_warning(
                 f"Could not check or remove the root {root}: {e}",
                 "Could not check or remove a scanner's results directory root; it "
                 "is not named because the plugin's redaction values could not be "
@@ -585,18 +767,25 @@ def sweep_writable(
                 values,
                 values_unread,
             )
-            raise
-        removed += _sweep_tree(root, values, values_unread)
+            refusals.append(OSError(_errno_of(e), shown))
+            continue
+        removed += _sweep_tree(root, values, values_unread, refusals)
     if removed:
         ASH_LOGGER.warning(
             f"Scanner sandbox: removed {removed} symlink(s) or special file(s) a "
             "scanner left in its results directory"
         )
+    if refusals:
+        raise _sweep_refused(refusals) from None
     return removed
 
 
 _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+#: How the sweep and the pre-check open each directory they walk: a directory
+#: only, never through a link at the name, and without blocking on a FIFO put
+#: where a directory was.
+_DIR_WALK_FLAGS = os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _NONBLOCK
 # No O_TRUNC: the file is truncated only after fstat shows it is a regular file
 # that no other name refers to (_open_regular).
 _FILE_FLAGS = os.O_WRONLY | os.O_CREAT | _NOFOLLOW | _NONBLOCK | _BINARY
@@ -893,7 +1082,7 @@ def replace_without_following(
         status = None
     if status is not None and _is_link_status(status):
         raise OutputLinkRefused(path, path, where="at a destination it writes")
-    staging = path.with_name(_staging_name(path.name))
+    staging = path.with_name(_staging_name(path.name, path.parent))
     fd = os.open(
         staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY, 0o666
     )
@@ -910,23 +1099,47 @@ def replace_without_following(
 _STAGING_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY
 #: The longest entry name the filesystems ASH writes to accept, in bytes (NAME_MAX
 #: on Linux and macOS; NTFS counts 255 characters, which is never fewer bytes).
+#: The ceiling, and the figure used where the directory's own limit cannot be read.
 _NAME_MAX = 255
 
 
-def _staging_name(name: str) -> str:
+def _name_max(directory: Optional[Union[str, Path]]) -> int:
+    """The longest entry name ``directory``'s filesystem accepts, in bytes.
+
+    ``os.pathconf(directory, "PC_NAME_MAX")`` where the platform has it, because a
+    filesystem can accept fewer than NAME_MAX bytes (eCryptfs accepts 143), and
+    a target whose name a plain open there accepts would otherwise fail with
+    ENAMETOOLONG at the staging open. _NAME_MAX when there is no directory to
+    ask, no pathconf (Windows), the call fails (the directory is not there yet)
+    or the answer is not a positive number; never more than _NAME_MAX.
+    """
+    if directory is None or not hasattr(os, "pathconf"):
+        return _NAME_MAX
+    try:
+        limit = os.pathconf(directory, "PC_NAME_MAX")
+    except (OSError, ValueError):
+        return _NAME_MAX
+    if not isinstance(limit, int) or limit <= 0:
+        return _NAME_MAX
+    return min(limit, _NAME_MAX)
+
+
+def _staging_name(name: str, directory: Optional[Union[str, Path]] = None) -> str:
     """The name of the staging file open_for_atomic_write writes ``name`` through.
 
     A dot, the target's name, the pid and 32 hex digits of randomness, then
     ``.tmp``. The target's name is shortened, from its end, until the whole fits
-    in _NAME_MAX bytes: the suffix alone is about 46 bytes, so a target whose name
-    a plain open accepts could otherwise fail with ENAMETOOLONG at the staging
-    open. Uniqueness is the pid and the random digits, which are always kept.
-    secrets, not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter that
-    report ids are built from, and a staging name only has to be unique.
+    in the name limit of ``directory``'s filesystem (``_name_max``; _NAME_MAX
+    bytes without one): the suffix alone is about 46 bytes, so a target whose
+    name a plain open accepts could otherwise fail with ENAMETOOLONG at the
+    staging open. Uniqueness is the pid and the random digits, which are always
+    kept. secrets, not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter
+    that report ids are built from, and a staging name only has to be unique.
     """
+    limit = _name_max(directory)
     suffix = f".{os.getpid()}.{secrets.token_hex(16)}.tmp"
     stem = name
-    while stem and len(os.fsencode(f".{stem}{suffix}")) > _NAME_MAX:
+    while stem and len(os.fsencode(f".{stem}{suffix}")) > limit:
         stem = stem[:-1]
     return f".{stem}{suffix}"
 
@@ -988,7 +1201,7 @@ def open_for_atomic_write(
     guard = _guard_root(path, root)
     anchor = guard[1] if guard is not None else None
     relative = path.relative_to(anchor).parts if anchor is not None else ()
-    staging = _staging_name(path.name)
+    staging = _staging_name(path.name, path.parent)
     dir_fd: Optional[int] = None
     if anchor is not None and _HAS_DIR_FD:
         dir_fd = _open_dir_beneath(anchor, relative[:-1], path)

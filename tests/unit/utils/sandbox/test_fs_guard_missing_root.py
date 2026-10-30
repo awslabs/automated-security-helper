@@ -44,9 +44,20 @@ def test_a_missing_root_among_others_does_not_stop_the_sweep(tmp_path):
     assert not os.path.lexists(written / "escape")
 
 
+def test_the_tree_sweep_itself_reads_a_missing_root_as_empty(tmp_path):
+    """sweep_writable passes a missing root over before the tree sweep runs;
+    the tree sweep, called on its own, reads one as empty too."""
+    missing = tmp_path / "results"
+
+    assert fs_guard._sweep_tree(missing) == 0
+
+
 @pytest.mark.skipif(not hasattr(os, "fwalk"), reason="the os.walk branch is taken")
 def test_the_os_walk_fallback_agrees_on_a_missing_root(tmp_path, monkeypatch):
+    """Called on the tree sweep directly, so the os.walk branch is reached:
+    through sweep_writable the missing root is passed over before it."""
     monkeypatch.delattr(os, "fwalk")
     missing = tmp_path / "results"
 
+    assert fs_guard._sweep_tree(missing) == 0
     assert fs_guard.sweep_writable([missing]) == 0

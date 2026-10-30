@@ -7,8 +7,16 @@ os.fwalk and os.walk call ``onerror`` for a subdirectory they cannot open and
 otherwise pass over it in silence. Called without one, fs_guard's sweep left every
 link below such a directory in place while reporting nothing, and the check that
 runs before a sandboxed scanner (refuse_links_below) passed a link it never saw.
-These run in-process on tmp_path only; the directory mode they set is POSIX, and
-root lists every directory, so they skip where neither holds.
+
+The refusal is logged where it is met and the sweep continues: the siblings of the
+refused directory and the other writable roots are still swept, the removals are
+counted, and one OSError is raised at the end whose text is the logged line (so it
+names no tool-chosen path the warning did not, and chains nothing that would).
+A directory the process can read but not search lists its entries and refuses
+their lstat; that is a refusal too, not a skip.
+
+These run in-process on tmp_path only; the directory modes they set are POSIX,
+and root lists every directory, so they skip where neither holds.
 """
 
 import logging
@@ -17,6 +25,7 @@ import sys
 
 import pytest
 
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.utils.sandbox import fs_guard
 
 pytestmark = [
@@ -29,6 +38,14 @@ pytestmark = [
         reason="root can list a directory whatever its mode",
     ),
 ]
+
+
+def _warnings(caplog, head):
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith(head)
+    ]
 
 
 @pytest.fixture
@@ -47,6 +64,21 @@ def locked_tree(tmp_path):
         locked.chmod(0o700)
 
 
+@pytest.fixture
+def readable_locked_tree(tmp_path):
+    """The same, but the subdirectory can be read and not searched (0o600): its
+    entries list, and their lstat is refused."""
+    root = tmp_path / "results"
+    locked = root / "locked"
+    locked.mkdir(parents=True)
+    (locked / "escape").symlink_to(tmp_path)
+    locked.chmod(0o600)
+    try:
+        yield root, locked
+    finally:
+        locked.chmod(0o700)
+
+
 def test_the_sweep_refuses_a_directory_it_cannot_list(locked_tree, caplog):
     root, locked = locked_tree
 
@@ -55,21 +87,19 @@ def test_the_sweep_refuses_a_directory_it_cannot_list(locked_tree, caplog):
             fs_guard.sweep_writable([root], ("SWEEPSECRET-4471",))
 
     assert "locked" in str(refused.value)
-    assert isinstance(refused.value.__cause__, PermissionError)
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "Could not list" in record.getMessage()
+    assert refused.value.__cause__ is None, "the raw OSError is not chained"
+    assert _warnings(caplog, "Could not list"), [
+        record.getMessage() for record in caplog.records
     ]
-    assert lines, [record.getMessage() for record in caplog.records]
     locked.chmod(0o700)
     assert os.path.lexists(locked / "escape"), "the refused link is left as found"
 
 
-def test_the_sweep_refusal_warning_hides_an_env_read_value(tmp_path, caplog):
+def test_the_sweep_refusal_hides_an_env_read_value(tmp_path, caplog):
     """The refusal names the directory and the root, and a tool can name a
     directory after an option it was given: the warning is redacted with the
-    sweep's values, as the could-not-remove warning is."""
+    sweep's values, as the could-not-remove warning is, and so is the raised
+    exception, whose text travels into the scanner's row and results file."""
     value = "SWEEPSECRET-4472"
     root = tmp_path / "results"
     locked = root / f"dir-{value}"
@@ -77,42 +107,186 @@ def test_the_sweep_refusal_warning_hides_an_env_read_value(tmp_path, caplog):
     locked.chmod(0o000)
     try:
         with caplog.at_level(logging.WARNING, logger="ash"):
-            with pytest.raises(PermissionError):
+            with pytest.raises(PermissionError) as refused:
                 fs_guard.sweep_writable([root], (value,))
     finally:
         locked.chmod(0o700)
 
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "Could not list" in record.getMessage()
-    ]
+    lines = _warnings(caplog, "Could not list")
     assert lines, [record.getMessage() for record in caplog.records]
     assert not any(value in line for line in lines), lines
+    assert value not in str(refused.value), str(refused.value)
+    assert refused.value.__cause__ is None
 
 
 def test_the_sweep_refusal_is_value_free_when_the_values_could_not_be_read(
     tmp_path, caplog
 ):
+    """With the plugin's values unread nothing can be redacted, so neither the
+    warning nor the exception names the directory: the executor's handler can
+    only redact the exception with the same values it could not read."""
     root = tmp_path / "results"
     locked = root / "dir-SWEEPSECRET-4473"
     locked.mkdir(parents=True)
     locked.chmod(0o000)
     try:
         with caplog.at_level(logging.WARNING, logger="ash"):
-            with pytest.raises(PermissionError):
+            with pytest.raises(PermissionError) as refused:
                 fs_guard.sweep_writable([root], (), values_unread=True)
     finally:
         locked.chmod(0o700)
 
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "Could not list" in record.getMessage()
-    ]
+    lines = _warnings(caplog, "Could not list")
     assert lines, [record.getMessage() for record in caplog.records]
     assert all("SWEEPSECRET-4473" not in line for line in lines), lines
     assert all("redaction values could not be read" in line for line in lines), lines
+    text = str(refused.value)
+    assert "SWEEPSECRET-4473" not in text, text
+    assert str(root) not in text, text
+    assert "redaction values could not be read" in text, text
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None or refused.value.__suppress_context__
+
+
+def test_a_root_the_sweep_cannot_open_is_refused_through_the_same_path(
+    tmp_path, caplog
+):
+    """os.fwalk raises for a root it cannot open without calling ``onerror``, so
+    the raw error, root path included, left the sweep with no warning at all;
+    the sweep's own walk reports the root like any directory."""
+    root = tmp_path / "results-SWEEPSECRET-4477"
+    root.mkdir()
+    (root / "escape").symlink_to(tmp_path)
+    root.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.sweep_writable([root], (), values_unread=True)
+    finally:
+        root.chmod(0o700)
+
+    lines = _warnings(caplog, "Could not list")
+    assert lines, [record.getMessage() for record in caplog.records]
+    assert "SWEEPSECRET-4477" not in str(refused.value), str(refused.value)
+    assert refused.value.__cause__ is None
+    assert os.path.lexists(root / "escape"), "the link behind the mode is left"
+
+
+def test_a_refusal_does_not_end_the_sweep_of_siblings_or_other_roots(tmp_path, caplog):
+    """One unlistable directory used to end the whole walk and the loop over the
+    policy's writable roots, so every link after it survived and the count of
+    removals was lost. The sweep now continues and raises once at the end."""
+    first = tmp_path / "results"
+    locked = first / "a-locked"
+    locked.mkdir(parents=True)
+    (locked / "hidden").symlink_to(tmp_path)
+    (first / "b").mkdir()
+    (first / "b" / "escape").symlink_to(tmp_path)
+    (first / "z-escape").symlink_to(tmp_path)
+    second = tmp_path / "other-results"
+    second.mkdir()
+    (second / "escape").symlink_to(tmp_path)
+    locked.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.sweep_writable([first, second], ("SWEEPSECRET-4478",))
+    finally:
+        locked.chmod(0o700)
+
+    assert not os.path.lexists(first / "b" / "escape"), "a sibling's link is swept"
+    assert not os.path.lexists(first / "z-escape"), "a later entry is swept"
+    assert not os.path.lexists(second / "escape"), "the next root is swept"
+    assert os.path.lexists(locked / "hidden"), "the refused directory is left"
+    assert "a-locked" in str(refused.value)
+    summaries = _warnings(caplog, "Scanner sandbox: removed")
+    assert summaries and "removed 3 " in summaries[0], summaries
+
+
+def test_several_refusals_raise_once_with_the_others_counted(tmp_path, caplog):
+    root = tmp_path / "results"
+    for name in ("a-locked", "b-locked"):
+        (root / name).mkdir(parents=True)
+    for name in ("a-locked", "b-locked"):
+        (root / name).chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.sweep_writable([root])
+    finally:
+        for name in ("a-locked", "b-locked"):
+            (root / name).chmod(0o700)
+
+    assert len(_warnings(caplog, "Could not list")) == 2
+    assert "and 1 more" in str(refused.value), str(refused.value)
+
+
+def test_the_spawn_cleanup_still_releases_after_a_refused_sweep(locked_tree):
+    """scope.py appends the sweep and then the release to the spawn plan's
+    cleanup; a sweep that raises must not keep the release from running."""
+    from automated_security_helper.utils.sandbox.backends import SpawnPlan
+
+    root, _locked = locked_tree
+    released = []
+    plan = SpawnPlan(
+        argv=[],
+        env={},
+        cleanup=[lambda: fs_guard.sweep_writable([root]), lambda: released.append(1)],
+    )
+
+    plan.run_cleanup()
+
+    assert released == [1]
+
+
+def test_a_readable_but_unsearchable_directory_is_refused_not_passed_over(
+    readable_locked_tree, caplog
+):
+    """A directory with read but not search permission lists its entries, and
+    the lstat of each fails with EACCES. The sweep read that as nothing to
+    examine and passed the link over; it is a refusal, like a listing failure."""
+    root, locked = readable_locked_tree
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        with pytest.raises(PermissionError) as refused:
+            fs_guard.sweep_writable([root], ("SWEEPSECRET-4479",))
+
+    assert "locked/escape" in str(refused.value), str(refused.value)
+    assert _warnings(caplog, "Could not examine"), [
+        record.getMessage() for record in caplog.records
+    ]
+    locked.chmod(0o700)
+    assert os.path.lexists(locked / "escape"), "the link is left as found"
+
+
+def test_refuse_links_below_refuses_a_readable_but_unsearchable_directory(
+    readable_locked_tree,
+):
+    root, _locked = readable_locked_tree
+
+    with pytest.raises(PermissionError) as refused:
+        fs_guard.refuse_links_below(root)
+
+    assert "locked/escape" in str(refused.value), str(refused.value)
+
+
+def test_the_refusal_names_the_directory_by_its_path_below_the_root(tmp_path, caplog):
+    """fwalk's ``onerror`` saw a bare entry name, so "cache" under the root could
+    be a/cache or b/cache; the walk reports the path below the root."""
+    root = tmp_path / "results"
+    (root / "a" / "cache").mkdir(parents=True)
+    (root / "b" / "cache").mkdir(parents=True)
+    (root / "a" / "cache").chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.sweep_writable([root])
+    finally:
+        (root / "a" / "cache").chmod(0o700)
+
+    assert "a/cache" in str(refused.value), str(refused.value)
+    assert "b/cache" not in str(refused.value), str(refused.value)
+    assert any("a/cache" in line for line in _warnings(caplog, "Could not list"))
 
 
 def test_the_os_walk_fallback_refuses_a_directory_it_cannot_list(
@@ -155,18 +329,14 @@ def test_the_os_walk_fallback_records_a_failed_removal_and_goes_on(
     assert removed == 1
     assert not os.path.lexists(root / "zzz-link"), "the sweep must continue past it"
     assert os.path.lexists(root / f"aaa-{value}"), "the failed one is left as found"
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "Could not remove" in record.getMessage()
-    ]
+    lines = _warnings(caplog, "Could not remove")
     assert lines, [record.getMessage() for record in caplog.records]
     assert not any("SWEEPSECRET-4476" in line for line in lines), lines
 
 
 def test_a_directory_removed_during_the_walk_is_not_a_refusal(tmp_path, monkeypatch):
-    """fwalk reports a subdirectory that vanished between its listing and its
-    open as ENOENT; nothing is below it, so the sweep goes on."""
+    """A subdirectory that vanished between its listing and its open reads as
+    ENOENT; nothing is below it, so the sweep continues without a word."""
     root = tmp_path / "results"
     (root / "gone").mkdir(parents=True)
     (root / "zzz-link").symlink_to(tmp_path)
@@ -195,6 +365,39 @@ def test_refuse_links_below_refuses_a_directory_it_cannot_list(locked_tree):
     assert isinstance(refused.value.__cause__, PermissionError)
 
 
+def test_refuse_links_below_refuses_a_root_it_cannot_check(tmp_path, monkeypatch):
+    """The root was read with ``Path.is_dir``, which since Python 3.14 reads every
+    OSError as False: a root the process could not check returned in silence and
+    the scanner ran without the pre-check. Measured with the error injected at
+    lstat, so it holds on every interpreter."""
+    root = tmp_path / "results"
+    root.mkdir()
+    real_lstat = os.lstat
+
+    def refusing_lstat(path, *args, **kwargs):
+        if os.fspath(path) == os.fspath(root) and not kwargs.get("dir_fd"):
+            raise PermissionError(13, "Permission denied", os.fspath(path))
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+    with pytest.raises(PermissionError):
+        fs_guard.refuse_links_below(root)
+
+
+def test_refuse_links_below_refuses_a_root_that_is_itself_a_link(tmp_path):
+    """``Path.is_dir`` followed a link at the root, and fwalk, told not to follow
+    links, then yielded nothing for it: a linked results directory passed the
+    pre-check in silence. It is the link the check exists to refuse."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    root = tmp_path / "results"
+    root.symlink_to(elsewhere)
+
+    with pytest.raises(OutputDirLinkRefused):
+        fs_guard.refuse_links_below(root)
+
+
 def test_a_root_that_cannot_be_checked_is_refused_not_skipped(tmp_path, caplog):
     """The sibling route at the root: ``Path.is_symlink`` already reads a missing
     root as False, so the handler around it only ever met the other errors (a
@@ -212,12 +415,9 @@ def test_a_root_that_cannot_be_checked_is_refused_not_skipped(tmp_path, caplog):
     finally:
         parent.chmod(0o700)
 
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "Could not check or remove the root" in record.getMessage()
+    assert _warnings(caplog, "Could not check or remove the root"), [
+        record.getMessage() for record in caplog.records
     ]
-    assert lines, [record.getMessage() for record in caplog.records]
     assert os.path.lexists(root / "escape"), "the link is left as found"
 
 
@@ -244,9 +444,6 @@ def test_a_root_check_error_is_refused_on_every_interpreter(
         with pytest.raises(PermissionError):
             fs_guard.sweep_writable([root], ("SWEEPSECRET-4475",))
 
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "Could not check or remove the root" in record.getMessage()
+    assert _warnings(caplog, "Could not check or remove the root"), [
+        record.getMessage() for record in caplog.records
     ]
-    assert lines, [record.getMessage() for record in caplog.records]

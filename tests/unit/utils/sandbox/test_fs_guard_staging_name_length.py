@@ -81,3 +81,61 @@ def test_replace_without_following_accepts_a_target_name_a_plain_open_accepts(
     assert sorted(p.name for p in tmp_path.iterdir()) == [target.name], (
         "no staging file is left behind"
     )
+
+
+def test_a_staging_name_fits_the_directorys_own_name_limit(tmp_path, monkeypatch):
+    """A filesystem can accept fewer bytes than NAME_MAX (eCryptfs accepts 143):
+    the staging name fits the limit the target's directory reports."""
+
+    def pathconf(path, name):
+        assert name == "PC_NAME_MAX"
+        assert os.fspath(path) == os.fspath(tmp_path)
+        return 143
+
+    monkeypatch.setattr(os, "pathconf", pathconf, raising=False)
+
+    staging = fs_guard._staging_name(_long_name(140), tmp_path)
+
+    assert len(os.fsencode(staging)) <= 143, staging
+    assert staging.endswith(".tmp") and f".{os.getpid()}." in staging, staging
+
+
+def test_the_name_limit_falls_back_to_name_max_when_it_cannot_be_read(
+    tmp_path, monkeypatch
+):
+    def failing_pathconf(path, name):
+        raise OSError(22, "Invalid argument", os.fspath(path))
+
+    monkeypatch.setattr(os, "pathconf", failing_pathconf, raising=False)
+
+    assert fs_guard._name_max(tmp_path) == fs_guard._NAME_MAX
+    assert fs_guard._name_max(None) == fs_guard._NAME_MAX
+
+
+def test_a_name_limit_above_name_max_is_capped(tmp_path, monkeypatch):
+    monkeypatch.setattr(os, "pathconf", lambda path, name: 1020, raising=False)
+
+    assert fs_guard._name_max(tmp_path) == fs_guard._NAME_MAX
+
+
+def test_the_writers_ask_the_targets_directory_for_its_limit(tmp_path, monkeypatch):
+    """Both staging writers pass the target's directory, so a directory whose
+    filesystem accepts fewer bytes gets a staging name that fits it."""
+    asked = []
+    real_pathconf = getattr(os, "pathconf", None)
+
+    def pathconf(path, name):
+        asked.append(os.fspath(path))
+        if real_pathconf is None:
+            return fs_guard._NAME_MAX
+        return real_pathconf(path, name)
+
+    monkeypatch.setattr(os, "pathconf", pathconf, raising=False)
+    target = tmp_path / "report.json"
+
+    with fs_guard.open_for_atomic_write(target) as handle:
+        handle.write("atomic\n")
+    fs_guard.replace_without_following(target, "replaced\n")
+
+    assert asked == [os.fspath(tmp_path), os.fspath(tmp_path)], asked
+    assert target.read_text() == "replaced\n"
