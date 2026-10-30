@@ -10,8 +10,11 @@
 * ``uriBaseId`` and the run's ``originalUriBaseIds``: dropped, a URI a scanner
   anchored to a declared base read as relative to the repository root.
 * ``automationDetails.id``: absent, the per-project documents of a workspace
-  were identical in tool identity, so each upload replaced the previous
-  project's analysis. The project key becomes the category.
+  are identical in tool identity, so each upload replaces the previous
+  project's analysis unless the upload names a category. The project key
+  becomes the category when ``emit_automation_details`` asks for it; an id in
+  the file overrides the category the upload-sarif action is given, so it is
+  not written unasked.
 """
 
 import json
@@ -198,25 +201,49 @@ class TestUriBaseIds:
         assert "originalUriBaseIds" not in out
 
 
-class TestAutomationDetails:
-    def test_a_per_project_scan_names_its_project_as_the_category(self, reporter):
-        model = _model(
-            _run(Result(ruleId="R", level=Level.error, message=Message(text="m")))
-        )
-        model.metadata.workspace_project = "api"
+def _per_project_model() -> AshAggregatedResults:
+    model = _model(
+        _run(Result(ruleId="R", level=Level.error, message=Message(text="m")))
+    )
+    model.metadata.workspace_project = "api"
+    return model
 
-        out = json.loads(reporter.report(model))["runs"][0]
+
+class TestAutomationDetails:
+    def test_a_per_project_scan_names_its_project_when_asked(self, test_plugin_context):
+        reporter = GHASReporter(
+            context=test_plugin_context,
+            config=GHASReporterConfig(
+                options=GHASReporterConfigOptions(emit_automation_details=True)
+            ),
+        )
+
+        out = json.loads(reporter.report(_per_project_model()))["runs"][0]
 
         assert out["automationDetails"] == {"id": "ash/api/"}
 
+    def test_a_per_project_scan_carries_none_by_default(self, reporter):
+        """The upload-sarif action fills automationDetails only on a run that
+        has none, so an id written unasked overrides the category an operator
+        already gives the upload and moves it to a new analysis."""
+        out = json.loads(reporter.report(_per_project_model()))["runs"][0]
+
+        assert "automationDetails" not in out
+
     @pytest.mark.parametrize("run_count", [1, 2], ids=["one-run", "two-runs"])
     def test_a_unified_model_names_no_project_whatever_its_run_count(
-        self, reporter, run_count
+        self, test_plugin_context, run_count
     ):
         """One run is left in a unified model when every other project was
         skipped. Its stamp used to become the category, so the category came
         and went between two scans of one workspace, and it was the per-project
         document's category with the other document's URI base."""
+        reporter = GHASReporter(
+            context=test_plugin_context,
+            config=GHASReporterConfig(
+                options=GHASReporterConfigOptions(emit_automation_details=True)
+            ),
+        )
         runs = [
             _run(
                 Result(ruleId="R", level=Level.error, message=Message(text="m")),

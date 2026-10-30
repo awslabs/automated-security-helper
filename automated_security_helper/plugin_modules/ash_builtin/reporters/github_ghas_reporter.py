@@ -289,6 +289,20 @@ class GHASReporterConfigOptions(ReporterOptionsBase):
             ),
         ),
     ] = True
+    emit_automation_details: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, a workspace project's own report carries "
+                "runAutomationDetails.id ash/<project key>/, the category GitHub "
+                "files the upload under, so the per-project reports of one "
+                "repository are kept apart. Off by default: an id in the file "
+                "takes precedence over the category the upload-sarif action is "
+                "given, so an upload that already names its category would be "
+                "moved to a new one, leaving the old analysis's alerts open."
+            ),
+        ),
+    ] = False
 
 
 class GHASReporterConfig(ReporterPluginConfigBase):
@@ -487,15 +501,21 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                     out_run["originalUriBaseIds"] = bases
 
             # automationDetails.id is the category GitHub files an upload
-            # under. The N per-project documents a workspace scan writes were
-            # identical in tool identity and carried none, so uploading them
-            # for one repository made each replace the previous project's
-            # analysis. The project's key, when the scan has one, keeps them
-            # apart; a single-directory scan and a unified workspace document
-            # are unchanged.
-            category = self._workspace_project(model)
-            if category:
-                out_run["automationDetails"] = {"id": f"ash/{category}/"}
+            # under. The N per-project documents a workspace scan writes are
+            # identical in tool identity and carry none, so uploading them for
+            # one repository makes each replace the previous project's
+            # analysis. The project's key keeps them apart, on request: the
+            # upload-sarif action fills automationDetails only on a run that
+            # has none (github/codeql-action, upload-lib.ts,
+            # populateRunAutomationDetails), so an id written here overrides
+            # the category: an operator already gave it, and an upgrade that
+            # wrote one unasked would move every such upload to a new category
+            # and leave the old analysis's alerts open. A single-directory
+            # scan and a unified workspace document carry none either way.
+            if self._emits_automation_details():
+                category = self._workspace_project(model)
+                if category:
+                    out_run["automationDetails"] = {"id": f"ash/{category}/"}
 
             report_dict = {
                 "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -616,6 +636,10 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             if uri:
                 out[str(key)] = {"uri": str(uri)}
         return out
+
+    def _emits_automation_details(self) -> bool:
+        """Whether the operator asked for ``automationDetails`` (off by default)."""
+        return bool(self.config and self.config.options.emit_automation_details)
 
     @staticmethod
     def _workspace_project(model: "AshAggregatedResults") -> Optional[str]:
