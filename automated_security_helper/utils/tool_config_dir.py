@@ -156,10 +156,15 @@ def _inside_tree(path: Path, scan_root: Optional[Path]) -> bool:
     return scan_root is not None and in_scanned_tree(path, scan_root)
 
 
-def _changeable_by_others(path: Path) -> Optional[str]:
-    """Why another local account could change what ``path`` names, or None.
+def _changeable_by_others(resolved: Path) -> Optional[str]:
+    """Why another local account could change what ``resolved`` names, or None.
 
-    Every directory from ``path`` up to ``/``, on its resolved path, is checked. One
+    ``resolved`` is a path the caller already resolved (``os.path.realpath``) and
+    will use as it is: the check does not resolve it again, so what it walks is
+    what the caller goes on to use, and a link re-pointed between a second
+    resolution and the use cannot send the use somewhere the check never saw.
+
+    Every directory from ``resolved`` up to ``/`` is checked. One
     that another account owns (root aside), or that its group or everyone can write
     without the sticky bit, lets someone else rename an entry in it, and so put a
     directory of their own where ASH made one, after the ``mkdtemp`` and before the
@@ -170,7 +175,6 @@ def _changeable_by_others(path: Path) -> Optional[str]:
     if not hasattr(os, "geteuid"):
         return None
     me = os.geteuid()
-    resolved = Path(os.path.realpath(path))
     for directory in (resolved, *resolved.parents):
         try:
             st = os.stat(directory)
@@ -226,13 +230,14 @@ def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Pat
             passed_over.append(f"{output_dir.as_posix()}: is not a directory yet")
     private: List[Path] = []
     for parent in candidates:
-        reason = _changeable_by_others(parent)
+        # Resolved once. The check walks this path and the directory is made and
+        # written under this same path, so a symbolic link in the path as given
+        # (TMPDIR, or the output directory) is never resolved a second time, by
+        # a path the check did not see.
+        resolved = Path(os.path.realpath(parent))
+        reason = _changeable_by_others(resolved)
         if reason is None:
-            # The resolved path: _changeable_by_others checked every directory on
-            # it, and the directory is made and written there, so a symbolic link
-            # in the path as given (TMPDIR, or the output directory) is not walked
-            # again afterwards by a path the check never saw.
-            private.append(Path(os.path.realpath(parent)))
+            private.append(resolved)
         else:
             passed_over.append(f"{parent.as_posix()}: {reason}")
     inside: List[Path] = []
