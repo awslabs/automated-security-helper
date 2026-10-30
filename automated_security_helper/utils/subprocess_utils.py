@@ -3324,8 +3324,10 @@ def kill_running_groups() -> int:
     signal, if the kernel lets this signal through. Returns how many groups were
     signalled. POSIX only; on Windows nothing is recorded.
 
-    Only children not yet reaped are signalled: an unreaped child's pid is not
-    reused, so its group id names its group and no other.
+    A group is signalled while it is still recorded: an unreaped child's pid is
+    not reused, so its group id names its group and no other, and a reaped
+    leader's group is recorded only while no process holds its pid again, so the
+    id can only name the leader's own orphans (see _forget_exited_groups).
 
     A spawn that starts its child while this runs is not missed. _STOPPING is set
     first, so a spawn that has not started its child yet does not start it, and
