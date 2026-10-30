@@ -1758,9 +1758,17 @@ class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
 
         # Under the handler's own lock: two close() calls at once each read the
         # root before either cleared it, and the counted registration was
-        # released twice.
-        with self.lock:  # type: ignore[union-attr]
+        # released twice. The lock may not exist yet: FileHandler opens its file
+        # before the base class makes the lock, so a refused open raises from
+        # __init__ with no lock, and reading self.lock there replaced the refusal
+        # with an AttributeError and left the root registered. Nothing else can
+        # reach a handler that has not been constructed, so no lock is needed then.
+        lock = getattr(self, "lock", None)
+        if lock is None:
             root, self._root = self._root, None
+        else:
+            with lock:
+                root, self._root = self._root, None
         if root is not None:
             fs_guard.release_writable_root(root)
 
