@@ -151,6 +151,34 @@ def test_a_link_to_a_directory_the_walk_found_no_file_in_is_not_hidden(tmp_path)
     assert values == ["./third_party/vendor.py"]
 
 
+def test_a_link_to_an_ignored_directory_holding_a_link_to_scanned_files_is_not_hidden(
+    tmp_path,
+):
+    """``src/vendored`` leads to ``third_party/lib``, whose own files are all
+    ignored, but that directory holds a further link to scanned files, which syft
+    reaches through ``src/vendored`` too. Written as ``./src/vendored/**``, the
+    exclusion hid those scanned files; the link's target must be a directory that
+    is hidden whole in its own right before the link is."""
+    tree = Path(os.path.realpath(tmp_path))
+    target = tree / "proj"
+    (target / "third_party" / "lib").mkdir(parents=True)
+    (target / "third_party" / "lib" / "vendored.py").write_text("", encoding="utf-8")
+    (target / "other").mkdir()
+    (target / "other" / "b.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "third_party" / "lib" / "inner").symlink_to(
+        target / "other", target_is_directory=True
+    )
+    (target / "src").mkdir()
+    (target / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "src" / "vendored").symlink_to(
+        target / "third_party" / "lib", target_is_directory=True
+    )
+
+    values = syft_excludes(target, target, _ignore("third_party/"))
+
+    assert values == ["./third_party/lib/vendored.py"]
+
+
 @pytest.mark.parametrize("function", [ignored_entries, _ignore_entries])
 def test_the_directory_links_default_is_not_a_shared_mapping(function):
     """The default is ``None``, resolved inside the call, not a ``{}`` literal that
