@@ -75,6 +75,13 @@ class NoRecursiveAliasLoader(yaml.SafeLoader):
     alias is taken.
     """
 
+    def compose_document(self) -> Any:
+        # The bound is per document. One loader composes every document of a
+        # yaml.load_all stream, so a total kept across documents refused a stream
+        # whose documents each sit under the bound.
+        self.__dict__["_ash_expanded_total"] = 0
+        return super().compose_document()
+
     def compose_node(self, parent: Any, index: Any) -> Any:
         open_anchors: Set[str] = self.__dict__.setdefault("_ash_open_anchors", set())
         event = self.peek_event()
@@ -130,10 +137,13 @@ class NoRecursiveAliasLoader(yaml.SafeLoader):
         total = self.__dict__.get("_ash_expanded_total", 0) + size
         self.__dict__["_ash_expanded_total"] = total
         if total > MAX_EXPANDED_NODES:
+            # Every node counts, plain or aliased: a document with no alias at
+            # all is refused at the same bound, so the text does not say the
+            # aliases took it there.
             raise AliasExpansionError(
                 "while composing the document",
                 None,
                 f"found a node that takes the document past {MAX_EXPANDED_NODES} "
-                "nodes once its aliases are written out",
+                "nodes (each alias counted as the nodes it names)",
                 cast("Optional[Mark]", mark),
             )

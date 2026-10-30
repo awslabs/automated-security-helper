@@ -17,6 +17,7 @@ import pytest
 import yaml
 from yaml.composer import ComposerError
 
+from automated_security_helper.utils import yaml_aliases
 from automated_security_helper.utils.yaml_aliases import (
     MAX_EXPANDED_NODES,
     AliasExpansionError,
@@ -66,3 +67,38 @@ def test_a_plain_document_of_ordinary_size_still_loads():
 
     loaded = yaml.load(text, Loader=NoRecursiveAliasLoader)
     assert len(loaded["items"]) == 2000
+
+
+def _plain_items(count: int) -> str:
+    """A mapping of one sequence of ``count`` scalars: ``count`` + 3 nodes."""
+    return "items:\n" + "".join(f"  - {n}\n" for n in range(count))
+
+
+def test_the_bound_counts_each_document_of_a_stream_on_its_own(monkeypatch):
+    """One loader composes every document of a yaml.load_all stream; the total
+    used to carry over, so a stream of documents each under the bound was
+    refused at the document that took the sum past it."""
+    monkeypatch.setattr(yaml_aliases, "MAX_EXPANDED_NODES", 40)
+    document = _plain_items(30)
+
+    loaded = list(
+        yaml.load_all("---\n".join([document] * 3), Loader=NoRecursiveAliasLoader)
+    )
+
+    assert [len(found["items"]) for found in loaded] == [30, 30, 30]
+
+
+def test_a_document_with_no_alias_is_refused_past_the_bound_in_its_own_words(
+    monkeypatch,
+):
+    """Every node counts, so a plain document past the bound is refused too, and
+    the refusal does not blame aliases the document does not hold."""
+    monkeypatch.setattr(yaml_aliases, "MAX_EXPANDED_NODES", 40)
+
+    with pytest.raises(AliasExpansionError) as refused:
+        yaml.load(_plain_items(60), Loader=NoRecursiveAliasLoader)
+
+    text = str(refused.value)
+    assert "past 40 nodes" in text, text
+    assert "each alias counted as the nodes it names" in text, text
+    assert "once its aliases" not in text, text
