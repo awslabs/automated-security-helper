@@ -3,11 +3,15 @@
 
 """The content database refresh takes one lock per cache and honors the operator.
 
-Four properties of utils/content_db_refresh.py, each pinned by one test:
+Five properties of utils/content_db_refresh.py, each pinned by one test:
 
 - the refresh lock for a cache is the same file before and after the cache is
   created, even when the cache's parent does not exist yet either, so two first
   refreshes of one cache are serialized;
+- a lock file another account left in a shared cache keeps the lock in the cache
+  (``exclusive_lock`` opens it read-only), and the temporary-directory lock a cache
+  that cannot be written falls back to is named for the cache alone, so two
+  accounts, or a refresh from before an upgrade and one from after, take turns;
 - the grype refresh runs with the operator's grype config when the caller gives
   one, so a database mirror or CA it names applies to the update as to the scan;
 - ``GRYPE_DB_AUTO_UPDATE=false`` turns ASH's grype update off with a warning, as
@@ -21,7 +25,9 @@ Every command is captured, never run.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -135,6 +141,39 @@ def test_the_lock_file_is_the_same_before_and_after_the_cache_exists(tmp_path):
     cache.mkdir(parents=True)
     after = refresh.update_lock_path("grype", cache)
     assert before == after == cache / ".ash-grype-update.lock"
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="a lock file's mode is read on POSIX, by a caller it binds",
+)
+def test_a_lock_file_this_account_cannot_write_keeps_the_lock_in_the_cache(tmp_path):
+    """A shared cache's lock file left by another account (mode 0644, read-only for
+    this one) is still the lock: ``exclusive_lock`` opens it read-only and ``flock``
+    takes it, so the two accounts' updates serialize. Sent to a per-account lock in
+    the temporary directory instead, the second account ran its update into the
+    shared cache while the first's was still writing it."""
+    cache = tmp_path / "shared-cache"
+    cache.mkdir()
+    lock = cache / ".ash-grype-update.lock"
+    lock.write_text("")
+    lock.chmod(0o444)
+    try:
+        assert refresh.update_lock_path("grype", cache) == lock
+    finally:
+        lock.chmod(0o644)
+
+
+def test_the_temporary_lock_is_named_for_the_cache_alone(tmp_path):
+    """Two refreshes of one cache that cannot be written, from different accounts
+    or from before and after an upgrade, meet at one temporary lock file: its name
+    carries the cache's digest and nothing of the caller."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+    cache = blocker / "db"
+    lock = refresh.update_lock_path("grype", cache)
+    digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
+    assert lock.name == f"ash-grype-update-{digest}.lock"
 
 
 def test_the_grype_refresh_runs_with_the_operators_config(tmp_path, captured):

@@ -105,7 +105,6 @@ failed rather than run against a database that could not be brought up to date.
 
 from __future__ import annotations
 
-import getpass
 import hashlib
 import ntpath
 import os
@@ -439,10 +438,8 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     """Where the refresh lock for ``cache_dir`` lives.
 
     In the cache directory when it, or the nearest directory above it that exists
-    (the one it will be created under), is writable and no lock file another
-    account left there stands in the way; otherwise in the temporary directory,
-    named for the cache and for this account, so the callers of this account on
-    this host still take turns.
+    (the one it will be created under), is writable; otherwise in the temporary
+    directory, named for the cache, so the callers on this host still take turns.
 
     The nearest existing ancestor rather than the parent alone: a first refresh of
     a cache whose parent does not exist yet either (``~/.cache/grype/db`` on a host
@@ -451,32 +448,29 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     refresh had created the cache would take the lock inside it, so the two ran at
     once.
 
-    The lock file itself is checked too: ``exclusive_lock`` opens it read-write,
-    and a shared cache's lock file created by another account (mode 0644) made
-    that open raise PermissionError out of the refresh. Such a caller takes the
-    temporary-directory lock instead. That lock's name carries the account
-    (``os.getuid`` where there is one), so two accounts sharing one cache do not
-    meet at a 0644 file in the shared temporary directory either; two accounts
-    then do not serialize against each other, which the cache lock could not do
-    for them either.
+    A lock file another account left in a shared cache (mode 0644) is no reason to
+    leave the cache: ``exclusive_lock`` opens a lock file it may not write for
+    reading alone and ``flock`` takes an exclusive lock on that descriptor
+    (``utils/file_lock._open_lock_file``), so the second account's update waits on
+    the first's. This function used to send such a caller to a per-account lock in
+    the temporary directory, and the two accounts then ran ``trivy image
+    --download-db-only`` or ``grype db update`` into the one cache at once. Only a
+    cache that cannot be written at all takes the temporary-directory lock, and
+    that name carries no account: a refresh from before this change and one from
+    after it, or two accounts that share the temporary directory, still meet at one
+    file, which ``exclusive_lock`` opens read-only when it is another's.
     """
     cache = Path(cache_dir)
     probe = cache
     while not probe.exists() and probe.parent != probe:
         probe = probe.parent
-    lock = cache / f".ash-{tool}-update.lock"
     # The ancestor has to be a directory the cache can be created under:
     # ``exclusive_lock`` creates the lock's missing parents, which fails under a
     # regular file at the cache's path, so that case takes the temporary lock.
-    if (
-        probe.is_dir()
-        and os.access(probe, os.W_OK)
-        and (not lock.exists() or os.access(lock, os.W_OK))
-    ):
-        return lock
+    if probe.is_dir() and os.access(probe, os.W_OK):
+        return cache / f".ash-{tool}-update.lock"
     digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
-    account = str(os.getuid()) if hasattr(os, "getuid") else getpass.getuser()
-    return Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}-{account}.lock"
+    return Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}.lock"
 
 
 def prepare_content_db(
