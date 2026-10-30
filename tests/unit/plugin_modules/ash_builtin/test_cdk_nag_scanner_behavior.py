@@ -1567,3 +1567,80 @@ def test_a_relative_jsii_node_path_is_still_a_value_to_redact(scanner, monkeypat
     monkeypatch.setenv("JSII_NODE", "tools/bin/node")
 
     assert "tools/bin/node" in scanner._environment_values()
+
+
+# ---------------------------------------------------------------------------
+# The dependency check and a bare JSII_NODE name
+# ---------------------------------------------------------------------------
+
+
+def _node_only_from_path(found_by_name):
+    """A find_executable stand-in that answers from the given names and nothing else."""
+
+    def find(name):
+        return found_by_name.get(name)
+
+    return find
+
+
+def test_a_bare_jsii_node_name_is_looked_up_on_path_not_in_the_working_directory(
+    scanner, monkeypatch, tmp_path
+):
+    """jsii hands JSII_NODE to Popen, which resolves a bare name on PATH; the check used
+    to read it as a path relative to the working directory, so JSII_NODE=nodejs with no
+    file of that name under the working directory, and no ``node`` on PATH, was graded
+    MISSING for the node jsii would have run."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", True)
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "find_executable",
+        _node_only_from_path({"nodejs": "/opt/elsewhere/bin/nodejs"}),
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    assert cdk_nag_scanner._node_named_by_jsii_node() == "/opt/elsewhere/bin/nodejs"
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.dependency_unavailable_reason is None
+
+
+def test_a_stray_file_named_like_a_bare_jsii_node_in_the_working_directory_is_not_it(
+    scanner, monkeypatch, tmp_path
+):
+    """The other direction of the same read: JSII_NODE=node and a file named ``node``
+    in the scanned repository (the working directory) used to pass the check, for a
+    node jsii would never start, because a bare name resolves on PATH, never here."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", True)
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    monkeypatch.setattr(cdk_nag_scanner, "find_executable", _node_only_from_path({}))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    monkeypatch.setenv("JSII_NODE", "node")
+
+    assert cdk_nag_scanner._node_named_by_jsii_node() is None
+    assert scanner.validate_plugin_dependencies() is False
+    assert "JSII_NODE" in (scanner.dependency_unavailable_reason or "")
+
+
+def test_a_jsii_node_that_names_a_location_is_still_asked_of_the_filesystem(
+    scanner, monkeypatch, tmp_path
+):
+    """The control: a value with a path separator is a location, found or not on the
+    filesystem, and PATH is not consulted for it."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", True)
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "find_executable",
+        _node_only_from_path({"node": "/usr/bin/node", "missing": "/usr/bin/missing"}),
+    )
+    named = tmp_path / "elsewhere" / "node"
+    named.parent.mkdir()
+    named.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setenv("JSII_NODE", str(named))
+    assert cdk_nag_scanner._node_named_by_jsii_node() == str(named)
+
+    monkeypatch.setenv("JSII_NODE", str(tmp_path / "missing" / "node"))
+    assert cdk_nag_scanner._node_named_by_jsii_node() is None

@@ -850,11 +850,22 @@ def _node_named_by_jsii_node() -> Optional[str]:
     is named by ``JSII_NODE`` was graded MISSING for the node the wrapper would have run.
     The variable's value is read, never printed: the check says that the name was
     honored, not what it holds.
+
+    A value that names a location is asked of the filesystem; a bare command name is
+    asked of PATH, through the same lookup every other tool of this scanner gets
+    (:func:`find_executable`, which never answers from the working directory). jsii
+    hands ``JSII_NODE`` to ``Popen``, which resolves a bare name on PATH, so
+    ``JSII_NODE=nodejs`` with no ``node`` on PATH is a node jsii runs; asking
+    ``Path(named).is_file()`` of that value read it relative to the working directory,
+    graded it MISSING, and in the other direction let a stray file named ``node`` in
+    the scanned repository pass the check for a node jsii would never start.
     """
     named = _jsii_node_value()
-    if named and Path(named).is_file():
-        return named
-    return None
+    if not named:
+        return None
+    if _names_a_location(named):
+        return named if Path(named).is_file() else None
+    return find_executable(named)
 
 
 #: The one reader of a pack flag's value: pydantic's own bool, so an extra key accepts
