@@ -356,6 +356,21 @@ def test_with_no_level_the_highest_severity_line_is_read():
     assert trivy_severity(*_run(message, level=None, tags=("MEDIUM",))) == "HIGH"
 
 
+def test_a_name_trivy_never_writes_is_not_a_severity_line():
+    """``Severity: EXTREME`` is not one of trivy's five names, whatever its level:
+    after trivy's own line it changes nothing, and on its own it leaves the
+    message with no severity line, so the rule's tag rates the result."""
+    after_trivys = (
+        "Misconfiguration AVD-AWS-0001\nSeverity: LOW\n"
+        "Message: Bucket 'b\nSeverity: EXTREME\n' has no logging"
+    )
+    alone = "Artifact: iac/x\nSeverity: EXTREME\n.tf\nMisconfiguration AVD-AWS-0001"
+
+    assert trivy_severity(*_run(after_trivys, level="note", tags=("MEDIUM",))) == "LOW"
+    assert trivy_severity(*_run(alone, level="error", tags=("HIGH",))) == "HIGH"
+    assert trivy_severity(*_run(alone, level=None, tags=("HIGH",))) == "HIGH"
+
+
 def test_with_no_severity_line_the_tag_rates_the_result_only_when_the_level_agrees():
     message = "Misconfiguration AVD-AWS-0001\nMessage: Bucket has no logging"
 
