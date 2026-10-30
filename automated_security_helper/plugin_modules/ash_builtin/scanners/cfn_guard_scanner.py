@@ -359,6 +359,13 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
+    #: The exit codes a completed cfn-guard run may end with (19 = at least one
+    #: rule failed), the same set ``_parse_response`` accepts per template. Declared
+    #: on the class so the base class's reading of a run's exit code sees
+    #: cfn-guard's own set and not its default of {0, 1}, under which 19 read as a
+    #: failed run and 1 as a clean one.
+    success_exit_codes: ClassVar[Set[int]] = set(_SUCCESS_EXIT_CODES)
+
     # Rules warnings already logged. The rules are selected again for the dependency
     # check and for each target, and each warning is logged once per scanner.
     _warned_rules: Set[str] = PrivateAttr(default_factory=set)

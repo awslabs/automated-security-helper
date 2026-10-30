@@ -46,6 +46,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_sca
     _MAX_COPY_NAME_BYTES,
     _NOT_STARTED_AFTER_BUDGET,
     _RULE_SET_NAME,
+    _SUCCESS_EXIT_CODES,
     CfnGuardScanner,
     CfnGuardScannerConfig,
     CfnGuardScannerConfigOptions,
@@ -355,6 +356,14 @@ def test_with_scan_timeout_null_every_template_runs_unbounded(source, faked_scan
     ):
         scanner.scan(target=source, target_type="source")
     assert [call.kwargs["timeout"] for call in double.call_args_list] == [None, None]
+
+
+def test_the_class_advertises_its_own_accepted_exit_codes():
+    # The base class reads success_exit_codes to grade a run's exit code; its
+    # default {0, 1} would read cfn-guard's 19 (a rule failed) as a failed run
+    # and 1 as a clean one. The class carries the set _parse_response accepts.
+    assert CfnGuardScanner.success_exit_codes == set(_SUCCESS_EXIT_CODES)
+    assert CfnGuardScanner.success_exit_codes == {0, 19}
 
 
 class TestRuleFiles:
