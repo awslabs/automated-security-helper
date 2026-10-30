@@ -356,17 +356,29 @@ def test_no_ini_adds_no_raw_entries(tmp_path):
     assert all(entry.startswith(source.as_posix()) for entry in _entries(argv))
 
 
-def test_additional_formats_leave_one_sarif_format_in_argv(tmp_path):
+def test_additional_formats_leave_one_sarif_format_in_argv(tmp_path, caplog):
+    """bandit's --format is single-valued (argparse store): a second one after
+    the base class's ``--format sarif`` won, bandit wrote that format into
+    bandit.sarif, and the SARIF read failed the scan. The option is logged as
+    not produced and adds nothing to argv."""
     source = _tree(tmp_path, ["app.py"])
-    scanner = _scanner(
-        source, tmp_path, BanditScannerConfigOptions(additional_formats=["html"])
-    )
+    with caplog.at_level(logging.WARNING):
+        scanner = _scanner(
+            source,
+            tmp_path,
+            BanditScannerConfigOptions(additional_formats=["json", "html"]),
+        )
 
     argv, _, _ = scanner._execute_scan(source, "source", [])
 
     assert argv.count("--format") == 1
     assert argv[argv.index("--format") + 1] == "sarif"
     assert "html" not in argv
+    assert "json" not in argv
+    assert any(
+        "additional_formats" in record.message and "not produced" in record.message
+        for record in caplog.records
+    ), [record.message for record in caplog.records]
 
 
 # ---------------------------------------------------------------------------

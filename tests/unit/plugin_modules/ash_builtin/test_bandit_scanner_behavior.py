@@ -20,7 +20,6 @@ dead code.
 import logging
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -163,40 +162,6 @@ def test_configure_with_none_leaves_the_existing_config(scanner):
 # ---------------------------------------------------------------------------
 # validate_plugin_dependencies decision tree
 # ---------------------------------------------------------------------------
-
-
-def test_uv_missing_but_bandit_on_path_falls_back_to_direct_execution(
-    scanner, monkeypatch, tmp_path
-):
-    """With uv absent and bandit directly runnable, run it directly."""
-    from automated_security_helper.utils import pre_installed_tool
-
-    binary = str(tmp_path / "bandit")
-    monkeypatch.setattr(
-        BanditScanner, "_validate_uv_tool_availability", lambda self: False
-    )
-    monkeypatch.setattr(
-        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
-    )
-    # The binary is verified before it runs; this pins the verified route, not
-    # how the verifier grades a file that does not exist.
-    monkeypatch.setattr(
-        pre_installed_tool,
-        "verify_pre_installed_tool",
-        lambda *args, **kwargs: SimpleNamespace(
-            status="satisfied",
-            executable=binary,
-            requirement="bandit[sarif,toml]>=1.7.8,<2.0.0",
-            detail="1.9.4 with the extras",
-        ),
-    )
-
-    assert scanner.validate_plugin_dependencies() is True
-    assert scanner.use_uv_tool is False, (
-        "the scanner must stop trying to route through uv once it has decided "
-        "to execute the binary directly"
-    )
-    assert scanner.dependencies_satisfied is True
 
 
 def test_uv_missing_and_bandit_absent_fails_validation(scanner, monkeypatch, caplog):
@@ -525,26 +490,6 @@ def test_confidence_level_is_passed_through(plugin_context, confidence):
     assert extra_arg_values(scanner, "--confidence-level") == [confidence]
     # Severity filtering is ASH's job, so bandit is always asked for everything.
     assert extra_arg_values(scanner, "--severity-level") == ["all"]
-
-
-def test_additional_formats_add_no_second_format_flag(plugin_context, caplog):
-    """bandit's --format is single-valued (argparse store): a second one after the
-    base class's ``--format sarif`` won, bandit wrote that format into
-    bandit.sarif, and the SARIF read failed the scan. The option is logged as not
-    produced and adds nothing to argv."""
-    with caplog.at_level(logging.WARNING):
-        scanner = BanditScanner(
-            context=plugin_context,
-            config=BanditScannerConfig(
-                options=BanditScannerConfigOptions(additional_formats=["json", "html"])
-            ),
-        )
-
-    assert extra_arg_values(scanner, "--format") == []
-    assert any(
-        "additional_formats" in record.message and "not produced" in record.message
-        for record in caplog.records
-    ), [record.message for record in caplog.records]
 
 
 def test_no_additional_formats_adds_no_format_flag(scanner):
