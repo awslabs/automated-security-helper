@@ -70,7 +70,7 @@ plugin_app = typer.Typer(
 @plugin_app.command(
     name="list",
     help="""
-The `plugin list` command lists all available plugins.
+The `plugin list` command lists the plugins a scan with this configuration runs.
 """,
 )
 def list_plugins(
@@ -116,15 +116,18 @@ def list_plugins(
                 "For scanners, add Version and Reachable columns reporting each "
                 "scanner's detected tool version and whether its dependencies are "
                 "satisfied (Yes/No/Unknown). Off by default, so the fast listing is "
-                "unchanged; enabling it instantiates each scanner and runs its "
-                "dependency check, which takes longer."
+                "unchanged; enabling it checks each scanner's dependencies and "
+                "probes its version, which takes longer."
             ),
         ),
     ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     """
-    List plugins available within the current Python session.
+    List the plugins a scan with this configuration runs: the built-in plugins
+    and those the run's plugin modules bring in, each built from its configured
+    section as the scan builds it. A plugin that is installed but not selected
+    by this configuration is not listed.
     """
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
         return

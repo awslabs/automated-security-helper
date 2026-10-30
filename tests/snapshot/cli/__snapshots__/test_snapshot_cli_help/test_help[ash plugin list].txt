@@ -1,7 +1,7 @@
 
  Usage: ash plugin list [OPTIONS]
 
- The `plugin list` command lists all available plugins.
+ The `plugin list` command lists the plugins a scan with this configuration runs.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --include-plugin-config      --no-include-plugin-config           Whether to include the plugin  │
@@ -50,9 +50,9 @@
 │                                                                   (Yes/No/Unknown). Off by       │
 │                                                                   default, so the fast listing   │
 │                                                                   is unchanged; enabling it      │
-│                                                                   instantiates each scanner and  │
-│                                                                   runs its dependency check,     │
-│                                                                   which takes longer.            │
+│                                                                   checks each scanner's          │
+│                                                                   dependencies and probes its    │
+│                                                                   version, which takes longer.   │
 │ --color                      --no-color                           Enable/disable colorized       │
 │                                                                   output                         │
 │                                                                   [default: color]               │

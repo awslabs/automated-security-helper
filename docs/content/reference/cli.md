@@ -39,7 +39,7 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash mcp`](#mcp) | Start the ASH MCP server (Model Context Protocol) |
 | [`ash merge`](#merge) | Merges the results of a sharded scan into one unified report. |
 | [`ash plugin`](#plugin) | Manage ASH plugins |
-| [`ash plugin list`](#plugin-list) | The `plugin list` command lists all available plugins. |
+| [`ash plugin list`](#plugin-list) | The `plugin list` command lists the plugins a scan with this configuration runs. |
 | [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
 
@@ -555,7 +555,7 @@ Subcommands: [`ash plugin list`](#plugin-list).
 
 ### <a id="plugin-list"></a>`ash plugin list`
 
-The `plugin list` command lists all available plugins.
+The `plugin list` command lists the plugins a scan with this configuration runs.
 
 ```text
 ash plugin list [OPTIONS]
@@ -570,7 +570,7 @@ ash plugin list [OPTIONS]
 | <a id="plugin-list--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2') |
 | <a id="plugin-list--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="plugin-list--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
-| <a id="plugin-list--show-versions"></a>`--show-versions` | flag | off |  | For scanners, add Version and Reachable columns reporting each scanner's detected tool version and whether its dependencies are satisfied (Yes/No/Unknown). Off by default, so the fast listing is unchanged; enabling it instantiates each scanner and runs its dependency check, which takes longer. |
+| <a id="plugin-list--show-versions"></a>`--show-versions` | flag | off |  | For scanners, add Version and Reachable columns reporting each scanner's detected tool version and whether its dependencies are satisfied (Yes/No/Unknown). Off by default, so the fast listing is unchanged; enabling it checks each scanner's dependencies and probes its version, which takes longer. |
 | <a id="plugin-list--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
 
 ## <a id="report"></a>`ash report`
