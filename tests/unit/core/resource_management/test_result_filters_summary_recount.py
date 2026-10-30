@@ -234,6 +234,18 @@ class TestAScannersFilterRecountsTheSummary:
         assert filtered["actionable_findings"] == 1
         assert filtered["total_scanners"] == 1
 
+    def test_total_scanners_counts_the_scanners_that_ran(self):
+        """total_scanners is the scanners that PASSED or FAILED, as the
+        producer counts it (the fixture says 2 for three entries, one MISSING).
+        A recount of len(kept) and one that leaves MISSING out agree on every
+        other test here, which keeps exactly one non-MISSING scanner."""
+        filtered = apply_content_filters(_results(), scanners="bandit,grype")
+
+        assert set(filtered["raw_results"]["scanner_results"]) == {"bandit", "grype"}
+        assert filtered["total_scanners"] == 1
+        assert filtered["summary_stats"]["missing"] == 1
+        assert filtered["summary_stats"]["passed"] == 1
+
     def test_the_summary_view_of_the_filtered_results_agrees(self):
         summary = filter_summary(apply_content_filters(_results(), scanners="semgrep"))
 
