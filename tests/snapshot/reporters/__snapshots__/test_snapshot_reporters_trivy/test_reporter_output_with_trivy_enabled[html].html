@@ -333,7 +333,7 @@ td:first-child { font-weight: 550; }
         <div><dl><dt>Actionable findings</dt><dd class="metric-accent">10<span class="metric-description">At or above scanner thresholds</span></dd></dl></div>
         <div><dl><dt>Below threshold</dt><dd>0<span class="metric-description">Active findings for context</span></dd></dl></div>
         <div><dl><dt>Suppressed</dt><dd>0<span class="metric-description">Excluded from actionable counts</span></dd></dl></div>
-        <div><dl><dt>Scanners completed</dt><dd>1<span> / 1</span><span class="metric-description">0 disabled · 0 unavailable</span></dd></dl></div>
+        <div><dl><dt>Scanners completed</dt><dd>1<span> / 1</span><span class="metric-description">0 skipped · 0 unavailable</span></dd></dl></div>
       </div>
       <div class="severity-strip" aria-label="Active findings by severity"><span class="severity-critical"><strong>0</strong> Critical</span><span class="severity-high"><strong>3</strong> High</span><span class="severity-medium"><strong>7</strong> Medium</span><span class="severity-low"><strong>0</strong> Low</span><span class="severity-info"><strong>0</strong> Info</span></div>
 
@@ -351,7 +351,7 @@ td:first-child { font-weight: 550; }
         <div class="search-control"><label for="finding-search">Search findings</label><input id="finding-search" type="search" placeholder="Rule, file, message, or scanner…" autocomplete="off"></div>
         <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
         <div><label for="finding-severity">Severity</label><select id="finding-severity"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option><option value="unknown">Unknown</option></select></div>
-        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="all">All scanners</option><option value="trivy">trivy</option></select></div>
+        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="">All scanners</option><option value="trivy">trivy</option></select></div>
         <button type="button" id="reset-filters" class="quiet-button">Reset</button>
       </div>
       <p id="finding-count" class="result-count" role="status" aria-live="polite">10 findings in this report</p>
@@ -539,11 +539,13 @@ Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)</p><p><strong
     themeButton.textContent = theme === "dark" ? "Light theme" : "Dark theme";
     themeButton.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} theme`);
   };
+  const preferredTheme = () =>
+    window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   try {
-    setTheme(localStorage.getItem("ash-report-theme") ||
-      (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+    const stored = localStorage.getItem("ash-report-theme");
+    setTheme(stored === "light" || stored === "dark" ? stored : preferredTheme());
   } catch (_) {
-    setTheme(window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    setTheme(preferredTheme());
   }
   themeButton.addEventListener("click", () => {
     const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -559,7 +561,15 @@ Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)</p><p><strong
   const empty = document.getElementById("empty-findings");
   document.querySelector(".finding-controls").hidden = cards.length === 0;
   count.hidden = cards.length === 0;
-  const searchable = new Map(cards.map((card) => [card, card.textContent.toLocaleLowerCase()]));
+  // Search the finding's own text: the title, scanner, rule, location and body,
+  // not the buttons and labels around them ("Copy", "Finding details").
+  const searchText = (card) => {
+    const clone = card.cloneNode(true);
+    clone.querySelectorAll("button, summary, strong, .pill, .finding-status").forEach((node) => node.remove());
+    return [...clone.querySelectorAll("h3, .finding-scanner, .finding-meta code, .finding-body > *")]
+      .map((node) => node.textContent).join("\n").toLocaleLowerCase();
+  };
+  const searchable = new Map(cards.map((card) => [card, searchText(card)]));
   const filter = () => {
     const query = search.value.trim().toLocaleLowerCase();
     let shown = 0;
@@ -569,7 +579,7 @@ Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)</p><p><strong
         (scope.value === "active" && status !== "suppressed");
       const matches = matchesScope &&
         (severity.value === "all" || card.dataset.severity === severity.value) &&
-        (scanner.value === "all" || card.dataset.scanner === scanner.value) &&
+        (scanner.value === "" || card.dataset.scanner === scanner.value) &&
         (!query || searchable.get(card).includes(query));
       card.hidden = !matches;
       if (matches) shown += 1;
@@ -581,7 +591,7 @@ Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)</p><p><strong
     search.value = "";
     scope.value = showAll ? "all" : "actionable";
     severity.value = "all";
-    scanner.value = "all";
+    scanner.value = "";
     filter();
     search.focus();
   };

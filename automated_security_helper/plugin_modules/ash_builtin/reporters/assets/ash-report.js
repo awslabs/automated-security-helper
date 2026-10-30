@@ -9,11 +9,13 @@
     themeButton.textContent = theme === "dark" ? "Light theme" : "Dark theme";
     themeButton.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} theme`);
   };
+  const preferredTheme = () =>
+    window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   try {
-    setTheme(localStorage.getItem("ash-report-theme") ||
-      (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+    const stored = localStorage.getItem("ash-report-theme");
+    setTheme(stored === "light" || stored === "dark" ? stored : preferredTheme());
   } catch (_) {
-    setTheme(window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    setTheme(preferredTheme());
   }
   themeButton.addEventListener("click", () => {
     const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -29,7 +31,15 @@
   const empty = document.getElementById("empty-findings");
   document.querySelector(".finding-controls").hidden = cards.length === 0;
   count.hidden = cards.length === 0;
-  const searchable = new Map(cards.map((card) => [card, card.textContent.toLocaleLowerCase()]));
+  // Search the finding's own text: the title, scanner, rule, location and body,
+  // not the buttons and labels around them ("Copy", "Finding details").
+  const searchText = (card) => {
+    const clone = card.cloneNode(true);
+    clone.querySelectorAll("button, summary, strong, .pill, .finding-status").forEach((node) => node.remove());
+    return [...clone.querySelectorAll("h3, .finding-scanner, .finding-meta code, .finding-body > *")]
+      .map((node) => node.textContent).join("\n").toLocaleLowerCase();
+  };
+  const searchable = new Map(cards.map((card) => [card, searchText(card)]));
   const filter = () => {
     const query = search.value.trim().toLocaleLowerCase();
     let shown = 0;
@@ -39,7 +49,7 @@
         (scope.value === "active" && status !== "suppressed");
       const matches = matchesScope &&
         (severity.value === "all" || card.dataset.severity === severity.value) &&
-        (scanner.value === "all" || card.dataset.scanner === scanner.value) &&
+        (scanner.value === "" || card.dataset.scanner === scanner.value) &&
         (!query || searchable.get(card).includes(query));
       card.hidden = !matches;
       if (matches) shown += 1;
@@ -51,7 +61,7 @@
     search.value = "";
     scope.value = showAll ? "all" : "actionable";
     severity.value = "all";
-    scanner.value = "all";
+    scanner.value = "";
     filter();
     search.focus();
   };
