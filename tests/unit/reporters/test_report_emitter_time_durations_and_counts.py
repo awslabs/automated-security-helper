@@ -152,6 +152,7 @@ class TestADurationIsOnlyWhatWasMeasured:
                     "status": "SKIPPED",
                     "excluded": True,
                     "dependencies_satisfied": True,
+                    "duration": 0.0,
                 }
             },
             "grype": {
@@ -159,6 +160,7 @@ class TestADurationIsOnlyWhatWasMeasured:
                     "scanner_name": "grype",
                     "status": "MISSING",
                     "dependencies_satisfied": False,
+                    "duration": 0.0,
                 }
             },
         }
@@ -190,7 +192,15 @@ class TestADurationIsOnlyWhatWasMeasured:
 
     def test_a_workspace_scan_records_no_scanner_duration(self):
         model = _model(
-            {"bandit": {"source": {"scanner_name": "bandit", "status": "PASSED"}}}
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 0.0,
+                    }
+                }
+            }
         )
         # The control: a single-directory scan keeps the measured zero it was given.
         assert _rows(model)["bandit"]["duration"] == 0.0

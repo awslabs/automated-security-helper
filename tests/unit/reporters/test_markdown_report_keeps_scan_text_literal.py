@@ -163,7 +163,13 @@ class TestTheSummaryLineIsOneLine:
 
         document = _report(test_plugin_context, model)
 
-        summary = [line for line in document.split("\n") if "<summary>" in line]
+        # The report holds other collapsible sections; this finding's summary is
+        # the one that names it.
+        summary = [
+            line
+            for line in document.split("\n")
+            if "<summary>" in line and "INJECTED HEADING" in line.upper()
+        ]
         # The control: the finding is in the report, with its summary line.
         assert len(summary) == 1, summary
         assert summary[0].endswith("</summary>"), summary[0]
