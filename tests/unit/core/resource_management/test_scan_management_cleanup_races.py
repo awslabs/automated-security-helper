@@ -484,6 +484,26 @@ class TestASurvivingToolKeepsTheTree:
         registry.remove_output_of_scan.assert_not_called()
         registry.cleanup_scan.assert_not_called()
 
+    def test_the_tool_is_named_by_basename_not_by_the_servers_path(
+        self, registry, tmp_path, alive
+    ):
+        """The tool is recorded as argv0 as spawned, which can be the server's
+        full path; this message reaches a remote MCP client, so it names the
+        tool as record_cancel_outcome does on a network transport: by basename,
+        with no path and no pid."""
+        alive[BANDIT_PID] = True
+        entry = self._stopped_with_a_surviving_tool(tmp_path)
+        entry.could_not_stop = (("/opt/tools/bin/bandit", BANDIT_PID),)
+        registry.get_scan.return_value = entry
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert "still stopping" in result["message"]
+        assert "bandit" in result["message"]
+        assert "/opt/tools" not in result["message"]
+        assert str(BANDIT_PID) not in result["message"]
+
     def test_the_scan_is_cleaned_up_once_the_tool_is_gone(
         self, registry, tmp_path, alive
     ):

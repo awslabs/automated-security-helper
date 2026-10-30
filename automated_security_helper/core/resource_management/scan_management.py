@@ -465,9 +465,10 @@ async def cleanup_scan_resources(
         # still stopping instead, with the tools named and nothing removed, as
         # the docstring promises for a scan that has not settled.
         if entry.a_surviving_tool_is_running():
-            tools = ", ".join(
-                dict.fromkeys(tool for tool, _pid in entry.could_not_stop)
-            )
+            # By basename: a tool is recorded as argv0 as spawned, which can be
+            # the server's full path, and this message reaches a remote MCP
+            # client (record_cancel_outcome names the tools the same way).
+            tools = ", ".join(entry.tool_display_names())
             return {
                 "success": False,
                 "scan_id": scan_id,
