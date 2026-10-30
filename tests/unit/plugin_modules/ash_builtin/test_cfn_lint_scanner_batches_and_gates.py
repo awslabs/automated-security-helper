@@ -363,9 +363,10 @@ class RunWideFaultCfnLint:
 def test_a_run_wide_failure_is_not_repeated_once_per_template(ash_temp_path):
     """At the base a batch of eight that failed for the run's own reason was re-run
     one template at a time: nine cfn-lint start-ups to report one failure eight
-    times. The first and the last template alone fail alike, the failure names no
-    template, and six sit between them (more than the fold's floor), so those six
-    are recorded with that failure and not re-run: three invocations."""
+    times. The first template alone fails alike and the failure names no template,
+    so one probe lint of a synthetic template decides: it fails alike, so the
+    seven remaining are recorded with that failure and not re-run. Three
+    invocations: the batch, the first template, the probe."""
     names = [f"{letter}.yaml" for letter in "abcdefgh"]
     repo = _repo(ash_temp_path, *names)
     fake = RunWideFaultCfnLint()
@@ -377,7 +378,8 @@ def test_a_run_wide_failure_is_not_repeated_once_per_template(ash_temp_path):
     assert len(batches) == 3, batches
     assert len(batches[0]) == 8
     assert len(batches[1]) == 1 and batches[1][0].endswith("a.yaml")
-    assert len(batches[2]) == 1 and batches[2][0].endswith("h.yaml")
+    assert len(batches[2]) == 1 and batches[2][0].endswith(".probe.yaml")
+    assert str(repo / ".ash") in batches[2][0], "the probe left the results dir"
     assert scanner.targets_attempted == 8
     assert scanner.targets_failed == 8
     assert any("read as a failure of the run" in e for e in scanner.errors)
@@ -387,9 +389,11 @@ def test_a_small_batch_with_alike_failures_at_both_ends_still_runs_the_middle(
     ash_temp_path,
 ):
     """Two templates with the SAME per-template fault at both ends of a small batch
-    fail alike when run alone. At the previous tip that equality alone folded the
+    fail alike when run alone. At an earlier tip that equality alone folded the
     template between them as failed without running it, and its finding was never
-    produced; below the fold's floor every middle template runs on its own."""
+    produced. The probe template (no Metadata) lints clean, so the failure is not
+    the run's and every remaining template runs on its own: the batch, the first
+    alone, the probe, then the two remaining."""
     repo = _repo(ash_temp_path, "aaa-faulty.yaml", "mmm.yaml", "zzz-faulty.yaml")
     fake = RegionFaultCfnLint("aaa-faulty.yaml", "zzz-faulty.yaml")
     scanner = _scanner(repo)
@@ -397,7 +401,8 @@ def test_a_small_batch_with_alike_failures_at_both_ends_still_runs_the_middle(
     report = _run(scanner, fake, repo)
 
     batches = [call[call.index("--") + 1 :] for call in fake.calls]
-    assert len(batches) == 4, batches
+    assert len(batches) == 5, batches
+    assert batches[2][0].endswith(".probe.yaml"), batches
     assert scanner.targets_attempted == 3
     assert scanner.targets_failed == 2
     assert not any("read as a failure of the run" in e for e in scanner.errors)
@@ -408,9 +413,38 @@ def test_a_small_batch_with_alike_failures_at_both_ends_still_runs_the_middle(
     assert [u.rsplit("/", 1)[-1] for u in uris] == ["mmm.yaml"]
 
 
+def test_a_large_batch_with_the_same_fault_at_both_ends_keeps_the_middles_findings(
+    ash_temp_path,
+):
+    """Eight templates, the first and the last naming the same unknown region: at
+    the previous tip the first and last re-runs failed alike, the failure text
+    names no template, six sat between them, so all six were recorded as failed
+    without being linted and their findings were lost. The probe decides instead:
+    it lints clean, so the six run on their own and every finding is kept."""
+    middles = [f"{letter}.yaml" for letter in "bcdefg"]
+    repo = _repo(ash_temp_path, "aaa-faulty.yaml", *middles, "zzz-faulty.yaml")
+    fake = RegionFaultCfnLint("aaa-faulty.yaml", "zzz-faulty.yaml")
+    scanner = _scanner(repo)
+
+    report = _run(scanner, fake, repo)
+
+    batches = [call[call.index("--") + 1 :] for call in fake.calls]
+    # The batch, the first alone, the probe, then the seven remaining one by one.
+    assert len(batches) == 10, batches
+    assert scanner.targets_attempted == 8
+    assert scanner.targets_failed == 2
+    assert not any("read as a failure of the run" in e for e in scanner.errors)
+    uris = sorted(
+        r.locations[0].physicalLocation.artifactLocation.uri
+        for r in report.runs[0].results
+    )
+    assert [u.rsplit("/", 1)[-1] for u in uris] == middles
+
+
 def test_a_faulty_first_template_does_not_hide_the_others(ash_temp_path):
-    """The first template alone fails as the batch did, the last alone passes, so
-    the failure is one template's and the rest are linted on their own."""
+    """The first template alone fails as the batch did and the probe template
+    lints clean, so the failure is one template's and the rest are linted on
+    their own: the batch, the first alone, the probe, then the two remaining."""
     repo = _repo(ash_temp_path, "aaa-faulty.yaml", "mmm.yaml", "zzz.yaml")
     fake = RegionFaultCfnLint("aaa-faulty.yaml")
     scanner = _scanner(repo)
@@ -418,7 +452,7 @@ def test_a_faulty_first_template_does_not_hide_the_others(ash_temp_path):
     report = _run(scanner, fake, repo)
 
     batches = [call[call.index("--") + 1 :] for call in fake.calls]
-    assert len(batches) == 4, batches
+    assert len(batches) == 5, batches
     assert scanner.targets_failed == 1
     assert not any("read as a failure of the run" in e for e in scanner.errors)
     uris = sorted(

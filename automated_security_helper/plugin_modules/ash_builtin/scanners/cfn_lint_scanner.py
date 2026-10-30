@@ -375,11 +375,28 @@ def _one_template_can_fail_the_run(response: Dict[str, Any]) -> bool:
     return bool(response) and not response.get("timed_out") and "error" not in response
 
 
-#: The fewest templates between a batch's first and last that are recorded with a
-#: run-wide failure instead of being re-run one at a time. Below it the re-runs are
-#: cheap and exact, so they are made; above it, two identical failures at both ends
-#: are read as the run's.
-_RUN_WIDE_FOLD_MIN_MIDDLE = 4
+#: The fewest templates left after a failed batch's first re-run for which one
+#: probe lint of a synthetic template is cheaper than linting each of them alone:
+#: below it the re-runs are made, each exact; from it on the probe decides whether
+#: the failure is the run's (see ``_PROBE_TEMPLATE``).
+_RUN_WIDE_PROBE_MIN_REMAINING = 2
+
+#: The template a probe lint runs with the batch's own options to decide whether a
+#: batch failure is the run's. Valid, one resource that takes no properties, and
+#: no Metadata: a fault of one template (a region its own cfn-lint Metadata names
+#: that this cfn-lint does not know) cannot reach it, while a fault of the run (an
+#: operator regions value this cfn-lint does not know, a configure_rules key it
+#: refuses, a broken install) fails it exactly as it failed the batch. cfn-lint's
+#: message for the Metadata fault names no template, so the first and last
+#: templates of a batch failing alike could not tell the two apart: a batch whose
+#: first and last templates named the same unknown region folded every template
+#: between them as failed without linting it.
+_PROBE_TEMPLATE = (
+    "AWSTemplateFormatVersion: '2010-09-09'\n"
+    "Resources:\n"
+    "  AshProbe:\n"
+    "    Type: AWS::CloudFormation::WaitConditionHandle\n"
+)
 
 
 def _names_a_template(text: str, names: List[str]) -> bool:
@@ -1518,16 +1535,16 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     # know, a configure_rules key it refuses, a broken install),
                     # and re-running every template alone would then repeat one
                     # failure once per template, each a cfn-lint start-up with a
-                    # fresh scan_timeout. So the first and the last template are
-                    # re-run alone first: when both fail exactly as the batch did,
-                    # the failure names no template, and more than
-                    # _RUN_WIDE_FOLD_MIN_MIDDLE templates sit between them, the
-                    # failure is read as the run's and those templates are
-                    # recorded with it, not re-run; otherwise each is linted on
-                    # its own and only the faulty ones fail. Two templates with
-                    # the same per-template fault at both ends of a large batch
-                    # still read as the run's: the recorded text says which
-                    # templates were not re-run and why.
+                    # fresh scan_timeout. So the first template is re-run alone:
+                    # when it fails exactly as the batch did, the failure names
+                    # no template, and _RUN_WIDE_PROBE_MIN_REMAINING or more
+                    # templates remain, one probe lint of _PROBE_TEMPLATE with
+                    # the same options decides: failing alike, the failure is
+                    # the run's and the remaining templates are recorded with
+                    # it, not re-run; otherwise each is linted on its own and
+                    # only the faulty ones fail. No template is ever recorded
+                    # as failed without a run that fails it or a probe that
+                    # shows the run itself fails.
                     self._plugin_log(
                         f"cfn-lint did not evaluate {len(batch)} template(s) in one "
                         f"invocation ({failure}); linting each one on its own.",
@@ -1557,27 +1574,25 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     if (
                         failure == batch_failure
                         and not timed_out
-                        and len(remaining) - 1 > _RUN_WIDE_FOLD_MIN_MIDDLE
+                        and len(remaining) >= _RUN_WIDE_PROBE_MIN_REMAINING
                         and not _names_a_template(
                             batch_failure,
                             [*arguments, *(shown_by_argument[a] for a in arguments)],
                         )
                     ):
-                        last_position, last_argument = remaining.pop()
-                        failure, batch_report, response = lint_alone(
-                            last_position, last_argument
+                        probe_failure, response = self._probe_run_wide_failure(
+                            index, option_args, results_dir, cwd, child_env
                         )
                         exit_codes.append(response.get("returncode"))
                         timed_out = timed_out or bool(response.get("timed_out"))
-                        fold([shown_by_argument[last_argument]], failure, batch_report)
-                        if failure == batch_failure:
+                        if probe_failure == batch_failure:
                             fold(
                                 [shown_by_argument[a] for _, a in remaining],
                                 f"{batch_failure} (read as a failure of the run, "
-                                "not of one template: the first and the last "
-                                "template of this batch failed alike when run "
-                                f"alone, so the {len(remaining)} between them were "
-                                "not re-run)",
+                                "not of one template: a probe template with no "
+                                "Metadata failed alike under the same options, "
+                                f"so the {len(remaining)} remaining were not "
+                                "re-run)",
                                 None,
                             )
                             continue
@@ -1693,6 +1708,34 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 texts = "; ".join((r.message.root.text or "") for r in config_errors)
                 failure = f"cfn-lint reported a configuration error: {texts}"
         return failure, batch_report, response if isinstance(response, dict) else {}
+
+    def _probe_run_wide_failure(
+        self,
+        index: int,
+        option_args: List[str],
+        results_dir: Path,
+        cwd: Path,
+        child_env: Dict[str, str],
+    ) -> Tuple[Optional[str], Dict[str, Any]]:
+        """Lint ``_PROBE_TEMPLATE`` once with the batch's options.
+
+        Returns the probe's failure reason (None when it linted) and the subprocess
+        response, so a timeout of the probe counts as the scan's. The probe is
+        written beside the batch's SARIF files, never into the scanned tree, and
+        its results are not merged: it is a question about the run, not a target.
+        """
+        probe = results_dir.joinpath(f"cfn-lint.{index}.probe.yaml")
+        with open_for_write(probe) as handle:
+            handle.write(_PROBE_TEMPLATE)
+        failure, _report, response = self._lint_once(
+            [probe.as_posix()],
+            results_dir.joinpath(f"cfn-lint.{index}.probe.sarif"),
+            option_args,
+            results_dir,
+            cwd,
+            child_env,
+        )
+        return failure, response
 
     @staticmethod
     def _batch_failure(
