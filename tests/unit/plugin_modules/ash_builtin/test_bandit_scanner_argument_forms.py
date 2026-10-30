@@ -143,6 +143,44 @@ def test_a_nul_entry_leaves_the_other_exclusions_in_place(tmp_path, caplog):
     assert any("NUL" in message for message in _warnings(caplog)), _warnings(caplog)
 
 
+def test_a_global_ignore_path_with_a_nul_is_warned_about(tmp_path, caplog):
+    """The entry was dropped silently by the builder; the scan now says so, and
+    the other ignore paths still reach bandit."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(
+            source, "source", _ignore("gen\0erated/**", "vendor/**")
+        )
+
+    entries = _entries(argv)
+    assert not any("\0" in entry for entry in entries), entries
+    assert f"{source.as_posix()}/vendor/*" in entries
+    assert any(
+        "ignore path" in message and "NUL" in message for message in _warnings(caplog)
+    ), _warnings(caplog)
+
+
+def test_an_ini_exclude_entry_with_a_nul_is_dropped_and_counted(tmp_path, caplog):
+    """The operator's .bandit exclude entries are split on commas and passed as
+    written; one holding a NUL is left out, counted in the warning, and the
+    entry beside it stays."""
+    source = _tree(tmp_path, ["app.py"])
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = ven\0dor,vendor\n", encoding="utf-8")
+    scanner = _scanner(source, tmp_path)
+    scanner._ini_file = ini
+
+    with caplog.at_level(logging.WARNING):
+        entries = scanner._ini_excludes()
+
+    assert entries == ["vendor"]
+    assert any(
+        "1 exclude entries" in message and "NUL" in message
+        for message in _warnings(caplog)
+    ), _warnings(caplog)
+
+
 # ---------------------------------------------------------------------------
 # The --exclude bound follows the platform's command-line limit
 # ---------------------------------------------------------------------------

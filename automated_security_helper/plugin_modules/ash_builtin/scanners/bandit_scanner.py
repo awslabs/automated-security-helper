@@ -1096,6 +1096,22 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             and Path(target).absolute() == Path(source_dir).absolute()
         ):
             for ignore_path in active_ignore_paths(global_ignore_paths):
+                if _cannot_be_passed(ignore_path.path):
+                    # Said, not swallowed: the entry gets no bandit form, so
+                    # bandit reads the files it covers; the SARIF step drops
+                    # their findings afterwards.
+                    ASH_LOGGER.warning(
+                        text_without_values(
+                            f"Global ignore path '{ignore_path.path}' holds a line "
+                            "break or a NUL character, which no --exclude entry can "
+                            "carry, so bandit gets no entry for it and reads the "
+                            "files it covers; their findings are dropped after the "
+                            "scan.",
+                            self._environment_values(),
+                        ),
+                        extra=NO_MARKUP,
+                    )
+                    continue
                 ignore_globs.extend(bandit_exclude_globs(anchor, ignore_path.path))
         output_entries: List[Tuple[str, Path]] = []
         for relative in self._ash_output_dirs_inside(Path(target)):
