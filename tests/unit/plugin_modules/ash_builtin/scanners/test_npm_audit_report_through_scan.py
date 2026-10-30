@@ -21,6 +21,9 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    npm_audit_scanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScanner,
     NpmAuditScannerConfig,
@@ -89,13 +92,20 @@ REPORT = {
             "critical": 1,
             "total": 5,
         },
-        "dependencies": {"prod": 5, "dev": 0, "total": 4},
+        "dependencies": {"prod": 5, "dev": 0, "total": 5},
     },
 }
 
 
 @pytest.fixture
-def context(tmp_path):
+def context(tmp_path, monkeypatch):
+    # Not the machine's: ASH_OFFLINE set in the environment makes scan() record
+    # the lockfile as MISSING, and a missing npm on PATH makes it a failed
+    # target; either failed the four tests below without saying why.
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setattr(
+        npm_audit_scanner, "find_executable", lambda name: str(tmp_path / name)
+    )
     context = PluginContext(
         source_dir=tmp_path / "src",
         output_dir=tmp_path / "out",

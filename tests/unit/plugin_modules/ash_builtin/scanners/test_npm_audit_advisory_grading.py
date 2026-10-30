@@ -17,6 +17,8 @@ rule and no result while the report's metadata counted the advisory.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -205,20 +207,31 @@ def test_a_zero_score_with_a_vector_is_still_no_score(scanner):
 
 
 def test_a_score_with_a_null_vector_is_a_score(scanner):
-    """The vector is not consulted: a positive score grades the result."""
+    """The vector is not consulted: a positive score grades the result. The
+    score sits in another band than the word (9.8 on a "high" advisory), so
+    the grade says which one set it; 7.5 on "high" read HIGH either way and
+    could not tell a score-graded result from a word-graded one."""
     document = _report(
         pkg=(
             "high",
-            [_via("pkg", "high", score=7.5, vector=None)],
+            [_via("pkg", "high", score=9.8, vector=None)],
             ["node_modules/pkg"],
         )
     )
 
+    converted = scanner._convert_npm_audit_to_sarif(
+        document, scanner.context.source_dir
+    )
+    (converted_result,) = converted.runs[0].results
+    # A scored advisory declares no word grade of its own; the normalizer's
+    # copy of the rule's score is what grades it.
+    assert "issue_severity" not in converted_result.properties.model_extra
+
     report, grades = _graded(scanner, document)
 
     rule = report.runs[0].tool.driver.rules[0]
-    assert rule.properties.model_extra["security_severity"] == 7.5
-    assert list(grades.values()) == ["HIGH"], grades
+    assert rule.properties.model_extra["security_severity"] == 9.8
+    assert list(grades.values()) == ["CRITICAL"], grades
 
 
 def test_a_via_entry_without_a_cvss_key_is_graded_by_its_word(scanner):
@@ -343,27 +356,11 @@ def test_a_transitive_entry_with_no_nodes_still_produces_a_result(scanner):
     assert grades[("npm-audit-transitive-child", None)] == "HIGH"
 
 
-def test_a_later_lockfile_s_score_reaches_the_rule_the_first_lockfile_kept(scanner):
-    """Two lockfiles hit one advisory. The first (an unscored record, as a yarn
-    4 one always is) makes the rule, and the merge keeps the first rule per id.
-    The second lockfile's result had a usable score, so it declares no grade of
-    its own and relies on the rule's score; with the kept rule carrying none it
-    fell to the SARIF level, CRITICAL for a high advisory. The kept rule takes
-    the score the later rule carries."""
-    first = _report(
-        pkg=("high", [_via("pkg", "high", score=0, vector=None)], ["node_modules/pkg"])
-    )
-    second = _report(
-        pkg=(
-            "high",
-            [_via("pkg", "high", score=7.5, vector="CVSS:3.1/AV:N")],
-            ["node_modules/pkg"],
-        )
-    )
-    # Outside the scanned tree, so no lockfile is indexed for either part.
+def _two_lockfiles(scanner, first, second):
+    """Two npm lockfiles, outside the scanned tree so neither is indexed,
+    converted and merged as the scan merges them, then graded."""
     locks = scanner.context.output_dir / "elsewhere"
-
-    report = normalize_sarif_result_severities(
+    return normalize_sarif_result_severities(
         scanner._convert_per_lockfile(
             [
                 (locks / "a" / "package-lock.json", first),
@@ -374,9 +371,68 @@ def test_a_later_lockfile_s_score_reaches_the_rule_the_first_lockfile_kept(scann
         )
     )
 
+
+@pytest.mark.parametrize("scored_first", [False, True])
+def test_the_one_rule_two_lockfiles_share_carries_the_score_either_one_brings(
+    scanner, scored_first
+):
+    """Two lockfiles hit one advisory; the merge keeps the first rule per id.
+    One lockfile's record is unscored (as a yarn 4 one always is) and declares
+    its word grade, HIGH; the other's has a usable score, 9.8, declares no
+    grade and relies on the rule's score. With the kept rule carrying no score
+    the scored result fell to the SARIF level, CRITICAL for a high advisory by
+    accident rather than by its score. Whichever lockfile comes first, the kept
+    rule carries the one score, the word-graded result keeps HIGH, and the
+    scored result reads the score's band, CRITICAL; the two bands differ so the
+    grades say which path graded which result (7.5 on "high" could not)."""
+    unscored = _report(
+        pkg=("high", [_via("pkg", "high", score=0, vector=None)], ["node_modules/pkg"])
+    )
+    scored = _report(
+        pkg=(
+            "high",
+            [_via("pkg", "high", score=9.8, vector="CVSS:3.1/AV:N")],
+            ["node_modules/pkg"],
+        )
+    )
+    first, second = (scored, unscored) if scored_first else (unscored, scored)
+
+    report = _two_lockfiles(scanner, first, second)
+
     (rule,) = report.runs[0].tool.driver.rules
-    assert rule.properties.model_extra["security_severity"] == 7.5
-    assert [result_severity(r) for r in report.runs[0].results] == ["HIGH", "HIGH"]
+    assert rule.properties.model_extra["security_severity"] == 9.8
+    assert sorted(result_severity(r) for r in report.runs[0].results) == [
+        "CRITICAL",
+        "HIGH",
+    ]
+
+
+def test_two_lockfiles_with_two_scores_keep_the_first_lockfile_s_score(scanner):
+    """Both records carry a score and they differ (5.0, then 7.5). The kept
+    rule is the first lockfile's and keeps its own score; the later score is
+    lent only to a rule that has none. Both results rely on the rule, so both
+    read the first score's band, MEDIUM: the choice is pinned here, where it
+    was not, so a change of it is a seen change."""
+    first = _report(
+        pkg=(
+            "high",
+            [_via("pkg", "high", score=5.0, vector="CVSS:3.1/AV:N")],
+            ["node_modules/pkg"],
+        )
+    )
+    second = _report(
+        pkg=(
+            "high",
+            [_via("pkg", "high", score=7.5, vector="CVSS:3.1/AV:N")],
+            ["node_modules/pkg"],
+        )
+    )
+
+    report = _two_lockfiles(scanner, first, second)
+
+    (rule,) = report.runs[0].tool.driver.rules
+    assert rule.properties.model_extra["security_severity"] == 5.0
+    assert [result_severity(r) for r in report.runs[0].results] == ["MEDIUM", "MEDIUM"]
 
 
 def test_a_root_with_no_nodes_still_gives_the_transitive_result_a_ref(scanner):
@@ -452,6 +508,82 @@ def test_a_yarn_or_pnpm_record_with_no_versions_still_produces_a_result(scanner)
     assert "installed_version" not in props, props
     assert props["vulnerable_versions"] == ">=3.7.0 <4.17.19"
     assert "dependency_paths" not in props
+    assert grades[("GHSA-p6mc-m468-83gw", None)] == "HIGH"
+
+
+_EMPTY_FINDINGS_ADVISORY = {
+    "module_name": "lodash",
+    "id": 1065,
+    "title": "Prototype Pollution",
+    "url": "https://github.com/advisories/GHSA-p6mc-m468-83gw",
+    "severity": "high",
+    "cwe": ["CWE-1321"],
+    "vulnerable_versions": ">=3.7.0 <4.17.19",
+    "patched_versions": ">=4.17.19",
+    "findings": [],
+}
+
+
+def _yarn_1_stream(advisory) -> str:
+    events = [
+        {
+            "type": "auditAdvisory",
+            "data": {
+                "resolution": {"id": 1065, "path": "lodash"},
+                "advisory": advisory,
+            },
+        },
+        {"type": "auditSummary", "data": {"vulnerabilities": {"high": 1}}},
+    ]
+    return "".join(json.dumps(event) + "\n" for event in events)
+
+
+@pytest.mark.parametrize(
+    ("yarn_major", "stdout"),
+    [
+        pytest.param(1, _yarn_1_stream(_EMPTY_FINDINGS_ADVISORY), id="yarn-1"),
+        pytest.param(
+            4,
+            json.dumps(
+                {
+                    "value": "lodash",
+                    "children": {
+                        "ID": 1065,
+                        "Issue": "Prototype Pollution",
+                        "URL": "https://github.com/advisories/GHSA-p6mc-m468-83gw",
+                        "Severity": "high",
+                        "Vulnerable Versions": ">=3.7.0 <4.17.19",
+                        "Tree Versions": [],
+                        "Dependents": [],
+                    },
+                }
+            )
+            + "\n",
+            id="yarn-4",
+        ),
+    ],
+)
+def test_an_advisory_the_reader_lists_no_version_for_still_reaches_a_result(
+    scanner, yarn_major, stdout
+):
+    """The test above hands the conversion a record built by hand. This one
+    runs the tool's own document through the reader first: a yarn 1 advisory
+    with an empty ``findings`` list and a yarn 4 line with no ``Tree Versions``
+    each come out of ``_parse_yarn_audit`` as a record with an empty versions
+    map, and that record converts to one result by name. A reader that dropped
+    such an advisory would lose it from start to finish while the hand-built
+    record still passed."""
+    report, reason = NpmAuditScanner._parse_yarn_audit(
+        yarn_major, {"stdout": stdout, "stderr": "", "returncode": 1}
+    )
+
+    assert reason is None, reason
+    (record,) = report["yarn_advisories"]
+    assert record["versions"] == {}
+    graded, grades = _graded(scanner, report)
+    (result,) = graded.runs[0].results
+    assert result.properties.model_extra["package_name"] == "lodash"
+    assert "installed_version" not in result.properties.model_extra
     assert grades[("GHSA-p6mc-m468-83gw", None)] == "HIGH"
 
 

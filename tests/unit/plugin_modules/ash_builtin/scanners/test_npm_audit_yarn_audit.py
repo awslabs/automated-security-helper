@@ -214,24 +214,27 @@ def test_yarn_reports_become_findings(plugin_context, name, expected):
     assert [_as_captured(c) for c in audit] == [capture["command"]]
 
 
-def test_yarn_2_and_later_audit_every_workspace(plugin_context):
+@pytest.mark.parametrize(
+    "name", ["berry3-clean", "berry-clean"], ids=["yarn-3", "yarn-4"]
+)
+def test_yarn_2_and_later_audit_every_workspace(plugin_context, name):
     """A yarn workspace monorepo has one lockfile at its root. ``yarn npm audit``
     without ``--all`` audits the root workspace's dependencies only, so the member
     workspaces' dependencies were never checked; ``--all`` audits every workspace
     from the same lockfile, as npm does. yarn 1 has one ``yarn audit`` for the whole
-    project and takes no such flag.
+    project and takes no such flag (``test_yarn_1_takes_no_workspace_flag``).
 
-    This pins the argument; yarn does not care where it stands among the
+    This pins the argument on each yarn 2+ major the captures cover (3 and 4;
+    there is no yarn 2 capture); yarn does not care where it stands among the
     others. What the flag changes in a report (an advisory reached only through
     a member workspace) is not pinned here: every yarn 2+ capture in the test
     data comes from a single-workspace project run without ``--all``, and a
     two-workspace capture has to be recorded by running the tool."""
-    for_yarn_1, _ = _scan(plugin_context, _capture("classic-clean"))
-    for_yarn_4, commands = _scan(plugin_context, _capture("berry-clean"))
+    report, commands = _scan(plugin_context, _capture(name))
 
     (audit,) = [c for c in commands if "--version" not in c]
     assert "--all" in audit, audit
-    assert for_yarn_1.runs[0].results == for_yarn_4.runs[0].results == []
+    assert report.runs[0].results == []
 
 
 def test_yarn_1_takes_no_workspace_flag(plugin_context):
@@ -627,16 +630,30 @@ def test_a_multi_line_value_in_a_yarn_1_stdout_error_event_is_hidden(sep):
         assert part not in (reason or ""), (part, reason)
 
 
-@pytest.mark.parametrize("sep", ["\N{LINE SEPARATOR}", "\u0085", "\x0c"])
+#: The separators ``str.splitlines`` honors that a JSON string may hold raw
+#: (code points at or above U+0020; the ndjson-lines tests use the same three).
+#: A form feed is not among them: JSON requires the control characters below
+#: U+0020 to be escaped, so ``json.dumps`` writes ``\f`` and no raw form feed
+#: ever reaches the stream, which made a form-feed case test nothing.
+_RAW_SEPARATORS = {
+    "line-separator": chr(0x2028),
+    "paragraph-separator": chr(0x2029),
+    "next-line": chr(0x0085),
+}
+
+
+@pytest.mark.parametrize("sep", sorted(_RAW_SEPARATORS), ids=sorted(_RAW_SEPARATORS))
 def test_an_error_event_holding_a_unicode_line_separator_keeps_its_message(sep):
     """The detail reader splits the stream as the parse loops do, at line feeds
     only. A yarn 1 error event whose data holds a separator str.splitlines
     knows was cut in two here, neither half parsed, and the reason shown was
     the event's raw opening instead of its message."""
+    separator = _RAW_SEPARATORS[sep]
     event = json.dumps(
-        {"type": "error", "data": f"Request failed{sep}Error: ENOTFOUND host"},
+        {"type": "error", "data": f"Request failed{separator}Error: ENOTFOUND host"},
         ensure_ascii=False,
     )
+    assert separator in event, "the separator must reach the stream raw"
 
     detail = NpmAuditScanner._yarn_error_detail(event + "\n", ())
 

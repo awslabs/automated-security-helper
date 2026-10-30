@@ -265,9 +265,35 @@ class TestTheHandedIgnoreList:
         )
 
         assert _names(started) == []
-        assert scanner.nothing_to_scan_reason() is not None
+        reason = scanner.nothing_to_scan_reason()
+        assert reason is not None and "no lockfile" in reason, reason
         # A scanner that was never handed a list still answers from the config.
         assert _scanner(context).nothing_to_scan_reason() is None
+
+    def test_nothing_to_scan_reason_follows_the_last_scan_on_a_reused_instance(
+        self, online, tmp_path
+    ):
+        """The same instance, scanned twice: first with the ignore path, then
+        with no list. The reason follows the LAST call's list, so after the
+        second scan the package is found again and the answer is None; a list
+        kept from the first call would still say the package was ignored."""
+        context = _context(tmp_path)
+        _package(context.source_dir / "vendor")
+        started = _audited(online)
+        scanner = _scanner(context)
+
+        scanner.scan(
+            target=context.source_dir,
+            target_type="source",
+            global_ignore_paths=[
+                IgnorePathWithReason(path="vendor/", reason="vendored")
+            ],
+        )
+        assert scanner.nothing_to_scan_reason() is not None
+        scanner.scan(target=context.source_dir, target_type="source")
+
+        assert _names(started) == ["vendor"]
+        assert scanner.nothing_to_scan_reason() is None
 
 
 class TestOfflineShrinkwrap:

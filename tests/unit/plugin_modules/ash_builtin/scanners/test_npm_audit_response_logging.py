@@ -223,7 +223,7 @@ def test_the_response_is_summarized_redacted_at_debug(context, messages):
     assert "second line" not in text
 
 
-def test_the_summary_unit():
+def test_the_summary_leaves_the_error_text_and_later_stderr_lines_out():
     """The error text is not part of the summary at all: a token in it (the
     runner quotes the failing command, credentials included) is never on the
     line, and the second stderr line is not either."""

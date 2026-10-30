@@ -3,7 +3,15 @@
 
 """The files utils/package_manager_child.py hands a package manager, and the copy.
 
-Three shapes the module missed:
+Two groups of tests. ``TestWhereYarnsCopyGoes`` reads where yarn's unsandboxed
+copy is placed and why each candidate (the output directory, the operator's
+cache directory, the runtime directory) is passed over: the scanned tree, the
+system temporary directory, an ancestor another account can write, an ancestor
+holding a settings file, a directory that cannot be made; with the real checks
+and with them stood down. The rest reads the inputs the module lists and copies
+(the byte order mark, the skip that holds the package, links of every shape:
+inside the tree, out of it, back into it, into ``node_modules``, aliases). The
+shapes the module first missed:
 
 - A ``package.json`` that starts with a UTF-8 byte order mark is JSON to the
   package managers, and ``json.loads`` refuses the mark, so under
@@ -53,6 +61,17 @@ def trusted_copy_dirs(monkeypatch, tmp_path):
     where the copy goes for another reason uses this; the checks themselves are
     read in ``TestWhereYarnsCopyGoes`` without it.
     """
+    # The settings-file check stays real for the tests that read it; a
+    # settings file above the run's temporary root (a checkout holding
+    # .npmrc with --basetemp inside it, a TMPDIR under a home with .yarnrc)
+    # would pass every candidate over for a reason no test here is about, so
+    # the run says so instead of failing those tests.
+    holder = child_module._settings_file_ancestor(tmp_path)
+    if holder is not None:
+        pytest.skip(
+            f"{holder[1]} in {holder[0]}, above the test's temporary root, would "
+            "disqualify every copy directory offered here"
+        )
     system_tmp = tmp_path / "system-tmp"
     system_tmp.mkdir()
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
@@ -211,6 +230,41 @@ class TestWhereYarnsCopyGoes:
 
         assert not cwd.is_relative_to(trusted_copy_dirs), cwd
         assert cwd.is_relative_to(cache_home / "ash"), cwd
+        # The reason, read at the placement itself: a rejection for any other
+        # cause would have placed the copy the same way.
+        chosen, passed_over = child_module._yarn_copy_parent(parent, repo)
+        assert chosen == cache_home / "ash", (chosen, passed_over)
+        assert len(passed_over) == 1, passed_over
+        assert "system temporary directory" in passed_over[0], passed_over
+
+    @pytest.mark.parametrize(
+        "variable", ["XDG_CACHE_HOME", "XDG_RUNTIME_DIR"], ids=["cache", "runtime"]
+    )
+    def test_a_cache_or_runtime_directory_under_the_system_temporary_directory_is_passed_over(
+        self, tmp_path, monkeypatch, trusted_copy_dirs, variable
+    ):
+        """``HOME=/tmp`` (containers with arbitrary UIDs) and
+        ``XDG_RUNTIME_DIR=/tmp/runtime-$USER`` (a fallback some tools set) put
+        the cache or the runtime directory under /tmp, which every account can
+        write: a planted /tmp/.npmrc would be back on yarn's path. Only the
+        output directory was ever checked by a test; the other two candidates
+        are held to the same check, and the reason names it."""
+        repo = tmp_path / "repo"
+        _yarn_package(repo)
+        parent = repo / ".ash" / "ash_output"
+        parent.mkdir(parents=True)
+        under_tmp = trusted_copy_dirs / "runtime-me"
+        under_tmp.mkdir()
+        monkeypatch.setenv("XDG_CACHE_HOME", str(repo / ".cache-inside"))
+        monkeypatch.setenv(variable, str(under_tmp))
+
+        chosen, passed_over = child_module._yarn_copy_parent(parent, repo)
+
+        assert chosen is None, (chosen, passed_over)
+        assert any(
+            str(under_tmp) in reason and "system temporary directory" in reason
+            for reason in passed_over
+        ), passed_over
 
     def test_a_candidate_below_a_directory_another_account_can_write_is_passed_over(
         self, tmp_path, monkeypatch, trusted_copy_dirs
@@ -320,13 +374,25 @@ class TestWhereYarnsCopyGoes:
             ".yarnrc.yml",
         )
 
-    def test_the_ancestor_check_names_a_world_writable_directory(self, tmp_path):
-        """Read with the real check: a directory any account can write, planted
-        above the candidate, is named; the nearest such directory is returned,
-        which is why the planted one is found before ``/tmp`` is."""
+    @pytest.mark.parametrize(
+        "mode",
+        [0o777, 0o1777, 0o775],
+        ids=["world-writable", "sticky-world-writable", "group-writable"],
+    )
+    def test_the_ancestor_check_names_a_directory_another_account_can_write(
+        self, tmp_path, mode
+    ):
+        """Read with the real check: a directory any account (or the group) can
+        write, planted above the candidate, is named; the nearest such
+        directory is returned, which is why the planted one is found before
+        ``/tmp`` is. The sticky bit changes nothing: ``/tmp`` itself is 1777,
+        and sticky stops no one from planting a NEW file beside the copy, so a
+        "sticky is safe" rule would pass exactly the directory the check is
+        for. Group-writable counts too: another account in the group writes
+        there."""
         shared = tmp_path / "shared"
         shared.mkdir()
-        shared.chmod(0o777)
+        shared.chmod(mode)
         candidate = shared / "ash" / "copies"
 
         assert child_module._untrusted_ancestor(candidate) == shared
@@ -459,6 +525,64 @@ class TestWhereYarnsCopyGoes:
 
         assert cwd.is_relative_to(runtime / "ash"), cwd
         assert leading == ()
+
+    def test_a_home_that_cannot_be_found_falls_to_the_runtime_directory(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """HOME unset with no passwd entry (arbitrary UIDs in a container):
+        ``Path.home`` raises, so there is no cache directory to try, and the
+        runtime directory is chosen with the cache named as not known. The
+        raise never reaches the scan."""
+        repo = tmp_path / "repo"
+        _yarn_package(repo)
+        parent = repo / ".ash" / "ash_output"
+        parent.mkdir(parents=True)
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+
+        def no_home(cls):
+            raise RuntimeError("Could not determine home directory.")
+
+        monkeypatch.setattr(Path, "home", classmethod(no_home))
+        runtime = tmp_path / "run" / "user" / "1000"
+        runtime.mkdir(parents=True)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+
+        chosen, passed_over = child_module._yarn_copy_parent(parent, repo)
+
+        assert chosen == runtime / "ash", (chosen, passed_over)
+        assert any("cache directory is not known" in p for p in passed_over), (
+            passed_over
+        )
+
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0, reason="root writes any mode"
+    )
+    def test_a_cache_directory_that_cannot_be_made_falls_to_the_runtime_directory(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """A read-only cache home (0500): making ``ash`` below it raises
+        PermissionError, which is a reason to pass the candidate over, not a
+        failure of the scan; the runtime directory is chosen."""
+        repo = tmp_path / "repo"
+        _yarn_package(repo)
+        parent = repo / ".ash" / "ash_output"
+        parent.mkdir(parents=True)
+        cache_home = tmp_path / "cache-home"
+        cache_home.mkdir()
+        cache_home.chmod(0o500)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+        runtime = tmp_path / "run" / "user" / "1000"
+        runtime.mkdir(parents=True)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+        try:
+            chosen, passed_over = child_module._yarn_copy_parent(parent, repo)
+        finally:
+            cache_home.chmod(0o700)
+
+        assert chosen == runtime / "ash", (chosen, passed_over)
+        assert any(
+            str(cache_home / "ash") in p and "cannot be made" in p for p in passed_over
+        ), passed_over
 
     def test_a_relative_runtime_directory_is_ignored(self, monkeypatch):
         monkeypatch.setenv("XDG_RUNTIME_DIR", "run")
@@ -601,6 +725,61 @@ class TestLinkedDirectories:
             ("packages/ext/package.json", LINK_LEAVES_TREE)
         ]
 
+    def test_a_linked_directory_inside_the_tree_without_a_top_manifest_lists_its_members(
+        self, tmp_path
+    ):
+        """``packages/inner -> ../../shared`` where ``shared`` holds members only
+        deeper down (``shared/x/package.json``): the link resolves inside the
+        tree, so it is walked like a directory, the member below it is listed
+        under the link's name, and no manifest that does not exist is listed
+        at the link's top (that is the out-of-tree shape, where the missing
+        manifest stands in for the refusal). Nothing is refused."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        shared = repo / "shared"
+        _manifest(shared / "x", "x-inside")
+        (package / "packages").mkdir()
+        os.symlink(shared, package / "packages" / "inner", target_is_directory=True)
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/inner/x/package.json",
+            "yarn.lock",
+        ]
+        assert refused_inputs("yarn", package, roots=[repo]) == []
+
+    def test_the_copy_holds_the_members_below_a_linked_directory_without_a_top_manifest(
+        self, tmp_path, trusted_copy_dirs
+    ):
+        """The same layout through the copy: the member is copied at the
+        link's path, and the copy neither fails on a manifest that does not
+        exist nor drops the member."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        shared = repo / "shared"
+        _manifest(shared / "x", "x-inside")
+        (package / "packages").mkdir()
+        os.symlink(shared, package / "packages" / "inner", target_is_directory=True)
+        parent = tmp_path / "out"
+        parent.mkdir()
+
+        with package_manager_child(
+            "yarn", package, parent=parent, scan_root=repo, yarn_major=1
+        ) as child:
+            copied = sorted(
+                p.relative_to(child.cwd).as_posix()
+                for p in child.cwd.rglob("*")
+                if p.is_file()
+            )
+
+        assert copied == [
+            "package.json",
+            "packages/inner/x/package.json",
+            "yarn.lock",
+        ]
+
     def test_a_link_back_into_the_walked_tree_ends(self, tmp_path):
         """A link to an ancestor would walk forever; each real directory is
         walked once. The link's own manifest is still a file yarn reads at that
@@ -732,10 +911,11 @@ class TestLinkedDirectories:
         ]
 
     def test_a_link_to_an_ancestor_lists_its_manifest_and_is_not_walked(self, tmp_path):
-        """``packages/root -> ..`` resolves above the package: walking it would
-        walk the whole scanned tree (the package included) under the link's
-        name. Its own manifest is a file yarn reads at that path, so it is
-        listed; nothing below it is."""
+        """``packages/root -> ../..`` resolves to the scanned tree's root, above
+        the package (``..`` alone would be the package itself, the loop case):
+        walking it would walk the whole scanned tree, the package included,
+        under the link's name. Its own manifest is a file yarn reads at that
+        path, so it is listed; nothing below it is."""
         repo = tmp_path / "repo"
         _manifest(repo, "mono")
         _manifest(repo / "other", "other")

@@ -32,9 +32,11 @@ pytestmark = pytest.mark.unit
 CAPTURES = (
     Path(__file__).resolve().parents[4] / "test_data" / "scanners" / "npmaudit" / "yarn"
 )
-#: Lockfile ``a`` answers with advisories and ``b`` with a clean report: a merge
-#: that kept the first lockfile's records twice gave the same count as one that
-#: kept both when both answered alike, so the two differ.
+#: Lockfile ``a`` answers with the CLEAN report and ``b`` with the advisories,
+#: and the walk is pinned to audit ``a`` first. A merge that kept only the first
+#: lockfile's records then saved nothing, where ``b``'s records are expected;
+#: with the vulnerable capture first (the shape before), the "first only" merge
+#: saved exactly the expected set and the test passed on the bug.
 CAPTURE = CAPTURES / "classic-vuln.json"
 CLEAN_CAPTURE = CAPTURES / "classic-clean.json"
 
@@ -66,14 +68,18 @@ def _project(root):
 
 
 def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
-    """Lockfile ``a`` answers with the vulnerable capture and ``b`` with the
-    clean one, so the merged file holds exactly ``a``'s records: a merge that
-    kept the first lockfile's records once per lockfile read the same count as
-    one that kept both when the two captures were the same."""
+    """Lockfile ``a`` is audited first and answers with the clean capture;
+    ``b`` is audited second and answers with the vulnerable one. The merged
+    file then holds exactly ``b``'s records, the SECOND lockfile's: a merge that
+    kept the first lockfile's records and dropped every lockfile after it saved
+    none, where the earlier arrangement (vulnerable first) gave that merge the
+    expected set for free. The walk is pinned to list ``a`` before ``b`` so the
+    order does not depend on the filesystem, and the audits are recorded by the
+    package they ran in."""
     vuln = json.loads(CAPTURE.read_text(encoding="utf-8"))
     clean = json.loads(CLEAN_CAPTURE.read_text(encoding="utf-8"))
     assert vuln["yarn_version"].split(".")[0] == clean["yarn_version"].split(".")[0]
-    by_project = {"a": vuln, "b": clean}
+    by_project = {"a": clean, "b": vuln}
     _project(plugin_context.work_dir / "a")
     _project(plugin_context.work_dir / "b")
     audits = []
@@ -85,8 +91,8 @@ def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
                 "stderr": "",
                 "returncode": 0,
             }
-        audits.append(list(command))
         manifest = json.loads((Path(kwargs["cwd"]) / "package.json").read_text())
+        audits.append(manifest["name"])
         capture = by_project[manifest["name"]]
         response = {
             "stdout": capture["stdout"],
@@ -96,13 +102,22 @@ def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
         self._process_command_response(response)
         return response
 
+    walk = NpmAuditScanner._package_manifests
+
+    def a_first(self, *args, **kwargs):
+        found = walk(self, *args, **kwargs)
+        return sorted(found, key=lambda m: 0 if Path(m).parent.name == "a" else 1)
+
     scanner = NpmAuditScanner(context=plugin_context, config=NpmAuditScannerConfig())
-    with patch.object(
-        NpmAuditScanner, "_run_subprocess", autospec=True, side_effect=respond
+    with (
+        patch.object(NpmAuditScanner, "_package_manifests", a_first),
+        patch.object(
+            NpmAuditScanner, "_run_subprocess", autospec=True, side_effect=respond
+        ),
     ):
         report = scanner.scan(target=plugin_context.work_dir, target_type="converted")
 
-    assert len(audits) == 2
+    assert audits == ["a", "b"], audits
     one_lockfile, _ = NpmAuditScanner._parse_yarn_audit(
         1,
         {
@@ -114,8 +129,13 @@ def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
     expected = one_lockfile["yarn_advisories"]
     assert len(expected) > 0
     # The SARIF already had both lockfiles' findings; results.json now does too:
-    # exactly a's records, named by lockfile, and none of b's (it had none).
+    # exactly b's records (the second lockfile's), and none from a (it had
+    # none). The raw records carry no lockfile field of their own; the SARIF
+    # results do, so the lockfile each finding came from is read there.
     assert len(report.runs[0].results) == len(expected)
+    assert {
+        r.properties.model_extra.get("lockfile") for r in report.runs[0].results
+    } == {"b/yarn.lock"}
     saved = json.loads(
         scanner.results_dir.joinpath("converted", "results.json").read_text()
     )

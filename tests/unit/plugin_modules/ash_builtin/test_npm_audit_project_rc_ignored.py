@@ -126,6 +126,13 @@ def online(monkeypatch, tmp_path):
     system_tmp.mkdir()
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
     monkeypatch.setattr(package_manager_child, "_untrusted_ancestor", lambda path: None)
+    # The settings-file check is stood down too: a .npmrc, .yarnrc or
+    # .yarnrc.yml in any directory above pytest's basetemp (a checkout holding
+    # one, a TMPDIR under a real home) would pass every candidate over and
+    # fail the placement tests for a reason that has nothing to do with them.
+    monkeypatch.setattr(
+        package_manager_child, "_settings_file_ancestor", lambda path: None
+    )
     return monkeypatch
 
 
@@ -463,20 +470,23 @@ def test_the_settings_file_yarn_is_told_to_read_is_never_one_the_package_holds(
     """In-place yarn 2+ runs in the package directory and is told the settings
     file name to look for. With a fixed, published name, a package that holds a
     file of that name would have yarn read it as its settings, yarnPath and
-    registry included. The name is drawn fresh for every child, so no file in the
-    package (or anywhere) matches it, and the probe's and the audit's names differ."""
+    registry included. What this pins: the name is of the published random
+    shape, it is not the former fixed name (planted here) nor the bare prefix
+    (planted too), no file in the package matches it, and the probe's and the
+    audit's names differ. It does NOT pin collision handling: a planted name
+    with a guessed token matches a fresh 128-bit token with probability about
+    2^-128, so such a plant tells nothing and none is made."""
     from automated_security_helper.utils import package_manager_child as child_module
 
     online.setattr(child_module, "_sandboxed", lambda: True)
     spawns = _record(online, yarn_version="3.8.7")
     scanner = _scanner(tmp_path)
     package = _repository(scanner.context.source_dir, "yarn.lock")
-    # The published prefix with every token a planted file could guess at:
-    # the former fixed name and a few shapes beside it.
+    # The former fixed name and the bare published prefix: the two names a
+    # regression to a fixed or an empty token would produce.
     for planted in (
         ".ash-no-yarnrc.yml",
         f"{NO_YARNRC_PREFIX}.yml",
-        f"{NO_YARNRC_PREFIX}{'0' * 32}.yml",
     ):
         (package / planted).write_text(
             f'yarnPath: ./marker.js\nnpmRegistryServer: "{REPOSITORY_REGISTRY}"\n',

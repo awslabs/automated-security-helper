@@ -287,7 +287,15 @@ def test_has_install_commands_is_false_when_the_arch_key_is_absent(
 
 @pytest.mark.parametrize(
     "machine,selected",
-    [("aarch64", "arm64"), ("arm64", "arm64"), ("x86_64", "amd64"), ("AMD64", "amd64")],
+    [
+        ("aarch64", "arm64"),
+        ("arm64", "arm64"),
+        # Windows on ARM spells it in capitals; the negative test above cannot
+        # tell "mapped to arm64" from "not recognized at all".
+        ("ARM64", "arm64"),
+        ("x86_64", "amd64"),
+        ("AMD64", "amd64"),
+    ],
 )
 def test_arch_key_is_derived_from_the_machine_type(
     scanner, monkeypatch, machine, selected

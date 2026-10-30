@@ -34,6 +34,7 @@ text of a failed audit was logged unredacted.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -54,14 +55,16 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfig,
 )
 
-# Read by name, not imported: a tree without the probe timeout (the base this
-# file is also run against) then fails the one assertion that reads it, instead
-# of refusing to collect the whole module.
-PROBE_TIMEOUT = getattr(npm_audit_scanner, "_VERSION_PROBE_TIMEOUT_SECONDS", None)
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.package_identity import identity_properties
 from automated_security_helper.utils.package_manager_child import NOT_A_REGULAR_FILE
 from tests.utils.aws_isolation import isolate_from_aws
 from tests.utils.npm_audit_reports import NPM_CLEAN
+
+# Read by name, not imported: a tree without the probe timeout (the base this
+# file is also run against) then fails the one assertion that reads it, instead
+# of refusing to collect the whole module.
+PROBE_TIMEOUT = getattr(npm_audit_scanner, "_VERSION_PROBE_TIMEOUT_SECONDS", None)
 
 pytestmark = pytest.mark.unit
 
@@ -109,16 +112,26 @@ def _package(root: Path, lockfile: str = "package-lock.json") -> Path:
 
 
 def _audited(monkeypatch, respond=None) -> list:
-    """The package managers npm-audit started an audit with, in order."""
+    """Each audit npm-audit started, in order, as ``(binary, package name)``.
+
+    The package name is read from the manifest in the audit's working
+    directory (the private copy, removed once the audit returns), so a test
+    can tell an audit of ``app`` from one of ``vendor``: ``command[0]`` alone
+    read the same for a regression that audited the wrong package. The
+    response goes through ``_process_command_response``, as the real runner's
+    does, so the scanner's own error recording runs."""
     started = []
 
     def fake_run(self, command, **kwargs):
         if "--version" in command:
             return {"stdout": "10.9.4\n", "returncode": 0}
-        started.append(command[0])
+        manifest = Path(kwargs["cwd"]) / "package.json"
+        started.append((command[0], json.loads(manifest.read_text())["name"]))
         if respond is not None:
             return respond(Path(kwargs["cwd"]))
-        return {"stdout": NPM_CLEAN, "returncode": 0}
+        response = {"stdout": NPM_CLEAN, "stderr": "", "returncode": 0}
+        self._process_command_response(response)
+        return response
 
     monkeypatch.setattr(NpmAuditScanner, "_run_subprocess", fake_run)
     return started
@@ -203,9 +216,14 @@ class TestTheVersionProbe:
 
         assert scanner.tool_version is None
 
-    def test_the_probe_is_bounded_and_runs_outside_the_scanned_tree(
+    def test_the_probe_is_bounded_and_runs_under_the_results_directory(
         self, context, monkeypatch
     ):
+        """The probe runs in a fresh directory of its own under the results
+        directory, with the subprocess timeout every other call here carries,
+        and the directory is gone once it has answered. Whether that directory
+        is outside the scanned tree depends on where the results directory is
+        (by default it is inside it); the next test reads that layout."""
         scanner, _, calls = self._probe(
             context, {"stdout": "10.9.4\n", "returncode": 0}, monkeypatch
         )
@@ -217,32 +235,105 @@ class TestTheVersionProbe:
         cwd = kwargs.get("cwd")
         assert cwd is not None, "the probe ran in the scanned root"
         assert Path(cwd).is_relative_to(scanner.results_dir), cwd
-        assert not Path(cwd).is_relative_to(context.source_dir), cwd
+        assert Path(cwd) != Path(scanner.results_dir), cwd
         assert not Path(cwd).exists(), "the probe directory is removed after the probe"
 
-    def test_the_probe_directory_is_a_project_of_its_own(self, context, monkeypatch):
-        """npm 7+ walks up from its working directory to the nearest package.json
-        to find the project whose .npmrc it reads before answering --version.
-        The results directory sits under the scanned root by default, so an
-        empty probe directory still read the repository's .npmrc; a manifest
-        in the probe directory stops the walk there."""
-        (context.source_dir / ".npmrc").write_text(
-            "//registry.example/:_authToken=${NPM_TOKEN}\n", encoding="utf-8"
-        )
+    @pytest.mark.parametrize(
+        "response",
+        [
+            pytest.param(
+                {
+                    "timed_out": True,
+                    "error": "the command was stopped",
+                    "returncode": None,
+                },
+                id="timed-out",
+            ),
+            pytest.param(
+                {"error": "spawn failed", "returncode": None, "stdout": ""},
+                id="did-not-start",
+            ),
+        ],
+    )
+    def test_a_probe_that_fails_leaves_the_version_unknown_and_its_directory_removed(
+        self, context, monkeypatch, response
+    ):
+        """The runner never raises: a timed-out or unstarted probe comes back as
+        a response with no stdout. npm is installed, so the check still passes;
+        the version stays unknown, and the probe directory (holding a manifest)
+        is removed on the way out rather than left under results_dir."""
+        scanner, satisfied, calls = self._probe(context, response, monkeypatch)
+
+        ((_, kwargs),) = calls
+        assert satisfied is True
+        assert scanner.tool_version is None
+        assert not Path(kwargs["cwd"]).exists(), kwargs["cwd"]
+
+    def test_a_probe_that_raises_still_removes_its_directory(
+        self, context, monkeypatch
+    ):
+        """Control for the cleanup's shape: the directory is removed in a
+        ``finally``, so even an exception out of the runner (which the real one
+        does not raise) leaves no probe directory with a manifest in it behind."""
         monkeypatch.setattr(
             npm_audit_scanner, "find_executable", lambda name: f"/usr/bin/{name}"
         )
         scanner = NpmAuditScanner(context=context, config=NpmAuditScannerConfig())
         seen = {}
 
+        def raising_run(self, command, **kwargs):
+            seen["cwd"] = Path(kwargs["cwd"])
+            raise OSError("the runner raised")
+
+        monkeypatch.setattr(NpmAuditScanner, "_run_subprocess", raising_run)
+
+        with pytest.raises(OSError):
+            scanner.validate_plugin_dependencies()
+
+        assert scanner.tool_version is None
+        assert not seen["cwd"].exists(), seen["cwd"]
+
+    def test_the_probe_directory_is_a_project_of_its_own(self, tmp_path, monkeypatch):
+        """npm 7+ walks up from its working directory to the nearest package.json
+        to find the project whose .npmrc it reads before answering --version.
+        The results directory sits under the scanned root by default
+        (``<source>/.ash/ash_output``), so an empty probe directory still read
+        the repository's .npmrc; a manifest in the probe directory stops the
+        walk there. The default layout is built here, so the planted .npmrc is
+        above the probe directory, as it is for a real scan."""
+        isolate_from_aws(monkeypatch, tmp_path)
+        source = tmp_path / "repo"
+        output = source / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        nested = PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output / "converted",
+            config=get_default_config(),
+        )
+        nested.work_dir.mkdir(parents=True, exist_ok=True)
+        (source / ".npmrc").write_text(
+            "//registry.example/:_authToken=${NPM_TOKEN}\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(
+            npm_audit_scanner, "find_executable", lambda name: f"/usr/bin/{name}"
+        )
+        scanner = NpmAuditScanner(context=nested, config=NpmAuditScannerConfig())
+        seen = {}
+
         def fake_run(self, command, **kwargs):
-            manifest = Path(kwargs["cwd"]) / "package.json"
+            cwd = Path(kwargs["cwd"])
+            manifest = cwd / "package.json"
+            seen["cwd"] = cwd
             seen["manifest"] = manifest.read_text() if manifest.exists() else None
             return {"stdout": "10.9.4\n", "returncode": 0}
 
         monkeypatch.setattr(NpmAuditScanner, "_run_subprocess", fake_run)
 
         assert scanner.validate_plugin_dependencies() is True
+        # The layout the test is about: the probe ran below the scanned root,
+        # where the repository's .npmrc is an ancestor.
+        assert seen["cwd"].is_relative_to(source), seen["cwd"]
         assert seen["manifest"] is not None, "the probe directory held no manifest"
         assert json.loads(seen["manifest"]) == {}
 
@@ -304,41 +395,61 @@ class TestWhichPackageManagersTheCheckNeeds:
         assert satisfied is False
         assert "npm" in (scanner.dependency_unavailable_reason or "")
 
+    def test_a_mixed_tree_is_audited_with_the_one_manager_installed(
+        self, context, monkeypatch
+    ):
+        """The mirror of the npm-present case: package-lock.json and yarn.lock
+        packages, yarn alone installed. yarn can audit its lockfile, so the
+        check passes; the npm lockfile is scan()'s failed target, named with
+        the manager it needed."""
+        _package(context.source_dir / "api", "package-lock.json")
+        _package(context.source_dir / "web", "yarn.lock")
+
+        scanner, satisfied = self._check(context, monkeypatch, present={"yarn"})
+
+        assert satisfied is True
+        assert scanner.dependency_unavailable_reason is None
+
+    def _counting_walk(self, monkeypatch):
+        """Every ``_package_manifests`` call as ``(args, kwargs)``: a refactor
+        to a keyword call would read as no walk at all were only ``args``
+        recorded."""
+        walks = []
+        real_walk = NpmAuditScanner._package_manifests
+
+        def counting(self, *args, **kwargs):
+            walks.append((args, kwargs))
+            return real_walk(self, *args, **kwargs)
+
+        monkeypatch.setattr(NpmAuditScanner, "_package_manifests", counting)
+        return walks
+
     def test_with_npm_installed_the_check_reads_no_tree(self, context, monkeypatch):
         """With npm on PATH the answer is True whatever the tree holds, so the
         check does not walk the scanned tree for the managers its lockfiles
         need: that walk, a full selection on every call, decided nothing."""
         _package(context.source_dir / "web", "yarn.lock")
-        walks = []
-        real_walk = NpmAuditScanner._package_manifests
-
-        def counting(self, *args, **kwargs):
-            walks.append(args)
-            return real_walk(self, *args, **kwargs)
-
-        monkeypatch.setattr(NpmAuditScanner, "_package_manifests", counting)
+        walks = self._counting_walk(monkeypatch)
 
         scanner, satisfied = self._check(context, monkeypatch, present={"npm"})
 
         assert satisfied is True
         assert walks == [], walks
 
-    def test_without_npm_the_check_reads_the_tree_once(self, context, monkeypatch):
-        """Control: npm absent, the tree decides, and it is read once."""
+    def test_without_npm_the_check_reads_the_source_tree_once(
+        self, context, monkeypatch
+    ):
+        """Control: npm absent, the tree decides, and it is read once. The
+        SOURCE tree: the check runs before the converted tree is written, so a
+        lockfile that exists only there (an extracted archive's) cannot count
+        here and is scan()'s to find; the reason then names npm alone."""
         _package(context.source_dir / "web", "yarn.lock")
-        walks = []
-        real_walk = NpmAuditScanner._package_manifests
-
-        def counting(self, *args, **kwargs):
-            walks.append(args)
-            return real_walk(self, *args, **kwargs)
-
-        monkeypatch.setattr(NpmAuditScanner, "_package_manifests", counting)
+        walks = self._counting_walk(monkeypatch)
 
         scanner, satisfied = self._check(context, monkeypatch, present={"yarn"})
 
         assert satisfied is True
-        assert walks == [("source",)], walks
+        assert walks == [(("source",), {})], walks
 
 
 # ---------------------------------------------------------------------------
@@ -354,8 +465,9 @@ class TestTheSelection:
         _package(context.source_dir / "app")
         _package(context.source_dir / "vendor")
         started = _audited(online)
+        scanner = _scanner(context)
 
-        _scanner(context).scan(
+        scanner.scan(
             target=context.source_dir,
             target_type="source",
             global_ignore_paths=[
@@ -363,7 +475,10 @@ class TestTheSelection:
             ],
         )
 
-        assert started == ["npm"], started
+        # The kept package, by name: one npm start alone would also fit a
+        # regression that audited vendor and dropped app.
+        assert started == [("npm", "app")], started
+        assert scanner.errors == [], scanner.errors
 
     def test_an_ignored_lockfile_is_not_the_one_audited(self, context, online):
         """yarn.lock is ignored and package-lock.json kept: npm audits the
@@ -371,8 +486,9 @@ class TestTheSelection:
         package = _package(context.source_dir / "app", "yarn.lock")
         (package / "package-lock.json").write_text("{}\n", encoding="utf-8")
         started = _audited(online)
+        scanner = _scanner(context)
 
-        _scanner(context).scan(
+        scanner.scan(
             target=context.source_dir,
             target_type="source",
             global_ignore_paths=[
@@ -380,7 +496,8 @@ class TestTheSelection:
             ],
         )
 
-        assert started == ["npm"], started
+        assert started == [("npm", "app")], started
+        assert scanner.errors == [], scanner.errors
 
     def test_a_lockfile_an_ignore_file_leaves_out_is_not_the_one_audited(
         self, context, online
@@ -393,10 +510,12 @@ class TestTheSelection:
         (package / "package-lock.json").write_text("{}\n", encoding="utf-8")
         (context.source_dir / ".gitignore").write_text("yarn.lock\n", encoding="utf-8")
         started = _audited(online)
+        scanner = _scanner(context)
 
-        _scanner(context).scan(target=context.source_dir, target_type="source")
+        scanner.scan(target=context.source_dir, target_type="source")
 
-        assert started == ["npm"], started
+        assert started == [("npm", "app")], started
+        assert scanner.errors == [], scanner.errors
 
     def test_a_sole_lockfile_an_ignore_file_leaves_out_is_still_audited(
         self, context, online
@@ -411,10 +530,12 @@ class TestTheSelection:
             "package-lock.json\n", encoding="utf-8"
         )
         started = _audited(online)
+        scanner = _scanner(context)
 
-        _scanner(context).scan(target=context.source_dir, target_type="source")
+        scanner.scan(target=context.source_dir, target_type="source")
 
-        assert started == ["npm"], started
+        assert started == [("npm", "lib")], started
+        assert scanner.errors == [], scanner.errors
 
     def test_a_sole_lockfile_outside_the_scan_set_is_still_audited(
         self, context, online, monkeypatch
@@ -431,10 +552,12 @@ class TestTheSelection:
             lambda **kwargs: [str(package / "package.json")],
         )
         started = _audited(online)
+        scanner = _scanner(context)
 
-        _scanner(context).scan(target=context.source_dir, target_type="source")
+        scanner.scan(target=context.source_dir, target_type="source")
 
-        assert started == ["npm"], started
+        assert started == [("npm", "app")], started
+        assert scanner.errors == [], scanner.errors
 
     def test_a_sole_lockfile_an_ignore_path_names_is_not_audited(self, context, online):
         """Control for the fallback: a lockfile an ignore path names stays
@@ -593,14 +716,17 @@ class TestYarn4Lines:
         assert report == {_YARN_ADVISORIES_KEY: [], "metadata": {"vulnerabilities": {}}}
 
 
-def test_a_url_ending_in_a_slash_gives_the_package_rule_id():
+def test_the_rule_id_is_the_urls_last_segment_or_the_packages_own_id():
     """Trailing slashes are dropped before the last segment is read, so an
     advisory URL with one keeps its id; a URL with no segment left at all (the
     empty string used to be the rule id, shared by every such advisory) falls
     back to the package's own id, carrying the tool's advisory id when the entry
     gives one. A URL whose last segment is a collection, not an advisory
     ("https://x/advisories/"), is read as that segment: no shape of an advisory
-    id is assumed."""
+    id is assumed, because a word-shape rule (a segment with no digit is not an
+    id, say) would misfile real GHSA ids, so every advisory from such a URL
+    shares the rule id ``advisories``. That choice is asserted here so a change
+    of it is a seen change, not a quiet one."""
     assert NpmAuditScanner._advisory_id("lodash", {"url": "///"}) == "npm-lodash"
     assert NpmAuditScanner._advisory_id("lodash", {"url": ""}) == "npm-lodash"
     assert NpmAuditScanner._advisory_id("lodash", {"url": "", "source": 42}) == (
@@ -609,6 +735,8 @@ def test_a_url_ending_in_a_slash_gives_the_package_rule_id():
     assert NpmAuditScanner._advisory_id("lodash", {"url": f"{GHSA}/"}) == (
         "GHSA-xvch-5gv4-984h"
     )
+    collection = {"url": "https://registry.example/advisories/", "source": 7}
+    assert NpmAuditScanner._advisory_id("lodash", collection) == "advisories"
 
 
 class TestTheNpmConversion:
@@ -774,7 +902,14 @@ class TestTheNpmConversion:
         ]
         assert "installed_version" not in transitive.properties.model_extra
 
-    def test_yarn_and_pnpm_results_name_their_lockfile(self, scanner, tmp_path):
+    @pytest.mark.parametrize(
+        ("lock_rel", "paths_key"),
+        [("web/yarn.lock", "dependents"), ("api/pnpm-lock.yaml", "dependency_paths")],
+        ids=["yarn", "pnpm"],
+    )
+    def test_yarn_and_pnpm_results_name_their_lockfile(
+        self, scanner, tmp_path, lock_rel, paths_key
+    ):
         record = {
             "package": "lodash",
             "id": 1065,
@@ -786,19 +921,19 @@ class TestTheNpmConversion:
             "vulnerable_versions": "<4.17.12",
             "patched_versions": None,
             "versions": {},
-            "paths_key": "dependents",
+            "paths_key": paths_key,
         }
         target = tmp_path / "repo"
 
         sarif = scanner._convert_npm_audit_to_sarif(
             {_YARN_ADVISORIES_KEY: [record], "metadata": {}},
             target,
-            lock_file=target / "web" / "yarn.lock",
+            lock_file=target / Path(lock_rel),
         )
 
         (result,) = sarif.runs[0].results
         props = result.properties.model_extra
-        assert props["lockfile"] == "web/yarn.lock"
+        assert props["lockfile"] == lock_rel
         assert "installed_version" not in props, "no version is known for this record"
 
 
@@ -844,6 +979,17 @@ def test_a_root_named_through_a_link_still_places_its_lockfile(tmp_path):
     )
 
 
+class _LogMessages(logging.Handler):
+    """What a file handler writes: the message, not Rich's rendering of it."""
+
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.texts: list[str] = []
+
+    def emit(self, record):
+        self.texts.append(record.getMessage())
+
+
 class TestTheScanLoop:
     def test_a_target_that_is_a_file_is_a_scanner_error(self, context, online):
         target = context.source_dir / "not-a-directory"
@@ -853,23 +999,47 @@ class TestTheScanLoop:
             _scanner(context).scan(target=target, target_type="source")
 
     def test_a_raised_audit_is_logged_and_recorded_redacted(self, context, online):
+        """The exception's text quotes the command line, token in plain text
+        and in a URL's userinfo both; the recorded failure and the log line
+        carry neither. The log is read through a handler of our own (ASH's
+        logger does not propagate, so caplog sees nothing), with the level set
+        and restored through setLevel so the logger's level cache is left as
+        found. The plain-text token is the one the values redaction must
+        catch; a token in URL userinfo alone would also be masked by the URL
+        rule, which would hide a broken values hook."""
         _package(context.source_dir / "app")
         scanner = _scanner(context)
 
         def fake_run(self, command, **kwargs):
             if "--version" in command:
                 return {"stdout": "10.9.4\n", "returncode": 0}
-            raise OSError(f"spawn failed for https://x:{TOKEN}@registry.example/")
+            raise OSError(
+                f"spawn failed with token {TOKEN} for https://x:{TOKEN}@registry.example/"
+            )
 
         online.setattr(NpmAuditScanner, "_run_subprocess", fake_run)
-        with (
-            patch.object(NpmAuditScanner, "_values_to_redact", return_value=(TOKEN,)),
-            pytest.raises(ScannerError) as raised,
-        ):
-            scanner.scan(target=context.source_dir, target_type="source")
+        messages = _LogMessages()
+        saved = ASH_LOGGER.level
+        ASH_LOGGER.addHandler(messages)
+        ASH_LOGGER.setLevel(logging.DEBUG)
+        try:
+            with (
+                patch.object(
+                    NpmAuditScanner, "_values_to_redact", return_value=(TOKEN,)
+                ),
+                pytest.raises(ScannerError) as raised,
+            ):
+                scanner.scan(target=context.source_dir, target_type="source")
+        finally:
+            ASH_LOGGER.removeHandler(messages)
+            ASH_LOGGER.setLevel(saved)
 
         assert "the audit raised OSError" in str(raised.value)
         assert TOKEN not in str(raised.value)
+        assert "https://***@registry.example/" in str(raised.value)
+        logged = [m for m in messages.texts if "the audit raised" in m]
+        assert logged, messages.texts
+        assert not any(TOKEN in m for m in messages.texts), messages.texts
 
     def test_results_json_keeps_both_lockfiles_nodes_for_one_package(
         self, context, online
