@@ -27,6 +27,7 @@ from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
+    DEFAULT_EXCLUDES,
     GrepScannerBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -58,7 +59,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Skip any file or directory whose path matches the pattern.",
         ),
-    ] = ["*-converted.py", "*_report_result.txt"]
+    ] = list(DEFAULT_EXCLUDES)
 
     exclude_rule: Annotated[
         List[str],

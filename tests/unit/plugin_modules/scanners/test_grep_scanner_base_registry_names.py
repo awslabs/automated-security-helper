@@ -115,7 +115,13 @@ def test_a_local_path_inside_the_scanned_tree_is_refused(
     and accepted wherever it sat. A rules directory the scanned repository ships is
     not passed to the tool, the scanner declines with a reason naming the option
     (it does not fall back to the cache: the operator asked for those rules), and
-    the path-trust refusal is logged once with the option's key."""
+    two warnings name the option's key, one each: path trust's own refusal
+    ("Ignoring <key> (<path>): it is inside ..."), and the scanner's reason, which
+    points back at it ("the warning above names which"). Each is logged once,
+    however many times the scanner reads its configuration. Which reason path
+    trust gives depends on where the temporary tree sits (inside the scanned
+    directory, or inside a git checkout that holds it), so the reason text is not
+    pinned here."""
     source_dir = Path(test_plugin_context.source_dir)
     (source_dir / "p" / "ci").mkdir(parents=True, exist_ok=True)
     (source_dir / "p" / "ci" / "x.yaml").write_text(RULE, encoding="utf-8")
@@ -132,10 +138,15 @@ def test_a_local_path_inside_the_scanned_tree_is_refused(
     assert not any(value.endswith("/p/ci") for value in _configs(scanner)), _configs(
         scanner
     )
-    assert (
-        sum(
-            "scanners.semgrep.options.config" in record.getMessage()
-            for record in caplog.records
-        )
-        == 1
-    ), [record.getMessage() for record in caplog.records]
+    messages = [record.getMessage() for record in caplog.records]
+    refusals = [
+        message
+        for message in messages
+        if message.startswith("Ignoring scanners.semgrep.options.config (")
+    ]
+    reasons = [
+        message for message in messages if "names rules ASH cannot pass" in message
+    ]
+    assert len(refusals) == 1, messages
+    assert len(reasons) == 1, messages
+    assert reasons[0] == reason

@@ -64,6 +64,16 @@ C = TypeVar("C", bound=ScannerPluginConfigBase)
 #: same pattern names every file the target exists for, so it is left out there.
 CONVERTED_FILE_EXCLUDE = "*-converted.py"
 
+#: Both scanners' documented default ``exclude`` value: the converted-file pattern
+#: and the report files ASH's own tooling writes beside a scan. The patterns are
+#: ASH's own, not the operator's, wherever the value holds them, told by VALUE as
+#: the converted target's drop is (_extra_args_for_target): a configuration
+#: ``ash config init`` wrote carries them as operator values. So a configured
+#: ``exclude`` that holds only these names no pattern the operator wrote
+#: (_post_process_sarif), and a ``cli_exclude_flags_match`` one of them produced
+#: where ASH passes it is ASH's own exclusion (_left_out_by_ash).
+DEFAULT_EXCLUDES: Tuple[str, ...] = (CONVERTED_FILE_EXCLUDE, "*_report_result.txt")
+
 #: The tools' switch for their git-ignore reading. Both skip every file the
 #: repository's ``.gitignore`` matches when the target is inside a git work tree.
 #: ASH's own output directory carries a ``.gitignore`` that ignores everything in
@@ -1012,6 +1022,13 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         under ``/opt/atlassian/pipelines/agent/build`` or ``/home/travis/build``
         would otherwise read every excluded file as one the tools' defaults left
         out.
+
+        A fourth set is the default ``exclude`` value (``DEFAULT_EXCLUDES``), on the
+        target whose command carries it: a configured value equal to a default is
+        ASH's own pattern wherever it travels, and a file it left out was left out
+        on purpose. The converted target drops the converted-file pattern from its
+        command (_extra_args_for_target), so a converted file the tool excluded
+        there matched a pattern the operator wrote, and is not ASH's.
         """
         parts = (*_parts_of_target_below_root(target), *_parts_below(path, target))
         if set(self._ignore_exclude_names).intersection(parts):
@@ -1030,7 +1047,31 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                     return True
             elif fnmatch.fnmatchcase(name, pattern):
                 return True
+        for pattern in self._default_excludes_passed():
+            if fnmatch.fnmatchcase(name, pattern):
+                return True
         return False
+
+    def _default_excludes_passed(self) -> List[str]:
+        """The ``DEFAULT_EXCLUDES`` the current target's command carries: those the
+        configured ``exclude`` holds, less the converted-file pattern on the
+        converted target, which drops it (_extra_args_for_target). Read raw, not
+        through ``_configured_values``: this is asked once per excluded file, and
+        that reader warns about a blank entry each time it is asked."""
+        configured = {
+            str(value)
+            for value in getattr(getattr(self.config, "options", None), "exclude", None)
+            or []
+        }
+        return [
+            pattern
+            for pattern in DEFAULT_EXCLUDES
+            if pattern in configured
+            and not (
+                pattern == CONVERTED_FILE_EXCLUDE
+                and self._scan_target_type == "converted"
+            )
+        ]
 
     def _post_process_sarif(self, sarif_report, final_args: List[str], target: Path):
         """Record how many files the tool scanned, and refuse a scan of none.
@@ -1042,8 +1083,10 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         (``cli_exclude_flags_match``, and not one of ASH's own exclusions, see
         ``_left_out_by_ash``) means the patterns left out every file the tool
         found, so the scan says nothing about them: that is an error, not a PASSED
-        with no findings; when the operator configured no exclude, the pattern is
-        one ASH does not recognize as its own, and the refusal says so. The same
+        with no findings; when the configured ``exclude`` holds no pattern beyond
+        the default value (``DEFAULT_EXCLUDES``, ASH's own), the operator wrote no
+        pattern, so the match is against an exclusion ASH does not recognize as
+        its own, and the refusal says so instead of blaming the operator. The same
         when the tool found a file in a covered language and could not parse it
         (``UNPARSED_SKIP_REASONS``), when it did not read a file for its size or
         permissions (``UNREAD_SKIP_REASONS``; the tool reports those before it
@@ -1091,9 +1134,18 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 ]
                 if not_ignored:
                     where = f"{self.command} scanned no file below {Path(target).as_posix()}"
-                    if self._configured_values(
-                        getattr(self.config, "options", None), "exclude"
-                    ):
+                    # The default value is ASH's own; only a pattern beyond it is
+                    # the operator's. The default configuration carries the two
+                    # default patterns, so a test on "any exclude configured"
+                    # blamed the operator on every default scan.
+                    operator_patterns = [
+                        pattern
+                        for pattern in self._configured_values(
+                            getattr(self.config, "options", None), "exclude"
+                        )
+                        if pattern not in DEFAULT_EXCLUDES
+                    ]
+                    if operator_patterns:
                         raise ScannerError(
                             f"{where}: its --exclude patterns left out all "
                             f"{len(excluded)} files it found, so its result says "

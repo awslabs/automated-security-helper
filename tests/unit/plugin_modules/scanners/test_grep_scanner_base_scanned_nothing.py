@@ -37,6 +37,9 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
+    DEFAULT_EXCLUDES,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
     SemgrepScanner,
     SemgrepScannerConfig,
@@ -520,13 +523,19 @@ def test_every_other_reason_of_the_tools_enum_grades_skipped(
 def test_an_exclusion_ash_does_not_recognize_is_named_when_no_operator_pattern_exists(
     test_plugin_context, monkeypatch, tmp_path
 ):
-    """With no operator ``exclude`` configured the command carries only ASH's own
+    """With no operator pattern configured the command carries only ASH's own
     patterns, so a ``cli_exclude_flags_match`` outside ASH's recognized
     exclusions is one ASH added and cannot place; the refusal says so and names
     the files, instead of blaming patterns the operator never wrote. The
-    operator's own pattern keeps the wording that names it.
+    operator's own pattern keeps the wording that names it, beside the defaults
+    or in their place.
 
-    Fails at the base: both cases read "its --exclude patterns left out".
+    "No operator pattern" is the default configuration: its ``exclude`` value is
+    the two default patterns (``DEFAULT_EXCLUDES``), which are ASH's own. A test on
+    "any exclude configured" read them as the operator's and blamed the operator
+    on every default scan (measured on the venue; fixed here).
+
+    Fails at the base: every case reads "its --exclude patterns left out".
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     with pytest.raises(ScannerError) as refused:
@@ -534,9 +543,67 @@ def test_an_exclusion_ash_does_not_recognize_is_named_when_no_operator_pattern_e
     assert "does not recognize as its own" in str(refused.value), str(refused.value)
     assert "src/app.py" in str(refused.value), str(refused.value)
 
-    with_pattern = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
+    for exclude in (["*.py"], [*DEFAULT_EXCLUDES, "*.py"]):
+        with_pattern = _scanner(test_plugin_context, monkeypatch, exclude=exclude)
+        with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
+            _grade(with_pattern, tmp_path, _excluded("src/app.py"))
+
+
+def test_a_file_the_default_exclude_value_left_out_grades_skipped(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """A source target holding only a converted notebook copy and a report file:
+    both are left out by the default ``exclude`` value, ASH's own patterns, so the
+    target is SKIPPED, not refused as the operator's doing.
+
+    Fails at the base: refused as "its --exclude patterns left out all 2".
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    skipped = _excluded("notebook-converted.py", "run_report_result.txt")
+
+    assert _grade(scanner, tmp_path, skipped) == 0
+
+
+def test_a_default_pattern_the_operator_removed_is_no_longer_ashs(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """``exclude: []`` takes the default patterns off the command, so a converted
+    copy the tool still reports as excluded matched nothing ASH passed: the
+    refusal says the pattern is one ASH does not recognize, and names the file.
+
+    Fails at the base: "its --exclude patterns left out all 1".
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch, exclude=[])
+    with pytest.raises(ScannerError) as refused:
+        _grade(scanner, tmp_path, _excluded("notebook-converted.py"))
+
+    assert "does not recognize as its own" in str(refused.value), str(refused.value)
+    assert "notebook-converted.py" in str(refused.value), str(refused.value)
+
+
+def test_on_the_converted_target_the_converted_file_pattern_is_the_operators(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The converted target drops the converted-file default from its command, so
+    a converted copy the tool excluded there matched a pattern the operator wrote
+    (``*.py`` here), and the refusal names the operator's patterns. A recognition
+    by file name alone would grade this SKIPPED with no notebook scanned.
+
+    Fails at the base: "its --exclude patterns left out all 1", the same text,
+    by the base's blame-every-exclude route; the row pins the converted-target
+    arm against the cure, not the base.
+    """
+    scanner = _scanner(
+        test_plugin_context, monkeypatch, exclude=[*DEFAULT_EXCLUDES, "*.py"]
+    )
+    scanner._scan_target_type = "converted"
     with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
-        _grade(with_pattern, tmp_path, _excluded("src/app.py"))
+        _grade(scanner, tmp_path, _excluded("notebook-converted.py"))
+
+    # The control: the same report on the source target under the default value
+    # alone, where the converted-file pattern travels as ASH's own, is SKIPPED.
+    source = _scanner(test_plugin_context, monkeypatch, exclude=list(DEFAULT_EXCLUDES))
+    assert _grade(source, tmp_path, _excluded("notebook-converted.py")) == 0
 
 
 def test_unread_files_beside_uncovered_ones_are_still_a_scanner_error(
