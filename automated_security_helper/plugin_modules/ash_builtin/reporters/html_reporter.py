@@ -220,9 +220,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "hotspots_section": self._format_hotspots_section(
                 emitter.get_top_hotspots(10)
             ),
-            "metadata_section": self._format_metadata(
-                model.metadata, getattr(model, "ash_config", None)
-            ),
+            "metadata_section": self._format_metadata(model.metadata),
             "footer_credit": html.escape(FOOTER_CREDIT),
         }
         return Template(
@@ -696,25 +694,13 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 return location
         return "N/A"
 
-    def _format_metadata(self, metadata, config=None) -> str:
+    def _format_metadata(self, metadata) -> str:
         """Format the metadata section.
 
         The dump holds the results file's text, extra fields included, so each
         key and value is one shown line.
-
-        The dump is the configuration's record of the metadata
-        (``record_of_metadata``), as every other metadata sink writes it: the
-        project name and the ``expected_scanners`` entries are read from the
-        configuration, and where its file read one from the environment the
-        record holds the written reference, not the value. Dumping the model
-        raw printed the value here while the results file, the flat export and
-        the off-host payloads all recorded the reference.
         """
-        from automated_security_helper.config.config_validator import (
-            record_of_metadata,
-        )
-
-        metadata_dict = record_of_metadata(config, metadata.model_dump(by_alias=True))
+        metadata_dict = metadata.model_dump(by_alias=True)
         formatted = "<div class='metadata-section'>"
 
         for key, value in metadata_dict.items():

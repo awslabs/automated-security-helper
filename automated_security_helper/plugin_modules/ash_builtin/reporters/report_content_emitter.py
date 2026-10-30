@@ -182,33 +182,12 @@ class ReportContentEmitter:
                 )
 
         return {
-            "project": self._recorded_project_name() or "Unknown",
+            "project": self.model.metadata.project_name or "Unknown",
             "scan_time": scan_time_str,
             "report_time": current_time_str,
             "tool_version": self.model.metadata.tool_version or "Unknown",
             "time_delta": time_delta,
         }
-
-    def _recorded_project_name(self) -> Any:
-        """The project name as the configuration's record of the metadata has it.
-
-        The metadata names the project as ``config.project_name``; where the
-        configuration's file read it from the environment, every other sink
-        (the results file, the flat export, the off-host payloads) records the
-        written reference through ``record_of_metadata``. The HTML masthead and
-        the Markdown and text ``Project:`` lines print this value, so recording
-        it here, at the one place the three reports read it, keeps the resolved
-        value out of the whole document rather than out of one section of it.
-        """
-        from automated_security_helper.config.config_validator import (
-            record_of_metadata,
-        )
-
-        name = self.model.metadata.project_name
-        if not name:
-            return name
-        recorded = record_of_metadata(self.ash_conf, {"project_name": name})
-        return recorded.get("project_name", name)
 
     def get_scanner_results(self) -> List[Dict[str, Any]]:
         """Get scanner results with pass/fail status based on severity thresholds."""
