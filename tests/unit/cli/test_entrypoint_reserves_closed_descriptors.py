@@ -51,6 +51,11 @@ def _recording_write(written: list[int]):
 @pytest.fixture
 def no_reservations(monkeypatch):
     monkeypatch.setattr(entrypoint, "_RESERVED_DESCRIPTORS", set())
+    # ensure_std_streams records a descriptor it could not reattach in
+    # _CLOSED_AT_START as well; patched too, so the tests that call it with
+    # sys.stderr None leave no 2 behind for the raw floor's other tests to read
+    # (test_startup_failure_diagnosability's raw write to descriptor 2).
+    monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
     return entrypoint._RESERVED_DESCRIPTORS
 
 
