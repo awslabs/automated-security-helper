@@ -27,6 +27,7 @@ Five mechanisms, each pinned against the behavior it replaced:
 import json
 import os
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -98,6 +99,39 @@ class TestCanonicalDirectorySurvivesAnUnresolvablePath:
         bad = str(tmp_path / "pro\x00j")
 
         assert str(_canonical_directory(bad)) == bad
+
+    def test_a_refused_resolve_falls_back_on_every_python(self, tmp_path):
+        """The loop test above reaches the fallback only on the Pythons whose
+        resolve() raises for a loop; here the refusal is forced, so the
+        fallback itself is measured on every interpreter, and so is what the
+        lookups make of a directory the registry cannot resolve any more."""
+        if not hasattr(os, "symlink"):
+            pytest.skip("symlinks are not available on this platform")
+        registry = ScanRegistry()
+        target = tmp_path / "target"
+        target.mkdir()
+        link = tmp_path / "link"
+        _symlink_or_skip(link, target)
+        scan_id = _register(registry, link)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+
+        # The directory of the running scan becomes a loop after registration.
+        link.unlink()
+        try:
+            link.symlink_to(link)
+        except (OSError, NotImplementedError):
+            pytest.skip("this platform refuses a self-referencing link")
+
+        with patch("pathlib.Path.resolve", side_effect=RuntimeError("loop")):
+            # The fallback: the raw path, no exception.
+            assert _canonical_directory(str(link)) == Path(str(link))
+            # The lookups take the same fallback and compare the raw
+            # path with the entry's resolved one: no match, no exception. The
+            # scan is still found by the directory it was registered as.
+            assert registry.get_scan_by_directory(str(link)) is None
+            assert registry.occupants_of_directory(str(link)) == []
+        assert registry.get_scan_by_directory(str(target)).scan_id == scan_id
+        assert registry.occupants_of_directory(str(target)) == [scan_id]
 
     def test_one_looping_historical_entry_does_not_break_registration(self, tmp_path):
         """The high finding end to end: register, retarget, register again."""
