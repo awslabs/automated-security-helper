@@ -282,11 +282,17 @@ def _wordlist_entries(scanner) -> list:
 
 
 def _handed_wordlists(scanner, monkeypatch) -> list:
+    """The word lists the worker request names; none when every filter was refused.
+
+    The request's settings are ``model_dump(exclude_defaults=True)``, which drops
+    an empty ``filters_used``, and the scanner puts the key back only when its own
+    list is not empty, so a request left with no filter has no key at all.
+    """
     seen = _record_worker(scanner, monkeypatch)
     scanner.scan(target=scanner.context.source_dir, target_type="source")
     return [
         item["file_name"]
-        for item in seen["scan_settings_dict"]["filters_used"]
+        for item in seen["scan_settings_dict"].get("filters_used", [])
         if item["path"] == WORDLIST_FILTER
     ]
 
