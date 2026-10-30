@@ -216,7 +216,9 @@ class TestTheEndOfAScan:
     ):
         orchestrator = _with_stub_phases(tmp_path, monkeypatch)
 
-        orchestrator._execute_scan(phases=["scan"])
+        # execute_scan, not _execute_scan: the write follows the phases, outside
+        # the arm that puts the previous results back on a failure or a cancel.
+        orchestrator.execute_scan(phases=["scan"])
 
         # Red at the base: the scan phase wrote it, and the stub phase here
         # does not, so nothing wrote it.

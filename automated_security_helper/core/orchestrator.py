@@ -1482,7 +1482,9 @@ class ASHScanOrchestrator(BaseModel):
         With keep_previous_results, the previous scan's results, set aside by
         initialize, are dropped once the phases have finished, and put back if the
         scan ends any other way: an exception, a cancel (ScanCancelled), Ctrl-C. A
-        cancel that lands after the last phase counts as ending without results.
+        cancel that lands after the last phase counts as ending without results;
+        one read at the results-file write itself leaves them set aside, for the
+        caller to settle (_write_results_file).
 
         Args:
             phases (List[ExecutionPhaseType], optional): The phases to execute.
@@ -1525,9 +1527,52 @@ class ASHScanOrchestrator(BaseModel):
             # config that serves many scans does not keep every finished
             # scan's directories.
             forget_derived_roots(self.config, self._run_id)
+        # Outside the arm above: a cancel read at the write ends the scan with no
+        # results file and the previous results still set aside, for the caller
+        # to settle, as the CLI's own write after its own check left them.
+        self._write_results_file(phases, results)
         if settle_on_success:
             self.settle_previous_results(restore=False)
         return results
+
+    def _write_results_file(
+        self, phases: List[str] | None, results: AshAggregatedResults
+    ) -> None:
+        """Write ash_aggregated_results.json once, after every phase has run.
+
+        The scan phase used to write it at its own end, before the engine's
+        changed-files narrowing, final suppression pass, metrics rebuild and
+        report phase, and the MCP progress tracker reads the file's existence
+        as the scan being complete. The CLI rewrites the file after execute_scan
+        returns; a direct caller of the orchestrator keeps this one as the final
+        file. Not for a report over existing results, which rewrites nothing of
+        the scan it reports on.
+
+        The cancel is read before the write and once more after it. A cancel
+        read before the write leaves no file; one that lands while the file is
+        being written takes the file this run wrote with it: a client polling a
+        cancelled scan reads that file as finished results. Either way the
+        cancel propagates from here, outside execute_scan's arm that puts the
+        previous results back, so they stay set aside for the caller to settle,
+        as the CLI's single write (after its own check) left them.
+        """
+        if not self._writes_results_file(phases or []):
+            return
+        raise_if_cancelled()
+        if not isinstance(results, AshAggregatedResults):
+            ASH_LOGGER.warning(
+                f"The engine returned {type(results).__name__}, not "
+                f"AshAggregatedResults; no results file was written to "
+                f"{self.output_dir}"
+            )
+            return
+        ASH_LOGGER.debug(f"Saving AshAggregatedResults to {self.output_dir}")
+        results.save_model(self.output_dir)
+        try:
+            raise_if_cancelled()
+        except ScanCancelled:
+            self._remove_results_file_written_before_a_cancel()
+            raise
 
     def settle_previous_results(self, restore: bool) -> None:
         """Put the previous results back, or drop them. Never raises.
@@ -1740,42 +1785,11 @@ class ASHScanOrchestrator(BaseModel):
             # given its warnings twice.
             self._record_config_warnings(asharp_model_results)
 
-            # The results file, once, after every phase: the scan phase used to
-            # write it at its own end, before the engine's changed-files
-            # narrowing, final suppression pass, metrics rebuild and report
-            # phase, and the MCP progress tracker reads the file's existence as
-            # the scan being complete. The CLI rewrites the file after this
-            # returns; a direct caller of the orchestrator keeps this one as the
-            # final file. Not for a report over existing results, which rewrites
-            # nothing of the scan it reports on.
-            #
-            # A cancel that arrived while the last phase ran is acted on before
-            # the write, not after: execute_scan checks once more when this
-            # returns, and a file written in between stayed behind for a later
-            # --use-existing to take for a finished scan when no previous results
-            # were set aside to be put back. A cancel that lands while the file
-            # is being written is read once more after the write, and the file
-            # this run wrote goes with it: a client polling a cancelled scan
-            # reads that file as finished results, and the base's single write
-            # (the CLI's, after its own check) never left one behind.
-            if self._writes_results_file(phases):
-                raise_if_cancelled()
-                if isinstance(asharp_model_results, AshAggregatedResults):
-                    ASH_LOGGER.debug(
-                        f"Saving AshAggregatedResults to {self.output_dir}"
-                    )
-                    asharp_model_results.save_model(self.output_dir)
-                    try:
-                        raise_if_cancelled()
-                    except ScanCancelled:
-                        self._remove_results_file_written_before_a_cancel()
-                        raise
-                else:
-                    ASH_LOGGER.warning(
-                        f"The engine returned {type(asharp_model_results).__name__}, "
-                        f"not AshAggregatedResults; no results file was written to "
-                        f"{self.output_dir}"
-                    )
+            # The results file is written by execute_scan once this returns,
+            # outside the arm that puts the previous results back
+            # (_write_results_file): the scan phase used to write it at its own
+            # end, before the engine's changed-files narrowing, final
+            # suppression pass, metrics rebuild and report phase.
 
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():
@@ -1783,9 +1797,9 @@ class ASHScanOrchestrator(BaseModel):
                     try:
                         shutil.rmtree(self.work_dir)
                     except OSError as e:
-                        # Every phase has finished and the results are written;
-                        # a working directory that could not be removed is not
-                        # a failed scan. Raised, it turned a completed scan into
+                        # Every phase has finished and the results are written
+                        # next; a working directory that could not be removed is
+                        # not a failed scan. Raised, it turned a completed scan into
                         # a failure and, with keep_previous_results, deleted the
                         # new results and restored the old ones.
                         ASH_LOGGER.warning(
