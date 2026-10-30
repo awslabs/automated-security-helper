@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
+import os
 import shutil
+import threading
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -40,6 +43,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanne
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
@@ -232,6 +236,9 @@ def test_install_command_carries_the_version_constraint(repo):
         ("1.30.2", "~=1.30.0", True),
         ("1.31.0", "~=1.30.0", False),
         ("1.31.0", "~=1.30", True),
+        # A shorter version is zero-padded for the prefix too: "1" is 1.0.0.
+        ("1", "~=1.0.0", True),
+        ("1.0", "~=1.0.0", True),
         ("1.30.7", "==1.30.*", True),
         ("1.31.0", "==1.30.*", False),
         ("1.30.1", None, True),
@@ -289,6 +296,12 @@ def test_map_zizmor_severity(severity, confidence, level, expected):
         ("workflows/ci.yml", False),
         ("github/workflows/ci.yml", False),
         ("actions/x/my-action.yml", False),
+        # GitHub and zizmor key on the exact spellings; handed these, zizmor
+        # rejected them and they read as failed targets.
+        ("Action.yml", False),
+        ("actions/x/ACTION.YAML", False),
+        (".github/workflows/ci.YAML", False),
+        (".github/workflows/ci.YML", False),
     ],
 )
 def test_is_zizmor_input(path, expected):
@@ -1418,3 +1431,265 @@ def test_a_tool_version_that_is_not_a_specifier_set_is_replaced_by_the_default(v
 @pytest.mark.parametrize("value", [">=1.29.0,<2.0.0", "==1.30.1", None])
 def test_a_specifier_set_tool_version_is_accepted(value):
     assert ZizmorScannerConfigOptions(tool_version=value).tool_version == value
+
+
+# --------------------------------------------------------------------------- #
+# The version probe, the uv route, the inputs and the report's logical paths
+# --------------------------------------------------------------------------- #
+
+
+def test_the_version_probe_keeps_a_prerelease_suffix(repo, monkeypatch):
+    """A pre-release zizmor is not the release it precedes: the probe keeps the
+    suffix, and version_satisfies then answers "cannot verify" rather than
+    accepting 1.30.0-rc.1 as 1.30.0."""
+    _with_executable(monkeypatch, "zizmor 1.30.0-rc.1\n")
+    scanner = _scanner(repo)
+
+    version = scanner._probe_executable_version("/opt/bin/zizmor")
+
+    assert version == "1.30.0-rc.1"
+    assert version_satisfies(version, ZIZMOR_DEFAULT_VERSION_CONSTRAINT) is None
+
+
+def test_a_rejected_path_binary_is_not_handed_back_through_uv_offline(
+    repo, monkeypatch
+):
+    """Offline, the only zizmor the uv runner sees on PATH is the one the version
+    probe just rejected: it is not a uv install and is not available, so the
+    scanner is MISSING with the probe's reason, never run to fail later."""
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    scanner = _scanner(repo)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {
+            "available": True,
+            "preferred_source": "pre_installed",
+            "pre_installed_path": "/opt/bin/zizmor",
+        },
+    )
+
+    def must_not_select(info):
+        raise AssertionError("the rejected binary was handed to the uv route")
+
+    object.__setattr__(scanner, "_select_tool_execution", must_not_select)
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert "does not satisfy" in scanner.dependency_unavailable_reason
+
+
+def test_a_failed_install_does_not_fall_back_to_a_zizmor_the_probe_rejected(
+    repo, monkeypatch
+):
+    """After the constrained install fails, a zizmor found by name would be the
+    PATH binary the probe rejected; the dependency is MISSING, not satisfied."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    scanner = _scanner(repo)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {"available": False, "preferred_source": "none"},
+    )
+    object.__setattr__(scanner, "_install_uv_tool", lambda **_: False)
+    monkeypatch.setattr(
+        zizmor_module,
+        "get_uv_tool_command",
+        lambda *args, **kwargs: ["/opt/bin/zizmor"],
+        raising=False,
+    )
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert "could not provide" in scanner.dependency_unavailable_reason
+
+
+def test_a_uv_route_the_constrained_probe_resolves_still_satisfies(repo, monkeypatch):
+    """The same probe answering with uv's own route (the release resolved from
+    uv's cache) is the one answer that still counts after a failed install."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    scanner = _scanner(repo)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {"available": False, "preferred_source": "none"},
+    )
+    object.__setattr__(scanner, "_install_uv_tool", lambda **_: False)
+    monkeypatch.setattr(
+        zizmor_module,
+        "get_uv_tool_command",
+        lambda *args, **kwargs: ["uv", "tool", "run", "zizmor"],
+    )
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.dependencies_satisfied is True
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX named pipes")
+def test_a_named_pipe_named_like_an_action_is_skipped_without_blocking(repo, caplog):
+    """Reading a FIFO blocks until a writer appears, outside any scan timeout,
+    for ASH's own probes and for zizmor. Only a regular file is an input. The
+    writer thread makes a read that does happen return instead of hanging the
+    test: a collection that reads the pipe then lists it, which the assertion
+    catches."""
+    pipe = repo / "pipes" / "action.yml"
+    pipe.parent.mkdir()
+    os.mkfifo(pipe)
+
+    def feed():
+        with open(pipe, "w") as writer:
+            writer.write("name: x\nruns:\n  using: composite\n  steps: []\n")
+
+    threading.Thread(target=feed, daemon=True).start()
+    scanner = _scanner(repo)
+
+    with caplog.at_level(logging.WARNING):
+        inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+
+    assert inputs == EXPECTED_INPUTS
+    assert "Not auditing pipes/action.yml" in caplog.text
+    assert "not a regular file" in caplog.text
+
+
+def test_a_link_whose_target_cannot_be_stated_is_skipped_not_raised(
+    repo, monkeypatch, caplog
+):
+    """Before Python 3.13, Path.is_file() on a link whose target cannot be
+    stat'ed raises PermissionError instead of answering; one such input must
+    not end the collection."""
+    link = repo / "linked" / "action.yml"
+    link.parent.mkdir()
+    _symlink_or_skip(link, repo / "actions" / "greet" / "action.yml")
+    kept = repo / "actions" / "clean" / "action.yaml"
+    monkeypatch.setattr(
+        zizmor_module, "scan_set", lambda **kwargs: [str(link), str(kept)]
+    )
+    original = Path.is_file
+
+    def is_file(self, *args, **kwargs):
+        if self == link:
+            raise PermissionError(13, "Permission denied", str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    scanner = _scanner(repo)
+
+    with caplog.at_level(logging.WARNING):
+        inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+
+    assert inputs == ["actions/clean/action.yaml"]
+    assert "Not auditing linked/action.yml" in caplog.text
+
+
+def test_an_action_under_a_vendored_directory_is_named_in_the_debug_log(repo, caplog):
+    scanner = _scanner(repo)
+
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
+        inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+
+    assert "node_modules/vendored-action/action.yml" not in inputs
+    assert "node_modules/vendored-action/action.yml" in caplog.text
+
+
+def test_a_file_written_as_an_action_that_zizmor_rejects_is_a_failed_target(repo):
+    """zizmor words a schema rejection of a real composite action like the
+    rejection of another tool's action.yml; the file itself tells them apart
+    (an action has a top-level ``runs`` key), and a real action ASH meant to
+    audit and could not is a failed target, not an inapplicable file."""
+    broken = repo / "broken" / "action.yml"
+    broken.parent.mkdir()
+    broken.write_text("name: broken\nruns:\n  using: nothing-zizmor-knows\n")
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        "file://broken/action.yml as action: input does not match expected "
+        "validation schema\n"
+    )
+
+    scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
+
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS) + 1
+    assert scanner.targets_failed == 1
+
+
+def test_a_converted_inputs_absolute_path_does_not_stay_in_the_logical_location(
+    repo,
+):
+    """A converted input is passed by absolute path, which zizmor copies into
+    the logical-location properties ASH's sanitizer does not rewrite; after the
+    URI is rebased the property is made relative to the target."""
+    scanner = _scanner(repo)
+    converted = repo / ".ash" / "ash_output" / "converted"
+    action = converted / "x" / "action.yml"
+    action.parent.mkdir(parents=True)
+    action.write_text("name: x\nruns:\n  using: composite\n  steps: []\n")
+    scanner._last_inputs = [action]
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "zizmor"}},
+                    "results": [
+                        {
+                            "ruleId": "zizmor/x",
+                            "level": "warning",
+                            "message": {"text": "m"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": "x/action.yml"},
+                                        "region": {"startLine": 1},
+                                    },
+                                    "logicalLocations": [
+                                        {
+                                            "properties": {
+                                                "symbolic": {
+                                                    "key": {
+                                                        "Local": {
+                                                            "verbatim_path": str(action)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    out = scanner._post_process_sarif(report, [], converted)
+
+    logical = out.runs[0].results[0].locations[0].logicalLocations[0]
+    local = logical.properties.model_extra["symbolic"]["key"]["Local"]
+    assert local["verbatim_path"] == "x/action.yml"
+    assert str(repo) not in json.dumps(local)
+
+
+def test_many_inputs_are_audited_in_several_runs_and_one_report(repo, monkeypatch):
+    """A tree with more inputs than one command line holds is audited in several
+    zizmor runs; the counters are summed and the findings joined."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40, raising=False)
+    calls: list = []
+    scanner = _scanner(repo)
+    _fake_run(scanner, stdout=CAPTURED_SARIF.read_text(), calls=calls)
+
+    report = scanner.scan(repo, "source", [])
+
+    inputs_per_call = [
+        call["command"][call["command"].index("--") + 1 :] for call in calls
+    ]
+    assert inputs_per_call == [[path] for path in EXPECTED_INPUTS]
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == 0
+    assert len(report.runs[0].results) == len(EXPECTED_INPUTS) * len(EXPECTED_FINDINGS)

@@ -98,8 +98,9 @@ finding is one zizmor itself expects to be wrong some of the time, so it drops
 one band rather than gating a build at the severity a confirmed finding would.
 The result is written to ``properties.issue_severity``, which every ASH gate and
 reporter reads first, and the SARIF ``level`` is rewritten to agree with it
-(HIGH error, MEDIUM warning, LOW note, INFO none). A finding missing either
-property keeps zizmor's own level, read through ASH's level mapping, and no
+(HIGH error, MEDIUM warning, LOW note, INFO none). A finding missing the
+severity property keeps zizmor's own level, read through ASH's level mapping;
+one missing the confidence property keeps its severity-derived band, with no
 confidence adjustment.
 
 Exit codes and per-target accounting
@@ -125,6 +126,7 @@ import re
 from pathlib import Path, PurePath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
+import yaml
 from pydantic import Field, PrivateAttr, field_validator
 
 from automated_security_helper.base.options import (
@@ -210,7 +212,20 @@ NO_ZIZMOR_INPUT = (
     "action (action.yml or action.yaml) for zizmor to audit in the scanned files"
 )
 _VERSION_PROBE_TIMEOUT_SECONDS = 30
-_VERSION_PATTERN = re.compile(r"zizmor\s+v?(\d+(?:\.\d+)*)")
+#: The version ``zizmor --version`` prints, whole: a pre-release or local suffix
+#: (``1.30.0-rc.1``) stays on it, so ``version_satisfies`` answers "cannot
+#: verify" rather than reading the release it precedes.
+_VERSION_PATTERN = re.compile(r"zizmor\s+v?(\d+(?:\.\d+)*\S*)")
+
+#: Characters of input paths one zizmor invocation is given. Windows caps a
+#: command line at 32,767 characters and the fixed arguments take a few hundred,
+#: so a tree with more inputs than fit is audited in several runs, their
+#: findings and counters joined (see ``scan``).
+_INPUT_ARGV_BUDGET = 24_000
+
+#: How much of a rejected ``action.yml`` is read to tell a GitHub action from a
+#: file of another tool: an action's top-level ``runs`` key is near the top.
+_ACTION_PROBE_LIMIT = 1 << 20
 #: zizmor's input-collection warnings, e.g. ``WARN collect_inputs:
 #: zizmor::registry::input: failed to parse input: ...`` (zizmor 1.29 and 1.30).
 #: Anchored on ``collect_inputs`` so an online audit's network warning is not
@@ -242,6 +257,44 @@ def _names_a_workflow(path_text: str, cwd: Optional[Path] = None) -> bool:
         text = os.path.normpath(os.path.join(Path(cwd).absolute().as_posix(), text))
     parts = PurePath(text).parts
     return len(parts) >= 3 and parts[-3] == ".github" and parts[-2] == "workflows"
+
+
+def _quoted_input_path(path_text: str, cwd: Path) -> Path:
+    """The file zizmor's warning quotes, as a path: relative to ``cwd`` (the
+    subprocess working directory) unless absolute."""
+    text = path_text.removeprefix("file://")
+    path = Path(text)
+    return path if path.is_absolute() else Path(cwd) / path
+
+
+def _declares_a_github_action(path: Path) -> bool:
+    """Whether the file at *path* is written as a GitHub action: a YAML mapping
+    with a top-level ``runs`` key, which every action metadata file has.
+
+    zizmor's "failed to validate <file> as action" line is the same for a file
+    named ``action.yml`` that belongs to another tool and for a composite action
+    whose metadata zizmor's schema rejects. The first is not applicable; the
+    second is a target ASH meant to audit and could not. A file that cannot be
+    read or parsed is not one written as an action.
+    """
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(_ACTION_PROBE_LIMIT)
+        document = yaml.safe_load(data.decode("utf-8", errors="replace"))
+    except (OSError, ValueError, RecursionError, yaml.YAMLError):
+        return False
+    return isinstance(document, dict) and "runs" in document
+
+
+def _probe(path: Path, method: str) -> bool:
+    """``path.<method>()`` for ``is_file``, ``is_symlink`` or ``exists``, read as
+    False when the stat is refused: before Python 3.13 those methods raise the
+    stat's PermissionError for a link whose target cannot be stat'ed instead of
+    answering, and one such input must not end the collection."""
+    try:
+        return bool(getattr(path, method)())
+    except OSError:
+        return False
 
 
 _BASE_SEVERITY: Dict[str, str] = {
@@ -329,7 +382,9 @@ def version_satisfies(
             if len(wanted) < 2:
                 return None
             low, high = _padded(current, wanted)
-            if low < high or current[: len(wanted) - 1] != wanted[:-1]:
+            # The prefix is compared zero-padded too: "1" is 1.0.0, so it
+            # satisfies "~=1.0.0" as PEP 440 reads it (>=1.0.0, ==1.0.*).
+            if low < high or low[: len(wanted) - 1] != wanted[:-1]:
                 return False
             continue
         left, right = _padded(current, wanted)
@@ -373,9 +428,13 @@ def is_zizmor_input(relative_path: PurePath, scan_root: Optional[Path] = None) -
     its parent's count, so a scan root that is itself a ``.github`` or
     ``.github/workflows`` directory has its workflows recognized, as actionlint's
     ``is_workflow_file`` does.
+
+    The names are matched exactly: GitHub loads ``action.yml``/``action.yaml``
+    and ``*.yml``/``*.yaml`` workflows by those spellings, and so does zizmor,
+    so a file named ``Action.yml`` or ``ci.YAML`` is neither, and handed to
+    zizmor it came back as a failed target.
     """
-    name = relative_path.name
-    if name.lower() in _ACTION_FILE_NAMES:
+    if relative_path.name in _ACTION_FILE_NAMES:
         return True
     parts: Tuple[str, ...] = relative_path.parts
     if scan_root is not None:
@@ -384,7 +443,7 @@ def is_zizmor_input(relative_path: PurePath, scan_root: Optional[Path] = None) -
         len(parts) >= 3
         and parts[-3] == ".github"
         and parts[-2] == "workflows"
-        and relative_path.suffix.lower() in _WORKFLOW_SUFFIXES
+        and relative_path.suffix in _WORKFLOW_SUFFIXES
     )
 
 
@@ -402,13 +461,11 @@ def _locations(result: Result) -> List[Location]:
     return locations
 
 
-def _verbatim_path(location: Location) -> Optional[str]:
-    """The input path zizmor was given, as zizmor records it for this location.
-
-    zizmor 1.29/1.30 put it in each logical location's
-    ``properties.symbolic.key.Local.verbatim_path``. None when absent, which
-    leaves the suffix match in ``ZizmorScanner._rebased_uri`` to decide.
-    """
+def _verbatim_path_holders(location: Location) -> List[Dict[str, Any]]:
+    """The ``Local`` dicts of this location's logical locations that carry a
+    ``verbatim_path``: zizmor 1.29/1.30 put the input path it was given in each
+    logical location's ``properties.symbolic.key.Local.verbatim_path``."""
+    holders: List[Dict[str, Any]] = []
     for logical in getattr(location, "logicalLocations", None) or []:
         properties = getattr(logical, "properties", None)
         extra = (getattr(properties, "model_extra", None) or {}) if properties else {}
@@ -417,10 +474,38 @@ def _verbatim_path(location: Location) -> Optional[str]:
             continue
         key = symbolic.get("key")
         local = key.get("Local") if isinstance(key, dict) else None
-        verbatim = local.get("verbatim_path") if isinstance(local, dict) else None
-        if isinstance(verbatim, str) and verbatim:
+        if isinstance(local, dict) and isinstance(local.get("verbatim_path"), str):
+            holders.append(local)
+    return holders
+
+
+def _verbatim_path(location: Location) -> Optional[str]:
+    """The input path zizmor was given, as zizmor records it for this location.
+
+    None when absent, which leaves the suffix match in
+    ``ZizmorScanner._rebased_uri`` to decide.
+    """
+    for local in _verbatim_path_holders(location):
+        verbatim = local["verbatim_path"]
+        if verbatim:
             return verbatim
     return None
+
+
+def _relative_logical_path(verbatim: str, target: Path) -> str:
+    """*verbatim* with the absolute checkout location taken off: a path under
+    *target* (the scan target: the source directory, or the work directory for
+    the converted files) becomes relative to it, so the logical-location and
+    code-flow properties, which ASH's path sanitizer does not rewrite, carry no
+    absolute path. A relative path, or one elsewhere, is returned as it is."""
+    path = PurePath(verbatim)
+    if not path.is_absolute():
+        return verbatim
+    target_abs = Path(target).absolute()
+    try:
+        return Path(verbatim).relative_to(target_abs).as_posix()
+    except ValueError:
+        return verbatim
 
 
 #: The config names zizmor discovers next to its inputs. ASH does not let it read
@@ -540,6 +625,9 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     _online_refusal_logged: bool = PrivateAttr(default=False)
     # Whether the tree-set honor_inline_ignores refusal was already logged.
     _ignores_refusal_logged: bool = PrivateAttr(default=False)
+    # The zizmor on PATH the version probe rejected in this dependency check,
+    # so the uv route does not hand the same binary back as "available".
+    _rejected_executable: Optional[str] = PrivateAttr(default=None)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -635,6 +723,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         constraint = self._get_tool_version_constraint()
         executable = find_executable(self.command or "zizmor")
         rejected_detail = None
+        self._rejected_executable = None
         if executable:
             version = self._probe_executable_version(executable)
             verdict = version_satisfies(version, constraint)
@@ -662,6 +751,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 )
             )
             self._plugin_log(rejected_detail, level=logging.INFO)
+            self._rejected_executable = executable
 
         # No usable zizmor on PATH: the uv route (step 2 of the docstring). A
         # scanner already recorded MISSING (uv refused at construction, an
@@ -690,13 +780,35 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         return False
 
     def _resolve_through_uv(self) -> bool:
-        """The uv path checkov uses, with the use_uv_tool flag kept consistent."""
+        """The uv path checkov uses, with the use_uv_tool flag kept consistent.
+
+        The uv runner reports a tool "available" from a uv install or from a
+        binary on PATH. When the only zizmor it sees on PATH is the one the
+        version probe just rejected (``_rejected_executable``), that is not a uv
+        install and is not available: offline the scanner is MISSING, as the
+        docstring of ``validate_plugin_dependencies`` says, and online uv
+        installs the constrained release. After a constrained install that
+        fails, only a uv route the constrained probe resolves satisfies the
+        dependency; a zizmor found by name would be that same rejected binary,
+        and running it would fail the scan at run time where the dependency
+        check already knows the answer.
+        """
         self.use_uv_tool = True
         if not self._validate_uv_tool_availability():
             return False
         installation_info = self._get_tool_installation_info()
         if installation_info.get("available"):
-            return self._select_tool_execution(installation_info)
+            if (
+                self._rejected_executable is not None
+                and installation_info.get("preferred_source") != "uv"
+            ):
+                self._plugin_log(
+                    "The zizmor the uv runner found on PATH is the one the version "
+                    "check rejected; it is not used through uv either.",
+                    level=logging.DEBUG,
+                )
+            else:
+                return self._select_tool_execution(installation_info)
         if self._is_offline_mode():
             return False
         self._plugin_log(
@@ -707,10 +819,14 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             self._plugin_log("Successfully installed zizmor via UV tool")
             self.dependencies_satisfied = True
             return True
+        # The constrained probe (uv tool run --from <requirement> zizmor
+        # --version) can still resolve the release from uv's cache; only that
+        # uv route counts. The probe's own fallback, a zizmor found by name on
+        # PATH, would be the binary the version check rejected above.
         resolved = get_uv_tool_command(
             self.command or "zizmor", from_spec=self._uv_probe_from_spec()
         )
-        if resolved is not None:
+        if resolved is not None and resolved[:3] == ["uv", "tool", "run"]:
             self.dependencies_satisfied = True
             return True
         return False
@@ -862,17 +978,36 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             relative = candidate.relative_to(target_abs)
             if not is_zizmor_input(relative, scan_root=target_abs):
                 continue
-            # Before the link checks, so a vendored file is never warned about.
+            # Before the link checks, so a vendored file is never warned about;
+            # a debug line says which file was left out, for a repository whose
+            # own action sits under a directory of such a name.
             if known_ignored.intersection(relative.parts[:-1]):
+                ASH_LOGGER.debug(
+                    f"zizmor: {relative.as_posix()} is under a directory ASH never "
+                    "audits (a vendored or virtualenv directory); not an input"
+                )
                 continue
             # A link whose target is missing, or that loops, is an input zizmor
             # cannot open, and it fails the whole run. Checked before resolve(),
-            # which raises on a loop before Python 3.13.
-            if candidate.is_symlink() and not candidate.is_file():
+            # which raises on a loop before Python 3.13. A stat the probe cannot
+            # make (a link to a path this process may not stat) reads as no
+            # file, never as an error that ends the collection.
+            if _probe(candidate, "is_symlink") and not _probe(candidate, "is_file"):
                 if report:
                     self._plugin_log(
                         f"Not auditing {relative.as_posix()}: it is a symbolic "
                         "link that does not resolve to a file.",
+                        level=logging.WARNING,
+                    )
+                continue
+            # A FIFO or a device named like an input is not one: zizmor would
+            # block reading it until the scan timeout, and ASH's own probe of
+            # the file would block too.
+            if not _probe(candidate, "is_file"):
+                if report:
+                    self._plugin_log(
+                        f"Not auditing {relative.as_posix()}: it is not a regular "
+                        "file.",
                         level=logging.WARNING,
                     )
                 continue
@@ -994,6 +1129,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         template. Delegates to the template otherwise. The dependency check is not
         repeated on the empty path: ScanPhase validated dependencies before
         calling scan(), and a scanner with nothing to read has nothing to run.
+
+        The inputs go on zizmor's command line in batches that fit the platform's
+        limit (``_input_batches``). A target with more than one batch is one
+        template run per batch: the counters are summed and the results joined
+        into the first run's report, so the scan reads as one; the stdout and
+        stderr logs in the results directory are the last batch's.
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
@@ -1007,24 +1148,72 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # _execute_scan's own reset, so without this the converted target read
         # the source target's exit code as its own.
         self.exit_code = 0
-        if target.exists() and any(target.iterdir()):
-            self._inputs = self._collect_inputs(
-                target, target_type, global_ignore_paths
+        if not (target.exists() and any(target.iterdir())):
+            return super().scan(
+                target, target_type, global_ignore_paths, config, *args, **kwargs
             )
-            if not self._inputs:
-                self._plugin_log(
-                    "No GitHub Actions workflows (.github/workflows/*.yml) or "
-                    "composite actions (action.yml) found; nothing for zizmor "
-                    "to audit.",
-                    target_type=target_type,
-                    level=logging.INFO,
-                    append_to_stream="stderr",
-                )
-                self._post_scan(target=target, target_type=target_type)
-                return self._empty_report()
-        return super().scan(
-            target, target_type, global_ignore_paths, config, *args, **kwargs
-        )
+        inputs = self._collect_inputs(target, target_type, global_ignore_paths)
+        if not inputs:
+            self._plugin_log(
+                "No GitHub Actions workflows (.github/workflows/*.yml) or "
+                "composite actions (action.yml) found; nothing for zizmor "
+                "to audit.",
+                target_type=target_type,
+                level=logging.INFO,
+                append_to_stream="stderr",
+            )
+            self._post_scan(target=target, target_type=target_type)
+            return self._empty_report()
+        batches = self._input_batches(inputs)
+        if len(batches) == 1:
+            self._inputs = inputs
+            return super().scan(
+                target, target_type, global_ignore_paths, config, *args, **kwargs
+            )
+        reports: List[SarifReport] = []
+        attempted = failed = 0
+        worst_exit_code = 0
+        for batch in batches:
+            self._inputs = batch
+            result = super().scan(
+                target, target_type, global_ignore_paths, config, *args, **kwargs
+            )
+            if not isinstance(result, SarifReport):
+                # The template declined to run (dependencies, pre-scan); its
+                # answer is the scan's.
+                return result
+            attempted += self.targets_attempted
+            failed += self.targets_failed
+            worst_exit_code = max(worst_exit_code, self.exit_code or 0)
+            reports.append(result)
+        self.targets_attempted = attempted
+        self.targets_failed = failed
+        self.exit_code = worst_exit_code
+        self._last_inputs = list(inputs)
+        joined = reports[0]
+        for part in reports[1:]:
+            joined.runs[0].results = list(joined.runs[0].results or []) + list(
+                part.runs[0].results or []
+            )
+        return joined
+
+    def _input_batches(self, inputs: List[Path]) -> List[List[Path]]:
+        """*inputs* in order, split so that each batch's arguments (with a
+        separator each) fit ``_INPUT_ARGV_BUDGET`` characters; an argument longer
+        than the budget is a batch of its own."""
+        batches: List[List[Path]] = []
+        current: List[Path] = []
+        used = 0
+        for path in inputs:
+            cost = len(self._input_argument(path)) + 1
+            if current and used + cost > _INPUT_ARGV_BUDGET:
+                batches.append(current)
+                current, used = [], 0
+            current.append(path)
+            used += cost
+        if current:
+            batches.append(current)
+        return batches
 
     def _empty_report(self) -> SarifReport:
         return SarifReport.model_validate(
@@ -1110,15 +1299,18 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         warnings so the per-target counters say what was really audited:
 
         * "failed to validate <file> as action" for a file outside
-          ``.github/workflows``: a file named ``action.yml`` that is not a GitHub
-          Actions definition (other tools use the name too). Not applicable, so
-          it is dropped from ``targets_attempted``.
+          ``.github/workflows`` that is not written as a GitHub action (no
+          top-level ``runs`` key): a file named ``action.yml`` that belongs to
+          another tool. Not applicable, so it is dropped from
+          ``targets_attempted``.
         * any other "failed to ..." line -- a YAML syntax error, a file in
-          ``.github/workflows`` that is not a valid workflow, or one there named
-          ``action.yml`` that zizmor read as a composite action and rejected: a
-          target ASH meant to audit and could not, so ``targets_failed`` counts
-          it. That is what makes ``--fail-on-incomplete-scanners`` notice, and
-          what turns a scan where every input failed into ERROR.
+          ``.github/workflows`` that is not a valid workflow, one there named
+          ``action.yml`` that zizmor read as a composite action and rejected, or
+          a file written as a GitHub action (it has ``runs``) whose metadata
+          zizmor's schema rejects: a target ASH meant to audit and could not, so
+          ``targets_failed`` counts it. That is what makes
+          ``--fail-on-incomplete-scanners`` notice, and what turns a scan where
+          every input failed into ERROR.
 
         Returns the warning lines, for the log.
         """
@@ -1128,7 +1320,13 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         cwd = Path(self._plugin_context.source_dir)
         for line in rejected:
             not_an_action = _NOT_AN_ACTION_PATTERN.search(line)
-            if not_an_action and not _names_a_workflow(not_an_action.group(1), cwd):
+            if (
+                not_an_action
+                and not _names_a_workflow(not_an_action.group(1), cwd)
+                and not _declares_a_github_action(
+                    _quoted_input_path(not_an_action.group(1), cwd)
+                )
+            ):
                 self.targets_attempted = max(0, self.targets_attempted - 1)
             else:
                 self.targets_failed += 1
@@ -1220,15 +1418,25 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Rebase result URIs, then apply the severity mapping in the module docstring."""
+        """Rebase result URIs, then apply the severity mapping in the module docstring.
+
+        The input path zizmor copied into each logical location (and so into
+        each code-flow step) is rewritten relative to the target once the URI
+        has been rebased with it: ASH's path sanitizer rewrites physical
+        locations only, and a converted input is passed by absolute path, which
+        would otherwise stay in the report.
+        """
         for run in sarif_report.runs or []:
             for result in run.results or []:
                 for location in _locations(result):
+                    verbatim = _verbatim_path(location)
                     physical = getattr(location.physicalLocation, "root", None)
                     artifact = getattr(physical, "artifactLocation", None)
                     if artifact is not None and artifact.uri:
-                        artifact.uri = self._rebased_uri(
-                            artifact.uri, _verbatim_path(location)
+                        artifact.uri = self._rebased_uri(artifact.uri, verbatim)
+                    for local in _verbatim_path_holders(location):
+                        local["verbatim_path"] = _relative_logical_path(
+                            local["verbatim_path"], target
                         )
                 extra = {}
                 if result.properties is not None:
