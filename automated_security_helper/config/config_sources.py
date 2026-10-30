@@ -5049,7 +5049,13 @@ def load_config_with_references(
     document = resolve_config_document(
         Path(config_path), anchor_relative_paths=anchor_relative_paths
     )
-    config = AshConfig.model_validate(document.data, strict=True)
+    # The strict_file_load context, as build_config and validate_config_document
+    # validate a document: it selects the named refusal of a typed field's
+    # environment reference rather than pydantic's message about the resolved
+    # text.
+    config = AshConfig.model_validate(
+        document.data, strict=True, context={"strict_file_load": True}
+    )
     config._environment_references = tuple(document.environment_references)
     return config
 
