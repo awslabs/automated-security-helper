@@ -630,6 +630,27 @@ class ReporterPluginBase(PluginBase, Generic[T]):
             cls, ReporterPluginConfigBase, value, handler, info
         )
 
+    @classmethod
+    def _declared_config_model(cls) -> Optional[type[ReporterPluginConfigBase]]:
+        """The config model this reporter class declares, or None.
+
+        Read from the class itself: a class taken from a value (``type(self)``)
+        handed to a call is what the shown-text guard refuses in the package.
+        """
+        return declared_config_model(cls)
+
+    @classmethod
+    def _config_through_declared_model(
+        cls, config: Any, handler: ValidatorFunctionWrapHandler
+    ) -> Any:
+        """``config`` validated by the model this reporter class declares.
+
+        The class is the caller here for the same reason as above.
+        """
+        return config_validated_by_declared_model(
+            cls, ReporterPluginConfigBase, config, handler
+        )
+
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
         """Set up default paths and initialize plugin configuration."""
@@ -643,9 +664,7 @@ class ReporterPluginBase(PluginBase, Generic[T]):
             # extension. Left None, the enabled filter was skipped, the report
             # was written as the base's "ash.txt", and the reporter could not be
             # selected by name. A reporter that declares no model keeps None.
-            declared = plugin_declared_config_model(
-                type(self), ReporterPluginConfigBase
-            )
+            declared = self._declared_config_model()
             if declared is not None:
                 self.config = declared()
         return self
@@ -662,9 +681,7 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         model. Assignment alone is not validated here.
         """
         if config:
-            self.config = config_validated_by_declared_model(
-                type(self), ReporterPluginConfigBase, config, _as_given
-            )
+            self.config = self._config_through_declared_model(config, _as_given)
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The files this reporter writes itself in the reports directory, beside its report.
