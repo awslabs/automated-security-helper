@@ -220,14 +220,16 @@ def test_the_equals_spelling_of_the_wrappers_own_value_options(runner, tmp_path)
         pytest.param(["--oci={runner}"], id="oci-equals"),
         pytest.param(["--runner", "{runner}"], id="runner"),
         pytest.param(["--runner={runner}"], id="runner-equals"),
+        pytest.param(["-o{runner}"], id="o-attached"),
     ],
 )
 def test_the_runner_option_in_every_spelling_names_the_wrappers_runner(
     runner, guard, tmp_path, spelling
 ):
     """--oci and --runner are the CLI's aliases of --oci-runner; the wrapper takes
-    them, and the = spelling, as its own. At the base they reached the scan inside
-    while the wrapper ran the runner the environment named."""
+    them, the = spelling and the short form with its value attached (`-opodman`, as
+    click reads it) as its own. At the base they reached the scan inside while the
+    wrapper ran the runner the environment named."""
     source, out = _dirs(tmp_path)
     program, _ = runner
     words = [word.format(runner=program) for word in spelling]
@@ -249,9 +251,12 @@ def test_the_runner_option_in_every_spelling_names_the_wrappers_runner(
         pytest.param("--source-dir=", "--source-dir", id="source-dir"),
         pytest.param("--oci-runner=", "--oci-runner", id="oci-runner"),
         pytest.param("--build-target= ", "--build-target", id="build-target-blank"),
+        pytest.param("-o ", "-o", id="o-attached-blank"),
     ],
 )
 def test_an_equals_spelling_with_no_value_is_refused(runner, tmp_path, word, option):
+    """An option whose value is attached but empty or blank (`--source-dir=`, `-o `)
+    is refused as the usage error the CLI exits 5 for, before anything is run."""
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,
@@ -261,6 +266,30 @@ def test_an_equals_spelling_with_no_value_is_refused(runner, tmp_path, word, opt
     assert result.returncode == 5, result.stdout + result.stderr
     assert f"ERROR: {option} needs a value." in result.stderr, result.stderr
     assert calls == []
+
+
+def test_the_short_uid_and_gid_options_take_an_attached_value(runner, tmp_path):
+    """`-u1234 -g1235`, as click reads a short option with its value attached, name
+    the image's UID and GID. At the base the words fell through to the scan inside
+    while the image was built with the caller's ids."""
+    source, out = _dirs(tmp_path)
+    result, calls = _run(
+        runner,
+        [
+            "--no-run",
+            "--source-dir",
+            str(source),
+            "--output-dir",
+            str(out),
+            "-u1234",
+            "-g1235",
+        ],
+    )
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    builds = [call for call in calls if call[:1] == ["build"]]
+    assert len(builds) == 1, f"expected one build call, got {calls}\n{shown}"
+    assert "UID=1234" in builds[0] and "GID=1235" in builds[0], builds[0]
 
 
 def test_dash_v_is_the_scans_verbose_not_the_wrappers_version(runner, tmp_path):

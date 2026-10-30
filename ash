@@ -898,8 +898,9 @@ INNER_VALUE_PENDING="NO"
 SUBCOMMAND_SEEN="NO"
 while (("$#")); do
   # Each of this script's own value options takes both spellings, `--opt value` and
-  # `--opt=value`, as the CLI inside does; --oci and --runner are the CLI's own
-  # aliases of --oci-runner, so they name this script's runner too.
+  # `--opt=value`, and its short form takes the value spaced or attached (`-o podman`,
+  # `-opodman`), as the CLI inside does; --oci and --runner are the CLI's own aliases
+  # of --oci-runner, so they name this script's runner too.
   case $1 in
     --source-dir | --source-dir=*)
       own_value "$1" "$#" "${2-}"
@@ -943,6 +944,24 @@ while (("$#")); do
       shift "${OWN_SHIFT}"
       CONTAINER_GID_SPECIFIED="YES"
       CONTAINER_GID="${OWN_VALUE}"
+      ;;
+    # The short forms with the value attached, `-opodman`, `-u1000`, `-g1000`, as click
+    # reads them. Before this they fell through to the scan inside the container, so
+    # the scan got a runner, UID or GID word it has no use for while this script built
+    # and ran with its defaults. A blank attached value is refused as a missing one.
+    -o?*)
+      require_value "-o" 2 "${1:2}"
+      OCI_RUNNER="${1:2}"
+      ;;
+    -u?*)
+      require_value "-u" 2 "${1:2}"
+      CONTAINER_UID_SPECIFIED="YES"
+      CONTAINER_UID="${1:2}"
+      ;;
+    -g?*)
+      require_value "-g" 2 "${1:2}"
+      CONTAINER_GID_SPECIFIED="YES"
+      CONTAINER_GID="${1:2}"
       ;;
     --no-build)
       NO_BUILD="YES"
