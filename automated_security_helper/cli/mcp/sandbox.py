@@ -523,11 +523,14 @@ def client_named_config_is_untrusted(
                 return True
         return any(_parts_below(candidate, root) is not None for root in config_roots)
 
+    # os.path.realpath, as config_is_client_supplied above: Path.resolve raises
+    # RuntimeError on Python 3.12 and older for a link that leads back to
+    # itself, and a named config is judged, not raised on.
     return not all(
         chosen_by_operator(candidate)
         for candidate in (
             Path(os.path.abspath(config_path)),
-            Path(config_path).resolve(),
+            Path(os.path.realpath(config_path)),
         )
     )
 

@@ -6,7 +6,8 @@
 
 * A client-delivered config is judged with ``Path.resolve``, which on Python
   3.12 and older raises for a link that leads back to itself, so a scanned tree
-  holding one made the scanner's construction raise.
+  holding one made the scanner's construction raise. The named-config judgment
+  kept the same call after the delivered-config one had moved off it.
 * ``session_sandbox`` validated an id with a separator-only rule, so ids the
   registry, source delivery and the TTL sweep refuse (a control character, a
   hidden delete name) still got a sandbox root.
@@ -34,6 +35,7 @@ from automated_security_helper.cli.mcp.sandbox import (
     ASH_MCP_ALLOWED_ROOTS_ENV,
     ASH_MCP_TRANSPORT_ENV,
     CONFIG_DIR_NAME,
+    client_named_config_is_untrusted,
     config_is_client_supplied,
     session_sandbox,
     validate_config_input,
@@ -80,6 +82,26 @@ class TestAClientConfigWithASymlinkLoopIsJudgedNotRaised:
         loop.symlink_to(loop.name)
 
         assert config_is_client_supplied(loop) is False
+
+    def test_a_named_config_that_is_a_self_referencing_link_is_judged(
+        self, monkeypatch, tmp_path
+    ):
+        """Red at the base on Python 3.12 and older: the named-config judgment
+        still resolved with Path.resolve after the delivered-config judgment had
+        moved to os.path.realpath, and raised RuntimeError on the loop.
+
+        The loop sits in a granted config root, so the as-named candidate is the
+        operator's and the judgment goes on to resolve it; a loop outside every
+        root is answered before the resolution and never reached the raise.
+        """
+        _delivered(OWN)
+        granted = tmp_path / "granted-config"
+        granted.mkdir()
+        monkeypatch.setenv(ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV, str(granted))
+        loop = granted / "ash.yaml"
+        loop.symlink_to(loop.name)
+
+        assert client_named_config_is_untrusted(loop, OWN) is False
 
 
 class TestSessionSandboxRefusesTheIdsEveryOtherBuilderRefuses:
