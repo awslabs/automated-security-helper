@@ -176,6 +176,40 @@ def test_the_failure_is_filed_on_the_row_of_the_target_that_failed(
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+def test_the_refiled_row_keeps_its_could_not_stop_record(
+    plugin_context, tmp_path, parallel
+):
+    """A tool ASH could not stop, still writing into the scanner's results
+    directory, is the case that can make the merge raise; the record of that
+    stop is what run_ash_scan's could-not-stop gate reads off the target's
+    report. Filing a fresh failure container under the target's key replaced the
+    report with one carrying no such record, so the gate lost the case it exists
+    for. The refiled row is the scan's own, so the record is still on it."""
+
+    def mark_unstoppable(container):
+        if container.could_not_stop is None:
+            container.could_not_stop = (
+                "shape-tool (pid 4242), which may still be running"
+            )
+
+    seen, _ = _run(
+        plugin_context,
+        tmp_path,
+        failing_target="converted",
+        parallel=parallel,
+        before_raise=mark_unstoppable,
+    )
+
+    record = seen[-1]
+    assert record.target_type == "converted"
+    assert record.status == ScannerStatus.ERROR
+    assert record.could_not_stop == (
+        "shape-tool (pid 4242), which may still be running"
+    )
+    assert seen[0].could_not_stop is None, "the merged target's row is untouched"
+
+
+@pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
 def test_every_failed_target_is_filed_not_only_the_first(
     plugin_context, tmp_path, parallel
 ):
