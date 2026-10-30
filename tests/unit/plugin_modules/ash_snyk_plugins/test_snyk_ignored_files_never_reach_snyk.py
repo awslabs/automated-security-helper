@@ -329,7 +329,7 @@ class TestTheSourceTarget:
         sys.platform == "win32",
         reason="Windows file names cannot hold a newline or an escape character",
     )
-    @pytest.mark.unit
+    @pytest.mark.integration
     def test_the_first_path_is_shown_with_its_controls_escaped(self, tmp_path, record):
         context = _context(tmp_path, ["thirdparty/**"])
         name = "a\nb\x1b[31m.js"
