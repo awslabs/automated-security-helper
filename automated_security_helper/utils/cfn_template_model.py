@@ -96,30 +96,69 @@ _ImplicitResolvers = Dict[Any, list[tuple[str, Any]]]
 #: the merging node, and the anchored nodes are shared, so a chain in which each
 #: mapping merges the previous one twice (``b: &b {<<: [*a, *a]}``) doubles at
 #: every link: thirty links are a billion pairs from a 1 KB file, in the
-#: unsandboxed ASH process. Checked after each node is flattened, so the work
-#: before the refusal is about twice this many pairs. A real template merges a
-#: few defaults into a few hundred resources and stays far below it.
+#: unsandboxed ASH process. Checked BEFORE a node's merge list is built, from the
+#: sizes of the mappings it merges, and summed over the document, so neither one
+#: wide merge (``{<<: [*a16, *a16, ...]}``) nor many siblings each merging a
+#: large mapping once can allocate past it. A real template merges a few defaults
+#: into a few hundred resources and stays far below it.
 MERGED_MAPPING_PAIRS_BOUND = 100_000
 
+#: PyYAML's tag for the merge key, ``<<``.
+_MERGE_TAG = "tag:yaml.org,2002:merge"
 
-def _flatten_mapping_within_bound(flatten: Any, node: yaml.MappingNode) -> None:
-    """``flatten(node)``, refused when merging grows the node past the bound.
+
+def _flatten_mapping_within_bound(
+    loader: Any, flatten: Any, node: yaml.MappingNode
+) -> None:
+    """``flatten(node)``, refused before the merge is built when it would pass the bound.
+
+    PyYAML's ``flatten_mapping`` flattens each merged mapping, then copies every
+    merged pair into one list and prepends it to the node's own pairs. The copy is
+    the allocation, so the check runs before it: each merged mapping is flattened
+    first (through ``loader.flatten_mapping``, so the same check covers it), their
+    sizes are added to the node's own, and the sum is refused when it passes
+    ``MERGED_MAPPING_PAIRS_BOUND``. The pairs every merge in the document has added
+    are summed on the loader too, so many small merges of one large mapping are
+    refused as one large merge is. ``flatten`` (the base class's) runs only when
+    both sums are within the bound; it finds the merged mappings already flat.
 
     Raises:
-        ConstructorError: the merged mapping holds more than
-            ``MERGED_MAPPING_PAIRS_BOUND`` pairs, and more than it held before.
+        ConstructorError: the merge would expand this mapping, or the document's
+            merges together, past ``MERGED_MAPPING_PAIRS_BOUND`` pairs.
     """
-    before = len(node.value)
+    incoming = 0
+    for key_node, value_node in list(node.value):
+        if getattr(key_node, "tag", None) != _MERGE_TAG:
+            continue
+        if isinstance(value_node, yaml.MappingNode):
+            merged_nodes = [value_node]
+        elif isinstance(value_node, yaml.SequenceNode):
+            # A non-mapping item is left for the base class to refuse.
+            merged_nodes = [
+                item for item in value_node.value if isinstance(item, yaml.MappingNode)
+            ]
+        else:
+            merged_nodes = []
+        for merged_node in merged_nodes:
+            loader.flatten_mapping(merged_node)
+            incoming += len(merged_node.value)
+    if incoming:
+        expanded = incoming + len(node.value)
+        document_total = getattr(loader, "_merged_pairs_added", 0) + incoming
+        if (
+            expanded > MERGED_MAPPING_PAIRS_BOUND
+            or document_total > MERGED_MAPPING_PAIRS_BOUND
+        ):
+            raise ConstructorError(
+                None,
+                None,
+                f"a merge key (<<) would expand this mapping to {expanded} key/value "
+                f"pairs ({document_total} added by this document's merges), more "
+                f"than the {MERGED_MAPPING_PAIRS_BOUND} ASH reads",
+                node.start_mark,
+            )
+        loader._merged_pairs_added = document_total
     flatten(node)
-    merged = len(node.value)
-    if merged > before and merged > MERGED_MAPPING_PAIRS_BOUND:
-        raise ConstructorError(
-            None,
-            None,
-            f"a merge key (<<) expands this mapping to {merged} key/value pairs, "
-            f"more than the {MERGED_MAPPING_PAIRS_BOUND} ASH reads",
-            node.start_mark,
-        )
 
 
 #: The byte order mark as UTF-8 decoding keeps it, U+FEFF, spelled by code point.
@@ -163,7 +202,7 @@ class _TemplateLoader(CfnYamlLoader):
     """
 
     def flatten_mapping(self, node: yaml.MappingNode) -> None:
-        _flatten_mapping_within_bound(super().flatten_mapping, node)
+        _flatten_mapping_within_bound(self, super().flatten_mapping, node)
 
 
 _TemplateLoader.yaml_implicit_resolvers = _without_the_timestamp_resolver(
@@ -530,7 +569,7 @@ class _TagTolerantLoader(yaml.SafeLoader):
     """
 
     def flatten_mapping(self, node: yaml.MappingNode) -> None:
-        _flatten_mapping_within_bound(super().flatten_mapping, node)
+        _flatten_mapping_within_bound(self, super().flatten_mapping, node)
 
 
 def _construct_untagged(

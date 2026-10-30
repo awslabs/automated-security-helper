@@ -17,6 +17,7 @@ Three behaviors of ``utils/cfn_template_model.py`` pinned here:
 from __future__ import annotations
 
 import pytest
+import yaml
 
 from automated_security_helper.utils import cfn_template_model
 from automated_security_helper.utils.cfn_template_model import (
@@ -50,6 +51,50 @@ def test_a_doubling_merge_chain_is_refused_as_a_constructor_error():
 def test_the_lenient_read_refuses_the_same_chain():
     """``_could_be_a_template`` reads with the SafeLoader-based loader, bounded too."""
     assert isinstance(_could_be_a_template(_doubling_merge_chain(30)), bool)
+
+
+def _chain_then(links: int, tail: str) -> str:
+    """The doubling chain to ``a<links>`` (each link under the bound), then ``tail``."""
+    lines = ["a0: &a0 {k: v}"]
+    for index in range(1, links + 1):
+        lines.append(f"a{index}: &a{index} {{<<: [*a{index - 1}, *a{index - 1}]}}")
+    return "\n".join(lines) + "\n" + tail
+
+
+def test_siblings_that_each_merge_a_large_mapping_once_are_refused_together():
+    """At the base each sibling was under the bound on its own (16,384 pairs), so
+    five of them were all built on top of the chain's 32,766; the document's
+    merges are now summed and the fifth sibling is refused."""
+    text = _chain_then(
+        14,
+        "v: {<<: *a14}\nw: {<<: *a14}\nx: {<<: *a14}\ny: {<<: *a14}\nz: {<<: *a14}\n"
+        "Resources: {}\n",
+    )
+    with pytest.raises(TemplateConstructorError):
+        get_model_from_template_text(text, "siblings.yaml")
+
+
+def test_a_wide_merge_is_refused_before_its_list_is_built():
+    """``{<<: [*a10 x 200]}`` is 204,800 pairs. The loader's own error names the
+    expansion the merge WOULD have built: the pre-check computes it from the merged
+    mappings' sizes and refuses before any list is allocated (at the base the
+    message named the size of a list already built)."""
+    aliases = ", ".join(["*a10"] * 200)
+    text = _chain_then(10, f"x: {{<<: [{aliases}]}}\nResources: {{}}\n")
+    with pytest.raises(yaml.constructor.ConstructorError) as raised:
+        yaml.load(text, Loader=cfn_template_model._TemplateLoader)  # nosec B506
+    assert "would expand this mapping" in str(raised.value), str(raised.value)
+    with pytest.raises(TemplateConstructorError):
+        get_model_from_template_text(text, "wide.yaml")
+
+
+def test_a_merge_well_within_the_bound_across_the_document_is_still_merged():
+    text = _chain_then(
+        8,
+        "Resources:\n  B:\n    Type: AWS::S3::Bucket\n    Properties: {<<: *a8}\n",
+    )
+    model = get_model_from_template_text(text, "within.yaml")
+    assert model is not None
 
 
 def test_a_merge_within_the_bound_is_still_merged():
