@@ -25,6 +25,9 @@ at the base.
   policy resolver then treated the operator's file as "a project's own config".
 * ``Path.is_file()`` on the ``--config`` path raised a bare ``PermissionError``.
 * A ``project_name`` read from the environment was printed as its value.
+* A config path that ``Path.resolve`` could not resolve (a link loop raises
+  ``RuntimeError`` on 3.10 to 3.12) escaped the UTF-8 path check as a traceback
+  instead of a definition error.
 """
 
 from pathlib import Path
@@ -42,6 +45,7 @@ from automated_security_helper.workspace.plan import ProjectPlan
 from automated_security_helper.workspace.resolver import (
     _apply_workspace_policy,
     _assign_display_labels,
+    _refuse_config_files_that_are_not_utf8,
     _refuse_missing_default_config,
     _resolve_project_config,
     _scanner_state,
@@ -307,3 +311,42 @@ class TestDisplayLabels:
         assert canary not in project.label
         assert canary not in project.display_label
         assert canary not in plan.render()
+
+
+class TestConfigPathsThatCannotBeResolved:
+    """``Path.resolve`` raising anything but ``ValueError`` escaped the check.
+
+    A real link loop raises ``RuntimeError`` only on 3.10 to 3.12 (3.13 returns
+    the path unresolved), so the loop is faked: the check must turn the error
+    into a definition error on every interpreter, never let it through.
+    """
+
+    @pytest.mark.parametrize(
+        "raised",
+        [RuntimeError("Symlink loop from 'loop'"), OSError(5, "Input/output error")],
+        ids=["link-loop", "unreadable-chain"],
+    )
+    def test_an_unresolvable_default_config_is_a_definition_error(
+        self, tmp_path, monkeypatch, raised
+    ):
+        given = tmp_path / "loop" / "ash.yaml"
+
+        def refuse(self, *args, **kwargs):
+            raise raised
+
+        monkeypatch.setattr(Path, "resolve", refuse)
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            _refuse_config_files_that_are_not_utf8(None, given)
+
+        message = str(excinfo.value)
+        assert "the default config, for a project that declares none" in message
+        assert type(raised).__name__ in message
+        assert "ash.yaml" in message
+        assert excinfo.value.__cause__ is raised
+
+    def test_a_resolvable_config_is_still_accepted(self, tmp_path):
+        given = tmp_path / "ash.yaml"
+        given.write_text("project_name: ok\n", encoding="utf-8")
+
+        _refuse_config_files_that_are_not_utf8(given, None, given)

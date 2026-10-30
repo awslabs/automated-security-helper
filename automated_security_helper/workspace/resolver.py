@@ -728,7 +728,10 @@ def _refuse_config_files_that_are_not_utf8(
 
     A path that holds a NUL byte is refused here too, as a definition error: the
     string reaches ``Path`` but no file can have that name, and the filesystem
-    layer raises ``ValueError`` for it rather than ``OSError``.
+    layer raises ``ValueError`` for it rather than ``OSError``. A path that
+    cannot be resolved at all is refused the same way: ``Path.resolve`` raises
+    ``RuntimeError`` for a link loop on 3.10 to 3.12 (and ``OSError`` where the
+    filesystem layer cannot read the chain), which escaped as a traceback.
     """
     problems = []
     for described, given in (
@@ -746,6 +749,13 @@ def _refuse_config_files_that_are_not_utf8(
                 f"The path given for {described} cannot be a file's name "
                 f"({type(exc).__name__} from the filesystem layer): "
                 f"{str(absolute)!r}. Check it for control characters."
+            ) from exc
+        except (RuntimeError, OSError) as exc:
+            raise WorkspaceDefinitionError(
+                f"The path given for {described} cannot be resolved "
+                f"({type(exc).__name__} from the filesystem layer): "
+                f"{str(absolute)!r}. Check it for a symbolic link that points "
+                "back at itself, and that every directory on it can be read."
             ) from exc
         for path in dict.fromkeys((absolute, resolved)):
             if not is_utf8_path(path):
