@@ -738,9 +738,12 @@ def _run_module_app(app: Callable[..., Any]) -> None:
     code, 2; outside it the error is raised to here, where ASH prints it as
     cli/main.py does for the root group and exits ASH_EXIT_USAGE_ERROR. typer's
     NoArgsIsHelpError prints the help instead, as typer prints it. A command's
-    ``typer.Exit`` comes back as its code, a return comes back as 0, and
-    click's Abort (an interrupted prompt) exits 1 with its one word, as click
-    does. Imports are inside: this runs after the streams are known good.
+    ``typer.Exit`` comes back as its code, and click's Abort (an interrupted
+    prompt) exits 1 with its one word, as click does. Outside standalone mode
+    click returns a command's own return value through the same channel as
+    ``Exit``'s code, so a command that returns an ``int`` exits with it where
+    standalone mode exited 0; a command that returns anything else exits 0.
+    Imports are inside: this runs after the streams are known good.
     """
     # Abort is typer's own (typer.exceptions, exported at the top level); the
     # vendored click package has no Abort, so importing it from there raised an
