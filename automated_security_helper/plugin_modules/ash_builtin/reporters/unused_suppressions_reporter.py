@@ -169,19 +169,26 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         """Under ``output_format: markdown`` the report is markdown, so it is
         written under MARKDOWN_EXTENSION, not the JSON one.
 
-        An extension the operator set is kept as set, whatever its value: the
-        test is whether the field was SET (``model_fields_set``), not whether
-        it equals the default. The change lands on a copy of the config, so
-        the object the caller handed in (the AshConfig's own reporter section,
-        say) is not changed under it.
+        An extension the operator chose is kept, where chosen means a value
+        other than the class default. The first form of this test asked whether
+        the field was SET (``model_fields_set``), and the real run never met
+        it: the report phase builds a reporter from ``get_plugin_config``,
+        which is a full dump of the section, so ``extension`` arrived with the
+        default's value, counted as set, and the markdown landed back in
+        ``ash.unused-suppressions.json``. An operator who wrote the default's
+        own value under ``markdown`` gets the markdown name too. The change
+        lands on a copy of the config, so the object the caller handed in (the
+        AshConfig's own reporter section, say) is not changed under it.
         """
         if isinstance(self.config, dict):
             self.config = UnusedSuppressionsReporterConfig.model_validate(self.config)
         output_format = getattr(
             getattr(self.config, "options", None), "output_format", "both"
         )
-        fields_set = getattr(self.config, "model_fields_set", set())
-        if output_format == "markdown" and "extension" not in fields_set:
+        default_extension = UnusedSuppressionsReporterConfig.model_fields[
+            "extension"
+        ].default
+        if output_format == "markdown" and self.config.extension == default_extension:
             self.config = self.config.model_copy(
                 update={"extension": self.MARKDOWN_EXTENSION}
             )

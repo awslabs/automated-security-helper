@@ -18,7 +18,11 @@ are being used" (or a percentage unused) with no scope stated.
 Markdown format. ``output_format: markdown`` made ``report`` return markdown,
 which the report phase wrote to ``ash.unused-suppressions.json``, the file
 ``ash config lint --fix-unused`` reads as JSON. The report is now written under
-the markdown extension instead.
+the markdown extension instead. The first cure switched the name only when the
+``extension`` field was unset, and the real run never met that: the report
+phase builds the reporter from ``get_plugin_config``, a full dump of the
+section, so the field arrived at its default and counted as set. The switch now
+asks whether the extension is the default's value.
 """
 
 import json
@@ -26,6 +30,7 @@ import json
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import reporter_file_name
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import AshSuppression
@@ -158,18 +163,63 @@ def test_markdown_output_format_names_the_report_file_as_markdown(tmp_path):
     assert reporter.report(model).startswith("# Unused Suppressions Report")
 
 
-@pytest.mark.parametrize("extension", ["unused.custom", "unused-suppressions.json"])
-def test_an_extension_the_operator_set_is_kept_under_markdown_format(
-    tmp_path, extension
-):
-    """Set is set, even to the default's own value."""
+def test_an_extension_the_operator_chose_is_kept_under_markdown_format(tmp_path):
+    """A value other than the default is the operator's choice and stays."""
     context = _context(tmp_path)
     config = UnusedSuppressionsReporterConfig(
-        extension=extension, options={"output_format": "markdown"}
+        extension="unused.custom", options={"output_format": "markdown"}
     )
     reporter = UnusedSuppressionsReporter(context=context, config=config)
 
-    assert reporter.config.extension == extension
+    assert reporter.config.extension == "unused.custom"
+
+
+def test_the_defaults_own_value_set_under_markdown_is_renamed_too(tmp_path):
+    """Red at the base: set to the default's own value, the extension stayed.
+    That is the value a full dump of the section carries, so it is the value
+    every real run handed in (the test below); an operator who typed it gets
+    the markdown name as well, since the report is markdown."""
+    context = _context(tmp_path)
+    config = UnusedSuppressionsReporterConfig(
+        extension="unused-suppressions.json", options={"output_format": "markdown"}
+    )
+    reporter = UnusedSuppressionsReporter(context=context, config=config)
+
+    assert reporter.config.extension == "unused-suppressions.md"
+
+
+def test_a_config_file_read_through_get_plugin_config_names_the_markdown_file(
+    tmp_path,
+):
+    """Red at the base. The report phase builds the reporter from the section
+    ``get_plugin_config`` gives, a full dump that carries ``extension`` at its
+    default, so the field counted as set and the switch never fired on a real
+    run: the markdown was written to ``ash.unused-suppressions.json``."""
+    config_path = tmp_path / ".ashrc.yaml"
+    config_path.write_text(
+        "project_name: demo\n"
+        "reporters:\n"
+        "  unused-suppressions:\n"
+        "    options:\n"
+        "      output_format: markdown\n",
+        encoding="utf-8",
+    )
+    config = AshConfig.from_file(config_path=config_path)
+    section = config.get_plugin_config("reporter", "unused-suppressions")
+    # The premise: the dump carries the default's value for the field.
+    assert isinstance(section, dict)
+    assert section["extension"] == "unused-suppressions.json"
+    context = PluginContext(
+        source_dir=tmp_path / "source",
+        output_dir=tmp_path / "output",
+        work_dir=tmp_path / "work",
+        config=config,
+    )
+
+    reporter = UnusedSuppressionsReporter(context=context, config=section)
+
+    assert reporter_file_name(reporter) == "ash.unused-suppressions.md"
+    assert reporter.companion_file_names() == ()
 
 
 def test_the_callers_config_object_is_not_changed(tmp_path):
