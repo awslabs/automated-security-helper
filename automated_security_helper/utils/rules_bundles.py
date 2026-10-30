@@ -88,6 +88,7 @@ or any directory above it.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import http.client
 import json
@@ -516,7 +517,26 @@ def install_rules_bundle(
             "ASH can write."
         ) from exc
 
-    with exclusive_lock(root.joinpath(".ash-rules-install.lock")):
+    lock_path = root.joinpath(".ash-rules-install.lock")
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(exclusive_lock(lock_path))
+        except TimeoutError as exc:
+            raise RulesBundleUnavailable(
+                f"{problem}, and another ASH process held the install lock "
+                f"{lock_path} for too long ({exc}). Wait for that install to "
+                "finish, then run the install again."
+            ) from exc
+        except OSError as exc:
+            # The lock is a file in the rules root. A root that exists but is
+            # not writable (the image's root-owned directory, run as another
+            # user) passes the mkdir above and fails here, so this is the same
+            # documented refusal, not a raw PermissionError out of the lock.
+            raise RulesBundleUnavailable(
+                f"{problem}, and the install lock {lock_path} could not be opened "
+                f"({exc}). Make the rules directory writable, or set "
+                f"{RULES_DIR_ENV} to a directory ASH can write."
+            ) from exc
         if not force:
             # Another install may have finished while this one waited for the
             # lock: the check is made again under it, so two concurrent installs
@@ -600,13 +620,28 @@ def _install_locked(
             aside = Path(tempfile.mkdtemp(prefix=".ash-rules-old-", dir=root))
             try:
                 os.replace(final, aside.joinpath("old"))
-            except OSError:
+            except OSError as exc:
                 # The old bundle stays where it was; the empty directory made
-                # for it is not left behind in the rules root.
+                # for it is not left behind in the rules root. The documented
+                # refusal, as for every other local failure of the install: a
+                # rule file a scan holds open (Windows refuses the rename), or
+                # a root this user may not write into.
                 shutil.rmtree(aside, ignore_errors=True)
-                raise
+                raise RulesBundleUnavailable(
+                    f"{problem}, and the rules in place at {final} could not be "
+                    f"moved aside ({exc}). Make sure no scan is reading them and "
+                    f"the rules directory is writable, or set {RULES_DIR_ENV} to "
+                    "a directory ASH can write."
+                ) from exc
             shutil.rmtree(aside, ignore_errors=True)
-        os.replace(staging, final)
+        try:
+            os.replace(staging, final)
+        except OSError as exc:
+            raise RulesBundleUnavailable(
+                f"{problem}, and the downloaded rules could not be moved into "
+                f"place at {final} ({exc}). Make the rules directory writable, "
+                f"or set {RULES_DIR_ENV} to a directory ASH can write."
+            ) from exc
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

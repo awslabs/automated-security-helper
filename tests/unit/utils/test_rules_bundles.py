@@ -14,12 +14,14 @@ rather than by the module under test.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import importlib.util
 import json
 import os
 import urllib.error
 import zipfile
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -30,6 +32,7 @@ from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 from automated_security_helper.utils import rules_bundles
 from automated_security_helper.utils.rules_bundles import (
     MANIFEST_NAME,
+    RULES_DIR_ENV,
     RulesBundleUnavailable,
     contents_digest,
     extract_bundle,
@@ -426,6 +429,100 @@ class TestOffline:
         calls = []
         assert _install(tmp_path, bundle, archive, calls, download=_offline(calls))
         assert calls == [] and (final / "wa-Security-Pillar.guard").is_file()
+
+
+class _OsWithoutRename:
+    """The module's ``os`` with ``replace`` refusing, and nothing else changed.
+
+    Bound onto the module under test only, so the interpreter's own ``os``
+    (and every other module's) keeps working while the test runs.
+    """
+
+    def __init__(self, error: OSError):
+        self._error = error
+
+    def replace(self, src, dst):
+        raise self._error
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+class TestALocalFailureIsTheDocumentedRefusal:
+    """Every local failure of the install is a RulesBundleUnavailable naming the
+    remedy, as the docstring promises: the lock take and the two renames used
+    to let the raw OSError out, past the conversion the mkdir and mkdtemp had."""
+
+    @contextmanager
+    def _refused_lock(self, path):
+        raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        yield  # pragma: no cover - the generator shape contextmanager needs
+
+    def test_a_lock_that_cannot_be_opened(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        with (
+            patch(
+                "automated_security_helper.utils.file_lock.exclusive_lock",
+                self._refused_lock,
+            ),
+            pytest.raises(RulesBundleUnavailable) as refused,
+        ):
+            _install(tmp_path, bundle, archive, [])
+        message = str(refused.value)
+        assert "install lock" in message and "could not be opened" in message
+        assert RULES_DIR_ENV in message and "Permission denied" in message
+        assert isinstance(refused.value.__cause__, PermissionError)
+        assert _contents(tmp_path / "rules") == []
+
+    def test_a_lock_held_too_long_names_the_other_install(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+
+        @contextmanager
+        def held_elsewhere(path):
+            raise TimeoutError(f"the lock on {path} was held for 30 seconds")
+            yield  # pragma: no cover
+
+        with (
+            patch(
+                "automated_security_helper.utils.file_lock.exclusive_lock",
+                held_elsewhere,
+            ),
+            pytest.raises(RulesBundleUnavailable, match="another ASH process"),
+        ):
+            _install(tmp_path, bundle, archive, [])
+        assert _contents(tmp_path / "rules") == []
+
+    def test_a_rename_into_place_that_fails(self, tmp_path, bundle_zip, monkeypatch):
+        archive, bundle = bundle_zip
+        monkeypatch.setattr(
+            rules_bundles,
+            "os",
+            _OsWithoutRename(PermissionError(errno.EACCES, "Permission denied")),
+        )
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, [])
+        message = str(refused.value)
+        assert "could not be moved into place" in message, message
+        assert RULES_DIR_ENV in message
+        assert _contents(tmp_path / "rules") == [], "the staging is cleaned up"
+
+    def test_a_bundle_in_place_that_cannot_be_moved_aside(
+        self, tmp_path, bundle_zip, monkeypatch
+    ):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        before = _tree(final)
+        monkeypatch.setattr(
+            rules_bundles,
+            "os",
+            _OsWithoutRename(PermissionError(errno.EACCES, "Permission denied")),
+        )
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, [], force=True)
+        message = str(refused.value)
+        assert "could not be moved aside" in message, message
+        assert _tree(final) == before, "the rules in place are left as they were"
+        assert _leftovers(tmp_path / "rules") == []
 
 
 class TestVerify:
