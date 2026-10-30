@@ -197,6 +197,55 @@ class TestADanglingLockfileLink:
         assert (package / lock_name, NOT_A_REGULAR_FILE) in refused
 
 
+class TestTheReadWhereThePlatformHasNoNonblockingOpen:
+    """Windows has no ``O_NONBLOCK``, and its ``os.set_blocking`` (3.12 and
+    later) accepts pipes only: on a file handle it raises
+    ERROR_INVALID_PARAMETER, which every lockfile's audit then reported as
+    ``the audit raised OSError: [WinError 87]``. The read clears only a flag it
+    set. Both tests shape ``os`` the way that platform has it; the file itself
+    runs on POSIX."""
+
+    def test_a_plain_open_is_read_without_touching_the_blocking_mode(
+        self, tmp_path, monkeypatch
+    ):
+        package = _package(tmp_path / "repo" / "web", "package-lock.json")
+        monkeypatch.delattr(os, "O_NONBLOCK", raising=False)
+
+        def refuse_a_file_handle(fd, blocking):
+            raise OSError(22, "The parameter is incorrect")
+
+        monkeypatch.setattr(os, "set_blocking", refuse_a_file_handle)
+
+        data = package_manager_child._read_admitted(
+            package / "package-lock.json", [tmp_path / "repo"]
+        )
+
+        assert data == b"{}\n"
+
+    @pytest.mark.skipif(
+        not hasattr(os, "O_NONBLOCK"), reason="no nonblocking open on this platform"
+    )
+    def test_the_control_a_nonblocking_open_is_made_blocking_before_the_read(
+        self, tmp_path, monkeypatch
+    ):
+        package = _package(tmp_path / "repo" / "web", "package-lock.json")
+        real_set_blocking = os.set_blocking
+        calls = []
+
+        def record(fd, blocking):
+            calls.append(blocking)
+            real_set_blocking(fd, blocking)
+
+        monkeypatch.setattr(os, "set_blocking", record)
+
+        data = package_manager_child._read_admitted(
+            package / "package-lock.json", [tmp_path / "repo"]
+        )
+
+        assert data == b"{}\n"
+        assert calls == [True]
+
+
 class TestWithinByIdentity:
     def test_a_root_named_through_a_link_still_holds_its_tree(self, tmp_path):
         """The containment test compares files, not real-path strings, so a root

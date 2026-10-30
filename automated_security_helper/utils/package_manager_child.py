@@ -563,13 +563,17 @@ def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
     swapped for a link out of the tree or a FIFO, and the read followed the
     new shape; here a swap before the open is caught by the check on the new
     object, a swap after it by the identity compare, and whatever is read came
-    from the descriptor the checks judged. ``O_NONBLOCK`` keeps the open of a
-    FIFO from waiting for a writer; it is cleared before the read.
+    from the descriptor the checks judged. Where the platform has ``O_NONBLOCK``
+    it keeps the open of a FIFO from waiting for a writer, and it is cleared
+    before the read. Windows has no ``O_NONBLOCK``, so the open there is plain
+    and nothing is cleared: its ``os.set_blocking`` (3.12 and later) accepts
+    pipes only and refuses a file handle with ERROR_INVALID_PARAMETER, which
+    read as "the audit raised OSError: [WinError 87]" on every lockfile.
     """
     roots = list(roots)
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    nonblocking = getattr(os, "O_NONBLOCK", 0)
     try:
-        fd = os.open(path, flags)
+        fd = os.open(path, os.O_RDONLY | nonblocking)
     except OSError:
         return None
     try:
@@ -584,7 +588,7 @@ def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
             return None
         if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
             return None
-        if hasattr(os, "set_blocking"):
+        if nonblocking:
             os.set_blocking(fd, True)
         with os.fdopen(fd, "rb") as handle:
             fd = -1
