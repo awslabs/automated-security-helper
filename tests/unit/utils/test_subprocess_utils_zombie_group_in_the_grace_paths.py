@@ -145,8 +145,10 @@ def test_the_servers_last_stop_settles_at_once_on_groups_of_zombies():
             patch.object(subprocess_utils, "_RUNNING_GROUPS", {process.pid: process})
         )
         # The server's stop flag is set by the call; put back on the way out so
-        # no later spawn reads the server as stopping.
+        # no later spawn reads the server as stopping. No spawn is starting:
+        # the count is this test's, not whatever an earlier test left.
         stack.enter_context(patch.object(subprocess_utils, "_STOPPING", False))
+        stack.enter_context(patch.object(subprocess_utils, "_SPAWNS_STARTING", 0))
         stack.enter_context(
             patch.object(subprocess_utils, "_leads_its_own_group", return_value=True)
         )
