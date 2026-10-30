@@ -247,38 +247,80 @@ class TestPnpmWorkspaceSettings:
         assert refused == [(package / "pnpm-workspace.yaml", LINK_LEAVES_TREE)]
 
 
-class TestAnInputSwappedAfterItsCheck:
-    def test_is_not_read_through_the_new_link(self, tmp_path, monkeypatch):
-        """The lockfile is a regular file when its name is checked and a link to a
-        file outside the tree when it is read: the copy never holds the outside
-        file's content, and the lockfile is left out of the copy."""
+class TestAnInputSwappedAroundItsOpen:
+    """The lockfile is a regular file in the tree when the scanner checks it and
+    its name points at a file outside the tree a moment later. The copy judges
+    the OPEN file, not the name, so the outside file's content never reaches it
+    whichever side of the open the swap lands on. (The name check ran inside the
+    read before the copy judged the descriptor; a hook on that check no longer
+    sees the read on a platform that names open files, so the swap is made from
+    the open itself and from the descriptor judgement.)"""
+
+    def _package_and_outside(self, tmp_path):
         package = _package(tmp_path / "repo" / "web", "package-lock.json")
         outside = tmp_path / "elsewhere" / "package-lock.json"
         outside.parent.mkdir()
         outside.write_text(MARKER, encoding="utf-8")
-        lockfile = package / "package-lock.json"
-        real_refusal = package_manager_child.input_refusal
+        return package, package / "package-lock.json", outside
+
+    def test_swapped_for_an_outside_link_before_its_open_is_left_out(
+        self, tmp_path, monkeypatch
+    ):
+        """The open follows the new link to the outside file, which is judged by
+        where it IS: outside every root, so it is not copied and the lockfile's
+        name is absent from the copy."""
+        package, lockfile, outside = self._package_and_outside(tmp_path)
+        real_open = os.open
         swapped = []
 
-        def swap_after_the_first_check(path, roots):
-            if Path(path) == lockfile and not swapped:
-                # The check ran on the regular file; now it is a link elsewhere.
-                answer = real_refusal(path, roots)
+        def swap_then_open(path, flags, *args, **kwargs):
+            if not swapped and os.fspath(path) == str(lockfile):
                 lockfile.unlink()
                 os.symlink(outside, lockfile)
                 swapped.append(path)
-                return answer
-            return real_refusal(path, roots)
+            return real_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", swap_then_open)
+
+        copied = _copy("npm", package, tmp_path)
+
+        assert swapped, "the lockfile was never opened, so the swap was not exercised"
+        assert all(MARKER.encode() not in data for data in copied.values()), copied
+        assert "package-lock.json" not in copied
+
+    @pytest.mark.skipif(
+        not os.path.islink("/proc/self/fd/0"), reason="no descriptor paths here"
+    )
+    def test_moved_aside_after_its_open_is_read_as_the_file_that_was_opened(
+        self, tmp_path, monkeypatch
+    ):
+        """Between the open and the judgement the regular file is renamed within
+        the tree and its old name becomes a link to the outside file. The
+        descriptor still names the regular file, inside the tree, so its own
+        bytes are copied under the lockfile's name; the outside file is never
+        read."""
+        package, lockfile, outside = self._package_and_outside(tmp_path)
+        identity = (lockfile.stat().st_dev, lockfile.stat().st_ino)
+        real_within = package_manager_child._descriptor_within
+        swapped = []
+
+        def swap_then_judge(fd, roots):
+            opened = os.fstat(fd)
+            if not swapped and (opened.st_dev, opened.st_ino) == identity:
+                lockfile.rename(lockfile.with_name("package-lock.json.moved"))
+                os.symlink(outside, lockfile)
+                swapped.append(fd)
+            return real_within(fd, roots)
 
         monkeypatch.setattr(
-            package_manager_child, "input_refusal", swap_after_the_first_check
+            package_manager_child, "_descriptor_within", swap_then_judge
         )
 
         copied = _copy("npm", package, tmp_path)
 
-        assert swapped, "the check never ran, so the swap was not exercised"
+        assert swapped, "the lockfile was never judged, so the swap was not exercised"
+        assert copied["package-lock.json"] == b"{}\n"
         assert all(MARKER.encode() not in data for data in copied.values()), copied
-        assert "package-lock.json" not in copied
 
 
 class TestADanglingLockfileLink:
