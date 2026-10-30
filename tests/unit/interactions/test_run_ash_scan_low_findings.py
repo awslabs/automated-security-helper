@@ -585,13 +585,12 @@ def test_a_refusal_inside_the_nix_shell_is_carried_past_a_kept_results_file(
     kept = out / "ash_aggregated_results.json"
     kept.write_text(AshAggregatedResults().model_dump_json(), encoding="utf-8")
     opts = _opts(tmp_path, mode=RunMode.nix, existing_results=str(kept))
-    # The venue need not have nix: the two refusals of nix mode are asked of
-    # run_ash_nix's own lookup, which answers a shell here, and the sweeps of an
-    # earlier container run touch nothing of this test's.
-    monkeypatch.setattr(
-        "automated_security_helper.interactions.run_ash_nix.nix_executable_for_this_run",
-        lambda: "/bin/nix",
-    )
+    # The venue need not have nix: the two refusals of nix mode are asked through
+    # run_ash_scan's own seam, ``nix_preflight`` (bound at import, so a stub of
+    # run_ash_nix's lookup does not reach it), which answers nothing here; the
+    # runner below starts no shell; and the sweeps of an earlier container run
+    # touch nothing of this test's.
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
     monkeypatch.setattr(ras, "sweep_env_dirs", list)
     monkeypatch.setattr(
