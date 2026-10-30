@@ -20,7 +20,9 @@ from it in these readings:
   refused, and offline trivy-repo never checked for a vulnerability database;
 - the ``module_dir`` refusal spelled the resolved path, which can carry an
   environment value;
-- the default ``ignore_unfixed: true`` withheld findings with nothing said;
+- the default ``ignore_unfixed: true`` withheld findings with nothing said; then
+  the warning said "(the default)" for an option the operator had written, and was
+  repeated on every read of the options;
 - a scan that raised left the previous target's end time in place, and an empty
   target kept the previous target's start time;
 - the catch-all error was not redacted, where the syft scanner's is.
@@ -379,6 +381,42 @@ def test_control_ignore_unfixed_off_is_not_warned_about(tmp_path, caplog):
         _scanner(tmp_path, ignore_unfixed=False)
 
     assert "ignore_unfixed" not in caplog.text
+
+
+def test_the_ignore_unfixed_warning_says_whether_the_option_was_written(
+    tmp_path, caplog
+):
+    """The warning said "(the default)" for an option the operator had set to true."""
+    with caplog.at_level("WARNING"):
+        _scanner(tmp_path, ignore_unfixed=True)
+
+    (written,) = [m for m in caplog.messages if "ignore_unfixed" in m]
+    assert "set in the configuration" in written
+    assert "the default" not in written
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        TrivyRepoScanner(
+            context=_scanner(tmp_path).context, config=TrivyRepoScannerConfig()
+        )
+
+    (default,) = [m for m in caplog.messages if "ignore_unfixed" in m]
+    assert "(the default)" in default
+    assert "set in the configuration" not in default
+
+
+def test_the_ignore_unfixed_warning_is_given_once_however_often_the_options_are_read(
+    tmp_path, caplog
+):
+    """The builtin trivy scanner's scan() reads the options per target; the line
+    is per scanner, as the construction-time test above has it per scan."""
+    with caplog.at_level("WARNING"):
+        scanner = _scanner(tmp_path, ignore_unfixed=True)
+        scanner._process_config_options()
+        scanner._process_config_options()
+
+    withheld = [m for m in caplog.messages if "ignore_unfixed" in m and "withheld" in m]
+    assert len(withheld) == 1, caplog.messages
 
 
 # --- times ---------------------------------------------------------------------------

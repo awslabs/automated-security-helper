@@ -226,14 +226,20 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         self._append_trivy_options()
         if self.config.options.ignore_unfixed:
             # The default here, unlike the builtin trivy scanner's, so every default
-            # run says once what it withholds, as grype's config warning does.
-            self._plugin_log(
-                "scanners.trivy-repo.options.ignore_unfixed is true (the default), "
+            # run says once what it withholds, as grype's config warning does. Once
+            # per scanner (_warned_inputs), however often the options are read, and
+            # as set: "the default" only when the option was not written.
+            written = "ignore_unfixed" in self.config.options.model_fields_set
+            warning = (
+                "scanners.trivy-repo.options.ignore_unfixed is true "
+                f"({'set in the configuration' if written else 'the default'}), "
                 "which restricts which vulnerabilities reach the report: those with "
                 "no fixed version are withheld, and the scan can pass with them "
-                "present. Set it to false to report them.",
-                level=logging.WARNING,
+                "present. Set it to false to report them."
             )
+            if warning not in self._warned_inputs:
+                self._warned_inputs.add(warning)
+                self._plugin_log(warning, level=logging.WARNING)
         return super()._process_config_options()
 
     def _default_misconfig_scanners(self, binary: str) -> Optional[List[str]]:
