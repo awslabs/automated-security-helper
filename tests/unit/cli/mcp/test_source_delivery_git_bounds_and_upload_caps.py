@@ -237,8 +237,11 @@ class TestUploadsAreBoundedPerSession:
         _upload(payload, "upload-0", tmp_path)
 
     def test_bytes_held_across_uploads_are_bounded(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(sd, "_MAX_INCOMING_BYTES", 10)
+        # The bound counts the upload's own bytes with the others' on every
+        # chunk, so it has to admit one whole archive for the first upload to
+        # land; a bound below one archive refused the first upload itself.
         payload = _zip_bytes({"a.py": b"print(1)\n"})
+        monkeypatch.setattr(sd, "_MAX_INCOMING_BYTES", len(payload) + 1)
         _upload(payload, "first", tmp_path)
 
         with pytest.raises(ValueError, match="hold"):
