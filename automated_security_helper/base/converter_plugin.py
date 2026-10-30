@@ -202,6 +202,13 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             )
             self.dependencies_satisfied = False
             self.dependency_unavailable_reason = reason
+            # Under the name the model declares, where it declares one: the
+            # phase keys the converter's results row, its progress rows and
+            # its events on config.name, and falls back to the class name, so
+            # a nameless fallback filed the converter under a second name.
+            declared_name = getattr(declared.model_fields.get("name"), "default", None)
+            if isinstance(declared_name, str) and declared_name:
+                return ConverterPluginConfigBase(name=declared_name)
             return ConverterPluginConfigBase()
 
     def configure(

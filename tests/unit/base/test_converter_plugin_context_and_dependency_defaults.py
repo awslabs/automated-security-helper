@@ -182,9 +182,15 @@ def test_the_default_dependency_check_is_true_where_nothing_is_declared(
     assert converter.validate_plugin_dependencies() is True
 
 
-def _default_config_records(converter_type, context):
+def _default_config_records(converter_type, context, declared_name):
     with _ash_records() as records:
         converter = converter_type(context=context)
+    # The fallback carries the name the model declares: ConvertPhase keys the
+    # converter's results row, its progress rows and its events on config.name
+    # and falls back to the class name, so a nameless fallback filed the
+    # converter under a second name, not the one its section and its
+    # suppressions use.
+    assert converter.config.name == declared_name
     # The fallback is a deliberate choice, asserted whole: the generic config,
     # ENABLED, and the converter recorded as unavailable with the model named.
     # ConvertPhase asks an enabled converter's dependency check and records a
@@ -221,7 +227,9 @@ def test_a_converter_whose_model_builds_is_ready_and_configured_by_it(
 def test_a_default_that_raises_something_other_than_validation_is_a_warning(
     test_plugin_context,
 ):
-    (record,) = _default_config_records(BrokenDefaultConverter, test_plugin_context)
+    (record,) = _default_config_records(
+        BrokenDefaultConverter, test_plugin_context, "broken"
+    )
 
     assert record.levelno == logging.WARNING
     assert "BrokenDefaultConverter" in record.getMessage()
@@ -232,7 +240,9 @@ def test_a_default_that_raises_something_other_than_validation_is_a_warning(
 
 def test_a_model_that_needs_a_section_is_still_told_at_debug(test_plugin_context):
     """The control: the expected shape keeps its level."""
-    (record,) = _default_config_records(SectionNeedingConverter, test_plugin_context)
+    (record,) = _default_config_records(
+        SectionNeedingConverter, test_plugin_context, "needy"
+    )
 
     assert record.levelno == logging.DEBUG
     assert "1 error(s)" in record.getMessage()
