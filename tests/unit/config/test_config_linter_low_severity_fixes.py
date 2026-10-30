@@ -150,7 +150,10 @@ class TestFixableMarks:
         ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
 
         assert [i.fixable for i in result.issues] == [False, False]
-        assert [i.fix_description for i in result.issues] == ["", ""]
+        # The description stays: it is the hand remedy once --fix has refused
+        # the file (a TOML lint's line_end fix text is read by
+        # tests/unit/config/test_checks_name_environment_values_by_place.py).
+        assert [i.fix_description for i in result.issues] == ["fix it", "fix it"]
 
     def test_an_unused_suppression_in_a_json_file_is_not_fixable_but_others_are(
         self, tmp_path
@@ -186,7 +189,7 @@ class TestFixableMarks:
         ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
 
         assert [i.fixable for i in result.issues] == [True, False]
-        assert result.issues[1].fix_description == ""
+        assert result.issues[1].fix_description == "fix it"
 
     def test_the_un_marked_issues_are_kept_for_the_refusal(self, tmp_path):
         """Red before the list existed: the marks were cleared and nothing kept

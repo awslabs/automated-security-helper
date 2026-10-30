@@ -416,6 +416,13 @@ class ConfigLinter:
         fix passes ``lint --fix``, as the documented pre-commit invocation runs
         it). Clearing the marks alone made that refusal silent: the CLI read no
         fixable issue, found nothing to fix, and exited 0 where it refused.
+
+        The issue's ``fix_description`` is kept: it is the remedy the operator
+        applies by hand once ``--fix`` has refused the file (``line_end = 7``
+        beside a bare ``line_start``), and it names a value read from the
+        environment as the message does, never by its value. The CLI prints
+        the description only for the issues it is about to fix, so an un-marked
+        issue's description reaches the operator through the issue listing.
         """
 
         toml = is_toml_file(config_path)
@@ -450,7 +457,6 @@ class ConfigLinter:
         for issue in result.issues:
             if issue.fixable and refused(issue):
                 issue.fixable = False
-                issue.fix_description = ""
                 result.fixes_refused.append(issue)
 
     @classmethod
