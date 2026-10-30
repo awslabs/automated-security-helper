@@ -766,7 +766,10 @@ class TestTheStoredInstallCommand:
             if line.startswith("Set up UV tool install command")
         ]
         assert "9.9" not in line, line
-        assert "bandit" in line, line
+        # The whole spec is one plugin-built input, hidden as one argument
+        # (the layer's own placeholder), so the tool's name inside it is
+        # hidden with it; the name is kept only where it stands alone.
+        assert "not shown>" in line, line
 
     def test_the_with_dependencies_hook_is_read_once(self):
         """One read serves the checks, the spec builder and the stored command.
