@@ -220,6 +220,22 @@ class ProjectPlan(BaseModel):
             ),
         ),
     ] = False
+    severity_ceiling: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "The workspace policy's max_severity_threshold as it applies to "
+                "this project; null when the workspace declares none. Carried so "
+                "the scan can bind a scanner's own options.severity_threshold to "
+                "the ceiling whenever one exists: effective_severity_threshold is "
+                "the project-wide answer only, and threshold_tightened_by_policy "
+                "says whether that value moved, not whether a ceiling is in force. "
+                "A ceiling MEDIUM over a project declaring MEDIUM tightened "
+                "nothing, and still caps a scanner whose own option says CRITICAL."
+            ),
+        ),
+    ] = None
     policy_suppressions: Annotated[
         List[AshSuppression],
         Field(
@@ -262,7 +278,13 @@ class ProjectPlan(BaseModel):
             description=(
                 "Whether findings from policy_scanners affect this project's exit "
                 "code. Carried per project so no consumer has to reach back into "
-                "the policy to interpret policy_scanners."
+                "the policy to interpret policy_scanners. With the gate off, a "
+                "policy scanner's MISSING tool and its stale content database do "
+                "not fail the project either, both being recorded per scanner; a "
+                "rule a scanner could not evaluate is recorded per run, not per "
+                "scanner, and a tool ASH could not stop may still write into the "
+                "project's output, so those two fail the project whichever config "
+                "asked for the scanner."
             ),
         ),
     ] = False

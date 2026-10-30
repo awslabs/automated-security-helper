@@ -1427,6 +1427,14 @@ def _apply_workspace_policy(
         resolved = resolved_for[project.key]
         project.effective_severity_threshold = resolved.effective_threshold
         project.threshold_tightened_by_policy = resolved.threshold_tightened
+        # The ceiling itself, beside its project-wide effect: a scanner's own
+        # options.severity_threshold is bound to it at scan time whether or not
+        # it moved the project-wide value.
+        project.severity_ceiling = (
+            workspace_policy.max_severity_threshold
+            if workspace_policy is not None
+            else None
+        )
         project.policy_suppressions = [
             entry.model_copy(update={"client_supplied": delivered})
             for entry in resolved.suppressions
