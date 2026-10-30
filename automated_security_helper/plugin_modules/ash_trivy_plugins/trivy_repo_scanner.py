@@ -525,6 +525,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
+                return None
 
         except Exception as e:
             # The run is over for this target, however it ended: the executor
@@ -539,13 +540,20 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             # answer nothing can be redacted, and the error text is not shown.
             read = guarded_values_read(self)
             if read.values is None:
-                raise ScannerError(
+                failure = (
                     "Trivy scan failed (the error text is not shown: the plugin's "
                     f"values hook {read.failure()})"
                 )
-            raise ScannerError(
-                text_without_values(f"Trivy scan failed: {str(e)}", read.values)
-            )
+            else:
+                failure = text_without_values(
+                    f"Trivy scan failed: {str(e)}", read.values
+                )
+        # Raised outside the except block, so the original exception, whose text
+        # is not redacted, is attached to the new one neither as __context__ nor
+        # as __cause__: `raise ... from None` would only hide it from the default
+        # traceback while leaving it readable on the object. Every other exit of
+        # the try body returns, so this line is reached from the except alone.
+        raise ScannerError(failure)
 
 
 def _target_is_empty(target: Path) -> bool:

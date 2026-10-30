@@ -452,6 +452,41 @@ def test_the_catch_all_error_is_redacted(tmp_path):
     assert "zz-secret-value" not in str(raised.value)
 
 
+@pytest.mark.parametrize(
+    "values_hook",
+    [
+        pytest.param({"return_value": ("zz-secret-value",)}, id="redacted"),
+        pytest.param({"side_effect": KeyError("hook")}, id="hook-raises"),
+    ],
+)
+def test_the_catch_all_error_is_not_chained_to_the_unredacted_one(
+    tmp_path, values_hook
+):
+    """The exception the catch-all replaces carries the unredacted text, so it
+    must not ride along as the ScannerError's ``__context__`` or ``__cause__``:
+    a handler that prints the chain would print the value. ``raise ... from
+    None`` leaves ``__context__`` set and only hides it from the default
+    traceback, so the error is raised outside the except block (the syft
+    scanner's shape)."""
+    scanner = _scanner(tmp_path)
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_values_to_redact", **values_hook),
+        patch.object(
+            scanner,
+            "_resolve_arguments",
+            side_effect=RuntimeError("cannot read zz-secret-value here"),
+        ),
+    ):
+        with pytest.raises(ScannerError) as raised:
+            scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
+
+    assert raised.value.__context__ is None
+    assert raised.value.__cause__ is None
+    assert "zz-secret-value" not in str(raised.value)
+
+
 def test_a_values_hook_that_raises_leaves_the_error_text_out(tmp_path):
     """With no usable answer from the hook nothing can be redacted, so the error
     carries the hook's failure and not the text, as the command record does."""
