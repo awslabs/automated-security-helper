@@ -374,6 +374,34 @@ class TestARuleIgittigittCannotCompile:
         )
 
 
+class TestAnIgnoreFileTheCallerNamesThatGoesBeforeItIsOpened:
+    def test_it_is_skipped_with_a_word_as_a_file_found_in_the_tree_is(
+        self, tmp_path, monkeypatch
+    ):
+        """The file passed the regular-file check and was gone at the open, which
+        raised out of the scan set; the same loss for a file found in the tree was
+        already a skip."""
+        root = _build(tmp_path / "src", {"a.py": "x\n"})
+        missing = str(tmp_path / "gone.ignore")
+        real_isfile = os.path.isfile
+
+        def isfile(path):
+            return True if str(path) == missing else real_isfile(path)
+
+        monkeypatch.setattr(os.path, "isfile", isfile)
+
+        with patch.object(gss.ASH_LOGGER, "warning") as warning:
+            lines = gss.get_ash_ignorespec_lines(str(root), [missing])
+
+        assert any(
+            line.startswith(gss.SKIPPED_MARKER_PREFIX) and "it does not exist" in line
+            for line in lines
+        ), lines
+        assert any("Skipped ignore file" in text for text in _said(warning)), _said(
+            warning
+        )
+
+
 class TestTheOrderOfIgnoreFiles:
     def test_one_outside_the_tree_sorts_the_same_for_a_relative_and_an_absolute_source(
         self, tmp_path, monkeypatch
