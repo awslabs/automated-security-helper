@@ -1027,6 +1027,25 @@ class ReportMetadata(StrippedRecordModel):
             ),
         ),
     ] = None
+    # Declared for the reasons the `shard` field above states. The engine writes
+    # True for a run under --ignore-suppressions, so a results file re-rendered
+    # later by `ash report` (whose context carries no such flag) still says the
+    # suppressions were not evaluated. It never writes False, and the field is
+    # left out of what is written while unset, so a normal run's record is
+    # written as before and a saved True survives a later report-only run.
+    suppressions_ignored: Annotated[
+        bool | None,
+        Field(
+            default=None,
+            exclude_if=lambda value: value is None,
+            description=(
+                "True when this run was made under --ignore-suppressions, so no "
+                "suppression was matched in any phase and the unused-suppressions "
+                "report is not evaluated. Absent otherwise: a normal run records "
+                "nothing here."
+            ),
+        ),
+    ] = None
 
     @field_validator("project_name")
     @classmethod

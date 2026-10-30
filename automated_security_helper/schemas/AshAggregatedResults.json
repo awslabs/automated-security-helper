@@ -16813,6 +16813,19 @@
           },
           "description": "Summary statistics (e.g., count by severity)"
         },
+        "suppressions_ignored": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "True when this run was made under --ignore-suppressions, so no suppression was matched in any phase and the unused-suppressions report is not evaluated. Absent otherwise: a normal run records nothing here.",
+          "title": "Suppressions Ignored"
+        },
         "tool_version": {
           "anyOf": [
             {
