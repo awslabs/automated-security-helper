@@ -1360,6 +1360,7 @@ def test_findings_from_the_packs_that_ran_reach_the_report_when_another_pack_fai
         "the AwsSolutions finding is a fact about the template and must be reported"
     )
     assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 1
     assert any("HIPAA.Security" in error for error in scanner.errors), scanner.errors
     assert any(
         "not evaluate every requested pack" in r.message for r in caplog.records
@@ -1369,6 +1370,37 @@ def test_findings_from_the_packs_that_ran_reach_the_report_when_another_pack_fai
         and "every requested" not in r.message
         for r in caplog.records
     ), [r.message for r in caplog.records]
+    # The run summary agrees with the report: it names the partly evaluated template,
+    # and does not say that no rules were evaluated while the finding sits in the SARIF.
+    assert any(
+        "did not evaluate every requested pack on 1 of 1 template(s)" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any("No rules were evaluated" in r.message for r in caplog.records), [
+        r.message for r in caplog.records
+    ]
+
+
+def test_a_template_no_rule_evaluated_still_reads_as_failed_on_all_in_the_summary(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """The control: a failure that comes with no findings keeps the old summary."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={},
+        failure="cdk-nag produced no validation report. No rules were evaluated.",
+    )
+
+    with caplog.at_level(logging.ERROR):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 0
+    assert any(
+        "failed on all 1 template(s)" in r.message
+        and "No rules were evaluated" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any("every requested pack on" in r.message for r in caplog.records)
 
 
 def test_the_missing_dependency_reason_offers_no_install_hint_for_a_wrapper_import_failure(

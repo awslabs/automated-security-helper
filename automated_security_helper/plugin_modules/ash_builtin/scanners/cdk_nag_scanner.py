@@ -1236,6 +1236,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # ScannerPluginBase.scan().
         self.targets_attempted = 0
         self.targets_failed = 0
+        # Of the failed targets, those a requested pack evaluated while another threw:
+        # their findings are kept, and the run summary says "not every requested pack
+        # was evaluated" for them, not "no rules were evaluated".
+        self.targets_partly_evaluated = 0
         self.errors = []
         self.exit_code = 0
         self._nothing_scanned_reason = None
@@ -1468,12 +1472,15 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         continue
 
                     if nag_result_dict.failure is not None:
-                        # The wrapper ran but could not read a validation report, so no rule was
-                        # evaluated against this template. Counted as a failed target because the
-                        # alternative is what this branch previously did: fall through to a
-                        # zero-iteration findings loop, raise nothing, and report the template as
-                        # clean. With one template that also defeated the "failed on all N" guard,
-                        # since no failure was ever recorded for it to count.
+                        # The wrapper ran but this template was not evaluated as requested: no
+                        # validation report, an unreadable one, a requested pack with no entry,
+                        # or a requested pack that threw while another evaluated the template
+                        # (that last case comes with findings, kept below). Counted as a failed
+                        # target because the alternative is what this branch previously did:
+                        # fall through to a zero-iteration findings loop, raise nothing, and
+                        # report the template as clean. With one template that also defeated
+                        # the "failed on all N" guard, since no failure was ever recorded for it
+                        # to count.
                         #
                         # Also named as an unevaluated target, here and at the
                         # two failure sites below. Before ``determine_status``
@@ -1518,6 +1525,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         ]
                         if kept:
                             sarif_results.extend(kept)
+                            self.targets_partly_evaluated += 1
                             ASH_LOGGER.error(
                                 f"cdk-nag did not evaluate every requested pack against "
                                 f"{cfn_file} ({len(kept)} finding(s) from the packs that "
@@ -1757,16 +1765,29 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # the run a success.
         scan_succeeded = self.targets_attempted <= 0 or self.targets_failed == 0
         if not scan_succeeded:
-            if self.targets_failed >= self.targets_attempted:
+            # Two kinds of failed target, told apart in the summary: a template no rule
+            # was evaluated against, and one a requested pack evaluated while another
+            # threw (its findings are in the report). Saying "no rules were evaluated"
+            # of the second contradicted the findings kept beside it.
+            unevaluated = self.targets_failed - self.targets_partly_evaluated
+            if unevaluated >= self.targets_attempted:
                 ASH_LOGGER.error(
                     f"cdk-nag failed on all {self.targets_attempted} template(s) in {target}. "
                     "No rules were evaluated, so this result is NOT a clean scan."
                 )
-            else:
+            elif unevaluated > 0:
                 ASH_LOGGER.error(
-                    f"cdk-nag failed on {self.targets_failed} of "
+                    f"cdk-nag failed on {unevaluated} of "
                     f"{self.targets_attempted} template(s) in {target}. No rules were "
                     "evaluated for the failed templates, so this result is NOT a clean scan."
+                )
+            if self.targets_partly_evaluated > 0:
+                ASH_LOGGER.error(
+                    f"cdk-nag did not evaluate every requested pack on "
+                    f"{self.targets_partly_evaluated} of {self.targets_attempted} "
+                    f"template(s) in {target}. The findings of the packs that ran are "
+                    "kept, but a requested pack evaluated no rule there, so this result "
+                    "is NOT a clean scan."
                 )
 
         self._post_scan(
