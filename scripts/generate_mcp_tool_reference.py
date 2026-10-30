@@ -279,6 +279,7 @@ TOOL_NOTES: dict[str, dict] = {
         ),
         "params": {"scan_id": {"notes": "From `run_ash_scan`"}},
         "returns": """{
+  "success": true,
   "scan_id": "...",
   "directory_path": "/path/to/scanned/project",
   "output_directory": "/path/to/.ash/ash_output",
@@ -286,12 +287,17 @@ TOOL_NOTES: dict[str, dict] = {
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
   "severity_threshold": "<the threshold the scan was judged by; null until it finishes when none was named>",
+  "requested_severity_threshold": "<the threshold the request named | null>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
+  "exit_code": "<int | null>",
+  "exit_code_meaning": "<str | null>",
   "is_complete": bool,
   "results_available": bool,
   "output_holds_previous_results": bool,
+  "output_superseded": bool,
+  "superseded_by": ["<scan_id>"],
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
@@ -300,6 +306,7 @@ TOOL_NOTES: dict[str, dict] = {
   "incomplete_converters": [{ "converter": "...", "reason": "...", "failed_input_kinds": ["..."] }],
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
+  "could_not_stop": [{ "scanner": "...", "reason": "..." }],
   "completed_scanners": int,
   "finished_scanners": int,
   "total_scanners": int,
@@ -307,11 +314,17 @@ TOOL_NOTES: dict[str, dict] = {
   "scanner_statuses": { "<scanner_name>": { "status": "PASSED | FAILED | ERROR | MISSING | SKIPPED", "excluded": bool, "dependencies_satisfied": bool } },
   "skipped_scanners": [{ "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies | excluded_by_configuration | skipped" }],
   "total_findings": int,
-  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
+  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int, "unknown": int },
   "scanners": {
     "<scanner_name>": {
       "<target_type>": { ... per-scanner-target progress ... }
     }
+  },
+  "skipped_scanners": ["<scanner_name>"],
+  "timestamp": "<iso8601>",
+  "operation": "get_scan_progress",
+  "scanner_statuses": {
+    "<scanner_name>": { "status": "...", "excluded": bool, "dependencies_satisfied": bool }
   }
 }""",
         # A caveat is a string, or a dict that is printed only when the server
@@ -352,7 +365,20 @@ TOOL_NOTES: dict[str, dict] = {
                 "`completed`, `incomplete`, `failed` or `cancelled`. It is decided by the "
                 "scan's state alone, never by a results file on disk, which can be a previous "
                 "scan's. `results_available` is `true` for `completed` and `incomplete`, the "
-                "scans whose results `get_scan_results` can read."
+                "scans whose results `get_scan_results` can read, and `false` for one of "
+                "them whose results file cannot be read (the scan ended without writing "
+                "its final results, or the file is not valid JSON): `error_message` then "
+                "names the file and `coverage_complete` is `null`."
+            ),
+            (
+                "**A later scan can take the output tree over.** `output_superseded` is "
+                "`true` once a later scan of the same directory has written "
+                "`output_directory`; `superseded_by` lists those scans' ids, oldest first, "
+                "and is empty otherwise. Nothing below is read from the files then: this "
+                "scan's results are gone, and `get_scan_results` on that directory reads "
+                "the newest scan's. `exit_code` and `exit_code_meaning` are the ASH exit "
+                "code of a run that ended with one and its documented meaning, `null` for "
+                "every other ending and while the scan runs."
             ),
             (
                 "**A failed or cancelled scan leaves the previous scan's results in place.** "
@@ -398,11 +424,11 @@ TOOL_NOTES: dict[str, dict] = {
             },
             (
                 "**Status enum:** the documented values are "
-                "`pending | running | completed | incomplete | failed | cancelled`. The registry uses "
-                "`pending` briefly while a scan is queued, transitions to `running` once "
-                "execution begins, and may also expose the legacy `in_progress` string from "
-                "older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` "
-                'as equivalent "not done yet" states.'
+                "`pending | running | completed | incomplete | failed | cancelled`, the "
+                "registry entry's own state and nothing else. The registry uses "
+                "`pending` briefly while a scan is queued and `running` once execution "
+                'begins; treat both as "not done yet", and read `is_complete` rather than '
+                "comparing the string."
             ),
         ],
     },
