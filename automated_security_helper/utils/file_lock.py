@@ -23,13 +23,18 @@ is taken: ``msvcrt.locking`` gives up after about ten seconds, shorter than a
 database download, and failing a scan for that would be worse than the
 cross-process race it guards against. The lock file is created if missing and never
 removed: removing it while another process waits on it would let a third process
-lock a new file of the same name. It is opened read-only: ``flock`` needs no write
-access, and a lock file another user created (a shared tool cache) is readable
-where it is not writable, so the second user's update is serialized rather than
-failing with ``PermissionError``. It is opened without following a link at its
-name, where the platform can refuse one (``O_NOFOLLOW``): a lock file lives in a
-shared cache or a shared temporary directory, and a link planted at its name would
-make the lock be taken on whatever the link points at.
+lock a new file of the same name. It is opened for writing when this account may
+write it, and read-only when it may not (:func:`_open_lock_file`): on a network
+mount (NFS, CIFS) ``flock`` is emulated with byte-range locks, and an exclusive
+one needs a descriptor open for writing, so a read-only open made the lock raise
+``EBADF`` there and every tool database refresh on a network home failed; a lock
+file another user created (a shared tool cache, mode 0644) is readable where it is
+not writable, and on a local filesystem ``flock`` takes an exclusive lock on a
+read-only descriptor, so that user's update is serialized rather than failing with
+``PermissionError``. It is opened without following a link at its name, where the
+platform can refuse one (``O_NOFOLLOW``): a lock file lives in a shared cache or a
+shared temporary directory, and a link planted at its name would make the lock be
+taken on whatever the link points at.
 
 The wait for the OS lock is bounded. A holder that is stopped or hung in another
 process held every later scan for good, outside any scan timeout; after
@@ -40,7 +45,9 @@ holder may be downloading a tool's database.
 Failure modes
 -------------
 * A filesystem that does not support the OS lock (some network mounts) raises
-  ``OSError`` from the OS call. That propagates, rather than running unlocked.
+  ``OSError`` from the OS call. That propagates, rather than running unlocked. So
+  does ``EBADF`` from a network mount for a lock file this account can only read:
+  there the emulated exclusive lock needs write access the account does not have.
 * A link at the lock file's name raises ``OSError`` where ``O_NOFOLLOW`` exists.
 * The lock is advisory: only code that takes it is serialized.
 """
@@ -83,6 +90,27 @@ def _thread_lock_for(path: Path) -> threading.Lock:
         return _thread_locks.setdefault(key, threading.Lock())
 
 
+def _open_lock_file(path: Path) -> int:
+    """A descriptor on *path*, created if missing: open for writing where this
+    account may write it, for reading alone where it may not.
+
+    Read-write first. On a network mount (NFS since Linux 2.6.12, CIFS) ``flock``
+    is emulated with byte-range locks, and an exclusive byte-range lock needs a
+    descriptor open for writing: a read-only descriptor made ``flock(LOCK_EX)``
+    raise ``EBADF`` there. Read-only only when the read-write open is refused: a
+    lock file another account created in a shared cache (mode 0644) is readable
+    where it is not writable, and on a local filesystem ``flock`` takes an
+    exclusive lock on a read-only descriptor, so the second account's update is
+    serialized rather than failing. A link at the name is not followed where the
+    platform can refuse one (``O_NOFOLLOW``).
+    """
+    common = os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        return os.open(path, os.O_RDWR | common, 0o644)
+    except PermissionError:
+        return os.open(path, os.O_RDONLY | common, 0o644)
+
+
 def _flock_within(fd: int, timeout: Optional[float], path: Path) -> None:
     """Take the exclusive OS lock on *fd*, waiting at most *timeout* seconds.
 
@@ -122,11 +150,7 @@ def exclusive_lock(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with _thread_lock_for(path):
-        # Read-only: flock needs no write access, and a lock file another user
-        # owns is readable (0o644) where opening it for writing is refused. Not
-        # following a link at the name, where the platform can refuse one.
-        flags = os.O_RDONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags, 0o644)
+        fd = _open_lock_file(path)
         try:
             if fcntl is not None:
                 _flock_within(fd, timeout, path)
