@@ -121,6 +121,14 @@ from automated_security_helper.core.resource_management.error_handling import (
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
+from automated_security_helper.utils.link_chain import (
+    LINK_HOPS,
+    components_down_to,
+    first_unsafe_link,
+    is_a_drive_spelling,
+    link_chain_names_a_windows_share,
+    names_a_windows_share,
+)
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import set_environ
@@ -847,113 +855,15 @@ def _running_on_windows() -> bool:
     return os.name == "nt"
 
 
-#: Links followed before a chain is given up on as unjudgeable, the bound
-#: ``os.path.realpath`` applies to a chain of links before it stops following.
-_LINK_HOPS = 40
-
-
-def _names_a_windows_share(path: object) -> bool:
-    """Whether the text of ``path`` names something other than a local volume path.
-
-    True for a UNC path, ``\\\\server\\share`` or ``//server/share``, and for any
-    path in the extended form, ``\\\\?\\...``, ``\\\\.\\...`` or the native ``\\??\\...``,
-    whose device is not a drive letter: ``\\\\?\\UNC\\server\\share`` (a share),
-    ``\\\\?\\GLOBALROOT\\...`` (the object namespace, through which a redirector or a
-    mounted share is reached by another name) and ``\\\\.\\pipe\\...`` (a device, not
-    a directory) are all refused by the callers, which open only directories on a
-    local volume. Only ``\\\\?\\C:\\repo`` and ``\\\\.\\C:\\repo``, a drive letter and a
-    separator after the prefix, are local; a drive-relative ``\\\\?\\C:repo`` is not,
-    and neither is ``\\\\.\\C:`` with nothing after the colon, which names the
-    volume's device rather than a directory. Forward slashes are read as separators first, so a
-    mixed spelling is judged by what it names. ``os.readlink`` returns a junction's
-    target in the extended form (its substitute name, since Python 3.8), so the
-    form is read here rather than taken for a share by its two leading separators,
-    and a junction to a local volume stays local.
-    """
-    text = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
-    text = text.replace("/", "\\")
-    if text.startswith(("\\\\?\\", "\\\\.\\", "\\??\\")):
-        rest = text[4:]
-        if not _is_a_drive_spelling(rest):
-            return True
-        # Behind a device prefix a ``..`` component is not a step up a local
-        # tree: Win32 normalizes a ``\\.\`` path before the object manager sees
-        # it, so ``\\.\C:\..\UNC\server\share`` is the share and ``\\.\C:\..\pipe\x``
-        # the pipe, each spelled with a drive letter in front. Such a spelling is
-        # judged by what it reaches, whatever it reaches: a caller that means a
-        # local directory names it without the step.
-        return any(part == ".." for part in rest.split("\\"))
-    return text.startswith("\\\\")
-
-
-def _is_a_drive_spelling(text: str) -> bool:
-    """Whether ``text`` is a drive letter, a colon and a separator: ``C:\\`` or ``C:\\repo``.
-
-    A directory on a volume always has the separator (the volume's root is
-    ``C:\\``), and so does the substitute name ``os.readlink`` gives for a
-    junction. ``C:`` alone, behind the prefix, names the volume's device object
-    (``\\\\.\\C:`` is how a raw volume is opened), not a directory on it, and the
-    drive-relative ``C:repo`` names nothing the extended form resolves against a
-    current directory; neither is a drive spelling here.
-    """
-    return (
-        len(text) >= 3
-        and text[0].isascii()
-        and text[0].isalpha()
-        and text[1] == ":"
-        and text[2] == "\\"
-    )
-
-
-def _link_chain_names_a_windows_share(text: str) -> Optional[bool]:
-    """Whether the link at ``text``, or a link it leads to, names a network share.
-
-    Read with ``os.readlink`` one hop at a time: reading a reparse point's
-    substitute name opens the link's own entry, never what it names, so a chain
-    is judged without a connection to anything it leads to. A relative name is
-    taken from the link's directory, as resolving would take it. The walk ends
-    at the first name that is not a link, or that is not there: a local name is
-    then all that resolving would open, and the answer is False.
-
-    None when the chain cannot be judged: a reparse point whose name cannot be
-    read (one that is no symbolic link or junction), a hop that cannot be
-    examined (its directory cannot be searched: it may be a link to a share that
-    nobody here can see), or a chain longer than ``_LINK_HOPS``. The caller
-    refuses then, as it refused every link before, since what resolving would
-    open cannot be told. Only a hop that is not there (no such file, or a path
-    component that is not a directory) ends the walk as a local name: nothing
-    is there to follow, so resolving opens nothing.
-    """
-    from automated_security_helper.utils.scanned_tree import _is_link_stat
-
-    current = text
-    for _ in range(_LINK_HOPS):
-        try:
-            target = os.readlink(current)
-        except (OSError, ValueError):
-            # OSError: the entry went away or cannot be opened. ValueError: on
-            # Windows CPython raises "not a symbolic link" for a reparse point
-            # that names a path but is neither a symbolic link nor a junction
-            # (a WSL link), which ``_is_link_stat`` reads as a link.
-            return None
-        if _names_a_windows_share(target):
-            return True
-        if not os.path.isabs(target):
-            target = os.path.join(os.path.dirname(current), target)
-        target = os.path.normpath(target)
-        try:
-            is_link = _is_link_stat(os.lstat(target))
-        except (FileNotFoundError, NotADirectoryError):
-            # Not there: a local name that resolving would open nothing for.
-            return False
-        except OSError:
-            # Cannot be examined (a directory the process cannot search): the
-            # entry may itself be a link to a share, so the chain is unjudged.
-            return None
-        if not is_link:
-            return False
-        current = target
-    return None
+#: The link-chain reading lives in ``utils/link_chain`` (one copy for this module
+#: and the config loader). The names are kept here for this module's tests; the
+#: hop bound is a module attribute so a test can shorten it, and is passed to the
+#: walk at call time.
+_LINK_HOPS = LINK_HOPS
+_names_a_windows_share = names_a_windows_share
+_is_a_drive_spelling = is_a_drive_spelling
+_link_chain_names_a_windows_share = link_chain_names_a_windows_share
+_components_down_to = components_down_to
 
 
 def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceError]:
@@ -990,75 +900,35 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
             "It names a network share or a device path, which the MCP server does "
             "not open. Name a directory on a local volume.",
         )
-    from automated_security_helper.utils.scanned_tree import _is_link_stat
-
-    # Win32 collapses ``..`` lexically before any file access, so a spelling
-    # like ``C:\granted\missing\..\lnk`` examines ``C:\granted\lnk`` and never
-    # asks whether ``missing`` is there. The walk judges that collapsed spelling,
-    # the one the OS will examine: walked as written, the missing component would
-    # end the walk with nothing judged and the link under the ``..`` would then be
-    # resolved by the gates. A ``..`` behind a device prefix was refused above.
-    components = _components_down_to(os.path.normpath(text))
-    for index, component in enumerate(components):
-        try:
-            is_link = _is_link_stat(os.lstat(component))
-        except OSError:
-            # Not there, or not examinable: nothing below it is either (the
-            # spelling is already collapsed, so no later ``..`` steps back over
-            # it), and the gates judge the path as they do on every other
-            # platform.
-            return None
-        if not is_link:
-            continue
-        reaches_a_share = _link_chain_names_a_windows_share(component)
-        if reaches_a_share is False:
-            # A local link: what it names is local, so the components under it
-            # are judged through it, as resolving would read them.
-            continue
-        where = (
-            "It is a link"
-            if index == len(components) - 1
-            else f"Its component {_shown_path(component)} is a link"
-        )
-        if reaches_a_share:
-            return _refusal(
-                what,
-                path,
-                Path(text),
-                f"{where} that leads to a network share or a device path, which "
-                "the MCP server does not open. Name a directory on a local volume.",
-            )
+    # The walk (utils/link_chain) judges the lexically collapsed spelling, the
+    # one Win32 examines, component by component from the anchor down; a local
+    # link is followed, a missing component ends it with nothing judged, and the
+    # first link that leads to a share or whose target cannot be read is the
+    # answer. The hop bound is read here at call time, so a test can shorten it.
+    unsafe = first_unsafe_link(text, hops=_LINK_HOPS)
+    if unsafe is None:
+        return None
+    where = (
+        "It is a link"
+        if unsafe.is_last
+        else f"Its component {_shown_path(unsafe.component)} is a link"
+    )
+    if unsafe.reaches_a_share:
         return _refusal(
             what,
             path,
             Path(text),
-            f"{where} whose target the MCP server cannot read, so it is not "
-            "resolved on Windows: resolving one can open a connection to the host "
-            "its target names. Name the directory itself.",
+            f"{where} that leads to a network share or a device path, which "
+            "the MCP server does not open. Name a directory on a local volume.",
         )
-    return None
-
-
-def _components_down_to(text: str) -> List[str]:
-    """``text``'s ancestors from its anchor down, then ``text`` itself.
-
-    ``C:\\a\\b`` gives ``C:\\a`` and ``C:\\a\\b``; the anchor alone (a drive root
-    or a share root) is not a component to judge. A relative path starts at its
-    first component. The spelling is kept as given: nothing here resolves.
-    """
-    parsed = Path(text)
-    parts = list(parsed.parts)
-    if parsed.anchor and parts and parts[0] == parsed.anchor:
-        current = parts[0]
-        rest = parts[1:]
-    else:
-        current = ""
-        rest = parts
-    components: List[str] = []
-    for part in rest:
-        current = os.path.join(current, part) if current else part
-        components.append(current)
-    return components or [text]
+    return _refusal(
+        what,
+        path,
+        Path(text),
+        f"{where} whose target the MCP server cannot read, so it is not "
+        "resolved on Windows: resolving one can open a connection to the host "
+        "its target names. Name the directory itself.",
+    )
 
 
 def _sibling_refusal(
