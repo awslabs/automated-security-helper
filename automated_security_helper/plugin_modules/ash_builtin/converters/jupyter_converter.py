@@ -46,7 +46,6 @@ from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
     scan_set,
 )
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.suppression_matcher import (
@@ -1185,9 +1184,12 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     def _output_base(self, ipynb_file: str, taken: Dict[str, str]) -> Path:
         """``<results_dir>/<name>-converted``, where this notebook's output goes.
 
-        The name is the notebook's path folded into one component
-        (get_normalized_filename), as it was. Two things change it, each written
-        to the log with the notebook it stands for. A folded name another
+        The name is the notebook's path relative to the scanned tree, folded into
+        one component (get_normalized_filename). It was the path relative to the
+        process working directory, so a run from outside the tree wrote the
+        host's absolute path into the name and two runs named one notebook two
+        ways. Two things change it, each written to the log with the notebook it
+        stands for. A folded name another
         notebook of this run already took (``a b.ipynb`` and ``a-b.ipynb`` fold
         to one name) gets a digest of this notebook's path relative to the
         scanned tree, so neither output overwrites the other: before this the
@@ -1197,8 +1199,8 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         non-ASCII notebook path does not fail its own conversion. ``taken`` maps
         each name used so far to its notebook.
         """
-        folded = get_normalized_filename(get_shortest_name(ipynb_file))
         relative = relative_display(ipynb_file, self.context.source_dir)
+        folded = get_normalized_filename(relative)
         digest = hashlib.sha256(
             relative.encode("utf-8", "surrogateescape")
         ).hexdigest()[:_OUTPUT_DIGEST_CHARS]

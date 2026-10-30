@@ -2330,6 +2330,24 @@ class TestOutputNames:
         info = messages_at(ash_log_records, logging.INFO)
         assert any("NB.ipynb" in m and "nb.ipynb" in m for m in info), info
 
+    def test_the_output_is_named_by_the_notebooks_path_in_the_tree_wherever_ash_runs(
+        self, converter, monkeypatch, tmp_path
+    ):
+        """The folded name was the notebook's path relative to the process
+        working directory: a run from outside the tree wrote the host's absolute
+        path into the converted file's name, and two runs named one notebook two
+        ways."""
+        notebook = write_notebook(converter.context.source_dir / "sub", "nb.ipynb")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        results, run = self._convert(converter, monkeypatch, [notebook])
+
+        assert len(run.calls) == 1
+        assert [path.name for path in results] == ["sub_snb__ipynb-converted.py"]
+        assert converter.failed_inputs == []
+
     def test_a_notebook_whose_folded_name_is_too_long_for_a_file_still_converts(
         self, converter, monkeypatch
     ):
