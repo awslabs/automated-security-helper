@@ -149,6 +149,10 @@ WORKSPACE_FILENAME = "fixture.code-workspace"
 STATUS_ERROR = "ERROR"
 STATUS_MISSING = "MISSING"
 STATUS_SKIPPED = "SKIPPED"
+#: Not a product status: the rollup marks a scanner the configuration excluded
+#: with an ``excluded`` flag beside whatever status it carries. The flag is
+#: folded into the status here so the did-it-run check reads one value.
+STATUS_EXCLUDED = "EXCLUDED"
 
 # Workspace exit codes: 0 success, 1 internal error, 2 actionable findings at or
 # above threshold, 3 invalid project config, 4 workspace definition or policy error,
@@ -789,11 +793,20 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
 
 
 def collect_scanner_statuses(results: Mapping[str, Any]) -> Dict[str, str]:
-    """The workspace-level per-scanner rollup, normalized."""
+    """The workspace-level per-scanner rollup, normalized.
+
+    A scanner the configuration excluded reads ``EXCLUDED`` whatever status it
+    carries beside the flag: the sibling gate treats excluded as not run, and
+    this one read the status alone, so an excluded checkov reporting PASSED
+    passed the did-it-run check.
+    """
     statuses: Dict[str, str] = {}
     for name, entry in _scanner_results_of(results).items():
         record: Mapping[str, Any] = entry if isinstance(entry, Mapping) else {}
-        statuses[str(name)] = normalize_status(record.get("status"))
+        if record.get("excluded"):
+            statuses[str(name)] = STATUS_EXCLUDED
+        else:
+            statuses[str(name)] = normalize_status(record.get("status"))
     return statuses
 
 
@@ -900,7 +913,10 @@ def check_gate_scanners_ran(statuses: Mapping[str, str]) -> List[str]:
     installed) or SKIPPED (nothing to scan, the fixture's Terraform file lost).
     Every assertion that reads checkov then passed by reading nothing from it, and
     the gate printed PASS having exercised one scanner while claiming two. Absent
-    from the rollup altogether is the same state with less evidence.
+    from the rollup altogether is the same state with less evidence, and so are
+    an entry the configuration excluded and an entry with no status at all
+    (``normalize_status`` reads a missing status as ``""``); both passed here
+    while the sibling gate refused them.
     """
     violations: List[str] = []
     for scanner in GATE_SCANNERS:
@@ -911,12 +927,12 @@ def check_gate_scanners_ran(statuses: Mapping[str, str]) -> List[str]:
                 f"(--scanners) but is absent from scanner_results; present: "
                 f"{sorted(statuses) or 'none'}"
             )
-        elif status in (STATUS_MISSING, STATUS_SKIPPED):
+        elif status in (STATUS_MISSING, STATUS_SKIPPED, STATUS_EXCLUDED) or not status:
             violations.append(
                 f"scanner '{scanner}' is one of the two this gate selects but "
-                f"reports {status}, so every check that reads its findings "
-                f"passed on an empty set. The gate asserts two scanner families "
-                f"and this run supplied one"
+                f"reports {status or 'no status'}, so every check that reads its "
+                f"findings passed on an empty set. The gate asserts two scanner "
+                f"families and this run supplied one"
             )
     return violations
 

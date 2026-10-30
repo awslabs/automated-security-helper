@@ -140,6 +140,58 @@ class TestGateScannersRan:
         violations = gate.check_gate_scanners_ran({"bandit": "PASSED"})
         assert any("absent from scanner_results" in v for v in violations)
 
+    @pytest.mark.parametrize(
+        "raw", ["SKIPPED", "skipped", "ScannerStatus.SKIPPED", " skipped "]
+    )
+    def test_every_spelling_of_a_skipped_status_is_read(self, gate, raw):
+        """A change in how the enum serializes must not silence the check."""
+        statuses = gate.collect_scanner_statuses(
+            {
+                "scanner_results": {
+                    "bandit": {"status": "passed"},
+                    "checkov": {"status": raw},
+                }
+            }
+        )
+        violations = gate.check_gate_scanners_ran(statuses)
+        assert len(violations) == 1
+        assert "checkov" in violations[0] and "SKIPPED" in violations[0]
+
+    def test_a_passed_status_in_any_spelling_is_clean(self, gate):
+        statuses = gate.collect_scanner_statuses(
+            {
+                "scanner_results": {
+                    "bandit": {"status": "ScannerStatus.PASSED"},
+                    "checkov": {"status": "passed"},
+                }
+            }
+        )
+        assert gate.check_gate_scanners_ran(statuses) == []
+
+    def test_an_excluded_scanner_did_not_run_whatever_its_status_says(self, gate):
+        """At the base only the status was read, so excluded + PASSED passed."""
+        statuses = gate.collect_scanner_statuses(
+            {
+                "scanner_results": {
+                    "bandit": {"status": "PASSED"},
+                    "checkov": {"status": "PASSED", "excluded": True},
+                }
+            }
+        )
+        assert statuses["checkov"] == gate.STATUS_EXCLUDED
+        violations = gate.check_gate_scanners_ran(statuses)
+        assert len(violations) == 1
+        assert "checkov" in violations[0] and "EXCLUDED" in violations[0]
+
+    def test_an_entry_with_no_status_did_not_run(self, gate):
+        """At the base a missing status normalized to '' and passed."""
+        statuses = gate.collect_scanner_statuses(
+            {"scanner_results": {"bandit": {"status": "PASSED"}, "checkov": {}}}
+        )
+        violations = gate.check_gate_scanners_ran(statuses)
+        assert len(violations) == 1
+        assert "checkov" in violations[0] and "no status" in violations[0]
+
     def test_evaluate_results_names_it_as_a_root_cause(self, gate, tmp_path):
         results = {
             "workspace": {
