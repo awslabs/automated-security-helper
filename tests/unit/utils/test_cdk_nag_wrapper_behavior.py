@@ -47,7 +47,6 @@ rather than just its plumbing:
 import base64
 import json
 import os
-import re
 import sys
 import types
 from pathlib import Path
@@ -74,9 +73,10 @@ STACK_NAME = "ASHCDKNagScanner"
 TEMPLATE_SEGMENT = "--tmp--secure-s3-template--yaml"
 
 # ``MyDataBucketPolicy`` deliberately precedes ``MyDataBucket`` so that a substring search for
-# "MyDataBucket" would hit the *policy* line first. The wrapper uses a word-boundary regex, so
-# the reported line must be the later one. See
-# test_finding_line_number_uses_word_boundary_not_substring.
+# "MyDataBucket" would hit the *policy* line first. The wrapper places a finding on the
+# line that declares the resource under the Resources key (the declaration-key search,
+# "A finding is placed on the resource's declaration" below), so the reported line must
+# be the later one. See test_finding_line_number_uses_word_boundary_not_substring.
 TEMPLATE_YAML = """Resources:
   MyDataBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -850,28 +850,34 @@ def test_normalize_rule_level_maps_only_the_documented_strings():
 # ---------------------------------------------------------------------------
 
 
+#: The compliance table, one row per (compliance, rule level, exception reason) with the
+#: (level, kind) it maps to. One table for the parametrized test and for the distinctness
+#: guard below, so an edit to a row reaches both.
+_COMPLIANCE_ROWS = [
+    # Non-compliant + Error is the only combination that fails the scan, and the only one
+    # the v3 report can currently produce.
+    ("Non-Compliant", "Error", "N/A", Level.error, Kind.fail),
+    # Non-compliant at a lower rule level is still a failed rule, at that level.
+    ("Non-Compliant", "Warning", "N/A", Level.warning, Kind.fail),
+    ("Non-Compliant", "Info", "N/A", Level.note, Kind.fail),
+    # A suppression with a stated reason is routed to human review.
+    (
+        "Suppressed",
+        "Error",
+        "Accepted risk, tracked separately",
+        Level.none,
+        Kind.review,
+    ),
+    # A suppression with no stated reason is not review-worthy.
+    ("Suppressed", "Error", "N/A", Level.none, Kind.informational),
+    # A compliant record carries no severity signal at all.
+    ("Compliant", "Error", "N/A", Level.none, Kind.informational),
+]
+
+
 @pytest.mark.parametrize(
     "compliance, rule_level, exception_reason, expected_level, expected_kind",
-    [
-        # Non-compliant + Error is the only combination that fails the scan, and the only one
-        # the v3 report can currently produce.
-        ("Non-Compliant", "Error", "N/A", Level.error, Kind.fail),
-        # Non-compliant at a lower rule level is still a failed rule, at that level.
-        ("Non-Compliant", "Warning", "N/A", Level.warning, Kind.fail),
-        ("Non-Compliant", "Info", "N/A", Level.note, Kind.fail),
-        # A suppression with a stated reason is routed to human review.
-        (
-            "Suppressed",
-            "Error",
-            "Accepted risk, tracked separately",
-            Level.none,
-            Kind.review,
-        ),
-        # A suppression with no stated reason is not review-worthy.
-        ("Suppressed", "Error", "N/A", Level.none, Kind.informational),
-        # A compliant record carries no severity signal at all.
-        ("Compliant", "Error", "N/A", Level.none, Kind.informational),
-    ],
+    _COMPLIANCE_ROWS,
 )
 def test_compliance_maps_to_distinct_level_and_kind(
     compliance, rule_level, exception_reason, expected_level, expected_kind
@@ -884,22 +890,22 @@ def test_compliance_maps_to_distinct_level_and_kind(
     ) == (expected_level, expected_kind)
 
 
-def test_the_four_compliance_rows_are_mutually_distinct():
+def test_the_compliance_rows_other_than_compliant_are_mutually_distinct():
     """Guard against the parametrized table above collapsing to one case.
 
     If a future edit makes several rows expect the same (level, kind), the table would be
-    testing one behavior N times while still looking thorough. The compliant row is excluded
-    because it shares (none, informational) with an unreasoned suppression by design -- the
-    four rows below are the ones required to stay distinct.
+    testing one behavior N times while still looking thorough. The rows are read from the
+    table itself (a literal copy here guarded nothing: editing the table could not make it
+    fail). The compliant row is excluded because it shares (none, informational) with an
+    unreasoned suppression by design; the other five are required to stay distinct.
     """
     rows = [
-        (Level.error, Kind.fail),
-        (Level.warning, Kind.fail),
-        (Level.note, Kind.fail),
-        (Level.none, Kind.review),
-        (Level.none, Kind.informational),
+        (level, kind)
+        for compliance, _rule_level, _reason, level, kind in _COMPLIANCE_ROWS
+        if compliance != "Compliant"
     ]
-    assert len(set(rows)) == len(rows)
+    assert len(rows) == 5, rows
+    assert len(set(rows)) == len(rows), rows
 
 
 def test_every_finding_from_a_v3_report_is_non_compliant(
@@ -2412,14 +2418,17 @@ def test_the_debug_log_does_not_dump_the_template(cdk_doubles, template_file, ou
 def test_a_link_left_at_the_copys_name_is_not_written_through(
     cdk_doubles, include_contents, template_file, outdir, tmp_path
 ):
-    """The copy for CfnInclude is created fresh, never through what is at its name."""
+    """The copy for CfnInclude is created fresh, never through what is at its name.
+
+    The synth directory is named by the wrapper's own namer, and the test asserts the
+    wrapper synthesized INTO it: a copy of the old sanitizer regex here planted the link
+    in a directory the wrapper no longer used once the namer changed, and the test then
+    passed whatever the wrapper did with a link at the real copy's name."""
     other = tmp_path / "elsewhere.yaml"
     other.write_text("unchanged\n", encoding="utf-8")
     synth_dir = outdir.joinpath(
-        re.sub(
-            r"(\/|\\|\.)+",
-            "--",
-            str(cdk_nag_wrapper.get_shortest_name(input=template_file)).lstrip("/"),
+        cdk_nag_wrapper._synth_directory_name(
+            template_file, cdk_nag_wrapper.get_shortest_name(input=template_file)
         )
     )
     synth_dir.mkdir(parents=True)
@@ -2428,6 +2437,10 @@ def test_a_link_left_at_the_copys_name_is_not_written_through(
 
     _run(template_file, outdir, scan_root=template_file.parent)
 
+    assert [Path(app.outdir) for app in cdk_doubles.apps] == [synth_dir], (
+        "the link was planted where the wrapper did not synthesize, so the test "
+        "measured nothing"
+    )
     assert other.read_text(encoding="utf-8") == "unchanged\n"
     assert include_contents == [TEMPLATE_YAML]
 
@@ -2733,13 +2746,21 @@ def test_a_successful_pack_with_no_violations_is_still_a_clean_evaluation(
 # that produced no entry. The packs are checked for presence by the name they report under.
 
 
+#: The name each real cdk-nag 3.x pack writes its ``pluginReports[]`` entry under, which is
+#: also the prefix of every rule id it mints. Not derivable from the class name:
+#: ``HIPAASecurityChecks`` reports as ``HIPAA.Security`` (see the HIPAA fixture above).
+_REPORTED_PACK_NAMES = {
+    "AwsSolutionsChecks": "AwsSolutions",
+    "HIPAASecurityChecks": "HIPAA.Security",
+}
+
+
 def _name_packs_by_class(monkeypatch):
-    """Give the doubles the reported name a real cdk-nag pack has (its class name minus
-    ``Checks``, which is also the prefix of every rule id it mints)."""
+    """Give the doubles the reported name the real pack of that class has."""
     monkeypatch.setattr(
         cdk_nag_wrapper,
         "_plugin_report_name",
-        lambda plugin: type(plugin).__name__.removesuffix("Checks"),
+        lambda plugin: _REPORTED_PACK_NAMES[type(plugin).__name__],
     )
 
 
@@ -2849,9 +2870,11 @@ def test_a_construct_naming_no_resource_of_the_template_is_logged_not_dropped_in
 # Each template gets its own synth directory, and never another's report
 # ---------------------------------------------------------------------------
 #
-# The sanitizer folds every separator and dot into the same two dashes, so ``a/b.yaml``
-# and ``a.b.yaml`` shared one synth directory, and a template whose synth wrote no report
-# was graded from the other template's validation-report.json.
+# Before the fix the sanitizer folded every separator and dot into the same two dashes,
+# so ``a/b.yaml`` and ``a.b.yaml`` shared one synth directory, and a template whose synth
+# wrote no report was graded from the other template's validation-report.json. The
+# directory name now ends in a digest of the template's full path
+# (``_synth_directory_name``).
 
 
 def test_templates_whose_names_sanitize_alike_get_distinct_synth_directories(
