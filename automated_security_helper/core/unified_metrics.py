@@ -198,14 +198,15 @@ def own_target_reports(
 
     ``additional_reports`` is keyed by scanner name, and a results file merged from
     another, or written by hand, can file a report under the wrong key. A mapping
-    that names another scanner is not read as this scanner's, as the calculator's
-    own readers refuse it; one that names no scanner (a report written before the
-    field existed) is kept. Every reader of the per-target reports in this module
-    goes through here, so the counters, the exit code, the reasons and the
-    unscanned inputs agree on which reports are the scanner's. The key and the
-    recorded name are matched in any case, as the calculator's ``_own_reports``
-    matches them: the name a row is read under is the union's first spelling,
-    and the reports can sit under another.
+    that names another scanner, or none, is not read as this scanner's, as the
+    calculator's status reader refuses it: a scan writes every report under the
+    name it carries, so an entry without one is no report of this version's.
+    Every reader of the per-target reports in this module goes through here, so
+    the counters, the exit code, the reasons and the unscanned inputs agree on
+    which reports are the scanner's. The key and the recorded name are matched in
+    any case, as the calculator's ``_own_reports`` matches them: the name a row is
+    read under is the union's first spelling, and the reports can sit under
+    another.
     """
     reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
     if not isinstance(reports, dict):
@@ -214,11 +215,8 @@ def own_target_reports(
         key: report
         for key, report in reports.items()
         if isinstance(report, dict)
-        and (
-            report.get("scanner_name") is None
-            or ScannerStatisticsCalculator._same_scanner(
-                report.get("scanner_name"), scanner_name
-            )
+        and ScannerStatisticsCalculator._same_scanner(
+            report.get("scanner_name"), scanner_name
         )
     }
 
@@ -1136,14 +1134,14 @@ def _populate_scanner_results_from_unified_metrics(
             status=status,
             missing_reason=metrics.missing_reason,
         )
-        # The exit code and the skipped reason are written when the metrics have
-        # one and dropped when they have none (the metrics are the authority: a
-        # row's stale code or reason is not kept), without passing an explicit
-        # None that would mark the field set on every row.
-        if metrics.exit_code is None:
-            fields.pop("exit_code", None)
-        else:
-            fields["exit_code"] = metrics.exit_code
+        # The exit code is written as the metrics have it, None included: the
+        # model's default is 0, which reads as a tool that ran and exited clean,
+        # so a tool that never ran (missing, excluded, refused before its start)
+        # has to carry an explicit None. The skipped reason is written when the
+        # metrics have one and dropped when they have none (the metrics are the
+        # authority: a row's stale reason is not kept), without passing a None
+        # that would mark the field set on every row.
+        fields["exit_code"] = metrics.exit_code
         if metrics.skipped_reason is None:
             fields.pop("skipped_reason", None)
         else:

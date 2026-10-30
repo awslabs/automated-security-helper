@@ -5,11 +5,13 @@
 
 - ScannerMetrics keeps its text as given: the threshold shown is the threshold
   graded, and the scanner name is the key the row is written under.
-- The readers of the per-target reports skip a report that names another scanner.
+- The readers of the per-target reports skip a report that names another scanner,
+  or none.
 - A non-list ``inputs_not_scanned`` value does not raise.
 - The rebuilt scanner_results row marks ``dependencies_satisfied`` and ``excluded``
-  set only when the metrics or the existing row say so, and carries no exit code
-  or skipped reason the metrics do not have.
+  set only when the metrics or the existing row say so, writes the exit code as
+  the metrics have it (None for a tool that never ran), and carries no skipped
+  reason the metrics do not have.
 - An unrecognized status is counted as an error and rebuilt as ERROR, not PASSED.
 """
 
@@ -73,13 +75,16 @@ class TestTheReportReaders:
         assert tool_exit_code(model, "bandit") is None
         assert inputs_not_scanned(model) == []
 
-    def test_a_report_naming_no_scanner_is_still_read(self):
+    def test_a_report_naming_no_scanner_is_not_read(self):
+        """A scan writes every report under the name it carries, so an entry
+        without one is no report of this version's (the calculator's status
+        reader refuses it the same way)."""
         model = AshAggregatedResults()
         model.additional_reports = {
             "bandit": {"source": {"status": "PASSED", "targets_attempted": 4}}
         }
 
-        assert target_counts(model, "bandit") == (4, 0)
+        assert target_counts(model, "bandit") == (None, 0)
 
     def test_a_non_list_inputs_not_scanned_value_does_not_raise(self):
         model = AshAggregatedResults()
@@ -109,8 +114,10 @@ class TestTheRebuiltRow:
             row.model_fields_set
         )
         assert "excluded" not in row.model_fields_set, row.model_fields_set
-        assert "exit_code" not in row.model_fields_set, row.model_fields_set
         assert "skipped_reason" not in row.model_fields_set, row.model_fields_set
+        # The exit code is written as the metrics have it, None included: the
+        # model's default 0 would read as a tool that ran and exited clean.
+        assert row.exit_code is None
 
     def test_a_missing_row_sets_the_flag_and_an_existing_flag_follows_the_metrics(
         self,
@@ -127,7 +134,7 @@ class TestTheRebuiltRow:
 
         row = model.scanner_results["tool"]
         assert row.dependencies_satisfied is True
-        assert "exit_code" not in row.model_fields_set, row.model_fields_set
+        assert row.exit_code is None
 
         _populate_scanner_results_from_unified_metrics(
             model, [_metrics(status="MISSING", dependencies_missing=True, exit_code=2)]
