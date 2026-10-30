@@ -200,7 +200,10 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.core import (
+    IgnorePathWithReason,
+    ignore_paths_that_skip_scanning,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.download_utils import (
@@ -1294,11 +1297,18 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         link out of the tree, a reference outside it, a vendored copy) is not
         input here either. ``global_settings.ignore_paths`` is applied as
         scan() applies it: the orchestrator hands scan() the config's list
-        through ``active_ignore_paths``, and the same list is read from the
-        config here, so a workflow the operator ignored is neither found nor
-        named. Without it this method found, refused and named a file scan()
-        had passed over in silence, and the reason then said the scan log
-        explained a file the log never mentioned. Logs nothing; scan() logs the
+        through ``active_ignore_paths`` and then
+        ``ignore_paths_that_skip_scanning`` (``models/core.py``: no entry under
+        ``--ignore-suppressions``, and never one a delivered tree's own config
+        supplied, which is left to the SARIF step), and this method builds the
+        same list from the config and the context's flag, so a workflow the
+        operator ignored is neither found nor named, and one only a client
+        config ignored, or one ignored under the flag, is found here as scan()
+        finds it. Without the first half this method found, refused and named
+        a file scan() had passed over in silence, and the reason then said the
+        scan log explained a file the log never mentioned; without the second
+        it applied more ignore paths than scan() did, so a workflow scan()
+        refused read as no workflow file. Logs nothing; scan() logs the
         warnings for the workflows it skips. When every workflow file was left
         out of the lint, the reason names them rather than saying there is no
         workflow file: there is, and the warnings say why each was not linted.
@@ -1308,7 +1318,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         settings = getattr(
             getattr(self.context, "config", None), "global_settings", None
         )
-        ignore_paths = active_ignore_paths(getattr(settings, "ignore_paths", None))
+        ignore_paths = ignore_paths_that_skip_scanning(
+            active_ignore_paths(getattr(settings, "ignore_paths", None)),
+            ignore_suppressions=bool(
+                getattr(self.context, "ignore_suppressions", False)
+            ),
+        )
         left_out: List[Dict[str, str]] = []
         for target_type, target in scan_targets(self.context):
             if self._workflow_files(

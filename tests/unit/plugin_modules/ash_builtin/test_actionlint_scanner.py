@@ -3266,6 +3266,60 @@ def test_an_ignored_workflow_is_not_named_in_the_nothing_to_scan_reason(
     assert scanner.inputs_not_scanned == []
 
 
+def _leak_only_repo(repo: Path, tmp_path: Path) -> None:
+    """Leave the repo with one workflow, a link to a file outside the tree."""
+    workflows = repo / ".github" / "workflows"
+    for name in ("clean.yml", "vulnerable.yml"):
+        (workflows / name).unlink()
+    outside = tmp_path / "outside.yml"
+    outside.write_text("on: push\n")
+    (workflows / "leak.yml").symlink_to(outside)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("client_supplied", "ignore_suppressions"),
+    [(True, False), (False, True)],
+    ids=["client-supplied-entry", "ignore-suppressions"],
+)
+def test_an_ignore_path_scan_does_not_apply_is_not_applied_by_the_reason(
+    repo, tmp_path, monkeypatch, on_path, client_supplied, ignore_suppressions
+):
+    """The orchestrator hands scan() the ignore paths that keep a file out of the
+    scan (models/core.ignore_paths_that_skip_scanning): an entry a client config
+    supplied is left to the SARIF step, and no entry applies under
+    --ignore-suppressions. Under either, scan() refuses the linked workflow and
+    records it. The reason reads the same filtered list, so it names that file
+    rather than saying the tree holds no workflow file, which was true of no
+    scan the orchestrator ran."""
+    _leak_only_repo(repo, tmp_path)
+    scanner = _scanner(repo)
+    ignore = IgnorePathWithReason(
+        path=".github/workflows/leak.yml", reason="t", client_supplied=client_supplied
+    )
+    scanner.context.config.global_settings.ignore_paths.append(ignore)
+    scanner.context.ignore_suppressions = ignore_suppressions
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    reason = scanner.nothing_to_scan_reason()
+
+    assert reason != module.NO_WORKFLOW_FILE
+    assert ".github/workflows/leak.yml" in reason
+    # The list the orchestrator hands scan() under this entry and flag.
+    handed = module.ignore_paths_that_skip_scanning(
+        [ignore], ignore_suppressions=ignore_suppressions
+    )
+    assert handed == []
+    assert (
+        scanner.scan(target=repo, target_type="source", global_ignore_paths=handed)
+        is True
+    )
+    assert fake.calls == []
+    assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+        ".github/workflows/leak.yml"
+    ]
+
+
 @pytest.mark.unit
 def test_a_reference_that_names_nothing_under_an_ancestor_is_not_a_leak(
     repo, tmp_path, on_path
