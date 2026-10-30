@@ -370,9 +370,23 @@ def _timeout_ending(scanner_plugin: Any) -> str:
       have no stop of their own, so the record can only be the timeout's, and
       the timeout's own ending is right.
 
-    Exact attribution needs a could-not-stop record per run on the plugin
-    (``plugin_base``); this reads what the plugin records today.
+    Exact attribution comes from the plugin's per-run record
+    (``scan_could_not_stop_runs`` on ``plugin_base``: one entry per run whose
+    stop failed, keyed by the flag that run ended with, ``timed_out`` among
+    them). With that record the reading is exact: ``timed_out`` in it means the
+    timeout's own stop failed (the timeout's ending); a record of other runs only
+    means a later run's tool may still be running while the timed-out tool was
+    killed; an empty record means every stop succeeded (the was-killed ending).
+    The kept-flag reading above is the fallback for a plugin that carries no such
+    record (an older plugin class, a double).
     """
+    runs = getattr(scanner_plugin, "scan_could_not_stop_runs", None)
+    if isinstance(runs, dict):
+        if "timed_out" in runs:
+            return COULD_NOT_STOP_ENDING
+        if runs:
+            return UNSTOPPED_LATER_RUN_ENDING
+        return WAS_KILLED_ENDING
     if _could_not_stop(scanner_plugin) is None:
         return WAS_KILLED_ENDING
     kept = _kept_flag(scanner_plugin)

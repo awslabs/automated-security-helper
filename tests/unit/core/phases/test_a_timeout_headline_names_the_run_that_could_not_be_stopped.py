@@ -216,3 +216,52 @@ class TestTheEndingFromTheRecords:
         assert _timeout_ending(self._plugin("pid 1", (flag, "r"))) == (
             COULD_NOT_STOP_ENDING
         )
+
+
+class TestTheEndingFromThePerRunRecord:
+    """The plugin's per-run record (``scan_could_not_stop_runs``, one entry per run
+    whose stop failed, keyed by the flag the run ended with) is exact, so the
+    ending reads it first and falls back to the kept flag only when a plugin
+    carries none. Red at the base: the record was not read, so a run whose cancel
+    stop failed beside a timeout that was killed read as the timeout's own failed
+    stop whenever the kept flag was the timeout's."""
+
+    def _plugin(self, runs, could_not_stop="pid 1", kept=("timed_out", "r")):
+        return SimpleNamespace(
+            scan_could_not_stop_runs=runs,
+            scan_could_not_stop=could_not_stop,
+            scan_kept_flag=kept,
+        )
+
+    def test_the_timeouts_own_failed_stop_is_the_timeouts(self):
+        assert _timeout_ending(self._plugin({"timed_out": "r"})) == (
+            COULD_NOT_STOP_ENDING
+        )
+        both = self._plugin(
+            {"timed_out": "r", "cancelled": "r"}, kept=("cancelled", "r")
+        )
+        assert _timeout_ending(both) == COULD_NOT_STOP_ENDING
+
+    def test_another_runs_failed_stop_is_that_runs_whatever_the_kept_flag(self):
+        assert _timeout_ending(self._plugin({"cancelled": "r"})) == (
+            UNSTOPPED_LATER_RUN_ENDING
+        )
+        assert _timeout_ending(self._plugin({"unflagged": "r"})) == (
+            UNSTOPPED_LATER_RUN_ENDING
+        )
+
+    def test_an_empty_record_means_every_stop_worked(self):
+        """The record outranks the single could-not-stop string: a plugin whose
+        every stop worked carries an empty record whatever else it holds."""
+        assert _timeout_ending(self._plugin({})) == WAS_KILLED_ENDING
+
+    def test_a_plugin_with_no_record_keeps_the_kept_flag_reading(self):
+        """The control: a plugin class without the record (or a double that
+        answers it with something that is not a dict) is read as before."""
+        assert _timeout_ending(self._plugin(None, kept=("cancelled", "r"))) == (
+            UNSTOPPED_LATER_RUN_ENDING
+        )
+        assert _timeout_ending(self._plugin("not a record")) == COULD_NOT_STOP_ENDING
+        assert _timeout_ending(self._plugin(None, could_not_stop=None)) == (
+            WAS_KILLED_ENDING
+        )
