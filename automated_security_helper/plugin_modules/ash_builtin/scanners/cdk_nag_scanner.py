@@ -203,6 +203,24 @@ run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
 #: their installer describes the wrong fault and reinstalls what is already there.
 _CDK_WRAPPER_IMPORT_ERROR: str | None = None
 
+
+def _import_error_summary(error: BaseException) -> str:
+    """The class of a wrapper import failure and the module it could not load.
+
+    What ``_cdk_unusable_detail`` puts in front of the operator, in the warning, in
+    ``dependency_unavailable_reason`` and in ``missing_dependency_reason``. Never
+    ``str(error)``: an ImportError's text carries the absolute path of the module it
+    was reading (``cannot import name 'x' from 'y' (/home/<user>/.venv/.../y/__init__.py)``),
+    and every other failure text this scanner records goes through the redaction
+    first. The module name is what the operator acts on; an error with no name is
+    named by its class alone.
+    """
+    name = getattr(error, "name", None)
+    if isinstance(name, str) and name:
+        return f"{type(error).__name__}: {name}"
+    return type(error).__name__
+
+
 if _CDK_AVAILABLE:
     try:
         from importlib.metadata import version as _get_version
@@ -219,9 +237,7 @@ if _CDK_AVAILABLE:
         _CDK_AVAILABLE = False
         _cdk_nag_version = "unavailable"
         run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
-        _CDK_WRAPPER_IMPORT_ERROR = (
-            f"{type(_wrapper_import_error).__name__}: {_wrapper_import_error}"
-        )
+        _CDK_WRAPPER_IMPORT_ERROR = _import_error_summary(_wrapper_import_error)
 
 
 def _cdk_unusable_detail() -> str:
@@ -1157,7 +1173,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # Also when every distribution is present but one sits outside the extra's
         # bound: the install resolves the three together to the declared versions,
         # and gating on presence alone left that state with no command to fix it.
-        if not _CDK_AVAILABLE or _unsatisfied_cdk_requirements():
+        # Not when every distribution is present and the wrapper itself did not
+        # import (_install_would_help, the one rule): the dependency check has just
+        # told the operator that installing the CDK packages again would change
+        # nothing, and `ash dependencies install --tool cdk-nag` ran exactly that
+        # install, exited 0, and left cdk-nag MISSING.
+        if (
+            not _CDK_AVAILABLE and _install_would_help()
+        ) or _unsatisfied_cdk_requirements():
             # Appended unconditionally. _cdk_extra_requirements never returns an
             # empty list, and the `if requirements:` that used to stand here was
             # what turned an empty result into a silent no-op: no pip command was
@@ -1625,6 +1648,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     # "not parseable" skip below is only for a file that does not.
                     local_failure = _local_parse_failure(cfn_file, scan_root)
                     if local_failure is None:
+                        # A file that parses is not thereby a template: the local
+                        # parse answers None for a document with no Resources mapping
+                        # too, and a YAMLError raised elsewhere in the worker (a
+                        # snippet dump, a text read for another template) reaches
+                        # here for every file the child was given, a package.json
+                        # included. As the two other failure arms do, only a file
+                        # that holds a template is a template that was not
+                        # evaluated; the rest take back their attempt.
+                        if self._uncount_a_file_that_holds_no_template(
+                            cfn_file, scan_root
+                        ):
+                            continue
                         self.targets_failed += 1
                         self.record_unevaluated_target(cfn_file)
                         described = error_text(e, self._environment_values())

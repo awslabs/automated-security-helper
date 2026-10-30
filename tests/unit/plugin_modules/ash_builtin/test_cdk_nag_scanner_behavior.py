@@ -1092,6 +1092,71 @@ def test_a_missing_distribution_still_gets_the_install_hint(
     assert "ash dependencies install --tool cdk-nag" in warned, warned
 
 
+def test_the_wrapper_import_error_is_recorded_as_its_class_and_module_not_its_text():
+    """What ``_cdk_unusable_detail`` shows the operator is the class and the module
+    that could not be loaded. The exception's own text carries the absolute path of
+    the module it was reading, and that text used to be recorded as is and reach the
+    warning, ``dependency_unavailable_reason`` and ``missing_dependency_reason``
+    unredacted, where every other failure text this scanner records is redacted."""
+    install_path = (
+        "/home/someone/.venv/lib/python3.12/site-packages/cfn_tools/__init__.py"
+    )
+    error = ImportError(
+        f"cannot import name 'dump_yaml' from 'cfn_tools' ({install_path})",
+        name="cfn_tools",
+    )
+
+    summary = cdk_nag_scanner._import_error_summary(error)
+
+    assert summary == "ImportError: cfn_tools"
+    assert install_path not in summary
+    assert cdk_nag_scanner._import_error_summary(
+        ModuleNotFoundError("No module named 'cfn_tools'", name="cfn_tools")
+    ) == ("ModuleNotFoundError: cfn_tools")
+    # A failure with no module name is named by its class alone, never by a text
+    # that may hold a path.
+    assert cdk_nag_scanner._import_error_summary(RuntimeError(install_path)) == (
+        "RuntimeError"
+    )
+
+
+def test_the_installer_stays_quiet_when_the_wrapper_itself_did_not_import(
+    scanner, monkeypatch
+):
+    """Every distribution is present and the wrapper did not import: the dependency
+    check says installing the CDK packages again would change nothing
+    (``_install_would_help``), so ``ash dependencies install --tool cdk-nag`` must not
+    run that install. It used to: the install command gated on the presence flag alone,
+    ran the install the check had just called useless, exited 0, and cdk-nag stayed
+    MISSING."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", [])
+    monkeypatch.setattr(
+        cdk_nag_scanner, "_CDK_WRAPPER_IMPORT_ERROR", "ModuleNotFoundError: cfn_tools"
+    )
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    assert cdk_nag_scanner._install_would_help() is False
+
+    commands = scanner.get_installation_commands("linux", "x86_64")
+
+    assert [command for command in commands if "pip" in command] == [], commands
+
+
+def test_the_installer_is_armed_by_a_missing_distribution_with_the_same_gate(
+    scanner, monkeypatch
+):
+    """The control for the test above: with a distribution missing the install is the
+    remedy, and the command is emitted."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", ["aws-cdk-lib"])
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_WRAPPER_IMPORT_ERROR", None)
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+
+    commands = scanner.get_installation_commands("linux", "x86_64")
+
+    assert [command for command in commands if "pip" in command], commands
+
+
 # ---------------------------------------------------------------------------
 # Rule-scoped text stays rule-scoped: the run-level notification and the foreign
 # plugin's descriptor
@@ -1220,6 +1285,30 @@ def test_a_yaml_error_on_a_file_that_does_not_parse_is_still_the_not_parseable_s
 
     assert scanner.targets_attempted == 0
     assert scanner.targets_failed == 0
+
+
+def test_a_worker_yaml_error_counts_only_the_files_that_hold_a_template(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """A YAMLError raised elsewhere in the worker reaches the scanner for every file
+    the child was given. A package.json parses, so the local parse says nothing is
+    wrong with it, and it used to be counted as a failed template beside the real
+    one ("the template parses, but the worker raised ..."), grading the scan ERROR
+    for a file that holds no template. Like the two other failure arms, the arm now
+    takes back the attempt of a file that holds no template and counts the template."""
+    from yaml import YAMLError
+
+    (scanner.context.work_dir / "package.json").write_text(
+        '{"name": "x", "version": "1.0.0"}\n', encoding="utf-8"
+    )
+    wrapper_double.side_effect = YAMLError("snippet dump failed")
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1, scanner.targets_attempted
+    assert scanner.targets_failed == 1, scanner.targets_failed
+    assert not any("package.json" in error for error in scanner.errors), scanner.errors
+    assert any("bucket.yaml" in error for error in scanner.errors), scanner.errors
 
 
 # ---------------------------------------------------------------------------
