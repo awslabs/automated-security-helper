@@ -21,7 +21,7 @@ def no_tool_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The scanner plugins' tool probes answer without starting a tool.
 
     Building a semgrep scanner asks uv for the tool's version
-    (``UVToolRunner.is_uv_available``, then ``get_tool_version``, which runs ``uv
+    (``UVToolRunner.uv_availability``, then ``get_tool_version``, which runs ``uv
     tool run <tool> --version``). Where uv and the tool are installed, that starts
     the tool, and the tool writes its own state (``~/.semgrep/settings.yml``).
     Those writes come from the process itself; with no process started, nothing
@@ -30,9 +30,17 @@ def no_tool_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     Under this fixture uv is reported available, and every tool's version as
     :data:`PINNED_TOOL_VERSION`. A test of a probe itself does not take this
     fixture, or replaces ``get_tool_version`` with its own recorder.
+
+    Both forms of the availability read are answered: the mixin's gates read
+    ``uv_availability`` (the answer with the probe's failure) and fall back to
+    ``is_uv_available`` only for a runner without it, and the unit tool guard
+    answers ``uv_availability`` with "absent" for every module that is not a
+    probe subject. Answering ``is_uv_available`` alone left the guard's answer
+    in force, so a deferred version probe never ran.
     """
     from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
+    monkeypatch.setattr(UVToolRunner, "uv_availability", lambda self: (True, None))
     monkeypatch.setattr(UVToolRunner, "is_uv_available", lambda self: True)
     monkeypatch.setattr(
         UVToolRunner,
