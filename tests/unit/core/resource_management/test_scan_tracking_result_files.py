@@ -391,9 +391,72 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
 
         assert progress.total_findings == 0
 
+    def test_the_count_mid_scan_is_the_count_after_aggregation(self, tmp_path):
+        """The per-target file ASH writes counts suppressed findings in
+        finding_count (the executor's total + suppressed); the aggregated file's
+        per-scanner finding_count is ScannerMetrics.total, which leaves them out.
+        Read verbatim, the scan's total dropped from 3 to 1 the moment the
+        aggregated file appeared. Both views now report the non-suppressed count
+        with suppressed as a bucket beside it, as SummaryStats does."""
+        document = {
+            "scanner_name": "bandit",
+            "finding_count": 3,
+            "severity_counts": {"high": 1, "suppressed": 2},
+            "status": "FAILED",
+        }
+        running = tmp_path / "running"
+        _write_result(running, "bandit", "source", document)
+
+        progress = create_scan_progress_from_files("scan-1", running)
+        view = get_scanner_progress(running)["bandit"]
+        info = get_scan_progress_info(running)
+
+        assert progress.total_findings == 1
+        assert progress.severity_counts["high"] == 1
+        assert progress.severity_counts["suppressed"] == 2
+        assert view["finding_count"] == 1
+        assert view["severity_counts"]["suppressed"] == 2
+        assert info["findings_count"] == 1
+        assert info["findings_summary"]["suppressed"] == 2
+
+        done = tmp_path / "done"
+        done.mkdir()
+        (done / "ash_aggregated_results.json").write_text(
+            json.dumps(
+                {
+                    "metadata": {"summary_stats": {}},
+                    "scanner_results": {
+                        "bandit": {
+                            "status": "FAILED",
+                            "finding_count": 1,
+                            "severity_counts": {"high": 1, "suppressed": 2},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        aggregated = create_scan_progress_from_files("scan-1", done)
+
+        assert aggregated.total_findings == progress.total_findings
+        assert aggregated.severity_counts == progress.severity_counts
+
     @pytest.mark.parametrize(
         ("document", "expected_total", "expected_counts"),
         [
+            pytest.param(
+                {"finding_count": 3, "severity_counts": {"high": 1, "suppressed": 2}},
+                1,
+                {"high": 1, "suppressed": 2},
+                id="the-suppressed-bucket-is-not-in-the-total",
+            ),
+            pytest.param(
+                {"finding_count": 1, "severity_counts": {"suppressed": 2}},
+                0,
+                {"suppressed": 2},
+                id="a-count-below-its-suppressed-bucket-reads-as-zero",
+            ),
             pytest.param(
                 {"finding_count": "3", "severity_counts": {"high": 3}},
                 0,
@@ -447,7 +510,8 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
         to this view's arithmetic over the buckets; a bucket whose value is not
         a non-negative int is dropped; a bucket name the model lacks lands in
         ``unknown``; and the recorded finding_count is the total even when the
-        buckets do not sum to it (the scanner's record wins)."""
+        buckets do not sum to it (the scanner's record wins), less its own
+        suppressed bucket, which the aggregated total leaves out too."""
         out = tmp_path / "ash_output"
         _write_result(out, "bandit", "source", {"scanner_name": "bandit", **document})
 

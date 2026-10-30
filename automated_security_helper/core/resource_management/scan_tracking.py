@@ -565,6 +565,47 @@ def _counts_of_document(
     )
 
 
+def _progress_counts_of_document(
+    document: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], int, Dict[str, int]]:
+    """The findings, count and buckets a progress view reports for one document.
+
+    The one rule both file-based views follow (``get_scanner_progress`` and
+    ``create_scan_progress_from_files`` each had a copy, and the copies
+    differed). The buckets are the ones the scanner recorded
+    (``severity_counts``, folded into the named buckets with anything else
+    under ``unknown``), else the ones the findings array gives. The count is the
+    recorded ``finding_count`` when the document carries one, else the length of
+    the findings array; the buckets are never summed into a count the scanner
+    did not record (``test_malformed_counts_are_read_defensively``).
+
+    The one adjustment: a recorded count beside recorded buckets has the
+    ``suppressed`` bucket taken out of it. The per-target file ASH writes counts
+    suppressed findings in ``finding_count`` (the executor sets it to
+    ``severity_counts.total + severity_counts.suppressed``), while the
+    aggregated file's per-scanner ``finding_count`` is ``ScannerMetrics.total``,
+    which leaves them out, so a scan's ``total_findings`` dropped by its
+    suppressed count the moment the aggregated file appeared. Reported this way
+    the count is SummaryStats' ``total``: the non-suppressed findings, with
+    ``suppressed`` a bucket beside it, mid-scan and after.
+    """
+    findings = _findings_of_document(document)
+    recorded_count, recorded_counts = _counts_of_document(document)
+    if recorded_counts is not None:
+        counts = empty_severity_counts()
+        for severity, value in recorded_counts.items():
+            counts[severity if severity in counts else UNKNOWN_SEVERITY] += value
+    else:
+        counts = extract_findings_summary(findings)
+    if recorded_count is None:
+        count = len(findings)
+    elif recorded_counts is not None:
+        count = max(recorded_count - counts["suppressed"], 0)
+    else:
+        count = recorded_count
+    return findings, count, counts
+
+
 def _recorded_scanner_status(result_file: Path) -> Optional[str]:
     """The ``status`` a scanner wrote into its ``ASH.ScanResults.json``, or None."""
     data = _read_scanner_result_document(result_file)
@@ -746,29 +787,20 @@ def get_scanner_progress(
         }
 
         # One read per file, through the regular-file guard, and the findings,
-        # counts and status derived from that one document.
+        # count and buckets derived from that one document by the one rule
+        # (_progress_counts_of_document), the same create_scan_progress_from_files
+        # applies.
         for target_type, result_file in target_results.items():
             try:
                 document = _read_scanner_result_document(result_file)
                 if document is None:
                     continue
-                findings = _findings_of_document(document)
+                findings, count, counts = _progress_counts_of_document(document)
                 scanner_progress[scanner_name]["findings"].extend(findings)
-                # The one rule of every progress path: the counts the scanner
-                # recorded win, and a findings array fills in only when the
-                # document carries no counts (see create_scan_progress_from_files).
-                recorded_count, recorded_counts = _counts_of_document(document)
-                count = recorded_count if recorded_count is not None else len(findings)
                 scanner_progress[scanner_name]["finding_count"] += count
-                counts = (
-                    recorded_counts
-                    if recorded_counts is not None
-                    else extract_findings_summary(findings)
-                )
                 totals = scanner_progress[scanner_name]["severity_counts"]
                 for severity, value in counts.items():
-                    bucket = severity if severity in totals else UNKNOWN_SEVERITY
-                    totals[bucket] += value
+                    totals[severity] += value
             except Exception as e:
                 _logger.warning(
                     f"Failed to parse result file for scanner {scanner_name}, target {target_type}: {str(e)}"
@@ -1370,8 +1402,6 @@ def create_scan_progress_from_files(
                         scan_progress.add_scanner_progress(unfinished)
                         continue
 
-                    findings = _findings_of_document(document)
-
                     # The scanner has finished: it wrote its results. How it
                     # finished is in the file's own status, which every scanner
                     # writes; one without it is counted as passed.
@@ -1380,27 +1410,21 @@ def create_scan_progress_from_files(
                     # record ASH writes (finding_count and severity_counts, no
                     # findings array) until the aggregated file exists. The
                     # counts win when the document carries them and a findings
-                    # array fills in only when it does not: the one rule both
-                    # progress paths follow (_add_aggregated_scanner_progress
-                    # reads the aggregated document's counts the same way), so
-                    # a scanner reports one total mid-scan and after
-                    # aggregation. Counted from the array alone, every finished
-                    # scanner read as 0 findings while the scan ran.
-                    recorded_count, recorded_counts = _counts_of_document(document)
+                    # array fills in only when it does not, with the suppressed
+                    # findings left out of the count as the aggregated file
+                    # leaves them out: the one rule both progress paths follow
+                    # (_progress_counts_of_document), so a scanner reports one
+                    # total mid-scan and after aggregation. Counted from the
+                    # array alone, every finished scanner read as 0 findings
+                    # while the scan ran.
+                    findings, count, counts = _progress_counts_of_document(document)
                     scanner_progress = ScannerProgress(
                         scanner_name=scanner_name,
                         target_type=target_type,
                         status=MCScannerStatus.COMPLETED,
-                        finding_count=len(findings),
+                        finding_count=count,
+                        severity_counts=counts,
                     )
-                    scanner_progress.update_findings(findings)
-                    if recorded_count is not None:
-                        scanner_progress.finding_count = recorded_count
-                    if recorded_counts is not None:
-                        scanner_progress.severity_counts = {
-                            **empty_severity_counts(),
-                            **recorded_counts,
-                        }
                     scanner_progress.mark_completed()
                     recorded = _status_of_document(document)
                     if recorded is not None:
@@ -1433,6 +1457,11 @@ def get_scan_progress_info(
     * ``in_progress`` with ``results_pending`` true: the file is a JSON object with
       neither ``scanner_results`` nor ``sarif``, which is not a results document
       yet.
+    * ``in_progress`` otherwise: the per-scanner files. ``findings_count`` is
+      then what the scanners recorded (their non-suppressed count, the rule
+      :func:`_progress_counts_of_document` states), which is more than
+      ``len(findings)`` for the files ASH writes, since those carry counts and
+      no findings array; for a completed scan the two agree.
     * ``error``: the file cannot be read as results, or the directory holds the
       results put back after a scan that ended without any
       (:func:`restored_results_refusal`), which are not this scan's.
