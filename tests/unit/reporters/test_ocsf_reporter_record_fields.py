@@ -237,11 +237,14 @@ class TestFindingUidIsStableAcrossRuns:
         # occurrence counter), so their uids differ.
         assert records[0]["finding_info"]["uid"] != records[1]["finding_info"]["uid"]
 
-    def test_a_flattening_with_more_rows_than_results_vouches_for_none(
+    def test_an_extra_flattened_row_takes_no_other_findings_uid(
         self, reporter, monkeypatch
     ):
         """An extra flattened row used to pass the length check (taken after the
-        list was cut to size) and shift every later uid onto another finding."""
+        list was cut to size) and shift every later uid onto another finding.
+        The pairing now walks the rows and gives each result the next row that
+        describes it, so the extra row is passed over: both findings keep the
+        uid of their own flattened id and nothing is derived from the extra."""
         model = AshAggregatedResults()
         model.sarif.runs[0].results = [
             Result(ruleId="R1", level=Level.error, message=Message(text="a")),
@@ -250,17 +253,17 @@ class TestFindingUidIsStableAcrossRuns:
         flat = list(model.to_flat_vulnerabilities())
         extra = flat[0].model_copy(update={"id": "an-extra-row"})
         monkeypatch.setattr(
-            AshAggregatedResults, "to_flat_vulnerabilities", lambda self: flat + [extra]
+            AshAggregatedResults,
+            "to_flat_vulnerabilities",
+            lambda self: [flat[0], extra, flat[1]],
         )
 
-        uids = {r["finding_info"]["uid"] for r in json.loads(reporter.report(model))}
+        uids = [r["finding_info"]["uid"] for r in json.loads(reporter.report(model))]
 
-        shared = {
-            str(uuid.uuid5(_FINDING_UID_NAMESPACE, key))
-            for key in [item.id for item in flat] + ["an-extra-row"]
-        }
-        assert len(uids) == 2
-        assert uids.isdisjoint(shared)
+        assert uids == [
+            str(uuid.uuid5(_FINDING_UID_NAMESPACE, item.id)) for item in flat
+        ]
+        assert str(uuid.uuid5(_FINDING_UID_NAMESPACE, "an-extra-row")) not in uids
 
     @pytest.mark.parametrize(
         "drift",
