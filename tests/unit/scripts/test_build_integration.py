@@ -93,9 +93,15 @@ class TestPreBuild:
 
 class TestValidate:
     def test_refuses_a_root_whose_version_is_unknown(
-        self, build_integration, tmp_path, capsys
+        self, build_integration, tmp_path, capsys, monkeypatch
     ):
+        """get_version falls back to the installed distribution's metadata, so a
+        foreign pyproject alone does not read as unknown where ASH is installed;
+        the unknown answer is forced to test the refusal itself."""
         root = _project_root(tmp_path, name="some-other-project")
+        monkeypatch.setattr(
+            build_integration, "get_version", lambda root=None: "unknown"
+        )
         assert build_integration.BuildIntegrator(root).validate_build_environment() is (
             False
         )
