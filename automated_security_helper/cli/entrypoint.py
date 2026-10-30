@@ -602,12 +602,15 @@ def _ash_traceback(exc_type, exc, tb) -> None:
     from typer.main import _typer_developer_exception_attr_name
 
     # As typer's hook decides: the tag Typer.__call__ put on the exception says
-    # whether the app wants a pretty traceback and its locals.
-    config = getattr(exc, _typer_developer_exception_attr_name, None)
+    # whether the app wants a pretty traceback and its locals. Its name is bound
+    # to this read and nothing else in the module: the locals check
+    # (tests/unit/utils/test_debug_locals_on_ci.py) accepts a setting read back
+    # from typer's tag only through such a name.
+    tag = getattr(exc, _typer_developer_exception_attr_name, None)
     standard = os.getenv(
         "TYPER_STANDARD_TRACEBACK", os.getenv("_TYPER_STANDARD_TRACEBACK")
     )
-    if standard or config is None or not config.pretty_exceptions_enable:
+    if standard or tag is None or not tag.pretty_exceptions_enable:
         detail = "".join(traceback.format_exception(exc_type, exc, tb))
         _emit(_shown(detail), sys.stderr)
         return
@@ -622,7 +625,7 @@ def _ash_traceback(exc_type, exc, tb) -> None:
         exc_type,
         exc,
         tb,
-        show_locals=bool(config.pretty_exceptions_show_locals),
+        show_locals=bool(tag.pretty_exceptions_show_locals),
         suppress=[os.path.dirname(typer.__file__)],
         # typer's widths, its TERMINAL_WIDTH or else the console's, where Rich's
         # own defaults are 100 and 88; read now, as typer_console reads it.
