@@ -127,7 +127,7 @@ def test_a_thread_whose_children_file_cannot_be_read_is_skipped(procfs):
         }
     )
 
-    assert landlock_exec._children() == [11, 12, 13]
+    assert landlock_exec._children_files() == [11, 12, 13]
     assert "/proc" not in proc.listed
 
 
@@ -142,7 +142,7 @@ def test_a_thread_that_exited_between_the_listing_and_the_read_is_skipped(procfs
         }
     )
 
-    assert landlock_exec._children() == [12]
+    assert landlock_exec._children_files() == [12]
     assert "/proc" not in proc.listed
 
 
@@ -151,13 +151,14 @@ def test_a_descendant_that_exited_before_its_read_has_no_children(procfs):
     below it, and no listing of /proc to find out."""
     proc = procfs({_task(4242): FileNotFoundError(errno.ENOENT, "gone")})
 
-    assert landlock_exec._children(4242) == []
+    assert landlock_exec._children_files(4242) == []
     assert "/proc" not in proc.listed
 
 
 def test_a_kernel_without_children_files_lists_proc_up_to_the_cap(procfs, monkeypatch):
     """The thread is there and has no children file: the fallback lists /proc, and
-    reads no more entries than PROC_SCAN_LIMIT allows."""
+    a walk with no deadline (the first reap pass) reads no more entries than
+    PROC_SCAN_LIMIT allows."""
     monkeypatch.setattr(landlock_exec, "PROC_SCAN_LIMIT", 3)
     files: Dict[str, Entry] = {
         _task("self"): ["7"],
@@ -168,7 +169,7 @@ def test_a_kernel_without_children_files_lists_proc_up_to_the_cap(procfs, monkey
         files[f"/proc/{pid}/stat"] = _stat(pid, ME)
     proc = procfs(files)
 
-    assert landlock_exec._children() == [1, 2, 3]
+    assert landlock_exec._descendants() == [1, 2, 3]
     stat_reads = [path for path in proc.opened if path.endswith("/stat")]
     assert len(stat_reads) == 3
     assert proc.listed.count("/proc") == 1
