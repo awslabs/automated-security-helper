@@ -31,6 +31,7 @@ from automated_security_helper.config.config_sources import (
     read_config_bytes,
     read_config_file_literally,
     read_config_text,
+    refuse_unless_a_file,
     unparsed_config_reason,
     uses_env_references,
 )
@@ -645,6 +646,12 @@ class ConfigLinter:
                 f"--fix-unused comments suppressions out, which JSON cannot hold; "
                 f"remove them from {config_path} by hand"
             )
+        # A path that is not a regular file (a FIFO, a directory, a device) is
+        # refused as every config reader refuses it, before the read below:
+        # ``read_config_bytes`` reports the same shape as an OSError from its
+        # fstat, which the except below would take for an unreadable file and
+        # answer with "nothing to comment out". ``fix`` refuses it the same way.
+        refuse_unless_a_file(config_path)
         # A file that does not parse, or cannot be read, has nothing to comment
         # out: ``lint`` reported it (SYNTAX_ERROR, exit 3), and this returns
         # with no changes rather than raising the parser's own error a second
