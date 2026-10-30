@@ -194,6 +194,14 @@ def test_a_symlinked_virtualenv_does_not_refuse_the_scan(tmp_path):
         assert own[0] not in python
         assert own[0] not in python3
 
+    # The whole scan is assembled too: a check later in it (the argument bound,
+    # the flag-key check, the text check over every entry) could still refuse
+    # this tree, and the two link globs have to reach the argument.
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+    passed = _entries(argv)
+    for entry in entries:
+        assert entry in passed, (entry, passed)
+
 
 def test_a_link_entry_with_glob_characters_is_escaped(tmp_path):
     """A link named with ``*`` used to be refused outright; its entry is now the
