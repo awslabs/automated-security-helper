@@ -156,6 +156,22 @@ class TestANonUtf8NameStaysOneComponent:
         assert ignore_path_matches("secr\udce9t/x.py", converted) is True
         assert ignore_path_matches("secr/udce9t/x.py", converted) is False
 
+    def test_the_validation_reads_the_escape_as_one_character_too(self):
+        """``_normalise`` ran on the raw text with every backslash a separator,
+        so the escape was split for the ``..``, drive and separator checks:
+        the file ``..é.py`` was refused as a traversal and ``c:é x.py`` as a
+        drive, and ``/é/x.py`` got the UNC message."""
+        assert _down("api/..\\udce9.py", "api") == "..\\udce9.py"
+        assert file_path_matches("..\udce9.py", "..\\udce9.py") is True
+        assert _down("c:\\udce9x.py", "api") is None
+        with pytest.raises(WorkspacePatternError) as excinfo:
+            _down("/\\udce9/x.py", "api")
+        message = str(excinfo.value)
+        assert "leading '/'" in message
+        assert "UNC" not in message
+        assert "\\udce9" in message
+        assert "\udce9" not in message
+
     def test_a_refusal_shows_the_escape_not_the_surrogate(self):
         with pytest.raises(WorkspacePatternError) as excinfo:
             _down("api/*/secr\\udce9t.py", "api/sub")

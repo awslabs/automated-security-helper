@@ -916,6 +916,15 @@ def _down_convert(text: str, prefix_parts: tuple) -> Optional[str]:
             if pattern_part != prefix_part:
                 return None
             continue
+        if by_equality:
+            # An earlier component matched only by its exact spelling, so the
+            # glob reading of the whole pattern matches nothing under the
+            # prefix and only the exact text can still match: a later glob
+            # component is its own text here, or nothing. "app[v2]/s?b/x.py"
+            # over "app[v2]/s?b" is "x.py"; over "app[v2]/sub" it is nothing.
+            if pattern_part != prefix_part:
+                return None
+            continue
         if _names_by_equality(pattern_part, prefix_part):
             # The matcher's equality reading anchors this component to the
             # project directory spelled exactly so; its glob reading matches
@@ -1039,9 +1048,14 @@ def to_project_pattern(
     Raises:
         WorkspacePatternError: On the same malformed inputs as
             :func:`to_workspace_pattern`, on a ``.`` or empty component
-            (:func:`_refuse_dot_components`), and on the shapes that have no
-            correct single-pattern rewrite (see "Fail-closed classes" in the
-            module docstring). The message names the pattern and the remedy.
+            (:func:`_refuse_dot_components`), on a leading ``/`` (the matcher
+            reads it literally, so the pattern matches no workspace-relative
+            path and has no rewrite that matches the same files; a leading
+            ``/`` in a PROJECT config is read as project-rooted by
+            :func:`to_workspace_pattern`, which this function does not invert
+            for that one shape), and on the shapes that have no correct
+            single-pattern rewrite (see "Fail-closed classes" in the module
+            docstring). The message names the pattern and the remedy.
         ValueError: ``kind`` is neither kind.
     """
     if kind not in _KINDS:
@@ -1050,16 +1064,20 @@ def to_project_pattern(
     if not prefix_parts:
         raise WorkspacePatternError("project prefix must name at least one component")
 
-    if not _relative_parts(_normalise(pattern, label="pattern")):
-        raise WorkspacePatternError("pattern must name at least one component")
-
     raw = str(pattern)
     # In the matcher's reading order (path_matching._match_form): a non-UTF-8
     # name's record-form escape ("\udcNN") is read as its one character before
     # the separators are, so its backslash is part of the name, not a separator,
-    # and such a name stays one component here. The result is written back in
-    # the record form, the form the operator wrote and a report shows.
-    form = undecodable_of_text(raw).replace("\\", "/")
+    # and such a name stays one component here, for the validation too: read on
+    # the raw text, the escape's backslash was a separator, so "api/..\udce9.py"
+    # was refused as a ".." traversal and "c:\udce9x.py" as a drive. The result
+    # is written back in the record form, the form the operator wrote and a
+    # report shows; the messages quote the raw text through _shown.
+    name = undecodable_of_text(raw)
+    if not _relative_parts(_normalise(name, label="pattern")):
+        raise WorkspacePatternError("pattern must name at least one component")
+
+    form = name.replace("\\", "/")
     if form.startswith("/") and _pattern_components(form)[0] == "":
         # The matcher reads the separator literally (it absorbs one only before
         # a leading "**"), and no workspace-relative path starts with one, so the

@@ -146,6 +146,25 @@ class TestABracketNamedProjectIsAnchoredByEquality:
         )
         _contract_holds("app[v2]/x.py", "application")
 
+    def test_a_later_wildcard_component_is_its_own_text_once_anchored_by_equality(
+        self,
+    ):
+        """Once ``app[v2]`` has matched only by its spelling, the glob reading
+        of the whole pattern matches nothing under the prefix, so a later
+        component in the prefix span can only match as its own text: ``s?b``
+        over ``s?b`` is that directory, over ``sub`` it is nothing. The base
+        refused both as a wildcard inside the project path."""
+        assert (
+            to_project_pattern("app[v2]/s?b/x.py", "app[v2]/s?b", kind=SUPPRESSION)
+            == "x.py"
+        )
+        _contract_holds("app[v2]/s?b/x.py", "app[v2]/s?b")
+        assert (
+            to_project_pattern("app[v2]/s?b/x.py", "app[v2]/sub", kind=SUPPRESSION)
+            is None
+        )
+        _contract_holds("app[v2]/s?b/x.py", "app[v2]/sub")
+
     def test_a_lone_bracket_is_a_literal_to_fnmatch_and_converts_as_before(self):
         """``a]b`` and ``a[b`` are literals to ``fnmatch`` and were right already."""
         assert to_project_pattern("a]b/x.py", "a]b", kind=SUPPRESSION) == "x.py"
