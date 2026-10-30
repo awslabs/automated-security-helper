@@ -195,7 +195,9 @@ class TestLinkedDirectories:
 
     def test_a_link_back_into_the_walked_tree_ends(self, tmp_path):
         """A link to an ancestor would walk forever; each real directory is
-        walked once, so every manifest is listed once."""
+        walked once. The link's own manifest is still a file yarn reads at that
+        path (``packages/loop/package.json`` is the root manifest to it), so it
+        is listed under the link's name; nothing below it is walked again."""
         repo = tmp_path / "repo"
         package = _yarn_package(repo)
         _manifest(package / "packages" / "api", "api")
@@ -206,8 +208,71 @@ class TestLinkedDirectories:
         assert _rel(listed, package) == [
             "package.json",
             "packages/api/package.json",
+            "packages/loop/package.json",
             "yarn.lock",
         ]
+
+    def test_a_member_reached_first_through_a_link_is_still_listed(self, tmp_path):
+        """A convenience link ``ui -> packages/ui`` is met before os.walk reaches
+        the real ``packages/ui``, and the walk through the link marked the real
+        directory as seen, so the member's manifest at its real path was dropped
+        and yarn's copy had no ``packages/ui``: the workspace member it names
+        went unaudited with no error. Both paths are listed."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "packages" / "ui", "ui")
+        os.symlink(
+            package / "packages" / "ui", package / "ui", target_is_directory=True
+        )
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/ui/package.json",
+            "ui/package.json",
+            "yarn.lock",
+        ]
+
+    def test_a_sibling_alias_of_a_member_lists_both_paths(self, tmp_path):
+        """``packages/ui-alias -> ui`` beside the real member: whichever os.walk
+        meets first, both manifests are listed."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "packages" / "ui", "ui")
+        os.symlink("ui", package / "packages" / "ui-alias", target_is_directory=True)
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/ui-alias/package.json",
+            "packages/ui/package.json",
+            "yarn.lock",
+        ]
+
+    def test_the_copy_holds_a_member_reached_first_through_a_link(self, tmp_path):
+        """The copy yarn audits from has the real member at its real path."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "packages" / "ui", "ui")
+        os.symlink(
+            package / "packages" / "ui", package / "ui", target_is_directory=True
+        )
+        parent = tmp_path / "out"
+        parent.mkdir()
+
+        with package_manager_child(
+            "yarn", package, parent=parent, scan_root=repo, yarn_major=1
+        ) as child:
+            copied = sorted(
+                p.relative_to(child.cwd).as_posix()
+                for p in child.cwd.rglob("*")
+                if p.is_file()
+            )
+
+        assert child.cwd != package
+        assert "packages/ui/package.json" in copied, copied
 
     def test_without_roots_a_linked_directory_is_not_walked(self, tmp_path):
         """A caller that names no roots gets the earlier shape: the linked

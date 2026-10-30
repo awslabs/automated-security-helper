@@ -336,15 +336,26 @@ def package_manager_inputs(
     ]
     bounds = [Path(r) for r in roots]
     # Directories already walked, by real path: a link back into the walked
-    # tree, or two links to one directory, would otherwise list a manifest
-    # twice or never end.
+    # tree, or two links to one directory, would otherwise never end, or list
+    # what is below the directory once per name it has.
     seen: set = set()
 
     def _walk(start: Path) -> None:
         for root, dirs, files in os.walk(start, followlinks=False):
             here = Path(root)
             real = os.path.realpath(here)
+            manifest = here / "package.json"
             if real in seen:
+                # The directory was already walked under another name: a
+                # linked directory is walked when the link is met, before
+                # os.walk reaches the real directory, so a member reached
+                # first through a link (``ui -> packages/ui``) came here as
+                # the real ``packages/ui`` and was dropped, and yarn's copy
+                # then had no ``packages/ui/package.json``. Its manifest is a
+                # file yarn reads at THIS path too, so it is listed under this
+                # name; only the descent below it is cut.
+                if "package.json" in files and manifest.exists():
+                    inputs.append(manifest)
                 dirs[:] = []
                 continue
             seen.add(real)
@@ -354,8 +365,8 @@ def package_manager_inputs(
                 if d not in _SKIPPED_DIR_NAMES
                 and not any(_within(here / d, s) for s in skipped)
             ]
-            if "package.json" in files and (here / "package.json").exists():
-                inputs.append(here / "package.json")
+            if "package.json" in files and manifest.exists():
+                inputs.append(manifest)
             # os.walk does not descend a linked directory; yarn does.
             for d in dirs:
                 linked = here / d
