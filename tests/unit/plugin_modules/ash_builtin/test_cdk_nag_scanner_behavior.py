@@ -1673,3 +1673,57 @@ def test_a_jsii_node_that_names_a_location_is_still_asked_of_the_filesystem(
 
     monkeypatch.setenv("JSII_NODE", str(tmp_path / "missing" / "node"))
     assert cdk_nag_scanner._node_named_by_jsii_node() is None
+
+
+# ---------------------------------------------------------------------------
+# The module as a script reads the missing-dependency reason through the one reader
+# ---------------------------------------------------------------------------
+
+
+def test_the_script_quotes_the_reason_through_the_one_reader(
+    scanner, caplog, monkeypatch
+):
+    """The script block used to call ``scanner.missing_dependency_reason()`` itself,
+    a second reader of the hook beside ``plugin_missing_dependency_reason`` (the
+    one-reader guard under tests/unit/base names every such read). It asks the
+    reader, so whatever the reader makes of the hook's answer is what the script's
+    error line quotes."""
+    asked = []
+
+    def reader(plugin_instance, values=(), **kwargs):
+        asked.append(plugin_instance)
+        return "the reader's text"
+
+    monkeypatch.setattr(cdk_nag_scanner, "plugin_missing_dependency_reason", reader)
+    with caplog.at_level(logging.ERROR, logger="ash"):
+        with pytest.raises(SystemExit) as excinfo:
+            cdk_nag_scanner._script_report_json(False, scanner)
+
+    assert excinfo.value.code == 1
+    assert asked == [scanner]
+    assert any(
+        "cdk-nag did not scan: the reader's text" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_the_script_still_exits_one_when_the_reason_hook_raises(
+    scanner, caplog, monkeypatch
+):
+    """At the base a hook that raised ended the script in that exception instead of
+    the exit status it owes its caller. Through the reader the raise is a DEBUG
+    line and the error line says no reason was recorded."""
+
+    def raising(self):
+        raise RuntimeError("the hook's own failure")
+
+    monkeypatch.setattr(CdkNagScanner, "missing_dependency_reason", raising)
+    with caplog.at_level(logging.ERROR, logger="ash"):
+        with pytest.raises(SystemExit) as excinfo:
+            cdk_nag_scanner._script_report_json(False, scanner)
+
+    assert excinfo.value.code == 1
+    assert any(
+        "cdk-nag did not scan: the scanner recorded no reason" in r.getMessage()
+        for r in caplog.records
+    )

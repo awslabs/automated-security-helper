@@ -38,6 +38,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
+    plugin_missing_dependency_reason,
 )
 from automated_security_helper.utils.ash_install import extra_requirements_from_metadata
 from automated_security_helper.utils.cdk_nag_worker import cdk_nag_worker_batch
@@ -2027,9 +2028,19 @@ def _script_report_json(report: "SarifReport | bool", scanner: CdkNagScanner) ->
     script used to call ``model_dump_json`` on that False and end in an
     AttributeError. The reason the scanner recorded is logged and the exit status is 1,
     which is what a script that scanned nothing owes its caller.
+
+    The reason is read through ``plugin_missing_dependency_reason``, the one
+    reader of that hook, so this line quotes the same text as the scan's MISSING
+    row and ``ash dependencies install``; a hook that raises or answers nothing
+    leaves the line saying so instead of ending the script in that exception.
     """
     if report is False or not hasattr(report, "model_dump_json"):
-        ASH_LOGGER.error(f"cdk-nag did not scan: {scanner.missing_dependency_reason()}")
+        reason = plugin_missing_dependency_reason(
+            scanner, when_it_raises="the script exits 1 with no reason to quote"
+        )
+        ASH_LOGGER.error(
+            f"cdk-nag did not scan: {reason or 'the scanner recorded no reason'}"
+        )
         raise SystemExit(1)
     return report.model_dump_json(
         indent=2,
