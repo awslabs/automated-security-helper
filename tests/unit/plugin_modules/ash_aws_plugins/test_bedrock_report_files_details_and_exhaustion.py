@@ -9,9 +9,10 @@ output file never existed for a clean scan; a secret finding's code snippet was
 written into the details with include_code_snippets on; a suppressed finding
 sat in the finding table with nothing to tell it from an analyzed one; and
 after the fallback walk exhausted, every later section walked the whole chain
-again. The memory of an exhaustion stops where the control plane left a
-candidate unchecked: a throttled listing is asked again by the next section,
-as the walk tests already pin.
+again. What a run keeps from an exhausted walk is the listing's answer alone,
+the candidates it does not name: a throttled listing is asked again by the next
+section, as the walk tests already pin, and a candidate that failed on one
+section's prompt is called again with the next one.
 
 No test here calls AWS: the sessions and clients are doubles.
 """
@@ -39,6 +40,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     MODULE,
+    PRIMARY_MODEL,
     make_reporter,
     plugin_context_in,
 )
@@ -69,11 +71,26 @@ class RuntimeDouble:
         }
 
 
-class ControlPlaneDouble:
-    """Lists no model; counts its listing calls. With ``throttled`` every
-    listing call fails with a ThrottlingException."""
+def _summary(model_id):
+    return {
+        "modelId": model_id,
+        "modelName": "a model",
+        "modelArn": f"arn:aws:bedrock:us-east-1::foundation-model/{model_id}",
+        "providerName": "test-vendor",
+        "modelLifecycle": {"status": "ACTIVE"},
+        "inputModalities": ["TEXT"],
+        "outputModalities": ["TEXT"],
+        "inferenceTypesSupported": ["ON_DEMAND"],
+    }
 
-    def __init__(self, throttled=False):
+
+class ControlPlaneDouble:
+    """Lists the models it is given (none by default); counts its listing
+    calls. With ``throttled`` every listing call fails with a
+    ThrottlingException."""
+
+    def __init__(self, *model_ids, throttled=False):
+        self.model_ids = list(model_ids)
         self.listings = 0
         self.throttled = throttled
 
@@ -87,7 +104,7 @@ class ControlPlaneDouble:
                 {"Error": {"Code": "ThrottlingException", "Message": "slow down"}},
                 "ListFoundationModels",
             )
-        return {"modelSummaries": []}
+        return {"modelSummaries": [_summary(model_id) for model_id in self.model_ids]}
 
 
 def _session_double(runtime, control_plane):
@@ -226,9 +243,9 @@ def test_a_suppressed_finding_is_marked_in_the_finding_table(monkeypatch, tmp_pa
 
 def test_a_later_section_does_not_walk_an_exhausted_chain_again(monkeypatch, tmp_path):
     """The configured model fails on every call and no fallback is listed. The
-    first section walks the chain and exhausts it; the second calls the
-    configured model once more and gets the exhaustion back without a second
-    listing or a second walk."""
+    first section walks the chain and finds every candidate unlisted; the
+    second calls the configured model once more and names the same candidates
+    unavailable without a second listing or a second call."""
     refusal = botocore.exceptions.ClientError(
         {"Error": {"Code": "ValidationException", "Message": "too long"}}, "Converse"
     )
@@ -272,5 +289,58 @@ def test_a_walk_the_control_plane_left_unchecked_is_asked_again(monkeypatch, tmp
 
     assert first.ok is False and "not checked" in first.text, first.text
     assert second.ok is False and "not checked" in second.text, second.text
-    assert reporter._walk_exhausted is None
+    assert reporter._unavailable_models == set()
     assert control_plane.listings == 2, "each section asked the control plane once"
+
+
+class _RuntimeByModel:
+    """A runtime whose answer is planned per model id: a list of exceptions
+    and replies consumed call by call, the last one repeated."""
+
+    def __init__(self, plan):
+        self.plan = {model: list(answers) for model, answers in plan.items()}
+        self.models = []
+
+    def converse(self, **kwargs):
+        model = kwargs["modelId"]
+        self.models.append(model)
+        answers = self.plan[model]
+        answer = answers.pop(0) if len(answers) > 1 else answers[0]
+        if isinstance(answer, Exception):
+            raise answer
+        return {
+            "output": {"message": {"role": "assistant", "content": [{"text": answer}]}}
+        }
+
+
+def test_a_candidate_that_failed_on_one_prompt_is_called_again_for_the_next(
+    monkeypatch, tmp_path
+):
+    """The other boundary: a listed candidate that failed on section one's
+    prompt (a refusal tied to that prompt) is not unavailable. Section two
+    calls it again with its own prompt, and it answers."""
+    refusal = botocore.exceptions.ClientError(
+        {"Error": {"Code": "ValidationException", "Message": "too long"}}, "Converse"
+    )
+    fallback = "test-vendor.test-model-fallback-1-v1:0"
+    runtime = _RuntimeByModel(
+        {PRIMARY_MODEL: [refusal], fallback: [refusal, "a shorter answer"]}
+    )
+    control_plane = ControlPlaneDouble(fallback)
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", _session_double(runtime, control_plane)
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_fallback_model",
+        {PRIMARY_MODEL: fallback, fallback: PRIMARY_MODEL}.get,
+    )
+    reporter = make_reporter(plugin_context_in(tmp_path), max_retries=0)
+    client = reporter._make_model_client(runtime)
+
+    first = reporter._outcome_with_fallback(client, "prompt one", "system")
+    second = reporter._outcome_with_fallback(client, "prompt two", "system")
+
+    assert first.ok is False and "No suitable fallback model found" in first.text
+    assert second.ok is True and second.text == "a shorter answer", second.text
+    assert runtime.models == [PRIMARY_MODEL, fallback, PRIMARY_MODEL, fallback]
+    assert reporter._unavailable_models == set()

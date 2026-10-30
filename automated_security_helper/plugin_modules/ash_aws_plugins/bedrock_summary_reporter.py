@@ -934,13 +934,15 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         # the fallback walk validates candidates with, built once, the
         # fallback model that answered, which the run's later calls go to first,
         # the configured model's error, kept for an exhaustion after it, and
-        # the exhaustion itself once a walk found nothing, so a later section
-        # whose configured call fails again is not walked through the same
-        # chain a second time.
+        # the candidates a walk found the listing does not name, which a later
+        # section's walk takes as unavailable without asking again. Only that
+        # listing fact is kept: a candidate that was called and failed is
+        # called again with the next section's prompt, and a candidate the
+        # control plane left unchecked is checked again.
         self._control_client: Any = None
         self._run_model: Optional[str] = None
         self._configured_error: Optional[str] = None
-        self._walk_exhausted: Optional[CallOutcome] = None
+        self._unavailable_models: set[str] = set()
         # The configured model and, as the listing spells it, the id the run's
         # calls go to, when validate_plugin_dependencies matched it
         # case-insensitively (Converse knows the listing's spelling). Kept as a
@@ -1184,7 +1186,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         self._control_client = None
         self._run_model = None
         self._configured_error = None
-        self._walk_exhausted = None
+        self._unavailable_models = set()
         # The answer cache is keyed by fixed section names, so a second report()
         # on one instance read the first run's answers for another model's
         # findings; the cache is one run's.
@@ -2029,7 +2031,12 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         configured model and walking again. A model-specific failure stands
         for the rest of the run, so if the run's model fails in turn the walk
         resumes after it, without calling the configured model again
-        (``_configured_error`` keeps why that one failed).
+        (``_configured_error`` keeps why that one failed). A walk that found
+        nothing is not kept as such: what it keeps is which candidates the
+        listing does not name (``_unavailable_models``), so a later section
+        does not ask the control plane about them again, while a candidate
+        that failed on one prompt is called again with the next one, and one
+        the control plane left unchecked is checked again.
         """
         opts = self.config.options
 
@@ -2054,13 +2061,6 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if outcome.ok or not opts.enable_fallback_models or not outcome.model_specific:
             return outcome
         self._configured_error = outcome.text
-        if self._walk_exhausted is not None:
-            # An earlier section walked the whole chain, every candidate was
-            # checked, and nothing answered (``_walk_outcome`` keeps that
-            # exhaustion). The configured model was still called, once, and
-            # failed again; the chain is not walked again for every section
-            # after that.
-            return self._walk_exhausted
         return self._walk_outcome(
             self._control_plane(),
             opts.model_id,
@@ -2188,11 +2188,22 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if resume_after is not None and resume_after not in called:
             called.append(resume_after)
         visited = set(called) | {primary}
+        # The candidates an earlier walk of this run found the listing does
+        # not name: a listing fact, which does not change within a run, so a
+        # later section takes them as unavailable without asking again. The
+        # shims' walks (keep_as_run_model False) neither read nor write it.
+        known_unavailable = (
+            getattr(self, "_unavailable_models", None) if keep_as_run_model else None
+        )
         model: Optional[str] = get_fallback_model(
             primary if resume_after is None else resume_after
         )
         while model and model not in visited:
             visited.add(model)
+            if known_unavailable is not None and model in known_unavailable:
+                unavailable.append(model)
+                model = get_fallback_model(model)
+                continue
             ASH_LOGGER.info(
                 text_without_values(f"Trying fallback model: {model}", values)
             )
@@ -2239,13 +2250,12 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             ok=False,
             model_specific=True,
         )
-        if keep_as_run_model and not not_checked and not listing_refused:
-            # The report run's walk checked every candidate and nothing
-            # answered: a later section's configured call that fails again gets
-            # this back without a second walk over the same chain. A walk the
-            # control plane left candidates unchecked in (a throttled or
-            # refused listing) is not remembered: the next section asks again.
-            self._walk_exhausted = exhausted
+        if known_unavailable is not None:
+            # Only the listing's answer is kept for the run's later sections.
+            # A candidate that was called and failed may answer the next
+            # section's prompt, and a candidate the control plane left
+            # unchecked (a throttled or refused listing) is checked again.
+            known_unavailable.update(unavailable)
         return exhausted
 
     # ------------------------------------------------------------------
