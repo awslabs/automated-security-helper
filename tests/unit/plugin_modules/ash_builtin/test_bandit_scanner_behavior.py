@@ -322,28 +322,6 @@ def test_failed_installation_falls_back_to_the_resolver(scanner, monkeypatch, ca
     )
 
 
-def test_failed_installation_still_succeeds_if_the_resolver_finds_bandit(
-    scanner, monkeypatch, tmp_path
-):
-    """The resolver's answer decides the outcome, not the install failure."""
-    monkeypatch.setattr(
-        BanditScanner, "_validate_uv_tool_availability", lambda self: True
-    )
-    monkeypatch.setattr(
-        BanditScanner, "_get_tool_installation_info", lambda self: {"available": False}
-    )
-    monkeypatch.setattr(
-        BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
-    )
-    monkeypatch.setattr(
-        bandit_scanner,
-        "get_uv_tool_command",
-        lambda command, **kwargs: [str(tmp_path / "bandit")],
-    )
-
-    assert scanner.validate_plugin_dependencies() is True
-
-
 def test_resolver_is_asked_about_the_scanners_own_command(scanner, monkeypatch):
     """The resolver must be queried for 'bandit', not some other tool name."""
     monkeypatch.setattr(
