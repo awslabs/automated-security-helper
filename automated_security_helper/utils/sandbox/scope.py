@@ -98,6 +98,11 @@ class SandboxScope:
     #: not read as "no values": the post-spawn sweep, whose only redaction is
     #: this scope's values, names no entry or path in its notes.
     environment_values_unread: bool = False
+    #: True for a scope built for a plugin CLASS, before construction (the
+    #: construction probes): a class has no values hook to call, so
+    #: ``environment_values_unread`` is set for it too, but nothing failed, and
+    #: the records say so instead of reporting a read that never happened.
+    class_scope: bool = False
     #: The owning plugin's uv-run inputs (its --from spec and --with
     #: dependencies), empty for a plugin that does not run through uv: a uv
     #: run's command-line records hide them with the full uv layer, like the
@@ -185,10 +190,18 @@ def _probe_reason_is_transient(refusal: SandboxUnavailable) -> bool:
     return any(marker in reason for marker in _TRANSIENT_REASON_MARKERS)
 
 
-#: The (scanner name, setting) pairs whose grant-withheld warning was written in
-#: this process. A scope is built for every spawn of a scanner (its probes, its
-#: scan, each converter run), so the warning repeated several times per scan.
-_WARNED_WITHHELD: Set[Tuple[str, str]] = set()
+#: The (tree scope key, scanner name, setting) triples whose grant-withheld
+#: warning was written in this process. A scope is built for every spawn of a
+#: scanner (its probes, its scan, each converter run), so the warning repeated
+#: several times per scan; the scanned tree is part of the key because one
+#: process can scan several trees in turn (an MCP server), each under its own
+#: configuration, and the next tree's warning is not the last one's repeat.
+#: Read and written under ``_withheld_lock`` (``_warn_withheld_once``), a lock
+#: of its own: ``_probe_lock`` is held across a backend probe, which can run to
+#: the probe timeout, and a note must not queue behind one. ``clear_backend_cache``
+#: empties it for the tests.
+_WARNED_WITHHELD: Set[Tuple[Any, str, str]] = set()
+_withheld_lock = threading.Lock()
 
 
 def clear_backend_cache() -> None:
@@ -458,12 +471,13 @@ def scanner_sandbox_scope(
     ):
         # The operator's list replaces every declared need, so this is their
         # choice; said once at INFO rather than withheld in silence.
-        if (name, "network_list") not in _WARNED_WITHHELD:
-            _WARNED_WITHHELD.add((name, "network_list"))
-            ASH_LOGGER.info(
-                f"{name} declares a network need, and sandbox.network_scanners does "
-                "not name it, so the sandbox withholds the network from it."
-            )
+        _warn_withheld_once(
+            name,
+            "network_list",
+            f"{name} declares a network need, and sandbox.network_scanners does "
+            "not name it, so the sandbox withholds the network from it.",
+            level=logging.INFO,
+        )
     read_path_scanners = list(getattr(settings, "read_path_scanners", []) or [])
     env_scanners = list(getattr(settings, "env_scanners", []) or [])
     # read_paths alone: cache_paths that follow a scanner's options are never
@@ -516,6 +530,7 @@ def scanner_sandbox_scope(
         env_scanners=env_scanners,
         environment_values=environment_values,
         environment_values_unread=environment_values_unread,
+        class_scope=isinstance(scanner_plugin, type),
         plugin_inputs=plugin_inputs,
         command=command,
     )
@@ -524,17 +539,35 @@ def scanner_sandbox_scope(
     return scope
 
 
-def _warn_withheld_once(name: str, key: str, message: str) -> None:
-    """Write a grant-withheld warning once per scanner and setting per process.
+def _warn_withheld_once(
+    name: str, key: str, message: str, level: int = logging.WARNING
+) -> None:
+    """Write a grant-withheld note once per scanned tree, scanner and setting.
 
     A scope is built for each spawn of a scanner (its probes, its scan, each
     converter run), so the same sentence otherwise repeated several times per
-    scan; the setting it names does not change between them.
+    scan; the setting it names does not change between them. It does change
+    between trees: one process can scan several in turn (an MCP server), each
+    under its own configuration, so the key carries the active scan's tree scope
+    (``tree_scope_key``; a scope built outside any scan carries the empty one),
+    and the second tree's note is written. Checked and added under
+    ``_withheld_lock``, the set's own lock: the scanner threads build their
+    scopes at the same moment, and ``_probe_lock`` is held across a backend
+    probe, which can run to the probe timeout. ``level`` is INFO for the
+    operator's own choice (the network list that omits
+    the scanner) and WARNING, the default, for a withheld grant; the note goes
+    through the logger's own ``info`` or ``warning`` method, the methods the
+    tests of these notes read.
     """
-    if (name, key) in _WARNED_WITHHELD:
-        return
-    _WARNED_WITHHELD.add((name, key))
-    ASH_LOGGER.warning(message)
+    from automated_security_helper.utils.subprocess_utils import tree_scope_key
+
+    entry = (tree_scope_key(), name, key)
+    with _withheld_lock:
+        if entry in _WARNED_WITHHELD:
+            return
+        _WARNED_WITHHELD.add(entry)
+    write = ASH_LOGGER.info if level == logging.INFO else ASH_LOGGER.warning
+    write(message)
 
 
 def sandbox_refusal_grades_missing(refusal: SandboxUnavailable) -> bool:
@@ -1152,10 +1185,14 @@ def _record_plan(scope: SandboxScope, policy: Any, plan: SpawnPlan) -> None:
         f"network={'yes' if policy.network else 'no'}) for {scope.scanner_name}"
     )
     if scope.environment_values_unread:
-        ASH_LOGGER.debug(
-            f"{head}: the planned command line is not shown because the plugin's "
-            "redaction values could not be read"
+        # A class scope has no values hook to read, so nothing failed there; the
+        # instance case is a hook that raised or gave no value set.
+        why = (
+            "a class scope carries no redaction values"
+            if scope.class_scope
+            else "the plugin's redaction values could not be read"
         )
+        ASH_LOGGER.debug(f"{head}: the planned command line is not shown because {why}")
         return
     ASH_LOGGER.debug(
         scope_shown_text(f"{head}: {_argv_text(plan.argv)}", _quoted_spellings(scope))

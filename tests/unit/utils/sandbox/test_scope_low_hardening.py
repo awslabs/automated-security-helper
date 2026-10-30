@@ -6,14 +6,16 @@
 A remembered probe refusal keeps no traceback; SandboxBackendUnavailable survives
 pickle; a scanner whose config is of another class is refused for that, and one
 whose config has no name is named by its declaration; a class scope says its
-values are unread; an explicit network list that omits a scanner is said once; a
-cache-only scanner gets no read_path_scanners advice and a warning is written once
-per process; a converter's offline option is read from the converters section; the
-probe directory is removed when the scope build raises anything; any planning
-failure is counted on the scope; a registration that raises runs the plan's
-cleanup; the sweep is the cleanup's first step and passes over the plan's private
-directories; a record that raises releases each root once; and a DEBUG record
-names no argv when the plugin's values could not be read. Nothing runs a backend.
+values are unread and that it is a class scope; an explicit network list that
+omits a scanner is said once; a cache-only scanner gets no read_path_scanners
+advice and a warning is written once per scanned tree, scanner and setting (a
+second tree in the same process gets its own); a converter's offline option is
+read from the converters section; the probe directory is removed when the scope
+build raises anything; any planning failure is counted on the scope; a
+registration that raises runs the plan's cleanup; the sweep is the cleanup's first
+step and passes over the plan's private directories; a record that raises releases
+each root once; and a DEBUG record names no argv when the plugin's values could not
+be read, saying for a class scope that none exist. Nothing runs a backend.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from automated_security_helper.base.converter_plugin import ConverterPluginBase
 from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.sandbox import scope
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from automated_security_helper.utils.sandbox.policy import (
@@ -160,6 +163,7 @@ def test_a_nameless_config_reads_as_the_declared_name_not_a_rename(fresh, tmp_pa
     built = scope.scanner_sandbox_scope(plugin, _context(tmp_path), None)
     assert built is not None
     assert built.scanner_name == "tool"
+    assert built.class_scope is False
 
 
 def test_a_class_scope_marks_its_values_unread(fresh, tmp_path):
@@ -167,6 +171,7 @@ def test_a_class_scope_marks_its_values_unread(fresh, tmp_path):
     assert built is not None
     assert built.environment_values_unread is True
     assert built.environment_values == ()
+    assert built.class_scope is True
 
 
 def test_an_explicit_network_list_omitting_the_scanner_is_said_once(
@@ -181,6 +186,39 @@ def test_an_explicit_network_list_omitting_the_scanner_is_said_once(
     said = [m for level, m in logger.lines if "network" in m and "tool" in m]
     assert len(said) == 1, logger.lines
     assert "withholds" in said[0]
+
+
+def test_a_withheld_note_is_said_once_per_scanned_tree(fresh, tmp_path, monkeypatch):
+    """One process can scan several trees in turn (an MCP server), each under
+    its own configuration: a note already written for one tree is written again
+    for the next, once, at both sites (the operator's network list at INFO, a
+    withheld grant at WARNING); the same tree twice stays one note."""
+    logger = _Logger()
+    monkeypatch.setattr(scope, "ASH_LOGGER", logger)
+    plugin = _Plugin(sandbox_requirements=SandboxRequirements(network=True))
+    context = _context(tmp_path, network_scanners=["other"])
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+
+    with subprocess_utils.scanning_tree(first):
+        for _ in range(2):
+            scope.scanner_sandbox_scope(plugin, context, None)
+        scope._warn_withheld_once("tool", "network", "withheld for the first tree")
+        scope._warn_withheld_once("tool", "network", "withheld for the first tree")
+    with subprocess_utils.scanning_tree(second):
+        scope.scanner_sandbox_scope(plugin, context, None)
+        scope._warn_withheld_once("tool", "network", "withheld for the second tree")
+
+    network_list = [
+        (level, m) for level, m in logger.lines if "sandbox.network_scanners" in m
+    ]
+    assert [level for level, _ in network_list] == ["info", "info"], logger.lines
+    withheld = [(level, m) for level, m in logger.lines if m.startswith("withheld")]
+    assert withheld == [
+        ("warning", "withheld for the first tree"),
+        ("warning", "withheld for the second tree"),
+    ], logger.lines
 
 
 def test_a_cache_only_scanner_gets_no_read_path_advice_and_advice_comes_once(
@@ -353,3 +391,24 @@ def test_the_record_names_no_argv_when_the_values_are_unread(
     assert "the-secret" not in record
     assert "could not be read" in record
     assert record.startswith("Scanner sandbox (recorder, network=no) for scanner")
+
+
+def test_the_record_of_a_class_scope_says_it_carries_no_values(
+    tmp_path, planning, monkeypatch
+):
+    """A class scope has no values hook to read, so nothing failed: its record
+    says so instead of reporting a read that never happened."""
+    logger = _Logger()
+    monkeypatch.setattr(scope, "ASH_LOGGER", logger)
+    monkeypatch.setattr(scope, "delivers", lambda *args: True)
+    monkeypatch.setattr(scope, "register_writable_root", lambda path: Path(path))
+    monkeypatch.setattr(scope, "release_writable_root", lambda path: None)
+    sandbox_scope = _scope(tmp_path, environment_values_unread=True, class_scope=True)
+
+    with scope.sandbox_scope(sandbox_scope):
+        scope._plan_spawn(sandbox_scope, ["tool", "--token=the-secret"], {}, None)
+
+    (record,) = [m for level, m in logger.lines if level == "debug"]
+    assert "the-secret" not in record
+    assert "carries no redaction values" in record
+    assert "could not be read" not in record
