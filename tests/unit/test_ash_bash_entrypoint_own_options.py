@@ -23,6 +23,7 @@ import os
 import shutil
 import stat
 import subprocess
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -120,8 +121,12 @@ def _run(
     env: Optional[Dict[str, str]] = None,
     script: Optional[str] = None,
     stdin=subprocess.DEVNULL,
+    stdout=subprocess.PIPE,
 ):
-    """Run ./ash against the recording runner: (result, calls)."""
+    """Run ./ash against the recording runner: (result, calls).
+
+    stdout is captured unless a caller hands in its own (a pseudo-terminal, to
+    make the wrapper see a terminal there); stderr is always captured."""
     program, log_dir = runner
     environment = with_fixed_ids(
         {k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV},
@@ -133,7 +138,8 @@ def _run(
     environment.update(env or {})
     result = subprocess.run(  # nosec B603 B607 - fixed script path, list args, no shell
         ["bash", script or str(ASH_SCRIPT), *args],
-        capture_output=True,
+        stdout=stdout,
+        stderr=subprocess.PIPE,
         text=True,
         cwd=str(cwd or REPO_ROOT),
         env=environment,
@@ -368,28 +374,46 @@ def test_the_containers_stdin_is_kept_open_for_piped_input(runner, tmp_path):
 
 
 def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(runner, tmp_path):
-    """With a terminal on stdin and stdout captured (`./ash scan > log`, or `./ash
-    scan &` from an interactive shell), -i would have the runner read the terminal,
-    and a background job stops on that read. So a terminal stdin gets no -i. The
-    terminal is a real pseudo-terminal, not a faked check."""
+    """`./ash scan &` from an interactive shell: the terminal is on stdin AND stdout.
+    With -i the runner reads the terminal and the background job stops on that read,
+    so a terminal stdin gets no -i, whatever stdout is. The terminal is a real
+    pseudo-terminal on both ends, which is the shape the earlier `[ -t 1 ]` arm
+    gave -i to; a captured stdout would not tell the two apart. The runner's options
+    come from the recording runner's log, not from the wrapper's output."""
     source, out = _dirs(tmp_path)
     try:
         controller, terminal = os.openpty()
     except OSError as error:  # pragma: no cover - a venue without pseudo-terminals
         pytest.skip(f"no pseudo-terminal on this host: {error}")
+    printed: List[bytes] = []
+
+    def drain() -> None:
+        # Whatever the wrapper prints to its terminal is read here, so a write can
+        # never block on a full pseudo-terminal buffer.
+        while True:
+            try:
+                chunk = os.read(controller, 4096)
+            except OSError:
+                return
+            if not chunk:
+                return
+            printed.append(chunk)
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
     try:
         result, calls = _run(
             runner,
             ["--no-build", "--source-dir", str(source), "--output-dir", str(out)],
             stdin=terminal,
+            stdout=terminal,
         )
     finally:
         os.close(terminal)
         os.close(controller)
-    shown = result.stdout + result.stderr
+    reader.join(timeout=10)
+    shown = b"".join(printed).decode("utf-8", "replace") + result.stderr
     assert result.returncode == 0, shown
     run = _only_run(calls, shown)
     options = _runner_options(run)
     assert "-i" not in options, options
-    # Captured stdout is not a terminal either, so no pseudo-terminal is asked for.
-    assert "-t" not in options, options
