@@ -250,7 +250,10 @@ def test_a_null_cvss_object_does_not_fail_the_conversion(scanner):
 
 def test_each_advisory_of_a_package_keeps_its_own_severity_and_range(scanner):
     """The package entry carries the highest of its advisories' severities and
-    the union of their ranges. Each result takes its own advisory's."""
+    the union of their ranges. Each result takes its own advisory's. With no
+    lockfile the installed version is unknown, and the result carries no
+    installed_version (the package's range stood in for it once; a range is not
+    a version), so the grades are keyed on None here."""
     document = _report(
         pkg=(
             "critical",
@@ -273,11 +276,12 @@ def test_each_advisory_of_a_package_keeps_its_own_severity_and_range(scanner):
     assert low.properties.model_extra["severity"] == "low"
     assert low.properties.model_extra["vulnerable_versions"] == ">=2.0.0 <2.0.3"
     assert ">=2.0.0 <2.0.3" in low.message.root.text
-    assert grades[("GHSA-pkg-low", "<1.0.0 || >=2.0.0 <2.0.3")] == "LOW"
+    assert "installed_version" not in low.properties.model_extra
+    assert grades[("GHSA-pkg-low", None)] == "LOW"
     critical = by_rule["GHSA-pkg-critical"]
     assert critical.level == "error"
     assert critical.properties.model_extra["vulnerable_versions"] == "<1.0.0"
-    assert grades[("GHSA-pkg-critical", "<1.0.0 || >=2.0.0 <2.0.3")] == "CRITICAL"
+    assert grades[("GHSA-pkg-critical", None)] == "CRITICAL"
     rules = {r.id: r for r in report.runs[0].tool.driver.rules}
     assert "low" in rules["GHSA-pkg-low"].properties.tags
     assert "critical" in rules["GHSA-pkg-critical"].properties.tags
@@ -334,7 +338,9 @@ def test_a_transitive_entry_with_no_nodes_still_produces_a_result(scanner):
         r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-child"
     ]
     assert len(transitive) == 1, [r.ruleId for r in report.runs[0].results]
-    assert grades[("npm-audit-transitive-child", "*")] == "HIGH"
+    # No node and no lockfile: the installed version is unknown, so the result
+    # carries no installed_version and the grade is keyed on None.
+    assert grades[("npm-audit-transitive-child", None)] == "HIGH"
 
 
 def test_a_later_lockfile_s_score_reaches_the_rule_the_first_lockfile_kept(scanner):
@@ -417,7 +423,9 @@ def test_a_null_nodes_list_on_a_root_does_not_fail_the_conversion(scanner):
 
 def test_a_yarn_or_pnpm_record_with_no_versions_still_produces_a_result(scanner):
     """The v1 and berry readers list each installed version under the record's
-    versions map; a record with an empty map is still the tool's finding."""
+    versions map; a record with an empty map is still the tool's finding, one
+    result for the package by name with no installed_version (the vulnerable
+    range stood in for the version once; a range is not a version)."""
     record = {
         "package": "lodash",
         "id": 1065,
@@ -441,9 +449,10 @@ def test_a_yarn_or_pnpm_record_with_no_versions_still_produces_a_result(scanner)
     (result,) = report.runs[0].results
     props = result.properties.model_extra
     assert props["package_name"] == "lodash"
-    assert props["installed_version"] == ">=3.7.0 <4.17.19"
+    assert "installed_version" not in props, props
+    assert props["vulnerable_versions"] == ">=3.7.0 <4.17.19"
     assert "dependency_paths" not in props
-    assert grades[("GHSA-p6mc-m468-83gw", ">=3.7.0 <4.17.19")] == "HIGH"
+    assert grades[("GHSA-p6mc-m468-83gw", None)] == "HIGH"
 
 
 def test_a_yarn_record_with_a_score_grades_from_it(scanner):
