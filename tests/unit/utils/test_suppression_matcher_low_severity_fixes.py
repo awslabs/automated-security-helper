@@ -119,6 +119,34 @@ class TestUnmatchedDirectoryWarning:
         messages = [record.getMessage() for record in ash_warnings]
         assert len(messages) == 1 and "'plain-dir/'" in messages[0], messages
 
+    def test_a_config_given_builds_the_record_itself(self, ash_warnings, monkeypatch):
+        """Red at the base: the function took ``recorded`` only, and the scan's
+        caller passed neither, so this one warning quoted a path read from the
+        environment by its value. Given the config, the record is built here
+        (``recorded_suppressions``) from the config's own suppressions, and the
+        path is quoted by its reference."""
+        from automated_security_helper.utils import suppression_matcher
+
+        suppression = AshSuppression(path="resolved-dir/", rule_id="R1", reason="r")
+        config = object()
+        asked_for = []
+
+        def fake_record(given):
+            asked_for.append(given)
+            return {id(suppression): {"path": "${ASH_LOW_FIX_DIR}/"}}
+
+        monkeypatch.setattr(suppression_matcher, "recorded_suppressions", fake_record)
+
+        warn_unmatched_directory_suppressions(
+            [suppression], used_ids=set(), config=config
+        )
+
+        assert asked_for == [config]
+        messages = [record.getMessage() for record in ash_warnings]
+        assert len(messages) == 1, messages
+        assert "'${ASH_LOW_FIX_DIR}/'" in messages[0]
+        assert "resolved-dir" not in messages[0]
+
 
 class TestUnreadableExpiration:
     def test_one_bad_date_warns_once_not_once_per_finding(self, ash_warnings):

@@ -26,6 +26,7 @@ from automated_security_helper.config.config_sources import (
     is_config_parse_error,
     is_json_file,
     is_toml_file,
+    load_config_document,
     parse_config_text,
     read_config_bytes,
     read_config_file_literally,
@@ -658,10 +659,12 @@ class ConfigLinter:
             # own, and an empty string in its place would read as one.
             return None, [], None
 
-        # Find the unused suppressions report
-        report_path, report_timestamp = cls._find_unused_report(
-            config_path, output_dir, config_data
-        )
+        # Find the unused suppressions report, under the name the merged
+        # configuration gives it (the chain is resolved in _find_unused_report):
+        # a scan reads the merged configuration, so an extension an `extends`
+        # base sets names the report it writes, and the fixer, which named it
+        # from this file's own data, found no report of that scan.
+        report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
 
         if report_path is None:
             return raw_content, [], None
@@ -2293,18 +2296,23 @@ class ConfigLinter:
 
     @classmethod
     def find_unused_report(
-        cls, config_path: Path, output_dir: Optional[Path] = None
+        cls,
+        config_path: Path,
+        output_dir: Optional[Path] = None,
+        config_data: Any = None,
     ) -> Tuple[Optional[Path], Optional[datetime]]:
         """The unused-suppressions report a lint of ``config_path`` reads, under
         the name the config gives it (``reporters.unused-suppressions.extension``),
         and the report's modification time; ``(None, None)`` when there is none.
 
         With ``output_dir`` the report is looked for there only; without it, in
-        the usual places beside the config. Public for the CLI's --source-dir
-        check, which looked under the default name alone and so never found a
-        report written under a configured extension.
+        the usual places beside the config. ``config_data`` is the configuration
+        that names the report, the merged one where the caller holds it; without
+        it the chain is resolved here (``_find_unused_report``). Public for the
+        CLI's --source-dir check, which looked under the default name alone and
+        so never found a report written under a configured extension.
         """
-        return cls._find_unused_report(config_path, output_dir)
+        return cls._find_unused_report(config_path, output_dir, config_data)
 
     @classmethod
     def _find_unused_report(
@@ -2315,18 +2323,33 @@ class ConfigLinter:
     ) -> Tuple[Optional[Path], Optional[datetime]]:
         """Find the unused suppressions report file.
 
-        ``config_data`` is the checked file as parsed, which names the report
-        (``_unused_report_name``); read here when the caller holds none.
+        ``config_data`` is the configuration that names the report
+        (``_unused_report_name``): the merged one where the caller holds it
+        (lint's ``resolved_data``), the checked file's own where the fixer
+        passes it. When the caller holds none, the chain is resolved here
+        (``load_config_document``: ``extends`` and ``patch`` applied, no model
+        built), so an extension set in a base names the report, as it names the
+        file a scan writes; a chain that cannot be resolved falls back to the
+        file alone, and a file that cannot be read to the default name.
 
         Returns:
             Tuple of (report_path, report_modification_time) or (None, None)
         """
         if config_data is None:
             try:
-                config_data = cls._load_config(config_path)
-            except (OSError, ValueError, yaml.YAMLError, ASHConfigSourceError):
-                # The caller's own load reports why; the default name stands.
-                config_data = None
+                config_data = load_config_document(config_path)
+            except (
+                OSError,
+                ValueError,
+                yaml.YAMLError,
+                ASHConfigSourceError,
+                RecursionError,
+            ):
+                try:
+                    config_data = cls._load_config(config_path)
+                except (OSError, ValueError, yaml.YAMLError, ASHConfigSourceError):
+                    # The caller's own load reports why; the default name stands.
+                    config_data = None
         report_name = cls._unused_report_name(config_data)
         # Determine the output directory
         if output_dir is not None:

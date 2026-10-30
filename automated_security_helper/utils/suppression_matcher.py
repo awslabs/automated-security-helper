@@ -295,6 +295,7 @@ def warn_unmatched_directory_suppressions(
     suppressions: Iterable[AshSuppression],
     used_ids: Iterable[str],
     recorded: Optional[Dict[int, Dict[str, Any]]] = None,
+    config: Any = None,
 ) -> None:
     """Warn once for each suppression whose path ends in ``/`` and matched nothing.
 
@@ -314,8 +315,16 @@ def warn_unmatched_directory_suppressions(
 
     ``recorded`` is ``recorded_suppressions(config)``. The warning then quotes a
     path the config file read from the environment by its reference, as every
-    other message about a suppression does, and never by its value.
+    other message about a suppression does, and never by its value. A caller
+    that holds the config passes it as ``config`` instead and the record is
+    built here, from the same list it is keyed by: the scan's caller passed
+    neither, so a path read from the environment was printed by its value in
+    this one warning. The record is keyed by ``id()``, so ``suppressions`` are
+    the config's own instances (``config.global_settings.suppressions``), not
+    copies; with ``config`` given that is what the record is built from.
     """
+    if recorded is None and config is not None:
+        recorded = recorded_suppressions(config)
     used = set(used_ids)
     for suppression in suppressions:
         path = getattr(suppression, "path", None) or ""

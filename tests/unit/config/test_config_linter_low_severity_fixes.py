@@ -394,6 +394,54 @@ class TestWhichSuppressionsTheReportLists:
         message read ``rule_id='None'``."""
         assert ConfigLinter._rule_shown(entry) == "*"
 
+    def test_an_extension_set_in_an_extends_base_names_the_report(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the report's name was taken from the checked file's
+        own data, so an ``extension`` an ``extends`` base sets (a scan reads the
+        merged configuration and writes ``reports/ash.<extension>``) made lint
+        report no report found. Lint names it from the merged data now."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "base.yaml").write_text(
+            "reporters:\n  unused-suppressions:\n    extension: from-base.json\n",
+            encoding="utf-8",
+        )
+        config_path = tmp_path / ".ash.yaml"
+        config_path.write_text(
+            "extends: base.yaml\n"
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - path: src/own.py\n"
+            "      rule_id: B1\n"
+            "      reason: own\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "out"
+        (out / "reports").mkdir(parents=True)
+        (out / "reports" / "ash.from-base.json").write_text(
+            json.dumps(
+                {
+                    "unused_suppressions": [
+                        {"path": "src/own.py", "rule_id": "B1", "reason": "own"}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = ConfigLinter.lint(config_path, output_dir=out, check_unused=True)
+
+        messages = [
+            issue.message
+            for issue in result.issues
+            if issue.category == LintCategory.SUPPRESSION_UNUSED
+        ]
+        assert not any("No unused suppressions report found" in m for m in messages), (
+            messages
+        )
+        assert any(m.startswith("Unused suppression:") for m in messages), messages
+
     def test_only_the_files_own_entries_are_fixable(self, tmp_path, monkeypatch):
         """An entry an ``extends`` base supplies is reported unused with the
         file's, since a scan reads the merged list, and is not fixable: the

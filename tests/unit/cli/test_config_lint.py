@@ -1790,3 +1790,94 @@ def test_lint_fix_passes_a_clean_toml_file_without_the_refusal(tmp_path):
     assert result.exit_code == 0, result.output
     flat = " ".join(result.output.split())
     assert "rewrites YAML and JSON config files" not in flat, flat
+
+
+def _a_scanned_tree_with_a_report(tmp_path: Path, extension: str) -> Path:
+    """A scanned tree whose last scan wrote the unused-suppressions report under
+    ``reports/ash.<extension>``, listing the one entry the configs below hold."""
+    root = tmp_path / "root"
+    reports = root / ".ash" / "ash_output" / "reports"
+    reports.mkdir(parents=True)
+    (reports / f"ash.{extension}").write_text(
+        json.dumps({"unused_suppressions": [{"path": "src/a.py", "rule_id": "B101"}]}),
+        encoding="utf-8",
+    )
+    return root
+
+
+_SUPPRESSION_LINES = (
+    "global_settings:\n  suppressions:\n    - path: src/a.py\n      rule_id: B101\n"
+    "      reason: once\n"
+)
+
+
+def test_lint_source_dir_finds_the_report_under_the_configured_extension(tmp_path):
+    """Red at the base: with --config outside the scanned tree, the --source-dir
+    check looked for the report under the default name alone, so a scan
+    configured with ``extension`` wrote a report the lint never pointed at, and
+    --fix-unused commented nothing out."""
+    root = _a_scanned_tree_with_a_report(tmp_path, "alt.json")
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    config_path = conf / "ash.yaml"
+    config_path.write_text(
+        "project_name: demo\n"
+        "reporters:\n  unused-suppressions:\n    extension: alt.json\n"
+        + _SUPPRESSION_LINES,
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        config_app,
+        [
+            "lint",
+            "--config",
+            str(config_path),
+            "--source-dir",
+            str(root),
+            "--fix-unused",
+            "--non-interactive",
+        ],
+        env={"COLUMNS": "400"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No unused suppressions report found" not in result.output, result.output
+    assert "# [ash-lint" in config_path.read_text(encoding="utf-8")
+
+
+def test_lint_source_dir_finds_the_report_named_by_an_extends_base(tmp_path):
+    """Red at the base: the report's name was read from the checked file's own
+    data, so an ``extension`` set in the ``extends`` base (what the scan, which
+    reads the merged configuration, wrote the report under) was never looked
+    for, by the --source-dir check or by the fixer."""
+    root = _a_scanned_tree_with_a_report(tmp_path, "from-base.json")
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    (conf / "base.yaml").write_text(
+        "reporters:\n  unused-suppressions:\n    extension: from-base.json\n",
+        encoding="utf-8",
+    )
+    config_path = conf / "ash.yaml"
+    config_path.write_text(
+        "extends: base.yaml\nproject_name: demo\n" + _SUPPRESSION_LINES,
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        config_app,
+        [
+            "lint",
+            "--config",
+            str(config_path),
+            "--source-dir",
+            str(root),
+            "--fix-unused",
+            "--non-interactive",
+        ],
+        env={"COLUMNS": "400"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No unused suppressions report found" not in result.output, result.output
+    assert "# [ash-lint" in config_path.read_text(encoding="utf-8")
