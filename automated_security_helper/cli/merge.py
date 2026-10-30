@@ -2244,6 +2244,12 @@ def apply_aggregated_suppressions(
             )
         else:
             lift_ash_suppressions(merged.sarif)
+            # The record goes with the suppressions. ``used_suppressions`` is the
+            # union of what the shards' passes matched; a scan run with the flag
+            # never calls apply_suppressions_to_sarif, which is what fills it, so
+            # its results record none, and a merged results file whose SARIF now
+            # carries none of the shards' suppressions must not say they matched.
+            merged.used_suppressions.clear()
 
     # Recomputed unconditionally, not only when suppressions ran. Under
     # ``--ignore-suppressions`` the counts change when a suppression the shards

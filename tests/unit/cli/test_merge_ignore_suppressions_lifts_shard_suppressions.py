@@ -118,6 +118,33 @@ def test_the_flag_keeps_a_scanners_own_suppression(tmp_path):
     assert [s.justification for s in native] == ["nosec comment in source"]
 
 
+def test_the_flag_clears_the_record_of_the_suppressions_the_shards_matched(tmp_path):
+    """``used_suppressions`` is the union of what the shards' passes matched. With
+    the suppressions lifted from every result, a record that still said they
+    matched would describe a SARIF the merged results file no longer holds; a
+    scan run with the flag records none, since it never runs the pass."""
+    model = _results_as_the_shards_left_them()
+    model.used_suppressions = {"bandit:B101:src/bandit_0.py"}
+
+    merged = apply_aggregated_suppressions(
+        model, _context(tmp_path, model.ash_config, ignore_suppressions=True)
+    )
+
+    assert merged.used_suppressions == set()
+
+
+def test_without_the_flag_the_shards_record_is_kept(tmp_path):
+    """The control: the pass adds to the set the shards filled, never replaces it."""
+    model = _results_as_the_shards_left_them()
+    model.used_suppressions = {"bandit:B101:src/bandit_0.py"}
+
+    merged = apply_aggregated_suppressions(
+        model, _context(tmp_path, model.ash_config, ignore_suppressions=False)
+    )
+
+    assert "bandit:B101:src/bandit_0.py" in merged.used_suppressions
+
+
 def test_the_metrics_follow_the_lifted_suppressions(tmp_path):
     kept = _merged(tmp_path, ignore_suppressions=False)
     lifted = _merged(tmp_path, ignore_suppressions=True)
