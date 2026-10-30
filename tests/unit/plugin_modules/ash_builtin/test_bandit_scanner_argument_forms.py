@@ -366,7 +366,9 @@ def test_a_verified_path_binary_reports_its_own_version(tmp_path, monkeypatch):
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: [binary])
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
+    )
     monkeypatch.setattr(
         pre_installed_tool,
         "verify_pre_installed_tool",
@@ -387,7 +389,9 @@ def test_a_path_binary_with_no_version_answer_keeps_the_probes(tmp_path, monkeyp
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: [binary])
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
+    )
     monkeypatch.setattr(
         pre_installed_tool,
         "verify_pre_installed_tool",

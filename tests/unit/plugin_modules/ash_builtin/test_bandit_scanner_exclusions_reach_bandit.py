@@ -612,7 +612,7 @@ def test_a_uv_answer_by_path_keeps_the_uv_route(tmp_path, monkeypatch):
     monkeypatch.setattr(
         bandit_scanner,
         "get_uv_tool_command",
-        lambda command: [uv, "tool", "run", "bandit"],
+        lambda command, **kwargs: [uv, "tool", "run", "bandit"],
     )
     monkeypatch.setattr(
         pre_installed_tool,
