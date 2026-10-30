@@ -141,15 +141,23 @@ def test_a_scored_advisory_is_graded_by_its_cvss_score(scanner):
         )
     )
 
+    # The converted report, before the normalizer: the scanner declares no
+    # word-based grade beside a usable score. After normalization the result
+    # carries the score's band (the normalizer's documented copy), which is
+    # what the ladder then reads.
+    converted = scanner._convert_npm_audit_to_sarif(
+        document, scanner.context.source_dir
+    )
+    assert "issue_severity" not in converted.runs[0].results[0].properties.model_extra
+
     report, grades = _graded(scanner, document)
 
     assert list(grades.values()) == ["CRITICAL"], grades
     rule = report.runs[0].tool.driver.rules[0]
     assert rule.properties.model_extra["security_severity"] == 9.8
-    # The scanner itself declares no word-grade; the normalizer writes the
-    # result's issue_severity from the rule's score afterwards.
-    raw = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
-    assert "issue_severity" not in raw.runs[0].results[0].properties.model_extra
+    assert report.runs[0].results[0].properties.model_extra["issue_severity"] == (
+        "CRITICAL"
+    )
 
 
 def test_npm_s_zero_score_without_a_vector_is_no_score(scanner):
@@ -276,11 +284,18 @@ def test_a_yarn_record_with_a_score_grades_from_it(scanner):
     }
     document = {"yarn_advisories": [record], "metadata": {}}
 
+    # Before the normalizer no word-based grade is declared beside the score.
+    converted = scanner._convert_npm_audit_to_sarif(
+        document, scanner.context.source_dir
+    )
+    (converted_result,) = converted.runs[0].results
+    assert "issue_severity" not in converted_result.properties.model_extra
+
     report, grades = _graded(scanner, document)
 
-    raw = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
-    (raw_result,) = raw.runs[0].results
-    assert "issue_severity" not in raw_result.properties.model_extra
+    (result,) = report.runs[0].results
+    # After it the result carries the score's band, the normalizer's copy.
+    assert result.properties.model_extra["issue_severity"] == "CRITICAL"
     rule = report.runs[0].tool.driver.rules[0]
     assert rule.properties.model_extra["security_severity"] == 9.8
     assert grades[("GHSA-xvch-5gv4-984h", "0.0.8")] == "CRITICAL"
