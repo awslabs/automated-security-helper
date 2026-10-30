@@ -444,3 +444,74 @@ def test_configure_with_ignore_nosec_adds_the_flag_once(tmp_path):
     argv, _, _ = scanner._execute_scan(source, "source", [])
 
     assert argv.count("--ignore-nosec") == 1
+
+
+# ---------------------------------------------------------------------------
+# A configuration handed to scan() is applied before the scan, once
+# ---------------------------------------------------------------------------
+
+
+def test_a_config_handed_to_the_scan_is_applied_before_it(tmp_path, monkeypatch):
+    """The executor passes each target's configuration to scan(); the base
+    pre-scan swapped self.config without rebuilding argv, so the construction
+    confidence level stayed and --ignore-nosec never appeared."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    monkeypatch.setattr(
+        BanditScanner, "validate_plugin_dependencies", lambda self: True
+    )
+    handed = BanditScannerConfig(
+        options=BanditScannerConfigOptions(confidence_level="high", ignore_nosec=True)
+    )
+
+    assert scanner._pre_scan(source, "source", config=handed) is True
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert _option_values(argv, "--confidence-level") == ["high"]
+    assert argv.count("--ignore-nosec") == 1
+    assert argv.count("--recursive") == 1
+    assert len([arg for arg in argv if arg.startswith("--exclude=")]) == 1
+
+
+def test_the_same_config_handed_again_changes_nothing(tmp_path, monkeypatch):
+    """The executor hands the same configuration on every target; an equal one
+    re-reads no option (no second config_file warning, no second probe)."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    monkeypatch.setattr(
+        BanditScanner, "validate_plugin_dependencies", lambda self: True
+    )
+    applied: list[int] = []
+    monkeypatch.setattr(BanditScanner, "_apply_config", lambda self: applied.append(1))
+
+    same = BanditScannerConfig(options=BanditScannerConfigOptions())
+    assert scanner._pre_scan(source, "source", config=same) is True
+    assert scanner._pre_scan(source, "source", config=same.model_dump()) is True
+
+    assert applied == []
+
+
+def test_a_new_tool_version_rebuilds_the_install_command_and_probe(
+    tmp_path, monkeypatch
+):
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    setups: list[int] = []
+    monkeypatch.setattr(
+        BanditScanner, "_setup_uv_tool_install_commands", lambda self: setups.append(1)
+    )
+
+    scanner.configure(
+        BanditScannerConfig(options=BanditScannerConfigOptions(confidence_level="low"))
+    )
+    assert setups == [], "the same tool_version builds no new install command"
+
+    scanner.configure(
+        BanditScannerConfig(
+            options=BanditScannerConfigOptions(tool_version=">=1.7.8,<1.8.0")
+        )
+    )
+
+    assert setups == [1]
+    assert scanner._deferred_tool_version_probe == ("bandit", scanner._uv_from_spec())
+    assert ">=1.7.8,<1.8.0" in (scanner._uv_from_spec() or "")

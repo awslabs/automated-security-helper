@@ -609,6 +609,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     # _process_config_options.
     _ini_file: Optional[Path] = PrivateAttr(default=None)
 
+    # The uv --from spec the install command and the version probe were built
+    # for; _apply_config rebuilds both only when a new configuration changes it.
+    _applied_from_spec: Optional[str] = PrivateAttr(default=None)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = BanditScannerConfig()
@@ -622,7 +626,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # The version probe is recorded here and run once, by the dependency
         # check, the SARIF step or the inventory (resolve_deferred_tool_version):
         # construction must start nothing, whoever constructs the scanner.
-        self._deferred_tool_version_probe = ("bandit", self._uv_from_spec())
+        self._applied_from_spec = self._uv_from_spec()
+        self._deferred_tool_version_probe = ("bandit", self._applied_from_spec)
         self.description = "Bandit is a Python source code security analyzer."
         self.args = ToolArgs(
             format_arg="--format",
@@ -697,20 +702,69 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         try:
             if config is not None:
                 self.config = config
-                # The option arguments (--confidence-level, --configfile or
-                # --ini, --ignore-nosec, the construction-time --exclude) are
-                # built from the configuration when it is read; swapping the
-                # configuration alone left the old ones in argv, so a new
-                # confidence_level or config_file was never applied. Start from
-                # the base arguments and read the new options once.
-                self._ini_file = None
-                self.args.extra_args = self._base_extra_args()
-                self._process_config_options()
+                self._apply_config()
 
         except Exception as e:
             raise ScannerError(
                 f"Failed to configure {self.__class__.__name__}: {str(e)}"
             )
+
+    def _apply_config(self) -> None:
+        """Rebuild what construction built from ``self.config``, after it changed.
+
+        The option arguments (``--confidence-level``, ``--configfile`` or
+        ``--ini``, ``--ignore-nosec``, the construction-time ``--exclude``) are
+        built from the configuration when it is read; swapping the configuration
+        alone left the old ones in argv, so a new ``confidence_level`` or
+        ``config_file`` was never applied. The arguments start again from the
+        base ones and the new options are read once. The ``uv tool install``
+        command and the deferred version probe are built from ``tool_version``
+        the same way; they are rebuilt only when the new configuration changes
+        the ``--from`` spec, so a configuration that differs elsewhere does not
+        run the version probe a second time.
+        """
+        self._ini_file = None
+        self.args.extra_args = self._base_extra_args()
+        self._process_config_options()
+        spec = self._uv_from_spec()
+        if spec != self._applied_from_spec:
+            self._setup_uv_tool_install_commands()
+            self._deferred_tool_version_probe = ("bandit", spec)
+            self._applied_from_spec = spec
+
+    def _pre_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        config: Any = None,
+        *args,
+        **kwargs,
+    ) -> bool:
+        """The base pre-scan, with a configuration handed to ``scan()`` applied first.
+
+        The executor passes each target's scanner configuration to ``scan()``,
+        and the base ``_pre_scan`` replaces ``self.config`` with it after the
+        dependency check and without rebuilding anything (``configure()`` is
+        called by nothing on that route), so the argv built at construction
+        stayed: the old ``--confidence-level``, no ``--ignore-nosec``, the old
+        ``--ini`` or ``--configfile``, while the ``--exclude`` rebuilt per scan
+        took the new ``excluded_paths`` and the run looked configured. Here a
+        configuration that differs from the current one is applied
+        (``_apply_config``) before the base runs its dependency check, so the
+        check and the argv read the configuration the scan runs under; one
+        equal to the current configuration, which the executor passes on every
+        target, changes nothing.
+        """
+        if config is not None:
+            if hasattr(config, "model_dump") and callable(config.model_dump):
+                config = config.model_dump(by_alias=True)
+            replacement = self.config.__class__.model_validate(config)
+            if replacement.model_dump(by_alias=True) != self.config.model_dump(
+                by_alias=True
+            ):
+                self.config = replacement
+                self._apply_config()
+        return super()._pre_scan(target, target_type, None, *args, **kwargs)
 
     def validate_plugin_dependencies(self) -> bool:
         """Enhanced validation with explicit tool installation.
