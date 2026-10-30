@@ -44,10 +44,11 @@ def handle_scan_completion_logging(*args, **kwargs) -> bool:
     if isinstance(remaining_count, (int, float)) and remaining_count > 0:
         ASH_LOGGER.info(message)
     elif kwargs.get("succeeded") is False:
-        # SCAN_COMPLETE is announced for every recorded turn, a turn that ended
-        # in a failure container included, so the last event of a scan can be
-        # a failed scanner's. "All scanners completed!" read as "all succeeded"
-        # then; the line names the failure when the emitter says so.
+        # SCAN_COMPLETE is announced for every recorded turn, a recorded turn
+        # whose scanner_succeeded is False included, so the last event of a
+        # scan can be a failed scanner's. "All scanners completed!" read as
+        # "all succeeded" then; the line names the failure when the emitter
+        # says so.
         scanner = kwargs.get("scanner")
         who = f"the last, {scanner}," if scanner else "the last"
         ASH_LOGGER.info(f"All scanners completed; {who} ended with a failure.")
