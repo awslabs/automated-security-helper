@@ -21,7 +21,7 @@ from typing import (
 )
 from urllib.parse import quote, quote_plus, unquote
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AnyUrl, BaseModel, ConfigDict
 
 
 def mask_secret_in_text(text: str, rule_id: str | None = None) -> str:
@@ -104,6 +104,16 @@ def _mask_secret_value(secret: str) -> str:
     )
 
 
+#: What the docstring below means by "already shows in every masked message", since
+#: it is written into the generated schema (schemas/AshAggregatedResults.json) and
+#: stays as it is: a shape holds no more than the masked form of its value shows,
+#: the characters ``_mask_secret_value`` leaves visible and the length. A value
+#: quoted in a message leaves that form in the masked message; a value read from
+#: a finding's region alone, whose lines are masked whole, leaves it nowhere, and
+#: its shape then tells those visible characters and the length on its own. Only
+#: a value of at least ``MIN_PROPAGATED_VALUE_LENGTH`` characters that
+#: ``_looks_like_a_secret`` has a shape at all, so no short value's shape can be
+#: reversed by trying values.
 class SecretValueShape(BaseModel):
     """What the masked form of a value shows: its visible prefix and suffix and its length.
 
@@ -170,10 +180,13 @@ def shapes_of_secret_values(values: Iterable[str]) -> List[SecretValueShape]:
 # * by value: every value a secret finding exposes -- quoted in its message
 #   (bandit B105-B107's ``Possible hardcoded password: '<value>'``, ferret-scan's
 #   ``Matched text: '<value>'``) or matched by its own region (semgrep's and
-#   opengrep's columns) -- is masked in its own message, and, when it looks like
-#   a secret (``_propagates``), with ``_mask_secret_value`` wherever it occurs as
-#   a whole token in the text findings report. Rule metadata, tags and
-#   identifiers are left alone (``_METADATA_FIELDS``, ``_SKIPPED_FIELDS``).
+#   opengrep's columns) -- is masked in its own message (a quoted value at its
+#   quotes; a matched value wherever the message repeats it, unless it is an
+#   ordinary word, which the message's label may be made of), in every finding
+#   that shows the line it was found on, and, when it looks like a secret
+#   (``_propagates``), with ``_mask_secret_value`` wherever it occurs as a whole
+#   token in the text findings report. Rule metadata, tags and identifiers are
+#   left alone (``_METADATA_FIELDS``, ``_SKIPPED_FIELDS``).
 #
 # A secret finding is one from a secrets scanner (``utils/scanner_tool_types.py``),
 # one tagged ``secret``, ``secrets`` or a hard-coded credential CWE (798, 259,
@@ -232,12 +245,13 @@ def _value_patterns(label: str) -> Tuple[re.Pattern[str], re.Pattern[str]]:
     ends the message: the first pattern takes everything to the last matching
     quote at the end. The second, to the first matching quote, is for a message
     that goes on after the value, which neither tool writes; it fails closed
-    by still masking what it can.
+    by still masking what it can. Both span line breaks, since a value can
+    hold one.
     """
     escaped = re.escape(label)
     return (
         re.compile(escaped + r"""\s*(["'])(.*)\1\s*\Z""", re.DOTALL),
-        re.compile(escaped + r"""\s*(["'])((?:(?!\1).)*)\1"""),
+        re.compile(escaped + r"""\s*(["'])((?:(?!\1).)*)\1""", re.DOTALL),
     )
 
 
@@ -275,19 +289,40 @@ def _mask_spans(text: str, spans: Iterable[Tuple[int, int]]) -> str:
 #: messages, and so their IDs, and SBOM entries. Every value is still masked in
 #: its own finding's message and lines.
 MIN_PROPAGATED_VALUE_LENGTH = 8
+#: The longest value whose shape is recorded and matched. A shape's length goes
+#: into a ``{N}`` quantifier; a stored results file could name any length, and a
+#: length past what ``re`` accepts made every later load fail to compile the
+#: pattern, while a very long one made matching slow. Values themselves are
+#: masked whatever their length.
+MAX_PROPAGATED_VALUE_LENGTH = 4096
+#: A value shorter than this is masked in its own finding only: a one-character
+#: value names nothing, and masked in every finding that overlaps its line it
+#: rewrote every occurrence of that character.
+MIN_LOCAL_VALUE_LENGTH = 2
 #: Shannon entropy per character below which a value is too repetitive to tell
 #: from ordinary text (``aaaaaaaa1``, ``86400000``).
 MIN_PROPAGATED_VALUE_ENTROPY = 2.5
 #: Letters alone, as one word or several joined by whitespace, dots, hyphens or
 #: underscores: words, identifiers and prose.
 _WORD_LIKE = re.compile(r"[A-Za-z]+(?:[\s._-]+[A-Za-z]+)*")
-#: Template placeholders: ``${NAME}``, ``$NAME``, ``{name}``, ``%(name)s``,
-#: ``<value>``.
-_PLACEHOLDER = re.compile(r"\$\{?\w+\}?|\{\w*\}|%\(\w+\)[a-z]|<[^<>]*>")
+#: The characters outside a word at either end of a value: the punctuation and
+#: spaces around a word (``password:``, ``--password``, ``'secret'``) make it no
+#: less a word.
+_EDGE_NON_WORD = re.compile(r"^\W+|\W+$")
+#: Template placeholders: ``${NAME}``, ``{name}``, ``%(name)s``, ``<value>``, and
+#: a bare ``$NAME`` as shells and templates name a variable: upper case with
+#: digits and underscores, or letters and underscores alone. A value such as
+#: ``$uperSecret99``, letters of both cases with digits, is not a reference.
+_PLACEHOLDER = re.compile(
+    r"\$\{\w+\}|\$(?:[A-Z_][A-Z0-9_]*|[A-Za-z_]+)|\{\w*\}|%\(\w+\)[a-z]|<[^<>]*>"
+)
 
 #: Fields that name things rather than hold text a finding reports: identifiers,
-#: and ASH's own bookkeeping on a result (``scanner_name`` and
-#: ``scanner_version``, which decide the result's tool type).
+#: every GUID a SARIF log carries, the fingerprints that are a result's identity
+#: (``utils/finding_identity.py``), and ASH's own bookkeeping on a result
+#: (``scanner_name`` and ``scanner_version``, which decide the result's tool
+#: type). A shape of the right length matched a GUID or a fingerprint and wrote a
+#: value its pattern refuses, or changed what identified the finding.
 _SKIPPED_FIELDS = frozenset(
     {
         "uri",
@@ -295,6 +330,13 @@ _SKIPPED_FIELDS = frozenset(
         "ruleId",
         "guid",
         "correlationGuid",
+        "baselineGuid",
+        "runGuid",
+        "firstDetectionRunGuid",
+        "lastDetectionRunGuid",
+        "deprecatedGuids",
+        "fingerprints",
+        "partialFingerprints",
         "baselineState",
         "scanner_name",
         "scanner_version",
@@ -416,32 +458,137 @@ def _text_of(message: Any) -> Optional[str]:
     return text if isinstance(text, str) else None
 
 
+#: The ``file`` scheme in each of its forms before an absolute path:
+#: ``file:///path``, ``file://localhost/path`` and ``file:/path``.
+_FILE_SCHEME = re.compile(r"(?i)\Afile:(?://(?:localhost)?)?(?=/)")
+#: Two or more slashes, and a ``.`` segment between slashes.
+_REPEATED_SLASHES = re.compile(r"/{2,}")
+_DOT_SEGMENTS = re.compile(r"/(?:\./)+")
+
+
 def _normalized_uri(uri: Any) -> Optional[str]:
     """``uri`` as a plain relative or absolute path, for comparing two names of a file.
 
-    Backslashes become slashes, ``file://`` and leading ``./`` go, and
-    percent-encoding is decoded: SARIF URIs are URI references, so
-    ``my%20app/settings.py`` and ``my app/settings.py`` name one file.
+    Backslashes become slashes; the ``file`` scheme, leading ``./``, interior
+    ``.`` segments and repeated slashes are removed; and percent-encoding is decoded:
+    SARIF URIs are URI references, so ``my%20app/settings.py`` and
+    ``my app/settings.py`` name one file. Decoding runs until nothing changes, so
+    a name one tool wrote raw with a literal ``%2B`` and another wrote encoded
+    as ``%252B`` meet at the same text; naming one file twice over is the safe
+    side (``_same_file``).
     """
     if not isinstance(uri, str) or not uri:
         return None
-    text = unquote(uri.replace("\\", "/"))
-    text = text.removeprefix("file://")
+    text = uri.replace("\\", "/")
+    while True:
+        decoded = unquote(text)
+        if decoded == text:
+            break
+        text = decoded
+    text = _FILE_SCHEME.sub("", text)
+    text = _REPEATED_SLASHES.sub("/", text)
+    text = _DOT_SEGMENTS.sub("/", text)
     while text.startswith("./"):
         text = text[2:]
     return text or None
 
 
-def _physical_locations_of(result: Any, related: bool = False) -> Iterable[Any]:
-    """``result``'s physical locations, and its related locations' with ``related``."""
+def _stack_locations(stack: Any) -> List[Any]:
+    return [
+        getattr(frame, "location", None)
+        for frame in getattr(stack, "frames", None) or []
+    ]
+
+
+def _locations_of(result: Any, related: bool = False) -> List[Any]:
+    """``result``'s locations; with ``related``, also its related locations, the
+    steps of its code flows (and their stacks) and the frames of its stacks.
+
+    Every one of them names a place in the code the result is about, so a
+    secret line any of them shows is masked, and a value exposed at that line
+    is masked in the result that shows it.
+    """
     locations = list(getattr(result, "locations", None) or [])
     if related:
         locations.extend(getattr(result, "relatedLocations", None) or [])
-    for location in locations:
-        physical = getattr(location, "physicalLocation", None)
-        physical = getattr(physical, "root", physical)
+        for flow in getattr(result, "codeFlows", None) or []:
+            for thread in getattr(flow, "threadFlows", None) or []:
+                for step in getattr(thread, "locations", None) or []:
+                    locations.append(getattr(step, "location", None))
+                    locations.extend(_stack_locations(getattr(step, "stack", None)))
+        for stack in getattr(result, "stacks", None) or []:
+            locations.extend(_stack_locations(stack))
+    return [location for location in locations if location is not None]
+
+
+def _physical_of(location: Any) -> Any:
+    """The physical location of a SARIF ``Location``, unwrapped, or None."""
+    physical = getattr(location, "physicalLocation", None)
+    return getattr(physical, "root", physical)
+
+
+def _physical_locations_of(result: Any, related: bool = False) -> Iterable[Any]:
+    """``result``'s physical locations, and its related locations' with ``related``."""
+    for location in _locations_of(result, related):
+        physical = _physical_of(location)
         if physical is not None:
             yield physical
+
+
+def _uri_of(physical: Any) -> Any:
+    return getattr(getattr(physical, "artifactLocation", None), "uri", None)
+
+
+def _resolve_artifact_uris(sarif_report: Any) -> None:
+    """Write the URI of every artifact location that names its file by index only.
+
+    SARIF lets a location name its artifact through ``artifactLocation.index``
+    into the run's ``artifacts`` array with no ``uri`` of its own. The maskings
+    below read the URI, so such a location was neither indexed as a secret
+    location nor placed for masking. The URI (and ``uriBaseId``) the artifact
+    carries is written onto the location, which names the same file the log
+    already does.
+    """
+    for container in list(getattr(sarif_report, "runs", None) or []) + list(
+        _external_properties_of(sarif_report)
+    ):
+        artifacts = list(getattr(container, "artifacts", None) or [])
+        if not artifacts:
+            continue
+        _resolve_artifact_uris_in(container, artifacts, set())
+
+
+def _resolve_artifact_uris_in(node: Any, artifacts: List[Any], seen: Set[int]) -> None:
+    if isinstance(node, (str, Enum)) or id(node) in seen:
+        return
+    if isinstance(node, BaseModel):
+        seen.add(id(node))
+        fields = type(node).model_fields
+        if "uri" in fields and "uriBaseId" in fields and "index" in fields:
+            index = getattr(node, "index", None)
+            if (
+                getattr(node, "uri", None) is None
+                and isinstance(index, int)
+                and 0 <= index < len(artifacts)
+            ):
+                location = getattr(artifacts[index], "location", None)
+                uri = getattr(location, "uri", None)
+                if isinstance(uri, str) and uri:
+                    node.uri = uri
+                    if getattr(node, "uriBaseId", None) is None:
+                        node.uriBaseId = getattr(location, "uriBaseId", None)
+            return
+        for name in fields:
+            _resolve_artifact_uris_in(getattr(node, name, None), artifacts, seen)
+        return
+    if isinstance(node, list):
+        seen.add(id(node))
+        for item in node:
+            _resolve_artifact_uris_in(item, artifacts, seen)
+    elif isinstance(node, dict):
+        seen.add(id(node))
+        for item in node.values():
+            _resolve_artifact_uris_in(item, artifacts, seen)
 
 
 def _external_properties_of(sarif_report: Any) -> List[Any]:
@@ -499,33 +646,94 @@ def _rule_ids_tagged(sarif_report: Any, is_tag) -> Set[str]:
 #: plaintext string ..." (F23, F31, F34-F37, F41, F44-F71 and others, written
 #: with a CFN_NAG_ prefix in its SARIF). "master username must not be a
 #: plaintext string" (F24) is not about a credential.
-_IAC_CREDENTIAL = re.compile(
-    r"(?i)\bhard[- ]?coded\b.*\b(?:secrets?|credentials?|passwords?|keys?|tokens?)\b"
-    r"|\b(?:secrets?|credentials?|passwords?|keys?|tokens?|securestring)\b.*"
-    r"\bhard[- ]?coded\b"
-    r"|(?:passw|secret|token|key|credential)\w*\s+must not be a plaintext"
-    r"|\bsensitive credentials\b"
-    r"|\bcredentials in the template\b",
-    re.DOTALL,
+#:
+#: A text describes one when it holds both a "hard-coded" and a credential word,
+#: in either order, or one of the fixed phrases. Each is its own search, since
+#: one pattern joining the two words with ``.*`` backtracked over the whole
+#: text for every credential word in it.
+_HARD_CODED = re.compile(r"(?i)\bhard[- ]?coded\b")
+_CREDENTIAL_WORD = re.compile(
+    r"(?i)\b(?:secrets?|credentials?|passwords?|keys?|tokens?|securestring)\b"
 )
+_IAC_CREDENTIAL = re.compile(
+    r"(?i)(?:passw|secret|token|key|credential)\w*\s+must not be a plaintext"
+    r"|\bsensitive credentials\b"
+    r"|\bcredentials in the template\b"
+)
+
+#: The tool type of the scanners whose rules and messages describe a credential
+#: this way (``utils/scanner_names.SCANNER_TOOL_TYPES``). A dependency scanner's
+#: rule whose CVE text mentions a hard-coded key, or a code scanner's message that
+#: names a ``hardcoded-secrets`` path, is not such a rule or message, and classed
+#: as one it masked the finding's file from its line to the end.
+_IAC_TOOL_TYPE = "IAC"
 
 
 def _describes_a_credential_in_code(text: Any) -> bool:
-    return isinstance(text, str) and bool(_IAC_CREDENTIAL.search(text))
+    if not isinstance(text, str):
+        return False
+    if _HARD_CODED.search(text) and _CREDENTIAL_WORD.search(text):
+        return True
+    return bool(_IAC_CREDENTIAL.search(text))
+
+
+def _may_describe_credentials(tool_types: AbstractSet[str]) -> bool:
+    """Whether a description of a credential in code counts for a scanner of these
+    types: an infrastructure scanner's, or one whose type is unknown."""
+    return not tool_types or _IAC_TOOL_TYPE in tool_types
 
 
 def _rule_ids_described(sarif_report: Any) -> Set[str]:
-    """IDs of rules whose name or description is about a credential in code."""
+    """IDs of rules whose name or description is about a credential in code.
+
+    Read from the rules of the runs whose results come from an infrastructure
+    scanner, or from scanners of no known type (``_may_describe_credentials``).
+    """
+    from automated_security_helper.utils.scanner_tool_types import result_tool_types
+
     found: Set[str] = set()
-    for rule in _rules_of(sarif_report):
-        texts = [getattr(rule, "name", None)]
-        for field in ("shortDescription", "fullDescription"):
-            texts.append(_text_of(getattr(rule, field, None)))
-        if any(_describes_a_credential_in_code(text) for text in texts) and getattr(
-            rule, "id", None
-        ):
-            found.add(rule.id)
+    containers = list(getattr(sarif_report, "runs", None) or []) + list(
+        _external_properties_of(sarif_report)
+    )
+    for container in containers:
+        tool_types: Set[str] = set()
+        for result in getattr(container, "results", None) or []:
+            tool_types |= result_tool_types(result)
+        if not _may_describe_credentials(tool_types):
+            continue
+        components: List[Any] = [
+            getattr(getattr(container, "tool", None), "driver", None),
+            getattr(container, "driver", None),
+        ]
+        components.extend(
+            getattr(getattr(container, "tool", None), "extensions", None) or []
+        )
+        components.extend(getattr(container, "extensions", None) or [])
+        for component in components:
+            for rule in getattr(component, "rules", None) or []:
+                texts = [getattr(rule, "name", None)]
+                for field in ("shortDescription", "fullDescription"):
+                    texts.append(_text_of(getattr(rule, field, None)))
+                if any(
+                    _describes_a_credential_in_code(text) for text in texts
+                ) and getattr(rule, "id", None):
+                    found.add(rule.id)
     return found
+
+
+def _rule_id_of(result: Any) -> str:
+    """The id of ``result``'s rule: ``ruleId``, or the ``id`` of its ``rule``
+    reference when a tool names the rule that way only."""
+    rule_id = getattr(result, "ruleId", None)
+    if isinstance(rule_id, str) and rule_id:
+        return rule_id
+    reference = getattr(result, "rule", None)
+    reference = getattr(reference, "root", reference)
+    if isinstance(reference, dict):
+        rule_id = reference.get("id")
+    else:
+        rule_id = getattr(reference, "id", None)
+    return rule_id if isinstance(rule_id, str) else ""
 
 
 def secret_detection_rule_ids(sarif_report: Any) -> Set[str]:
@@ -553,7 +761,7 @@ def is_secret_detection(
         result_tool_types,
     )
 
-    rule_id = getattr(result, "ruleId", None) or ""
+    rule_id = _rule_id_of(result)
     if rule_id in detection_rule_ids:
         return True
     if rule_id.startswith(_SECRET_RULE_PREFIXES) or _SECRET_RULE_ID.search(rule_id):
@@ -587,15 +795,16 @@ def is_secret_finding(
         result_tool_types,
     )
 
-    rule_id = getattr(result, "ruleId", None) or ""
+    rule_id = _rule_id_of(result)
     if rule_id in secret_rule_ids or _is_secret_rule_id(rule_id):
         return True
     if any(_is_secret_tag(tag) for tag in result_tags(result)):
         return True
-    if SECRETS_TOOL_TYPE in result_tool_types(result):
+    tool_types = result_tool_types(result)
+    if SECRETS_TOOL_TYPE in tool_types:
         return True
     text = _text_of(getattr(result, "message", None)) or ""
-    return _text_reports_a_secret(text)
+    return _text_reports_a_secret(text, _may_describe_credentials(tool_types))
 
 
 def _is_secret_rule_id(rule_id: Any) -> bool:
@@ -607,10 +816,12 @@ def _is_secret_rule_id(rule_id: Any) -> bool:
     )
 
 
-def _text_reports_a_secret(text: Any) -> bool:
-    """Whether a message quotes a value or describes a credential in code."""
+def _text_reports_a_secret(text: Any, may_describe: bool = True) -> bool:
+    """Whether a message quotes a value or, when ``may_describe``, describes a
+    credential in code (``_may_describe_credentials``)."""
     return isinstance(text, str) and (
-        bool(_quoted_values(text)) or _describes_a_credential_in_code(text)
+        bool(_quoted_values(text))
+        or (may_describe and _describes_a_credential_in_code(text))
     )
 
 
@@ -667,43 +878,84 @@ _PEM_BEGIN = "-----BEGIN"
 _PEM_END = "-----END"
 
 
+def _outside_quoted_values(text: str) -> str:
+    """``text`` without the values it quotes (``_quoted_values``).
+
+    What a finding is about is read from the rest of its message: a quoted value
+    that merely mentions a private key is the evidence, not the kind of finding.
+    """
+    pieces = []
+    position = 0
+    for start, end in _quoted_values(text):
+        pieces.append(text[position:start])
+        position = max(position, end)
+    pieces.append(text[position:])
+    return "".join(pieces)
+
+
 def _is_private_key_finding(result: Any) -> bool:
     from automated_security_helper.utils.scanner_tool_types import result_tags
 
     texts = [
-        getattr(result, "ruleId", None) or "",
-        _text_of(getattr(result, "message", None)) or "",
+        _rule_id_of(result),
+        _outside_quoted_values(_text_of(getattr(result, "message", None)) or ""),
     ]
     texts.extend(tag for tag in result_tags(result) if isinstance(tag, str))
     return any(_PRIVATE_KEY.search(text) for text in texts)
 
 
-def _known_lines(sarif_report: Any) -> Dict[str, Dict[int, str]]:
-    """The text of every line any snippet of the report places: uri -> line -> text."""
-    known: Dict[str, Dict[int, str]] = {}
+def _basename(uri: str) -> str:
+    return uri.rsplit("/", 1)[-1]
 
-    def record(uri: Any, first_line: Any, text: Any) -> None:
+
+class _KnownLines:
+    """The text of every line any snippet of a report places: uri -> line -> text.
+
+    Looked up by file (``matching``): two URIs name one file when they are equal
+    or one is a suffix of the other at a path separator (``_same_file``), which
+    means they share a last segment, so the candidates are found by basename
+    instead of a scan of every file for every lookup.
+    """
+
+    def __init__(self) -> None:
+        self.lines: Dict[str, Dict[int, str]] = {}
+        self._by_basename: Dict[str, List[str]] = {}
+
+    def record(self, uri: Any, first_line: Any, text: Any) -> None:
         normalized = _normalized_uri(uri)
         if normalized is None or not isinstance(first_line, int):
             return
         if not isinstance(text, str) or _UNCOUNTED_LINE_BREAK.search(text):
             return
-        lines = known.setdefault(normalized, {})
+        if normalized not in self.lines:
+            self.lines[normalized] = {}
+            self._by_basename.setdefault(_basename(normalized), []).append(normalized)
+        lines = self.lines[normalized]
         for offset, line in enumerate(_split_lines(text)):
             lines.setdefault(first_line + offset, line)
 
+    def matching(self, uri: str) -> Iterable[Dict[int, str]]:
+        """The lines of every known file ``uri`` may name."""
+        for candidate in self._by_basename.get(_basename(uri), []):
+            if _same_file(candidate, uri):
+                yield self.lines[candidate]
+
+
+def _known_lines(sarif_report: Any) -> _KnownLines:
+    """The text of every line any snippet of the report places."""
+    known = _KnownLines()
     for result in _all_results(sarif_report):
         for physical in _physical_locations_of(result, related=True):
-            uri = getattr(getattr(physical, "artifactLocation", None), "uri", None)
+            uri = _uri_of(physical)
             for name in ("region", "contextRegion"):
                 region = getattr(physical, name, None)
-                record(
+                known.record(
                     uri,
                     getattr(region, "startLine", None),
                     getattr(getattr(region, "snippet", None), "text", None),
                 )
     for artifact in _artifacts_of(sarif_report):
-        record(
+        known.record(
             getattr(getattr(artifact, "location", None), "uri", None),
             1,
             getattr(getattr(artifact, "contents", None), "text", None),
@@ -711,7 +963,7 @@ def _known_lines(sarif_report: Any) -> Dict[str, Dict[int, str]]:
     return known
 
 
-def _block_end(known: Dict[str, Dict[int, str]], uri: str, start: int) -> Optional[int]:
+def _block_end(known: _KnownLines, uri: str, start: int) -> Optional[int]:
     """The line a PEM block starting at ``start`` ends on in ``uri``, if known.
 
     Each file ``uri`` may name (``_same_file``: equal, or one a suffix of the
@@ -721,9 +973,7 @@ def _block_end(known: Dict[str, Dict[int, str]], uri: str, start: int) -> Option
     the range short.
     """
     ends: List[int] = []
-    for candidate, lines in known.items():
-        if not _same_file(candidate, uri):
-            continue
+    for lines in known.matching(uri):
         own = [
             number
             for number, text in lines.items()
@@ -734,21 +984,15 @@ def _block_end(known: Dict[str, Dict[int, str]], uri: str, start: int) -> Option
     return max(ends) if ends else None
 
 
-def _line_is_masked(known: Dict[str, Dict[int, str]], uri: str, line: int) -> bool:
+def _line_is_masked(known: _KnownLines, uri: str, line: int) -> bool:
     """Whether some snippet shows ``line`` of ``uri`` as a line an earlier masking wrote."""
     return any(
-        (lines.get(line) or "").strip() == MASKED_LINE
-        for candidate, lines in known.items()
-        if _same_file(candidate, uri)
+        (lines.get(line) or "").strip() == MASKED_LINE for lines in known.matching(uri)
     )
 
 
-def _starts_a_block(known: Dict[str, Dict[int, str]], uri: str, line: int) -> bool:
-    return any(
-        _PEM_BEGIN in (lines.get(line) or "")
-        for candidate, lines in known.items()
-        if _same_file(candidate, uri)
-    )
+def _starts_a_block(known: _KnownLines, uri: str, line: int) -> bool:
+    return any(_PEM_BEGIN in (lines.get(line) or "") for lines in known.matching(uri))
 
 
 class _LineRanges:
@@ -793,8 +1037,10 @@ class _SecretIndex:
         self.secret_results: List[Any] = []
         #: (uri, first line, last line, values) of each secret finding's location:
         #: every finding that overlaps it has these values masked, whatever they
-        #: look like. The lines are None when the location gives none.
+        #: look like. The lines are None when the location gives none. Looked up
+        #: by the file's basename (``local_values_for``), as the locations are.
         self.local_values: List[Tuple[str, Optional[int], Optional[int], Set[str]]] = []
+        self._local_by_basename: Dict[str, List[int]] = {}
         #: id(secret finding) -> every value it exposed, whatever it looks like.
         self.values_of: Dict[int, Set[str]] = {}
         #: (region, END line) of each key block found from other snippets, for the
@@ -817,8 +1063,10 @@ class _SecretIndex:
         """Add shapes of values whose tokens are masked wherever they occur.
 
         A shape read from a results file is checked against what
-        ``_mask_secret_value`` would have shown for its length; one that does not
-        match was not written by ASH and is ignored.
+        ``_mask_secret_value`` would have shown for its length, and against the
+        lengths a shape can have (``MIN_PROPAGATED_VALUE_LENGTH`` to
+        ``MAX_PROPAGATED_VALUE_LENGTH``); one that does not match was not written
+        by ASH and is ignored.
         """
         for shape in shapes:
             if isinstance(shape, dict):
@@ -828,18 +1076,39 @@ class _SecretIndex:
                     continue
             if not isinstance(shape, SecretValueShape):
                 continue
-            if shape.length < MIN_PROPAGATED_VALUE_LENGTH or (
-                len(shape.prefix),
-                len(shape.suffix),
-            ) != _visible_lengths(shape.length):
+            if (
+                not MIN_PROPAGATED_VALUE_LENGTH
+                <= shape.length
+                <= MAX_PROPAGATED_VALUE_LENGTH
+                or (len(shape.prefix), len(shape.suffix))
+                != _visible_lengths(shape.length)
+            ):
                 continue
             self.shapes.add(shape)
             self._pattern = None
 
+    def add_local_values(
+        self, uri: str, start: Optional[int], end: Optional[int], values: Set[str]
+    ) -> None:
+        """Record the values a secret finding exposed at a location of ``uri``."""
+        self._local_by_basename.setdefault(_basename(uri), []).append(
+            len(self.local_values)
+        )
+        self.local_values.append((uri, start, end, values))
+
+    def local_values_for(
+        self, uri: str
+    ) -> Iterable[Tuple[str, Optional[int], Optional[int], Set[str]]]:
+        """The recorded locations in a file the normalized ``uri`` may name."""
+        for position in self._local_by_basename.get(_basename(uri), []):
+            entry = self.local_values[position]
+            if _same_file(entry[0], uri):
+                yield entry
+
     def add_location(self, uri: str, start: Optional[int], end: Optional[int]) -> None:
         if uri not in self.lines:
             self.lines[uri] = _LineRanges()
-            self._by_basename.setdefault(uri.rsplit("/", 1)[-1], []).append(uri)
+            self._by_basename.setdefault(_basename(uri), []).append(uri)
         current = self.lines[uri]
         if current is None:
             return
@@ -863,7 +1132,7 @@ class _SecretIndex:
         whole = False
         lines = _LineRanges()
         matched = False
-        for candidate in self._by_basename.get(normalized.rsplit("/", 1)[-1], []):
+        for candidate in self._by_basename.get(_basename(normalized), []):
             if not _same_file(candidate, normalized):
                 continue
             matched = True
@@ -878,46 +1147,41 @@ class _SecretIndex:
         """``text`` with each value, and each token of a recorded shape, masked.
 
         A token of a shape is masked only when it could be a value the shape
-        stands for (``_mask_match``): every shape is of a value that
+        stands for (``_mask_token``): every shape is of a value that
         ``_propagates``, so a token that is letters alone, a placeholder or too
         repetitive (``_looks_like_a_secret``) is an ordinary word, not that
         value, and is kept. The hidden characters of a shape match ``password``
         and ``provided`` as readily as the credential, and masking them rewrote
         every message that held such a word, bandit's own label among them.
+
+        The longest alternative is tried first, values and shapes together: a
+        value that is the punctuation-delimited head of a longer shape token
+        (``abc!1234`` in ``abc!1234$efgh5678``) masked its own part and left the
+        rest of the token readable, since the shape could no longer match it.
         """
         if not self.values and not self.shapes:
             return text
         if self._pattern is None:
-            alternatives = []
-            if self.values:
-                alternatives.append(
-                    "(?P<value>"
-                    + "|".join(
-                        _token_pattern(re.escape(value), value[0], value[-1])
-                        for value in sorted(self.values, key=len, reverse=True)
-                    )
-                    + ")"
-                )
-            if self.shapes:
-                alternatives.append(
-                    "(?P<shape>"
-                    + "|".join(
-                        _shape_pattern(shape)
-                        for shape in sorted(self.shapes, key=_shape_key, reverse=True)
-                    )
-                    + ")"
-                )
-            self._pattern = re.compile("|".join(alternatives))
-        return self._pattern.sub(_mask_match, text)
+            alternatives: List[Tuple[int, int, str]] = [
+                (len(value), 1, _token_pattern(re.escape(value), value[0], value[-1]))
+                for value in self.values
+            ]
+            alternatives.extend(
+                (shape.length, 0, _shape_pattern(shape)) for shape in self.shapes
+            )
+            alternatives.sort(reverse=True)
+            self._pattern = re.compile(
+                "|".join(pattern for _, _, pattern in alternatives)
+            )
+        return self._pattern.sub(self._mask_token, text)
 
-
-def _mask_match(match: "re.Match[str]") -> str:
-    """The masked form of a matched value, or the token itself for a shape token
-    that is not a value (see ``_SecretIndex.mask_values``)."""
-    token = match.group(0)
-    if match.groupdict().get("value") is None and not _looks_like_a_secret(token):
+    def _mask_token(self, match: "re.Match[str]") -> str:
+        """The masked form of a matched value, or the token itself for a shape
+        token that is not a value (see ``mask_values``)."""
+        token = match.group(0)
+        if token in self.values or _looks_like_a_secret(token):
+            return _mask_secret_value(token)
         return token
-    return _mask_secret_value(token)
 
 
 def _token_pattern(body: str, first: Optional[str], last: Optional[str]) -> str:
@@ -968,8 +1232,15 @@ def _propagates(value: str) -> bool:
 
 
 def _looks_like_a_secret(value: str) -> bool:
-    """Not letters alone, not a placeholder, and not repetitive (see the constants)."""
-    if _WORD_LIKE.fullmatch(value) or _PLACEHOLDER.fullmatch(value):
+    """Not letters alone, not a placeholder, and not repetitive (see the constants).
+
+    The punctuation and spaces at either end do not count: ``password:``,
+    ``--password`` and ``'secret'`` are the words inside them, and masked
+    everywhere they rewrote bandit's own label, which then no longer marked the
+    finding as a secret finding on the next pass.
+    """
+    core = _EDGE_NON_WORD.sub("", value)
+    if not core or _WORD_LIKE.fullmatch(core) or _PLACEHOLDER.fullmatch(value):
         return False
     return _entropy(value) >= MIN_PROPAGATED_VALUE_ENTROPY
 
@@ -988,11 +1259,29 @@ def _mask_message_values(text: str) -> str:
     return _mask_spans(text, _quoted_values(text))
 
 
+def _region_last_line(region: Any, start: int) -> int:
+    """The last line a region starting at ``start`` covers: its ``endLine`` when
+    it has one at or after ``start``, else the last line of its snippet, else
+    ``start``. A region with no ``endLine`` whose snippet has several lines
+    covers them all; counted as one line it missed the later ones."""
+    end = getattr(region, "endLine", None)
+    text = getattr(getattr(region, "snippet", None), "text", None)
+    last = start
+    if isinstance(text, str) and not _UNCOUNTED_LINE_BREAK.search(text):
+        last = start + max(len(_split_lines(text)) - 1, 0)
+    if isinstance(end, int) and end > last:
+        last = end
+    return last
+
+
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
+    from automated_security_helper.utils.scanner_tool_types import result_tool_types
+
+    _resolve_artifact_uris(sarif_report)
     index = _SecretIndex()
     rule_ids = secret_rule_ids(sarif_report)
     described = _rule_ids_described(sarif_report)
-    known: Optional[Dict[str, Dict[int, str]]] = None
+    known: Optional[_KnownLines] = None
     for result in _all_results(sarif_report):
         if not is_secret_finding(result, rule_ids):
             continue
@@ -1003,31 +1292,47 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
         # cfn-nag reports a credential rule at its resource's first line only; the
         # property holding the value is somewhere after it. A finding that quotes
         # its value (bandit's "Possible hardcoded password: '...'") names the
-        # line itself and is not one of these.
+        # line itself and is not one of these; and the description counts for an
+        # infrastructure scanner's finding only (_may_describe_credentials).
         resource_only = not quoted and (
-            getattr(result, "ruleId", None) in described
-            or _describes_a_credential_in_code(text)
+            _rule_id_of(result) in described
+            or (
+                _may_describe_credentials(result_tool_types(result))
+                and _describes_a_credential_in_code(text)
+            )
         )
         exposed: List[str] = []
         for value_start, value_end in quoted:
-            exposed.extend(_exposed_values(text[value_start:value_end].strip(), result))
+            exposed.extend(_exposed_values(text[value_start:value_end], result))
         if not quoted:
             exposed.extend(_matched_values(result))
         # Every value is masked wherever it looks like a secret; and, whatever it
         # looks like, in every finding that overlaps where this one reports it.
         index.add_values(exposed)
-        local = {value for value in exposed if value and "\n" not in value}
+        local = {
+            value
+            for value in exposed
+            if len(value) >= MIN_LOCAL_VALUE_LENGTH and "\n" not in value
+        }
         index.values_of[id(result)] = local
-        for physical in _physical_locations_of(result):
-            uri = _normalized_uri(
-                getattr(getattr(physical, "artifactLocation", None), "uri", None)
-            )
+        primary = _locations_of(result)
+        # A related location of a secret finding (a credential literal reported
+        # where it is used) is a secret location too: indexed as is, with no
+        # key or resource range of its own.
+        for position, location in enumerate(_locations_of(result, related=True)):
+            physical = _physical_of(location)
+            if physical is None:
+                continue
+            is_primary = position < len(primary)
+            uri = _normalized_uri(_uri_of(physical))
             if uri is None:
                 continue
             region = getattr(physical, "region", None)
             start = getattr(region, "startLine", None)
             end = getattr(region, "endLine", None)
             if isinstance(start, int):
+                end = _region_last_line(region, start)
+            if isinstance(start, int) and is_primary:
                 # A key reported on its BEGIN line (detect-secrets does) runs to
                 # its END line, which only some other finding's snippet may show.
                 # With no END line known, every later line is masked.
@@ -1043,13 +1348,14 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                 ):
                     block_end = _block_end(known, uri, start)
                     if block_end is not None:
-                        end = block_end
+                        # The scanner's own range stands where it reaches
+                        # further: the first END line at or after the start
+                        # ends the first block, not a range that spans more.
+                        end = max(block_end, end)
                         index.block_ends.append((region, block_end))
                         index.end_marks.append((result, False))
                     elif _masked_to_end_of_file(result) or not (
-                        isinstance(end, int)
-                        and end > start
-                        and _line_is_masked(known, uri, end)
+                        end > start and _line_is_masked(known, uri, end)
                     ):
                         # No END line in any snippet. A producer's own endLine
                         # says nothing about where the key ends, so every later
@@ -1062,24 +1368,20 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                         # only when an earlier masking wrote it.
                         end = _TO_END_OF_FILE
                         index.end_marks.append((result, True))
-                elif resource_only and not (isinstance(end, int) and end > start):
+                elif resource_only and end <= start:
                     # cdk-nag writes endLine == startLine for the resource's
                     # first line; a one-line region says nothing about where
                     # the resource ends.
                     end = _TO_END_OF_FILE
             index.add_location(uri, start, end)
             if local:
-                index.local_values.append(
-                    (
-                        uri,
-                        start if isinstance(start, int) else None,
-                        end
-                        if isinstance(end, int)
-                        and isinstance(start, int)
-                        and end >= start
-                        else start,
-                        local,
-                    )
+                index.add_local_values(
+                    uri,
+                    start if isinstance(start, int) else None,
+                    end
+                    if isinstance(end, int) and isinstance(start, int) and end >= start
+                    else start,
+                    local,
                 )
     return index
 
@@ -1087,35 +1389,20 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
 def _line_spans(physical: Any) -> List[Tuple[Optional[int], Optional[int]]]:
     """The (first, last) lines a physical location's region and context cover.
 
-    ``(None, None)`` for a region or context with a snippet but no first line,
-    which cannot be placed.
+    A region or context with a first line covers through its ``endLine`` or the
+    last line of its snippet, whichever is further (``_region_last_line``).
+    ``(None, None)`` for one with a snippet but no first line, which cannot be
+    placed.
     """
     spans: List[Tuple[Optional[int], Optional[int]]] = []
-    region = getattr(physical, "region", None)
-    if region is not None:
+    for name in ("region", "contextRegion"):
+        region = getattr(physical, name, None)
+        if region is None:
+            continue
         start = getattr(region, "startLine", None)
-        end = getattr(region, "endLine", None)
         if isinstance(start, int):
-            spans.append(
-                (start, end if isinstance(end, int) and end >= start else start)
-            )
+            spans.append((start, _region_last_line(region, start)))
         elif getattr(region, "snippet", None) is not None:
-            spans.append((None, None))
-    context = getattr(physical, "contextRegion", None)
-    if context is not None:
-        start = getattr(context, "startLine", None)
-        end = getattr(context, "endLine", None)
-        text = getattr(getattr(context, "snippet", None), "text", None)
-        if isinstance(start, int):
-            last = (
-                start + max(len(_split_lines(text)) - 1, 0)
-                if isinstance(text, str)
-                else start
-            )
-            if isinstance(end, int) and end > last:
-                last = end
-            spans.append((start, last))
-        elif isinstance(text, str):
             spans.append((None, None))
     return spans
 
@@ -1126,9 +1413,7 @@ def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
     if not index.local_values:
         return found
     for physical in _physical_locations_of(result, related=True):
-        uri = _normalized_uri(
-            getattr(getattr(physical, "artifactLocation", None), "uri", None)
-        )
+        uri = _normalized_uri(_uri_of(physical))
         if uri is None:
             continue
         for first, last in _line_spans(physical):
@@ -1142,9 +1427,7 @@ def _values_at(
     """The values of the secret findings whose location lines ``first``-``last``
     of the normalized ``uri`` overlap; a span with no line overlaps every one."""
     found: Set[str] = set()
-    for secret_uri, start, end, values in index.local_values:
-        if not _same_file(secret_uri, uri):
-            continue
+    for _, start, end, values in index.local_values_for(uri):
         # A span with no line cannot be placed, so it overlaps. Each pair is None
         # together (_line_spans, _index_secrets), so the end checks only say so
         # to the type checker.
@@ -1202,7 +1485,7 @@ def _matched_values(result: Any) -> List[str]:
         if first < 0 or last > len(lines[0]):
             continue
         match = lines[0][first:last].strip()
-        literals = [found.group(2) for found in _STRING_LITERAL.finditer(match)]
+        literals = _string_literals(match)
         values.extend(literals or [match])
     return values
 
@@ -1241,12 +1524,49 @@ def _snippet_column_offset(
     return None
 
 
-#: A quoted string literal in a line of source. The two alternatives inside it
-#: are disjoint (an escape, or one character that is neither the quote nor a
-#: backslash), so the search is linear: with ``(?!\1).`` a backslash matched
-#: either one, and an unterminated quote followed by n backslashes took a
-#: Fibonacci(n) number of paths.
-_STRING_LITERAL = re.compile(r"""(["'])((?:\\.|(?!\1)[^\\])*)\1""")
+_QUOTES = frozenset("\"'")
+
+
+def _string_literals(line: str) -> List[str]:
+    """The body of every quoted string literal in a line of source, in order.
+
+    A literal runs from a quote to the next quote of its kind that an odd run of
+    backslashes does not escape; what it holds is kept as written. An unterminated
+    quote starts no literal, and the scan goes on from the character after it, so
+    a literal of the other kind inside it is still found. One pass over the line:
+    a pattern tried again from every quote took time quadratic in the length of
+    a line of escaped quotes with no closing one.
+    """
+    literals: List[str] = []
+    unescaped: Dict[str, List[int]] = {quote: [] for quote in _QUOTES}
+    backslashes = 0
+    for position, character in enumerate(line):
+        if character == "\\":
+            backslashes += 1
+            continue
+        if character in _QUOTES and backslashes % 2 == 0:
+            unescaped[character].append(position)
+        backslashes = 0
+    pending = dict.fromkeys(_QUOTES, 0)
+    position = 0
+    length = len(line)
+    while position < length:
+        character = line[position]
+        if character not in _QUOTES:
+            position += 1
+            continue
+        closers = unescaped[character]
+        cursor = pending[character]
+        while cursor < len(closers) and closers[cursor] <= position:
+            cursor += 1
+        pending[character] = cursor
+        if cursor < len(closers):
+            closing = closers[cursor]
+            literals.append(line[position + 1 : closing])
+            position = closing + 1
+        else:
+            position += 1
+    return literals
 
 
 def _exposed_values(quoted: str, result: Any) -> List[str]:
@@ -1260,31 +1580,45 @@ def _exposed_values(quoted: str, result: Any) -> List[str]:
     line no secret finding reports is masked too.
 
     Only the exact shape counts as already masked (``_is_masked_form``): a raw
-    value can hold a ``*`` too, and is returned as it is. When no line holds a
-    value whose mask is the quoted one, the masked form itself is returned: masking
-    it again changes nothing, and it still carries the value's shape. It is not
-    returned beside a value read back, whose own test decides whether it is
-    masked elsewhere (``_propagates``): the masked form of ``password`` would
-    otherwise mask every eight-letter word that starts with p and ends with d.
+    value can hold a ``*`` too, and is returned as it is, without the whitespace
+    around it. When no line holds a value whose mask is the quoted one, the
+    masked form itself is returned: masking it again changes nothing, and it
+    still carries the value's shape. It is not returned beside a value read back,
+    whose own test decides whether it is masked elsewhere (``_propagates``): the
+    masked form of ``password`` would otherwise mask every eight-letter word that
+    starts with p and ends with d. ``quoted`` is the text between the quotes as
+    written: a value with spaces around it masks to a form with those spaces, and
+    read back it has to match that form.
     """
-    if not quoted:
+    stripped = quoted.strip()
+    if not stripped:
         return []
-    if not _is_masked_form(quoted):
-        return [quoted]
+    forms = {form for form in (quoted, stripped) if _is_masked_form(form)}
+    if not forms:
+        return [stripped]
     found = []
     for line in _own_snippet_lines(result):
-        for match in _STRING_LITERAL.finditer(line):
-            candidate = match.group(2)
-            if candidate != quoted and _mask_secret_value(candidate) == quoted:
+        for candidate in _string_literals(line):
+            if candidate not in forms and _mask_secret_value(candidate) in forms:
                 found.append(candidate)
-    return found or [quoted]
+    return found or [stripped]
 
 
 def _is_masked_form(text: str) -> bool:
-    """Whether ``text`` has the shape ``_mask_secret_value`` writes for its length."""
+    """Whether ``text`` has the shape ``_mask_secret_value`` writes for its length.
+
+    The hidden characters are all asterisks and the visible ones are not: a value
+    of asterisks alone (the ``********`` of a placeholder password) is a value,
+    not a masked form. Taken as one it was propagated as a shape with no token
+    boundary, which masked every run of eight characters from ``*`` to ``*``,
+    Markdown's ``**Note**`` among them.
+    """
     shown_prefix, shown_suffix = _visible_lengths(len(text))
     hidden = text[shown_prefix : len(text) - shown_suffix]
-    return bool(hidden) and set(hidden) == {"*"}
+    visible = text[:shown_prefix] + text[len(text) - shown_suffix :]
+    if not hidden or set(hidden) != {"*"}:
+        return False
+    return not visible or set(visible) != {"*"}
 
 
 def _own_snippet_lines(result: Any) -> List[str]:
@@ -1351,7 +1685,13 @@ def _mask_snippet(
     last_line: Optional[int],
     placed: Tuple[bool, _LineRanges],
 ) -> None:
-    """Mask one ``ArtifactContent`` in place by the reported lines in its file."""
+    """Mask one ``ArtifactContent`` in place by the reported lines in its file.
+
+    The text and its plain rendering are masked line by line. The Markdown
+    rendering is not numbered like the text (a code fence puts the first line of
+    code on its second line), so it is masked whole when the content reaches a
+    reported line, as the base64 form is dropped then.
+    """
     whole, lines = placed
     if content is None:
         return
@@ -1360,22 +1700,29 @@ def _mask_snippet(
         masked = _mask_lines(text, first_line, whole, lines)
         if masked != text:
             content.text = masked
+    if isinstance(first_line, int):
+        last = max(first_line, last_line or 0)
+        if isinstance(text, str):
+            last = max(last, first_line + len(_split_lines(text)) - 1)
+        reached = whole or lines.overlaps(first_line, last)
+    else:
+        reached = True
     rendered = getattr(content, "rendered", None)
-    for name in ("text", "markdown"):
-        value = getattr(rendered, name, None) if rendered is not None else None
-        if isinstance(value, str):
-            masked = _mask_lines(value, first_line, whole, lines)
-            if masked != value:
-                setattr(rendered, name, masked)
+    if rendered is not None:
+        plain = getattr(rendered, "text", None)
+        if isinstance(plain, str):
+            masked = _mask_lines(plain, first_line, whole, lines)
+            if masked != plain:
+                rendered.text = masked
+        markdown = getattr(rendered, "markdown", None)
+        if isinstance(markdown, str) and reached:
+            masked = _mask_text_whole(markdown)
+            if masked != markdown:
+                rendered.markdown = masked
     # Base64 content cannot be masked line by line, so it is dropped when its
     # lines reach a reported line, or cannot be placed.
-    if getattr(content, "binary", None) is not None:
-        if (
-            whole
-            or not isinstance(first_line, int)
-            or lines.overlaps(first_line, max(first_line, last_line or 0))
-        ):
-            content.binary = None
+    if getattr(content, "binary", None) is not None and reached:
+        content.binary = None
 
 
 def _mask_region(region: Any, placed: Tuple[bool, _LineRanges]) -> None:
@@ -1480,14 +1827,28 @@ def _replacements_of(result: Any) -> Iterable[Tuple[Any, Any]]:
                 yield change, replacement
 
 
+def _annotation_regions(result: Any) -> Iterable[Any]:
+    """The annotation regions of every location of ``result``, and the regions
+    of every attachment it carries: source text outside its snippets."""
+    for location in _locations_of(result, related=True):
+        yield from getattr(location, "annotations", None) or []
+    for attachment in getattr(result, "attachments", None) or []:
+        yield from getattr(attachment, "regions", None) or []
+
+
 def _mask_own_source_text(result: Any, index: _SecretIndex) -> None:
     """Mask whole the source text a secret finding carries outside its snippets.
 
-    Its ``properties`` named in ``_SOURCE_FIELDS``, a ``snippet`` beside any of
-    its physical locations, the inserted content and deleted region of every fix
-    it proposes, and a fenced code block in its message. Its message's markdown
-    is masked at the values it quotes as its text is, and its message arguments
-    at the values the finding exposed, whatever they look like.
+    Its ``properties`` named in ``_SOURCE_FIELDS``, the inserted content and
+    deleted region of every fix it proposes, the annotation regions of its
+    locations and the regions of its attachments, and a fenced code block in its
+    message. Its message's text and markdown are masked at the values they quote
+    and at every value the finding exposed that is not an ordinary word
+    (``_WORD_LIKE``): a value its region matched and its message repeats is
+    masked there too, while the words of a label such as "Possible hardcoded
+    password:" are left, since they are what recognizes the finding. Its message
+    arguments are masked at every value the finding exposed, whatever it looks
+    like.
     """
     whole_file = (True, _LineRanges())
     properties = getattr(result, "properties", None)
@@ -1504,16 +1865,24 @@ def _mask_own_source_text(result: Any, index: _SecretIndex) -> None:
         _mask_snippet(
             getattr(replacement, "insertedContent", None), None, None, whole_file
         )
+    for region in _annotation_regions(result):
+        _mask_region(region, whole_file)
     message = getattr(result, "message", None)
     root: Any = getattr(message, "root", message)
     if root is None:
         return
     own = _SecretIndex()
     own.values = set(index.values_of.get(id(result), ()))
+    in_text = _SecretIndex()
+    in_text.values = {
+        value
+        for value in own.values
+        if not _WORD_LIKE.fullmatch(_EDGE_NON_WORD.sub("", value))
+    }
     for name in ("text", "markdown"):
         text = getattr(root, name, None)
         if isinstance(text, str):
-            masked = _mask_fenced_code(_mask_message_values(text))
+            masked = _mask_fenced_code(in_text.mask_values(_mask_message_values(text)))
             if masked != text:
                 setattr(root, name, masked)
     arguments = getattr(root, "arguments", None)
@@ -1525,14 +1894,42 @@ def _mask_own_source_text(result: Any, index: _SecretIndex) -> None:
                     arguments[position] = masked
 
 
+def _changed(item: Any, masked: Any) -> bool:
+    """Whether a parent holding ``item`` has to store ``masked`` in its place: a
+    string masked to another, or a URL masked to a new object."""
+    if isinstance(item, str):
+        return masked != item
+    return isinstance(item, AnyUrl) and masked is not item
+
+
+def _mask_url(node: AnyUrl, index: _SecretIndex) -> Any:
+    """``node`` with the values in it masked: the same URL when nothing changed,
+    else a URL of the masked text, or that text when it is no URL any more.
+
+    A pydantic URL (``versionControlProvenance.repositoryUri``,
+    ``hostedViewerUri``) is neither a str nor a model, and a credential written
+    into it (``https://user:token@host/repo``) was kept.
+    """
+    text = str(node)
+    masked = index.mask_values(text)
+    if masked == text:
+        return node
+    try:
+        return type(node)(masked)
+    except (ValueError, TypeError):
+        return masked
+
+
 def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
-    """Mask ``node`` in place; returns the replacement for a string node."""
+    """Mask ``node`` in place; returns the replacement for a string or URL node."""
     if isinstance(node, Enum):
         # An enum member (Result.level, Suppression.kind) is a str as well, and
         # masking it wrote a value the model refuses (_ENUM_FIELDS).
         return node
     if isinstance(node, str):
         return index.mask_values(node)
+    if isinstance(node, AnyUrl):
+        return _mask_url(node, index)
     if id(node) in seen:
         return node
     if isinstance(node, BaseModel):
@@ -1545,6 +1942,21 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
             if placed is not None:
                 _mask_region(getattr(node, "region", None), placed)
                 _mask_region(getattr(node, "contextRegion", None), placed)
+        elif "physicalLocation" in fields and "annotations" in fields:
+            # A location's annotations are regions of its physical location's
+            # file, placed by their own lines.
+            placed = index.lines_for(_uri_of(_physical_of(node)))
+            if placed is not None:
+                for region in getattr(node, "annotations", None) or []:
+                    _mask_region(region, placed)
+        elif "artifactLocation" in fields and "regions" in fields:
+            # An attachment: regions of interest in the file it names.
+            placed = index.lines_for(
+                getattr(getattr(node, "artifactLocation", None), "uri", None)
+            )
+            if placed is not None:
+                for region in getattr(node, "regions", None) or []:
+                    _mask_region(region, placed)
         elif "artifactLocation" in fields and "replacements" in fields:
             # A fix's change to one file: its deleted regions are placed by
             # their lines; what it inserts at a reported line is masked whole.
@@ -1633,13 +2045,13 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
             if value is None:
                 continue
             masked = _mask_tree(value, index, seen)
-            if isinstance(value, str) and masked != value:
+            if _changed(value, masked):
                 setattr(node, name, masked)
         return node
     if isinstance(node, list):
         for position, item in enumerate(node):
             masked = _mask_tree(item, index, seen)
-            if isinstance(item, str) and masked != item:
+            if _changed(item, masked):
                 node[position] = masked
         return node
     if isinstance(node, dict):
@@ -1648,8 +2060,14 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
                 continue
             item = node[key]
             masked = _mask_tree(item, index, seen)
-            if isinstance(item, str) and masked != item:
+            if _changed(item, masked):
                 node[key] = masked
+            # A value used as a key (a map keyed by the values it holds) is text
+            # of the tree as much as any other string.
+            if isinstance(key, str):
+                masked_key = index.mask_values(key)
+                if masked_key != key and masked_key not in node:
+                    node[masked_key] = node.pop(key)
         return node
     return node
 
@@ -1709,15 +2127,11 @@ def _mask_report(
             _mask_region(getattr(physical, "region", None), whole_file)
             _mask_region(getattr(physical, "contextRegion", None), whole_file)
         _mask_own_source_text(result, index)
-    if index.lines or index.values or index.shapes:
-        seen: Set[int] = set()
-        for run in getattr(sarif_report, "runs", None) or []:
-            _mask_tree(run, index, seen)
-        for external in _external_properties_of(sarif_report):
-            _mask_tree(external, index, seen)
     # A value that does not look like a secret is not masked everywhere, but it is
     # masked in every finding whose region or context overlaps the secret
-    # finding's location: what that finding reports is the same line.
+    # finding's location: what that finding reports is the same line. This pass
+    # runs before the one by value and shape: that one can mask a token inside
+    # such a value and leave the rest of it, which no longer matches here.
     if index.local_values:
         secret_ids = {id(result) for result in index.secret_results}
         for result in _all_results(sarif_report):
@@ -1742,8 +2156,14 @@ def _mask_report(
                 if value is None:
                     continue
                 masked = _mask_tree(value, local_index, set())
-                if isinstance(value, str) and masked != value:
+                if _changed(value, masked):
                     setattr(result, name, masked)
+    if index.lines or index.values or index.shapes:
+        seen: Set[int] = set()
+        for run in getattr(sarif_report, "runs", None) or []:
+            _mask_tree(run, index, seen)
+        for external in _external_properties_of(sarif_report):
+            _mask_tree(external, index, seen)
     return index
 
 
@@ -1845,14 +2265,18 @@ def _additional_entry_is_secret(entry: Dict[str, Any], scanner_name: Any) -> boo
         scanner_tool_type,
     )
 
-    if scanner_tool_type(scanner_name) == SECRETS_TOOL_TYPE:
+    tool_type = scanner_tool_type(scanner_name)
+    if tool_type == SECRETS_TOOL_TYPE:
         return True
     if _is_secret_rule_id(entry.get("rule_id")):
         return True
     tags = entry.get("tags")
     if isinstance(tags, list) and any(_is_secret_tag(tag) for tag in tags):
         return True
-    return any(_text_reports_a_secret(entry.get(name)) for name in _ENTRY_TEXTS)
+    may_describe = _may_describe_credentials({tool_type} if tool_type else set())
+    return any(
+        _text_reports_a_secret(entry.get(name), may_describe) for name in _ENTRY_TEXTS
+    )
 
 
 #: The text fields of an additional-report entry the flat model shows.
@@ -1913,7 +2337,24 @@ def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], s
         if placed is not None:
             whole, lines = placed
             text = _mask_lines(text, first_line, whole, lines)
-        return index.mask_values(text)
+        text = index.mask_values(text)
+        # The values a secret finding exposed, whatever they look like, are
+        # masked in text that shows the lines it reports, as in every finding
+        # that overlaps them (_overlapping_values): a short value reused next
+        # to its line was shown from disk.
+        normalized = _normalized_uri(uri)
+        if normalized is not None and index.local_values:
+            last = (
+                first_line + max(len(_split_lines(text)) - 1, 0)
+                if isinstance(first_line, int)
+                else None
+            )
+            values = _values_at(normalized, first_line, last, index)
+            if values:
+                local = _SecretIndex()
+                local.values = set(values)
+                text = local.mask_values(text)
+        return text
 
     return mask
 
@@ -1935,10 +2376,53 @@ def mask_secret_values_in_tree(
     return tree
 
 
+def _yaml_double_quoted(value: str) -> str:
+    """``value`` as the YAML report writes it inside double quotes: the report's
+    own dumper (``utils/report_yaml``) escapes the quote, the backslash, the
+    control characters and, since it allows no unicode, every character outside
+    ASCII, in upper-case hex (``\\xE9``, ``\\u20AC``, and the eight-digit ``\\U``
+    form past the basic plane)."""
+    from automated_security_helper.utils.report_yaml import report_yaml
+
+    written = report_yaml(value, default_style='"', width=2**31 - 1).strip()
+    if len(written) >= 2 and written[0] == written[-1] == '"':
+        return written[1:-1]
+    return value
+
+
+def _shown(value: str) -> str:
+    """``value`` as the HTML and text reports show it (``terminal_text``): control
+    and format characters, and a backslash before text that reads as an escape,
+    written as escapes."""
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+    return str(shown_not_obeyed(value))
+
+
+#: ElementTree's escaping of an attribute value: ``&``, ``<``, ``>`` and ``"``,
+#: and the layout characters as character references; the single quote stays.
+_XML_ATTRIBUTE_ESCAPES = (
+    ("&", "&amp;"),
+    ("<", "&lt;"),
+    (">", "&gt;"),
+    ('"', "&quot;"),
+    ("\r", "&#13;"),
+    ("\n", "&#10;"),
+    ("\t", "&#09;"),
+)
+
+
+def _xml_attribute(value: str) -> str:
+    for character, reference in _XML_ATTRIBUTE_ESCAPES:
+        value = value.replace(character, reference)
+    return value
+
+
 #: How a value is written into the text formats reports use: as is, inside a JSON
 #: string, HTML or XML text and attributes, doubled quotes (CSV, YAML), a
-#: backslash-escaped single quote (shell and script strings) and percent-encoded
-#: (URLs, with a space as ``%20`` or ``+``).
+#: backslash-escaped single quote (shell and script strings), percent-encoded
+#: (URLs, with a space as ``%20`` or ``+``), inside a YAML double-quoted scalar,
+#: as the reports show it, and as the JUnit report's XML attributes carry it.
 _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: value,
     lambda value: json.dumps(value)[1:-1],
@@ -1957,6 +2441,17 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     # The Markdown reporter: HTML-escaped, then every Markdown character
     # backslash-escaped (markdown_reporter._text).
     lambda value: _MARKDOWN_CHARACTER.sub(r"\\\1", html.escape(value, quote=False)),
+    # The YAML report's double-quoted scalar (report_yaml), with its upper-case
+    # escapes of every character outside ASCII.
+    _yaml_double_quoted,
+    # The HTML report writes snippets and descriptions as the console shows them
+    # (terminal_text.shown_not_obeyed), then HTML-escaped; the text report as
+    # shown alone.
+    _shown,
+    lambda value: html.escape(_shown(value), quote=False),
+    # An XML attribute as ElementTree writes it (the JUnit report): the double
+    # quote and the layout characters escaped, the single quote not.
+    _xml_attribute,
 )
 
 #: The characters the Markdown reporter backslash-escapes in a value.
