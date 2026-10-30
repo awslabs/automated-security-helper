@@ -156,14 +156,14 @@ class TestInvocationFailureWording:
         )
         assert (
             CfnLintScanner._batch_failure(
-                {"error": "No such file"}, Path("batch.sarif"), ()
+                {"error": "No such file"}, Path("batch.sarif"), values=()
             )
             == "cfn-lint could not be started: No such file"
         )
 
     def test_a_timeout_ash_ended_says_killed(self):
         text = CfnLintScanner._batch_failure(
-            {"returncode": -9, "timed_out": True}, Path("batch.sarif"), ()
+            {"returncode": -9, "timed_out": True}, Path("batch.sarif"), values=()
         )
         assert text == f"cfn-lint timed out{WAS_KILLED_ENDING}"
 

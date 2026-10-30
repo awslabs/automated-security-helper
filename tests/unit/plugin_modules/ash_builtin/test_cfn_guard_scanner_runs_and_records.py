@@ -184,14 +184,14 @@ class TestRunFailureWording:
 class TestParseResponse:
     def test_sarif_with_no_run_is_not_a_clean_template(self):
         failure, report = CfnGuardScanner._parse_response(
-            {"returncode": 0, "stdout": "{}", "stderr": ""}, ()
+            {"returncode": 0, "stdout": "{}", "stderr": ""}, values=()
         )
         assert report is None
         assert failure is not None and "holds no run" in failure
 
     def test_sarif_with_a_run_is_read(self):
         failure, report = CfnGuardScanner._parse_response(
-            {"returncode": 0, "stdout": _sarif(), "stderr": ""}, ()
+            {"returncode": 0, "stdout": _sarif(), "stderr": ""}, values=()
         )
         assert failure is None and report is not None
 
