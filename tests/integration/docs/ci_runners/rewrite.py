@@ -22,7 +22,10 @@ these rules:
     release tag becomes a call of the pull request's copy, ``./.github/workflows/<file>``.
 ``ash-version``
     The scan workflow's ``ash-version`` becomes the head commit, and ``ash-repo`` the
-    base repository, on the line after it.
+    base repository, on the line after it. The commit is written quoted and followed
+    by ``# pragma: allowlist secret``: a forty-digit hex value on a user's own
+    workflow line is what detect-secrets reads as a high-entropy string, and the
+    pragma is the marker ASH's own files use for a value that is not a secret.
 ``artifact-actions`` (github-actions)
     ``actions/upload-artifact`` and ``actions/download-artifact`` at any ref become the
     pinned v4 releases (ACT_UPLOAD_ARTIFACT, ACT_DOWNLOAD_ARTIFACT), because act 0.2.89

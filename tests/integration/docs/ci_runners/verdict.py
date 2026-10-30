@@ -632,9 +632,13 @@ def written_after_problems(path: Path, *, started: float) -> list[str]:
     """``path`` must exist and have been written at or after ``started``, a POSIX time,
     within ``DOS_TIME_SLACK_S``.
 
-    In act's host mode every job shares one working directory, so a file an earlier
-    job wrote is still there when a later one runs; only one written after the later
-    step started can be that step's output.
+    act's host executor runs each job in its own copy of the project and removes it at
+    the job's end (measured: the project's own ``.ash/ash_output`` is never written, so
+    the harness reads the artifact the job uploaded), so ``path`` is a file unpacked
+    from that artifact with the mtime its zip entry recorded, which is the file's own
+    (reports._EXTENDED_TIMESTAMP). A file the job's checkout already held, or one a step
+    that did not write left in place, carries an mtime before the step started; only one
+    written after the step started can be that step's output.
     """
     path = Path(path)
     if path.is_symlink() or not path.is_file():
@@ -654,9 +658,11 @@ def merged_sarif_problems(
 ) -> list[str]:
     """The merged SARIF must be written by the merge step and be the one uploaded.
 
-    In act's host mode every job shares one working directory, so a SARIF a shard
-    wrote is still there when the merge job runs; only one written after the merge step
-    started can be its output.
+    ``sarif`` is the file unpacked from the merge job's own uploaded artifact, with the
+    mtime its zip entry recorded (written_after_problems says why); a SARIF the merge
+    step did not write, one its checkout held or a download left in place, carries an
+    mtime before the merge step started, and only one written after it can be the
+    merge's output.
     """
     sarif = Path(sarif)
     problems = []
