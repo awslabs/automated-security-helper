@@ -5,6 +5,7 @@ import fnmatch
 import glob
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import (
     Annotated,
@@ -84,24 +85,38 @@ BANDIT_DEFAULT_EXCLUDES = (
 )
 
 
-def _exclude_argument_limit(platform: str = os.name) -> int:
-    """The longest ``--exclude=...`` argument passed, in bytes, on ``platform``.
+#: The longest ``--exclude=...`` argument passed where arguments are bounded one by
+#: one: Linux refuses one argument longer than 128 KiB (MAX_ARG_STRLEN) with E2BIG,
+#: so 120 KiB leaves room for the rest of the command line.
+_EXCLUDE_ARGUMENT_LIMIT = 120 * 1024
 
-    Linux refuses one argument longer than 128 KiB (MAX_ARG_STRLEN) with E2BIG,
-    so 120 KiB leaves room for the rest of the command line. Windows has no
-    per-argument bound but limits the WHOLE command line CreateProcess is given
-    to 32,767 characters, so there the bound is 24 KiB: with the 120 KiB bound,
-    a tree with many links or ignore paths made bandit fail to start instead of
-    dropping the best-effort globs with a warning. The bound counts UTF-8 bytes
-    (``_argument_length``); a character is at least one byte, so a value under
-    24 KiB of bytes is under 24 KiB of characters too.
+#: Windows bounds the WHOLE command line CreateProcess is given, not one argument.
+_WINDOWS_COMMAND_LINE_LIMIT = 32767
+
+
+def _exclude_fits(token: str, rest: Sequence[str], platform: str = os.name) -> bool:
+    """Whether the ``--exclude=...`` ``token`` fits the command line beside ``rest``.
+
+    ``rest`` is every other argument of the command. On Windows the whole line,
+    as ``subprocess`` builds it (``list2cmdline``), has to stay within 32,767
+    characters, so the budget for the token is what the other arguments leave;
+    elsewhere one argument is bounded on its own (``_EXCLUDE_ARGUMENT_LIMIT``,
+    in UTF-8 bytes as exec passes them, ``_argument_length``). A fixed 24 KiB
+    bound on Windows refused scans whose required entries fit the real line.
     """
     if platform == "nt":
-        return 24 * 1024
-    return 120 * 1024
+        line = subprocess.list2cmdline([*rest, token])
+        return len(line) <= _WINDOWS_COMMAND_LINE_LIMIT
+    return _argument_length(token) <= _EXCLUDE_ARGUMENT_LIMIT
 
 
-_EXCLUDE_ARGUMENT_LIMIT = _exclude_argument_limit()
+def _command_line_bound_text(platform: str = os.name) -> str:
+    """The bound ``_exclude_fits`` applies on ``platform``, for an error message."""
+    if platform == "nt":
+        return (
+            f"the {_WINDOWS_COMMAND_LINE_LIMIT}-character command line Windows allows"
+        )
+    return f"one command-line argument ({_EXCLUDE_ARGUMENT_LIMIT} bytes)"
 
 
 def _holds_a_line_break(text: str) -> bool:
@@ -1372,13 +1387,16 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         merged here while ``_resolve_arguments`` runs: resolution does not
         rebuild the token.
 
-        The value is bounded to one command-line argument
-        (``_EXCLUDE_ARGUMENT_LIMIT``): the configured, output-directory and
-        link entries have to fit, or bandit is not run on ``target`` (over the
-        bound it would read the file a link points at, or exec would fail with
-        E2BIG and blame nothing); the global-ignore globs are added while they
-        fit and dropped with a warning past it, since the SARIF step applies
-        every ignore path after the scan either way.
+        The value is bounded to what the command line can carry
+        (``_exclude_fits``: one argument of 120 KiB where arguments are bounded
+        one by one, the whole 32,767-character line on Windows): the configured,
+        output-directory and link entries have to fit, or bandit is not run on
+        ``target`` (over the bound it would read the file a link points at, or
+        exec would fail with E2BIG and blame nothing); the global-ignore globs
+        are added while they fit and dropped with a warning past it, since the
+        SARIF step applies every ignore path after the scan either way. The
+        bound is measured on the resolved command, so the budget on Windows is
+        what the other arguments leave.
         """
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("bandit.sarif")
@@ -1426,32 +1444,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 "directory inside it), which one command-line argument cannot "
                 "carry, so bandit would run with no exclusion at all."
             )
-        length = _argument_length(f"--exclude={','.join(entries)}")
-        if length > _EXCLUDE_ARGUMENT_LIMIT:
-            raise ScannerError(
-                f"Not running bandit on {Path(target).as_posix()}: its --exclude "
-                f"value, with the {len(links)} links that leave the scanned tree, is "
-                f"longer than one command-line argument can be "
-                f"({_EXCLUDE_ARGUMENT_LIMIT} bytes)."
-            )
-        left_out = 0
-        for entry in best_effort:
-            added = _argument_length(entry) + (1 if entries else 0)
-            if length + added > _EXCLUDE_ARGUMENT_LIMIT:
-                left_out += 1
-                continue
-            entries.append(entry)
-            length += added
-        if left_out:
-            self._plugin_log(
-                f"{left_out} globs for the global ignore paths are not in bandit's "
-                "--exclude, which would be longer than one command-line argument "
-                "can be; bandit reads the files they cover, and ASH drops their "
-                "findings.",
-                target_type=target_type,
-                level=logging.WARNING,
-            )
-
         # A new list: the one extra_args holds is put back as it was, unchanged.
         original_extra_args = self.args.extra_args
         resolution_args = [
@@ -1472,15 +1464,57 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     ).as_posix(),
                 )
             )
-        self.args.extra_args = resolution_args + [
-            ToolExtraArg(key=f"--exclude={','.join(entries)}", value=None)
-        ]
+        # Resolved with the required entries first: the bound is measured on
+        # the whole command, so the other arguments have to be known before the
+        # token can be judged and the best-effort globs added to it.
+        token = f"--exclude={','.join(entries)}"
+        self.args.extra_args = resolution_args + [ToolExtraArg(key=token, value=None)]
         try:
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file
             )
         finally:
             self.args.extra_args = original_extra_args
+
+        token_index = next(
+            (
+                index
+                for index, argument in enumerate(final_args)
+                if str(argument).startswith("--exclude=")
+            ),
+            None,
+        )
+        if token_index is None:
+            raise ScannerError(
+                f"Not running bandit on {Path(target).as_posix()}: its --exclude "
+                "argument was not placed in the command line, so bandit would run "
+                "with no exclusion at all."
+            )
+        rest = [str(argument) for argument in final_args]
+        del rest[token_index]
+        if not _exclude_fits(token, rest):
+            raise ScannerError(
+                f"Not running bandit on {Path(target).as_posix()}: its --exclude "
+                f"value, with the {len(links)} links that leave the scanned tree, "
+                f"does not fit {_command_line_bound_text()}."
+            )
+        left_out = 0
+        for entry in best_effort:
+            candidate = f"{token},{entry}" if entries else f"--exclude={entry}"
+            if not _exclude_fits(candidate, rest):
+                left_out += 1
+                continue
+            entries.append(entry)
+            token = candidate
+        if left_out:
+            self._plugin_log(
+                f"{left_out} globs for the global ignore paths are not in bandit's "
+                f"--exclude, which would not fit {_command_line_bound_text()}; "
+                "bandit reads the files they cover, and ASH drops their findings.",
+                target_type=target_type,
+                level=logging.WARNING,
+            )
+        final_args[token_index] = token
 
         return final_args, results_file, None
 

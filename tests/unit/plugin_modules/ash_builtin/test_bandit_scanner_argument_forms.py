@@ -48,7 +48,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     BanditScanner,
     BanditScannerConfig,
     BanditScannerConfigOptions,
-    _exclude_argument_limit,
+    _exclude_fits,
     _not_a_plain_substring,
     _spelled_absolute,
     bandit_exclude_globs,
@@ -199,12 +199,41 @@ def test_an_ini_exclude_entry_with_a_nul_is_dropped_and_counted(tmp_path, caplog
 # ---------------------------------------------------------------------------
 
 
-def test_the_exclude_bound_fits_a_windows_command_line():
-    """Windows limits the WHOLE command line to 32,767 characters; the Linux
-    per-argument bound of 120 KiB was used there too."""
-    assert _exclude_argument_limit("nt") < 32767
-    assert _exclude_argument_limit("posix") == 120 * 1024
-    assert _EXCLUDE_ARGUMENT_LIMIT == _exclude_argument_limit(os.name)
+def test_the_windows_bound_is_the_whole_command_line():
+    """Windows limits the WHOLE command line to 32,767 characters, so the budget
+    for --exclude is what the other arguments leave: a fixed 24 KiB bound
+    refused required entries of 24 to 31 KiB that fit the real line."""
+    rest = ["bandit", "--recursive", "--format", "sarif", "C:/src"]
+    assert _exclude_fits("--exclude=" + "x" * 31000, rest, "nt")
+    assert not _exclude_fits("--exclude=" + "x" * 32760, rest, "nt")
+    long_rest = ["x" * 2000]
+    assert not _exclude_fits("--exclude=" + "x" * 31000, long_rest, "nt")
+
+
+def test_elsewhere_one_argument_is_bounded_on_its_own():
+    long_rest = ["x" * 200_000]
+    assert _exclude_fits(
+        "--exclude=" + "x" * (_EXCLUDE_ARGUMENT_LIMIT - 10), long_rest, "posix"
+    )
+    assert not _exclude_fits(
+        "--exclude=" + "x" * _EXCLUDE_ARGUMENT_LIMIT, long_rest, "posix"
+    )
+    assert _exclude_fits("--exclude=vendor", [], os.name)
+
+
+def test_the_required_entries_are_judged_on_the_resolved_command(tmp_path):
+    """The bound is measured beside the other arguments of the resolved
+    command, and the token the scan passes is the one that was judged."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+
+    argv, _, _ = scanner._execute_scan(source, "source", _ignore("vendor/**"))
+
+    tokens = [arg for arg in argv if arg.startswith("--exclude=")]
+    assert len(tokens) == 1
+    rest = [arg for arg in argv if not arg.startswith("--exclude=")]
+    assert _exclude_fits(tokens[0], rest)
+    assert f"{source.as_posix()}/vendor/*" in _entries(argv)
 
 
 # ---------------------------------------------------------------------------
