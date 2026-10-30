@@ -311,6 +311,26 @@ def test_arch_key_is_derived_from_the_machine_type(
     )
 
 
+@pytest.mark.parametrize("machine", ["armv7l", "i686", ""])
+def test_a_machine_outside_both_families_selects_no_install_commands(
+    scanner, monkeypatch, machine
+):
+    """A 32-bit ARM or x86 host, or a platform that cannot name its machine
+    (platform.machine() returns ""), matches neither entry: both lists are
+    non-empty and the answer is still False. A substring match ("arm" in the
+    name) would have picked the arm64 list on a 32-bit ARM host."""
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    scanner.custom_install_commands["linux"]["amd64"] = [["echo", "install"]]
+    scanner.custom_install_commands["linux"]["arm64"] = [["echo", "install"]]
+
+    assert scanner._has_install_commands() is False, (
+        f"{machine!r} is neither an amd64 nor an arm64 machine"
+    )
+
+
 def test_execute_scan_stub_raises_not_implemented(scanner):
     with pytest.raises(NotImplementedError, match="overrides scan"):
         scanner._execute_scan(
