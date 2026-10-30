@@ -410,8 +410,12 @@ class CommandSafeStream:
         # looks its attributes up before it fills them in) the lookup of
         # ``_target`` came back here, read ``target`` again, and recursed
         # until RecursionError. A private attribute is this wrap's own, never
-        # forwarded.
-        if name.startswith(("rich_", "_")):
+        # forwarded. Nor ``target`` itself: it is a property of this class,
+        # so a lookup of it reaches here only when the property raised
+        # AttributeError (``_target`` not set yet, on that same half-made
+        # instance), and reading ``self.target`` to forward it would recurse
+        # the same way.
+        if name == "target" or name.startswith(("rich_", "_")):
             raise AttributeError(name)
         return getattr(self.target, name)
 
