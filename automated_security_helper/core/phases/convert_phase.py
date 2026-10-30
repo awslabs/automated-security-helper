@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from automated_security_helper.base.engine_phase import EnginePhase
-from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.base.plugin_config import (
+    plugin_config_key,
+    section_enabled,
+)
 from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import (
@@ -65,10 +68,13 @@ def _row_keys(
 ) -> Dict[int, str]:
     """The ``converter_results`` key of each instance, by ``id``, each unique.
 
-    Computed once, before the filter, so the row a converter's run writes, the
-    row its exception handler writes and the row the filtered-out pass writes
-    all land under one key, and under a key no other converter of this run (a
-    converter whose constructor raised included) is recorded under.
+    Computed once, after the filter and before any row is written, so the row a
+    converter's run writes, the row its exception handler writes and the row
+    the filtered-out pass writes all land under one key, and under a key no
+    other converter of this run (a converter whose constructor raised included)
+    is recorded under. The same key names the converter in its progress rows
+    and in its CONVERT_START and CONVERT_COMPLETE events, so two converters
+    sharing a display name are told apart there too.
     """
     taken = set(aggregated_results.converter_results)
     keys: Dict[int, str] = {}
@@ -82,21 +88,6 @@ def _row_keys(
         taken.add(key)
         keys[id(plugin_instance)] = key
     return keys
-
-
-def _section_enabled(plugin_config: Any) -> bool:
-    """Whether a converter's config section leaves it enabled.
-
-    Read from the dict ``get_plugin_config`` returns as well as from a model; an
-    absent section or an absent key means the default, enabled.
-    """
-    if plugin_config is None:
-        return True
-    if isinstance(plugin_config, dict):
-        enabled = plugin_config.get("enabled", True)
-    else:
-        enabled = getattr(plugin_config, "enabled", True)
-    return bool(enabled)
 
 
 def _redaction_values(plugin_instance: Any, run_config: Any) -> tuple:
@@ -118,6 +109,21 @@ def _failure_text(error: BaseException, values: Any) -> str:
     redacted here, once, before it is recorded anywhere.
     """
     return f"{type(error).__name__}: {error_text(error, values)}"
+
+
+def _answers_python_only(plugin_instance: Any) -> bool:
+    """Whether a converter says it is Python-only, read with a guard.
+
+    ``is_python_only`` is plugin-supplied, so the exception set is open; a check
+    that raises is read as "not Python-only", which is what
+    ``filter_enabled_plugins`` does with the same call, so the pre-filter
+    dependency skip and the filter agree on which converters a Python-only run
+    leaves out.
+    """
+    try:
+        return bool(plugin_instance.is_python_only())
+    except Exception:
+        return False
 
 
 def _refused_over_limit(plugin_instance: Any) -> str:
@@ -426,9 +432,7 @@ class ConvertPhase(EnginePhase):
 
             display_name = _converter_display_name(plugin_instance)
             row_key = row_keys.get(id(plugin_instance), display_name)
-            enabled = bool(
-                getattr(getattr(plugin_instance, "config", None), "enabled", True)
-            )
+            enabled = section_enabled(getattr(plugin_instance, "config", None))
             declined_by_python_only = False
             if python_based_plugins_only:
                 try:
@@ -587,7 +591,7 @@ class ConvertPhase(EnginePhase):
                 # either way: the check never ran, so neither value would be a
                 # measurement. failure is the signal here.
                 aggregated_results.converter_results[failed_name] = ConverterStatusInfo(
-                    excluded=not _section_enabled(plugin_config),
+                    excluded=not section_enabled(plugin_config),
                     failure=failure,
                     converted_paths=[],
                 )
@@ -608,13 +612,15 @@ class ConvertPhase(EnginePhase):
         # filter_enabled_plugins read the stored value instead of calling would
         # change the scan and report phases, which share it.
         #
-        # Not for a converter the config turned off. The filter below drops it on
-        # its enabled flag before asking about its dependencies, and a dependency
-        # check can resolve and install a tool (the jupyter converter's resolves
-        # nbconvert through uv), which a run that disabled the converter asked it
-        # not to do.
+        # Not for a converter the config turned off, and not for a non-Python
+        # converter on a Python-only run. The filter below drops both before
+        # asking about their dependencies, and a dependency check can resolve
+        # and install a tool (the jupyter converter's resolves nbconvert through
+        # uv), which a run that left the converter out asked it not to do.
         for plugin_instance in all_converter_instances:
-            if not _section_enabled(getattr(plugin_instance, "config", None)):
+            if not section_enabled(getattr(plugin_instance, "config", None)):
+                continue
+            if python_based_plugins_only and not _answers_python_only(plugin_instance):
                 continue
             try:
                 with plugin_probe_scope(plugin_instance, self.plugin_context):
@@ -733,7 +739,7 @@ class ConvertPhase(EnginePhase):
                     phase=ExecutionPhase.CONVERT,
                     task_id=converter_task,
                     completed=50,
-                    description=f"Running converter: {escape_markup(display_name)}",
+                    description=f"Running converter: {escape_markup(row_key)}",
                 )
 
                 # Call convert method directly - converters should handle finding their own targets
@@ -745,9 +751,9 @@ class ConvertPhase(EnginePhase):
 
                     self.notify_event(
                         AshEventType.CONVERT_START,
-                        converter=display_name,
+                        converter=row_key,
                         converter_class=plugin_instance.__class__.__name__,
-                        message=f"Starting converter: {display_name}",
+                        message=f"Starting converter: {row_key}",
                     )
                 except Exception as event_error:
                     ASH_LOGGER.error(
@@ -799,7 +805,7 @@ class ConvertPhase(EnginePhase):
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[yellow]({escape_markup(display_name)}) Converted "
+                                f"[yellow]({escape_markup(row_key)}) Converted "
                                 f"{len(convert_result)} files, "
                                 f"{escape_markup(outcome)}"
                             ),
@@ -810,7 +816,7 @@ class ConvertPhase(EnginePhase):
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[green]({escape_markup(display_name)}) Converted "
+                                f"[green]({escape_markup(row_key)}) Converted "
                                 f"{len(convert_result)} files, "
                                 f"{escape_markup(accepted)}"
                             ),
@@ -821,7 +827,7 @@ class ConvertPhase(EnginePhase):
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[green]({escape_markup(display_name)}) Converted "
+                                f"[green]({escape_markup(row_key)}) Converted "
                                 f"{len(convert_result)} files"
                             ),
                         )
@@ -834,12 +840,12 @@ class ConvertPhase(EnginePhase):
 
                         self.notify_event(
                             AshEventType.CONVERT_COMPLETE,
-                            converter=display_name,
+                            converter=row_key,
                             converter_class=plugin_instance.__class__.__name__,
                             converted_files=convert_result,
                             file_count=len(convert_result),
                             message=(
-                                f"Converter {display_name} completed: "
+                                f"Converter {row_key} completed: "
                                 f"{len(convert_result)} files converted{also}"
                             ),
                         )
@@ -875,7 +881,7 @@ class ConvertPhase(EnginePhase):
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[red]({escape_markup(display_name)}) "
+                                f"[red]({escape_markup(row_key)}) "
                                 f"{escape_markup(outcome)}"
                             ),
                         )
@@ -885,7 +891,7 @@ class ConvertPhase(EnginePhase):
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[yellow]({escape_markup(display_name)}) "
+                                f"[yellow]({escape_markup(row_key)}) "
                                 f"{escape_markup(accepted)}"
                             ),
                         )
@@ -894,7 +900,7 @@ class ConvertPhase(EnginePhase):
                             phase=ExecutionPhase.CONVERT,
                             task_id=converter_task,
                             completed=100,
-                            description=f"[yellow]({escape_markup(display_name)}) No files to convert",
+                            description=f"[yellow]({escape_markup(row_key)}) No files to convert",
                         )
 
                     # Notify converter complete (no files)
@@ -905,12 +911,12 @@ class ConvertPhase(EnginePhase):
 
                         self.notify_event(
                             AshEventType.CONVERT_COMPLETE,
-                            converter=display_name,
+                            converter=row_key,
                             converter_class=plugin_instance.__class__.__name__,
                             converted_files=[],
                             file_count=0,
                             message=(
-                                f"Converter {display_name} completed: "
+                                f"Converter {row_key} completed: "
                                 f"{outcome or 'no files to convert'}"
                             ),
                         )
@@ -1010,7 +1016,7 @@ class ConvertPhase(EnginePhase):
                         task_id=converter_task,
                         completed=100,
                         description=(
-                            f"[red]({escape_markup(display_name)}) Failed: "
+                            f"[red]({escape_markup(row_key)}) Failed: "
                             f"{escape_markup(error_text(e, values))}"
                         ),
                     )

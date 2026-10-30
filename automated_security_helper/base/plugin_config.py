@@ -256,3 +256,21 @@ def plugin_config_key(plugin_class: type) -> str:
         declared_plugin_name(plugin_class)
         or getattr(plugin_class, "__name__", "Unknown").lower()
     )
+
+
+def section_enabled(plugin_config: Any) -> bool:
+    """Whether a plugin's config section leaves it enabled.
+
+    The one reading of ``enabled`` the phases share: the pre-filter dependency
+    skip, the constructor-failure row's ``excluded`` flag, the filtered-out
+    row and the not-selected test of a scanner all ask this, so they cannot
+    disagree. Read from the dict ``get_plugin_config`` returns as well as from
+    a model; an absent section or an absent key means the default, enabled.
+    """
+    if plugin_config is None:
+        return True
+    if isinstance(plugin_config, dict):
+        enabled = plugin_config.get("enabled", True)
+    else:
+        enabled = getattr(plugin_config, "enabled", True)
+    return bool(enabled)

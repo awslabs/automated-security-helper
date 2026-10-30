@@ -387,11 +387,15 @@ class ReportPhase(EnginePhase):
         each reporter and before writing what one returned, and a cancel that
         stops it removes every report it had written: the engine checks only
         between phases, so a cancel_scan landing here let every reporter write,
-        and a scan with no previous results set aside kept those reports. Only
-        the files this phase wrote, by path, are removed, and the reports
-        directory with them if this phase created it and nothing else is in it.
-        The previous results, where they were set aside, are put back by
-        whoever settles them (core/previous_results.py).
+        and a scan with no previous results set aside kept those reports. The
+        files this phase wrote, by path, are removed, and so is every other
+        entry that appeared under the reports directory while it ran (a
+        reporter's own companion files and directories), compared against a
+        listing taken before the reporters ran; when that listing did not
+        complete, only the files this phase wrote go. The reports directory
+        goes with them if this phase created it and nothing else is in it. The
+        previous results, where they were set aside, are put back by whoever
+        settles them (core/previous_results.py).
 
         Args:
             report_dir(Path): The directory to save reports to.
@@ -453,10 +457,12 @@ class ReportPhase(EnginePhase):
                 report_dir.rmdir()
             except OSError:
                 pass  # not empty, or already gone: left as it is
-        if self._written_reports:
+        if self._written_reports or appeared:
             ASH_LOGGER.info(
                 f"The scan was cancelled during the report phase; removed the "
-                f"{len(self._written_reports)} report(s) it had written"
+                f"{len(self._written_reports)} report(s) it had written and "
+                f"{len(appeared)} other entr{'y' if len(appeared) == 1 else 'ies'} "
+                f"that appeared under {report_dir} while it ran"
             )
 
     def _write_reports(

@@ -6,7 +6,10 @@ from automated_security_helper.base.converter_plugin import ConverterPluginBase
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import ReporterPluginBase
-from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.base.plugin_config import (
+    plugin_config_key,
+    section_enabled,
+)
 from automated_security_helper.core.constants import PYTHON_ONLY_SKIPPED_REASON
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.scanner_selection import (
@@ -223,21 +226,6 @@ def _holds_a_regular_file(directory: Any) -> bool:
     converted and then never scanned. A file is a file whatever it is called.
     """
     return next(iter(_regular_files_under(directory)), None) is not None
-
-
-def _section_enabled(plugin_config: Any) -> bool:
-    """Whether a scanner's config section leaves it enabled.
-
-    Read from the dict ``get_plugin_config`` returns as well as from a model; an
-    absent section or an absent key means the default, enabled.
-    """
-    if plugin_config is None:
-        return True
-    if isinstance(plugin_config, dict):
-        enabled = plugin_config.get("enabled", True)
-    else:
-        enabled = getattr(plugin_config, "enabled", True)
-    return bool(enabled)
 
 
 def _loses_builtin_scanners(failed_module: str) -> bool:
@@ -713,7 +701,7 @@ class ScanPhase(EnginePhase):
                             not_selected_reasons.append(
                                 f"not named by {names.allowlist}"
                             )
-                        if not _section_enabled(plugin_config):
+                        if not section_enabled(plugin_config):
                             not_selected_reasons.append(
                                 "disabled in the configuration (enabled: false)"
                             )
