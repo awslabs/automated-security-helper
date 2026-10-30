@@ -79,6 +79,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 import shutil
 import stat
 import sys
@@ -465,7 +466,19 @@ def _key(template: "str | Path") -> str:
 
 
 def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
-    """The complete answer lines the child wrote, in order.
+    """The complete answer lines the child wrote, in order; see ``_read_response``."""
+    return _read_response(response_path)[1]
+
+
+def _read_response(response_path: Path) -> tuple[bool, List[Dict[str, Any]]]:
+    """``(started, answers)``: whether the child wrote its protocol header, and the
+    complete answer lines it wrote after it, in order.
+
+    The header is the first thing the child writes, before it looks at a template, so
+    its absence is a structural fact about the child's run: it never got as far as its
+    templates (the interpreter did not start, cdk-nag did not import, node was refused),
+    which is a failure the next child shares whatever the stderr says. A header with no
+    answers is a child that started and died on its first template.
 
     The file is in a directory a sandboxed child can write, so it is opened without
     following a symlink and read up to a cap: a child must not be able to point the
@@ -487,12 +500,12 @@ def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
     the ones the caller fails for want of an answer.
     """
     if not response_path.exists() or response_path.is_symlink():
-        return []
+        return False, []
     try:
         if not stat.S_ISREG(os.lstat(response_path).st_mode):
-            return []
+            return False, []
     except OSError:
-        return []
+        return False, []
     flags = (
         os.O_RDONLY
         | getattr(os, "O_NOFOLLOW", 0)
@@ -502,7 +515,7 @@ def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
     fd = os.open(response_path, flags)
     with os.fdopen(fd, "rb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            return []
+            return False, []
         # In bounded pieces up to one byte past the cap, so the cap check below
         # still sees a response that crossed it without a cap-sized allocation.
         chunks: List[bytes] = []
@@ -521,13 +534,13 @@ def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
         data = data[: data.rfind(b"\n") + 1]
     lines = data.decode("utf-8", errors="replace").split("\n")
     if not lines:
-        return []
+        return False, []
     try:
         header = json.loads(lines[0])
     except ValueError:
-        return []
+        return False, []
     if not isinstance(header, dict) or header.get("protocol") != PROTOCOL_VERSION:
-        return []
+        return False, []
     answers: List[Dict[str, Any]] = []
     # The last element is the text after the final newline: empty for a complete
     # file, a fragment for a child that died mid-write. Either way it is not an answer.
@@ -539,7 +552,21 @@ def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
         if not isinstance(answer, dict) or not isinstance(answer.get("status"), str):
             break
         answers.append(answer)
-    return answers
+    return True, answers
+
+
+def _failure_signature(response: Dict[str, Any], reason: str) -> tuple:
+    """What two answerless children must share for their failure to be one failure.
+
+    The exit code as the runner reported it, and the reason text with paths and numbers
+    masked: a traceback through the child's per-run scratch directory, a pid in a node
+    fatal-error line, or a byte count differ from child to child while the failure is
+    the same, and an exact compare read every such pair as two different failures and
+    paid a third child for it.
+    """
+    masked = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s|'\"]+", "<path>", reason)
+    masked = re.sub(r"\d+", "<n>", masked)
+    return (response.get("returncode"), masked)
 
 
 def _lowest_kept_log_level() -> int:
@@ -661,8 +688,16 @@ def _run_child(
             timeout=timeout,
             values=values,
         )
-        answers = _read_answers(response_path)[: len(templates)]
-        recorded = outcome if isinstance(outcome, dict) else {}
+        started, answers = _read_response(response_path)
+        answers = answers[: len(templates)]
+        # A copy of the runner's response with one fact of this run added: whether
+        # the child wrote its protocol header, that is, reached its templates. The
+        # batch reads it to tell a startup failure (shared by every child) from a
+        # crash a template provoked; the scanner's exit-code recorder reads only
+        # ``returncode`` and the stop flags and is not affected by the extra key.
+        recorded = dict(outcome) if isinstance(outcome, dict) else {}
+        if recorded:
+            recorded["worker_started"] = started
         if len(answers) == len(templates):
             return answers, None, False, recorded
         if outcome.get("timed_out"):
@@ -795,14 +830,19 @@ class _Batch:
         template provokes used to fail every template in the batch, while the same
         crash on a later template failed only that one. The retry is bounded so a
         failure every child shares (cdk-nag not importing, node refused) is not paid
-        once per template: a second child in a row that answers nothing WITH THE SAME
-        REASON as the first fails everything still pending with it. Two neighboring
-        templates that each crash the child for their own reasons give two different
-        reasons, so the second is not taken as shared and the next template still gets
-        its own child; three answerless children in a row fail the rest whatever their
-        reasons, so a run of crashing templates stays bounded. A child that ran out of
-        time fails everything still pending at once, as before, and so does a child
-        the runner could not stop.
+        once per template: a second child in a row that answers nothing fails
+        everything still pending when its failure is the first's. Two signals say so.
+        The structural one: a child that never wrote its protocol header never reached
+        its templates, so its failure is a startup failure the next child shares,
+        whatever the text says. The textual one, for a child that did start: the same
+        exit code and the same reason once paths and numbers are masked (a per-run
+        scratch path or a pid in the text does not make two failures of one). Two
+        neighboring templates that each crash a started child for their own reasons
+        give two different signatures, so the second is not taken as shared and the
+        next template still gets its own child; three answerless children in a row
+        fail the rest whatever their signatures, so a run of crashing templates stays
+        bounded. A child that ran out of time fails everything still pending at once,
+        as before, and so does a child the runner could not stop.
 
         The timeout bounds the whole of this call, not each child. The first child
         gets the configured limit; a child started after one died gets what is left
@@ -812,7 +852,7 @@ class _Batch:
         limits as it had templates.
         """
         answerless_in_a_row = 0
-        last_answerless_error: Optional[str] = None
+        last_signature: Optional[tuple] = None
         deadline = None if self.timeout is None else time.monotonic() + self.timeout
         first_child = True
         while pending:
@@ -859,10 +899,17 @@ class _Batch:
                 # carries no exit code and is not a child's record.
                 self._record_child(response)
             rest = pending[len(answers) :]
+            # A runner that raised left no response: the child never started either.
+            started = bool(response.get("worker_started")) if response else False
+            signature = _failure_signature(response, error)
             shared = (
                 not answers
                 and answerless_in_a_row > 0
-                and (error == last_answerless_error or answerless_in_a_row >= 2)
+                and (
+                    not started
+                    or signature == last_signature
+                    or answerless_in_a_row >= 2
+                )
             )
             if fail_rest or shared:
                 for template in rest:
@@ -870,10 +917,10 @@ class _Batch:
                 return
             if answers:
                 answerless_in_a_row = 0
-                last_answerless_error = None
+                last_signature = None
             else:
                 answerless_in_a_row += 1
-                last_answerless_error = error
+                last_signature = signature
             self.errors[rest[0]] = error
             pending = rest[1:]
 

@@ -18,9 +18,14 @@ What these pin, and why each matters:
   failure from any other exception, and it prints ``type(e).__name__``.
 - A child that dies keeps the answers it gave. Only the template it was on fails, and a
   new child takes the rest; that holds for a death on the first template too. A second
-  child in a row that gives nothing, or any child that ran into ``scan_timeout``, fails
-  what is pending at once, so a failure every child shares is paid twice, not once per
-  template.
+  child in a row that gives nothing fails what is pending at once when its failure is
+  the first's: a child that never wrote its protocol header never reached its templates
+  (a startup failure every child shares, whatever its stderr says), and a child that
+  did start shares the failure when its exit code and its reason, with paths and
+  numbers masked, are the first's. Two started children that crash for their own
+  reasons do not; three answerless children in a row fail the rest whatever they say.
+  Any child that ran into ``scan_timeout`` fails what is pending at once. So a failure
+  every child shares is paid twice, not once per template.
 - The response file is read without blocking and only when it is a regular file, so a
   FIFO planted at its path cannot hang the parent; a response past the size cap keeps
   the complete answers inside the cap.
@@ -72,20 +77,24 @@ def _fake_child(
     returncode: int = 0,
     answer_first: Optional[int] = None,
     timed_out: bool = False,
+    stderr: Optional[str] = None,
 ):
     """A stand-in for run_command_with_output_handling that plays the child's part.
 
     Writes the header, then one answer line per template, as the real child does.
     ``answer_first`` stops after that many answers and reports ``returncode``: a child
-    that died part way. ``answers_by_template=None`` is a child that died before
-    writing anything.
+    that died part way (``answer_first=0`` is a child that wrote its header and died on
+    its first template). ``answers_by_template=None`` is a child that died before
+    writing anything, its header included. ``stderr`` replaces the default noise.
     """
+    stderr = (
+        "noise\n\x1b[31mTraceback\x1b[0m\nOSError: boom" if stderr is None else stderr
+    )
 
     def fake(command, **kwargs):
         calls.append(list(command))
         request_path, response_path = Path(command[-2]), Path(command[-1])
         request = json.loads(request_path.read_text(encoding="utf-8"))
-        stderr = "noise\n\x1b[31mTraceback\x1b[0m\nOSError: boom"
         if answers_by_template is None:
             return {"returncode": returncode, "stderr": stderr}
         templates = request["templates"]
@@ -979,14 +988,15 @@ def _children_in_turn(*fakes):
 def test_two_answerless_children_with_different_reasons_are_not_one_shared_failure(
     tmp_path, monkeypatch
 ):
-    """Two neighboring templates each crash the child for their own reason: the second
-    crash is not the first's, so the third template still gets its own child instead of
-    being failed with the second template's reason, as it was before this read."""
+    """Two neighboring templates each crash a STARTED child (its header is written) for
+    their own reason: the second crash is not the first's, so the third template still
+    gets its own child instead of being failed with the second template's reason, as it
+    was before this read."""
     templates = _templates(tmp_path, 3)
     answers = {t.as_posix(): NOT_CFN for t in templates}
     fake, calls = _children_in_turn(
-        _fake_child(None, [], returncode=134),
-        _fake_child(None, [], returncode=139),
+        _fake_child({}, [], returncode=134, answer_first=0),
+        _fake_child({}, [], returncode=139, answer_first=0),
         _fake_child(answers, []),
     )
     _patch_spawn(monkeypatch, fake)
@@ -1006,12 +1016,13 @@ def test_two_answerless_children_with_different_reasons_are_not_one_shared_failu
 def test_three_answerless_children_in_a_row_fail_the_rest_whatever_their_reasons(
     tmp_path, monkeypatch
 ):
-    """The bound: a run of crashes with differing reasons stops at the third child."""
+    """The bound: a run of started children crashing with differing reasons stops at the
+    third child."""
     templates = _templates(tmp_path, 4)
     fake, calls = _children_in_turn(
-        _fake_child(None, [], returncode=1),
-        _fake_child(None, [], returncode=2),
-        _fake_child(None, [], returncode=3),
+        _fake_child({}, [], returncode=1, answer_first=0),
+        _fake_child({}, [], returncode=2, answer_first=0),
+        _fake_child({}, [], returncode=3, answer_first=0),
     )
     _patch_spawn(monkeypatch, fake)
     outdir = tmp_path / "out"
@@ -1027,6 +1038,98 @@ def test_three_answerless_children_in_a_row_fail_the_rest_whatever_their_reasons
         with pytest.raises(RuntimeError, match="exited 3 "):
             _call(templates[3], outdir)
     assert len(calls) == 3
+
+
+@pytest.mark.unit
+def test_two_children_that_never_started_are_one_shared_failure_whatever_they_said(
+    tmp_path, monkeypatch
+):
+    """A child that wrote no protocol header never reached its templates: a startup
+    failure (cdk-nag not importing, node refused) that every child shares. Its stderr
+    carries the child's own scratch path, so the two texts differ, and a reader that
+    compared text took the second for a new failure and paid a third child. The
+    structural signal decides instead: two headerless children, and the rest is failed."""
+    templates = _templates(tmp_path, 3)
+    fake, calls = _children_in_turn(
+        _fake_child(
+            None,
+            [],
+            returncode=1,
+            stderr='Traceback\n  File "/tmp/ash-work/cdk-nag/run-one/request.json"\n'
+            "ModuleNotFoundError: No module named 'cdk_nag'",
+        ),
+        _fake_child(
+            None,
+            [],
+            returncode=1,
+            stderr='Traceback\n  File "/tmp/ash-work/cdk-nag/run-two/request.json"\n'
+            "ModuleNotFoundError: No module named 'cdk_nag'",
+        ),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        for t in templates:
+            with pytest.raises(RuntimeError, match="No module named 'cdk_nag'"):
+                _call(t, outdir)
+    assert len(calls) == 2, calls
+
+
+@pytest.mark.unit
+def test_a_started_childs_crash_whose_text_differs_only_in_paths_and_numbers_is_shared(
+    tmp_path, monkeypatch
+):
+    """Two started children die the same way; only a pid and a scratch path in the
+    stderr differ. Masked, the reasons are one, so the second child proves the failure
+    shared and the rest is failed, where an exact compare paid a third child."""
+    templates = _templates(tmp_path, 3)
+    fake, calls = _children_in_turn(
+        _fake_child(
+            {},
+            [],
+            returncode=134,
+            answer_first=0,
+            stderr="FATAL ERROR: heap out of memory (pid 4242)\n"
+            "at /tmp/ash-work/cdk-nag/run-one/bin/jsii-runtime.js",
+        ),
+        _fake_child(
+            {},
+            [],
+            returncode=134,
+            answer_first=0,
+            stderr="FATAL ERROR: heap out of memory (pid 4301)\n"
+            "at /tmp/ash-work/cdk-nag/run-two/bin/jsii-runtime.js",
+        ),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        for t in templates:
+            with pytest.raises(RuntimeError, match="heap out of memory"):
+                _call(t, outdir)
+    assert len(calls) == 2, calls
+
+
+@pytest.mark.unit
+def test_the_failure_signature_masks_paths_and_numbers_but_keeps_the_exit_code():
+    one = cdk_nag_worker._failure_signature(
+        {"returncode": 134},
+        "exited 134 before answering: at /tmp/w/run-one/x.js | pid 4242",
+    )
+    two = cdk_nag_worker._failure_signature(
+        {"returncode": 134},
+        "exited 134 before answering: at /tmp/w/run-two/x.js | pid 4301",
+    )
+    other_code = cdk_nag_worker._failure_signature(
+        {"returncode": 139},
+        "exited 139 before answering: at /tmp/w/run-one/x.js | pid 4242",
+    )
+    assert one == two
+    assert one != other_code
 
 
 @pytest.mark.unit
