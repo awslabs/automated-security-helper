@@ -35,8 +35,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess  # nosec B404
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -59,7 +60,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scan
     mandatory_prefixes,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
-from automated_security_helper.utils import pre_installed_tool
+from automated_security_helper.utils import pre_installed_tool, uv_tool_runner
 from automated_security_helper.utils.cfn_template_discovery import TemplateDiscovery
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.pre_installed_tool import PreInstalledToolVerdict
@@ -67,8 +68,15 @@ from automated_security_helper.utils.subprocess_utils import (
     COULD_NOT_STOP_SUFFIX,
     WAS_KILLED_ENDING,
 )
+from automated_security_helper.utils.uv_tool_runner import (
+    _reset_uv_tool_runner_caches,
+)
 
 pytestmark = pytest.mark.unit
+
+#: The uv the real-resolver tests find. The probe spawns it with the process
+#: boundary replaced, so nothing is created at this path.
+UV_PATH = os.path.abspath("/opt/uv/bin/uv")
 
 FIXTURES = (
     Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "cfn_lint_guard"
@@ -505,6 +513,48 @@ class TestResolverOfflineMode:
         ):
             ((_, kwargs),) = calls
             assert kwargs.get("offline") is False
+
+    def _real_resolver_probe(self, repo, **opts):
+        """Through the real resolver with only the process boundary replaced:
+        the probe it spawns, as argv and environment."""
+        scanner = _scanner(repo, **opts)
+        spawn = MagicMock(
+            return_value=subprocess.CompletedProcess([], 0, "v1.57.1\n", "")
+        )
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch.object(uv_tool_runner, "spawn_run", spawn),
+            patch.object(uv_tool_runner, "find_uv_or_none", lambda: UV_PATH),
+            patch.object(uv_tool_runner, "find_executable", lambda name: None),
+            patch.object(
+                CfnLintScanner, "resolve_deferred_tool_version", return_value=None
+            ),
+            patch.object(
+                CfnLintScanner, "_validate_uv_tool_availability", return_value=False
+            ),
+        ):
+            os.environ.pop("ASH_OFFLINE", None)
+            os.environ.pop("UV_OFFLINE", None)
+            _reset_uv_tool_runner_caches()
+            try:
+                assert scanner.validate_plugin_dependencies() is True
+            finally:
+                _reset_uv_tool_runner_caches()
+        return spawn.call_args.args[0], spawn.call_args.kwargs["env"]
+
+    def test_the_probe_runs_offline_for_a_scanner_offline_by_its_options(self, repo):
+        """The resolver's own probe carries the mode: ``uv tool run --offline``
+        with ``UV_OFFLINE`` set, while ASH itself is online."""
+        argv, env = self._real_resolver_probe(repo, offline=True)
+        assert argv[:4] == [UV_PATH, "tool", "run", "--offline"]
+        assert argv[-2:] == ["cfn-lint", "--version"]
+        assert env.get("UV_OFFLINE") == "1"
+
+    def test_the_probe_runs_online_for_a_scanner_that_follows_ash(self, repo):
+        argv, env = self._real_resolver_probe(repo, offline=False)
+        assert "--offline" not in argv
+        assert argv[:3] == [UV_PATH, "tool", "run"]
+        assert "UV_OFFLINE" not in env
 
 
 def test_the_captured_fixture_is_read_by_the_fake():
