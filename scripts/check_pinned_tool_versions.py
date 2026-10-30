@@ -1321,8 +1321,11 @@ _FILE_REDIRECT = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?!/dev/null(?![\w/.-]))[^\s<>
 _REDIRECT_WORD = re.compile(r"(?:&|\d*)>>?\s*\S*|<<-?\s*[\"']?\w+[\"']?")
 # A command substitution, $(...) or `...`, in the arguments of an install in a script.
 _SUBSTITUTION = re.compile(r"\$\([^()]*\)|`[^`]*`")
-# Shells, which run the body of a here-document they are given.
-_SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ash", "ksh"})
+# Shells, which run the body of a here-document they are given, and the commands that
+# start the user's shell and give it their input: ``su - user <<EOF``.
+_SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ash", "ksh", "su", "runuser"})
+# The sudo options that start a shell: -s, -i, --shell, --login, in a cluster too (-Hs).
+_SUDO_SHELL_OPTION = re.compile(r"--shell|--login|-[A-Za-z]*[si][A-Za-z]*")
 # A shell redirection among the arguments of the install: "> /dev/null", "2>".
 _REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
 # The options of apt-get that take their value as the next word. A short option takes
@@ -1374,11 +1377,17 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
         )
         command = cleaned[start:stop]
         words = _REDIRECT_WORD.sub(" ", command).split()
-        is_file = bool(_FILE_REDIRECT.search(command)) and not any(
-            word.rsplit("/", 1)[-1] in _SHELLS for word in words
-        )
+        is_file = bool(_FILE_REDIRECT.search(command)) and not _runs_a_shell(words)
         markers.append((match.group(2), is_file))
     return markers
+
+
+def _runs_a_shell(words: list[str]) -> bool:
+    """Whether the words of a command start a shell that reads its input."""
+    names = [word.strip("(){}").rsplit("/", 1)[-1] for word in words]
+    if any(name in _SHELLS for name in names):
+        return True
+    return "sudo" in names and any(_SUDO_SHELL_OPTION.fullmatch(w) for w in words)
 
 
 @dataclass(frozen=True)
@@ -1406,9 +1415,8 @@ def _run_blocks(text: str) -> list[_RunBlock]:
     """
     blocks: list[_RunBlock] = []
     current: list[tuple[int, str]] | None = None
-    # here-document (name, body is a file's content) found on the instruction's lines
-    markers: list[tuple[str, bool]] = []
-    # here-documents whose body is being read, in the order the shell reads them
+    # here-documents (name, body is a file's content) whose body is being read, in the
+    # order the shell reads them
     terminators: list[tuple[str, bool]] = []
     file_body: list[tuple[int, str]] = []  # the body being read, if it is a file's
     for number, raw in enumerate(text.splitlines(), start=1):
@@ -1441,11 +1449,12 @@ def _run_blocks(text: str) -> list[_RunBlock]:
         continued = line.endswith("\\")
         body = line[:-1] if continued else line
         current.append((number, body))
-        markers += _heredoc_markers(body)
         if continued:
             continue
-        if markers:
-            terminators, markers = markers, []
+        # The command is the whole logical line, as Docker joins it: a shell named on
+        # one physical line takes the here-document marker on the next.
+        terminators = _heredoc_markers(" ".join(text for _, text in current))
+        if terminators:
             continue
         blocks.append(_RunBlock(current))
         current = None

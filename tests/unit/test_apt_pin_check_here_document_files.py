@@ -192,6 +192,59 @@ class TestAShellBodyIsStillCommands:
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
 
+class TestTheWholeCommandDecidesWhoReadsTheBody:
+    EXPANSION_REFUSED = r"Dockerfile:3 installs '\$@'"
+
+    def _refused(self, tmp_path, body: str) -> None:
+        with pytest.raises(checker.PinEnumerationError, match=self.EXPANSION_REFUSED):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_shell_named_on_an_earlier_continued_line_runs_the_body(self, tmp_path):
+        # Red before: the marker's own physical line had no shell word, its redirect
+        # made the body "a file", and the "$@" in what bash runs was skipped.
+        body = (
+            "RUN /bin/bash -euo pipefail \\\n"
+            "    <<'EOF' > /var/log/setup.log\n"
+            'apt-get install -y "$@"\n'
+            "EOF\n"
+        )
+        self._refused(tmp_path, body)
+
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN (bash) <<EOF > /var/log/setup.log",
+            "RUN su - builder <<EOF > /var/log/setup.log",
+            "RUN runuser -l builder <<EOF > /var/log/setup.log",
+            "RUN sudo -s <<EOF > /var/log/setup.log",
+            "RUN sudo -u builder -i <<EOF > /var/log/setup.log",
+            "RUN sudo --login <<EOF > /var/log/setup.log",
+        ],
+    )
+    def test_a_shell_in_other_spellings_runs_the_body(self, tmp_path, first_line):
+        # Red before: "bash)" and the su and sudo forms are no word in the shell list.
+        self._refused(tmp_path, f'{first_line}\napt-get install -y "$@"\nEOF\n')
+
+    def test_a_file_written_after_a_continuation_is_still_a_file(self, tmp_path):
+        """Control: the command and its redirect on two physical lines."""
+        body = (
+            "RUN cat \\\n"
+            "    > /usr/local/bin/setup.sh <<'EOF'\n"
+            'apt-get install -y "$@"\n'
+            "EOF\n"
+        )
+        assert _pins(tmp_path, body) == {}
+
+    def test_sudo_without_a_shell_option_writing_a_file_is_a_file(self, tmp_path):
+        """Control: sudo alone does not make the body a shell's."""
+        body = (
+            "RUN sudo -u builder cat > /usr/local/bin/setup.sh <<'EOF'\n"
+            'apt-get install -y "$@"\n'
+            "EOF\n"
+        )
+        assert _pins(tmp_path, body) == {}
+
+
 class TestAMultiLineInstallInAHereDocument:
     def test_a_continued_install_with_two_pins_is_read(self, tmp_path):
         """Control: the usual form, a package per continued line, joins correctly."""
