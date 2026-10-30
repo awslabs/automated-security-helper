@@ -1526,6 +1526,7 @@ jobs:
     uses: ./.github/workflows/run-ash-security-scan.yml
   sarif:
     needs: ash
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/upload-ash-sarif.yml
 """
 CALLED_BOTH = {
@@ -1552,6 +1553,19 @@ def test_a_reusable_call_expects_the_called_workflow_s_own_jobs():
         "ash": ("failure", 1, True),
         "upload-sarif": ("success", 1, False),
     }
+
+
+def test_a_dependent_of_the_gated_scan_is_left_out_without_an_if_that_admits_it():
+    """GitHub skips a job whose ``needs`` failed unless its ``if`` says otherwise, so
+    a SARIF job with a plain ``needs: ash`` never runs after the gated scan fails,
+    and act is not expected to report it."""
+    reports = _module("reports")
+    plain = REUSABLE_CALLER.replace("    if: ${{ !cancelled() }}\n", "")
+    plan = reports.act_job_plan(
+        reports.load_workflow(plain),
+        {name: reports.load_workflow(text) for name, text in CALLED_BOTH.items()},
+    )
+    assert sorted(plan) == ["ash"], plan
 
 
 def test_a_call_of_a_workflow_that_was_not_copied_is_an_error():

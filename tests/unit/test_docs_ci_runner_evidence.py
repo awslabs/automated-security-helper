@@ -249,16 +249,105 @@ def _called_workflows() -> dict:
     [
         (STEPS_JOB, {"ash": "failure"}),
         (SHARDED, {"shard": "success", "merge": "failure"}),
-        (REUSABLE, {"ash": "failure", "upload-sarif": "success"}),
-        (QUIET, {"ash": "success"}),
+        (REUSABLE, {"ash": "failure", "report": "success"}),
+        (QUIET, {"ash": "success", "report": "success"}),
     ],
     ids=["steps", "sharded", "reusable", "reusable without the gate"],
 )
 def test_a_job_that_gates_on_findings_fails_and_the_others_pass(text, expected):
-    """A reusable call's jobs are expected under the called workflow's job ids."""
+    """A reusable call's jobs are expected under the called workflow's job ids: the
+    scan workflow's ``ash`` and its ``report`` job, which runs after a scan that passed
+    or failed when the caller leaves a reporting input on. The ``sarif`` job of
+    REUSABLE needs ``ash`` and has no ``if``, so GitHub skips it after the gated scan
+    fails, and nothing of upload-ash-sarif.yml is expected."""
     load = _api("reports", "load_workflow")
     results = _api("reports", "expected_act_results")(load(text), _called_workflows())
     assert results == expected
+
+
+@pytest.mark.unit
+def test_a_job_needing_a_failing_job_runs_only_when_its_if_admits_that():
+    """GitHub starts a dependent of a failed job only under ``always()``,
+    ``!cancelled()`` or ``failure()``; a dependent of a passing job runs as before."""
+    load = _api("reports", "load_workflow")
+    plan = _api("reports", "act_job_plan")
+    base = "on:\n  push:\njobs:\n  scan:\n    steps:\n      - run: ash scan .\n"
+    dependent = "  after:\n    needs: scan\n{condition}    steps:\n      - run: echo\n"
+    for condition, expected in [
+        ("", []),
+        ("    if: ${{ always() }}\n", ["after"]),
+        ("    if: ${{ !cancelled() }}\n", ["after"]),
+        ("    if: failure()\n", ["after"]),
+        ("    if: success()\n", []),
+        ("    if: needs.scan.result == 'failure'\n", ["after"]),
+        ("    if: needs.scan.result == 'success'\n", []),
+        ("    if: ${{ github.event_name == 'push' }}\n", ["after"]),
+    ]:
+        text = base + dependent.format(condition=condition)
+        jobs = [job for job in plan(load(text), {}) if job != "scan"]
+        assert jobs == expected, (condition, jobs)
+    quiet = base.replace("ash scan .", "ash scan --no-fail-on-findings .")
+    assert "after" in plan(load(quiet + dependent.format(condition="")), {})
+
+
+@pytest.mark.unit
+def test_a_caller_guarded_by_a_called_workflows_outputs_is_not_expected_under_act():
+    """The pages' SARIF job runs when ``needs.ash.outputs.artifact-id`` is set, an
+    output of the reusable scan workflow. act does not deliver a called workflow's
+    outputs (measured: the job never starts), so the plan leaves the job out instead
+    of expecting a result act never reports."""
+    load = _api("reports", "load_workflow")
+    text = REUSABLE.replace(
+        "    needs: ash\n",
+        "    needs: ash\n"
+        "    if: ${{ !cancelled() && needs.ash.outputs.artifact-id != '' }}\n",
+    )
+    plan = _api("reports", "act_job_plan")(load(text), _called_workflows())
+    assert "upload-sarif" not in plan, sorted(plan)
+    assert plan["report"].caller == "ash" and plan["report"].workflow == (
+        "run-ash-security-scan.yml"
+    )
+
+
+@pytest.mark.unit
+def test_a_reusable_calls_report_job_follows_the_callers_inputs():
+    """The scan workflow's report job runs only when a reporting input is on; a
+    caller that turns the three off gets no report job, so none is expected."""
+    load = _api("reports", "load_workflow")
+    plan = _api("reports", "act_job_plan")
+    off = QUIET.replace(
+        "      fail-on-findings: false\n",
+        "      fail-on-findings: false\n"
+        "      post-pr-comment: false\n"
+        "      collect-junit-xml-report: false\n"
+        "      collect-sarif-report: false\n",
+    )
+    assert sorted(plan(load(off), _called_workflows())) == ["ash"]
+    assert sorted(plan(load(QUIET), _called_workflows())) == ["ash", "report"]
+    entry = plan(load(QUIET), _called_workflows())["report"]
+    assert entry.inputs["fail-on-findings"] is False
+    assert entry.inputs["artifact-name"] == "ash_output", "the declared default"
+
+
+@pytest.mark.unit
+def test_the_sarif_upload_is_expected_from_the_planned_jobs():
+    """An upload is expected when a job of upload-ash-sarif.yml is planned, or when
+    the scan call leaves collect-sarif-report on and the event is a pull request."""
+    load = _api("reports", "load_workflow")
+    plan = _api("reports", "act_job_plan")
+    expected = _api("reports", "sarif_upload_expected")
+    called = _called_workflows()
+    assert expected(plan(load(REUSABLE), called), "pull_request") is True
+    assert expected(plan(load(REUSABLE), called), "push") is False
+    off = REUSABLE.replace(
+        "      ash-version: 0123456789abcdef0123456789abcdef01234567\n",
+        "      ash-version: 0123456789abcdef0123456789abcdef01234567\n"
+        "      collect-sarif-report: false\n",
+    )
+    assert expected(plan(load(off), called), "pull_request") is False
+    always = off.replace("    needs: ash\n", "    needs: ash\n    if: always()\n")
+    assert expected(plan(load(always), called), "push") is True
+    assert expected(plan(load(STEPS_JOB), {}), "pull_request") is False
 
 
 @pytest.mark.unit
@@ -269,13 +358,101 @@ def test_load_workflow_keeps_the_on_key():
 
 @pytest.mark.unit
 def test_the_artifacts_a_workflow_uploads_are_named_per_matrix_run():
+    """A matrix name is expanded per run; a called workflow's name is read with the
+    call's inputs: the scan workflow uploads under ``${{ steps.inputs.outputs
+    .artifact_name }}``, its ``artifact-name`` input, ``ash_output`` by default."""
     load = _api("reports", "load_workflow")
     names = _api("reports", "uploaded_artifact_names")
-    assert names([load(SHARDED)]) == [f"ash-shard-{n}" for n in range(4)]
+    assert names(load(SHARDED)) == [f"ash-shard-{n}" for n in range(4)]
+    called = _called_workflows()
+    assert names(load(REUSABLE), called) == ["ash_output"]
+    custom = REUSABLE.replace(
+        "      ash-version: 0123456789abcdef0123456789abcdef01234567\n",
+        "      ash-version: 0123456789abcdef0123456789abcdef01234567\n"
+        "      artifact-name: ash-custom\n",
+    )
+    assert names(load(custom), called) == ["ash-custom"]
+    plan = _api("reports", "act_job_plan")(load(SHARDED), {})
+    assert names(load(SHARDED), {}, {"merge": plan["merge"]}) == [], (
+        "with a plan, only the jobs it expects to run upload"
+    )
+
+
+@pytest.mark.unit
+def test_an_input_expression_with_no_value_stays_as_written():
+    resolve = _api("reports", "resolve_inputs")
+    assert resolve("${{ inputs.artifact-name }}", {"artifact-name": "x"}) == "x"
+    assert resolve("${{ steps.inputs.outputs.output_dir }}", {"output-dir": "o"}) == "o"
+    kept = "${{ steps.other.outputs.name }}"
+    assert resolve(kept, {"name": "x"}) == kept
+    assert "${{" in resolve("${{ inputs.unknown }}", {})
+
+
+@pytest.mark.unit
+def test_a_step_that_writes_the_wrapper_through_a_heredoc_is_not_wrapped():
+    """The scan workflow's helper step writes ``with_commands_stopped``'s definition,
+    its ``printf '::stop-commands::...'`` included, to a file through a heredoc and
+    prints nothing itself; the steps that call the wrapper are the wrapped ones."""
+    wraps = _api("reports", "wraps_commands")
+    helper = (
+        "cat > \"${RUNNER_TEMP}/ash-one-line.sh\" <<'EOF'\n"
+        "with_commands_stopped() {\n"
+        "  printf '::stop-commands::%s\\n' \"${token}\"\n"
+        "}\n"
+        "EOF\n"
+    )
+    assert wraps(helper) is False
+    assert (
+        wraps('. "${RUNNER_TEMP}/ash-one-line.sh"\nwith_commands_stopped uvx ash')
+        is True
+    )
+    assert wraps('  FOO=1 with_commands_stopped --capture out tail -n 20 <<<"x"')
+    assert wraps("printf '::stop-commands::%s\\n' \"${token}\"\nash scan") is True
+    assert wraps("with_commands_stopped_later=1\necho") is False
     scan = (
         REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
     ).read_text(encoding="utf-8")
-    assert names([load(STEPS_JOB), load(scan)]) == ["ash_output"]
+    pairs = _api("reports", "wrapped_job_steps")(
+        [_api("reports", "load_workflow")(scan)]
+    )
+    assert ("ash", "Write the one_line helper") not in pairs, pairs
+    assert ("ash", "Check that this ASH can install the scanner tools") in pairs, pairs
+
+
+@pytest.mark.unit
+def test_a_wrapped_step_with_an_if_is_checked_only_in_the_runs_it_had():
+    check = _api("verdict", "resume_token_problems")
+    conditional = _api("reports", "conditional_steps")
+    workflow = {
+        "jobs": {
+            "ash": {
+                "steps": [
+                    {
+                        "name": "Base",
+                        "if": "inputs.changed",
+                        "run": "with_commands_stopped git",
+                    },
+                    {"name": "Preflight", "run": "with_commands_stopped uvx ash"},
+                ]
+            }
+        }
+    }
+    assert conditional([workflow]) == {("ash", "Base")}
+    log = "\n".join(
+        [
+            json.dumps({"jobID": "ash", "msg": "⭐ Run Main Preflight"}),
+            json.dumps({"jobID": "ash", "msg": "  ⚙  ::stop-commands::" + "a" * 32}),
+            json.dumps({"jobID": "ash", "msg": "  ⚙  ::" + "a" * 32 + "::"}),
+            json.dumps({"jobID": "ash", "msg": "  ✅  Success - Main Preflight"}),
+            json.dumps(
+                {"jobID": "ash", "msg": "🏁  Job failed", "jobResult": "failure"}
+            ),
+        ]
+    )
+    wrapped = [("ash", "Base"), ("ash", "Preflight")]
+    assert check(log, wrapped, optional=conditional([workflow])) == []
+    problems = check(log, wrapped)
+    assert problems and all("Base" in p for p in problems), problems
 
 
 @pytest.mark.unit

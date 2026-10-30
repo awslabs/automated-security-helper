@@ -45,6 +45,8 @@ AGGREGATED = "ash_aggregated_results.json"
 DEFAULT_THRESHOLD = "MEDIUM"
 #: ASH's reusable scan workflow, whose scan job gates on its caller's input.
 SCAN_WORKFLOW = "run-ash-security-scan.yml"
+#: ASH's reusable workflow that uploads the SARIF report to code scanning.
+SARIF_WORKFLOW = "upload-ash-sarif.yml"
 #: How many characters of a log a failure message quotes at most.
 TAIL_CHARS = 4000
 
@@ -397,13 +399,209 @@ class JobPlan:
     """What act should report for one job id: its result, its runs, whether it gates.
 
     ``caller`` is the job of the block that calls the reusable workflow this job is
-    from, or None for a job of the block itself.
+    from, or None for a job of the block itself; ``workflow`` is that reusable
+    workflow's file name, and ``inputs`` what the call gives it (the caller's ``with``
+    over the workflow's declared defaults), both None for a job of the block itself.
     """
 
     result: str
     runs: int
     gates: bool
     caller: str | None = None
+    workflow: str | None = None
+    inputs: Mapping[str, Any] | None = None
+
+
+#: A job-level ``if``, with or without the ``${{ }}`` around it.
+_EXPRESSION_WRAP = re.compile(r"^\s*\$\{\{(?P<body>.*)\}\}\s*$", re.DOTALL)
+_EXPRESSION_TOKEN = re.compile(
+    r"\s*(?:(?P<string>'(?:[^']|'')*')|(?P<op>&&|\|\||==|!=|!|\(|\))"
+    r"|(?P<path>[A-Za-z_][\w.-]*(?:\(\))?))"
+)
+
+
+class _JobCondition:
+    """What a job's ``if`` can be read as before the run; None where it cannot.
+
+    ``results`` maps the jobs ``needs`` may name to their planned result, "skipped"
+    for one the plan left out; ``called`` names those that call a reusable workflow,
+    whose outputs act does not deliver (the ``if`` of a job that reads them is
+    false under act, measured: the job never starts); ``inputs`` are the values a
+    reusable workflow's ``inputs.<name>`` have for this call. Anything else
+    (``github.*``, ``env.*``, a plain job's outputs) is unknown, and an unknown
+    condition keeps the job expected, so a job act then skips is named, never passed
+    over.
+    """
+
+    def __init__(
+        self,
+        results: Mapping[str, str],
+        called: Iterable[str] = (),
+        inputs: Mapping[str, Any] | None = None,
+    ) -> None:
+        self.results = dict(results)
+        self.called = set(called)
+        self.inputs = dict(inputs or {})
+
+    def runs(self, job: Mapping[str, Any]) -> bool:
+        """Whether GitHub starts ``job`` given its ``needs`` and ``if``."""
+        needs = job.get("needs")
+        needs = [needs] if isinstance(needs, str) else list(needs or [])
+        condition = job.get("if")
+        if condition is None:
+            return all(self.results.get(str(need)) == "success" for need in needs)
+        if isinstance(condition, bool):
+            return condition
+        try:
+            value = self.evaluate(str(condition), needs)
+        except ValueError:
+            return True
+        return value is not False
+
+    def evaluate(self, text: str, needs: list[str]) -> Any:
+        wrapped = _EXPRESSION_WRAP.match(text)
+        tokens = _tokens(wrapped["body"] if wrapped else text)
+        value, rest = self._or(tokens, needs)
+        if rest:
+            raise ValueError(f"unread tail {rest!r}")
+        return value
+
+    def _or(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, tokens = self._and(tokens, needs)
+        while tokens and tokens[0] == "||":
+            other, tokens = self._and(tokens[1:], needs)
+            left, right = _truth(value), _truth(other)
+            value = (
+                True
+                if left or right
+                else (False if left is False and right is False else None)
+            )
+        return value, tokens
+
+    def _and(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, tokens = self._not(tokens, needs)
+        while tokens and tokens[0] == "&&":
+            other, tokens = self._not(tokens[1:], needs)
+            left, right = _truth(value), _truth(other)
+            value = (
+                False
+                if left is False or right is False
+                else (True if left and right else None)
+            )
+        return value, tokens
+
+    def _not(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        if tokens and tokens[0] == "!":
+            value, tokens = self._not(tokens[1:], needs)
+            truth = _truth(value)
+            return (None if truth is None else not truth), tokens
+        return self._comparison(tokens, needs)
+
+    def _comparison(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, tokens = self._primary(tokens, needs)
+        if tokens and tokens[0] in ("==", "!="):
+            other, rest = self._primary(tokens[1:], needs)
+            if value is None or other is None:
+                return None, rest
+            equal = str(value).lower() == str(other).lower()
+            return (equal if tokens[0] == "==" else not equal), rest
+        return value, tokens
+
+    def _primary(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        if not tokens:
+            raise ValueError("an operand is missing")
+        token, rest = tokens[0], tokens[1:]
+        if token == "(":
+            value, rest = self._or(rest, needs)
+            if not rest or rest[0] != ")":
+                raise ValueError("a parenthesis is not closed")
+            return value, rest[1:]
+        if token.startswith("'"):
+            return token[1:-1].replace("''", "'"), rest
+        return self._path(token, needs), rest
+
+    def _path(self, token: str, needs: list[str]) -> Any:
+        if token == "always()":
+            return True
+        if token == "cancelled()":
+            return False
+        if token == "success()":
+            return all(self.results.get(str(need)) == "success" for need in needs)
+        if token == "failure()":
+            return any(self.results.get(str(need)) == "failure" for need in needs)
+        parts = token.split(".")
+        if parts[0] == "needs" and len(parts) >= 3:
+            job = parts[1]
+            if parts[2] == "result" and len(parts) == 3:
+                return self.results.get(job)
+            if parts[2] == "outputs" and len(parts) == 4 and job in self.called:
+                return ""
+            return None
+        if parts[0] == "inputs" and len(parts) == 2:
+            return self.inputs.get(parts[1])
+        return None
+
+
+def _tokens(text: str) -> list[str]:
+    tokens = []
+    position = 0
+    text = text.strip()
+    while position < len(text):
+        match = _EXPRESSION_TOKEN.match(text, position)
+        if match is None or match.end() == position:
+            raise ValueError(f"cannot read {text[position:]!r}")
+        tokens.append(match["string"] or match["op"] or match["path"])
+        position = match.end()
+    return tokens
+
+
+def _truth(value: Any) -> bool | None:
+    """GitHub's truth of an expression value: false, '' and 0 are false; None is unknown."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.lower() not in ("", "false", "0")
+    return bool(value)
+
+
+def call_inputs(job: Mapping[str, Any], target: Mapping[str, Any]) -> dict[str, Any]:
+    """The inputs a call of reusable workflow ``target`` gives: the caller's ``with``
+    over the workflow's declared defaults."""
+    declared = ((target.get("on") or {}).get("workflow_call") or {}).get("inputs")
+    inputs: dict[str, Any] = {}
+    for name, spec in (declared or {}).items() if isinstance(declared, Mapping) else []:
+        if isinstance(spec, Mapping) and "default" in spec:
+            inputs[str(name)] = spec["default"]
+    given = job.get("with")
+    if isinstance(given, Mapping):
+        inputs.update({str(name): value for name, value in given.items()})
+    return inputs
+
+
+def _in_dependency_order(
+    jobs: Mapping[str, Any],
+) -> list[tuple[str, Mapping[str, Any]]]:
+    """The jobs with each one after the jobs it needs; an unknown or cyclic need is
+    kept in file order after the rest."""
+    pending = [(str(k), v) for k, v in jobs.items() if isinstance(v, Mapping)]
+    ordered: list[tuple[str, Mapping[str, Any]]] = []
+    done: set[str] = set()
+    while pending:
+        progress = False
+        for job_id, job in list(pending):
+            needs = job.get("needs")
+            needs = [needs] if isinstance(needs, str) else list(needs or [])
+            if all(
+                str(need) in done or str(need) not in dict(pending) for need in needs
+            ):
+                ordered.append((job_id, job))
+                done.add(job_id)
+                pending.remove((job_id, job))
+                progress = True
+        if not progress:
+            ordered += pending
+            break
+    return ordered
 
 
 def act_job_plan(
@@ -413,11 +611,18 @@ def act_job_plan(
 
     A job that calls a reusable workflow runs that workflow's jobs, which act reports
     under the called workflow's own job ids; ``called`` holds the called workflows by
-    file name. A call of a workflow that is not in ``called``, a nested call, and two
+    file name. A job GitHub does not start is left out: one whose ``needs`` include a
+    job planned to fail and that has no ``if`` admitting that (``always()``,
+    ``!cancelled()``, ``failure()``), one whose ``if`` reads false from what the plan
+    knows (``needs.<job>.result``, ``inputs.<name>`` of a reusable call), and one whose
+    ``if`` reads the outputs of a job that calls a reusable workflow, which act does
+    not deliver. A call of a workflow that is not in ``called``, a nested call, and two
     jobs that would report under one id are errors naming them.
     """
     plan: dict[str, JobPlan] = {}
     missing = []
+    results: dict[str, str] = {}
+    callers: set[str] = set()
 
     def add(job_id: str, entry: JobPlan) -> None:
         if job_id in plan:
@@ -427,28 +632,35 @@ def act_job_plan(
             )
         plan[job_id] = entry
 
-    for job_id, job in (workflow.get("jobs") or {}).items():
-        if not isinstance(job, Mapping):
-            continue
+    for job_id, job in _in_dependency_order(workflow.get("jobs") or {}):
         uses = str(job.get("uses") or "")
         runs = matrix_runs(job)
+        if not _JobCondition(results, callers).runs(job):
+            results[job_id] = "skipped"
+            continue
         if not uses:
             gates = _job_gates(job)
-            add(str(job_id), JobPlan("failure" if gates else "success", runs, gates))
+            result = "failure" if gates else "success"
+            results[job_id] = result
+            add(job_id, JobPlan(result, runs, gates))
             continue
+        callers.add(job_id)
         name = PurePosixPath(uses.split("@", 1)[0]).name
         target = called.get(name)
         if target is None:
             missing.append(f"job {job_id} calls {uses}")
             continue
-        for called_id, called_job in (target.get("jobs") or {}).items():
-            if not isinstance(called_job, Mapping):
-                continue
+        inputs = call_inputs(job, target)
+        called_results: dict[str, str] = {}
+        for called_id, called_job in _in_dependency_order(target.get("jobs") or {}):
             if called_job.get("uses"):
                 raise ValueError(
                     f"{name}'s job {called_id} calls another workflow, "
                     f"{called_job['uses']}"
                 )
+            if not _JobCondition(called_results, inputs=inputs).runs(called_job):
+                called_results[called_id] = "skipped"
+                continue
             if name == SCAN_WORKFLOW:
                 gates = _input_on(job.get("with"), "fail-on-findings") and any(
                     _RUNS_ASH.search(str(step.get("run", "")))
@@ -456,15 +668,24 @@ def act_job_plan(
                 )
             else:
                 gates = _job_gates(called_job)
+            result = "failure" if gates else "success"
+            called_results[called_id] = result
             add(
-                str(called_id),
+                called_id,
                 JobPlan(
-                    "failure" if gates else "success",
+                    result,
                     runs * matrix_runs(called_job),
                     gates,
-                    caller=str(job_id),
+                    caller=job_id,
+                    workflow=name,
+                    inputs=inputs,
                 ),
             )
+        # The caller's own result is the called workflow's: failed when any of its
+        # jobs did (GitHub), which is what a dependent of the caller reads.
+        results[job_id] = (
+            "failure" if "failure" in called_results.values() else "success"
+        )
     if missing:
         raise ValueError(
             "the workflows a block calls must be copied into the fixture: "
@@ -482,9 +703,37 @@ def expected_act_results(
     }
 
 
+#: A shell heredoc in a step's ``run``: its body is a file the step writes, not a
+#: command the step runs.
+_HEREDOC = re.compile(
+    r"<<-?[ \t]*(?P<quote>['\"]?)(?P<tag>\w+)(?P=quote)[^\n]*\n.*?\n[ \t]*(?P=tag)"
+    r"[ \t]*(?=\n|$)",
+    re.DOTALL,
+)
+#: A command line that runs the stop-commands wrapper the scan workflow's helper
+#: file defines, ``with_commands_stopped <command>``; the line that defines the
+#: function, ``with_commands_stopped() {``, is not one.
+_WRAPPER_CALL = re.compile(
+    r"(?m)^[ \t]*(?:\w+=\S*[ \t]+)*with_commands_stopped(?![\w(])"
+)
+_STOP_COMMANDS = "::stop-commands::"
+
+
+def wraps_commands(run: str) -> bool:
+    """Whether a step's ``run`` stops workflow commands around a command: it prints
+    ``::stop-commands::`` itself, or calls ``with_commands_stopped``.
+
+    A heredoc's body is left out: the scan workflow's helper step writes the wrapper's
+    definition, ``printf '::stop-commands::...'`` included, to a file through one, and
+    prints nothing itself.
+    """
+    text = _HEREDOC.sub("", run)
+    return _STOP_COMMANDS in text or bool(_WRAPPER_CALL.search(text))
+
+
 def wrapped_job_steps(workflows: Iterable[Mapping[str, Any]]) -> list[tuple[str, str]]:
-    """(job id, step name) of each step that prints ``::stop-commands::`` around its
-    command, in order.
+    """(job id, step name) of each step that stops workflow commands around its
+    command (wraps_commands), in order.
 
     A wrapped step without a name is an error: act names an unnamed step after its
     command, so its log could not be matched to it.
@@ -495,7 +744,7 @@ def wrapped_job_steps(workflows: Iterable[Mapping[str, Any]]) -> list[tuple[str,
             if not isinstance(job, Mapping):
                 continue
             for step in _steps(job):
-                if "::stop-commands::" not in str(step.get("run", "")):
+                if not wraps_commands(str(step.get("run", ""))):
                     continue
                 if not step.get("name"):
                     raise ValueError(
@@ -505,6 +754,19 @@ def wrapped_job_steps(workflows: Iterable[Mapping[str, Any]]) -> list[tuple[str,
                 pair = (str(job_id), str(step["name"]))
                 if pair not in pairs:
                     pairs.append(pair)
+    return pairs
+
+
+def conditional_steps(workflows: Iterable[Mapping[str, Any]]) -> set[tuple[str, str]]:
+    """(job id, step name) of each named step with an ``if``, which may not run."""
+    pairs: set[tuple[str, str]] = set()
+    for workflow in workflows:
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            if not isinstance(job, Mapping):
+                continue
+            for step in _steps(job):
+                if step.get("if") is not None and step.get("name"):
+                    pairs.add((str(job_id), str(step["name"])))
     return pairs
 
 
@@ -518,24 +780,85 @@ def gating_step(workflow: Mapping[str, Any], command: str) -> tuple[str, str] | 
     return None
 
 
-def uploaded_artifact_names(workflows: Iterable[Mapping[str, Any]]) -> list[str]:
-    """The artifact names the workflows' upload-artifact steps use, per matrix run."""
+#: ``${{ inputs.<name> }}``, and the scan workflow's ``${{ steps.inputs.outputs.<name>
+#: }}``: its input-checking step copies every input to an output of the same name
+#: with ``-`` as ``_``.
+_INPUT_EXPRESSION = re.compile(
+    r"\$\{\{\s*(?:inputs\.(?P<input>[\w-]+)|steps\.inputs\.outputs\.(?P<output>\w+))"
+    r"\s*\}\}"
+)
+
+
+def resolve_inputs(text: str, inputs: Mapping[str, Any]) -> str:
+    """``text`` with each ``${{ inputs.<name> }}`` replaced by the call's value of that
+    input (call_inputs), and each ``${{ steps.inputs.outputs.<name> }}`` by the value
+    of the input of that name, ``_`` read as ``-``. An expression with no value stays
+    as written, so its reader can say so."""
+
+    def replace(match: re.Match[str]) -> str:
+        if match["input"] is not None:
+            candidates = [match["input"]]
+        else:
+            candidates = [match["output"], match["output"].replace("_", "-")]
+        for name in candidates:
+            if name in inputs:
+                return str(inputs[name])
+        return match.group(0)
+
+    return _INPUT_EXPRESSION.sub(replace, text)
+
+
+def uploaded_artifact_names(
+    workflow: Mapping[str, Any],
+    called: Mapping[str, Mapping[str, Any]] | None = None,
+    plan: Mapping[str, JobPlan] | None = None,
+) -> list[str]:
+    """The artifact names the workflow's upload-artifact steps use, per matrix run,
+    and those of each reusable workflow it calls, with the call's inputs resolved
+    (resolve_inputs). With ``plan``, only the jobs the plan expects to run count."""
     names: list[str] = []
-    for workflow in workflows:
-        for job in (workflow.get("jobs") or {}).values():
-            if not isinstance(job, Mapping):
+
+    def collect(job: Mapping[str, Any], inputs: Mapping[str, Any]) -> None:
+        matrix = ((job.get("strategy") or {}).get("matrix")) or {}
+        for step in _steps(job):
+            if not str(step.get("uses", "")).startswith("actions/upload-artifact@"):
                 continue
-            matrix = ((job.get("strategy") or {}).get("matrix")) or {}
-            for step in job.get("steps") or []:
-                if not isinstance(step, Mapping):
-                    continue
-                if not str(step.get("uses", "")).startswith("actions/upload-artifact@"):
-                    continue
-                name = str((step.get("with") or {}).get("name") or "artifact")
-                for expanded in _expand_matrix(name, matrix):
-                    if expanded not in names:
-                        names.append(expanded)
+            name = str((step.get("with") or {}).get("name") or "artifact")
+            for expanded in _expand_matrix(resolve_inputs(name, inputs), matrix):
+                if expanded not in names:
+                    names.append(expanded)
+
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        if not isinstance(job, Mapping):
+            continue
+        uses = str(job.get("uses") or "")
+        if not uses:
+            if plan is None or str(job_id) in plan:
+                collect(job, {})
+            continue
+        target = (called or {}).get(PurePosixPath(uses.split("@", 1)[0]).name)
+        if target is None:
+            continue
+        inputs = call_inputs(job, target)
+        for called_id, called_job in (target.get("jobs") or {}).items():
+            if not isinstance(called_job, Mapping):
+                continue
+            if plan is None or str(called_id) in plan:
+                collect(called_job, inputs)
     return names
+
+
+def sarif_upload_expected(plan: Mapping[str, JobPlan], event: str | None) -> bool:
+    """Whether the planned run uploads ASH's SARIF report: a job of the SARIF upload
+    workflow is planned, or a call of the scan workflow leaves ``collect-sarif-report``
+    on and the event is a pull request, the one event its own upload step runs on."""
+    for entry in plan.values():
+        if entry.workflow == SARIF_WORKFLOW:
+            return True
+        if entry.workflow == SCAN_WORKFLOW and event == "pull_request":
+            if _truth((entry.inputs or {}).get("collect-sarif-report", True)):
+                return True
+    return False
 
 
 def _expand_matrix(name: str, matrix: Mapping[str, Any]) -> list[str]:

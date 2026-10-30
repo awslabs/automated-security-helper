@@ -414,7 +414,9 @@ def _command_text(text: str) -> str:
 
 
 def resume_token_problems(
-    log: str, steps: Iterable[str | tuple[str, str]]
+    log: str,
+    steps: Iterable[str | tuple[str, str]],
+    optional: Iterable[tuple[str, str]] = (),
 ) -> list[str]:
     """Each run of each step in ``steps`` stops workflow commands and prints its resume.
 
@@ -424,12 +426,14 @@ def resume_token_problems(
     line of its own after the stop line. A wanted step must also have run, in each
     run of its job (each matrix entry) that act reported a result for, since a step
     that never ran was never checked; a step named alone, in some job, once act
-    reported any job's result. A job act reported no result for is not this check's:
-    act_result_problems names it.
+    reported any job's result. A pair in ``optional`` (a step with an ``if``) is
+    checked in each run it had, and may have had none. A job act reported no result
+    for is not this check's: act_result_problems names it.
     """
     wanted = list(steps)
     names = {step for step in wanted if isinstance(step, str)}
     pairs = {tuple(step) for step in wanted if not isinstance(step, str)}
+    may_skip = {tuple(step) for step in optional}
     runs = _act_step_runs(log)
     problems = []
     for run in runs:
@@ -470,6 +474,8 @@ def resume_token_problems(
                 )
             continue
         job, name = step
+        if (job, name) in may_skip:
+            continue
         for matrix in [
             matrix for reported_job, matrix in reported if reported_job == job
         ]:

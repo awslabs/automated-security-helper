@@ -1455,8 +1455,17 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
             source="merge" if merge else "scan",
             actionable=sum(expected.values()),
         )
+    # The names are read with each call's inputs resolved; a name the harness still
+    # cannot read before the run is named, never looked up as literal text.
+    names = reports.uploaded_artifact_names(workflow, called, plan)
+    problems += [
+        f"the artifact name {name!r} is an expression the harness cannot read before "
+        "the run"
+        for name in names
+        if "${{" in name
+    ]
     problems += reports.artifact_problems(
-        out / "artifacts", reports.uploaded_artifact_names([workflow, *called.values()])
+        out / "artifacts", [name for name in names if "${{" not in name]
     )
     # act's host executor runs the job in a directory it removes at the job's end and
     # never writes the project's .ash/ash_output, so the artifact the job uploaded is
@@ -1482,10 +1491,10 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
             problems.append(f"act's log has no start of step {step!r} of job {job}")
         else:
             problems += verdict.written_after_problems(aggregated, started=started)
-    if (
-        "upload-sarif" in prepared.rewritten
-        or "upload-ash-sarif.yml" in prepared.rewritten
-    ):
+    # An upload is expected from the jobs the plan expects to run: a block whose SARIF
+    # job calls upload-ash-sarif.yml behind an ``if`` act cannot satisfy, or whose scan
+    # call turns collect-sarif-report off, uploads nothing under act.
+    if reports.sarif_upload_expected(plan, prepared.run.event):
         sarif = output / "reports" / "ash.ghas.sarif"
         uploads = [path for path, _ in _stub_records(prepared, "upload-sarif")]
         if not uploads:
@@ -1500,12 +1509,16 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
             for upload in uploads:
                 problems += verdict.stub_sarif_problems(sarif, upload)
     problems += stub_problems(prepared)
+    workflows = [workflow, *called.values()]
     try:
-        wrapped = reports.wrapped_job_steps([workflow, *called.values()])
+        wrapped = reports.wrapped_job_steps(workflows)
     except ValueError as error:
         problems.append(str(error))
         wrapped = []
-    problems += verdict.resume_token_problems(log, wrapped)
+    # A wrapped step behind an ``if`` is checked in the runs it had, and may have none.
+    problems += verdict.resume_token_problems(
+        log, wrapped, optional=reports.conditional_steps(workflows)
+    )
     return problems
 
 
