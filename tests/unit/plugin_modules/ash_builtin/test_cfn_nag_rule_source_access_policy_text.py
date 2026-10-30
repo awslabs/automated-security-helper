@@ -10,6 +10,8 @@ Read from the sources, since this suite cannot run Ruby.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
@@ -39,4 +41,8 @@ def test_a_string_policy_is_parsed_before_the_parser_reads_it(rule):
 def test_a_string_that_is_not_json_is_reported_as_unread(rule):
     source = rule.read_text(encoding="utf-8")
     assert "unread_policies << resource.logical_resource_id" in source
-    assert "is a string" in source and "not a JSON document" in source
+    # Ruby joins adjacent string literals across a `\`-continued line, so the
+    # message is read as Ruby reads it, not line by line: one rule breaks the
+    # line between "is a " and "string".
+    joined = re.sub(r'"\s*\\\s*\n\s*"', "", source)
+    assert "is a string that is not a JSON document" in joined
