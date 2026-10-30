@@ -9709,19 +9709,28 @@ class _McpHttpClient:
     of this client's requests is left open for the server's stop to wait on. ``tool``
     calls a tool and returns its result. The server answers with a JSON body or with an
     event stream, whose ``data`` lines are read for the answer.
+
+    A stateful server issues the session's id on ``initialize``. A stateless server
+    started with ``--trust-upstream-session-id`` issues none and takes the
+    ``Mcp-Session-Id`` the client sends as the session, the way a platform in front
+    of ASH would set it; ``session_id`` is that header, sent on every request from
+    ``initialize`` on.
     """
 
-    def __init__(self, port: int) -> None:
+    def __init__(self, port: int, session_id: Optional[str] = None) -> None:
         self.port = port
         self.headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
+        if session_id is not None:
+            self.headers["mcp-session-id"] = session_id
         answer, response = self._post(_MCP_INITIALIZE)
         assert "result" in answer, answer
-        session = response.getheader("mcp-session-id")
-        assert session, "the server gave the session no id"
-        self.headers["mcp-session-id"] = session
+        if session_id is None:
+            session = response.getheader("mcp-session-id")
+            assert session, "the server gave the session no id"
+            self.headers["mcp-session-id"] = session
         self.headers["mcp-protocol-version"] = answer["result"]["protocolVersion"]
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
         self._id = _MCP_INITIALIZE["id"]
@@ -10166,9 +10175,25 @@ _SWEEP_LOCK_WAIT_IS_BOUNDED = (
     "because another server holds it, removes nothing more and leaves the remaining "
     "sessions to its next sweep, so another server cannot hold up a stop signal."
 )
+_SWEEP_COVERS_THE_ENDS_IT_CANNOT_SEE = (
+    "It also removes a workspace nobody used for `--session-workspace-ttl` seconds, 86400 "
+    "(24 hours) by default, which covers sessions whose end it cannot see, such as every "
+    "stateless one."
+)
+_A_HELD_SESSION_IS_KEPT = (
+    "A session the server still holds as issued, a stateful session it has not seen end "
+    "or an open event stream, is kept whatever its age: its workspace, with the profile "
+    "copy and the upload in it, ends with the session, not with the sweep."
+)
 #: The sweep's "about a second", and the TTL the sweep tests give the server.
 _SWEEP_LOCK_WAIT_SECONDS = 1
 _SWEEP_TTL_SECONDS = 1
+#: The sessions the sweep tests name on a stateless server, where the client's
+#: ``Mcp-Session-Id`` is the session (``--trust-upstream-session-id``). A stateless
+#: server holds no session as issued, so the sweep is what ends them, which is the
+#: page's reason for the sweep. The ids are path components (``validated_path_component``).
+_STALE_SESSION = "page-claims-stale"
+_SWEEPING_SESSION = "page-claims-sweeper"
 
 #: Another server sharing the workspace root, as far as the sweep can tell: a process
 #: that holds the lock the servers share until the file it watches appears, or a
@@ -10220,11 +10245,19 @@ def _another_servers_lock(root: Path, tmp_path: Path) -> Iterator[None]:
 
 
 def _sweep_server(
-    tmp_path: Path, command: Optional[List[str]] = None
+    tmp_path: Path, command: Optional[List[str]] = None, *, stateless: bool = False
 ) -> Tuple[subprocess.Popen, int, _Lines, Path, Path]:
     """A streamable-HTTP server whose session workspaces go stale after
     ``_SWEEP_TTL_SECONDS``, with a profile registered: the process, its port, the
-    reader of its standard error, the workspace root, and the profile."""
+    reader of its standard error, the workspace root, and the profile.
+
+    ``stateless`` starts it with ``--stateless-http --trust-upstream-session-id``: it
+    issues no session and holds none, and the client's ``Mcp-Session-Id`` names the
+    session, so a session unused past the TTL is the sweep's to remove. A stateful
+    server (the default) keeps every session it has issued and not seen end.
+
+    Two servers started from one ``tmp_path`` share the workspace root.
+    """
     root = tmp_path / "workspaces"
     profile = tmp_path / "profile.yaml"
     profile.write_text("project_name: page-claims-sweep\n", encoding="utf-8")
@@ -10235,16 +10268,21 @@ def _sweep_server(
         "--profile",
         f"page-claims={profile}",
     ]
+    if stateless:
+        options += ["--stateless-http", "--trust-upstream-session-id"]
     process, port, lines = _mcp_http_server(
         tmp_path, command or list(_ASH_MODULE), env=env, options=options
     )
     return process, port, lines, root, profile
 
 
-def _session_with_a_workspace(port: int, upload_id: str) -> _McpHttpClient:
+def _session_with_a_workspace(
+    port: int, upload_id: str, session_id: Optional[str] = None
+) -> _McpHttpClient:
     """A session that has bound the profile and sent the first chunk of an upload, so
-    its workspace holds both."""
-    client = _McpHttpClient(port)
+    its workspace holds both. ``session_id`` is the client's own id on a stateless
+    server; a stateful server issues one."""
+    client = _McpHttpClient(port, session_id)
     chunk = base64.b64encode(_delivery_zip({"app.py": b"x = 1\n"})).decode("ascii")
     sent = client.tool(
         "set_source_zip_chunk",
@@ -10263,15 +10301,18 @@ def _workspace(root: Path, client: _McpHttpClient) -> Path:
     return root / client.headers["mcp-session-id"]
 
 
-def _start_a_session_in_the_background(port: int) -> Tuple[threading.Thread, Dict]:
+def _start_a_session_in_the_background(
+    port: int, session_id: Optional[str] = None
+) -> Tuple[threading.Thread, Dict]:
     """A new session's ``initialize``, on a thread: the request that sets off a sweep
-    that is due. The result holds the seconds it took, or the error it raised."""
+    that is due. The result holds the seconds it took, or the error it raised.
+    ``session_id`` is the new session's own id on a stateless server."""
     result: Dict[str, Any] = {}
 
     def run() -> None:
         started = time.monotonic()
         try:
-            _McpHttpClient(port)
+            _McpHttpClient(port, session_id)
         except BaseException as error:  # reported by the test
             result["error"] = error
         result["seconds"] = time.monotonic() - started
@@ -10294,23 +10335,26 @@ def test_a_session_write_is_refused_as_busy_while_the_sweep_holds_the_session(
 ) -> None:
     """mcp-server.md (Deliver source to the server).
 
-    A streamable-HTTP server with a one-second ``--session-workspace-ttl`` has a
-    session that bound a profile and sent an upload's first chunk; the session then
-    goes unused past the TTL. Another server holds the lock a sweep takes before it
-    removes a session, so the sweep that a new session's first request sets off holds
-    the stale session while it waits for the lock. A ``set_source_zip_chunk`` or a
-    ``select_profile`` the stale session sends during that wait must be refused with
-    ``success`` false and ``error_type`` ``session_workspace_busy``. The control is
-    that the same calls succeeded before the session went stale.
+    A stateless streamable-HTTP server with a one-second ``--session-workspace-ttl``
+    has a session that bound a profile and sent an upload's first chunk; the session
+    then goes unused past the TTL. Stateless, because the server holds no session as
+    issued, so the sweep is what ends an unused one; a stateful server keeps a session
+    it still holds (the held-session test below). Another server holds the lock a
+    sweep takes before it removes a session, so the sweep that a new session's first
+    request sets off holds the stale session while it waits for the lock. A
+    ``set_source_zip_chunk`` or a ``select_profile`` the stale session sends during
+    that wait must be refused with ``success`` false and ``error_type``
+    ``session_workspace_busy``. The control is that the same calls succeeded before
+    the session went stale.
     """
     assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
-    process, port, lines, root, _profile = _sweep_server(tmp_path)
+    process, port, lines, root, _profile = _sweep_server(tmp_path, stateless=True)
     try:
-        stale = _session_with_a_workspace(port, "page-claims-upload")
+        stale = _session_with_a_workspace(port, "page-claims-upload", _STALE_SESSION)
         assert _workspace(root, stale).is_dir()
         with _another_servers_lock(root, tmp_path):
             time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-            sweeping, _ = _start_a_session_in_the_background(port)
+            sweeping, _ = _start_a_session_in_the_background(port, _SWEEPING_SESSION)
             time.sleep(0.3)
             if tool == "set_source_zip_chunk":
                 chunk = base64.b64encode(b"more").decode("ascii")
@@ -10335,26 +10379,29 @@ def test_a_session_write_is_refused_as_busy_while_the_sweep_holds_the_session(
 def test_a_removed_workspace_takes_the_upload_and_the_bound_profile_with_it(
     tmp_path: Path,
 ) -> None:
-    """mcp-server.md (Deliver source to the server).
+    """mcp-server.md (Deliver source to the server; Clean up).
 
-    A session binds a profile and sends an upload's first chunk, then goes unused
-    past the one-second TTL, and a new session's first request sets off the sweep,
-    with no other server holding its lock. The stale session's workspace, with the
-    profile's copy, must be gone. The upload must be gone with it: its next chunk is
-    refused, and the upload sent again from chunk 0 is accepted. Selecting the
-    profile again must succeed and write its copy again. The control is the
-    workspace, the copy and the upload's first chunk all there before the sweep.
+    On a stateless streamable-HTTP server, whose sessions it does not hold, a session
+    binds a profile and sends an upload's first chunk, then goes unused past the
+    one-second TTL, and a new session's first request sets off the sweep, with no
+    other server holding its lock. The stale session's workspace, with the profile's
+    copy, must be gone. The upload must be gone with it: its next chunk is refused,
+    and the upload sent again from chunk 0 is accepted. Selecting the profile again
+    must succeed and write its copy again. The control is the workspace, the copy and
+    the upload's first chunk all there before the sweep. A session the server still
+    holds is not swept (the held-session test below).
     """
     assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
-    process, port, lines, root, _profile = _sweep_server(tmp_path)
+    assert_on_page(MCP_SERVER, _SWEEP_COVERS_THE_ENDS_IT_CANNOT_SEE)
+    process, port, lines, root, _profile = _sweep_server(tmp_path, stateless=True)
     chunk = base64.b64encode(_delivery_zip({"app.py": b"x = 1\n"})).decode("ascii")
     try:
-        stale = _session_with_a_workspace(port, "page-claims-upload")
+        stale = _session_with_a_workspace(port, "page-claims-upload", _STALE_SESSION)
         workspace = _workspace(root, stale)
         copies = list(workspace.rglob("ash.yaml"))
         assert copies, f"no copy of the profile in {workspace}"
         time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-        _McpHttpClient(port)
+        _McpHttpClient(port, _SWEEPING_SESSION)
         assert not workspace.exists(), f"the sweep left {workspace}"
         next_chunk = stale.tool(
             "set_source_zip_chunk",
@@ -10389,10 +10436,11 @@ def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
 ) -> None:
     """mcp-server.md (Clean up).
 
-    Two sessions of a streamable-HTTP server with a one-second
+    Two sessions of a stateless streamable-HTTP server with a one-second
     ``--session-workspace-ttl`` go unused past the TTL while another process holds
     the lock the sweep takes before it removes a session. A new session's first
-    request sets off the sweep.
+    request sets off the sweep. Stateless, so the server holds neither session and
+    the sweep is what removes them once the lock is free.
 
     Removes nothing more: that request must be answered within the page's second plus
     three, and both stale workspaces must stay. Once the lock is free, the next sweep,
@@ -10407,13 +10455,20 @@ def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
     assert_on_page(MCP_SERVER, _SWEEP_LOCK_WAIT_IS_BOUNDED)
     go = tmp_path / "interrupt-now.txt"
     command = _interrupter([(go, "now")]) if check == "ctrl-c-is-not-held-up" else None
-    process, port, lines, root, _profile = _sweep_server(tmp_path, command)
+    process, port, lines, root, _profile = _sweep_server(
+        tmp_path, command, stateless=True
+    )
     try:
-        stale = [_session_with_a_workspace(port, f"upload-{n}") for n in (1, 2)]
+        stale = [
+            _session_with_a_workspace(port, f"upload-{n}", f"{_STALE_SESSION}-{n}")
+            for n in (1, 2)
+        ]
         workspaces = [_workspace(root, client) for client in stale]
         with _another_servers_lock(root, tmp_path):
             time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-            sweeping, result = _start_a_session_in_the_background(port)
+            sweeping, result = _start_a_session_in_the_background(
+                port, f"{_SWEEPING_SESSION}-1"
+            )
             if check == "ctrl-c-is-not-held-up":
                 time.sleep(0.3)
                 go.write_text("now", encoding="utf-8")
@@ -10442,11 +10497,80 @@ def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
             for workspace in workspaces:
                 assert workspace.is_dir(), f"the sweep removed {workspace}"
         time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-        _McpHttpClient(port)
+        _McpHttpClient(port, f"{_SWEEPING_SESSION}-2")
         for workspace in workspaces:
             assert not workspace.exists(), f"the next sweep left {workspace}"
     finally:
         _stop_server(process)
+
+
+@pytest.mark.e2e
+def test_a_session_the_server_still_holds_is_kept_past_the_ttl(tmp_path: Path) -> None:
+    """mcp-server.md (Clean up).
+
+    A stateful streamable-HTTP server with a one-second ``--session-workspace-ttl``
+    issues a session that binds the profile and sends an upload's first chunk, then
+    goes unused past the TTL; a new session's first request sets off the sweep. The
+    server still holds the first session as issued (it never saw a ``DELETE``), so the
+    sweep must keep it: the workspace is still there with the profile's copy, and the
+    upload goes on, its next chunk accepted. The control is the stateless case above,
+    where the same idle session is swept because the server holds no session.
+    """
+    assert_on_page(MCP_SERVER, _A_HELD_SESSION_IS_KEPT)
+    process, port, lines, root, _profile = _sweep_server(tmp_path)
+    chunk = base64.b64encode(_delivery_zip({"app.py": b"x = 1\n"})).decode("ascii")
+    try:
+        held = _session_with_a_workspace(port, "page-claims-upload")
+        workspace = _workspace(root, held)
+        copies = list(workspace.rglob("ash.yaml"))
+        assert copies, f"no copy of the profile in {workspace}"
+        time.sleep(_SWEEP_TTL_SECONDS + 1.5)
+        _McpHttpClient(port)
+        assert workspace.is_dir(), f"the sweep removed the held session's {workspace}"
+        assert all(copy.is_file() for copy in copies), f"the copy left {workspace}"
+        next_chunk = held.tool(
+            "set_source_zip_chunk",
+            upload_id="page-claims-upload",
+            sequence=1,
+            data_b64=chunk,
+            last=True,
+        )
+    finally:
+        _stop_server(process)
+
+    assert next_chunk.get("success") is True, next_chunk
+
+
+@pytest.mark.e2e
+def test_a_previous_servers_workspace_is_swept_once_nobody_holds_it(
+    tmp_path: Path,
+) -> None:
+    """mcp-server.md (Clean up).
+
+    A stateful server issues a session that binds the profile and sends an upload's
+    first chunk, and is then killed without ending the session, so its workspace stays
+    under the root. A second server on the same root, with a one-second
+    ``--session-workspace-ttl``, holds no such session, so a new session's first
+    request past the TTL must sweep the workspace: the end the first server could not
+    see is the sweep's to cover. The control is the workspace there before the second
+    server's sweep.
+    """
+    assert_on_page(MCP_SERVER, _SWEEP_COVERS_THE_ENDS_IT_CANNOT_SEE)
+    first, port, lines, root, _profile = _sweep_server(tmp_path)
+    try:
+        orphaned = _session_with_a_workspace(port, "page-claims-upload")
+        workspace = _workspace(root, orphaned)
+        assert workspace.is_dir()
+    finally:
+        _stop_server(first)
+    assert workspace.is_dir(), f"killing the server removed {workspace}"
+    second, port, lines, root, _profile = _sweep_server(tmp_path)
+    try:
+        time.sleep(_SWEEP_TTL_SECONDS + 1.5)
+        _McpHttpClient(port)
+        assert not workspace.exists(), f"the second server's sweep left {workspace}"
+    finally:
+        _stop_server(second)
 
 
 @pytest.mark.parametrize(
