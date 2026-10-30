@@ -677,6 +677,8 @@ def test_validate_plugin_explains_offline_mode_for_a_uv_managed_tool(plugin_cont
     hints = [msg for msg, _ in logged if "Offline mode is enabled" in msg]
     assert len(hints) == 1
     assert "stub-tool" in hints[0]
+    assert "ASH_OFFLINE" in hints[0]
+    assert "options.offline" in hints[0]
 
 
 def test_no_offline_hint_is_logged_when_the_tool_is_not_uv_managed(plugin_context):
