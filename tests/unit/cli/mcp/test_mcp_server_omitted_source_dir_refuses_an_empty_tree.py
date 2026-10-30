@@ -10,6 +10,11 @@ string for ``source_dir`` is not None, so it skipped the omitted-form
 resolution and the scan ran on the server's working directory, which the
 omitted form exists to refuse. An empty tree is now refused as a gone one is,
 and a blank ``source_dir`` is the omitted form.
+
+A third gap followed: the check took any entry in the listing for a tree to
+scan, so a tree of empty directories, or a bare ``.git`` directory left where a
+checkout never landed, was scanned and reported clean. The check now walks to
+the first regular file, ``.git`` aside, and a tree with none is refused too.
 """
 
 from __future__ import annotations
@@ -53,6 +58,47 @@ def test_an_empty_delivered_tree_is_refused(tmp_path) -> None:
     assert resolution.error is not None
     assert resolution.error["error_type"] == "delivered_source_missing"
     assert "Deliver it again" in resolution.error["error"]
+
+
+def test_a_tree_of_empty_directories_is_refused(tmp_path) -> None:
+    """Red at the base: a directory entry counted as something to scan."""
+    delivered = tmp_path / "session-c" / "source"
+    (delivered / "src" / "pkg").mkdir(parents=True)
+    (delivered / "docs").mkdir()
+    sd._set_session_source_dir("session-c", delivered)
+
+    resolution = _resolve_omitted_source_dir("session-c")
+
+    assert resolution.source_dir is None, "a tree with no file was handed to the scan"
+    assert resolution.error is not None
+    assert resolution.error["error_type"] == "delivered_source_missing"
+
+
+def test_a_tree_holding_only_a_git_directory_is_refused(tmp_path) -> None:
+    """Red at the base: a clone whose checkout never landed left ``.git`` alone,
+    and that entry counted."""
+    delivered = tmp_path / "session-d" / "source"
+    (delivered / ".git" / "objects").mkdir(parents=True)
+    (delivered / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    sd._set_session_source_dir("session-d", delivered)
+
+    resolution = _resolve_omitted_source_dir("session-d")
+
+    assert resolution.source_dir is None, "a bare .git was handed to the scan"
+    assert resolution.error is not None
+    assert resolution.error["error_type"] == "delivered_source_missing"
+
+
+def test_a_file_below_an_empty_top_level_is_used(tmp_path) -> None:
+    delivered = tmp_path / "session-e" / "source"
+    (delivered / "src" / "pkg").mkdir(parents=True)
+    (delivered / "src" / "pkg" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    sd._set_session_source_dir("session-e", delivered)
+
+    resolution = _resolve_omitted_source_dir("session-e")
+
+    assert resolution.error is None
+    assert resolution.source_dir == str(delivered)
 
 
 def test_a_delivered_tree_with_a_file_is_used(tmp_path) -> None:

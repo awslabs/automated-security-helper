@@ -384,17 +384,31 @@ class _OmittedSourceResolution(NamedTuple):
 
 
 def _holds_an_entry(directory: Path) -> bool:
-    """Whether ``directory`` is a directory with at least one entry in it.
+    """Whether ``directory`` holds at least one regular file, ``.git`` aside.
 
-    A delivered tree that is on disk but empty is the same false-negative shape
-    as one that is gone: the scan runs and reports clean. A directory whose
-    listing fails is read as holding nothing, so the caller refuses it as it
-    refuses one that cannot be read.
+    A delivered tree that is on disk but holds nothing a scanner reads is the
+    same false-negative shape as one that is gone: the scan runs and reports
+    clean. A listing with an entry in it was taken for a tree to scan, so a tree
+    of empty directories, or a bare ``.git`` directory left where a checkout
+    never landed, was scanned and reported clean. The walk now stops at the first
+    regular file, skips ``.git`` at every level, and follows no symbolic link. A
+    directory whose listing fails is read as holding nothing, so the caller
+    refuses it as it refuses one that cannot be read.
     """
     try:
         if not directory.is_dir():
             return False
-        return any(True for _ in directory.iterdir())
+        pending = [directory]
+        while pending:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    if entry.name == ".git":
+                        continue
+                    if entry.is_file(follow_symlinks=False):
+                        return True
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+        return False
     except OSError:
         return False
 
