@@ -123,8 +123,10 @@ def test_a_fixed_copy_carries_no_advisory_meant_for_another(scanner, monkeypatch
 def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):
     """Control: with no installed version the answer is uncertain, so the
     advisory is still reported on the copy. Once: the two via entries are one
-    GHSA split into two ranges, and one advisory on one copy is one result (the
-    first range named), where it used to be one result per range."""
+    GHSA split into two ranges, and one advisory on one copy is one result,
+    where it used to be one result per range. That result names BOTH ranges:
+    the first alone understated the advisory for a copy that is in fact at a
+    version the second range covers."""
     node = "node_modules/minimist"
     _versions(monkeypatch, {})
 
@@ -132,8 +134,10 @@ def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatc
         _report([node]), scanner.context.source_dir
     )
 
-    assert _rows(report) == [(node, "<0.2.4")]
+    assert _rows(report) == [(node, "<0.2.4 || >=1.0.0 <1.2.6")]
     assert len(report.runs[0].tool.driver.rules) == 1
+    (result,) = report.runs[0].results
+    assert "<0.2.4 || >=1.0.0 <1.2.6" in result.message.root.text
 
 
 def test_an_unparsable_range_keeps_the_result(scanner, monkeypatch):

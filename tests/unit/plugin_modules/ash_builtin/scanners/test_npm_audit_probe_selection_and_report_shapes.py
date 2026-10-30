@@ -511,6 +511,42 @@ class TestTheNpmConversion:
 
         results = sarif.runs[0].results
         assert len(results) == 1, [(r.ruleId, r.message.root.text) for r in results]
+        (result,) = results
+        assert (
+            result.properties.model_extra["vulnerable_versions"]
+            == "<0.2.4 || >=1.0.0 <1.2.6"
+        ), "the kept result names every range of the advisory"
+
+    def test_two_yarn_records_for_one_advisory_and_copy_are_one_result(self, scanner):
+        """yarn and pnpm list an advisory once per vulnerable range; two records
+        sharing a URL and naming no version were two identical rows, where the
+        npm path already made them one. One result, both ranges named."""
+
+        def record(rng):
+            return {
+                "package": "lodash",
+                "id": 1065,
+                "title": "Prototype Pollution",
+                "url": GHSA,
+                "severity": "high",
+                "cvss": {},
+                "cwe": [],
+                "vulnerable_versions": rng,
+                "patched_versions": None,
+                "versions": {},
+                "paths_key": "dependents",
+            }
+
+        rules, results = {}, []
+        scanner._add_yarn_results(
+            [record("<4.17.12"), record(">=4.17.15 <4.17.19")], rules, results
+        )
+
+        (result,) = results
+        props = result.properties.model_extra
+        assert props["vulnerable_versions"] == "<4.17.12 || >=4.17.15 <4.17.19"
+        assert "<4.17.12 || >=4.17.15 <4.17.19" in result.message.root.text
+        assert list(rules) == ["GHSA-xvch-5gv4-984h"]
 
     def test_an_unknown_installed_version_is_not_the_range(self, scanner, monkeypatch):
         _unknown_versions(monkeypatch)

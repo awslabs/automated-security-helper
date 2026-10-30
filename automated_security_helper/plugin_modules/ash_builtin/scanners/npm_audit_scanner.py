@@ -1512,6 +1512,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         A rule's ``helpUri`` is left unset for an advisory without a URL: the
         SARIF model types it as a URL and refused the empty string.
         """
+        # The result kept per (rule id, URI, installed version): see the
+        # dedupe in the npm path and ``_widen_result``.
+        emitted: Dict[tuple[str, str, Any], Result] = {}
         for record in records:
             pkg_name = record["package"]
             severity = str(record["severity"])
@@ -1554,40 +1557,78 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             # the package by name, its installed version unknown.
             copies = sorted(record["versions"].items()) or [(None, [])]
             for version, paths in copies:
+                # Two records for one advisory, package and copy (an advisory
+                # the tool lists once per vulnerable range) are one result
+                # naming both ranges, as the npm path makes them; they were
+                # two identical rows.
+                uri = f"node_modules/{pkg_name}/package.json"
+                kept_result = emitted.get((vuln_id, uri, version))
+                if kept_result is not None:
+                    self._widen_result(
+                        kept_result,
+                        record["vulnerable_versions"],
+                        pkg_name,
+                        title,
+                        record["url"],
+                    )
+                    continue
                 per_copy = dict(extra)
                 if paths:
                     per_copy[record["paths_key"]] = paths
                 if version is not None:
                     per_copy["installed_version"] = version
-                results.append(
-                    Result(
-                        ruleId=vuln_id,
-                        level=level,
-                        message=Message(
-                            text=f"{title} in {pkg_name} {record['vulnerable_versions']}. {record['url']}"
-                        ),
-                        locations=[
-                            Location(
-                                physicalLocation=PhysicalLocation(
-                                    artifactLocation=ArtifactLocation(
-                                        uri=f"node_modules/{pkg_name}/package.json"
-                                    ),
-                                    region=Region(startLine=1, startColumn=1),
-                                )
+                result = Result(
+                    ruleId=vuln_id,
+                    level=level,
+                    message=Message(
+                        text=f"{title} in {pkg_name} {record['vulnerable_versions']}. {record['url']}"
+                    ),
+                    locations=[
+                        Location(
+                            physicalLocation=PhysicalLocation(
+                                artifactLocation=ArtifactLocation(uri=uri),
+                                region=Region(startLine=1, startColumn=1),
                             )
-                        ],
-                        properties=PropertyBag(
-                            **identity_properties(pkg_name, version, None),
-                            vulnerable_versions=record["vulnerable_versions"],
-                            recommendation=f"Update {pkg_name} to a non-vulnerable version",
-                            severity=severity,
-                            cwe=record["cwe"],
-                            cvss=record["cvss"],
-                            **per_copy,
-                            **grade,
-                        ),
-                    )
+                        )
+                    ],
+                    properties=PropertyBag(
+                        **identity_properties(pkg_name, version, None),
+                        vulnerable_versions=record["vulnerable_versions"],
+                        recommendation=f"Update {pkg_name} to a non-vulnerable version",
+                        severity=severity,
+                        cwe=record["cwe"],
+                        cvss=record["cvss"],
+                        **per_copy,
+                        **grade,
+                    ),
                 )
+                emitted[(vuln_id, uri, version)] = result
+                results.append(result)
+
+    @staticmethod
+    def _widen_result(
+        kept: Result, more_range: Any, pkg_name: str, title: str, url: Any
+    ) -> None:
+        """Add ``more_range`` to the ranges the kept result names, once.
+
+        A second via entry (npm) or record (yarn, pnpm) for the same advisory
+        and place is folded into the result already emitted for it: its range
+        joins ``vulnerable_versions`` with ``||``, the grammar advisories use,
+        and the message names the joined ranges. A range already named is not
+        repeated.
+        """
+        extra = kept.properties.model_extra if kept.properties is not None else None
+        current = str((extra or {}).get("vulnerable_versions") or "")
+        ranges = [part.strip() for part in current.split("||") if part.strip()]
+        new_range = str(more_range or "").strip()
+        if not new_range or new_range in ranges:
+            return
+        ranges.append(new_range)
+        combined = " || ".join(ranges)
+        if kept.properties is None:
+            kept.properties = PropertyBag()
+        setattr(kept.properties, "vulnerable_versions", combined)  # noqa: B010
+        kept.message = Message(text=f"{title} in {pkg_name} {combined}. {url or ''}")
 
     @staticmethod
     def _advisory_id(pkg_name: str, via: Dict[str, Any]) -> str:
@@ -1757,12 +1798,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # The place of these results: yarn and pnpm name no install path, so the
         # audited lockfile is what tells one project's finding from another's.
         lock_shown = _shown_lockfile(lock_file, target_path)
-        # (rule id, result URI) pairs already emitted for this lockfile: one
-        # GHSA can come back as several via entries with one URL (one per
-        # vulnerable range), which share a rule, and a copy whose version the
-        # lockfile does not give is kept under each, so it was reported once
-        # per range. One result per rule and place.
-        emitted: Set[tuple[str, str]] = set()
+        # The result already emitted for a (rule id, result URI) pair of this
+        # lockfile: one GHSA can come back as several via entries with one URL
+        # (one per vulnerable range), which share a rule, and a copy whose
+        # version the lockfile does not give is kept under each, so it was
+        # reported once per range. One result per rule and place, and that
+        # result names every range the advisory covers (_widen_result): the
+        # first range alone understated the advisory for a copy that is in
+        # fact at a version the second range covers.
+        emitted: Dict[tuple[str, str], Result] = {}
 
         # Process vulnerabilities
         if "vulnerabilities" in npm_audit_results:
@@ -1888,9 +1932,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         ):
                             continue
                         uri = f"node_modules/{pkg_location}/package.json"
-                        if (vuln_id, uri) in emitted:
+                        kept_result = emitted.get((vuln_id, uri))
+                        if kept_result is not None:
+                            self._widen_result(
+                                kept_result,
+                                via_range,
+                                pkg_name,
+                                title,
+                                via.get("url", ""),
+                            )
                             continue
-                        emitted.add((vuln_id, uri))
                         # installed_version only when the lockfile gives one:
                         # the advisory's range stood in for it, and a range is
                         # not a version.
@@ -1925,6 +1976,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 **grade,
                             ),
                         )
+                        emitted[(vuln_id, uri)] = result
                         results.append(result)
 
                 # Handle transitive-only vulnerabilities: all via entries
