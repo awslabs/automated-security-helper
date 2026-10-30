@@ -444,6 +444,39 @@ class ScanRegistryEntry:
         return self.status == MCScanStatus.FAILED and self.cancel_event.is_set()
 
 
+def _without_process_ids(text: str) -> str:
+    """*text* with every ``(pid N)`` parenthetical dropped (utils/subprocess_utils).
+
+    Imported at the call, not at the module: the helper is the one spelling of
+    the pid parenthetical the executor writes and the only redactor of it, and
+    only a remote read (``check_scan_progress(..., name_process_ids=False)``)
+    needs it, so a tree without it still imports this module and serves every
+    local read.
+    """
+    from automated_security_helper.utils.subprocess_utils import without_process_ids
+
+    return without_process_ids(text)
+
+
+def _coverage_without_process_ids(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """A copy of a coverage payload whose ``could_not_stop`` reasons name no pid.
+
+    The payload is the entry's stored coverage (or the empty one), so it is not
+    changed in place: the rows are copied with their ``reason`` redacted and
+    every other key is the same object.
+    """
+    rows = payload.get("could_not_stop")
+    if not isinstance(rows, list):
+        return payload
+    shown = []
+    for row in rows:
+        if isinstance(row, dict) and isinstance(row.get("reason"), str):
+            shown.append({**row, "reason": _without_process_ids(row["reason"])})
+        else:
+            shown.append(row)
+    return {**payload, "could_not_stop": shown}
+
+
 def _claims_output_tree(
     status: MCScanStatus, *, was_pending: bool, had_runner: bool
 ) -> bool:
@@ -1853,10 +1886,25 @@ class ScanRegistry:
             }
 
     def check_scan_progress(
-        self, scan_id: str, session_id: Optional[str] = None
+        self,
+        scan_id: str,
+        session_id: Optional[str] = None,
+        *,
+        name_process_ids: bool = True,
     ) -> Dict[str, Any]:
         """
         Check the progress of a scan.
+
+        ``name_process_ids`` False keeps server process ids out of the response:
+        the entry's warnings (``record_cancel_outcome`` names each tool the
+        cancel could not end with its pid on a local transport) and the stored
+        coverage's ``could_not_stop`` reasons (the executor records each with
+        the pid of the tool it could not end) are read through
+        ``utils.subprocess_utils.without_process_ids``. The texts were written
+        for the transport of the moment they were recorded; a later read by a
+        remote client, or by a client the "every caller remote" override makes
+        remote, was handed them as recorded. The entry's own records are not
+        changed, so a local read after a remote one still names the pids.
 
         Args:
             scan_id: ID of the scan to check
@@ -2195,6 +2243,12 @@ class ScanRegistry:
                             )
                         ],
                     }
+                warnings = list(entry.warnings)
+                if not name_process_ids:
+                    # Read-side redaction: the stored texts keep their pids
+                    # (a local read still names them); this response does not.
+                    warnings = [_without_process_ids(text) for text in warnings]
+                    coverage_payload = _coverage_without_process_ids(coverage_payload)
 
                 # Combine registry entry information with progress info
                 result = {
@@ -2215,7 +2269,7 @@ class ScanRegistry:
                         entry.requested_severity_threshold
                     ),
                     "config_path": entry.config_path,
-                    "warnings": entry.warnings,
+                    "warnings": warnings,
                     # The entry's reason when it has one; else, for an ended
                     # scan, what the file read found, so a finished scan whose
                     # results file is now unreadable says so without the entry

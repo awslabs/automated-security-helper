@@ -795,7 +795,10 @@ async def get_scan_by_directory(
 
 
 async def check_scan_progress(
-    scan_id: str, session_id: Optional[str] = None
+    scan_id: str,
+    session_id: Optional[str] = None,
+    *,
+    name_process_ids: bool = True,
 ) -> Dict[str, Any]:
     """
     Check the progress of a scan.
@@ -804,6 +807,10 @@ async def check_scan_progress(
         scan_id: ID of the scan to check
         session_id: When given, another session's scan is reported exactly as an
             unknown id is.
+        name_process_ids: False keeps server process ids out of the response's
+            warnings and could_not_stop reasons (``ScanRegistry.check_scan_progress``);
+            the caller passes the transport's word, a remote client reading
+            False.
 
     Returns:
         Dictionary with scan progress information, or, on any failure, the
@@ -837,7 +844,10 @@ async def check_scan_progress(
         # results file, which blocked the event loop for the duration while
         # it ran here.
         return await asyncio.to_thread(
-            registry.check_scan_progress, scan_id, **_scoped(session_id)
+            registry.check_scan_progress,
+            scan_id,
+            name_process_ids=name_process_ids,
+            **_scoped(session_id),
         )
     except MCPResourceError as e:
         # Add operation context to the error

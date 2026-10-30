@@ -37,6 +37,7 @@ from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
 from automated_security_helper.core.resource_management.scan_management import (
+    check_scan_progress,
     cleanup_scan_resources,
 )
 from automated_security_helper.core.resource_management.scan_registry import (
@@ -518,6 +519,29 @@ class TestASurvivingToolKeepsTheTree:
         assert result["removed_output"] is True
         assert not output.exists()
         registry.cleanup_scan.assert_called_once_with("scan-1")
+
+
+class TestTheProgressReadPassesTheTransportsWord:
+    def test_name_process_ids_reaches_the_registry(self, registry):
+        registry.check_scan_progress.return_value = {"success": True}
+
+        with _use(registry):
+            result = asyncio.run(check_scan_progress("scan-1", name_process_ids=False))
+
+        assert result == {"success": True}
+        registry.check_scan_progress.assert_called_once_with(
+            "scan-1", name_process_ids=False
+        )
+
+    def test_the_default_names_them(self, registry):
+        registry.check_scan_progress.return_value = {"success": True}
+
+        with _use(registry):
+            asyncio.run(check_scan_progress("scan-1"))
+
+        registry.check_scan_progress.assert_called_once_with(
+            "scan-1", name_process_ids=True
+        )
 
 
 class TestTheEntryIsReadAgainAfterTheWait:

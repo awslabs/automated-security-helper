@@ -1380,6 +1380,90 @@ class TestTheStartTimeIsReadFromProcStat:
         assert started.isdigit()
 
 
+class TestARemoteReadKeepsProcessIdsOutOfTheResponse:
+    """The entry's warnings name each surviving tool with its pid on a local
+    transport, and the stored coverage's could_not_stop reasons carry the pid
+    the executor recorded. Both were written for the transport of the moment;
+    a later progress read by a remote client (or under the every-caller-remote
+    override) was handed them as recorded, while the cancel warning's own rule
+    withholds pids from a remote client. check_scan_progress now redacts both
+    at the read when name_process_ids is False, and leaves the entry's records
+    as they are, so a local read still names them."""
+
+    @staticmethod
+    def _stopped_with_recorded_pids(tmp_path):
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / ".ash" / "ash_output").mkdir(parents=True)
+        scan_id = _register(registry, project)
+        entry = registry.get_scan(scan_id)
+        entry.has_runner = True
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+        registry.cancel_scan(scan_id)
+        with patch(f"{_MODULE}._process_start_time", return_value="100"):
+            # The local transport's warning: the tool AND its pid.
+            registry.record_cancel_outcome(scan_id, (("bandit", 4242),))
+        entry.runner_done.set()
+        from automated_security_helper.core.resource_management.scan_registry import (
+            _empty_coverage,
+        )
+
+        entry.coverage = {
+            **_empty_coverage(),
+            "could_not_stop": [
+                {"scanner": "bandit", "reason": "the tool kept running (pid 4242)"}
+            ],
+        }
+        return registry, entry
+
+    @staticmethod
+    def _stand_in_redactor(text):
+        return text.replace(" (pid 4242)", "")
+
+    def test_a_local_read_names_the_pids_as_recorded(self, tmp_path):
+        registry, entry = self._stopped_with_recorded_pids(tmp_path)
+
+        progress = registry.check_scan_progress(entry.scan_id)
+
+        assert "4242" in json.dumps(progress["warnings"])
+        assert "4242" in json.dumps(progress["could_not_stop"])
+
+    def test_a_remote_read_goes_through_the_redactor(self, tmp_path):
+        registry, entry = self._stopped_with_recorded_pids(tmp_path)
+
+        with patch(f"{_MODULE}._without_process_ids", self._stand_in_redactor):
+            progress = registry.check_scan_progress(
+                entry.scan_id, name_process_ids=False
+            )
+
+        assert "4242" not in json.dumps(progress["warnings"])
+        assert "bandit" in json.dumps(progress["warnings"])
+        assert progress["could_not_stop"] == [
+            {"scanner": "bandit", "reason": "the tool kept running"}
+        ]
+        # The entry's own records are not changed by the read.
+        assert "4242" in json.dumps(entry.warnings)
+        assert "4242" in json.dumps(entry.coverage["could_not_stop"])
+
+    def test_a_remote_read_with_the_real_redactor(self, tmp_path):
+        """The redactor is utils.subprocess_utils.without_process_ids (U01's);
+        where the tree carries it, the real one is exercised."""
+        from automated_security_helper.utils import subprocess_utils
+
+        if getattr(subprocess_utils, "without_process_ids", None) is None:
+            pytest.skip(
+                "utils.subprocess_utils.without_process_ids is not in this tree"
+            )
+        registry, entry = self._stopped_with_recorded_pids(tmp_path)
+
+        progress = registry.check_scan_progress(entry.scan_id, name_process_ids=False)
+
+        assert "4242" not in json.dumps(progress["warnings"])
+        assert "4242" not in json.dumps(progress["could_not_stop"])
+        assert "bandit" in json.dumps(progress["warnings"])
+
+
 class TestATrailingSeparatorStillGivesTheBasename:
     def test_the_tool_is_named_without_its_trailing_slash(self, tmp_path):
         """argv0 recorded with a trailing separator gave an empty basename, so
