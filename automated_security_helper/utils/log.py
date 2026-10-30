@@ -803,15 +803,23 @@ class WindowsSafeFilter(logging.Filter):
                 # Formatted with its arguments, shown once, and put in ASCII
                 # with every character kept as text or as its escape. A record
                 # whose arguments do not fit its message keeps both and has
-                # each put in ASCII on its own.
+                # each put in ASCII on its own. A message the console can
+                # already write (ASCII, its arguments in) is left as it was
+                # logged: this filter is for what the console cannot encode,
+                # the sinks show text themselves, each once, and a handler an
+                # application put on the logger gets such a record as written.
+                # Shown here, an ASCII message had a backslash run before text
+                # that reads as an escape doubled: the JSON "é" of a
+                # suggested --config-overrides command came out as "\\u00e9",
+                # which the pasted command then read as the text "u00e9".
                 folded = self._folded_message(record)
-                if folded is not None:
+                if folded is None:
+                    record.msg = self._in_ascii(record.msg)
+                elif not folded.isascii():
                     record.msg = shown_in_ascii(
                         shown_not_obeyed(folded), self._emoji_map
                     )
                     record.args = ()
-                else:
-                    record.msg = self._in_ascii(record.msg)
         if record.args:
             # The arguments are put into the message when the record is
             # formatted, after this filter: one outside the stream's encoding

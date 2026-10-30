@@ -45,6 +45,51 @@ def _filtered(message: str) -> logging.LogRecord:
     return record
 
 
+def _filtered_plain(message: str, args=()) -> logging.LogRecord:
+    """A plain (no markup) record through the active filter."""
+    windows_filter = WindowsSafeFilter()
+    windows_filter._active = True
+    record = logging.LogRecord("ash", logging.INFO, __file__, 1, message, args, None)
+    assert windows_filter.filter(record)
+    return record
+
+
+def test_an_ascii_message_keeps_its_own_escape_text():
+    """A suggested command quotes a JSON document whose non-ASCII character is
+    JSON's own escape, four ASCII characters after one backslash. Shown, that
+    run was doubled and the pasted command read the escape as text; a message
+    the console can already write is left as it was logged."""
+    import json
+    import shlex
+
+    message = "ash --config-overrides " + shlex.quote(
+        json.dumps({"ignore_paths": ["café dir/.ash/ash_output"]})
+    )
+    assert message.isascii() and "\\u00e9" in message
+
+    record = _filtered_plain(message)
+
+    assert record.getMessage() == message
+    (quoted,) = shlex.split(record.getMessage())[2:]
+    assert json.loads(quoted) == {"ignore_paths": ["café dir/.ash/ash_output"]}
+
+
+def test_an_ascii_message_with_ascii_arguments_is_left_as_logged():
+    record = _filtered_plain("scan %s in %d ms", ("a::b ##vso[x]", 3))
+
+    assert record.msg == "scan %s in %d ms"
+    assert record.args == ("a::b ##vso[x]", 3)
+
+
+def test_a_message_the_console_cannot_write_is_folded_and_shown():
+    record = _filtered_plain("path %s", ("café ::x",))
+
+    assert record.args == ()
+    assert record.getMessage().isascii()
+    assert "caf\\xe9" in record.getMessage()
+    assert "::x" not in record.getMessage()
+
+
 def _shown(record: logging.LogRecord) -> Text:
     message = record.getMessage()
     if getattr(record, "markup", False):
