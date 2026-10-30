@@ -187,6 +187,38 @@ class TestVerifyThirdParty:
         (verify.third_party / ".ash-third-party-leftover").mkdir()
         assert verify.run() == []
 
+    @pytest.mark.parametrize("leftover", ["old", "KEPT"])
+    def test_a_work_directory_that_still_holds_an_earlier_entry_is_a_problem(
+        self, monkeypatch, tmp_path, leftover
+    ):
+        """A publish that did not finish kept the previous entry in a hidden directory.
+
+        Without this the image ships stale license files there, and the check passes
+        because the directory is skipped as scratch space.
+        """
+        verify = _Verify(monkeypatch, tmp_path)
+        work = verify.third_party / ".ash-third-party-kept"
+        (work / leftover).mkdir(parents=True)
+        (work / leftover / "LICENSE").write_text("stale\n", encoding="utf-8")
+
+        problems = verify.run()
+
+        assert any(
+            ".ash-third-party-kept" in p and "did not finish" in p for p in problems
+        ), problems
+        assert not (verify.third_party / "index.json").exists()
+
+    def test_a_work_directory_holding_only_the_new_copy_is_not_a_problem(
+        self, monkeypatch, tmp_path
+    ):
+        """Control: a publish killed before it set the old entry aside left no old copy."""
+        verify = _Verify(monkeypatch, tmp_path)
+        work = verify.third_party / ".ash-third-party-killed"
+        (work / "incoming").mkdir(parents=True)
+        (work / "incoming" / "LICENSE").write_text("new\n", encoding="utf-8")
+
+        assert verify.run() == []
+
     def test_any_other_directory_with_no_entry_is_still_a_problem(
         self, monkeypatch, tmp_path
     ):

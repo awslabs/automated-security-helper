@@ -165,6 +165,80 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
         assert (kept[0] / "old" / "LICENSE").read_bytes() == b"old\n"
         assert str(kept[0] / "old") in capsys.readouterr().err
 
+    @staticmethod
+    def _keep_the_old_entry(monkeypatch, final: Path) -> None:
+        """Make a publish end with the old entry only in its work directory."""
+        real = os.replace
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(dst) == final and Path(src).name == "incoming":
+                raise OSError(errno.ENOSPC, "No space left on device")
+            if Path(dst) == final and Path(src).name == "old":
+                raise OSError(errno.EACCES, "Permission denied")
+            return real(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", replace)
+
+    def _fail_one_publish(self, tmp_path: Path) -> "tuple[Path, Path]":
+        third_party, final = self._old_entry(tmp_path)
+        with pytest.MonkeyPatch.context() as patch:
+            self._keep_the_old_entry(patch, final)
+            with pytest.raises(PermissionError):
+                installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+        kept = [
+            p
+            for p in third_party.iterdir()
+            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
+        ]
+        assert len(kept) == 1, "the work directory holding the old entry was deleted"
+        return third_party, kept[0]
+
+    def test_the_kept_directory_is_marked_with_the_tools_name(self, tmp_path):
+        _, kept = self._fail_one_publish(tmp_path)
+
+        marker = kept / installer._PUBLISH_KEPT_MARKER
+        assert marker.read_text(encoding="utf-8").strip() == "demo"
+
+    def test_a_later_publish_of_the_same_tool_removes_the_kept_directory(
+        self, tmp_path
+    ):
+        """with-retry runs the install again; the old copy is superseded by then."""
+        # Red before: nothing removed the kept directory, so a retried install that
+        # succeeded shipped the previous license files in a hidden directory.
+        third_party, _ = self._fail_one_publish(tmp_path)
+
+        published = installer.publish_third_party(
+            _staged(tmp_path / "again", b"newer\n"), third_party
+        )
+
+        assert (published / "LICENSE").read_bytes() == b"newer\n"
+        assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+    def test_a_later_publish_of_another_tool_leaves_the_kept_directory(self, tmp_path):
+        """Control: only the tool the old copy belongs to supersedes it."""
+        third_party, kept = self._fail_one_publish(tmp_path)
+        other = tmp_path / "again" / "other"
+        other.mkdir(parents=True)
+        (other / "LICENSE").write_bytes(b"other\n")
+
+        installer.publish_third_party(other, third_party)
+
+        assert (kept / "old" / "LICENSE").read_bytes() == b"old\n"
+        assert sorted(p.name for p in third_party.iterdir()) == sorted(
+            [kept.name, "other"]
+        )
+
+    def test_a_work_directory_without_the_marker_is_left_alone(self, tmp_path):
+        """Control: another publish's work directory that is still in use."""
+        third_party = tmp_path / "third-party"
+        live = third_party / f"{installer._PUBLISH_WORK_PREFIX}live"
+        (live / "incoming").mkdir(parents=True)
+        (live / "incoming" / "LICENSE").write_bytes(b"in flight\n")
+
+        installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert (live / "incoming" / "LICENSE").read_bytes() == b"in flight\n"
+
     def test_an_entry_a_concurrent_publish_put_there_makes_the_old_one_surplus(
         self, tmp_path, monkeypatch
     ):
@@ -201,8 +275,10 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
         self, tmp_path, monkeypatch, capsys
     ):
         """EXDEV copy ok, removal part way, copy back fails: ``old`` is the only whole copy."""
-        # Red before: keep_work was assigned only inside the restore's except, so an
-        # exception out of the aside step ran ``finally: rmtree(work)`` over ``old``.
+        # Red before: the decision to keep the work directory was made only in the
+        # restore's except clause, so an exception out of the aside step reached the
+        # finally clause with nothing marked and it deleted the work directory,
+        # ``old`` with it.
         third_party, final = self._old_entry(tmp_path)
         (final / "SOURCE").write_bytes(b"old source\n")
         real_replace, real_rmtree, real_copytree = (
@@ -252,8 +328,8 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
     ):
         """After a failed restore, asking whether the name holds an entry raises."""
         # Red before: ``final.is_symlink() or final.exists()`` in the restore's
-        # except raised before ``keep_work`` was assigned, so the work directory,
-        # and the old entry in it, was deleted.
+        # except clause raised before the work directory was marked to be kept, so
+        # the finally clause deleted it, and the old entry in it.
         third_party, final = self._old_entry(tmp_path)
         real_replace = os.replace
         armed = {"on": False}

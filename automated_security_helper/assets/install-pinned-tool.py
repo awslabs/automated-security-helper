@@ -1235,6 +1235,34 @@ def _rename_or_copy(src: Path, dst: Path) -> None:
 
 # Names the scratch directory publish_third_party works in, inside third_party_dir.
 _PUBLISH_WORK_PREFIX = ".ash-third-party-"
+# A file naming the tool, written into a work directory that is kept because the old
+# entry in it may be the only complete copy. The next publish of that tool that
+# finishes removes the directory, and verify_third_party reports one still there.
+_PUBLISH_KEPT_MARKER = "KEPT"
+
+
+def _remove_kept_work_dirs(third_party_dir: Path, tool: str) -> None:
+    """Delete the work directories an earlier publish of ``tool`` kept.
+
+    Called once a publish of ``tool`` has put its new entry in place, which
+    supersedes the old copy those directories were kept for. Only a directory
+    carrying the kept marker for this tool goes: another publish's work directory
+    that is still in use has no marker. A directory that cannot be read or removed
+    stays, and verify_third_party reports it.
+    """
+    try:
+        candidates = sorted(third_party_dir.iterdir())
+    except OSError:
+        return
+    for path in candidates:
+        if not path.name.startswith(_PUBLISH_WORK_PREFIX):
+            continue
+        try:
+            marked = (path / _PUBLISH_KEPT_MARKER).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if marked.strip() == tool:
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def _same_files(first: Path, second: Path) -> bool:
@@ -1290,6 +1318,12 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     at the name after a failed restore. A check that itself raises, or an aside step
     that fails twice (the EXDEV copy made, the removal stopped part way, the copy
     back failed), therefore keeps it.
+
+    A kept directory is marked with the tool's name. with-retry runs the install
+    again after the failure, and a later publish of the same tool that finishes
+    removes the directories marked for it, because the old copy they hold is
+    superseded by then. One that nothing removed is reported by
+    verify_third_party, so it cannot ship unnoticed in the image.
     """
     third_party_dir.mkdir(parents=True, exist_ok=True)
     for path in staged.iterdir():
@@ -1342,6 +1376,12 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
                 raise
     finally:
         if old_at_risk:
+            try:
+                (work / _PUBLISH_KEPT_MARKER).write_text(
+                    final.name + "\n", encoding="utf-8"
+                )
+            except OSError:
+                pass
             print(
                 f"the previous {final.name} license entry may exist only at {old}; "
                 f"the publish to {final} did not finish, so that directory is kept",
@@ -1349,6 +1389,7 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
             )
         else:
             shutil.rmtree(work, ignore_errors=True)
+    _remove_kept_work_dirs(third_party_dir, final.name)
     print(f"Installed {staged.name} license files to {final}", flush=True)
     return final
 
@@ -1562,7 +1603,8 @@ def verify_third_party(
     ``search_path`` (PATH when None) in a copy no Python package installed; and
     every such copy of any of its executables reports the recorded version. A
     directory with no entry is a problem too: it would be a license claim for
-    something this table no longer describes.
+    something this table no longer describes. So is a publish's work directory
+    that still holds an earlier entry, which a publish that did not finish leaves.
 
     Reading a file as another user also takes search permission on the
     directories the path goes through, which a mode on the file does not give:
@@ -1603,6 +1645,22 @@ def verify_third_party(
         and not p.name.startswith(_PUBLISH_WORK_PREFIX)
     ):
         problems.append(f"{unexpected}: directory with no license entry")
+
+    # A work directory is skipped above because it is not a license claim, but one
+    # that still holds an earlier entry (`old`) or the kept marker is a stale copy of
+    # license files, shipped in a hidden directory, so it is reported.
+    for leftover in sorted(
+        p.name
+        for p in third_party_dir.iterdir()
+        if p.is_dir()
+        and p.name.startswith(_PUBLISH_WORK_PREFIX)
+        and (os.path.lexists(p / "old") or os.path.lexists(p / _PUBLISH_KEPT_MARKER))
+    ):
+        problems.append(
+            f"{leftover}: left by a license publish that did not finish and still "
+            "holds an earlier license entry; remove it once the entry it belongs "
+            "to is confirmed"
+        )
 
     for tool in sorted(entries):
         entry = entries[tool]
