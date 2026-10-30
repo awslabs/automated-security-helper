@@ -125,7 +125,14 @@ def test_a_message_below_error_is_not_an_error(plugin_context):
 
 
 class _RecordHookBreaks(_Plugin):
-    def _tool_text_for_records(self, text, stream):
+    """An override of the seam the handler calls to record the failure.
+
+    The text-shaping hook is not the stand-in: ``_process_command_response``
+    guards it and leaves a value-free note, so a raise there never reaches the
+    handler this test is about (see the raising-shaping-hook tests).
+    """
+
+    def _process_command_response(self, response):
         raise RuntimeError("the record hook broke")
 
 
