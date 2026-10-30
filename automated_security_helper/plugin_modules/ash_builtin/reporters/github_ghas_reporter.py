@@ -245,11 +245,13 @@ def _project_path_is_placeable(project_path: str) -> bool:
     percent-decoded as well as written, because it is joined into a URI that
     GitHub decodes: a component spelled ``%2e%2e`` is ``..`` to the consumer.
     """
-    text = project_path.strip().replace("\\", "/")
-    if text.startswith("/") or _DRIVE_ANCHOR.match(text):
-        return False
-    for spelling in (text, unquote(text)):
-        if spelling.startswith("/") or ".." in PurePosixPath(spelling).parts:
+    for spelling in (project_path, unquote(project_path)):
+        text = spelling.strip().replace("\\", "/")
+        if (
+            text.startswith("/")
+            or _DRIVE_ANCHOR.match(text)
+            or ".." in PurePosixPath(text).parts
+        ):
             return False
     return True
 
