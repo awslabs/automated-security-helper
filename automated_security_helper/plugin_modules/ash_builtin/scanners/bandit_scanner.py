@@ -526,9 +526,12 @@ def bandit_excluded_path_globs(anchor: str, path: str) -> List[str]:
       carry one; see ``_cannot_be_passed``), a ``.`` or empty component, or
       nothing at all: no entry. The caller warns that such an entry excludes
       nothing.
-    * A leading ``/`` is dropped and the rest read relative to the target, so
-      an absolute path (``/home/me/project/vendor``) names nothing under it;
-      the caller warns about such an entry.
+    * A leading ``/`` is dropped and the rest read relative to the target:
+      ``/vendor`` is read as ``vendor`` and does exclude ``<target>/vendor``,
+      while an absolute path that repeats the target's own prefix
+      (``/home/me/project/vendor`` under ``/home/me/project``) is read as
+      ``home/me/project/vendor`` below the target and names nothing there; the
+      caller warns about such an entry.
 
     The same globs tell ASH, after the scan, which findings a client-delivered
     ``excluded_paths`` entry would have kept from bandit
@@ -576,8 +579,11 @@ def _spelled_absolute(path: str) -> bool:
     """Whether an ``excluded_paths`` entry is written as an absolute path.
 
     A leading ``/`` (or ``\\``), or a drive letter (``C:``), on either platform's
-    spelling: ``bandit_excluded_path_globs`` reads every entry relative to the
-    scanned target, so such an entry names nothing there.
+    spelling. ``bandit_excluded_path_globs`` drops the leading separator and
+    reads the rest relative to the scanned target, so ``/vendor`` still names
+    ``<target>/vendor``, while a path that repeats the target's own absolute
+    prefix names nothing there; the caller tells the operator what the entry is
+    read as.
     """
     spelled = path.replace("\\", "/")
     return spelled.startswith("/") or (
@@ -1166,8 +1172,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 )
             elif warn and _spelled_absolute(item.path):
                 # The leading "/" is dropped and the rest read relative to the
-                # scanned target, so an absolute path names nothing there; the
-                # operator was told nothing and the entry excluded nothing.
+                # scanned target, so a path that repeats the target's own
+                # absolute prefix names nothing there; the operator was told
+                # nothing and the entry excluded nothing.
                 ASH_LOGGER.warning(
                     text_without_values(
                         f"bandit excluded_paths entry {item.path!r} is written as "
