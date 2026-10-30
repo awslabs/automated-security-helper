@@ -13,6 +13,7 @@ exit code 2 if any check raised and so did not run (an ERROR line names it).
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -230,6 +231,19 @@ def _row_name(row: str) -> str:
     return _TRAILING_PARENTHETICAL.sub("", row.strip())
 
 
+def _options_loader():
+    """A SafeLoader that keeps an ``!ENV`` scalar as its own text."""
+    import yaml
+
+    class _KeepsEnvTag(yaml.SafeLoader):
+        pass
+
+    _KeepsEnvTag.add_constructor(
+        "!ENV", lambda loader, node: loader.construct_scalar(node)
+    )
+    return _KeepsEnvTag
+
+
 def _load_options_yaml(body: str):
     """Parse a documented YAML block, keeping an ``!ENV`` scalar as its own text.
 
@@ -241,16 +255,76 @@ def _load_options_yaml(body: str):
     """
     import yaml
 
-    class _KeepsEnvTag(yaml.SafeLoader):
-        pass
-
-    _KeepsEnvTag.add_constructor(
-        "!ENV", lambda loader, node: loader.construct_scalar(node)
-    )
     try:
-        return yaml.load(body, Loader=_KeepsEnvTag)  # nosec B506 - a SafeLoader subclass
+        return yaml.load(body, Loader=_options_loader())  # nosec B506 - a SafeLoader subclass
     except yaml.YAMLError:
         return None
+
+
+def _load_options_documents(body: str) -> list:
+    """Every document of a documented YAML block, read as ``_load_options_yaml`` reads one.
+
+    A block holding two documents (a ``---`` between two configs) raised in the
+    single-document load and was skipped as deliberately invalid YAML, so neither
+    document's option keys were checked. YAML that does not parse yields no
+    document.
+    """
+    import yaml
+
+    try:
+        return list(yaml.load_all(body, Loader=_options_loader()))  # nosec B506 - a SafeLoader subclass
+    except yaml.YAMLError:
+        return []
+
+
+def _alias_names(alias: object) -> list[str]:
+    """The key spellings a pydantic alias declaration accepts."""
+    if alias is None:
+        return []
+    if isinstance(alias, str):
+        return [alias]
+    choices = getattr(alias, "choices", None)
+    if choices is not None:
+        names: list[str] = []
+        for choice in choices:
+            names.extend(_alias_names(choice))
+        return names
+    path = getattr(alias, "path", None)
+    if path:
+        return [str(path[0])]
+    return []
+
+
+def _accepted_option_keys(model: type) -> set[str]:
+    """The field names of an options model plus every alias the runtime reads.
+
+    The key test used to consult ``model_fields`` names only, while a model may
+    declare an ``alias`` or a ``validation_alias`` and ASH reads a config written
+    under either, so an option documented under its alias was reported as one
+    the plugin does not declare.
+    """
+    keys: set[str] = set()
+    for name, info in model.model_fields.items():
+        keys.add(name)
+        keys.update(_alias_names(getattr(info, "alias", None)))
+        keys.update(_alias_names(getattr(info, "validation_alias", None)))
+    return keys
+
+
+def _validation_detail(exc: Exception) -> str:
+    """The first validation error as ``<field>: <message>``.
+
+    The detail used to be the first non-empty line after pydantic's title line,
+    which for a wrong value is the field-location line alone, so the report
+    named the field and not what was wrong with its value.
+    """
+    errors = getattr(exc, "errors", None)
+    if callable(errors):
+        for error in errors():
+            location = ".".join(str(part) for part in error.get("loc", ()))
+            message = str(error.get("msg", "")).strip()
+            return f"{location or 'options'}: {message}".rstrip(": ")
+    return str(exc).splitlines()[0]
 
 
 def _model_for(models: dict[str, type], plugin_name: str) -> type | None:
@@ -272,6 +346,23 @@ def _model_for(models: dict[str, type], plugin_name: str) -> type | None:
     return None
 
 
+def _is_delimiter_row(line: str) -> bool:
+    """Whether ``line`` is a markdown table delimiter row such as ``|---|:--:|``.
+
+    A delimiter row is non-empty and holds at least one dash and one pipe. The
+    subset test alone passed a blank line, because the empty set is a subset of
+    anything, so a data row whose first entry matched the header text and sat
+    before a blank line was taken as a header row.
+    """
+    stripped = line.strip()
+    return (
+        bool(stripped)
+        and "-" in stripped
+        and "|" in stripped
+        and set(stripped) <= set("|-: ")
+    )
+
+
 def table_first_column(text: str, header_cell: str) -> list[str] | None:
     """Return the first cell of each data row of one specific markdown table.
 
@@ -291,10 +382,12 @@ def table_first_column(text: str, header_cell: str) -> list[str] | None:
         cells = [cell.strip() for cell in stripped.strip("|").split("|")]
         if not cells or cells[0].lower() != want:
             continue
-        # A header row is only a header row when a delimiter row follows it.
+        # A header row is only a header row when a delimiter row follows it. A
+        # data row named like the header, followed by a blank line at its table's
+        # end, used to pass as one and shadow the real table.
         if index + 1 >= len(lines):
             continue
-        if not set(lines[index + 1].strip()) <= set("|-: "):
+        if not _is_delimiter_row(lines[index + 1]):
             continue
 
         rows: list[str] = []
@@ -532,10 +625,11 @@ def mcp_tool_names() -> dict[str, str]:
     invisible to it. A decorator is a property of the function, not of the line
     after it, so the only way to read it correctly is from the syntax tree.
 
-    Accepts both ``@mcp.tool`` and ``@mcp.tool(...)``, since either registers.
+    Accepts both ``@mcp.tool`` and ``@mcp.tool(...)``, since either registers. A
+    ``name=`` argument to the decorator is the name the tool is registered under,
+    and the one the reference documents; the function's own name was taken
+    before, so such a tool was demanded of the page under a name no client sees.
     """
-    import ast
-
     tree = ast.parse(read_text(MCP_SERVER_PY))
     names: dict[str, str] = {}
 
@@ -550,10 +644,24 @@ def mcp_tool_names() -> dict[str, str]:
                 and isinstance(target.value, ast.Name)
                 and target.value.id == "mcp"
             ):
-                names[node.name] = f"mcp_server.py:{node.lineno}"
+                registered = _registered_tool_name(decorator, node.name)
+                names[registered] = f"mcp_server.py:{node.lineno}"
                 break
 
     return names
+
+
+def _registered_tool_name(decorator: ast.expr, function_name: str) -> str:
+    """The name ``@mcp.tool`` registers: its ``name=`` argument, else the function's."""
+    if isinstance(decorator, ast.Call):
+        for keyword in decorator.keywords:
+            if (
+                keyword.arg == "name"
+                and isinstance(keyword.value, ast.Constant)
+                and isinstance(keyword.value.value, str)
+            ):
+                return keyword.value.value
+    return function_name
 
 
 #: A tool's section in the MCP tools reference: ``## run_ash_scan``.
@@ -605,6 +713,23 @@ def check_mcp_tools() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+#: A release pin as the install pages write it, read as a whole token: ``@v3.7.0``
+#: and whatever a tag carries after the patch number (``@v3.7.0-beta``,
+#: ``@v3.7.0rc1``). Stopping at the patch number read a pre-release pin as the
+#: release whose digits it starts with.
+_VERSION_PIN = re.compile(r"@v\d[0-9A-Za-z.+-]*")
+
+
+def _version_pins(content: str) -> list[str]:
+    """Every ``@v...`` pin in ``content`` as a whole token, sentence punctuation dropped.
+
+    Both the outdated-pin search and the presence test used to stop at the patch
+    number, so ``@v3.0.0-beta.1`` satisfied a current ``@v3.0.0`` and was
+    never reported as the stale pin it is.
+    """
+    return [match.rstrip(".,;:") for match in _VERSION_PIN.findall(content)]
+
+
 def check_version_consistency() -> list[str]:
     """Verify key docs files reference the current version."""
     failures: list[str] = []
@@ -620,16 +745,16 @@ def check_version_consistency() -> list[str]:
         if not path.exists():
             failures.append(f"File {label} does not exist")
             continue
-        content = read_text(path)
+        pins = set(_version_pins(read_text(path)))
         # Every older pin is reported, whether or not the current one is also on the
         # page: a reader who copies the one stale command installs the wrong release.
-        outdated = set(re.findall(r"@v\d+\.\d+\.\d+", content)) - {version_tag}
+        outdated = pins - {version_tag}
         if outdated:
             failures.append(
                 f"{label} references outdated version(s) {sorted(outdated)} "
                 f"instead of {version_tag}"
             )
-        elif version_tag not in content:
+        elif version_tag not in pins:
             failures.append(f"{label} does not reference version {version_tag}")
 
     return failures
@@ -667,12 +792,9 @@ def _config_list_problems(
     failures: list[str] = []
     lists_found = 0
     run: list[tuple[int, str, str]] = []
-    for lineno, line in enumerate(lines + [""], start=1):
-        match = _CONFIG_LIST_ITEM.match(line)
-        if match:
-            run.append((lineno, match.group(1) or "", match.group(2)))
-            continue
 
+    def close_run() -> None:
+        nonlocal lists_found, run
         # A run of one is a single example, not an inventory.
         if len(run) >= 2:
             lists_found += 1
@@ -710,6 +832,19 @@ def _config_list_problems(
                     f"root only. A reader who puts the file there is silently ignored."
                 )
         run = []
+
+    for lineno, line in enumerate(lines, start=1):
+        match = _CONFIG_LIST_ITEM.match(line)
+        if match:
+            run.append((lineno, match.group(1) or "", match.group(2)))
+            continue
+        # A blank line between items makes a loose list, not two lists. It used
+        # to close the run, so a loose inventory was read as several runs of one
+        # item and none of them was checked.
+        if not line.strip():
+            continue
+        close_run()
+    close_run()
     return failures, lists_found
 
 
@@ -778,37 +913,55 @@ def check_config_path() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-# Matches a YAML mapping key "file_path:", optionally as a list item, and not
-# an expression that merely ends in "file_path:" (Python if-statements etc).
-_YAML_FILE_PATH_KEY = re.compile(r"^\s*-?\s*file_path\s*:(\s|$)")
+# A ``file_path`` mapping key: a YAML block key, optionally a list item; a quoted
+# JSON key; or a key inside a flow mapping (``{rule_id: B101, file_path: x}``).
+# An expression that merely ends in ``file_path:`` (a Python if-statement) is not
+# a key, and a Python annotation ``file_path: str`` never reaches this regex,
+# because only YAML and JSON blocks are read.
+_FILE_PATH_KEY = re.compile(r"""(?:^\s*-?\s*|[{,]\s*)["']?file_path["']?\s*:(?:\s|$)""")
+
+#: The fence languages a suppression example is written in. A block with no
+#: language is read too; a Python or shell block never is.
+_SUPPRESSION_BLOCK_LANGS = frozenset({"yaml", "yml", "json", "jsonc", "json5", ""})
+
+#: The mapping key that makes a block a suppression config.
+_SUPPRESSIONS_KEY = re.compile(
+    r"""(?:^\s*|[{,]\s*)["']?suppressions["']?\s*:""", re.MULTILINE
+)
 
 
 def check_suppression_field_name() -> list[str]:
-    """Flag docs using 'file_path:' in suppression context (should be 'path:')."""
+    """Flag docs using 'file_path:' as a suppression key (the key is 'path:').
+
+    Read per fenced block, through the parser the other docs checks use, and only
+    in YAML and JSON blocks that declare a ``suppressions`` mapping. The earlier
+    form scanned every line of a page for a YAML-shaped key and then looked twenty
+    lines around it for the substring ``suppress`` or ``rule_id``. That reported
+    three correct shapes: a Python annotation ``file_path: str`` near the word
+    ``rule_id``; ASH's own flat finding output, whose records carry ``file_path``,
+    ``rule_id`` and ``is_suppressed`` fields side by side; and any config example
+    within twenty lines of ``unused-suppressions``. It also missed a JSON or
+    flow-mapping suppression written ``"file_path":``, which the block-style key
+    regex never matched. The block is the context: a ``file_path`` key is a wrong
+    suppression key when the same block configures ``suppressions``, and nothing
+    about the lines around the block says so.
+    """
     failures: list[str] = []
 
     for md_file in collect_md_files():
-        content = read_text(md_file)
-        lines = content.splitlines()
-
-        for i, line in enumerate(lines):
-            # Only flag YAML mapping keys. A bare substring test also matches
-            # Python inside fenced code blocks, e.g. "if rule_id and file_path:",
-            # where file_path is a local variable and the colon ends an if-statement.
-            if not _YAML_FILE_PATH_KEY.match(line):
+        page = _docs_checks().parse_page(md_file, REPO_ROOT, read_text(md_file))
+        rel_path = md_file.relative_to(REPO_ROOT)
+        for block in page.blocks:
+            if (block.lang or "").lower() not in _SUPPRESSION_BLOCK_LANGS:
                 continue
-
-            # Check surrounding context (20 lines before/after) for suppression keywords
-            context_start = max(0, i - 20)
-            context_end = min(len(lines), i + 20)
-            context_block = "\n".join(lines[context_start:context_end]).lower()
-
-            if "suppress" in context_block or "rule_id" in context_block:
-                rel_path = md_file.relative_to(REPO_ROOT)
-                failures.append(
-                    f"{rel_path}:{i + 1} uses 'file_path:' in suppression context "
-                    f"(should be 'path:')"
-                )
+            if not _SUPPRESSIONS_KEY.search(block.body):
+                continue
+            for offset, line in enumerate(block.body.splitlines()):
+                if _FILE_PATH_KEY.search(line):
+                    failures.append(
+                        f"{rel_path}:{block.body_line + offset} uses 'file_path:' as "
+                        f"a suppression key (the key is 'path:')"
+                    )
 
     return failures
 
@@ -818,7 +971,12 @@ def check_suppression_field_name() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _plugin_option_models(config_suffix: str, options_base: type) -> dict[str, type]:
+def _plugin_option_models(
+    config_suffix: str,
+    options_base: type,
+    package: object = None,
+    notes: list[str] | None = None,
+) -> dict[str, type]:
     """Map each built-in plugin's config name to its options model.
 
     Keyed on the ``name`` Literal of the plugin's config class, because that is the
@@ -830,23 +988,31 @@ def _plugin_option_models(config_suffix: str, options_base: type) -> dict[str, t
     convention (``s3_reporter.py`` but also ``github_ghas_reporter.py``,
     ``archive_converter.py``), and a suffix filter silently shrinks the model set,
     which would make this check pass by simply not knowing about a plugin.
+
+    A module whose import raises ImportError is skipped and named in ``notes``:
+    an optional dependency missing from this environment is not a documentation
+    problem, but a check that passed without seeing a plugin has to say so, and
+    the skip used to be silent. Any other exception propagates, so a built-in
+    plugin broken at import makes the check ERROR instead of leaving its
+    documented options unchecked behind a passing gate. ``package`` is the
+    package to walk; the tests pass one of their own.
     """
     import importlib
     import pkgutil
 
-    from automated_security_helper import plugin_modules
+    if package is None:
+        from automated_security_helper import plugin_modules as package
 
     models: dict[str, type] = {}
-    for mod in pkgutil.walk_packages(
-        plugin_modules.__path__, plugin_modules.__name__ + "."
-    ):
+    for mod in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
         try:
             module = importlib.import_module(mod.name)
-        except Exception:  # noqa: BLE001, S112  # nosec B112 -- see below
-            # Deliberately broad and deliberately silent. A plugin module whose
-            # optional dependency is missing in this environment is not a
-            # documentation problem, and failing the docs gate on it would make
-            # the gate depend on which extras happen to be installed.
+        except ImportError as err:
+            if notes is not None:
+                notes.append(
+                    f"{mod.name} did not import ({err}); the options it documents "
+                    "are not checked in this environment"
+                )
             continue
 
         config_name = None
@@ -913,8 +1079,6 @@ def check_plugin_option_keys() -> list[str]:
     with docs_checks.parse_page, the parser that check and the docs runner use, so
     the three agree on which marker governs which block.
     """
-    from pydantic import ValidationError
-
     from automated_security_helper.base.options import (
         ConverterOptionsBase,
         ReporterOptionsBase,
@@ -930,11 +1094,13 @@ def check_plugin_option_keys() -> list[str]:
 
     failures: list[str] = []
     models: dict[str, dict[str, type]] = {}
+    notes: list[str] = []
     for section, config_suffix, base in kinds:
-        found = _plugin_option_models(config_suffix, base)
+        found = _plugin_option_models(config_suffix, base, notes=notes)
         if not found:
             return [f"Could not import any built-in {section} options model"]
         models[section] = found
+    _print_skipped(sorted(set(notes)))
 
     for md_file in collect_md_files():
         page = _docs_checks().parse_page(md_file, REPO_ROOT, read_text(md_file))
@@ -945,52 +1111,62 @@ def check_plugin_option_keys() -> list[str]:
                 continue
             line_no = block.body_line
             # Deliberately-invalid YAML is documented on purpose in places and
-            # returns None; an !ENV reference is valid ASH config and parses.
-            parsed = _load_options_yaml(block.body)
-            if not isinstance(parsed, dict):
+            # yields no document; an !ENV reference is valid ASH config and
+            # parses. A block of several documents is checked document by
+            # document.
+            for parsed in _load_options_documents(block.body):
+                if not isinstance(parsed, dict):
+                    continue
+                failures.extend(
+                    _options_block_problems(
+                        parsed, models, kinds, f"{rel_path}:~{line_no}"
+                    )
+                )
+
+    return failures
+
+
+def _options_block_problems(
+    parsed: dict, models: dict[str, dict[str, type]], kinds, where: str
+) -> list[str]:
+    """The option-key and validation problems of one parsed config document."""
+    from pydantic import ValidationError
+
+    failures: list[str] = []
+    for section, _config_suffix, _base in kinds:
+        entries = parsed.get(section)
+        if not isinstance(entries, dict):
+            continue
+
+        for plugin_name, plugin_cfg in entries.items():
+            if not isinstance(plugin_cfg, dict):
+                continue
+            options = plugin_cfg.get("options")
+            if not isinstance(options, dict):
+                continue
+            model = _model_for(models[section], plugin_name)
+            if model is None:
                 continue
 
-            for section, _config_suffix, _base in kinds:
-                entries = parsed.get(section)
-                if not isinstance(entries, dict):
-                    continue
+            accepted = _accepted_option_keys(model)
+            for key in options:
+                if key not in accepted:
+                    failures.append(
+                        f"{where} {section}.{plugin_name}"
+                        f".options.{key} is not a field of "
+                        f"{model.__name__}. Use an option {plugin_name} "
+                        "declares, or mark a block that shows the mistake "
+                        "config kind=ash-invalid"
+                    )
 
-                for plugin_name, plugin_cfg in entries.items():
-                    if not isinstance(plugin_cfg, dict):
-                        continue
-                    options = plugin_cfg.get("options")
-                    if not isinstance(options, dict):
-                        continue
-                    model = _model_for(models[section], plugin_name)
-                    if model is None:
-                        continue
-
-                    for key in options:
-                        if key not in model.model_fields:
-                            failures.append(
-                                f"{rel_path}:~{line_no} {section}.{plugin_name}"
-                                f".options.{key} is not a field of "
-                                f"{model.__name__}. Use an option {plugin_name} "
-                                "declares, or mark a block that shows the mistake "
-                                "config kind=ash-invalid"
-                            )
-
-                    try:
-                        model.model_validate(options)
-                    except ValidationError as exc:
-                        detail = next(
-                            (
-                                ln.strip()
-                                for ln in str(exc).splitlines()[1:]
-                                if ln.strip() and "further information" not in ln
-                            ),
-                            str(exc).splitlines()[0],
-                        )
-                        failures.append(
-                            f"{rel_path}:~{line_no} {section}.{plugin_name}.options "
-                            f"does not validate against {model.__name__}: {detail}"
-                        )
-
+            try:
+                model.model_validate(options)
+            except ValidationError as exc:
+                failures.append(
+                    f"{where} {section}.{plugin_name}.options "
+                    f"does not validate against {model.__name__}: "
+                    f"{_validation_detail(exc)}"
+                )
     return failures
 
 
