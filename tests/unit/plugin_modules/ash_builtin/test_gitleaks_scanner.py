@@ -1707,6 +1707,37 @@ def _another_thread_reads_the_clock() -> None:
     thread.join()
 
 
+class _Clock:
+    """A stand-in for ``_monotonic`` that moves only when the test moves it.
+
+    Time passes in the fake gitleaks run, not per read: the re-scan reads the
+    clock when it sets the deadline, before each copy and before each run, and
+    a scripted sequence of readings pinned that count, so a check added to the
+    copy step read the sequence ahead and timed the first run with a later
+    reading.
+    """
+
+    def __init__(self, now: float) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _timed_runs(scanner, clock: _Clock, monkeypatch, seconds_per_run: float) -> list:
+    """Record each run's timeout and let ``seconds_per_run`` pass during it."""
+    timeouts = []
+    fake = scanner._run_subprocess
+
+    def timed(command, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        clock.now += seconds_per_run
+        return fake(command, **kwargs)
+
+    monkeypatch.setattr(scanner, "_run_subprocess", timed)
+    return timeouts
+
+
 @pytest.mark.unit
 def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
     """Each run is given what is left of one scan_timeout, not a fresh one."""
@@ -1714,18 +1745,11 @@ def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
         gitleaks_scanner as module,
     )
 
-    clock = iter([100.0, 100.0, 130.0, 130.0])
-    monkeypatch.setattr(module, "_monotonic", lambda: next(clock))
+    clock = _Clock(100.0)
+    monkeypatch.setattr(module, "_monotonic", clock)
     _another_thread_reads_the_clock()
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, scan_timeout=50)
-    timeouts = []
-    fake = scanner._run_subprocess
-
-    def timed(command, **kwargs):
-        timeouts.append(kwargs.get("timeout"))
-        return fake(command, **kwargs)
-
-    monkeypatch.setattr(scanner, "_run_subprocess", timed)
+    timeouts = _timed_runs(scanner, clock, monkeypatch, seconds_per_run=30.0)
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
     (source / ".gitleaksignore").write_text(
@@ -1741,10 +1765,11 @@ def test_a_re_scan_with_no_time_left_fails_the_scan(tmp_path, monkeypatch):
         gitleaks_scanner as module,
     )
 
-    clock = iter([100.0, 100.0, 160.0, 160.0])
-    monkeypatch.setattr(module, "_monotonic", lambda: next(clock))
+    clock = _Clock(100.0)
+    monkeypatch.setattr(module, "_monotonic", clock)
     _another_thread_reads_the_clock()
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, scan_timeout=50)
+    _timed_runs(scanner, clock, monkeypatch, seconds_per_run=60.0)
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
     (source / ".gitleaksignore").write_text(
