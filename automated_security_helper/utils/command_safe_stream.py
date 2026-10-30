@@ -285,8 +285,9 @@ class CommandSafeStream:
             # text.endswith(...): whitespace or a color code after a line
             # break still starts the line, so a later checked write of this
             # wrap (the target lookup can answer another stream) reads the
-            # state the check would have left.
-            self._at_line_start = self._safe(text, self._at_line_start)[1]
+            # state the check would have left. Read alone: the checked text
+            # itself is not written here.
+            self._at_line_start = self._line_state_after(text, self._at_line_start)
             return written
         safe, at_line_start = self._safe(text, self._at_line_start)
         target.write(safe)
@@ -357,6 +358,30 @@ class CommandSafeStream:
                     at_line_start = False
             pieces[index] = piece
         return "".join(pieces), at_line_start
+
+    @staticmethod
+    def _line_state_after(text: str, at_line_start: bool) -> bool:
+        """Whether the next text starts a line once *text* has been written: the
+        state :meth:`_safe` would leave, read without building the checked text.
+
+        For a write that passes as is (no runner reads this stream), only the
+        state is needed, and ``_safe`` was run whole to read its second value.
+        The answer is the same: a line break puts the following piece at a line
+        start, and a piece with anything past its lead (whitespace, terminal
+        sequences, escaped bytes) ends one. ``_safe``'s two substitutions each
+        put escape text in the place of one non-lead character, so they never
+        empty a piece's remainder and never change this answer.
+        """
+        pieces = _LINE_BREAK.split(text)
+        if len(pieces) > 1:
+            at_line_start = True
+        last = pieces[-1]
+        if at_line_start:
+            lead_match = _LINE_LEAD.match(last)
+            lead = lead_match.end() if lead_match else 0
+            if lead < len(last):
+                at_line_start = False
+        return at_line_start
 
     def retargeted(self, replace: Callable[[TextIO], TextIO]) -> "CommandSafeStream":
         """A new wrap, with this wrap's buffer rule, of what *replace* makes of
@@ -499,7 +524,7 @@ class CommandSafeBuffer(io.BufferedIOBase):
                 target.write(_encoded(tail))
             written = target.write(given)
             text = tail + codecs.decode(given, "utf-8", "surrogateescape")
-            owner._at_line_start = owner._safe(text, owner._at_line_start)[1]
+            owner._at_line_start = owner._line_state_after(text, owner._at_line_start)
             return written
         if deferred:
             # A deferred byte write, drained after the write it interrupted:
