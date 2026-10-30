@@ -567,10 +567,17 @@ def undecodable_candidate_is_a_template(
     tsconfig.json is. The scanners and the tool-absent check all ask here, so the
     tool-present and tool-absent answers agree.
 
+    The second open takes the same scanned-tree terms as the first
+    (:func:`read_template_text`): a regular file with more than one hard link is
+    read. The first cut opened with the default, which refuses a hard link, so a
+    hard-linked non-UTF-8 candidate passed the first read, raised at the decode, and
+    the second open raised ``TreeInputRefused`` out of the callers' except arms,
+    which catch ``OSError`` only; one hard-linked Latin-1 .yaml ended the discovery.
+
     Raises:
         OSError: the second read failed; the caller counts the file as unreadable.
     """
-    with open_in_scanned_tree(template_path, scan_root) as f:
+    with open_in_scanned_tree(template_path, scan_root, allow_hardlinks=True) as f:
         data = f.read()
     return _could_be_a_template(_decode_leniently(data))
 

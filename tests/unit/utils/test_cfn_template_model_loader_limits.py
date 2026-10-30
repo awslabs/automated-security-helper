@@ -16,6 +16,7 @@ Three behaviors of ``utils/cfn_template_model.py`` pinned here:
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -258,6 +259,19 @@ def test_a_candidate_that_is_not_utf8_counts_only_when_its_text_is_a_template(
     assert holds_cloudformation_template([stack], tmp_path) is True
     assert holds_cloudformation_template([utf16], tmp_path) is True
     assert holds_cloudformation_template([notes, utf16], tmp_path) is True
+
+
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_a_hard_linked_non_utf8_candidate_is_judged_like_its_twin(tmp_path):
+    """The first read admits a hard-linked regular file; at the previous tip the
+    second read refused it (TreeInputRefused, caught here as "every doubt counts as a
+    template"), so the hard link counted as a template where its twin did not."""
+    notes = tmp_path / "latin-notes.yaml"
+    notes.write_bytes(b"greeting: caf\xe9\n")
+    linked = tmp_path / "linked-notes.yaml"
+    os.link(notes, linked)
+    assert holds_cloudformation_template([linked], tmp_path) is False
+    assert holds_cloudformation_template([notes, linked], tmp_path) is False
 
 
 def test_a_failed_target_counts_as_a_template_for_the_tool_absent_check(tmp_path):

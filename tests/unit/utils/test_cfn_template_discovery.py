@@ -12,6 +12,7 @@ to ``cfn_nag_scan`` must be exactly the discovered templates.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -104,6 +105,29 @@ def test_a_candidate_that_is_not_utf8_is_judged_from_its_text(context):
         "short.yml",
         "stack.yaml",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_a_hard_linked_non_utf8_candidate_is_judged_like_its_twin(context):
+    """The first read of a candidate admits a hard-linked regular file; at the
+    previous tip the second read, made to judge a non-UTF-8 candidate from its text,
+    opened with the default that refuses a hard link, so TreeInputRefused escaped
+    the UnicodeDecodeError arm (which catches OSError only) and one hard-linked
+    Latin-1 .yaml ended the discovery of the whole target. Both names are now
+    skipped, as the unlinked file is."""
+    source = Path(context.source_dir)
+    (source / "latin-notes.yaml").write_bytes(b"greeting: caf\xe9\n")
+    os.link(source / "latin-notes.yaml", source / "linked-notes.yaml")
+
+    found = discover_templates(context, "source")
+
+    assert [shown for shown, _ in found.skipped] == [
+        "latin-notes.yaml",
+        "linked-notes.yaml",
+    ]
+    assert found.unreadable == []
+    assert len(found.templates) == 4
 
 
 @pytest.mark.integration
