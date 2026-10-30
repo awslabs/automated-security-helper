@@ -7983,6 +7983,20 @@
   the flattening cannot vouch for is keyed on the result alone: scanner, workspace
   project, rule, message, file and lines, with two identical results numbered.
 
+- **The OCSF report leaves out results that state no failing finding, and says
+  when its array is short.** A result whose SARIF `kind` is `pass`, `notApplicable`
+  or `informational` (a cdk-nag rule that was not evaluated) is left out of
+  `ash.ocsf.json`, as it is left out of `ash.ghas.sarif`; such results stay in
+  every other report. A finding the OCSF builder could not convert used to be
+  dropped with a log line, and the array looked complete. The array now carries
+  one extra record when that happens: `status_id` 99 with `status` `Incomplete`,
+  severity Informational, an empty `vulnerabilities` array, the fixed
+  `finding_info.uid` `ash-ocsf-conversion-shortfall` and the label
+  `ash_row_type:conversion_shortfall`; its `status_detail` says how many findings
+  are absent and how many were built by the fallback path, and those fallback
+  records carry the label `ash_row_type:degraded_finding`. A reader that takes
+  `vulnerabilities[0]` from every record skips the shortfall record by its label.
+
 - **The GitHub GHAS report leaves out results that state no failing finding, and
   names its category only when asked.** A result whose SARIF `kind` is `pass`,
   `open`, `review`, `notApplicable` or `informational` (a cdk-nag rule that was
