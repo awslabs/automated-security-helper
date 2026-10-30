@@ -171,6 +171,24 @@ class ASHConfigUnsetVariableError(ASHConfigSourceError):
         self.config_file = config_file
         self.detail = message if detail is None else detail
 
+    def __reduce__(self):
+        # BaseException rebuilds an exception as ``cls(*args)``, and ``variable``
+        # is required and keyword-only, so copy.copy, copy.deepcopy and pickle
+        # (a worker process handing the error back) failed with a TypeError.
+        # Rebuilt from the message and the variable, with the instance's other
+        # attributes restored from its ``__dict__``.
+        message = self.args[0] if self.args else ""
+        return (
+            _rebuild_unset_variable_error,
+            (type(self), message, self.variable),
+            self.__dict__,
+        )
+
+
+def _rebuild_unset_variable_error(cls, message, variable):
+    """``cls(message, variable=variable)``, for ``ASHConfigUnsetVariableError.__reduce__``."""
+    return cls(message, variable=variable)
+
 
 class ASHConfigEnvNotResolvedError(ASHConfigSourceError):
     """A config file an MCP client delivered uses ``!ENV``.
