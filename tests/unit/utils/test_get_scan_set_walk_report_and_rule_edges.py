@@ -659,15 +659,31 @@ class TestThePrintedScanSet:
 
 class TestTheCommandLineFilterPattern:
     def test_a_pattern_anchored_at_the_end_filters_the_real_scan_set(self, tmp_path):
-        """The command line compiles ``\\.py$`` and ``scan_set`` read it with
-        ``re.match``, which only matches at the start of the full path, so the
-        usual spelling filtered out everything with exit 0. The test above mocks
+        """The command line compiles ``\\.py$`` and asks ``scan_set`` to search for
+        it. Matched from the start of the path, as a library caller's pattern is, the
+        usual spelling filtered out everything with exit 0. The test below mocks
         ``scan_set`` and cannot see that."""
         root = _build(tmp_path / "src", {"a.py": "", "b.txt": "", "sub/c.py": ""})
 
-        found = scan_set(source=str(root), filter_pattern=re.compile(r"\.py$"))
+        found = scan_set(
+            source=str(root), filter_pattern=re.compile(r"\.py$"), filter_anywhere=True
+        )
 
         assert _names(root, found) == {"a.py", "sub/c.py"}
+
+    def test_a_library_caller_keeps_the_match_from_the_start(self, tmp_path):
+        """``scan_set(filter_pattern=...)`` is a library API with in-process callers.
+        A pattern that leans on the start of the path, such as a leading negative
+        lookahead, must keep leaving out what it names: searched for anywhere, it
+        starts matching after ``node_modules`` and lets those files through."""
+        root = _build(tmp_path / "src", {"a.py": "", "node_modules/b.py": ""})
+
+        found = scan_set(
+            source=str(root),
+            filter_pattern=re.compile(r"(?!.*node_modules).*\.py$"),
+        )
+
+        assert _names(root, found) == {"a.py"}
 
     @staticmethod
     def _arguments(pattern):
@@ -692,6 +708,7 @@ class TestTheCommandLineFilterPattern:
 
         assert gss.main() == 0
         assert seen["filter_pattern"].pattern == r"\.py$"
+        assert seen["filter_anywhere"] is True
 
     def test_a_pattern_that_is_not_a_regular_expression_is_refused(
         self, monkeypatch, capsys

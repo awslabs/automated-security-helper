@@ -3058,7 +3058,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--filter-pattern",
-        help="Filter results against a regular expression pattern, searched for anywhere in each file's full path (anchor it with ^ or $). Defaults to returning empty which returns the full list of files to be included in the scan.",
+        help="Filter results against a regular expression pattern, searched for anywhere in each path as listed: the --source value as given, then the file's path below it (anchor it with ^ or $). Defaults to returning empty which returns the full list of files to be included in the scan.",
         default=None,
         type=str,
     )
@@ -3413,6 +3413,7 @@ def scan_set(
     write_lists: bool = False,
     workspace_output_dir: Optional[str] = None,
     links_not_scanned: Optional[List[Dict[str, str]]] = None,
+    filter_anywhere: bool = False,
 ) -> list[str]:
     """Get list of files not matching .gitignore underneath source path.
 
@@ -3441,9 +3442,14 @@ def scan_set(
         ignorefile: List of ignore files to use in addition to the standard gitignore.
         debug: Enable debug logging.
         print_results: Print results to stdout. Defaults to False for library usage.
-        filter_pattern: Filter results against a re.Pattern, searched for anywhere in each
-            file's full path (``re.search``; anchor it with ``^`` or ``$``). Defaults to
-            returning the full scan set.
+        filter_pattern: Filter results against a re.Pattern, matched from the start of
+            each path as listed (``re.match``: *source* as given, then the file's path
+            below it), so a pattern that leans on that start, such as a leading negative
+            lookahead, keeps its meaning. Defaults to returning the full scan set.
+        filter_anywhere: Search *filter_pattern* for anywhere in each path instead
+            (``re.search``; anchor it with ``^`` or ``$``). The command line sets it, so
+            that an end-anchored ``--filter-pattern`` means what it reads as; a library
+            caller gets the match from the start unless it asks.
         honor_ignore_files: Whether the scanned repository's ``.gitignore`` and
             ``.ignore`` files decide what is left out. False scans every file but
             the ones ASH leaves out on its own (``.git``, CDK assets, the bundled
@@ -3674,10 +3680,11 @@ def scan_set(
     # Filtered before it is printed, so what is shown is what is returned. The pair
     # written above is the whole scan set, as before.
     if filter_pattern:
+        matcher = re.search if filter_anywhere else re.match
         ashscanset_list = [
             file
             for file in ashscanset_list
-            if re.search(pattern=filter_pattern, string=file)
+            if matcher(pattern=filter_pattern, string=file)
         ]
 
     if print_results:
@@ -3723,6 +3730,7 @@ def main() -> int:
         debug=args.debug,
         print_results=True,
         filter_pattern=filter_pattern,
+        filter_anywhere=True,
         honor_ignore_files=args.honor_ignore_files,
         write_lists=True,
     )
