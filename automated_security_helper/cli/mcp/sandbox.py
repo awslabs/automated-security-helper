@@ -859,8 +859,9 @@ def _names_a_windows_share(path: object) -> bool:
     mounted share is reached by another name) and ``\\\\.\\pipe\\...`` (a device, not
     a directory) are all refused by the callers, which open only directories on a
     local volume. Only ``\\\\?\\C:\\repo`` and ``\\\\.\\C:\\repo``, a drive letter and a
-    separator (or nothing) after the prefix, are local; a drive-relative
-    ``\\\\?\\C:repo`` is not. Forward slashes are read as separators first, so a
+    separator after the prefix, are local; a drive-relative ``\\\\?\\C:repo`` is not,
+    and neither is ``\\\\.\\C:`` with nothing after the colon, which names the
+    volume's device rather than a directory. Forward slashes are read as separators first, so a
     mixed spelling is judged by what it names. ``os.readlink`` returns a junction's
     target in the extended form (its substitute name, since Python 3.8), so the
     form is read here rather than taken for a share by its two leading separators,
@@ -874,17 +875,21 @@ def _names_a_windows_share(path: object) -> bool:
 
 
 def _is_a_drive_spelling(text: str) -> bool:
-    """Whether ``text`` is a drive letter and a colon, ``C:``, alone or before a separator.
+    """Whether ``text`` is a drive letter, a colon and a separator: ``C:\\`` or ``C:\\repo``.
 
-    ``C:`` and ``C:\\repo`` are drive spellings; the drive-relative ``C:repo`` is not,
-    because in the extended form nothing resolves it against a current directory.
+    A directory on a volume always has the separator (the volume's root is
+    ``C:\\``), and so does the substitute name ``os.readlink`` gives for a
+    junction. ``C:`` alone, behind the prefix, names the volume's device object
+    (``\\\\.\\C:`` is how a raw volume is opened), not a directory on it, and the
+    drive-relative ``C:repo`` names nothing the extended form resolves against a
+    current directory; neither is a drive spelling here.
     """
     return (
-        len(text) >= 2
+        len(text) >= 3
         and text[0].isascii()
         and text[0].isalpha()
         and text[1] == ":"
-        and (len(text) == 2 or text[2] == "\\")
+        and text[2] == "\\"
     )
 
 
