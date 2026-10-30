@@ -485,13 +485,47 @@ def test_a_python_without_ctypes_still_names_the_system_directory(monkeypatch):
 @POSIX_ONLY
 def test_only_a_kill_or_term_death_while_stopping_is_the_servers(monkeypatch):
     monkeypatch.setattr(spu, "_server_stopping", lambda: True)
+    monkeypatch.setattr(spu, "_SERVER_KILLED", set())
     assert spu._stopped_by_the_server(-signal.SIGKILL) is True
     assert spu._stopped_by_the_server(-signal.SIGTERM) is True
     assert spu._stopped_by_the_server(-signal.SIGSEGV) is False
     assert spu._stopped_by_the_server(0) is False
     assert spu._stopped_by_the_server(None) is False
+    # A child the stop did not signal is read by its code alone.
+    assert spu._stopped_by_the_server(143, _FakeChild(returncode=143)) is False
     monkeypatch.setattr(spu, "_server_stopping", lambda: False)
     assert spu._stopped_by_the_server(-signal.SIGKILL) is False
+
+
+class _WrapperThatEndsItsTreeOnSigterm(_FakeChild):
+    """A wrapper that handles the SIGTERM it is sent first, ends its tree and
+    exits with a code of its own within the settle."""
+
+    def wait(self, timeout=None):
+        self.calls.append(("wait", timeout))
+        self.returncode = 143
+        return self.returncode
+
+
+@POSIX_ONLY
+def test_a_child_the_servers_stop_signalled_is_the_servers_whatever_its_code(
+    monkeypatch,
+):
+    monkeypatch.setattr(spu, "_server_stopping", lambda: True)
+    monkeypatch.setattr(spu, "_SERVER_KILLED", set())
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda process: False)
+    monkeypatch.setattr(spu, "_KILLED_GROUP_SETTLE_SECONDS", 0.01)
+    child = _WrapperThatEndsItsTreeOnSigterm()
+    assert spu._kill_group(child) is True
+    assert child.calls == ["terminate", ("wait", 0.01)], child.calls
+    # Signalled by the stop and exited 143: the server's stop, not a run that
+    # returned normally while the server stopped.
+    assert spu._stopped_by_the_server(child.returncode, child) is True
+    # The code alone, with no process, still reads 143 as the tool's own.
+    assert spu._stopped_by_the_server(143) is False
+    # Once the server is not stopping, nothing is the server's.
+    monkeypatch.setattr(spu, "_server_stopping", lambda: False)
+    assert spu._stopped_by_the_server(child.returncode, child) is False
 
 
 # --- the record -------------------------------------------------------------------------------

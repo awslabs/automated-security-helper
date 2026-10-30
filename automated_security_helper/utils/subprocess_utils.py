@@ -3478,6 +3478,15 @@ _STOPPING = False
 #: _RUNNING_GROUPS_LOCK; kill_running_groups waits for it to reach 0.
 _SPAWNS_STARTING = 0
 
+#: The pids the server's stop signalled (_kill_group, through kill_running_groups
+#: or _record_spawn), for _stopped_by_the_server: a child in this set that then
+#: exited was ended by the server whatever code it died with, since a wrapper
+#: turns the SIGTERM a groupless child is sent first into the end of its own
+#: tree and exits with a code of its own. The stop is one-way, so the set only
+#: grows, by at most the number of recorded groups; a pid is never reused by a
+#: spawn the server admits after its stop began (_begin_spawn refuses them).
+_SERVER_KILLED: set = set()
+
 #: How long kill_running_groups waits for the spawns already starting to record
 #: their child. Popen returns in milliseconds; this allows for a busy host. A
 #: spawn still starting after it kills its child itself once it records it.
@@ -3650,11 +3659,15 @@ def _kill_group(process: subprocess.Popen) -> bool:
     wrapper before its setsid, a Landlock wrapper, whose scanner it forked into
     a session of its own) is sent SIGTERM first, which such a wrapper turns
     into the end of its tree, and SIGKILL after a short settle; killed
-    outright, the wrapper died and the scanner it started ran on.
+    outright, the wrapper died and the scanner it started ran on. Every pid
+    signalled here is recorded in _SERVER_KILLED, so _stopped_by_the_server
+    reads the child's ending as the server's whatever code the wrapper exits
+    with.
     """
     if os.name == "nt":
         if process.poll() is None:
             process.kill()
+            _SERVER_KILLED.add(process.pid)
             return True
         return False
     if process.returncode is not None:
@@ -3666,6 +3679,7 @@ def _kill_group(process: subprocess.Popen) -> bool:
             return False
     if _leads_its_own_group(process) or process.returncode is not None:
         if _signal_group(process.pid, signal.SIGKILL):
+            _SERVER_KILLED.add(process.pid)
             return True
     if process.poll() is None:
         process.terminate()
@@ -3673,6 +3687,7 @@ def _kill_group(process: subprocess.Popen) -> bool:
             process.wait(timeout=_KILLED_GROUP_SETTLE_SECONDS)
         except subprocess.TimeoutExpired:
             process.kill()
+        _SERVER_KILLED.add(process.pid)
         return True
     return False
 
@@ -4214,12 +4229,13 @@ def _run_cancellable(
                             + ((tool, process.pid),),
                         ) from error
                 raise
-            if _stopped_by_the_server(process.returncode):
-                # The wait ended because a signal killed the child while the
-                # server's last stop (kill_running_groups) ran: ASH's own stop,
+            if _stopped_by_the_server(process.returncode, process):
+                # The wait ended because the server's last stop
+                # (kill_running_groups) signalled the child, or a signal of
+                # the stop's kind killed it while the stop ran: ASH's own stop,
                 # so the scan ends as a cancel, as a child killed by
-                # _record_spawn does. Returned normally, the -N would read as a
-                # signal ASH did not send.
+                # _record_spawn does. Returned normally, the code would read as
+                # the tool's own ending.
                 raise ScanCancelled(
                     "the server is stopping, so "
                     f"{_shown_tool(args, _SPAWN_VALUES.get())} was stopped"
@@ -4241,19 +4257,27 @@ _SERVER_STOP_RETURNCODES = frozenset(
 )
 
 
-def _stopped_by_the_server(returncode: Any) -> bool:
-    """Whether the child's code is the server's own stop, and nothing else.
+def _stopped_by_the_server(
+    returncode: Any, process: Optional[subprocess.Popen] = None
+) -> bool:
+    """Whether the child's ending is the server's own stop, and nothing else.
 
-    Only a SIGKILL or SIGTERM death while the server stops is ASH's: a tool
-    that died of a SIGSEGV, or that the operator killed with another signal, in
-    those same seconds is not a stop ASH performed, and reporting it as one hid
-    the tool's own ending.
+    A child the server's stop signalled (``_kill_group``, recorded in
+    _SERVER_KILLED) was ended by it whatever code it died with: a wrapper that
+    turns the SIGTERM a groupless child is sent first into the end of its tree
+    exits with a code of its own (143, or the scanner's) within the settle, and
+    read by the signal number alone that ending was a normal run returned while
+    the server stopped. For a child the stop did not signal, or when no process
+    is given, only a SIGKILL or SIGTERM death while the server stops is ASH's: a
+    tool that died of a SIGSEGV, or that the operator killed with another
+    signal, in those same seconds is not a stop ASH performed, and reporting it
+    as one hid the tool's own ending.
     """
-    return (
-        is_exit_code(returncode)
-        and returncode in _SERVER_STOP_RETURNCODES
-        and _server_stopping()
-    )
+    if not _server_stopping():
+        return False
+    if process is not None and process.pid in _SERVER_KILLED:
+        return True
+    return is_exit_code(returncode) and returncode in _SERVER_STOP_RETURNCODES
 
 
 def _runner(sandboxed: bool) -> Any:
