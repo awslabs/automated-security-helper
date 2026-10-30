@@ -850,18 +850,29 @@ _LINK_HOPS = 40
 
 
 def _names_a_windows_share(path: object) -> bool:
-    """Whether the text of ``path`` is a UNC path, ``\\\\server\\share`` or ``//server/share``.
+    """Whether the text of ``path`` names something other than a local volume path.
 
-    A path in the extended form, ``\\\\?\\...`` or ``\\\\.\\...``, names a share
-    only through its ``UNC`` device: ``\\\\?\\UNC\\server\\share`` does,
-    ``\\\\?\\C:\\repo`` is a local volume. ``os.readlink`` returns a junction's
-    target in that form (its substitute name, since Python 3.8), so the form is
-    read here rather than taken for a share by its two leading separators.
+    True for a UNC path, ``\\\\server\\share`` or ``//server/share``, and for any
+    path in the extended form, ``\\\\?\\...`` or ``\\\\.\\...``, whose device is not
+    a drive letter: ``\\\\?\\UNC\\server\\share`` (a share), ``\\\\?\\GLOBALROOT\\...``
+    (the object namespace, through which a redirector or a mounted share is reached
+    by another name) and ``\\\\.\\pipe\\...`` (a device, not a directory) are all
+    refused by the callers, which open only directories on a local volume. Only
+    ``\\\\?\\C:\\repo`` and ``\\\\.\\C:\\repo``, a drive letter after the prefix, are
+    local. ``os.readlink`` returns a junction's target in the extended form (its
+    substitute name, since Python 3.8), so the form is read here rather than taken
+    for a share by its two leading separators, and a junction to a local volume
+    stays local.
     """
     text = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
     if text[:4] in ("\\\\?\\", "\\\\.\\", "//?/", "//./"):
-        return text[4:8].upper() in ("UNC\\", "UNC/")
+        return not _is_a_drive_spelling(text[4:])
     return text.startswith(("\\\\", "//"))
+
+
+def _is_a_drive_spelling(text: str) -> bool:
+    """Whether ``text`` starts with a drive letter and a colon, ``C:`` or ``C:\\repo``."""
+    return len(text) >= 2 and text[0].isascii() and text[0].isalpha() and text[1] == ":"
 
 
 def _link_chain_names_a_windows_share(text: str) -> Optional[bool]:
@@ -939,8 +950,8 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
             what,
             path,
             Path(text),
-            "It names a network share, which the MCP server does not open. Name a "
-            "directory on a local volume.",
+            "It names a network share or a device path, which the MCP server does "
+            "not open. Name a directory on a local volume.",
         )
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
@@ -958,8 +969,8 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
             what,
             path,
             Path(text),
-            "It is a link that leads to a network share, which the MCP server does "
-            "not open. Name a directory on a local volume.",
+            "It is a link that leads to a network share or a device path, which the "
+            "MCP server does not open. Name a directory on a local volume.",
         )
     return _refusal(
         what,

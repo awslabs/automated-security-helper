@@ -363,15 +363,68 @@ class TestWindowsRefusesBeforeResolving:
             ("//server/share/tree", True),
             ("\\\\?\\UNC\\server\\share\\tree", True),
             ("\\\\?\\unc\\server\\share", True),
+            ("\\\\?\\GLOBALROOT\\Device\\LanmanRedirector\\server\\share", True),
+            ("\\\\?\\GLOBALROOT\\??\\UNC\\server\\share", True),
+            ("\\\\?\\GLOBALROOT\\Device\\Mup\\server\\share", True),
+            ("\\\\.\\pipe\\ash", True),
+            ("\\\\?\\Volume{0000}\\repo", True),
+            ("\\\\?\\", True),
             ("\\\\?\\C:\\repo", False),
             ("\\\\.\\C:\\repo", False),
+            ("\\\\?\\c:", False),
+            ("//?/D:/repo", False),
             ("C:\\repo", False),
             ("/srv/repo", False),
         ],
     )
     def test_the_share_spelling_reads_the_extended_form(self, text, share):
-        """``\\\\?\\C:\\...``, the form a junction's name takes, is a local volume."""
+        """Only a drive letter after ``\\\\?\\`` or ``\\\\.\\`` is a local volume.
+
+        The object namespace (``GLOBALROOT``, through which a redirector or a
+        mounted share is reached by another name), a named pipe and a volume GUID
+        are refused with the UNC spellings: none is a directory on a local volume
+        the server may open. At tip15 every non-``UNC`` device read as local.
+        """
         assert sandbox._names_a_windows_share(text) is share
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "\\\\?\\GLOBALROOT\\Device\\LanmanRedirector\\server\\share\\tree",
+            "\\\\?\\GLOBALROOT\\??\\UNC\\server\\share\\tree",
+            "\\\\?\\GLOBALROOT\\Device\\Mup\\server\\share\\tree",
+            "\\\\.\\pipe\\ash",
+        ],
+    )
+    def test_a_device_namespace_path_is_refused_without_resolving(
+        self, monkeypatch, spelling
+    ):
+        """A client-named path in the device namespace never reaches a resolve."""
+        resolved = []
+        real_resolve = Path.resolve
+
+        def recording_resolve(self, strict=False):
+            resolved.append(str(self))
+            return real_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+
+        refusal = validate_scan_target_in_sandbox(spelling, session_id=OWN)
+
+        assert refusal is not None
+        assert "network share or a device path" in str(refusal)
+        assert all("server" not in p and "pipe" not in p for p in resolved), resolved
+
+    def test_a_drive_letter_extended_path_is_judged_as_before(self, tmp_path):
+        """Control: the extended form of a local path is not refused by spelling.
+
+        Off a Windows host the spelling is not a path of this filesystem, so the
+        pre-resolve gate alone is checked: it returns None and the ordinary gates
+        judge the path.
+        """
+        assert (
+            sandbox._refusal_before_resolving("Scan target", "\\\\?\\C:\\repo") is None
+        )
 
     def test_a_plain_local_directory_is_judged_as_before(self, tmp_path):
         """Control: the Windows check refuses only what resolving would open."""
