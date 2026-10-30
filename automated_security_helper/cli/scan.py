@@ -427,6 +427,14 @@ def _settle_output_dir(
                     "directory, or scan a directory outside the output directory."
                 )
             )
+    # A file where the output directory goes ended the run in a FileExistsError
+    # traceback, from the first mkdir of it. A missing one is still made. This is
+    # asked before the containment question below: an output path that is a file,
+    # or under one, is refused as that (the refusal every runner prints alike),
+    # not as a working directory "that cannot be read (NotADirectoryError)".
+    output_refusal = output_dir_refusal(output_dir)
+    if output_refusal is not None:
+        _fail_usage(shown_on_one_line(output_refusal))
     # The reverse: an output directory inside the scanned tree whose working
     # directories already hold something of the tree's. The scan removes each of
     # them before it starts (the orchestrator's ensure_directories), so
@@ -457,11 +465,6 @@ def _settle_output_dir(
                         "files out of it."
                     )
                 )
-    # A file where the output directory goes ended the run in a FileExistsError
-    # traceback, from the first mkdir of it. A missing one is still made.
-    output_refusal = output_dir_refusal(output_dir)
-    if output_refusal is not None:
-        _fail_usage(shown_on_one_line(output_refusal))
 
     existing_results = None
     if use_existing:

@@ -239,6 +239,34 @@ class TestAnOutputDirectoryThatWouldClearTheScannedTreeIsRefused:
         err = capsys.readouterr().err
         assert "cannot be read (PermissionError)" in err, err
 
+    @pytest.mark.parametrize(
+        "output_dir, refusal",
+        [
+            pytest.param(
+                "src/afile", "Output directory is not a directory", id="a-file"
+            ),
+            pytest.param(
+                "src/afile/out",
+                "Output directory cannot be created",
+                id="under-a-file",
+            ),
+        ],
+    )
+    def test_an_output_path_that_is_a_file_is_refused_as_that(
+        self, tmp_path, capsys, output_dir, refusal
+    ):
+        """A file inside the tree, or a path under one, is not a directory the
+        scan could write into at all; it is refused as that, the line every
+        runner prints alike, not as a working directory that cannot be read."""
+        (tmp_path / "src" / "afile").write_text("not a directory\n")
+
+        code = _refused(source_dir="src", output_dir=output_dir)
+
+        assert code == ASH_EXIT_USAGE_ERROR
+        err = capsys.readouterr().err
+        assert refusal in err, err
+        assert "cannot be read" not in err, err
+
     def test_the_default_output_directory_with_old_results_is_not_refused(
         self, tmp_path
     ):
