@@ -295,3 +295,49 @@ def test_the_probe_argv_carries_the_pinned_spec(context, monkeypatch):
     argv = spawn.call_args.args[0]
     assert argv[:3] == [UV_PATH, "tool", "run"]
     assert argv[-4:] == ["--from", spec, "bandit", "--version"]
+
+
+@pytest.mark.parametrize("scanner_offline", [True, False], ids=["offline", "online"])
+def test_semgreps_own_offline_mode_reaches_the_real_resolvers_probe(
+    context, monkeypatch, scanner_offline
+):
+    """Through the real resolver, with ASH online: semgrep's check passes its own
+    offline mode as the resolver's ``offline`` keyword, and the spawned probe
+    carries it as ``--offline`` and ``UV_OFFLINE=1``; online, neither. Every other
+    semgrep test replaces the resolver with a ``**kwargs`` stub, so a keyword the
+    resolver does not accept would raise TypeError on every host where uv is not
+    available to the runner and no test would see it; this row calls the real
+    signature.
+
+    Fails at the base: the resolver was asked without ``offline``, so the probe of
+    a scanner with ``options.offline: true`` ran online under ASH online.
+    """
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.delenv("UV_OFFLINE", raising=False)
+    spawn = MagicMock(return_value=subprocess.CompletedProcess([], 0, "1.180.0\n", ""))
+    monkeypatch.setattr(uv_tool_runner, "spawn_run", spawn)
+    monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: UV_PATH)
+    monkeypatch.setattr(uv_tool_runner, "find_executable", lambda name: None)
+    scanner = _semgrep(context, monkeypatch)
+    # The scanner's own mode, as the mixin resolves it from options.offline; ASH's
+    # mode stays off (ASH_OFFLINE unset), so only the keyword can carry it.
+    monkeypatch.setattr(
+        SemgrepScanner, "_is_offline_mode", lambda self: scanner_offline
+    )
+    _uv_absent(monkeypatch, SemgrepScanner)
+    _reset_uv_tool_runner_caches()
+    try:
+        assert scanner._validate_tool_dependencies() is True
+    finally:
+        _reset_uv_tool_runner_caches()
+
+    spec = scanner._uv_from_spec()
+    assert spec is not None and spec.startswith("semgrep")
+    argv = spawn.call_args.args[0]
+    env = spawn.call_args.kwargs["env"]
+    assert argv[0] == UV_PATH
+    assert argv[-4:] == ["--from", spec, "semgrep", "--version"]
+    assert ("--offline" in argv) is scanner_offline, argv
+    assert (env.get("UV_OFFLINE") == "1") is scanner_offline, sorted(
+        key for key in env if key.startswith("UV_")
+    )
