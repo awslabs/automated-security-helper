@@ -837,8 +837,14 @@ class WindowsSafeFilter(logging.Filter):
                 if folded is None:
                     record.msg = self._in_ascii(record.msg)
                 elif not folded.isascii():
+                    # Shown for a sink that puts it in ASCII: a backslash run is
+                    # doubled only before the text of an escape shown_in_ascii
+                    # or shown_not_obeyed writes, so a message that quotes a
+                    # path with an accented letter raw and as JSON's escape (the
+                    # suggested command above) keeps the escape as logged.
                     record.msg = shown_in_ascii(
-                        shown_not_obeyed(folded), self._emoji_map
+                        shown_not_obeyed(folded, lookalikes="ascii"),
+                        self._emoji_map,
                     )
                     record.args = ()
         if record.args:

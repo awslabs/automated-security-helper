@@ -49,6 +49,10 @@ mid-line and stays readable.
 ``ash report`` on a terminal shows the report itself, so it breaks no command
 and doubles a backslash run only before the text of an escape this module
 writes (``lookalikes="written"``): a Windows path's ``\\x64`` is left as it is.
+A sink that then puts the text in ASCII (utils/log.py's WindowsSafeFilter, through
+:func:`shown_in_ascii`) doubles a run only before the text of an escape one of
+the two would write there (``lookalikes="ascii"``): JSON's ``\\u00e9`` in a
+suggested command is left as it is, since the ASCII form of "é" is ``\\xe9``.
 In JSON it writes JSON's own escapes instead (:func:`json_controls_shown`).
 
 :func:`shown_not_obeyed` and :func:`shown_on_one_line`, which also writes tab,
@@ -137,11 +141,30 @@ def _reads_as_written_escape(after: str) -> bool:
     )
 
 
+def _reads_as_ascii_escape(after: str) -> bool:
+    """Whether *after* is an escape this module or :func:`shown_in_ascii` writes.
+
+    The text of a character outside ASCII, or of one :func:`is_shown_as_escape`
+    names, in the form :func:`escape_for` gives it: ``\\xe9`` for "é", never
+    JSON's ``\\u00e9``, whose value is below U+0100.
+    """
+    match = _ESCAPE_TEXT.match(after)
+    if match is None:
+        return False
+    try:
+        character = chr(int(match.group()[1:], 16))
+    except (ValueError, OverflowError):
+        return False
+    if character.isascii() and not is_shown_as_escape(character):
+        return False
+    return escape_for(character).lower() == "\\" + match.group().lower()
+
+
 def controls_shown(
     text: str,
     *,
     keep_layout: bool = True,
-    lookalikes: Literal["any", "written"] = "any",
+    lookalikes: Literal["any", "written", "ascii"] = "any",
 ) -> str:
     """*text* with each character :func:`is_shown_as_escape` names written as its
     escape, one to one.
@@ -154,18 +177,23 @@ def controls_shown(
     *lookalikes* "written" doubles a backslash run only before the text of an
     escape this function writes, rather than before any ``xNN``, ``uNNNN`` or
     ``UNNNNNNNN``; ``ash report`` uses it, as a Windows path's ``\\x64`` is no
-    escape it writes.
+    escape it writes. *lookalikes* "ascii" doubles a run before that text and
+    before the text of a character outside ASCII in the form :func:`escape_for`
+    writes it, for text :func:`shown_in_ascii` then puts in ASCII: a JSON
+    document's ``\\u00e9`` is left as it is, where "any" doubled its run and the
+    command that quoted it then read the text "u00e9".
     """
 
     def shown(match: re.Match[str]) -> str:
         run = match.group(1)
         if run:
             after = match.end()
-            reads_as_escape = (
-                _ESCAPE_TEXT.match(text, after) is not None
-                if lookalikes == "any"
-                else _reads_as_written_escape(text[after : after + 9])
-            )
+            if lookalikes == "any":
+                reads_as_escape = _ESCAPE_TEXT.match(text, after) is not None
+            elif lookalikes == "written":
+                reads_as_escape = _reads_as_written_escape(text[after : after + 9])
+            else:
+                reads_as_escape = _reads_as_ascii_escape(text[after : after + 9])
             if reads_as_escape or (
                 after < len(text) and _escaped(text, after, keep_layout)
             ):
@@ -298,15 +326,19 @@ def hash_command_broken(match: re.Match[str]) -> str:
     return match.group(1) * 2 + "\\x23"
 
 
-def shown_not_obeyed(text: str) -> ShownText:
+def shown_not_obeyed(
+    text: str, *, lookalikes: Literal["any", "written", "ascii"] = "any"
+) -> ShownText:
     """*text* as a console or a CI log shows it: what it says, not what it commands.
 
     Tab and newline lay the text out and are kept. A :class:`ShownText` is
-    returned as it is, since it was shown already.
+    returned as it is, since it was shown already. *lookalikes* is
+    :func:`controls_shown`'s: "ascii" for text :func:`shown_in_ascii` then puts
+    in ASCII.
     """
     if isinstance(text, ShownText):
         return text
-    return _as_shown(commands_broken(controls_shown(text)))
+    return _as_shown(commands_broken(controls_shown(text, lookalikes=lookalikes)))
 
 
 #: A tab, newline or carriage return, with the run of backslashes just before it,

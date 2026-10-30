@@ -90,6 +90,47 @@ def test_a_message_the_console_cannot_write_is_folded_and_shown():
     assert "::x" not in record.getMessage()
 
 
+def _suggested_ignore_paths(message: str) -> list:
+    """The ignore_paths entries the suggested command in *message* adds."""
+    import json
+    import shlex
+
+    command = message.split("--config-overrides ", 1)[1].rstrip(".")
+    (override,) = shlex.split(command)
+    key, value = override.split("+=", 1)
+    assert key == "global_settings.ignore_paths"
+    return json.loads(value)
+
+
+def test_a_suggested_command_in_a_message_the_console_cannot_write_is_kept():
+    """The warning that suggests the command names the directory raw in its
+    prose and as JSON's escape inside the quoted document. The prose makes the
+    message one the console cannot write, so it is shown and put in ASCII: the
+    raw letter becomes ``\\xe9``, and the JSON escape, whose run the default
+    showing doubled, stays as logged, so the pasted command adds the directory
+    the warning names."""
+    import json
+    import shlex
+
+    relative = "café dir/.ash/ash_output"
+    entry = json.dumps([{"path": f"{relative}/", "reason": "earlier ASH output"}])
+    override = shlex.quote(f"global_settings.ignore_paths+={entry}")
+    message = (
+        f"{relative} is not this scan's output directory. "
+        f"For example: --config-overrides {override}."
+    )
+    assert not message.isascii() and "\\u00e9" in message
+
+    record = _filtered_plain(message)
+
+    shown = record.getMessage()
+    assert shown.isascii()
+    assert shown.startswith("caf\\xe9 dir/.ash/ash_output is not")
+    assert _suggested_ignore_paths(shown) == [
+        {"path": f"{relative}/", "reason": "earlier ASH output"}
+    ]
+
+
 def _shown(record: logging.LogRecord) -> Text:
     message = record.getMessage()
     if getattr(record, "markup", False):
