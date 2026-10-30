@@ -93,11 +93,25 @@ Failure modes and known limitations
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
+)
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    ASHRespelledOverrideError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -173,6 +187,89 @@ _PLUGIN_SEGMENTS: Tuple[Tuple[str, Literal["scanner", "converter"]], ...] = (
 _MISSING = object()
 
 
+def replay_overrides_onto(
+    trusted_config: "AshConfig", overrides: Sequence[str]
+) -> "AshConfig":
+    """``trusted_config`` with the operator's ``overrides`` replayed onto it.
+
+    Each confinement step replays the operator's ``--config-overrides`` onto
+    the trusted base, so an override sets a confined value whatever the file
+    says. The overrides already applied to the resolved config, so one that
+    only the trusted base refuses (a value its section's model refuses there)
+    changes nothing on that base. Applied as one set, such an override refused
+    the whole set and aborted the resolution. They are applied together first,
+    and when that is refused each is applied on its own: the ones the trusted
+    base refuses are left out, with one warning naming their keys and never
+    their values. A respelled section (``ASHRespelledOverrideError``) is still
+    refused, as the reporters replay refuses it: the scan does not resolve
+    under a spelling the operator did not type
+    (tests/unit/config/test_a_respelled_reporter_override_fails_the_scan.py).
+    """
+    from automated_security_helper.config.resolve_config import (
+        apply_config_overrides,
+    )
+
+    overrides = list(overrides)
+    if not overrides:
+        return trusted_config
+    try:
+        return apply_config_overrides(trusted_config, overrides)
+    except ASHRespelledOverrideError:
+        raise
+    except ASHConfigValidationError:
+        pass
+    replayed = trusted_config
+    skipped: List[str] = []
+    for override in overrides:
+        try:
+            replayed = apply_config_overrides(replayed, [override])
+        except ASHRespelledOverrideError:
+            raise
+        except ASHConfigValidationError:
+            skipped.append(override.partition("=")[0])
+    if skipped:
+        # The folded key can be a section key the trusted file read from the
+        # environment, so it is redacted with that file's values.
+        from automated_security_helper.config.config_validator import redact_values
+        from automated_security_helper.utils.error_text import (
+            config_environment_values,
+        )
+        from automated_security_helper.utils.log import NO_MARKUP
+
+        values = config_environment_values(trusted_config)
+        keys = ", ".join(redact_values(key, values) for key in skipped)
+        ASH_LOGGER.warning(
+            f"The overrides at {keys} do not apply to the trusted "
+            "configuration, so they are not replayed onto it; the other overrides "
+            "are. Each applied to the resolved configuration already.",
+            extra=NO_MARKUP,
+        )
+    return replayed
+
+
+def _options_mapping(section: Any) -> Dict[str, Any]:
+    """The ``options`` of a trusted plugin section as a mapping.
+
+    A section that is not a mapping (a plugin section the operator's file wrote
+    as a scalar or a list), or whose ``options`` is not one, holds no option, so
+    it reads as empty instead of raising out of the confinement.
+    """
+    if not isinstance(section, dict):
+        return {}
+    options = section.get("options")
+    return options if isinstance(options, dict) else {}
+
+
+def _trusted_values(options: Dict[str, Any], names: Iterable[str]) -> Dict[str, Any]:
+    """The trusted base's value for each of ``names`` it sets, under either spelling."""
+    found: Dict[str, Any] = {}
+    for name in names:
+        wanted = _trusted_option(options, name)
+        if wanted is not _MISSING and wanted is not None:
+            found[name] = wanted
+    return found
+
+
 def _confined_options() -> Dict[str, Dict[str, Any]]:
     confined: Dict[str, Dict[str, Any]] = {
         scanner: dict.fromkeys(names)
@@ -205,12 +302,31 @@ def _wrote(options: Any, name: str, written: Any) -> bool:
 
     A plugin's section is a dict holding only what was written. A built-in
     scanner's options are a model, whose unset fields read as their defaults,
-    so its ``model_fields_set`` says which were written.
+    so its ``model_fields_set`` says which were written. That holds for a
+    freshly parsed config only: ``_file_wrote`` answers for a resolved one.
     """
     if written is _MISSING or written is None:
         return False
     fields_set = getattr(options, "model_fields_set", None)
     return fields_set is None or name in fields_set
+
+
+def _file_wrote(config: "AshConfig", segments: Sequence[str], written: Any) -> bool:
+    """Whether the config set the option at ``segments`` itself, rather than
+    leaving it to its default, read from the resolved ``config``.
+
+    ``apply_config_overrides`` rebuilds the config, which puts every field in
+    ``model_fields_set``, so one unrelated override made every in-tree
+    tightening value read as written (``_wrote``). It stamps a record of the
+    paths the operator supplied, which ``recorded_config._sets`` reads in
+    place of ``model_fields_set`` on a rebuilt config and reads as ``_wrote``
+    does on a freshly parsed one.
+    """
+    if written is _MISSING or written is None:
+        return False
+    from automated_security_helper.config.recorded_config import _sets
+
+    return _sets(config, list(segments))
 
 
 def _options_of(section: Any) -> Any:
@@ -245,6 +361,11 @@ def confine_scanner_config_files(
 ) -> None:
     """Replace the tool config choices an in-tree or delivered file made with the trusted base's.
 
+    A plugin scanner's section the file leaves out (or holds without an options
+    mapping) is given the trusted base's values for these options, since the
+    file replaces the operator's config rather than adding to it. The warning
+    names only an option the file wrote.
+
     Args:
         config: The resolved AshConfig, changed in place.
         trusted_config: The trusted base ``resolve_config`` built for the sandbox
@@ -260,9 +381,6 @@ def confine_scanner_config_files(
         _scanner_sections,
     )
     from automated_security_helper.config.config_sources import describe_config_path
-    from automated_security_helper.config.resolve_config import (
-        apply_config_overrides,
-    )
 
     scanner_overrides = [
         override
@@ -283,23 +401,41 @@ def confine_scanner_config_files(
         scanner_overrides = _folded_onto_trusted(
             trusted_config, scanner_overrides, config, section="scanners"
         )
-        trusted_config = apply_config_overrides(trusted_config, scanner_overrides)
+        trusted_config = replay_overrides_onto(trusted_config, scanner_overrides)
 
     ignored: List[str] = []
+    extra = getattr(config.scanners, "__pydantic_extra__", None)
     for scanner, option_defaults in _confined_options().items():
         trusted_section = trusted_config.get_plugin_config("scanner", scanner)
-        trusted_options = (trusted_section or {}).get("options") or {}
-        for key, section in _scanner_sections(config, scanner):
+        trusted_options = _options_mapping(trusted_section)
+        # A plugin scanner's section the config leaves out, or holds with no
+        # options mapping, is given the trusted base's confined values whole:
+        # a file inside the tree replaces the operator's config, so leaving
+        # the section out would drop the operator's choices for that scanner
+        # (confine_tool_versions gives tool_version the same way). A built-in
+        # scanner's section is a typed field and is always present.
+        trusted_values = _trusted_values(trusted_options, option_defaults)
+        sections = _scanner_sections(config, scanner)
+        if not sections:
+            if trusted_values and isinstance(extra, dict):
+                extra[scanner] = {"options": dict(trusted_values)}
+            continue
+        for key, section in sections:
             options = _options_of(section)
             if options is None:
+                if (
+                    trusted_values
+                    and isinstance(section, dict)
+                    and section.get("options") is None
+                ):
+                    section["options"] = dict(trusted_values)
                 continue
             for name, default in option_defaults.items():
                 wanted = _trusted_option(trusted_options, name)
                 written = _get(options, name)
                 current = _or_default(written, default)
-                if _wrote(options, name, written) and current in TIGHTENING_VALUES.get(
-                    (scanner, name), ()
-                ):
+                wrote = _file_wrote(config, ("scanners", key, "options", name), written)
+                if wrote and current in TIGHTENING_VALUES.get((scanner, name), ()):
                     continue
                 if current == _or_default(wanted, default):
                     if written is None and default is not None:
@@ -307,7 +443,12 @@ def confine_scanner_config_files(
                         # plugin would get None; give it the trusted value.
                         _set(options, name, wanted, default)
                     continue
-                if current != default:
+                # Only a value the file wrote is named in the warning: a
+                # built-in scanner's options model reads an unwritten option as
+                # the model's own default (opengrep's config as ``p/ci``), which
+                # is not the file's choice, though it still gives way to the
+                # operator's value.
+                if current != default and wrote:
                     ignored.append(f"scanners.{key}.options.{name}")
                 _set(options, name, wanted, default)
     ignored.extend(_confine_settings_files(config, trusted_config))
@@ -347,7 +488,13 @@ def _plugin_sections(segment: Any) -> List[Tuple[str, Any]]:
 def _spellings_in(options: Any, name: str) -> List[str]:
     """The keys ``options`` holds ``name`` under: either spelling in a plugin's dict."""
     if isinstance(options, dict):
-        return [key for key in options if key.replace("-", "_") == name]
+        # A key that is not a string (a YAML `1:` under a plugin's options) is
+        # no spelling of the option; skipped, where str.replace raised.
+        return [
+            key
+            for key in options
+            if isinstance(key, str) and key.replace("-", "_") == name
+        ]
     if name in type(options).model_fields or name in (
         getattr(options, "__pydantic_extra__", None) or {}
     ):
@@ -397,10 +544,6 @@ def confine_tool_versions(
         source: Why those files are not the operator's, and the fix, for the
             warning.
     """
-    from automated_security_helper.config.resolve_config import (
-        apply_config_overrides,
-    )
-
     sections = {segment for segment, _kind in _PLUGIN_SEGMENTS}
     replayed = [
         override
@@ -420,7 +563,7 @@ def confine_tool_versions(
         replayed = _folded_onto_trusted(
             trusted_config, replayed, config, section="scanners"
         )
-        trusted_config = apply_config_overrides(trusted_config, replayed)
+        trusted_config = replay_overrides_onto(trusted_config, replayed)
 
     ignored: List[str] = []
     for segment, kind in _PLUGIN_SEGMENTS:
@@ -430,7 +573,7 @@ def confine_tool_versions(
             seen.add(key)
             options = _options_of(section)
             trusted_section = trusted_config.get_plugin_config(kind, key)
-            trusted_options = (trusted_section or {}).get("options") or {}
+            trusted_options = _options_mapping(trusted_section)
             if options is None:
                 # A plugin section with no options mapping (or one that is not
                 # a mapping): the operator's pin still applies, so the mapping
@@ -536,9 +679,7 @@ def _confine_settings_files(
     )
 
     trusted_section = trusted_config.get_plugin_config("scanner", "detect-secrets")
-    trusted_settings = ((trusted_section or {}).get("options") or {}).get(
-        "scan_settings"
-    ) or {}
+    trusted_settings = _options_mapping(trusted_section).get("scan_settings") or {}
     ignored: List[str] = []
     for key, section in _scanner_sections(config, "detect-secrets"):
         options = _options_of(section)
