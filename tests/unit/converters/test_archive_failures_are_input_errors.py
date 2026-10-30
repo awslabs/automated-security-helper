@@ -21,8 +21,12 @@ directory first, so a scan run from inside the tree recorded a different path.
 from __future__ import annotations
 
 import errno
+import gzip
 import io
+import lzma
+import tarfile
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -51,6 +55,39 @@ def _damaged_zip() -> bytes:
     return data.replace(b"y = 2", b"y = 3")
 
 
+def _corrupted_deflate_zip() -> bytes:
+    """A zip whose central directory is sound and whose one deflated member's
+    compressed bytes are damaged, so the failure comes from the decompressor
+    (zlib.error) or the CRC check (BadZipFile) at extraction, not at open."""
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        # Varied enough that the compressed data runs to hundreds of bytes, so
+        # the damage below lands inside it and not in the central directory.
+        archive.writestr(
+            "z.js", "".join(f"z{i} = {i * 7919 % 1009}\n" for i in range(200))
+        )
+    data = bytearray(zipped.getvalue())
+    # The local file header's name comes first; its compressed data follows it.
+    start = data.find(b"z.js") + len(b"z.js")
+    assert data.find(b"PK\x01\x02") > start + 100
+    data[start + 10 : start + 18] = b"\xff" * 8
+    return bytes(data)
+
+
+def _cut_tar_bz2() -> bytes:
+    """A bz2-compressed tar whose stream is damaged inside its first block."""
+    packed = io.BytesIO()
+    with tarfile.open(fileobj=packed, mode="w:bz2") as archive:
+        info = tarfile.TarInfo("z.js")
+        content = b"z = 1\n" * 200
+        info.size = len(content)
+        archive.addfile(info, io.BytesIO(content))
+    data = bytearray(packed.getvalue())
+    assert data[:3] == b"BZh"
+    data[20:28] = b"\x00" * 8
+    return bytes(data)
+
+
 def _converter(context, monkeypatch, archive: Path) -> ArchiveConverter:
     monkeypatch.setattr(f"{ARCHIVE_MODULE}.scan_set", lambda **kwargs: [str(archive)])
     return ArchiveConverter(context=context, config=ArchiveConverterConfig())
@@ -61,11 +98,17 @@ def _converter(context, monkeypatch, archive: Path) -> ArchiveConverter:
     [
         pytest.param("lib/b.tar", b"not a tar at all\n", id="named-as-a-tar"),
         pytest.param("c.zip", _damaged_zip(), id="damaged-zip"),
+        pytest.param("d.zip", _corrupted_deflate_zip(), id="corrupted-deflate"),
+        pytest.param("lib/t.tar.bz2", _cut_tar_bz2(), id="damaged-bz2-stream"),
     ],
 )
 def test_an_archive_that_cannot_be_read_is_an_input_error(
     test_plugin_context, monkeypatch, name, content
 ):
+    """Whatever the reader raises for a damaged archive (a CRC mismatch, a
+    decompressor's error, a stream that is not a tar), the record is an input
+    error: this converter runs no tool, so only the run's own errno values make a
+    tool error (test_the_kind_of_a_failure_follows_the_error)."""
     source = Path(test_plugin_context.source_dir)
     archive = source / name
     archive.parent.mkdir(parents=True, exist_ok=True)
@@ -153,6 +196,23 @@ def test_a_failure_of_the_run_is_a_tool_error_that_no_suppression_accepts(
         pytest.param(zipfile.BadZipFile("bad"), "input", id="bad-zip"),
         pytest.param(archive_converter._UnreadableArchive("cut"), "input", id="cut"),
         pytest.param(EOFError(), "input", id="eof"),
+        pytest.param(tarfile.ReadError("unexpected end of data"), "input", id="tar"),
+        pytest.param(
+            tarfile.CompressionError("bz2 module is not available"),
+            "input",
+            id="tar-compression",
+        ),
+        pytest.param(gzip.BadGzipFile("Not a gzipped file"), "input", id="gzip"),
+        pytest.param(
+            zlib.error("Error -3 while decompressing data"), "input", id="zlib"
+        ),
+        pytest.param(lzma.LZMAError("Corrupt input data"), "input", id="lzma"),
+        pytest.param(OSError("Invalid data stream"), "input", id="bz2-stream-no-errno"),
+        pytest.param(
+            FileNotFoundError(errno.ENOENT, "No such file or directory"),
+            "input",
+            id="member-gone",
+        ),
         pytest.param(
             NotImplementedError("That compression method is not supported"),
             "input",
