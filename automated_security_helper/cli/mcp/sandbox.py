@@ -853,26 +853,39 @@ def _names_a_windows_share(path: object) -> bool:
     """Whether the text of ``path`` names something other than a local volume path.
 
     True for a UNC path, ``\\\\server\\share`` or ``//server/share``, and for any
-    path in the extended form, ``\\\\?\\...`` or ``\\\\.\\...``, whose device is not
-    a drive letter: ``\\\\?\\UNC\\server\\share`` (a share), ``\\\\?\\GLOBALROOT\\...``
-    (the object namespace, through which a redirector or a mounted share is reached
-    by another name) and ``\\\\.\\pipe\\...`` (a device, not a directory) are all
-    refused by the callers, which open only directories on a local volume. Only
-    ``\\\\?\\C:\\repo`` and ``\\\\.\\C:\\repo``, a drive letter after the prefix, are
-    local. ``os.readlink`` returns a junction's target in the extended form (its
-    substitute name, since Python 3.8), so the form is read here rather than taken
-    for a share by its two leading separators, and a junction to a local volume
-    stays local.
+    path in the extended form, ``\\\\?\\...``, ``\\\\.\\...`` or the native ``\\??\\...``,
+    whose device is not a drive letter: ``\\\\?\\UNC\\server\\share`` (a share),
+    ``\\\\?\\GLOBALROOT\\...`` (the object namespace, through which a redirector or a
+    mounted share is reached by another name) and ``\\\\.\\pipe\\...`` (a device, not
+    a directory) are all refused by the callers, which open only directories on a
+    local volume. Only ``\\\\?\\C:\\repo`` and ``\\\\.\\C:\\repo``, a drive letter and a
+    separator (or nothing) after the prefix, are local; a drive-relative
+    ``\\\\?\\C:repo`` is not. Forward slashes are read as separators first, so a
+    mixed spelling is judged by what it names. ``os.readlink`` returns a junction's
+    target in the extended form (its substitute name, since Python 3.8), so the
+    form is read here rather than taken for a share by its two leading separators,
+    and a junction to a local volume stays local.
     """
     text = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
-    if text[:4] in ("\\\\?\\", "\\\\.\\", "//?/", "//./"):
+    text = text.replace("/", "\\")
+    if text.startswith(("\\\\?\\", "\\\\.\\", "\\??\\")):
         return not _is_a_drive_spelling(text[4:])
-    return text.startswith(("\\\\", "//"))
+    return text.startswith("\\\\")
 
 
 def _is_a_drive_spelling(text: str) -> bool:
-    """Whether ``text`` starts with a drive letter and a colon, ``C:`` or ``C:\\repo``."""
-    return len(text) >= 2 and text[0].isascii() and text[0].isalpha() and text[1] == ":"
+    """Whether ``text`` is a drive letter and a colon, ``C:``, alone or before a separator.
+
+    ``C:`` and ``C:\\repo`` are drive spellings; the drive-relative ``C:repo`` is not,
+    because in the extended form nothing resolves it against a current directory.
+    """
+    return (
+        len(text) >= 2
+        and text[0].isascii()
+        and text[0].isalpha()
+        and text[1] == ":"
+        and (len(text) == 2 or text[2] == "\\")
+    )
 
 
 def _link_chain_names_a_windows_share(text: str) -> Optional[bool]:

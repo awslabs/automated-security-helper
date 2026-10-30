@@ -369,21 +369,30 @@ class TestWindowsRefusesBeforeResolving:
             ("\\\\.\\pipe\\ash", True),
             ("\\\\?\\Volume{0000}\\repo", True),
             ("\\\\?\\", True),
+            ("\\??\\UNC\\server\\share", True),
+            ("\\??\\GLOBALROOT\\Device\\Mup\\server\\share", True),
+            ("\\\\?/GLOBALROOT/Device/Mup/server/share", True),
+            ("\\\\?\\C:repo", True),
             ("\\\\?\\C:\\repo", False),
             ("\\\\.\\C:\\repo", False),
+            ("\\??\\C:\\repo", False),
             ("\\\\?\\c:", False),
             ("//?/D:/repo", False),
             ("C:\\repo", False),
+            ("C:repo", False),
+            ("\\repo", False),
             ("/srv/repo", False),
         ],
     )
     def test_the_share_spelling_reads_the_extended_form(self, text, share):
-        """Only a drive letter after ``\\\\?\\`` or ``\\\\.\\`` is a local volume.
+        """Only a drive letter after ``\\\\?\\``, ``\\\\.\\`` or ``\\??\\`` is a local volume.
 
         The object namespace (``GLOBALROOT``, through which a redirector or a
-        mounted share is reached by another name), a named pipe and a volume GUID
-        are refused with the UNC spellings: none is a directory on a local volume
-        the server may open. At tip15 every non-``UNC`` device read as local.
+        mounted share is reached by another name), a named pipe, a volume GUID and
+        a drive-relative ``C:repo`` behind the prefix are refused with the UNC
+        spellings: none is a directory on a local volume the server may open. A
+        forward slash is a separator, so a mixed spelling is judged by what it
+        names. At tip15 every non-``UNC`` device read as local.
         """
         assert sandbox._names_a_windows_share(text) is share
 
@@ -394,6 +403,8 @@ class TestWindowsRefusesBeforeResolving:
             "\\\\?\\GLOBALROOT\\??\\UNC\\server\\share\\tree",
             "\\\\?\\GLOBALROOT\\Device\\Mup\\server\\share\\tree",
             "\\\\.\\pipe\\ash",
+            "\\??\\UNC\\server\\share\\tree",
+            "\\\\?\\C:server\\share",
         ],
     )
     def test_a_device_namespace_path_is_refused_without_resolving(
