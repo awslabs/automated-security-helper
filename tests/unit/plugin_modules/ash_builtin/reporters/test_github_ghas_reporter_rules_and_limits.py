@@ -319,6 +319,24 @@ class TestUploadLimits:
         (rule,) = doc["tool"]["driver"]["rules"]
         assert rule["properties"]["tags"] == [f"t{i}" for i in range(10)]
 
+    def test_the_tag_cut_is_logged_with_the_rule_it_cut(self, reporter, monkeypatch):
+        logger = MagicMock()
+        monkeypatch.setattr(github_ghas_reporter, "ASH_LOGGER", logger)
+        run = _run(
+            [_result("R1", "a")],
+            [
+                ToolComponent(
+                    name="a",
+                    rules=[_rule("R1", "t", tags=[f"t{i}" for i in range(15)])],
+                )
+            ],
+        )
+
+        reporter.report(_model(run))
+
+        logged = [call.args[0] for call in logger.debug.call_args_list]
+        assert any("R1" in message and "15 tags" in message for message in logged)
+
     def test_results_past_the_cap_are_the_least_severe(self, reporter, monkeypatch):
         monkeypatch.setattr(github_ghas_reporter, "_MAX_RESULTS_PER_RUN", 2)
         results = [

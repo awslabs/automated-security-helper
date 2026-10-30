@@ -81,8 +81,10 @@ if TYPE_CHECKING:
 # document emitted here stays under every one: locations and tags are cut at what
 # GitHub keeps anyway, results past the cap are the least severe ones (GitHub
 # itself keeps "the top 5,000 results ... prioritized by severity" of a run) and
-# rules no emitted result names go first. Each cut is logged; a rejected upload
-# would have lost the whole file in silence.
+# rules no emitted result names are cut first. The cuts are logged by what they cost:
+# results at ERROR, rules at WARNING, and the locations and tags GitHub drops
+# itself at DEBUG. The table's limit on the compressed size of the file is not
+# checked here; a file over it is rejected by GitHub, with the whole upload lost.
 _MAX_RESULTS_PER_RUN = 25000
 _MAX_RULES_PER_RUN = 25000
 _LOCATIONS_KEPT_PER_RESULT = 100
@@ -980,6 +982,11 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # ten GitHub includes; past twenty it rejects the file.
             properties: Dict[str, Any] = {"security-severity": severity}
             if rule_info["tags"]:
+                if len(rule_info["tags"]) > _TAGS_KEPT_PER_RULE:
+                    ASH_LOGGER.debug(
+                        f"GHAS report: rule {rule_id}'s {len(rule_info['tags'])} tags "
+                        f"are cut to the {_TAGS_KEPT_PER_RULE} GitHub includes"
+                    )
                 properties["tags"] = list(rule_info["tags"])[:_TAGS_KEPT_PER_RULE]
             rule_dict["properties"] = properties
 
