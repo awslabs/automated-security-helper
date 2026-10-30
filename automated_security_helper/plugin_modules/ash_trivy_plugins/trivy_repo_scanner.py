@@ -553,7 +553,21 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             # records end_time, and one left from the previous target would give
             # this one an end before its start.
             self.end_time = datetime.now(timezone.utc)
-            raise ScannerError(f"Trivy scan failed: {str(e)}")
+            # Redacted, as the syft scanner's catch-all is: the text can quote a
+            # path the configuration read from the environment (an OSError naming
+            # the TRIVY_SECRET_CONFIG or TRIVY_IGNOREFILE file). Through the same
+            # guarded read as the command record above, so a values hook that
+            # raises does not replace this error with its own; with no usable
+            # answer nothing can be redacted, and the error text is not shown.
+            read = guarded_values_read(self)
+            if read.values is None:
+                raise ScannerError(
+                    "Trivy scan failed (the error text is not shown: the plugin's "
+                    f"values hook {read.failure()})"
+                )
+            raise ScannerError(
+                text_without_values(f"Trivy scan failed: {str(e)}", read.values)
+            )
 
 
 def _target_is_empty(target: Path) -> bool:

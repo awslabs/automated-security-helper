@@ -22,7 +22,8 @@ from it in these readings:
   environment value;
 - the default ``ignore_unfixed: true`` withheld findings with nothing said;
 - a scan that raised left the previous target's end time in place, and an empty
-  target kept the previous target's start time.
+  target kept the previous target's start time;
+- the catch-all error was not redacted, where the syft scanner's is.
 """
 
 from __future__ import annotations
@@ -356,6 +357,51 @@ def test_a_scan_that_raises_records_its_own_end_time(tmp_path):
             scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
 
     assert scanner.end_time is not None
+
+
+def test_the_catch_all_error_is_redacted(tmp_path):
+    """The syft scanner's pin, for trivy-repo: an exception in the scan that quotes
+    a value the scanner redacts (an OSError naming the TRIVY_SECRET_CONFIG or
+    TRIVY_IGNOREFILE file) must not come out as is."""
+    scanner = _scanner(tmp_path)
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_values_to_redact", return_value=("zz-secret-value",)),
+        patch.object(
+            scanner,
+            "_resolve_arguments",
+            side_effect=RuntimeError("cannot read zz-secret-value here"),
+        ),
+    ):
+        with pytest.raises(ScannerError) as raised:
+            scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
+
+    assert "Trivy scan failed" in str(raised.value)
+    assert "zz-secret-value" not in str(raised.value)
+
+
+def test_a_values_hook_that_raises_leaves_the_error_text_out(tmp_path):
+    """With no usable answer from the hook nothing can be redacted, so the error
+    carries the hook's failure and not the text, as the command record does."""
+    scanner = _scanner(tmp_path)
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_values_to_redact", side_effect=KeyError("hook")),
+        patch.object(
+            scanner,
+            "_resolve_arguments",
+            side_effect=RuntimeError("cannot read zz-secret-value here"),
+        ),
+    ):
+        with pytest.raises(ScannerError) as raised:
+            scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
+
+    message = str(raised.value)
+    assert "Trivy scan failed" in message
+    assert "zz-secret-value" not in message
+    assert "values hook" in message
 
 
 def test_an_empty_target_does_not_keep_the_previous_targets_start_time(tmp_path):
