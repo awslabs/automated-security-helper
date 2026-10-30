@@ -74,7 +74,14 @@ def _chain(error: BaseException) -> Iterator[BaseException]:
         yield current
         pending.append(current.__context__)
         pending.append(current.__cause__)
-        members = getattr(current, "exceptions", None)
+        # getattr's default covers AttributeError alone; an error whose lookup
+        # raises something else (a proxying error class) names no group, and a
+        # printer that raised here would replace the error it was printing, as
+        # carried_environment_values says of its carried-values read.
+        try:
+            members = getattr(current, "exceptions", None)
+        except Exception:  # noqa: BLE001 -- whatever the error's lookup raised
+            members = None
         if isinstance(members, tuple):
             pending.extend(
                 member for member in members if isinstance(member, BaseException)
