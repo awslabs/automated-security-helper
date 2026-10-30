@@ -418,8 +418,12 @@ def _raise_as_reported(answer: Dict[str, Any]) -> None:
             try:
                 rebuilt: OSError = os_cls(*fields)
             except TypeError:
-                # A builtin whose constructor reads the fields differently
-                # (BlockingIOError takes a count where the file name goes).
+                # No builtin OSError subclass refuses these five fields: every one
+                # takes OSError's own (errno, strerror, filename, winerror,
+                # filename2), and BlockingIOError reads an int third field as its
+                # characters_written rather than raising, so a descriptor-valued
+                # filename (": 3") lands there and its text drops the suffix. Kept
+                # for an OSError subclass another runtime constructs differently.
                 rebuilt = type(name, (OSError,), {})(*fields)
             raise rebuilt
         raise os_cls(message)
@@ -498,8 +502,19 @@ _READ_CHUNK_BYTES = 1024 * 1024
 #: The least of the batch's time limit a new child is started with. A child needs
 #: seconds to start the jsii kernel before it can answer anything; one started with
 #: less is certain to time out, and used to add a timed-out record and a "killed at
-#: the limit" reason for templates that were never going to be evaluated.
+#: the limit" reason for templates that were never going to be evaluated. Bounded
+#: by half the configured limit (``_child_floor``): a fixed floor above a small
+#: limit refused every second child, so the headerless retry the batch promises,
+#: and every retry after a child died at once, read "time ran out" with almost
+#: the whole limit left.
 _MIN_CHILD_SECONDS = 5.0
+
+
+def _child_floor(timeout: Optional[float]) -> float:
+    """The least of what is left of ``timeout`` another child is started with."""
+    if timeout is None:
+        return _MIN_CHILD_SECONDS
+    return min(_MIN_CHILD_SECONDS, timeout / 2)
 
 
 def _key(template: "str | Path") -> str:
@@ -940,9 +955,11 @@ class _Batch:
         The timeout bounds the whole of this call, not each child. The first child
         gets the configured limit; a child started after one died gets what is left
         of it, and when nothing is left, or less than a child needs to get past jsii
-        startup, the pending templates fail with the timeout reason without a child
-        being started. Each child used to get the full limit afresh, so a batch whose
-        children kept dying ran for about half as many limits as it had templates.
+        startup (``_child_floor``: a few seconds, never more than half the limit, so
+        a small limit still admits the retry), the pending templates fail with the
+        timeout reason without a child being started. Each child used to get the full
+        limit afresh, so a batch whose children kept dying ran for about half as many
+        limits as it had templates.
 
         A child the runner could not stop is recorded for the scanner's run-level
         gate whether or not it had answered every template first: a child that
@@ -962,7 +979,7 @@ class _Batch:
                 child_timeout = self.timeout
             else:
                 remaining = deadline - time.monotonic()
-                if remaining <= _MIN_CHILD_SECONDS:
+                if remaining <= _child_floor(self.timeout):
                     from automated_security_helper.utils.error_text import (
                         timeout_limit_token,
                     )

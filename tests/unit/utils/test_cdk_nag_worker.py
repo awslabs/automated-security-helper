@@ -170,8 +170,9 @@ def test_children_that_die_before_answering_fail_everything_after_two_tries(
     tmp_path, monkeypatch
 ):
     """A failure every child shares (here, every child dies at once) costs two children:
-    the first fails its template, the second proves the failure is not that template's
-    and fails everything still pending."""
+    the first never reached a template, so it fails none and the same list goes to one
+    more child; the second, dying the same way before its header, proves the failure is
+    not any template's and fails everything still pending."""
     templates = _templates(tmp_path, 3)
     calls: List[List[str]] = []
     _patch_spawn(monkeypatch, _fake_child(None, calls, returncode=1))
@@ -189,6 +190,31 @@ def test_children_that_die_before_answering_fail_everything_after_two_tries(
     assert len(calls) == 2, (
         "a second answerless child in a row must fail the rest, not be started once "
         f"per template; got {len(calls)} children for {len(templates)} templates"
+    )
+
+
+@pytest.mark.unit
+def test_the_headerless_retry_is_started_under_a_small_limit(tmp_path, monkeypatch):
+    """The second child is started only while more than a floor of the limit is left,
+    so one started with less does not time out for nothing. The floor was a fixed five
+    seconds whatever the limit, so under a limit of two seconds the retry the batch
+    promises never ran: every template read "time ran out" with almost the whole
+    limit unspent. The floor is bounded by half the limit."""
+    templates = _templates(tmp_path, 3)
+    calls: List[List[str]] = []
+    _patch_spawn(monkeypatch, _fake_child(None, calls, returncode=1))
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, timeout=2, values=()
+    ):
+        for t in templates:
+            with pytest.raises(RuntimeError) as raised:
+                _call(t, outdir)
+            message = str(raised.value)
+            assert "exited 1" in message, message
+            assert "time ran out" not in message, message
+    assert len(calls) == 2, (
+        f"the headerless retry was not started; got {len(calls)} children"
     )
 
 

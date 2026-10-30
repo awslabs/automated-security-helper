@@ -354,6 +354,41 @@ def test_an_os_error_on_a_file_descriptor_keeps_the_descriptor():
     assert str(excinfo.value) == str(raised)
 
 
+def test_a_rebuilt_descriptor_error_is_rendered_by_error_text_without_raising():
+    """The scanner renders a rebuilt error through ``error_text``, not ``str``; an
+    integer filename must cross that reader too (it names no path, so the text is the
+    error's own), and never raise inside the scanner's except handler."""
+    from automated_security_helper.utils.error_text import (
+        error_text,
+        os_error_without_named_file,
+    )
+
+    answer = cdk_nag_worker._raised_answer(OSError(9, "Bad file descriptor", 3))
+    with pytest.raises(OSError) as excinfo:
+        cdk_nag_worker._raise_as_reported(answer)
+
+    text = error_text(excinfo.value)
+    assert "Bad file descriptor" in text and text.endswith(": 3"), text
+    assert os_error_without_named_file(excinfo.value, "/tree/t.yaml") == text
+
+
+def test_a_rebuilt_blocking_io_error_keeps_the_builtin_class():
+    """BlockingIOError reads an int third field as characters_written, not as a
+    filename, and refuses nothing: the rebuilt error is the builtin class, with the
+    descriptor moved to that field and no path in its text."""
+    answer = cdk_nag_worker._raised_answer(
+        BlockingIOError(11, "Resource temporarily unavailable", "/tree/t.yaml")
+    )
+    answer["filename"] = 3
+    with pytest.raises(BlockingIOError) as excinfo:
+        cdk_nag_worker._raise_as_reported(answer)
+
+    assert type(excinfo.value) is BlockingIOError
+    assert excinfo.value.characters_written == 3
+    assert excinfo.value.filename is None
+    assert str(excinfo.value) == "[Errno 11] Resource temporarily unavailable"
+
+
 def test_an_os_error_without_an_errno_keeps_its_text():
     raised = OSError("socket closed")
 
