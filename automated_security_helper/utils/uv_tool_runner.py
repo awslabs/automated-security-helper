@@ -3684,7 +3684,17 @@ def get_uv_tool_command(
                     encoding="utf-8",
                     errors="replace",
                 )
-                probe_exited = True
+                # Neither memo has a scope in its key, on purpose: uv's answer
+                # about its copy of the tool does not depend on the tree. A
+                # non-zero exit from inside a sandbox scope is not that answer,
+                # though: the wrapper's view of the filesystem and network
+                # decides what the probe could reach there (as uv_availability
+                # and get_tool_version already read it), so remembered it
+                # would serve one backend's refusal to every caller on the
+                # host for the rest of the process. It counts as a probe that
+                # did not answer: this call falls back to the PATH binary and
+                # nothing is remembered. A success is uv's own, in any scope.
+                probe_exited = probe.returncode == 0 or _probe_scope_key() is None
                 if probe.returncode == 0:
                     # With the --from it was probed under: the bare command
                     # resolves another environment than the one that answered.
@@ -3693,7 +3703,7 @@ def get_uv_tool_command(
                         command.extend(["--from", from_spec])
                     command.append(tool_name)
                     started = uv_path
-                if not is_checking_only():
+                if probe_exited and not is_checking_only():
                     with _uv_tool_runner_cache_lock:
                         if _lookup_generation == generation:
                             _uv_probe_answers[probe_key] = probe.returncode == 0

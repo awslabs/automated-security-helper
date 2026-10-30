@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import subprocess  # nosec B404
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -125,6 +126,57 @@ class TestGetUvToolCommandMemo:
         assert get_uv_tool_command("bandit", offline=True) is None
         assert "--offline" in spawn.call_args.args[0]
         assert spawn.call_args.kwargs["env"]["UV_OFFLINE"] == "1"
+
+    def test_a_miss_from_inside_a_sandbox_scope_is_not_remembered(
+        self, spawn, monkeypatch, tmp_path
+    ):
+        """A non-zero exit under a sandbox scope is the wrapper's view of the
+        tool, not uv's: served from the memo, one backend's refusal answered
+        every caller on the host for the rest of the process."""
+        from automated_security_helper.utils.sandbox import scope as sandbox_scope
+
+        scoped = sandbox_scope.SandboxScope(
+            backend=SimpleNamespace(name="zz-backend"),
+            scanner_name="zz-scanner",
+            requirements=None,
+            source_dir=tmp_path,
+            output_dir=tmp_path,
+            results_dir=tmp_path,
+            scan_target=None,
+            offline=False,
+        )
+        monkeypatch.setattr(
+            uv_tool_runner, "find_executable", lambda name: "/usr/bin/bandit"
+        )
+        with sandbox_scope.sandbox_scope(scoped):
+            assert get_uv_tool_command("bandit") == ["/usr/bin/bandit"]
+        assert uv_tool_runner._uv_probe_answers == {}
+        assert uv_tool_runner._uv_command_cache == {}
+        spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.9", "")
+        assert get_uv_tool_command("bandit") == ["uv", "tool", "run", "bandit"]
+        assert spawn.call_count == 2
+
+    def test_a_success_from_inside_a_sandbox_scope_is_uvs_own(
+        self, spawn, monkeypatch, tmp_path
+    ):
+        """The control: a tool that answered under the wrapper is remembered."""
+        from automated_security_helper.utils.sandbox import scope as sandbox_scope
+
+        scoped = sandbox_scope.SandboxScope(
+            backend=SimpleNamespace(name="zz-backend"),
+            scanner_name="zz-scanner",
+            requirements=None,
+            source_dir=tmp_path,
+            output_dir=tmp_path,
+            results_dir=tmp_path,
+            scan_target=None,
+            offline=False,
+        )
+        spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.9", "")
+        with sandbox_scope.sandbox_scope(scoped):
+            assert get_uv_tool_command("bandit") == ["uv", "tool", "run", "bandit"]
+        assert get_uv_tool_command("bandit") == ["uv", "tool", "run", "bandit"]
+        assert spawn.call_count == 1
 
     def test_a_from_spec_probe_gets_the_environment_building_budget(self, spawn):
         """Resolving a spec with extras and a constraint on a cold cache builds
