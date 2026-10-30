@@ -585,3 +585,72 @@ def test_two_long_paths_sharing_a_tail_get_distinct_names(tmp_path):
     first = _synth_directory_name(tmp_path / "one" / tail, f"one/{tail}")
     second = _synth_directory_name(tmp_path / "two" / tail, f"two/{tail}")
     assert first != second
+
+
+# ---------------------------------------------------------------------------
+# What the logged failure reason names
+# ---------------------------------------------------------------------------
+
+
+def test_a_pack_whose_violations_could_not_be_placed_is_named_in_the_logged_reason(
+    tmp_path, caplog
+):
+    """The arm for a failed pack whose listed violations all took a skip path fed the
+    returned reason but not the logged one, so ash.log read ``evaluated this template
+    ()``: empty parentheses and no pack name. The detail is a count, no template
+    content, so the log carries the same text."""
+    report = _write_report(
+        tmp_path,
+        {
+            "pluginName": "AwsSolutions",
+            "conclusion": "failure",
+            "violations": [_violation(violatingConstructs="not-a-list")],
+        },
+    )
+    with caplog.at_level("ERROR"):
+        per_pack, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert per_pack == {}
+    assert failure is not None and "AwsSolutions: 1 listed violation(s)" in failure
+    logged = [
+        r.getMessage()
+        for r in caplog.records
+        if "not every requested pack evaluated this template" in r.getMessage()
+    ]
+    assert len(logged) == 1, [r.getMessage() for r in caplog.records]
+    assert (
+        "(pack(s) that reported failure without evaluating a rule: AwsSolutions: 1 "
+        in (logged[0])
+    ), logged[0]
+
+
+def test_a_report_holding_only_an_unrequested_failure_names_the_missing_pack(tmp_path):
+    """At the base the empty-report line fired whenever the mapping and the failed
+    list were both empty, which an unrequested plugin's failure leaves them: the
+    report held a plugin report, and the requested pack that wrote none went
+    unnamed. The entries read decide; the requested pack is named as missing."""
+    report = _write_report(
+        tmp_path,
+        {
+            "pluginName": "CloudFormation Validate",
+            "conclusion": "failure",
+            "violations": [],
+        },
+    )
+    per_pack, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert per_pack == {}
+    assert failure is not None
+    assert "contains no plugin reports" not in failure
+    assert "requested pack(s) with no entry in the report: AwsSolutions" in failure
+
+
+def test_a_report_with_no_plugin_entry_still_reads_as_holding_no_plugin_reports(
+    tmp_path,
+):
+    """The control: no entry at all keeps the empty-report line."""
+    report = _write_report(tmp_path)
+    per_pack, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert per_pack == {}
+    assert failure is not None and "contains no plugin reports" in failure

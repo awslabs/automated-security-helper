@@ -208,7 +208,7 @@ class _TemplateLocations:
         self._numbered: List[tuple[int, str]] = list(enumerate(template_lines, start=1))
         self._found: Dict[str, tuple[int | None, int | None]] = {}
         candidates: List[tuple[int, int, int]] = []
-        other_sections: List[tuple[int, int]] = []
+        other_sections: List[tuple[int, int, int]] = []
         for i, line_str in self._numbered:
             section_match = self._SECTION.match(line_str)
             if section_match is not None:
@@ -216,7 +216,7 @@ class _TemplateLocations:
                 continue
             other_match = self._OTHER_SECTION.match(line_str)
             if other_match is not None:
-                other_sections.append((len(other_match.group(1)), i))
+                other_sections.append((len(other_match.group(1)), i, other_match.end()))
         # Shallowest first, each with the text after its key and its body read once.
         self._sections: List[tuple[int, str, List[tuple[int, str]]]] = [
             (start, template_lines[start - 1][key_end:], self._body(start, indent))
@@ -231,35 +231,47 @@ class _TemplateLocations:
         top_indent = min((indent for indent, _, _ in candidates), default=None)
         inside_resources: set = set()
         for _, start, key_end in candidates:
-            inside_resources.update(self._json_object_lines(start, key_end))
+            inside_resources.update(self._json_object_lines(start, key_end) or ())
         other_sections = [
-            (indent, start)
-            for indent, start in other_sections
+            (indent, start, key_end)
+            for indent, start, key_end in other_sections
             if (top_indent is None or indent <= top_indent)
             and start not in inside_resources
         ]
         # The whole-file fallback never reads a line inside another top-level section:
         # its keys are not declarations at any depth, and in unindented JSON every key
-        # sits at depth 0, so "shallowest" there meant "first in the file".
+        # sits at depth 0, so "shallowest" there meant "first in the file". A JSON
+        # section is bounded by its own braces, as the Resources object is above: the
+        # indent-bounded read ended at the first ``}`` at the section's indent, which
+        # in unindented JSON closes the section's first nested object, not the section,
+        # so an Output written over several lines put the later Outputs back into the
+        # fallback. The section's key line is left out too: nothing on it declares a
+        # resource, and a one-line section holds its whole body there.
         excluded: set = set()
-        for indent, start in other_sections:
+        for indent, start, key_end in other_sections:
+            excluded.add(start)
+            object_lines = self._json_object_lines(start, key_end)
+            if object_lines is not None:
+                excluded.update(object_lines)
+                continue
             for i, _ in self._body(start, indent, stop_at_sections=True):
                 excluded.add(i)
         self._fallback_lines = [
             (i, line_str) for i, line_str in self._numbered if i not in excluded
         ]
 
-    def _json_object_lines(self, start: int, key_end: int) -> set:
+    def _json_object_lines(self, start: int, key_end: int) -> set | None:
         """The lines after a JSON section's key line that its object spans, by brackets.
 
-        Empty when the key opens no brace (YAML nests by indentation and is bounded by
-        indent instead). Brackets inside quoted strings are not counted; an object that
-        never closes spans to the end of the template.
+        None when the key opens no brace (YAML nests by indentation and is bounded by
+        indent instead); empty when the object closes on the key line. Brackets inside
+        quoted strings are not counted; an object that never closes spans to the end
+        of the template.
         """
         lines: set = set()
         after_key = self._numbered[start - 1][1][key_end:]
         if not after_key.lstrip().startswith("{"):
-            return lines
+            return None
         depth = 0
         in_string: str | None = None
         escaped = False
@@ -1286,6 +1298,10 @@ def _violations_from_validation_report(
                 or pack_name in expected_plugins
             ):
                 failed_packs.append(f"{pack_label}{detail}")
+                # The detail is a count, no template content, so the logged reason
+                # carries it too; without this line that reason named no pack for
+                # a template that failed on this arm alone.
+                failed_labels.append(f"{pack_label}{detail}")
                 failed_names.add(pack_name)
                 ASH_LOGGER.error(
                     f"cdk-nag pack '{pack_label}' reported '{conclusion}' and listed "
@@ -1305,13 +1321,16 @@ def _violations_from_validation_report(
     ASH_LOGGER.debug(
         f"cdk-nag validation report: {len(per_pack)} pack(s), {total} violation record(s)"
     )
-    if not per_pack and not failed_packs:
-        # The report parsed but named no plugin. Every registered pack writes an entry even
-        # when it found nothing -- a compliant template yields ``{pack: []}``, not ``{}`` -- so
-        # an empty mapping here means no pack reported, which is not a clean scan either.
-        # A failed pack leaves no entry either, so the mapping is empty too when every
-        # pack that wrote an entry failed; that is ``failed_packs``' reason below, which
-        # names the packs, not this one.
+    if not seen_names:
+        # The report parsed but held no plugin entry. Every registered pack writes an
+        # entry even when it found nothing -- a compliant template yields ``{pack: []}``,
+        # not ``{}`` -- so no entry at all means no pack reported, which is not a clean
+        # scan either. Decided on the entries read, not on ``per_pack`` and
+        # ``failed_packs``: a failed pack leaves no entry in the mapping, and an
+        # unrequested plugin's failure is logged without joining ``failed_packs``, so
+        # a report whose only entries were unrequested failures read as holding no
+        # plugin reports, and the requested pack it lacked went unnamed; that case
+        # falls through to ``missing`` below, which names it.
         reason = (
             f"cdk-nag validation report {report_path} contains no plugin reports. No pack "
             "evaluated this template."
@@ -1379,6 +1398,15 @@ def _violations_from_validation_report(
     return per_pack, None
 
 
+def _names_a_location(value: str) -> bool:
+    """Whether *value* spells a filesystem location (holds a path separator) rather
+    than a bare command name that PATH resolves; the scanner's dependency check reads
+    ``JSII_NODE`` by the same test. ``/`` is a separator on every platform node runs
+    on; ``os.sep`` and ``os.altsep`` cover the host's own."""
+    separators = {"/", os.sep, os.altsep} - {None}
+    return bool(value) and any(separator in value for separator in separators)
+
+
 def run_cdk_nag_against_cfn_template(
     template_path: Path,
     nag_packs: List[
@@ -1434,11 +1462,14 @@ def run_cdk_nag_against_cfn_template(
         # repository being scanned. So it is given the node ASH resolved, as an
         # absolute path. With none, it is left to start "node" itself unless that
         # would find one through the working directory. An explicit JSII_NODE is
-        # the operator's choice and is kept.
-        if not os.environ.get("JSII_NODE"):
-            node, refusal = lookup_for_scan(
-                "node", scan_root if scan_root is not None else Path.cwd()
-            )
+        # the operator's choice and is kept; one that is a bare command name is
+        # resolved through the same lookup first, so the node the dependency check
+        # approved on PATH is the one jsii starts, not a copy the working directory
+        # would supply to a bare name.
+        explicit_node = os.environ.get("JSII_NODE") or ""
+        lookup_root = scan_root if scan_root is not None else Path.cwd()
+        if not explicit_node:
+            node, refusal = lookup_for_scan("node", lookup_root)
             if node is not None:
                 jsii_env["JSII_NODE"] = node
             elif refusal is not None:
@@ -1451,6 +1482,14 @@ def run_cdk_nag_against_cfn_template(
                         "node is not on PATH, and the copy found through the "
                         f"working directory, {local}, is not run"
                     )
+        elif not _names_a_location(explicit_node):
+            node, refusal = lookup_for_scan(explicit_node, lookup_root)
+            if node is not None:
+                jsii_env["JSII_NODE"] = node
+            elif refusal is not None:
+                raise RuntimeError(refusal)
+            # Not on PATH and not in the tree: the operator's value stands, and jsii's
+            # own error names what it could not start.
         _original_jsii_env = apply_environ_overrides(jsii_env)
 
         # Suppress JSII stack traces by redirecting stderr for entire function

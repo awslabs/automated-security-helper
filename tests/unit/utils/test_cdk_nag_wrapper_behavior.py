@@ -3620,3 +3620,129 @@ def test_a_failed_packs_recorded_error_is_on_the_failure_reason_not_in_the_log(
         "reported 'failure' with no violations and recorded an error" in r.getMessage()
         for r in caplog.records
     ), [r.getMessage() for r in caplog.records]
+
+
+# ---------------------------------------------------------------------------
+# An Output written over several lines in unindented JSON
+# ---------------------------------------------------------------------------
+
+UNINDENTED_JSON_WITH_A_MULTI_LINE_OUTPUT = (
+    "{\n"
+    '"Outputs": {\n'
+    '"Other": {\n'
+    '"Value": "x"\n'
+    "},\n"
+    '"MyDataBucket": {"Value": {"Ref": "MyDataBucket"}}\n'
+    "},\n"
+    '"Resources": {\n'
+    '"MyDataBucket": {\n'
+    '"Type": "AWS::S3::Bucket"}\n'
+    "}\n"
+    "}\n"
+)
+
+
+def test_an_output_written_over_several_lines_does_not_end_the_outputs_section():
+    """The Outputs section used to be bounded by indent, ending at the first ``}`` at
+    its own indent, which in unindented JSON closes the first Output's object, not the
+    section. The later Output named like the resource then stayed in the whole-file
+    fallback and, sitting first, took the resource's finding, so a same-line
+    ``ash-ignore`` on the Output would have applied to it. A JSON section is bounded by
+    its braces, as the Resources object is."""
+    lines = UNINDENTED_JSON_WITH_A_MULTI_LINE_OUTPUT.splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    assert locations.of("MyDataBucket") == (9, 1), lines[8]
+
+
+def test_a_one_line_outputs_section_is_left_out_of_the_fallback_whole():
+    """The one-line control: the section's key line holds its whole body, and no key
+    on it declares a resource."""
+    lines = (
+        "{\n"
+        '"Outputs": {"MyDataBucket": {"Value": "x"}},\n'
+        '"Resources": {\n'
+        '"MyDataBucket": {\n'
+        '"Type": "AWS::S3::Bucket"}\n'
+        "}\n"
+        "}\n"
+    ).splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    assert locations.of("MyDataBucket") == (4, 1), lines[3]
+
+
+# ---------------------------------------------------------------------------
+# A bare JSII_NODE is resolved through the scan lookup before jsii starts it
+# ---------------------------------------------------------------------------
+
+
+def test_a_bare_jsii_node_is_resolved_to_the_path_the_check_approved(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """jsii hands JSII_NODE to the spawn as given; a bare name is looked up by the
+    spawn, which on Windows reads the working directory (the scanned repository)
+    before PATH. The dependency check approved the PATH copy, so the wrapper hands
+    jsii that copy's absolute path, through the same lookup every tool of the scan
+    gets."""
+    resolved = _fake_node(tmp_path / "installed" / "bin")
+    asked: list = []
+
+    def lookup(command, root):
+        asked.append((command, Path(root)))
+        return str(resolved), None
+
+    monkeypatch.setattr(cdk_nag_wrapper, "lookup_for_scan", lookup)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert [command for command, _ in asked] == ["nodejs"]
+    assert jsii_node_during_the_call == [str(resolved)]
+    assert os.environ.get("JSII_NODE") == "nodejs", "the operator's value is restored"
+
+
+def test_a_bare_jsii_node_found_only_in_the_tree_is_refused(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    monkeypatch.setattr(
+        cdk_nag_wrapper,
+        "lookup_for_scan",
+        lambda command, root: (None, f"{command} found only in the scanned tree"),
+    )
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    with pytest.raises(RuntimeError, match="found only in the scanned tree"):
+        _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert jsii_node_during_the_call == [], "cdk-nag started anyway"
+
+
+def test_a_bare_jsii_node_on_no_path_is_left_as_the_operator_set_it(
+    cdk_doubles,
+    template_file,
+    outdir,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """Neither on PATH nor in the tree: the value stands and jsii's own error names
+    what it could not start."""
+    monkeypatch.setattr(cdk_nag_wrapper, "lookup_for_scan", lambda c, r: (None, None))
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert jsii_node_during_the_call == ["nodejs"]
