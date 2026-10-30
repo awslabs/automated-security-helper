@@ -1189,15 +1189,19 @@ class TestPrompts:
         assert "run_ash_scan" in result
 
     def test_run_ash_security_scan_prompt_default(self):
-        """Prompt uses cwd when no source_dir is given."""
+        """With no source_dir the prompt names the session's source directory and
+        has the agent call run_ash_scan with no source_dir, never a directory of
+        the server's own: a prompt has no request context, so it cannot tell a
+        local client from a network one, and naming the working directory steered
+        a remote agent to pass the server's tree explicitly."""
         from automated_security_helper.cli.mcp_server import run_ash_security_scan
 
         with patch("pathlib.Path.cwd", return_value=Path("/default/dir")):
-            # The function calls Path.cwd().absolute() internally
-            with patch.object(Path, "absolute", return_value=Path("/default/dir")):
-                result = run_ash_security_scan(source_dir=None)
+            result = run_ash_security_scan(source_dir=None)
 
-        assert "/default/dir" in result or str(Path("/default/dir")) in result
+        assert "this session's source directory" in result, result
+        assert "called with no source_dir" in result, result
+        assert "/default/dir" not in result, result
 
     def test_analyze_security_findings_prompt(self):
         """Prompt includes directory and analysis instructions."""
