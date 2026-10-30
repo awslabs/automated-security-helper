@@ -52,7 +52,7 @@ def test_a_crlf_newline_changes_the_bytes_on_every_platform(tmp_path, writer):
 
 
 @pytest.mark.parametrize("writer", WRITERS)
-def test_newline_is_refused_for_a_binary_handle(tmp_path, writer):
+def test_newline_is_dropped_for_a_binary_handle(tmp_path, writer):
     """The text options are built only for a text handle: a binary writer gets
     none of them, so a ``newline`` passed with ``binary=True`` is dropped rather
     than handed to a bytes layer that would refuse it. Pinned so the drop stays

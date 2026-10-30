@@ -156,3 +156,29 @@ def test_refuse_links_below_refuses_a_directory_it_cannot_list(locked_tree):
 
     assert "locked" in str(refused.value)
     assert isinstance(refused.value.__cause__, PermissionError)
+
+
+def test_a_root_that_cannot_be_checked_is_refused_not_skipped(tmp_path, caplog):
+    """The sibling route at the root: ``Path.is_symlink`` already reads a missing
+    root as False, so the handler around it only ever met the other errors (a
+    parent the process cannot search, a link loop) and passed the whole root
+    over in silence. Those are refused, logged as the other sweep failures are."""
+    parent = tmp_path / "unsearchable"
+    root = parent / "results"
+    root.mkdir(parents=True)
+    (root / "escape").symlink_to(tmp_path)
+    parent.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError):
+                fs_guard.sweep_writable([root], ("SWEEPSECRET-4474",))
+    finally:
+        parent.chmod(0o700)
+
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Could not check or remove the root" in record.getMessage()
+    ]
+    assert lines, [record.getMessage() for record in caplog.records]
+    assert os.path.lexists(root / "escape"), "the link is left as found"

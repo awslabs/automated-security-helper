@@ -284,6 +284,29 @@ def _guard_root(path: Path, root: Optional[Union[str, Path]]) -> Optional[Path]:
     return named
 
 
+def _sweep_warning(
+    text: str, value_free: str, values: Iterable[str], values_unread: bool
+) -> None:
+    """Log a sweep failure, redacted with the sweep's values.
+
+    ``text`` names the entry or root and the OS error; ``value_free`` says the
+    same with nothing a tool or an option chose. When the caller could not read
+    its redaction values (``values_unread``) nothing in ``text`` can be hidden, so
+    the value-free line is logged instead.
+    """
+    if values_unread:
+        # The values to hide could not be read, so nothing here can be redacted:
+        # no entry name, root or OS error.
+        ASH_LOGGER.warning(value_free)
+        return
+    # The entry's name and the root are paths a tool or an option chose, so
+    # either can hold an env-read value: redacted with the sweep's values, and
+    # the scope's, before it is logged.
+    from automated_security_helper.utils.sandbox.scope import scope_shown_text
+
+    ASH_LOGGER.warning(scope_shown_text(text, tuple(values)))
+
+
 def _sweep_tree(
     root: Path, values: Iterable[str] = (), values_unread: bool = False
 ) -> int:
@@ -304,28 +327,17 @@ def _sweep_tree(
     """
     removed = 0
 
-    def warn(text: str, value_free: str) -> None:
-        if values_unread:
-            # The values to hide could not be read, so nothing here can be
-            # redacted: no entry name, root or OS error.
-            ASH_LOGGER.warning(value_free)
-            return
-        # The entry's name and the root are paths a tool or an option chose, so
-        # either can hold an env-read value: redacted with the sweep's values,
-        # and the scope's, before it is logged.
-        from automated_security_helper.utils.sandbox.scope import scope_shown_text
-
-        ASH_LOGGER.warning(scope_shown_text(text, tuple(values)))
-
     def unlistable(error: OSError) -> None:
         if error.errno == errno.ENOENT:
             # Removed while the walk ran: nothing is below it any more.
             return
-        warn(
+        _sweep_warning(
             f"Could not list {error.filename} under {root}: {error}",
             "Could not list a directory a scanner left in its results directory; "
             "it is not named because the plugin's redaction values could not be "
             "read",
+            values,
+            values_unread,
         )
         raise OSError(
             error.errno,
@@ -365,11 +377,13 @@ def _sweep_tree(
                 os.unlink(name, dir_fd=dir_fd)
                 removed += 1
             except OSError as e:
-                warn(
+                _sweep_warning(
                     f"Could not remove {name} under {root}: {e}",
                     "Could not remove an entry a scanner left in its results "
                     "directory; it is not named because the plugin's redaction "
                     "values could not be read",
+                    values,
+                    values_unread,
                 )
             if name in dirnames:
                 dirnames.remove(name)
@@ -445,8 +459,23 @@ def sweep_writable(
                 root.unlink()
                 removed += 1
                 continue
-        except OSError:
+        except FileNotFoundError:
+            # Removed since the check: nothing is there to sweep.
             continue
+        except OSError as e:
+            # The root could not be checked (a parent the process cannot search,
+            # a link loop) or a link at the root could not be removed. Passing it
+            # over would leave whatever is there for a reader that opens paths by
+            # name to follow, so it is refused as an unlistable directory is.
+            _sweep_warning(
+                f"Could not check or remove the root {root}: {e}",
+                "Could not check or remove a scanner's results directory root; it "
+                "is not named because the plugin's redaction values could not be "
+                "read",
+                values,
+                values_unread,
+            )
+            raise
         removed += _sweep_tree(root, values, values_unread)
     if removed:
         ASH_LOGGER.warning(
