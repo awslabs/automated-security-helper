@@ -4541,7 +4541,6 @@ def run_ended_with_the_server(
     )
 
 
-#: The option whose values a shown command line writes as their keys.
 def _argv_list(args: Any) -> Any:
     """``args`` as a list of its own, for the program to be resolved in.
 
@@ -4581,6 +4580,7 @@ def _resolved_or_refused(
         return error
 
 
+#: The option whose values a shown command line writes as their keys.
 _CONFIG_OVERRIDES_OPTION = "--config-overrides"
 
 
@@ -5032,7 +5032,9 @@ def _write_stream_logs(
 ) -> List[str]:
     """Write each captured stream to its log, after the sandbox's cleanup.
 
-    ``streams`` is (name, preference, text) triples; empty texts are skipped.
+    ``streams`` is (name, preference, text) triples; an empty or absent text is
+    written as an empty log, so a log a previous run left at the name is
+    truncated rather than read back as this run's (the comment at ``todo``).
     The sandbox's cleanup runs first because its FIRST step is sweep_writable
     over the policy's writable dirs (inserted by scope.prepare_spawn), which
     removes a link a scanner left at a log's name before ASH writes there;
