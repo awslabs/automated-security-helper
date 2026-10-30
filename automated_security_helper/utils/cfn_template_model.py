@@ -119,8 +119,14 @@ def _flatten_mapping_within_bound(
     sizes are added to the node's own, and the sum is refused when it passes
     ``MERGED_MAPPING_PAIRS_BOUND``. The pairs every merge in the document has added
     are summed on the loader too, so many small merges of one large mapping are
-    refused as one large merge is. ``flatten`` (the base class's) runs only when
-    both sums are within the bound; it finds the merged mappings already flat.
+    refused as one large merge is. The loader's sum is advanced as each merged
+    mapping is counted, never from a value read before the loop: a merged mapping
+    that is flattened inside this call (an anchor constructed later than the
+    mapping that merges it, which is every anchor inside a sequence) adds its own
+    merges to the sum first, and a write of "the sum before the loop plus this
+    node's merges" erased them, so a doubling chain anchored inside a list was
+    never refused. ``flatten`` (the base class's) runs only when both sums are
+    within the bound; it finds the merged mappings already flat.
 
     A mapping that merges itself (``a: &a {<<: *a}``) is left to the base class,
     which deletes the merge key before it recurses and builds ``{}``: the
@@ -154,7 +160,6 @@ def _flatten_mapping_within_bound(
     if entered:
         in_progress.add(id(node))
     try:
-        base_total = getattr(loader, "_merged_pairs_added", 0)
         incoming = 0
         for key_node, value_node in list(node.value):
             if getattr(key_node, "tag", None) != _MERGE_TAG:
@@ -177,12 +182,17 @@ def _flatten_mapping_within_bound(
                     # nothing is added by it.
                     continue
                 loader.flatten_mapping(merged_node)
-                incoming += len(merged_node.value)
-                # Compared as the sum grows, so the refusal comes at the first
+                added = len(merged_node.value)
+                incoming += added
+                # Compared as the sums grow, so the refusal comes at the first
                 # merged mapping that passes the bound, not after every merged
-                # mapping of a wide merge has been flattened and counted.
+                # mapping of a wide merge has been flattened and counted. The
+                # document's sum is read after the merged mapping was flattened
+                # and advanced by this mapping alone: the flatten above may have
+                # added that mapping's own merges to it.
                 expanded = incoming + len(node.value)
-                document_total = base_total + incoming
+                document_total = getattr(loader, "_merged_pairs_added", 0) + added
+                loader._merged_pairs_added = document_total
                 if (
                     expanded > MERGED_MAPPING_PAIRS_BOUND
                     or document_total > MERGED_MAPPING_PAIRS_BOUND
@@ -196,8 +206,6 @@ def _flatten_mapping_within_bound(
                         f"{MERGED_MAPPING_PAIRS_BOUND} ASH reads",
                         node.start_mark,
                     )
-        if incoming:
-            loader._merged_pairs_added = base_total + incoming
         flatten(node)
         done.add(id(node))
     finally:

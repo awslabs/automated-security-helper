@@ -76,6 +76,49 @@ def test_siblings_that_each_merge_a_large_mapping_once_are_refused_together():
         get_model_from_template_text(text, "siblings.yaml")
 
 
+def _chain_in_a_sequence(links: int, merges: int) -> str:
+    """The doubling chain to ``a<links>`` anchored INSIDE a sequence, then ``c0``
+    merging ``a<links>`` once and ``c1..c<merges>`` each merging the one before, and
+    a ``Resources`` that merges the last.
+
+    A mapping inside a sequence is constructed later than the mapping that merges
+    it (PyYAML builds sequences through a deferred generator), so every mapping of
+    the chain is flattened inside the ``Resources`` pre-check, nested, and the
+    document's sum has to survive that nesting.
+    """
+    lines = ["Defaults:", "  - &a0 {k: v}"]
+    for index in range(1, links + 1):
+        lines.append(f"  - &a{index} {{<<: [*a{index - 1}, *a{index - 1}]}}")
+    lines.append(f"  - &c0 {{<<: *a{links}}}")
+    for index in range(1, merges + 1):
+        lines.append(f"  - &c{index} {{<<: *c{index - 1}}}")
+    lines.append(f"Resources: {{<<: *c{merges}}}")
+    return "\n".join(lines) + "\n"
+
+
+def test_a_doubling_chain_anchored_inside_a_sequence_is_refused_by_both_loaders():
+    """At the previous tip the document's sum was read once, before the merged
+    mappings were flattened, and written back after them: a mapping flattened
+    inside that call added its own merges to the sum first, and the write erased
+    them. So a chain whose anchors sit inside a list (every one flattened inside
+    the ``Resources`` pre-check) read a sum of zero at every level and was never
+    refused, although ``a1..a16`` alone add 131,070 pairs; three more mappings
+    each merging ``a16`` then allocated 65,536 pair references apiece under a
+    document-wide bound of 100,000. Top-level anchors never reached this: cfn_tools
+    builds top-level mappings eagerly, so each was flattened before the mapping
+    that merges it."""
+    text = _chain_in_a_sequence(16, 3)
+    with pytest.raises(yaml.constructor.ConstructorError) as refused:
+        yaml.load(text, Loader=cfn_template_model._TemplateLoader)  # nosec B506
+    assert "added by this document's merges" in str(refused.value), str(refused.value)
+    with pytest.raises(yaml.constructor.ConstructorError):
+        yaml.load(text, Loader=cfn_template_model._TagTolerantLoader)  # nosec B506
+    with pytest.raises(TemplateConstructorError):
+        get_model_from_template_text(text, "nested-chain.yaml")
+    # The lenient read answers the question it is asked and raises nothing.
+    assert isinstance(_could_be_a_template(text), bool)
+
+
 def test_a_wide_merge_is_refused_before_its_list_is_built():
     """``{<<: [*a10 x 200]}`` is 204,800 pairs. The loader's own error names the
     expansion the merge WOULD have built: the pre-check computes it from the merged
