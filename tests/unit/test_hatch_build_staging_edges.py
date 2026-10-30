@@ -24,6 +24,13 @@ looked up, although git could still name it. Both handlers also printed the same
 "asset staging error" line, whichever step had failed; each now prints one line
 that names its step.
 
+Splitting the handlers then left a staging error printed and skipped, with a valid
+commit recorded: the artifact shipped a stale or missing assets/Dockerfile beside a
+healthy-looking revision, and nothing machine-readable showed it. A staging error
+now fails the build, like the missing staged source before it; a commit-step error
+still records "build-error" and lets the build go on, since it costs the revision
+and leaves the artifact complete.
+
 What is asserted
 ----------------
 Each runs the hook from a copy in ``tmp_path``. The console is a cp1252 wrapper
@@ -121,25 +128,37 @@ def test_the_staged_dockerfile_has_unix_line_breaks_on_every_host(
 
 
 @pytest.mark.parametrize(
-    ("staging_fails", "commit_fails", "steps"),
+    ("staging_fails", "commit_fails", "message"),
     [
-        pytest.param(True, False, ["staging the Dockerfile"], id="staging-only"),
-        pytest.param(False, True, ["recording the commit"], id="commit-only"),
+        pytest.param(
+            True,
+            False,
+            "Error staging the Dockerfile, failing the build",
+            id="staging-only",
+        ),
+        pytest.param(
+            False,
+            True,
+            "Unexpected error recording the commit, continuing the build",
+            id="commit-only",
+        ),
+        # The staging error ends the hook before the commit step runs.
         pytest.param(
             True,
             True,
-            ["staging the Dockerfile", "recording the commit"],
+            "Error staging the Dockerfile, failing the build",
             id="both",
         ),
     ],
 )
 def test_each_failing_step_prints_one_message_naming_it(
-    monkeypatch, tmp_path, capsys, staging_fails, commit_fails, steps
+    monkeypatch, tmp_path, capsys, staging_fails, commit_fails, message
 ):
     """Red at the base: both handlers printed the same two lines ("Unexpected
     error in build hook" and "Continuing build despite asset staging error"), so
     a commit-record failure said it was a staging error, and both failing printed
-    the pair twice with nothing to tell the steps apart."""
+    the pair twice with nothing to tell the steps apart. Red before the staging
+    error failed the build: the staging message said it was continuing."""
     hook = _hook_in(monkeypatch, tmp_path / "tree")
     _give_it_its_inputs(hook, "FROM scratch\n")
     sha = hashlib.sha1(b"a commit", usedforsecurity=False).hexdigest()
@@ -159,21 +178,23 @@ def test_each_failing_step_prints_one_message_naming_it(
         monkeypatch.setattr(hook, "staged_dockerfile_text", staged)
     monkeypatch.setattr(hook.subprocess, "run", run)
 
-    object.__new__(hook.CustomBuildHook)._stage_assets()
+    if staging_fails:
+        with pytest.raises(RuntimeError, match="would not stage"):
+            object.__new__(hook.CustomBuildHook)._stage_assets()
+    else:
+        object.__new__(hook.CustomBuildHook)._stage_assets()
 
     messages = [
-        line
-        for line in capsys.readouterr().out.splitlines()
-        if "continuing the build" in line
+        line for line in capsys.readouterr().out.splitlines() if "the build:" in line
     ]
-    assert len(messages) == len(steps), messages
-    for step in steps:
-        assert sum(step in line for line in messages) == 1, (step, messages)
+    assert len(messages) == 1, messages
+    assert message in messages[0], messages
 
 
-def test_an_error_while_staging_the_dockerfile_keeps_the_commit(monkeypatch, tmp_path):
-    """Red at the base: the staging error was handled by the code that records
-    "build-error", which ran before the commit was looked up."""
+def test_an_error_while_staging_the_dockerfile_fails_the_build(monkeypatch, tmp_path):
+    """Red before: the staging error was printed and skipped, and the hook went on
+    to record a valid commit beside a stale or missing assets/Dockerfile, with
+    nothing machine-readable to show it."""
     hook = _hook_in(monkeypatch, tmp_path / "tree")
     _give_it_its_inputs(hook, "FROM scratch\n")
     sha = hashlib.sha1(b"a commit", usedforsecurity=False).hexdigest()
@@ -191,6 +212,38 @@ def test_an_error_while_staging_the_dockerfile_keeps_the_commit(monkeypatch, tmp
 
     monkeypatch.setattr(hook.subprocess, "run", run)
 
-    object.__new__(hook.CustomBuildHook)._stage_assets()
+    with pytest.raises(RuntimeError, match="would not stage"):
+        object.__new__(hook.CustomBuildHook)._stage_assets()
 
-    assert hook.ASH_INSTALLED_REVISION_PATH.read_text() == sha
+    # The build stopped before it recorded a healthy-looking commit.
+    assert not hook.ASH_INSTALLED_REVISION_PATH.exists()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        pytest.param("unreadable", id="read-error"),
+        pytest.param("unwritable", id="write-error"),
+    ],
+)
+def test_a_dockerfile_that_cannot_be_read_or_written_fails_the_build(
+    monkeypatch, tmp_path, fault
+):
+    """Red before: a decode error on the root Dockerfile and a write error on
+    assets/Dockerfile were printed and the build went on."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _give_it_its_inputs(hook, "FROM scratch\n")
+    # No git: should the staging error not stop the hook, nothing is started.
+    monkeypatch.setattr(hook.shutil, "which", lambda name: None)
+    if fault == "unreadable":
+        # Bytes that are not utf-8, in place of the text _give_it_its_inputs wrote.
+        dockerfile = hook.ASH_REPO_ROOT / "Dockerfile"
+        dockerfile.write_bytes(b"FROM scratch\n# \xff\xfe\n")
+    else:
+        # A directory where the generated file goes: opening it to write fails.
+        (hook.ASH_ASSETS_PATH / "Dockerfile").mkdir(parents=True)
+
+    with pytest.raises((UnicodeDecodeError, OSError)):
+        object.__new__(hook.CustomBuildHook)._stage_assets()
+
+    assert not hook.ASH_INSTALLED_REVISION_PATH.exists()

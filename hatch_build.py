@@ -50,12 +50,12 @@ DOCKERFILE_STAGED_PACKAGE_FILES: tuple = (
 class StagedSourceMissingError(FileNotFoundError):
     """A file DOCKERFILE_STAGED_PACKAGE_FILES names is not in the tree being built.
 
-    Its own class, so _stage_assets fails the build on exactly this and on
-    nothing else. Catching FileNotFoundError by name caught more: a git found on
-    PATH whose interpreter is missing raises FileNotFoundError from
-    subprocess.run inside _get_commit_sha, and that case is an unrunnable git,
-    which records "build-error" and lets the build continue, like every other
-    error of the hook.
+    _stage_assets fails the build on this, as it does on every other error of the
+    Dockerfile staging. It is a class of its own so that it is told apart from the
+    plain FileNotFoundError that _get_commit_sha raises when git is found on PATH
+    but cannot be run (its interpreter missing, say). That is an unrunnable git,
+    which _record_commit meets by recording "build-error" and letting the build
+    continue: it costs the revision and leaves the artifact complete.
     """
 
 
@@ -392,18 +392,18 @@ class CustomBuildHook(BuildHookInterface):
                         "No Dockerfile available - this may be expected for wheel-only builds"
                     )
 
-        except StagedSourceMissingError:
-            # The staging loop's own assertion: a Dockerfile source that does not
-            # exist. Re-raised so the build fails here, as the comment above says
-            # it must. The handler below used to catch it with everything else,
-            # so the build went on with a stale or missing assets/Dockerfile and
-            # recorded "build-error" as the commit: exactly the silently-dropped
-            # stage the assertion exists to refuse. Caught by its own class, not
-            # as FileNotFoundError: that name also covers a git that cannot be
-            # run, which _record_commit handles.
-            raise
         except Exception as e:
-            _say(f"Unexpected error staging the Dockerfile, continuing the build: {e}")
+            # Every error of the staging fails the build, a missing source
+            # (StagedSourceMissingError) and a Dockerfile or staged file that would
+            # not read, decode or write alike, as the comment above says a dropped
+            # stage must. A handler that printed it and went on shipped a stale or
+            # missing assets/Dockerfile beside a healthy-looking commit record, so
+            # nothing machine-readable showed the failure and the artifact broke
+            # at image build time only. The commit step below is the other kind of
+            # error: it costs the revision and leaves the artifact complete, so it
+            # records "build-error" and the build goes on.
+            _say(f"Error staging the Dockerfile, failing the build: {e}")
+            raise
 
         # After the staging, outside its handler: an error while staging the
         # Dockerfile used to be caught by the same handler that records

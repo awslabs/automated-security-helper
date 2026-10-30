@@ -26,8 +26,9 @@ assertion. ``_get_commit_sha`` runs git with ``subprocess.run`` and handles only
 (its interpreter missing, say) raises FileNotFoundError with ENOENT, and that
 re-raise failed the build where an unrunnable git is meant to record
 "build-error" and continue (test_hatch_build_records_commit.py pins that for
-PermissionError). The missing staged source now raises its own class, caught by
-name.
+PermissionError). The missing staged source now raises its own class, so the two are
+told apart; since then every error of the Dockerfile staging fails the build (see
+test_hatch_build_staging_edges.py), and only the commit step records "build-error".
 
 What is asserted
 ----------------
