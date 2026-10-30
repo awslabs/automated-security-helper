@@ -176,8 +176,20 @@ CREDENTIAL_MARKERS = (
 _URL_USERINFO = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*@")
 
 #: Proxy settings only matter, and are only passed, when the scanner has a network.
+#: ALL_PROXY too: curl, Go's net/http and Python's urllib read it where no
+#: scheme-specific variable is set, so a host configured that way alone would
+#: otherwise lose its proxy inside the sandbox.
 PROXY_ENV_NAMES = frozenset(
-    {"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"}
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    }
 )
 
 #: Host directories every sandbox mounts read-only when they exist. These are the
@@ -293,10 +305,31 @@ class SandboxPolicy:
                 continue
             if _URL_USERINFO.match(value or ""):
                 continue
+            if key == "PYTHONPATH":
+                # Passed through for the workers ASH starts with its own
+                # interpreter; a relative or empty entry would be read against the
+                # scanner's working directory, the scanned tree.
+                value = _anchored_entries(value)
+                if not value:
+                    continue
             kept[key] = value
         kept["HOME"] = self.home.as_posix()
         kept.update(self.extra_env)
         return kept
+
+
+def _anchored_entries(value: str) -> str:
+    """``value``, a PATH-like list, without its relative and empty entries.
+
+    PYTHONPATH reaches every scanner (the ``PYTHON`` prefix) so a worker started
+    with ASH's interpreter imports from the same entries. A relative entry, or an
+    empty one, is read against the process's working directory, which for a
+    scanner is the scanned tree, so a Python-based scanner would import the
+    repository's modules; only the absolute entries are passed.
+    """
+    return os.pathsep.join(
+        entry for entry in value.split(os.pathsep) if os.path.isabs(entry)
+    )
 
 
 def _expand(raw: str) -> Optional[Path]:
@@ -340,6 +373,51 @@ def _screened_uv_directory(path: Optional[Path], named_by: str) -> Optional[Path
     return None
 
 
+def _xdg_directory(name: str, default: Path) -> Path:
+    """``$name`` when it is set and absolute, else ``default``.
+
+    The XDG base directory specification says a relative value is invalid and is
+    to be ignored, and uv ignores one the same way. Read as given, a relative
+    XDG_DATA_HOME or XDG_CACHE_HOME named uv's directories under ASH's working
+    directory, usually the scanned repository, which ``_existing`` then made
+    absolute and the policy mounted, as executable where uv's tools would be.
+    """
+    value = os.environ.get(name, "")
+    return Path(value) if value and os.path.isabs(value) else default
+
+
+def _uv_data_directories() -> Tuple[Optional[Path], Optional[Path]]:
+    """uv's tools directory and its managed-interpreter directory, as uv finds them.
+
+    UV_TOOL_DIR and UV_PYTHON_INSTALL_DIR where set, each screened
+    (_screened_uv_directory), else ``uv/tools`` and ``uv/python`` under the XDG
+    data home. None for a directory that is screened out; nothing says here
+    whether a directory exists.
+    """
+    data = _xdg_directory("XDG_DATA_HOME", _policy_home() / ".local" / "share")
+    tools = (
+        _screened_uv_directory(_expand(os.environ["UV_TOOL_DIR"]), "UV_TOOL_DIR")
+        if os.environ.get("UV_TOOL_DIR")
+        else data / "uv" / "tools"
+    )
+    pythons = (
+        _screened_uv_directory(
+            _expand(os.environ["UV_PYTHON_INSTALL_DIR"]), "UV_PYTHON_INSTALL_DIR"
+        )
+        if os.environ.get("UV_PYTHON_INSTALL_DIR")
+        else data / "uv" / "python"
+    )
+    return tools, pythons
+
+
+def _holds_a_python_lib(prefix: Path) -> bool:
+    """Whether ``prefix`` has a ``lib/python*`` directory: an interpreter installation."""
+    try:
+        return any(prefix.glob("lib/python*"))
+    except OSError:
+        return False
+
+
 def _uv_directories() -> List[Path]:
     """uv's tool and interpreter directories, without starting uv.
 
@@ -348,71 +426,102 @@ def _uv_directories() -> List[Path]:
     environment variables and XDG defaults rather than by running ``uv tool dir``:
     this runs for every scanner spawn, and a spawn here would itself need wrapping.
     A directory UV_TOOL_DIR or UV_PYTHON_INSTALL_DIR names is screened first
-    (_screened_uv_directory).
+    (_screened_uv_directory). Every filesystem predicate here runs under an OSError
+    guard: a tools directory whose entries cannot be examined (a name past the
+    system's length limit, an unreadable entry) contributes nothing rather than
+    failing the policy.
     """
-    home = Path.home()
-    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
-    candidates = [
-        _screened_uv_directory(_expand(os.environ["UV_TOOL_DIR"]), "UV_TOOL_DIR")
-        if os.environ.get("UV_TOOL_DIR")
-        else None,
-        _screened_uv_directory(
-            _expand(os.environ["UV_PYTHON_INSTALL_DIR"]), "UV_PYTHON_INSTALL_DIR"
-        )
-        if os.environ.get("UV_PYTHON_INSTALL_DIR")
-        else None,
-        data / "uv" / "tools",
-        data / "uv" / "python",
-    ]
-    found = _existing(candidates)
+    tools, pythons = _uv_data_directories()
+    found = _existing([tools, pythons])
     # Each installed tool's environment runs on the interpreter it was created
     # with, which need not be in uv's default python directory: a tool installed
     # with UV_PYTHON_INSTALL_DIR set elsewhere keeps pointing there. Its
     # bin/python symlink names it.
-    for tools_dir in [p for p in found if p.name == "tools" or p == candidates[0]]:
+    for tools_dir in [p for p in found if tools is not None and p == tools]:
         try:
             entries = list(tools_dir.iterdir())
         except OSError:
             continue
         for tool in entries:
             interpreter = tool / "bin" / "python"
-            if not interpreter.is_symlink():
+            try:
+                if not interpreter.is_symlink():
+                    continue
+                real = Path(os.path.realpath(interpreter))
+                # The link's path as spelled at each hop: a link that passes
+                # through a symlinked directory (a minor-version alias of the
+                # installation) dangles inside a sandbox that mounts only the
+                # resolved prefix, so each spelling of the prefix is mounted too.
+                spelled = [hop.parent.parent for hop in _symlink_hops(interpreter)[1:]]
+            except OSError:
                 continue
-            real = Path(os.path.realpath(interpreter))
             prefix = real.parent.parent
             # Only an interpreter installation: a prefix with a lib/python*
             # directory, never a broad directory a link happens to point into.
             if (
                 real.parent.name in _BIN_DIR_NAMES
-                and any(prefix.glob("lib/python*"))
+                and _holds_a_python_lib(prefix)
                 and not _broader_than_a_tool(prefix)
             ):
                 found.append(prefix)
+                found += [
+                    hop
+                    for hop in spelled
+                    if hop != prefix and Path(os.path.realpath(hop)) == prefix
+                ]
     return _existing(found)
 
 
 def _uv_tool_locks() -> List[Path]:
     """The ``.lock`` file of uv's tools directory, where one exists."""
-    home = Path.home()
-    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
-    tool_dir = (
-        _expand(os.environ["UV_TOOL_DIR"])
-        if os.environ.get("UV_TOOL_DIR")
-        else data / "uv" / "tools"
-    )
+    tool_dir, _pythons = _uv_data_directories()
     # Not the lock of a tools directory too broad to mount (_uv_directories warns).
     if tool_dir is None or _broader_than_a_tool(tool_dir):
         return []
     lock = tool_dir / ".lock"
-    return [lock.absolute()] if lock.is_file() and not lock.is_symlink() else []
+    try:
+        return [lock.absolute()] if lock.is_file() and not lock.is_symlink() else []
+    except OSError:
+        return []
 
 
 def uv_cache_directory() -> Optional[Path]:
     """uv's cache directory, the same way uv resolves it."""
     if os.environ.get("UV_CACHE_DIR"):
         return _expand(os.environ["UV_CACHE_DIR"])
-    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    return cache / "uv"
+    return _xdg_directory("XDG_CACHE_HOME", _policy_home() / ".cache") / "uv"
+
+
+def _uv_environment(
+    mounted: Sequence[Path], uv_cache: Optional[Path]
+) -> Dict[str, str]:
+    """Variables that point a sandboxed uv at the directories the policy mounts.
+
+    uv finds its tools, its managed interpreters and its cache from UV_TOOL_DIR,
+    UV_PYTHON_INSTALL_DIR and UV_CACHE_DIR, else from the XDG data and cache
+    homes, else under $HOME. ``filter_env`` drops the XDG variables and every
+    backend gives the scanner another HOME (a private one, or the real one with
+    a tmpfs over it), so a uv that computed those directories inside the sandbox
+    looked where the policy mounted nothing: ``uv tool run`` found no installed
+    tool, and under bwrap's throwaway overlay the host cache sat mounted while uv
+    used an empty one in the private home. Each variable the environment does not
+    set is set to the mounted directory uv would otherwise have computed. A
+    backend that mounts the cache read-only points UV_CACHE_DIR at a private
+    directory on top of this (``_private_caches``).
+    """
+    tools, pythons = _uv_data_directories()
+    mounted_real = {os.path.realpath(p) for p in mounted}
+    hints: Dict[str, str] = {}
+    for name, path in (
+        ("UV_TOOL_DIR", tools),
+        ("UV_PYTHON_INSTALL_DIR", pythons),
+        ("UV_CACHE_DIR", uv_cache),
+    ):
+        if path is None or os.environ.get(name):
+            continue
+        if os.path.realpath(path) in mounted_real:
+            hints[name] = path.absolute().as_posix()
+    return hints
 
 
 _BIN_DIR_NAMES = ("bin", "sbin", "Scripts")
@@ -479,6 +588,33 @@ def _distinct_home(home: Path, passwd_home: Optional[Path]) -> Optional[Path]:
     return real
 
 
+def _policy_home() -> Path:
+    """The home directory the policy hides and hands the scanner as HOME.
+
+    ``core.constants.usable_home``'s answer: HOME when it is set, not empty and
+    absolute; else the passwd entry's home when that is absolute. ``Path.home()``
+    read HOME as given, so a relative HOME named a directory under ASH's working
+    directory, usually the scanned repository: the backends hid that part of the
+    tree as the home and told the scanner its home was there, and uv's default
+    directories were computed under it. An empty HOME read as the root.
+
+    With no usable home, and for a home of "/" (a container's), the filesystem
+    root is returned. The root names no home: ``_homes`` leaves it out, the
+    backends mount no private home over it and deny no reads under it, and the
+    scanner's HOME is the root, as a process with that environment reads it.
+    """
+    from automated_security_helper.core.constants import usable_home
+
+    home = usable_home()
+    if home is None:
+        passwd = _passwd_home()
+        if passwd is not None and passwd.is_absolute():
+            home = passwd
+    if home is None:
+        return Path(Path.cwd().anchor)
+    return home
+
+
 def _homes() -> List[Path]:
     """The home directories, resolved, that a path's breadth is measured against.
 
@@ -488,8 +624,8 @@ def _homes() -> List[Path]:
     left out of both: a HOME of "/", as in some containers, names no home, and as
     one it would make every top-level directory "directly under a home".
     """
-    home = Path(os.path.realpath(Path.home()))
-    homes = [] if home == Path("/") else [home]
+    home = Path(os.path.realpath(_policy_home()))
+    homes = [] if home == Path(home.anchor) else [home]
     other = _distinct_home(home, _passwd_home())
     return homes if other is None else [*homes, other]
 
@@ -541,8 +677,11 @@ def _contained_option_paths(
     Options are repository-writable, so a path they name is mounted only when it
     resolves inside one of ``roots`` (the source tree and the operator's
     ``extra_read_paths``) and is a regular file or directory, never a socket or
-    device. The resolved path is what goes into the policy, so a link swapped after
-    this check is not followed later.
+    device. The resolved path is what goes into the policy, so the policy names
+    the file this check examined and not the spelling the option gave. The
+    backends resolve every policy path again when they plan the spawn, so a link
+    put in the resolved path's place between this check and the spawn is followed
+    then; the containment is decided here, the mount is made there.
     """
     real_roots = [Path(os.path.realpath(root)) for root in roots]
     kept: List[str] = []
@@ -642,16 +781,40 @@ def _broader_than_a_tool(
     any directory directly under one (~/.local, ~/.cargo): each of those holds other
     files of the user's. A directory a link at the top of a home names (``links``,
     _home_link_targets) counts as directly under that home, so it and any directory
-    holding it are true too. ``homes`` defaults to _homes().
+    holding it are true too. Also true for the XDG data home, ``~/.local/share``,
+    and for any directory in a home that holds a ``keyrings`` directory: two
+    levels down, so the rule above admitted it, and it holds the user's keyrings.
+    ``homes`` defaults to _homes().
     """
     real = Path(os.path.realpath(path))
     if real == Path("/"):
         return True
     homes = _homes() if homes is None else homes
     links = _home_link_targets(homes) if links is None else links
-    return any(
+    if any(
         real == home or real in home.parents or real.parent == home for home in homes
-    ) or any(real == link or real in link.parents for link in links)
+    ) or any(real == link or real in link.parents for link in links):
+        return True
+    in_a_home = any(home in real.parents for home in homes)
+    return in_a_home and (
+        (real.name == "share" and real.parent.name == ".local")
+        or os.path.lexists(real / "keyrings")
+    )
+
+
+def _exposes_a_home(real: Path, homes: Sequence[Path]) -> bool:
+    """Whether a read grant of ``real`` would expose far more than one directory.
+
+    A filesystem root, a home directory, a directory holding one, or a directory
+    holding a directory a link at the top of a home names (~/.local kept on
+    another disk is part of that home). A directory directly under a home
+    (``~/.gem``, ``~/rules``) is admitted: whoever named it chose it.
+    """
+    return (
+        real == Path(real.anchor)
+        or any(real == home or real in home.parents for home in homes)
+        or any(real in link.parents for link in _home_link_targets(homes))
+    )
 
 
 def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
@@ -679,14 +842,7 @@ def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
                     "not a directory."
                 )
             continue
-        real = Path(os.path.realpath(value))
-        if (
-            real == Path(real.anchor)
-            or any(real == home or real in home.parents for home in homes)
-            # Holding a directory a link at the top of a home names (~/.local kept
-            # on another disk) is holding part of that home.
-            or any(real in link.parents for link in _home_link_targets(homes))
-        ):
+        if _exposes_a_home(Path(os.path.realpath(value)), homes):
             from automated_security_helper.utils.log import ASH_LOGGER
 
             ASH_LOGGER.warning(
@@ -699,6 +855,38 @@ def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
     return granted
 
 
+def _screened_declared_paths(
+    spelled: Sequence[str], scanner_name: str, kind: str
+) -> List[Path]:
+    """A scanner's declared ``read_paths`` or ``cache_paths``, expanded and screened.
+
+    Each is ``_expand``ed (``~`` and ``$VAR``), and the same breadth screen the
+    ``read_path_env`` values get applies (``_exposes_a_home``): a value that
+    resolves to a filesystem root, a home or a directory holding one is refused
+    with a warning. cfn-nag declares ``$GEM_HOME``, trivy and grype declare their
+    cache variables; an operator who points one of those at the home directory
+    or at ``/`` would otherwise have it mounted whole, and executable, for the
+    scanner. ``~/.gem`` itself, a directory directly in the home, is admitted.
+    """
+    homes = _homes()
+    kept: List[Path] = []
+    for raw in spelled:
+        path = _expand(raw)
+        if path is None:
+            continue
+        if _exposes_a_home(Path(os.path.realpath(path)), homes):
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.warning(
+                f"{scanner_name}'s {kind} entry {raw!r} names {path.as_posix()!r}, "
+                "which is not mounted in the scanner sandbox: it would expose far "
+                "more than one directory."
+            )
+            continue
+        kept.append(path)
+    return kept
+
+
 def _symlink_hops(path: Path) -> List[Path]:
     """``path`` and every path its symlink chain passes through, as spelled.
 
@@ -706,6 +894,12 @@ def _symlink_hops(path: Path) -> List[Path]:
     which may itself pass through a symlinked ``/home/me``. Mounting only the final
     real file leaves the intermediate spellings dangling inside the sandbox, and
     exec fails with ENOENT on a file that exists.
+
+    A relative link target is read against the directory the link really sits in,
+    as the kernel reads it: ``..`` in the target names that directory's parent,
+    not the parent of the spelling, which differs once the spelling passed through
+    a symlinked directory. Folded lexically against the spelling, ``../b`` after a
+    link ``/a -> /x/y`` named ``/b`` where the kernel reads ``/x/b``.
     """
     hops = [path]
     current = path
@@ -713,7 +907,10 @@ def _symlink_hops(path: Path) -> List[Path]:
         if not current.is_symlink():
             break
         target = Path(os.readlink(current))
-        current = target if target.is_absolute() else current.parent / target
+        if target.is_absolute():
+            current = target
+        else:
+            current = Path(os.path.realpath(current.parent)) / target
         hops.append(Path(os.path.normpath(current)))
     return hops
 
@@ -764,9 +961,53 @@ def _executable_prefix(argv0: str) -> List[Path]:
         is_bin = _a_bin_directory(parent, homes, links)
         if is_bin or not too_broad(parent):
             paths.append(parent)
-        if is_bin and not too_broad(parent.parent):
+        # The prefix above a bin directory: refused when it is directly in a home
+        # (~/.local, ~/.cargo), unless it is one installation (a venv or a conda
+        # root, ~/.venv or ~/miniconda3), which is what _refuse_a_home_among admits
+        # for ASH's own interpreter; a tool installed there could otherwise not
+        # start, its bin directory mounted and its library not.
+        if is_bin and (
+            not too_broad(parent.parent)
+            or _an_installation_directly_in_a_home(parent.parent, homes)
+        ):
             paths.append(parent.parent)
     return _existing(paths)
+
+
+def _an_installation_directly_in_a_home(path: Path, homes: Sequence[Path]) -> bool:
+    """Whether ``path`` resolves to a venv or conda root directly in one of ``homes``."""
+    real = Path(os.path.realpath(path))
+    return real.parent in homes and _is_an_installation_root(real)
+
+
+#: env's options that take the next word as their argument.
+_ENV_OPTIONS_WITH_AN_ARGUMENT = frozenset({"-u", "--unset", "-C", "--chdir"})
+
+
+def _env_program(words: Sequence[str]) -> Optional[str]:
+    """The program an ``env`` shebang line runs: the first word after env's own.
+
+    Skipped: env's options, the argument of one that takes one (``-u NAME``,
+    ``-C DIR``), a ``--option=value`` spelling, ``-S`` (what follows is the split
+    command line, whose first word is the program) and ``NAME=value`` assignments.
+    Read as the program, an assignment or an option's argument named a program
+    that exists nowhere, so the interpreter's prefix was not mounted and the
+    script could not start inside the sandbox.
+    """
+    skip_next = False
+    for word in words:
+        if skip_next:
+            skip_next = False
+            continue
+        if word in ("-S", "--split-string"):
+            continue
+        if word.startswith("-"):
+            skip_next = word in _ENV_OPTIONS_WITH_AN_ARGUMENT
+            continue
+        if "=" in word:
+            continue
+        return word
+    return None
 
 
 def _shebang_interpreter(script: Path) -> Optional[Path]:
@@ -783,24 +1024,33 @@ def _shebang_interpreter(script: Path) -> Optional[Path]:
         return None
     program = words[0]
     if os.path.basename(program) == "env":
-        names = [w for w in words[1:] if not w.startswith("-")]
-        if not names:
+        name = _env_program(words[1:])
+        if name is None:
             return None
-        program = _lookup(names[0]) or ""
+        program = _lookup(name) or ""
     return Path(program) if os.path.isabs(program) else None
 
 
 def _ash_paths() -> Tuple[List[Path], List[Path]]:
     """ASH's own package (rule packs and configs it passes to scanners) and Python.
 
-    Returns every path to mount, and the sys.path entries among them that are only
-    import entries (not an interpreter directory or a link directory of it), which
-    the caller keeps from being executable where they are the scan's data.
+    Returns every path to mount, and the entries among them that are data where
+    they sit in the scan's data: the sys.path entries that are only import entries
+    (not an interpreter directory or a link directory of it), and the ASH bin
+    directory. The caller keeps those from being executable, and from being read
+    by a tool given a staged copy, where they lie inside a scanned tree; ASH's
+    interpreter and link directories stay executable wherever they are.
 
-    And the ASH bin directory, when it is anchored. A relative ASH_BIN_PATH is not
-    searched for tools (subprocess_utils.find_executable), and here _existing would
-    make it absolute against the cwd: ASH_BIN_PATH=bin, run from the repository,
-    made the bin/ it committed a read-only and executable path.
+    The ASH bin directory is mounted when it is anchored. A relative ASH_BIN_PATH is
+    not searched for tools (subprocess_utils.find_executable), and here _existing
+    would make it absolute against the cwd: ASH_BIN_PATH=bin, run from the
+    repository, made the bin/ it committed a read-only and executable path. An
+    anchored one inside the scanned tree is mounted, as data.
+
+    An interpreter with no path (an embedding that leaves ``sys.executable``
+    empty) names no binary directory and no link directory: ``realpath("")`` is
+    the working directory, whose grandparent was mounted as the interpreter's
+    prefix and which was itself mounted as a link directory.
     """
     from automated_security_helper.utils.subprocess_utils import _bin_path, _is_anchored
 
@@ -845,23 +1095,23 @@ def _ash_paths() -> Tuple[List[Path], List[Path]]:
 
     import_path = [Path(entry) for entry in sys.path if _importable(entry)]
     interpreter_dirs = [Path(sys.prefix), Path(sys.base_prefix), Path(sys.exec_prefix)]
-    # The real interpreter's install prefix, read from where its binary is. For a
-    # binary directly in a top-level directory that is the filesystem root, which
-    # names no installation. Where that directory is already a system read path
-    # (/bin without a merged /usr, /opt), the root is left out: the binary's
-    # directory is mounted as a link directory below, and that grants nothing new.
-    # Anywhere else (/mnt/python3, /srv/python3) it stays in and is refused, since
-    # leaving it out would mount that whole top-level directory for every scanner.
-    # A sys prefix of "/" is refused either way.
-    real_binary_dir = Path(os.path.realpath(sys.executable)).parent
-    real_prefix = real_binary_dir.parent
-    system_paths = [Path(path) for path in SYSTEM_READ_PATHS]
-    system_paths += [Path(os.path.realpath(path)) for path in system_paths]
-    if real_prefix.parent != real_prefix or not _inside_any(
-        real_binary_dir, system_paths
-    ):
-        interpreter_dirs.append(real_prefix)
-    link_dirs = [hop.parent for hop in _symlink_hops(Path(sys.executable))]
+    link_dirs: List[Path] = []
+    if sys.executable:
+        # The real interpreter's install prefix, read from where its binary is. For
+        # a binary directly in a top-level directory that is the filesystem root,
+        # which names no installation. Where that directory is already a system
+        # read path (/bin without a merged /usr, /opt), the root is left out: the
+        # binary's directory is mounted as a link directory below, and that grants
+        # nothing new. Anywhere else (/mnt/python3, /srv/python3) it stays in and is
+        # refused, since leaving it out would mount that whole top-level directory
+        # for every scanner. A sys prefix of "/" is refused either way.
+        real_binary_dir = Path(os.path.realpath(sys.executable)).parent
+        real_prefix = real_binary_dir.parent
+        if real_prefix.parent != real_prefix or not _inside_any(
+            real_binary_dir, _system_read_paths_real()
+        ):
+            interpreter_dirs.append(real_prefix)
+        link_dirs = [hop.parent for hop in _symlink_hops(Path(sys.executable))]
     bin_path = _bin_path()
     # Only when anchored: a relative ASH_BIN_PATH is not searched for tools
     # (subprocess_utils.find_executable), and _existing would make it absolute
@@ -873,9 +1123,9 @@ def _ash_paths() -> Tuple[List[Path], List[Path]]:
         interpreter_dirs, link_dirs, bin_path, homes, interpreter_roots
     )
     interpreter_real = {os.path.realpath(p) for p in [*interpreter_dirs, *link_dirs]}
-    import_only = [
+    data_entries = [
         p for p in import_path if os.path.realpath(p) not in interpreter_real
-    ]
+    ] + ([bin_path] if bin_path is not None else [])
     return (
         _existing(
             [
@@ -887,8 +1137,14 @@ def _ash_paths() -> Tuple[List[Path], List[Path]]:
                 bin_path,
             ]
         ),
-        _existing(import_only),
+        _existing(data_entries),
     )
+
+
+def _system_read_paths_real() -> List[Path]:
+    """The system read paths, as spelled and resolved."""
+    system_paths = [Path(path) for path in SYSTEM_READ_PATHS]
+    return system_paths + [Path(os.path.realpath(path)) for path in system_paths]
 
 
 def _is_an_installation_root(path: Path) -> bool:
@@ -1001,7 +1257,9 @@ def _refuse_a_home_among(
       ~/.local is not);
     - a link's directory that is "/", a home or holds one, or is inside a home
       without being a bin, sbin or Scripts directory or lying inside an interpreter
-      (~/.config for ~/.config/python3);
+      (~/.config for ~/.config/python3), or is a top-level directory that is not a
+      system read path (/srv for /srv/python3: mounted, it would show every
+      scanner all of that directory, the way a prefix of "/" would);
     - an ASH_BIN_PATH that is "/", a home or holds one, or is directly in a home
       without being a bin, sbin or Scripts directory (~/.local).
     Whether a directory is a bin directory is judged on what it resolves to
@@ -1037,6 +1295,7 @@ def _refuse_a_home_among(
             directly_in_a_home(real) and not _is_an_installation_root(real)
         ):
             raise SandboxUnavailable(_refused_prefix(path, real, homes, links))
+    system_paths = _system_read_paths_real()
     for path in link_dirs:
         real = Path(os.path.realpath(path))
         in_a_home = any(home in real.parents for home in homes) or any(
@@ -1051,6 +1310,18 @@ def _refuse_a_home_among(
             and not part_of_an_interpreter
         ):
             raise SandboxUnavailable(_refused_link(path, real, homes, links))
+        if (
+            real != Path(real.anchor)
+            and real.parent == Path(real.anchor)
+            and not _inside_any(real, system_paths)
+        ):
+            raise SandboxUnavailable(
+                f"ASH's Python {sys.executable!r} is reached through a link in "
+                f"{path.as_posix()!r}, a top-level directory that is not a system "
+                "read path, so the sandbox would mount all of it for every scanner. "
+                "Use an interpreter whose path passes through no such directory, or "
+                "a virtual environment created from the interpreter's real path."
+            )
     if bin_path is not None and os.path.isdir(bin_path):
         real = Path(os.path.realpath(bin_path))
         if holds_a_home(real) or (
@@ -1066,28 +1337,39 @@ def _refuse_a_home_among(
             )
 
 
-def _refuse_symlinked_results_dir(output_dir: Path, results_dir: Path) -> None:
+def _refuse_symlinked_results_dir(
+    output_dir: Path, results_dir: Path, source_dir: Optional[Path] = None
+) -> None:
     """Refuse a results directory reached through a symlink below the output dir.
 
     The default output directory is inside the source tree, so the scanned
     repository can commit ``.ash/ash_output/scanners/<name>`` as a symlink to any
     directory the user can write. Mounting the results directory writable would
     then hand the scanner that directory.
+
+    Every component below the output directory is examined. A results directory
+    outside the output directory but inside ``source_dir`` is examined below the
+    source directory the same way: those components are the repository's too, and
+    examining the final one alone left a committed link above it unseen. A
+    results directory under neither is examined at its final component only;
+    the components above it are the operator's spelling.
     """
     output_dir = Path(os.path.abspath(output_dir))
     results_dir = Path(os.path.abspath(results_dir))
-    try:
-        relative = results_dir.relative_to(output_dir)
-    except ValueError:
-        relative = None
-    if relative is None:
-        components = [results_dir]
-    else:
+    components = [results_dir]
+    for root in [output_dir] + (
+        [Path(os.path.abspath(source_dir))] if source_dir else []
+    ):
+        try:
+            relative = results_dir.relative_to(root)
+        except ValueError:
+            continue
         components = []
-        current = output_dir
+        current = root
         for part in relative.parts:
             current = current / part
             components.append(current)
+        break
     for component in components:
         if component.is_symlink():
             raise SandboxUnavailable(
@@ -1203,7 +1485,7 @@ def build_scanner_policy(
             so nothing in it is executable. The pre-installed tool check's staged
             Nix metadata under TMPDIR is the one such directory.
     """
-    real_home = Path.home()
+    real_home = _policy_home()
     read_granted = not requirements.read_paths_require_grant or scanner_name in set(
         read_path_scanners
     )
@@ -1243,16 +1525,25 @@ def build_scanner_policy(
         else []
     )
     scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
-    ash_paths, ash_import_entries = _ash_paths()
+    ash_paths, ash_data_entries = _ash_paths()
     homes = _homes()
+    trees = (source_dir, output_dir, *scanned_trees)
+    # Declared read paths from the scanner's own code, and the operator's extra
+    # read paths: screened and expanded here, named again below where the
+    # executable set is decided.
+    screened_declared_read = _screened_declared_paths(
+        declared_read, scanner_name, "read_paths"
+    )
+    tool_prefixes = _executable_prefix(argv0) + [
+        path for program in also_runs for path in _executable_prefix(program)
+    ]
     read_only = _existing(
         [p for p in (Path(p) for p in SYSTEM_READ_PATHS) if not _under_home(p, homes)]
-        + _path_directories([source_dir, output_dir])
+        + _path_directories(list(trees))
         + _uv_directories()
         + ash_paths
-        + _executable_prefix(argv0)
-        + [path for program in also_runs for path in _executable_prefix(program)]
-        + [_expand(p) for p in declared_read]
+        + tool_prefixes
+        + screened_declared_read
         + env_named_reads
         + [_expand(p) for p in extra_read_paths]
         + [*scan_tree, scan_target, _readable_cwd(cwd), tool_config_dir]
@@ -1263,10 +1554,13 @@ def build_scanner_policy(
         uv_cache_directory(),
         "UV_CACHE_DIR" if os.environ.get("UV_CACHE_DIR") else "XDG_CACHE_HOME",
     )
-    cache = _existing([uv_cache] + [_expand(p) for p in declared_cache])
+    cache = _existing(
+        [uv_cache]
+        + _screened_declared_paths(declared_cache, scanner_name, "cache_paths")
+    )
 
     refuse_symlinked_output_dir(source_dir, output_dir)
-    _refuse_symlinked_results_dir(output_dir, results_dir)
+    _refuse_symlinked_results_dir(output_dir, results_dir, source_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
     writable = [results_dir.absolute()]
 
@@ -1304,21 +1598,39 @@ def build_scanner_policy(
         ]
     )
     # An import entry of ASH's interpreter inside the scanned tree, the output
-    # directory or another root of the scan (PYTHONPATH=src) is the repository's
-    # to write and is read as Python source, not run from: readable, and never
-    # executable, like the tree. ASH's interpreter and link directories stay
-    # executable wherever they are.
+    # directory or another root of the scan (PYTHONPATH=src), and an ASH bin
+    # directory there, are the repository's to write and are read as data, not
+    # run from: readable, and never executable, like the tree. ASH's interpreter
+    # and link directories stay executable wherever they are. A tool given a
+    # staged copy, which reads none of the scan's trees, does not read such an
+    # entry either: hidden with the tree it sits in, the policy would give it
+    # back as a listed path.
     from automated_security_helper.utils.scanned_tree import is_inside_tree
 
-    trees = (source_dir, output_dir, *scanned_trees)
-    in_tree_imports = [
+    in_tree_data = [
         entry
-        for entry in ash_import_entries
+        for entry in ash_data_entries
         if any(is_inside_tree(entry, tree) for tree in trees)
     ]
+    if requirements.staged_input_only:
+        hidden = {os.path.realpath(p) for p in in_tree_data}
+        read_only = [p for p in read_only if os.path.realpath(p) not in hidden]
     not_programs = {
-        os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS, *in_tree_imports]
+        os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS, *in_tree_data]
     }
+    # A path the scanner's own declaration names (``read_paths``, which the
+    # scanned repository can write when the paths follow its options) that sits
+    # inside the scan's data is data too, so sandbox-exec does not give exec back
+    # beneath it after the tree's deny. A tool prefix inside the tree (a venv in
+    # the scanned project that ASH itself runs from) and an operator's
+    # ``extra_read_paths`` entry there stay executable, as they were.
+    scan_data_real = [Path(os.path.realpath(p)) for p in scan_data]
+    declared_in_data = {
+        os.path.realpath(p)
+        for p in screened_declared_read
+        if _inside_any(Path(os.path.realpath(p)), scan_data_real)
+    } - {os.path.realpath(p) for p in tool_prefixes}
+    not_programs |= declared_in_data
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
 
     extra_env: Dict[str, str] = {}
@@ -1326,6 +1638,8 @@ def build_scanner_policy(
         # uv otherwise tries the index before using what it has cached, and fails
         # with a DNS error rather than running the tool.
         extra_env["UV_OFFLINE"] = "1"
+    # Where uv looks for its tools, interpreters and cache inside the sandbox.
+    extra_env.update(_uv_environment([*read_only, *cache], uv_cache))
     # uv opens its cache for writing on every run, to lock it, so it cannot use one
     # it may only read: where the host cache is read-only, uv gets a private one.
     cache_env = tuple(dict.fromkeys(("UV_CACHE_DIR", *requirements.cache_env)))
