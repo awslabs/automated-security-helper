@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``fix`` applies an issue computed earlier only when the file still raises it.
+"""``fix`` applies an issue computed earlier only to the entry it was about,
+and only when the file still raises it.
 
 Why this file exists
 --------------------
@@ -10,8 +11,16 @@ confirmation, and then calls ``ConfigLinter.fix`` with the issues it printed.
 ``fix`` reads the file again. A suppression issue names its entry by index
 (``global_settings.suppressions[2]``), so an entry removed or moved between the
 lint and the confirmation made the fix delete, or narrow, whichever entry sat
-at that index in the fresh read. ``fix`` now keeps only the given issues the
-fresh read raises again.
+at that index in the fresh read.
+
+Two mechanisms now hold. Each suppression issue carries the id of the entry
+it was raised on (``LintIssue.entry_id``); ``fix`` lints the file again, with
+the caller's source and output directories so it reads the same chain, keeps a
+suppression issue only when the fresh lint raises the same category for the
+same id (and applies the fresh issue, whose index is the entry's index now),
+and keeps any other issue only when the fresh lint raises it unchanged. Then
+every fixer resolves its entry against the list as loaded, so two fixes on one
+entry both land although the first changes the entry's id.
 """
 
 from pathlib import Path
@@ -208,6 +217,75 @@ def test_of_two_entries_with_one_id_only_the_expired_one_is_removed(tmp_path):
     assert [i.category for i in fixed_issues] == [LintCategory.SUPPRESSION_EXPIRED]
     remaining = yaml.safe_load(fixed_content)["global_settings"]["suppressions"]
     assert remaining == [{"path": "src/same.py", "rule_id": "B101", "reason": "same"}]
+
+
+def test_an_entry_un_expired_while_the_prompt_waited_is_kept(tmp_path):
+    """Red before the fresh lint came back: the entry's id leaves expiration
+    out, so the stale removal still found the entry and popped it although its
+    expiration now lies in the future."""
+    config_path = tmp_path / ".ash.yaml"
+    _write(
+        config_path,
+        [
+            {"path": "src/first.py", "rule_id": "B101", "reason": "keep"},
+            {
+                "path": "src/expired.py",
+                "rule_id": "B102",
+                "reason": "old",
+                "expiration": "2020-01-01",
+            },
+        ],
+    )
+    issues = ConfigLinter.lint(config_path).fixable_issues
+    assert [i.category for i in issues] == [LintCategory.SUPPRESSION_EXPIRED]
+    _write(
+        config_path,
+        [
+            {"path": "src/first.py", "rule_id": "B101", "reason": "keep"},
+            {
+                "path": "src/expired.py",
+                "rule_id": "B102",
+                "reason": "old",
+                "expiration": "2099-12-31",
+            },
+        ],
+    )
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, issues)
+
+    assert fixed_issues == []
+    data = yaml.safe_load(fixed_content)
+    assert [s["path"] for s in data["global_settings"]["suppressions"]] == [
+        "src/first.py",
+        "src/expired.py",
+    ]
+
+
+def test_the_fresh_lint_reads_the_chain_the_callers_lint_read(tmp_path):
+    """The control for the fresh lint's directories: a config that extends a
+    base above its own directory lints with the repository root as the source
+    directory; the fix is given the same root, so its fresh lint reads the same
+    chain and the confirmed fix is applied, not dropped."""
+    (tmp_path / "base.yaml").write_text("project_name: demo\n", encoding="utf-8")
+    (tmp_path / "ci").mkdir()
+    config_path = tmp_path / "ci" / "ash.yaml"
+    config_path.write_text(
+        "extends: ../base.yaml\nscanners:\n  bandit:\n    name: bandit\n",
+        encoding="utf-8",
+    )
+    issues = [
+        i
+        for i in ConfigLinter.lint(config_path, source_dir=tmp_path).fixable_issues
+        if i.category == LintCategory.INTERNAL_FIELD
+    ]
+    assert [i.path for i in issues] == ["scanners.bandit.name"]
+
+    fixed_content, fixed_issues = ConfigLinter.fix(
+        config_path, issues, source_dir=tmp_path
+    )
+
+    assert [i.path for i in fixed_issues] == ["scanners.bandit.name"]
+    assert "name" not in yaml.safe_load(fixed_content)["scanners"]["bandit"]
 
 
 def test_an_issue_the_file_still_raises_is_applied(tmp_path):

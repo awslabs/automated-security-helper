@@ -433,28 +433,58 @@ class ConfigLinter:
         located = {advice(i) for i in result.issues if i.path and advice(i)}
         result.issues = [i for i in result.issues if i.path or advice(i) not in located]
 
+    #: The issue categories whose fixer edits one entry of
+    #: ``global_settings.suppressions``; their issues carry ``entry_id``.
+    _SUPPRESSION_FIX_CATEGORIES = frozenset(
+        {
+            LintCategory.SUPPRESSION_LINE_RANGE,
+            LintCategory.SUPPRESSION_MULTILINE_REASON,
+            LintCategory.SUPPRESSION_EXPIRED,
+        }
+    )
+
     @classmethod
     def fix(
         cls,
         config_path: Path,
         issues: Optional[List[LintIssue]] = None,
+        output_dir: Optional[Path] = None,
+        source_dir: Optional[Path] = None,
     ) -> Tuple[str, List[LintIssue]]:
         """Auto-fix fixable issues in the config file.
 
         Args:
             config_path: Path to the configuration file
             issues: Pre-computed issues to fix (if None, will re-lint)
+            output_dir: The ASH output directory the caller's lint used
+            source_dir: The source directory the caller's lint used, which
+                bounds where ``extends`` bases may be; passed to the fresh
+                lint below so it reads the same chain the caller's did
 
         Returns:
             Tuple of (fixed_content, list_of_fixed_issues)
+
+        The given issues were computed before the caller's confirmation
+        prompt, and the file is read again here. A fresh lint of that read
+        decides which of them still hold: a suppression issue is kept when the
+        fresh lint raises the same category for the same entry (by the entry's
+        id), and the fresh issue, whose path names the entry's index NOW, is
+        the one applied; any other issue is kept when the fresh lint raises it
+        unchanged. So an entry the operator removed, un-expired or rewrote
+        while the prompt waited is not edited on the strength of the old
+        reading, and an edit the operator made meanwhile is not undone.
         """
         cls._refuse_to_rewrite_toml(config_path)
         cls._refuse_to_rewrite_env_references(config_path)
         config_data, raw_content = cls._load_config_and_text(config_path)
 
+        fresh = cls.lint(
+            config_path, output_dir=output_dir, source_dir=source_dir
+        ).fixable_issues
         if issues is None:
-            lint_result = cls.lint(config_path)
-            issues = lint_result.fixable_issues
+            issues = fresh
+        else:
+            issues = cls._issues_still_raised(issues, fresh)
 
         fixed_issues: List[LintIssue] = []
 
@@ -2409,6 +2439,42 @@ class ConfigLinter:
             suppression["line_end"] = suppression["line_start"]
             return True
         return False
+
+    @classmethod
+    def _issues_still_raised(
+        cls, given: List[LintIssue], fresh: List[LintIssue]
+    ) -> List[LintIssue]:
+        """The given issues a fresh lint of the file still raises, each as the
+        fresh lint raised it.
+
+        A suppression issue (``_SUPPRESSION_FIX_CATEGORIES``) that carries an
+        entry id matches a fresh issue of the same category and id, whatever
+        its index now: the fresh issue is returned, so the fixer edits the
+        entry where it sits in the file as read. An entry whose fields changed
+        has another id and is not matched; one whose expiration moved into the
+        future raises no fresh issue and is not matched. Any other issue is
+        kept when a fresh issue equals it.
+        """
+        kept: List[LintIssue] = []
+        for issue in given:
+            if (
+                issue.category in cls._SUPPRESSION_FIX_CATEGORIES
+                and issue.entry_id is not None
+            ):
+                match = next(
+                    (
+                        candidate
+                        for candidate in fresh
+                        if candidate.category == issue.category
+                        and candidate.entry_id == issue.entry_id
+                    ),
+                    None,
+                )
+                if match is not None:
+                    kept.append(match)
+            elif issue in fresh:
+                kept.append(issue)
+        return kept
 
     @classmethod
     def _loaded_suppressions(

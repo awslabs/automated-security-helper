@@ -1761,7 +1761,14 @@ def lint(
         if lint_result.scan_ignores_file or not loadable:
             pass
         elif fix and not fix_refused:
-            applied = _apply_fixes(config_path, fixable, non_interactive, color)
+            applied = _apply_fixes(
+                config_path,
+                fixable,
+                non_interactive,
+                color,
+                output_dir=output_dir_path,
+                source_dir=scan_root,
+            )
         if fix_unused and loadable and not lint_result.scan_ignores_file:
             applied = (
                 _apply_unused_fixes(
@@ -1825,10 +1832,17 @@ def _apply_fixes(
     fixable: List[Any],
     non_interactive: bool,
     color: bool,
+    output_dir: Path | None = None,
+    source_dir: Path | None = None,
 ) -> bool:
     """Apply auto-fixes (``fixable``, the issues other than unused suppressions)
     to the config file. Returns whether the file was written. The caller has
-    refused a TOML file and one that reads the environment before this."""
+    refused a TOML file and one that reads the environment before this.
+
+    ``output_dir`` and ``source_dir`` are what the lint that produced
+    ``fixable`` ran with; the fix lints the file again with them, so its read
+    of the file is the same reading the operator confirmed.
+    """
     from automated_security_helper.config.config_linter import ConfigLinter
 
     if not fixable:
@@ -1850,7 +1864,9 @@ def _apply_fixes(
             secho("Aborted.", fg=typer.colors.YELLOW)
             raise typer.Exit(0)
 
-    fixed_content, fixed_issues = ConfigLinter.fix(config_path, fixable)
+    fixed_content, fixed_issues = ConfigLinter.fix(
+        config_path, fixable, output_dir=output_dir, source_dir=source_dir
+    )
 
     if fixed_issues:
         # One line and exit 1 for a target that cannot be written, as update
