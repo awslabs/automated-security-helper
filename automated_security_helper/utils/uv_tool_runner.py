@@ -3067,10 +3067,14 @@ _uv_tool_probe_locks: "_weakref.WeakValueDictionary[str, threading.Lock]" = (
 # scanners with no progress reporting (an earlier review finding).
 _UV_VERSION_PROBE_TIMEOUT = 5
 
-# Timeout for ``UVToolRunner.get_tool_version``. Higher than the constant above
-# on purpose, and the two are not merged. That probe resolves a bare tool name;
-# this one resolves a full ``--from`` spec with extras and a version constraint,
-# which on a cold uv cache means materializing an environment.
+# Timeout for ``UVToolRunner.get_tool_version``, and for ``get_uv_tool_command``'s
+# probe when it is given a ``--from`` spec. Higher than the constant above on
+# purpose, and the two are not merged. A probe of a bare tool name starts a tool
+# uv already has; a probe of a full ``--from`` spec with extras and a version
+# constraint, on a cold uv cache, means materializing an environment. Under the
+# 5 s budget that probe was killed on every dependency check (a timed-out probe
+# is never remembered), each kill leaving the half-written cache the resolver's
+# docstring warns about.
 #
 # Kept at its historical 15s rather than lowered now that the probe is
 # serialized. It is true that this is now the whole workspace's stall budget
@@ -3666,7 +3670,13 @@ def get_uv_tool_command(
                     text=True,
                     check=False,
                     env=probe_env if probe_env is not None else snapshot_environ(),
-                    timeout=_UV_VERSION_PROBE_TIMEOUT,
+                    # A --from spec may have to build its environment first;
+                    # the bare name keeps the short budget (see the constants).
+                    timeout=(
+                        _UV_TOOL_VERSION_PROBE_TIMEOUT
+                        if from_spec
+                        else _UV_VERSION_PROBE_TIMEOUT
+                    ),
                     # As every other probe in this module decodes: the locale
                     # codec in strict mode raised UnicodeDecodeError, which is
                     # neither a SubprocessError nor an OSError, out of this

@@ -126,6 +126,25 @@ class TestGetUvToolCommandMemo:
         assert "--offline" in spawn.call_args.args[0]
         assert spawn.call_args.kwargs["env"]["UV_OFFLINE"] == "1"
 
+    def test_a_from_spec_probe_gets_the_environment_building_budget(self, spawn):
+        """Resolving a spec with extras and a constraint on a cold cache builds
+        an environment; under the bare name's 5 s budget that probe was killed
+        on every dependency check, and a timed-out probe is never remembered."""
+        get_uv_tool_command("bandit", from_spec="bandit[sarif]>=1.7")
+        assert spawn.call_args.kwargs["timeout"] == (
+            uv_tool_runner._UV_TOOL_VERSION_PROBE_TIMEOUT
+        )
+        assert (
+            spawn.call_args.kwargs["timeout"] > uv_tool_runner._UV_VERSION_PROBE_TIMEOUT
+        )
+
+    def test_a_bare_name_probe_keeps_the_short_budget(self, spawn):
+        """The control: the tool uv already has is still probed under 5 s."""
+        get_uv_tool_command("bandit")
+        assert spawn.call_args.kwargs["timeout"] == (
+            uv_tool_runner._UV_VERSION_PROBE_TIMEOUT
+        )
+
 
 class TestValidateCachedToolTellsAProbeThatDidNotRun:
     def test_a_timed_out_probe_is_not_a_broken_tool(self, spawn, runner):
