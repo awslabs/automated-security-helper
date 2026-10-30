@@ -28,7 +28,7 @@ Scanner              Suppressed Critical     High   Medium      Low     Info   D
 bandit                        1        0        1        2        1        0      12.5s          3 FAILED   MEDIUM (global)
 cdk-nag                       0        0        0        0        0        0         7s          0 PASSED   MEDIUM (global)
 checkov                       0        0        0        0        2        1      500ms          0 PASSED   MEDIUM (global)
-detect-secrets                0        0        0        0        0        0      250ms          0 SKIPPED  MEDIUM (global)
+detect-secrets                0        0        0        0        0        0        N/A          0 SKIPPED  MEDIUM (global)
 grype                         0        0        0        0        0        0        N/A          0 MISSING  MEDIUM (global)
 npm-audit                     0        0        0        0        0        0         1s          0 ERROR    MEDIUM (global)
 opengrep                      0        0        1        0        0        0     1m 35s          0 PASSED   CRITICAL (config)

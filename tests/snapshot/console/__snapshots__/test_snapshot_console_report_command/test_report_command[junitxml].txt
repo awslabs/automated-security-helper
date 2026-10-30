@@ -26,6 +26,6 @@ issue_severity: LOW</system-out></testcase><testcase name="S3 versioning disable
 scanner_name: checkov
 issue_severity: LOW</system-out></testcase><testcase name="Cross-region replication off [CKV_AWS_144]" classname="CKV_AWS_144"><skipped message="Finding is below configured severity threshold" type="threshold" /><system-out>tags: []
 scanner_name: checkov
-issue_severity: INFO</system-out></testcase></testsuite><testsuite name="opengrep" tests="1" errors="1" failures="0" skipped="0" time="0"><testcase name="Unescaped user input [javascript.express.xss]" classname="javascript.express.xss"><error message="Unescaped user input" type="warning" /><system-out>tags: []
+issue_severity: INFO</system-out></testcase></testsuite><testsuite name="opengrep" tests="1" errors="0" failures="0" skipped="1" time="0"><testcase name="Unescaped user input [javascript.express.xss]" classname="javascript.express.xss"><skipped message="Finding is below configured severity threshold" type="threshold" /><system-out>tags: []
 scanner_name: opengrep
 issue_severity: HIGH</system-out></testcase></testsuite></testsuites>

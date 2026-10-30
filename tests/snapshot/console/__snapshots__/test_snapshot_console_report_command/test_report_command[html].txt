@@ -442,7 +442,7 @@ td:first-child { font-weight: 550; }
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td>250ms</td>
+                <td>N/A</td>
                 <td class="status-passed">0</td>
                 <td class="status-skipped">SKIPPED</td>
                 <td>MEDIUM (global)</td>
@@ -561,7 +561,7 @@ td:first-child { font-weight: 550; }
             </div>
 
             <div class="metadata-item">
-                <strong>summary_stats:</strong> {&#x27;severity_counts&#x27;: {&#x27;suppressed&#x27;: 6, &#x27;critical&#x27;: 1, &#x27;high&#x27;: 2, &#x27;medium&#x27;: 2, &#x27;low&#x27;: 3, &#x27;info&#x27;: 3}, &#x27;start&#x27;: None, &#x27;end&#x27;: None, &#x27;duration&#x27;: 0.0, &#x27;total&#x27;: 11, &#x27;actionable&#x27;: 4, &#x27;passed&#x27;: 3, &#x27;failed&#x27;: 2, &#x27;missing&#x27;: 1, &#x27;skipped&#x27;: 2, &#x27;error&#x27;: 1}
+                <strong>summary_stats:</strong> {&#x27;severity_counts&#x27;: {&#x27;suppressed&#x27;: 3, &#x27;critical&#x27;: 1, &#x27;high&#x27;: 2, &#x27;medium&#x27;: 2, &#x27;low&#x27;: 3, &#x27;info&#x27;: 3}, &#x27;start&#x27;: None, &#x27;end&#x27;: None, &#x27;duration&#x27;: 0.0, &#x27;total&#x27;: 11, &#x27;actionable&#x27;: 4, &#x27;passed&#x27;: 3, &#x27;failed&#x27;: 2, &#x27;missing&#x27;: 1, &#x27;skipped&#x27;: 2, &#x27;error&#x27;: 1}
             </div>
 
             <div class="metadata-item">

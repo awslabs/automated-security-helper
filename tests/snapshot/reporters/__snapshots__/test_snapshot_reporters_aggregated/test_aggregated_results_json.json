@@ -242,7 +242,7 @@
           "ignore_nosec": false,
           "excluded_paths": [],
           "additional_formats": [],
-          "tool_version": ">=1.7.0,<2.0.0",
+          "tool_version": ">=1.7.8,<2.0.0",
           "install_timeout": 300
         }
       },
@@ -512,7 +512,8 @@
         "name": "github-ghas",
         "enabled": true,
         "options": {
-          "exclude_suppressed": true
+          "exclude_suppressed": true,
+          "emit_automation_details": false
         },
         "extension": "ghas.sarif"
       },
@@ -2150,7 +2151,10 @@
                 "state": null,
                 "justification": "(ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret",
                 "location": null,
-                "properties": null
+                "properties": {
+                  "tags": [],
+                  "ashApplied": true
+                }
               }
             ],
             "baselineState": null,
@@ -2417,7 +2421,7 @@
             "name": "syft",
             "version": "1.33.0",
             "description": null,
-            "scope": "required",
+            "scope": null,
             "hashes": null,
             "licenses": null,
             "copyright": null,
@@ -2457,7 +2461,7 @@
         "name": "snapshot-fixture",
         "version": null,
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": null,
         "copyright": null,
@@ -2498,12 +2502,19 @@
         "name": "requests",
         "version": "2.19.1",
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": [
           {
             "license": {
-              "id": "Apache-2.0"
+              "bom-ref": null,
+              "id": "Apache-2.0",
+              "name": null,
+              "acknowledgement": null,
+              "text": null,
+              "url": null,
+              "licensing": null,
+              "properties": null
             }
           }
         ],
@@ -2548,7 +2559,7 @@
         "name": "python",
         "version": "3.12-slim",
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": null,
         "copyright": null,

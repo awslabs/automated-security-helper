@@ -1,11 +1,10 @@
 $ ash config validate-plugin-dependencies invalid.yaml
-[<LOG_TIME>] ERROR    Configuration validation failed: Invalid value at 'build.build_mode': Input
-                      should be 'ONLINE' or 'OFFLINE'; Invalid value at 'converters.archive': Value
-                      error, Converter 'archive' contains internal-only field 'install_timeout' -
-                      this should not be in user configs.; Invalid value at 'scanners.bandit': Value
-                      error, Scanner 'bandit' contains internal-only field 'tool_version' - this
-                      should not be in user configs; if you meant a version constraint, put it under
-                      options.
+ERROR    Configuration validation failed: Invalid value at 'build.build_mode': Input should be
+         'ONLINE' or 'OFFLINE'; Invalid value at 'converters.archive': Value error, Converter
+         'archive' contains internal-only field 'install_timeout' - this should not be in user
+         configs.; Invalid value at 'scanners.bandit': Value error, Scanner 'bandit' contains
+         internal-only field 'tool_version' - this should not be in user configs; if you meant a
+         version constraint, put it under options.
 Config file '<TMP>/demo-project/invalid.yaml' is not valid.
 Invalid configuration in invalid.yaml:
   Invalid value at 'build.build_mode': Input should be 'ONLINE' or 'OFFLINE'

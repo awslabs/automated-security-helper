@@ -170,7 +170,7 @@ scanners:
       ignore_nosec: false
       excluded_paths: []
       additional_formats: []
-      tool_version: '>=1.7.0,<2.0.0'
+      tool_version: '>=1.7.8,<2.0.0'
       install_timeout: 300
   cdk-nag:
     name: cdk-nag
@@ -392,6 +392,7 @@ reporters:
     enabled: true
     options:
       exclude_suppressed: true
+      emit_automation_details: false
     extension: ghas.sarif
   junitxml:
     name: junitxml

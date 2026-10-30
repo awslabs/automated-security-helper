@@ -326,12 +326,12 @@ td:first-child { font-weight: 550; }
       <div class="outcome outcome--danger">
         <div class="outcome__inner">
         <div class="outcome-mark" aria-hidden="true">!</div>
-        <div><h2>Scan incomplete</h2><p>3 actionable findings. Some inputs or scanners were not evaluated.</p><p class="next-step"><strong>Next:</strong> Review findings, resolve coverage gaps, and scan again.</p></div>
+        <div><h2>Scan incomplete</h2><p>2 actionable findings. Some inputs or scanners were not evaluated.</p><p class="next-step"><strong>Next:</strong> Review findings, resolve coverage gaps, and scan again.</p></div>
         </div>
       </div>
       <div class="metric-grid">
-        <div><dl><dt>Actionable findings</dt><dd class="metric-accent">3<span class="metric-description">At or above scanner thresholds</span></dd></dl></div>
-        <div><dl><dt>Below threshold</dt><dd>0<span class="metric-description">Active findings for context</span></dd></dl></div>
+        <div><dl><dt>Actionable findings</dt><dd class="metric-accent">2<span class="metric-description">At or above scanner thresholds</span></dd></dl></div>
+        <div><dl><dt>Below threshold</dt><dd>1<span class="metric-description">Active findings for context</span></dd></dl></div>
         <div><dl><dt>Suppressed</dt><dd>0<span class="metric-description">Excluded from actionable counts</span></dd></dl></div>
         <div><dl><dt>Scanners completed</dt><dd>3<span> / 4</span><span class="metric-description">0 skipped · 1 unavailable</span></dd></dl></div>
       </div>
@@ -344,7 +344,7 @@ td:first-child { font-weight: 550; }
       <a href="#projects">Projects</a>
       <a href="#scan-metadata">Scan metadata</a>
     </nav>
-    <div id="projects" class="workspace-section"><div class="section" id="workspace-projects"><h2>Projects</h2><p>Each project is scanned independently and judged against its own threshold, so a workspace fails when any project does.</p><div class="table-scroll" role="region" aria-label="Project results" tabindex="0"><table><thead><tr><th>Project</th><th>Status</th><th>Findings</th><th>Actionable</th><th>Threshold</th><th>Result</th></tr></thead><tbody><tr class="failed"><td>snapshot-api (api)</td><td>COMPLETED</td><td>1</td><td>1</td><td>MEDIUM</td><td class="status-failed">FAILED (incomplete)</td></tr><tr class="failed"><td>snapshot-web (web)</td><td>COMPLETED</td><td>2</td><td>1</td><td>HIGH</td><td class="status-failed">FAILED</td></tr><tr class="failed"><td>docs</td><td>SKIPPED</td><td>n/a</td><td>n/a</td><td>n/a</td><td class="status-failed">SKIPPED (error)</td></tr></tbody></table></div></div></div>
+    <div id="projects" class="workspace-section"><div class="section" id="workspace-projects"><h2>Projects</h2><p>Each project is scanned independently and judged against its own threshold, so a workspace fails when any project does.</p><div class="table-scroll" role="region" aria-label="Project results" tabindex="0"><table><thead><tr><th>Project</th><th>Status</th><th>Findings</th><th>Actionable</th><th>Threshold</th><th>Result</th></tr></thead><tbody><tr class="failed"><td>snapshot-api (api)</td><td>COMPLETED</td><td>1</td><td>1</td><td>MEDIUM</td><td class="status-failed">FAILED (incomplete)</td></tr><tr class="failed"><td>snapshot-web (web)</td><td>COMPLETED</td><td>2</td><td>1</td><td>HIGH</td><td class="status-failed">FAILED</td></tr><tr class="failed"><td>docs</td><td>SKIPPED</td><td>n/a</td><td>n/a</td><td>n/a</td><td class="status-failed">SKIPPED (error)</td></tr></tbody></table></div><ul class="project-notes"><li><strong>snapshot-api (api)</strong>: did not complete: npm-audit</li><li><strong>docs</strong>: &#x27;docs&#x27; does not exist as a directory at &#x27;<REPO>/tests/test_data/snapshot_fixture/workspace/docs&#x27;</li></ul></div></div>
     <section id="findings" aria-labelledby="findings-title" class="report-section">
       <div class="section-heading"><h2 id="findings-title">Findings</h2><p>Sorted by severity</p></div>
       <div class="finding-controls js-only">
@@ -358,7 +358,7 @@ td:first-child { font-weight: 550; }
       <div id="empty-findings" class="empty-state" hidden><h3>No findings match this view</h3><p>Try another severity or scanner, or reset the filters.</p><button type="button" class="primary-button" id="empty-reset">Show all findings</button></div>
       <div class="findings-list"><article class="finding-card" aria-labelledby="finding-1" data-severity="high" data-status="actionable" data-scanner="bandit"><div class="finding-card__inner"><div class="finding-top"><span class="pill severity-high">HIGH</span><span class="finding-status">Actionable</span><span class="finding-scanner">bandit</span></div><h3 id="finding-1">B602</h3><p class="finding-meta"><code>B602</code><span><code>app.py:7</code> <button type="button" class="quiet-button copy-location js-only" aria-label="Copy location for finding 1" data-copy-location="app.py:7">Copy</button></span></p><details><summary>Finding details</summary><div class="finding-body"><p class="finding-description">subprocess call with shell=True identified, security issue.</p><p><strong>Project:</strong> api</p></div></details></div></article>
 <article class="finding-card" aria-labelledby="finding-2" data-severity="high" data-status="actionable" data-scanner="checkov"><div class="finding-card__inner"><div class="finding-top"><span class="pill severity-high">HIGH</span><span class="finding-status">Actionable</span><span class="finding-scanner">checkov</span></div><h3 id="finding-2">CKV_AWS_20</h3><p class="finding-meta"><code>CKV_AWS_20</code><span><code>main.tf:1</code> <button type="button" class="quiet-button copy-location js-only" aria-label="Copy location for finding 2" data-copy-location="main.tf:1">Copy</button></span></p><details><summary>Finding details</summary><div class="finding-body"><p class="finding-description">S3 Bucket has an ACL defined which allows public READ access.</p><p><strong>Project:</strong> web</p></div></details></div></article>
-<article class="finding-card" aria-labelledby="finding-3" data-severity="medium" data-status="actionable" data-scanner="semgrep"><div class="finding-card__inner"><div class="finding-top"><span class="pill severity-medium">MEDIUM</span><span class="finding-status">Actionable</span><span class="finding-scanner">semgrep</span></div><h3 id="finding-3">terraform.aws.best-practice.s3-bucket-name-hardcoded</h3><p class="finding-meta"><code>terraform.aws.best-practice.s3-bucket-name-hardcoded</code><span><code>main.tf:2</code> <button type="button" class="quiet-button copy-location js-only" aria-label="Copy location for finding 3" data-copy-location="main.tf:2">Copy</button></span></p><details><summary>Finding details</summary><div class="finding-body"><p class="finding-description">Bucket name is hardcoded; derive it from a variable.</p><p><strong>Project:</strong> web</p></div></details></div></article></div>
+<article class="finding-card" aria-labelledby="finding-3" data-severity="medium" data-status="below-threshold" data-scanner="semgrep"><div class="finding-card__inner"><div class="finding-top"><span class="pill severity-medium">MEDIUM</span><span class="finding-status">Below threshold</span><span class="finding-scanner">semgrep</span></div><h3 id="finding-3">terraform.aws.best-practice.s3-bucket-name-hardcoded</h3><p class="finding-meta"><code>terraform.aws.best-practice.s3-bucket-name-hardcoded</code><span><code>main.tf:2</code> <button type="button" class="quiet-button copy-location js-only" aria-label="Copy location for finding 3" data-copy-location="main.tf:2">Copy</button></span></p><details><summary>Finding details</summary><div class="finding-body"><p class="finding-description">Bucket name is hardcoded; derive it from a variable.</p><p><strong>Project:</strong> web</p></div></details></div></article></div>
       <noscript><p class="notice">All findings are visible. Enable JavaScript to search and filter this report.</p></noscript>
     </section>
     <section id="scanner-results" aria-labelledby="scanner-title" class="report-section">
@@ -444,13 +444,13 @@ td:first-child { font-weight: 550; }
             </tr>
 
             <tr>
-                <td>2</td>
-                <td>main.tf</td>
+                <td>1</td>
+                <td>app.py</td>
             </tr>
 
             <tr>
                 <td>1</td>
-                <td>app.py</td>
+                <td>main.tf</td>
             </tr>
             </table></div></div>
     </section>

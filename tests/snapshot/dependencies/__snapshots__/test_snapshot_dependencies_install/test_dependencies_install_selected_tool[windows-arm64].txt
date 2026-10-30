@@ -6,10 +6,10 @@ $ ash dependencies install --bin-path bin -t scanner --tool grype --tool semgrep
 ╰─────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: windows, architecture: arm64
-[<LOG_TIME>] INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+INFO     Loaded 2 converters, 16 scanners, and 15 reporters
 Installing dependencies for scanner plugin: grype
 Installing dependencies for scanner plugin: semgrep
-Running command: uv tool install semgrep>=1.125.0,<2.0.0
+Running command: uv tool install semgrep<2.0.0,>=1.125.0
 Command succeeded with exit code: 0
                         Dependency installation results
 ┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓

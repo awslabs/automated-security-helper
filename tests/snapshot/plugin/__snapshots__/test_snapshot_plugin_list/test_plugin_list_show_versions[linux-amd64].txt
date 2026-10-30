@@ -1,5 +1,9 @@
 $ ash plugin list --show-versions
-[<LOG_TIME>] INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+WARNING  cfn-nag cannot be installed here: RubyGems (`gem`) is not on PATH, no C compiler (cc, gcc
+         or clang) is on PATH, and cfn-nag's `psych` dependency has to build from source. It will be
+         reported as having no install path on this machine rather than failing the install of every
+         other scanner.
 ASH Scanners
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Enabled ┃ Class          ┃ Module         ┃ Version ┃ Reachable ┃ Plugin Config ┃

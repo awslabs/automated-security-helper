@@ -10,4 +10,7 @@ Found 1 issue(s):
   • Commented out unused suppression: path='src/old.py', rule_id='B105'
 
 ✅ Commented out 1 unused suppression(s) in unused.yaml
+
+Remaining after the fixes:
+  ℹ️  Unused suppression: path='src/old.py', rule_id='B105'
 [exit code: 0]
