@@ -215,6 +215,45 @@ class TestVersionPins:
         assert "README.md" in failures[0]
         assert "@v3.0.0-beta.1" in failures[0]
 
+    def test_a_floating_major_tag_of_the_current_version_is_not_outdated(
+        self, freshness, monkeypatch, tmp_path
+    ):
+        """The install pages document the moving `@v3` tag beside the exact pin;
+        the whole-token comparison must not report it as a stale release."""
+        readme = tmp_path / "README.md"
+        readme.write_text(
+            "Pin `@v3.7.1` for a reproducible install. The floating `@v3` tag "
+            "follows the latest 3.x release; `@v3.7` follows the 3.7 line.\n",
+            encoding="utf-8",
+        )
+        install = tmp_path / "install.md"
+        install.write_text("pip install ash@v3.7.1\n", encoding="utf-8")
+        monkeypatch.setattr(freshness, "README_MD", readme)
+        monkeypatch.setattr(freshness, "INSTALL_MD", install)
+        monkeypatch.setattr(freshness, "get_version_from_pyproject", lambda: "3.7.1")
+        assert freshness.check_version_consistency() == []
+
+    def test_a_tag_of_another_line_is_outdated(self, freshness, monkeypatch, tmp_path):
+        readme = tmp_path / "README.md"
+        readme.write_text("pip install ash@v3.7.1 or ash@v3.6\n", encoding="utf-8")
+        install = tmp_path / "install.md"
+        install.write_text("pip install ash@v3.7.1\n", encoding="utf-8")
+        monkeypatch.setattr(freshness, "README_MD", readme)
+        monkeypatch.setattr(freshness, "INSTALL_MD", install)
+        monkeypatch.setattr(freshness, "get_version_from_pyproject", lambda: "3.7.1")
+        failures = freshness.check_version_consistency()
+        assert len(failures) == 1
+        assert "@v3.6" in failures[0]
+
+    def test_floating_tag_shapes(self, freshness):
+        assert freshness._is_floating_tag("@v3", "3.7.1")
+        assert freshness._is_floating_tag("@v3.7", "3.7.1")
+        assert not freshness._is_floating_tag("@v3.7.1", "3.7.1")
+        assert not freshness._is_floating_tag("@v3.6", "3.7.1")
+        assert not freshness._is_floating_tag("@v3.7.1-beta.1", "3.7.1")
+        assert not freshness._is_floating_tag("@v3-beta", "3.7.1")
+        assert not freshness._is_floating_tag("@v4", "3.7.1")
+
 
 class TestLooseConfigDiscoveryLists:
     SUPPORTED = {".ash.yaml", ".ash.yml", "ash.yaml"}

@@ -730,6 +730,23 @@ def _version_pins(content: str) -> list[str]:
     return [match.rstrip(".,;:") for match in _VERSION_PIN.findall(content)]
 
 
+def _is_floating_tag(pin: str, version: str) -> bool:
+    """Whether ``pin`` is a moving major or minor tag of ``version``.
+
+    The release process moves ``v3`` to each 3.x release, and the install pages
+    document it beside the exact pin, so ``@v3`` (or ``@v3.7``) is current while
+    the version it abbreviates is. A pre-release or build suffix is a tag of its
+    own and never floats; an exact pin of another release is outdated.
+    """
+    parts = pin.removeprefix("@v").split(".")
+    current = version.split(".")
+    if not parts or len(parts) >= len(current):
+        return False
+    if not all(part.isdigit() for part in parts):
+        return False
+    return parts == current[: len(parts)]
+
+
 def check_version_consistency() -> list[str]:
     """Verify key docs files reference the current version."""
     failures: list[str] = []
@@ -748,7 +765,12 @@ def check_version_consistency() -> list[str]:
         pins = set(_version_pins(read_text(path)))
         # Every older pin is reported, whether or not the current one is also on the
         # page: a reader who copies the one stale command installs the wrong release.
-        outdated = pins - {version_tag}
+        # A floating major or minor tag of the current version is not a stale pin.
+        outdated = {
+            pin
+            for pin in pins
+            if pin != version_tag and not _is_floating_tag(pin, version)
+        }
         if outdated:
             failures.append(
                 f"{label} references outdated version(s) {sorted(outdated)} "
