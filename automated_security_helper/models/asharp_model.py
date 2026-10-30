@@ -1201,7 +1201,10 @@ class AshAggregatedResults(RecordModel):
     # call it multiple times during rendering. It holds for as long as the
     # findings it was made from stand: _flat_cache_source says which (see
     # _flat_source), so a copy made with another sarif, or a sarif or
-    # additional_reports replaced or added to since, is flattened again.
+    # additional_reports replaced or appended to since, is flattened again. An
+    # edit in place that keeps both objects and their counts (a suppression set
+    # on a result, a result replaced by index, masking) is not seen: code that
+    # makes one calls _invalidate_flat_cache().
     _flat_cache: Optional[List[FlatVulnerability]] = PrivateAttr(default=None)
     _flat_cache_source: Optional[tuple] = PrivateAttr(default=None)
 
@@ -1518,7 +1521,9 @@ class AshAggregatedResults(RecordModel):
         (bumping summary_stats.suppressed, updating scanner_results). Subsequent
         calls return the memoized list so the method is safe to call from
         reporters multiple times per run, for as long as the sarif and the
-        additional_reports it was made from stand (see _flat_source).
+        additional_reports it was made from stand: not replaced, and not
+        appended to (see _flat_source). Code that edits the findings in place
+        calls _invalidate_flat_cache() after.
 
         Returns:
             List[FlatVulnerability]: A list of flattened vulnerability objects
@@ -1614,7 +1619,9 @@ class AshAggregatedResults(RecordModel):
         """What to_flat_vulnerabilities flattens, as it stands now: the sarif and
         the additional_reports objects themselves (held, so that one replaced by
         another is told by identity and never by a reused id), and how many
-        results and report entries they hold, which an append changes."""
+        results and report entries they hold, which an append changes. An edit
+        that keeps both objects and both counts is not told: see
+        _invalidate_flat_cache."""
         sarif = self.sarif
         results = (
             sum(len(run.results or []) for run in sarif.runs)
@@ -1627,6 +1634,18 @@ class AshAggregatedResults(RecordModel):
             if isinstance(value, list)
         )
         return (sarif, self.additional_reports, results, entries)
+
+    def _invalidate_flat_cache(self) -> None:
+        """Forget the flattened findings, so the next to_flat_vulnerabilities
+        flattens again.
+
+        For code that edits the findings in place without changing which sarif
+        and additional_reports the model holds or how many results and entries
+        they hold: setting or clearing a result's suppressions, replacing a
+        result by index, masking a value. Replacing and appending need no call.
+        """
+        self._flat_cache = None
+        self._flat_cache_source = None
 
     def _apply_suppression_side_effects(
         self, scanner: Optional[str], count: Optional[int] = None
@@ -1742,6 +1761,9 @@ class AshAggregatedResults(RecordModel):
         # No secret value a finding exposes is written to the file; see
         # utils/secret_masking.py. In place, so what is reported next is masked too.
         mask_secrets_in_results(self)
+        # The masking edited the findings in place, which the cache does not
+        # see: what is flattened next is flattened from the masked ones.
+        self._invalidate_flat_cache()
 
         # Refused rather than created through when it is a link, which it can have
         # become since the run set it up (utils/report_path_links.py).
