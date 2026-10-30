@@ -204,3 +204,107 @@ class TestTheWalk:
         first.symlink_to(second)
 
         assert link_chain.link_chain_names_a_windows_share(str(first)) is True
+
+
+class TestAHopsTargetIsJudgedThroughItsParents:
+    """A hop's target is examined with ``os.lstat``, which follows a link in a
+    PARENT component of the target. A config linked as ``.ash/ash.yaml ->
+    ../vendor/cfg.yaml`` with ``vendor`` a junction to a share had that lstat
+    open the share, and when nothing answered there the chain read "not there"
+    and judged the link LOCAL. The target's parent components are judged first."""
+
+    def test_a_share_junction_in_the_targets_parent_is_the_answer(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the first module: ``vendor`` is a dangling link here, so the
+        lstat of ``vendor/cfg.yaml`` raised FileNotFoundError and the chain
+        answered False (local); the walk then admitted the path."""
+        dot_ash = tmp_path / ".ash"
+        dot_ash.mkdir()
+        (tmp_path / "vendor").symlink_to("\\\\server\\share\\vendor")
+        (dot_ash / "ash.yaml").symlink_to(os.path.join("..", "vendor", "cfg.yaml"))
+        examined = []
+        real_lstat = os.lstat
+
+        def recording_lstat(path, *args, **kwargs):
+            examined.append(str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", recording_lstat)
+
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(dot_ash / "ash.yaml"))
+            is True
+        )
+        found = link_chain.first_unsafe_link(str(dot_ash / "ash.yaml"))
+
+        assert found is not None
+        assert found.component == str(dot_ash / "ash.yaml")
+        assert found.reaches_a_share is True
+        # Nothing under the junction was ever asked about.
+        assert str(tmp_path / "vendor" / "cfg.yaml") not in examined
+
+    def test_a_local_link_in_the_targets_parent_is_followed(self, tmp_path):
+        """Control: a parent that is a local link leaves the hop local."""
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "cfg.yaml").write_text("x")
+        (tmp_path / "vendor").symlink_to(real)
+        dot_ash = tmp_path / ".ash"
+        dot_ash.mkdir()
+        (dot_ash / "ash.yaml").symlink_to(os.path.join("..", "vendor", "cfg.yaml"))
+
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(dot_ash / "ash.yaml"))
+            is False
+        )
+        assert link_chain.first_unsafe_link(str(dot_ash / "ash.yaml")) is None
+
+    def test_an_unreadable_link_in_the_targets_parent_is_unjudged(
+        self, tmp_path, monkeypatch
+    ):
+        real = tmp_path / "real"
+        real.mkdir()
+        (tmp_path / "vendor").symlink_to(real)
+        dot_ash = tmp_path / ".ash"
+        dot_ash.mkdir()
+        (dot_ash / "ash.yaml").symlink_to(os.path.join("..", "vendor", "cfg.yaml"))
+        real_readlink = os.readlink
+
+        def vendor_unreadable(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "vendor":
+                raise ValueError("not a symbolic link")
+            return real_readlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "readlink", vendor_unreadable)
+
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(dot_ash / "ash.yaml"))
+            is None
+        )
+
+    def test_the_hop_budget_is_shared_with_the_parent_walks(
+        self, tmp_path, monkeypatch
+    ):
+        """One budget for the whole judgment: a self-looping link spends it to
+        the last read and no further, and the parent walks of each hop draw on
+        the same budget rather than their own."""
+        loop = tmp_path / "loop"
+        loop.symlink_to(loop)
+        reads = []
+        real_readlink = os.readlink
+
+        def counting_readlink(path, *args, **kwargs):
+            reads.append(str(path))
+            return real_readlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "readlink", counting_readlink)
+
+        assert link_chain.link_chain_names_a_windows_share(str(loop), hops=5) is None
+        assert len(reads) == 5
+
+        reads.clear()
+        found = link_chain.first_unsafe_link(str(loop), hops=3)
+        assert found is not None
+        assert found.reaches_a_share is None
+        assert len(reads) == 3

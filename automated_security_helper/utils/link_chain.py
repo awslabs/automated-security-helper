@@ -127,6 +127,25 @@ def is_a_drive_spelling(text: str) -> bool:
     )
 
 
+class _Hops:
+    """The one budget of ``os.readlink`` calls a judgment may spend.
+
+    Shared between the chain reading and the component walk when one calls the
+    other (a hop's target has parent components, and a parent component can be
+    a link with its own chain), so a crafted tree of links costs at most
+    ``LINK_HOPS`` reads in all, never a product of nested bounds.
+    """
+
+    def __init__(self, left: int) -> None:
+        self.left = left
+
+    def take(self) -> bool:
+        if self.left <= 0:
+            return False
+        self.left -= 1
+        return True
+
+
 def link_chain_names_a_windows_share(
     text: str, *, hops: int = LINK_HOPS
 ) -> Optional[bool]:
@@ -139,17 +158,30 @@ def link_chain_names_a_windows_share(
     at the first name that is not a link, or that is not there: a local name is
     then all that resolving would open, and the answer is False.
 
+    A hop's target is examined with ``os.lstat``, which does not follow the
+    target itself but DOES follow a link in any of the target's parent
+    components; so before that lstat the target's parent components are judged
+    by the component walk (:func:`first_unsafe_link`), and a parent that is a
+    link to a share, or whose target cannot be read, is the chain's answer. A
+    config file linked as ``.ash/ash.yaml -> ..\\vendor\\cfg.yaml`` with
+    ``vendor`` a junction to a share is judged at ``vendor`` and the share is
+    never opened.
+
     None when the chain cannot be judged: a reparse point whose name cannot be
     read (one that is no symbolic link or junction), a hop that cannot be
     examined (its directory cannot be searched: it may be a link to a share that
-    nobody here can see), or a chain longer than ``hops``. The caller refuses
-    then, as it refused every link before, since what resolving would open
-    cannot be told. Only a hop that is not there (no such file, or a path
-    component that is not a directory) ends the walk as a local name: nothing
-    is there to follow, so resolving opens nothing.
+    nobody here can see), or more than ``hops`` reads in all, the parent walks
+    included. The caller refuses then, as it refused every link before, since
+    what resolving would open cannot be told. Only a hop that is not there (no
+    such file, or a path component that is not a directory) ends the walk as a
+    local name: nothing is there to follow, so resolving opens nothing.
     """
+    return _chain_names_a_windows_share(text, _Hops(hops))
+
+
+def _chain_names_a_windows_share(text: str, budget: _Hops) -> Optional[bool]:
     current = text
-    for _ in range(hops):
+    while budget.take():
         try:
             target = os.readlink(current)
         except (OSError, ValueError):
@@ -164,6 +196,15 @@ def link_chain_names_a_windows_share(
         if not os.path.isabs(target):
             target = os.path.join(os.path.dirname(current), target)
         target = os.path.normpath(target)
+        parent = os.path.dirname(target)
+        if parent and parent != target:
+            # The lstat below follows a link in a PARENT component of the
+            # target; judge those components first, as the caller's own path
+            # was judged, so a junction to a share on the way is found before
+            # anything under it is touched.
+            unsafe_parent = _first_unsafe_link(parent, budget)
+            if unsafe_parent is not None:
+                return True if unsafe_parent.reaches_a_share else None
         try:
             is_link = is_link_stat(os.lstat(target))
         except (FileNotFoundError, NotADirectoryError):
@@ -233,8 +274,13 @@ def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLin
 
     The caller judges the TEXT of ``text`` with :func:`names_a_windows_share`
     first, with its own wording; this walk assumes a spelling that names a local
-    volume.
+    volume. ``hops`` bounds the ``os.readlink`` calls of the whole judgment, the
+    chains of every link met and of every parent of a hop's target included.
     """
+    return _first_unsafe_link(text, _Hops(hops))
+
+
+def _first_unsafe_link(text: str, budget: _Hops) -> Optional[UnsafeLink]:
     components = components_down_to(os.path.normpath(text))
     for index, component in enumerate(components):
         try:
@@ -243,7 +289,7 @@ def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLin
             return None
         if not is_link:
             continue
-        reaches_a_share = link_chain_names_a_windows_share(component, hops=hops)
+        reaches_a_share = _chain_names_a_windows_share(component, budget)
         if reaches_a_share is False:
             continue
         return UnsafeLink(
