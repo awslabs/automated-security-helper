@@ -170,8 +170,9 @@ _CDK_NAG_CHILD = (
     "directory its parent made and wrote the request into with fs_guard"
 )
 _DETECT_SECRETS_CHILD = (
-    "the worker child's output file, created exclusively after its parent "
-    "wrote the request beside it with fs_guard and removed the name"
+    "the worker child's output file, created exclusively with mode 0600 (os.open "
+    "O_EXCL|O_NOFOLLOW, then os.fdopen) after its parent wrote the request beside "
+    "it with fs_guard and removed the name"
 )
 _MCP_PROFILE_COPY = (
     "the MCP server's workspace root: a session's profile copy, saved to a "
@@ -405,7 +406,11 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _TOOL_CONFIG_DIR,
     ),
-    (f"{_ASH}/utils/detect_secrets_worker.py", "main", "open"): (
+    (f"{_ASH}/utils/detect_secrets_worker.py", "_write_output", "os.open"): (
+        1,
+        _DETECT_SECRETS_CHILD,
+    ),
+    (f"{_ASH}/utils/detect_secrets_worker.py", "_write_output", "os.fdopen"): (
         1,
         _DETECT_SECRETS_CHILD,
     ),
