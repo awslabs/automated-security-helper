@@ -34,6 +34,7 @@ import threading
 import time
 from datetime import date
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 import yaml
@@ -42,6 +43,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_scanner_exclusions import (
     SCANNER_EXCLUSION_OPTIONS,
     ClientScannerExclusion,
+    _entry_fields,
+    _pattern_of,
     _same_trivy_id,
     _trusted_ignore_file,
     glob_excludes,
@@ -449,3 +452,17 @@ def test_an_entry_an_operator_file_adds_by_a_patch_operation_is_the_operators(
     assert kept[0].expiration == "2099-01-01"
     assert kept[0].reason == "op"
     assert config._client_scanner_exclusions == []
+
+
+def test_an_entry_held_in_a_mapping_that_is_not_a_dict_reads_whole():
+    """The pattern, reason and expiration of one entry come from the same
+    reading: an entry in a mapping type that is not a ``dict`` read as a
+    pattern-less entry (kept untouched) while its expiration was read, so the
+    two readings of one entry disagreed."""
+    entry = MappingProxyType(
+        {"path": "vendor", "reason": "r", "expiration": "2000-01-01"}
+    )
+    assert _pattern_of(entry) == ("vendor", "r")
+    assert _entry_fields(entry) == ("vendor", "r", "2000-01-01")
+    assert _entry_fields({"path": "vendor"}) == ("vendor", None, None)
+    assert _entry_fields("vendor") == ("vendor", None, None)

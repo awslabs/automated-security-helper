@@ -1365,10 +1365,17 @@ def _scan_timeout_of(options: Any) -> Optional[float]:
 
 
 def _pattern_of(entry: Any) -> Tuple[Optional[str], Optional[str]]:
-    """An option entry's pattern and reason: a string, or a path-with-reason entry."""
+    """An option entry's pattern and reason: a string, or a path-with-reason entry.
+
+    A mapping entry is read as any ``Mapping``, as ``_entry_fields`` and
+    ``_operator_fields`` read one, so an entry held in a mapping type that is
+    not a ``dict`` is the same entry to every reading (a ``dict``-only test
+    here left ``_entry_fields`` reading its expiration from an entry whose
+    pattern this function had not found).
+    """
     if isinstance(entry, str):
         return entry, None
-    if isinstance(entry, dict):
+    if isinstance(entry, Mapping):
         path = entry.get("path")
         reason = entry.get("reason")
         return (path if isinstance(path, str) else None), (
