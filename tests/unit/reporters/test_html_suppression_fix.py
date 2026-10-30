@@ -107,6 +107,10 @@ class TestSuppressedRowReasons:
 
         table = reporter._format_findings_table([finding])
 
+        # The finding is in the table as an active row: the rule column names
+        # it, no suppressed group is rendered, and the empty-table notice is
+        # absent. Absence alone would also pass for an empty string.
+        assert "TEST-001" in table
         assert "Suppressed Findings" not in table
         assert "No active findings to display" not in table
 
