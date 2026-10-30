@@ -75,6 +75,8 @@ from automated_security_helper.utils.scan_output_dirs import (
     SCAN_START_FILE_NAMES,
     GitIndexAnswer,
     GitIndexUnavailable,
+    _repository_root_of,
+    _resolved,
     committed_files_at_results_paths,
     entries_on_disk,
     git_index_below,
@@ -194,6 +196,58 @@ def _absolute(path: str | Path) -> Path:
     return Path(os.path.abspath(os.fspath(path)))
 
 
+class _GitFailures:
+    """The repositories git has failed to list during one composite check.
+
+    A workspace check asks git about the output root, the spool, the projects
+    entry and every project's directory, each with a call of its own that may
+    take :data:`scan_output_dirs.GIT_INDEX_TIMEOUT_SECONDS`. Once git has not
+    answered for a repository, the next directory in it gets the same answer
+    without another call, so a hung git costs one wait and not one per project.
+    A directory in another repository (a nested checkout) is still asked.
+    """
+
+    def __init__(self) -> None:
+        self._answers: dict[Path, GitIndexAnswer] = {}
+
+    def remember(self, answer: GitIndexAnswer) -> None:
+        if answer.unanswered and answer.repository is not None:
+            self._answers.setdefault(answer.repository, answer)
+
+    def known_for(self, directory: str | Path) -> Optional[GitIndexAnswer]:
+        """The answer remembered for the repository holding *directory*, spelled
+        for *directory*, or None."""
+        if not self._answers:
+            return None
+        base = _absolute(directory)
+        if not base.is_dir():
+            return None
+        root = _repository_root_of(_resolved(base))
+        remembered = self._answers.get(root) if root is not None else None
+        if remembered is None:
+            return None
+        return GitIndexAnswer(
+            base,
+            repository=remembered.repository,
+            error=remembered.error,
+            could_not_run=remembered.could_not_run,
+        )
+
+
+def _index_below(
+    directory: str | Path, failures: Optional[_GitFailures]
+) -> GitIndexAnswer:
+    """:func:`git_index_below`, answered from *failures* where git already failed."""
+    if failures is not None:
+        known = failures.known_for(directory)
+        if known is not None:
+            return known
+    answer = git_index_below(directory)
+    if failures is not None:
+        failures.remember(answer)
+    return answer
+
+
 def _scoped(
     output_dir: str | Path,
     entries: Iterable[Path],
@@ -238,6 +292,7 @@ def _found_in_the_way(
     files: Optional[Collection[str]],
     directories: Optional[Collection[str]],
     not_on_disk: Collection[str],
+    failures: Optional[_GitFailures] = None,
 ) -> _Found:
     # A fresh scan (neither files nor directories given) also removes the
     # previous-run files results_path_names does not list.
@@ -246,9 +301,16 @@ def _found_in_the_way(
         if files is None and directories is None
         else ()
     )
-    try:
-        committed = committed_files_at_results_paths(output_dir)
-    except GitIndexUnavailable as unavailable:
+    unanswered = failures.known_for(output_dir) if failures is not None else None
+    committed: List[Path] = []
+    if unanswered is None:
+        try:
+            committed = committed_files_at_results_paths(output_dir)
+        except GitIndexUnavailable as unavailable:
+            unanswered = unavailable.answer
+            if failures is not None:
+                failures.remember(unanswered)
+    if unanswered is not None:
         root_files, cleared = results_path_names()
         skipped = {output_name_key(name) for name in not_on_disk}
         base = _absolute(output_dir)
@@ -257,17 +319,19 @@ def _found_in_the_way(
             for path in entries_on_disk(output_dir, (*root_files, *unlisted), cleared)
             if not (path.parent == base and output_name_key(path.name) in skipped)
         ]
-        return _Found(
-            [], _scoped(output_dir, on_disk, files, directories), unavailable.answer
-        )
+        return _Found([], _scoped(output_dir, on_disk, files, directories), unanswered)
     found = _Found(_scoped(output_dir, committed, files, directories), [], None)
     if unlisted:
-        found = _combined([found, _found_under(output_dir, unlisted)])
+        found = _combined([found, _found_under(output_dir, unlisted, failures)])
     return found
 
 
-def _found_under(output_dir: str | Path, names: Collection[str]) -> _Found:
-    answer = git_index_below(output_dir)
+def _found_under(
+    output_dir: str | Path,
+    names: Collection[str],
+    failures: Optional[_GitFailures] = None,
+) -> _Found:
+    answer = _index_below(output_dir, failures)
     if answer.unanswered:
         return _Found([], entries_on_disk(output_dir, (), names), answer)
     if answer.names is None:
@@ -284,12 +348,16 @@ def _found_under(output_dir: str | Path, names: Collection[str]) -> _Found:
     return _Found(sorted(found), [], None)
 
 
-def _found_tracked_entry(output_dir: str | Path, name: str) -> _Found:
+def _found_tracked_entry(
+    output_dir: str | Path,
+    name: str,
+    failures: Optional[_GitFailures] = None,
+) -> _Found:
     """Whether git tracks ``output_dir/<name>`` ITSELF, which for a directory name
     means a link (git tracks no directories). Nothing under it is counted here;
     :func:`_found_under` is for that. Where git could not answer and a link is on
     disk at the name, the link is the unverified entry."""
-    answer = git_index_below(output_dir)
+    answer = _index_below(output_dir, failures)
     path = _absolute(output_dir) / name
     if answer.unanswered:
         on_disk = [path] if os.path.islink(path) else []
@@ -311,7 +379,10 @@ def _combined(found: Iterable[_Found]) -> _Found:
     for item in found:
         committed.extend(item.committed)
         unverified.extend(item.unverified)
-        if answer is None:
+        # The answer the refusal quotes is git's for the entries it names. A check
+        # that found nothing on disk carries an answer too (git could not list
+        # its directory), and it may be another repository's.
+        if answer is None and item.unverified:
             answer = item.answer
     return _Found(sorted(committed), sorted(unverified), answer)
 
@@ -368,8 +439,10 @@ def committed_entries_in_project_outputs(
     directories = list(project_output_dirs)
     if not directories:
         return []
+    failures = _GitFailures()
     found = _combined(
-        _found_in_the_way(directory, None, None, ()) for directory in directories
+        _found_in_the_way(directory, None, None, (), failures)
+        for directory in directories
     )
     common = Path(
         os.path.commonpath([os.fspath(_absolute(path)) for path in directories])
@@ -410,19 +483,22 @@ def committed_entries_in_a_workspace_output(
     workspaces. When git could not answer, one :class:`UnverifiedOutputFilesError`
     names what is on disk in all of those places.
     """
+    failures = _GitFailures()
     if every_results_path_at_the_root:
-        root = _found_in_the_way(output_dir, None, None, ())
+        root = _found_in_the_way(output_dir, None, None, (), failures)
     else:
-        root = _found_in_the_way(output_dir, root_files, WORKSPACE_ROOT_DIRECTORIES, ())
+        root = _found_in_the_way(
+            output_dir, root_files, WORKSPACE_ROOT_DIRECTORIES, (), failures
+        )
     found = _combined(
         [
             root,
-            _found_under(output_dir, (WORKSPACE_SPOOL_DIR_NAME,)),
+            _found_under(output_dir, (WORKSPACE_SPOOL_DIR_NAME,), failures),
             # The projects directory itself: a committed link there would have
             # every project's output cleared and written through it.
-            _found_tracked_entry(output_dir, WORKSPACE_PROJECTS_DIR_NAME),
+            _found_tracked_entry(output_dir, WORKSPACE_PROJECTS_DIR_NAME, failures),
             *(
-                _found_in_the_way(directory, None, None, ())
+                _found_in_the_way(directory, None, None, (), failures)
                 for directory in project_output_dirs
             ),
         ]
@@ -430,14 +506,16 @@ def committed_entries_in_a_workspace_output(
     return _settled(found, output_dir)
 
 
-def _named(output: Path, entries: Sequence[Path]) -> str:
+def _named(output: Path, entries: Sequence[Path], *, git_tracks_it: bool = True) -> str:
     """The first :data:`NAMED_IN_THE_MESSAGE` of *entries*, relative to *output*,
-    and a count of the rest. *output* itself, which git can track as a link, is
-    named as such."""
+    and a count of the rest. *output* itself is named as such: for committed
+    entries, which git can track as a link, with "which git tracks"; for entries
+    git could not account for (*git_tracks_it* False), without that claim."""
+    itself = "the output directory itself" + (
+        ", which git tracks" if git_tracks_it else ""
+    )
     shown = [
-        "the output directory itself, which git tracks"
-        if path == output
-        else path.relative_to(output).as_posix()
+        itself if path == output else path.relative_to(output).as_posix()
         for path in entries[:NAMED_IN_THE_MESSAGE]
     ]
     more = f" and {len(entries) - len(shown)} more" if len(entries) > len(shown) else ""
@@ -518,7 +596,8 @@ def unverified_output_files_error(
     error = (answer.error if answer is not None else None) or "no answer"
     return UnverifiedOutputFilesError(
         f"ASH's output directory {output.as_posix()} holds {_file_count(entries)} "
-        f"where a scan deletes or writes its own output: {_named(output, entries)}. "
+        "where a scan deletes or writes its own output: "
+        f"{_named(output, entries, git_tracks_it=False)}. "
         f"It is in the git repository at {repository}, and git could not list "
         f"what is committed there ({error}), so ASH cannot tell whether those "
         "files are committed. ASH did not delete or overwrite anything, and this "
