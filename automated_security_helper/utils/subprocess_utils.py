@@ -3465,24 +3465,29 @@ def _stop_tree(
             except BaseException:
                 # A Ctrl-C during the grace: the group is still SIGKILLed, so
                 # the tool is not left SIGTERMed only while the interrupt goes
-                # on. The group id is still the child's: the leader is not
-                # reaped before the wait returns. A refused kill (EPERM on a
-                # member the server may not signal) is marked and logged, not
-                # raised: the interrupt is what the caller handles, not an
-                # OSError in its place, and the record says the stop was
-                # refused, as _stop_child says for the ordinary stop.
-                try:
-                    _signal_group(pgid, signal.SIGKILL)
-                except OSError as error:
-                    _note_stop_refused(process)
-                    ASH_LOGGER.warning(
-                        _logged_without(
-                            f"Could not stop {_argv_of(process)[0]} (process group "
-                            f"{pgid}) after an interrupt: {error}",
-                            _SPAWN_VALUES.get(),
-                        ),
-                        extra=NO_MARKUP,
-                    )
+                # on. The wait polls the leader on every pass, so the leader
+                # can be reaped and its group emptied during a sleep, and the
+                # id is then the kernel's to reuse (the case the guard below
+                # the wait exists for): the group is read before the kill, and
+                # a group gone with its leader reaped is not signalled. A
+                # refused kill (EPERM on a member the server may not signal) is
+                # marked and logged, not raised: the interrupt is what the
+                # caller handles, not an OSError in its place, and the record
+                # says the stop was refused, as _stop_child says for the
+                # ordinary stop.
+                if process.returncode is None or _group_survives(pgid):
+                    try:
+                        _signal_group(pgid, signal.SIGKILL)
+                    except OSError as error:
+                        _note_stop_refused(process)
+                        ASH_LOGGER.warning(
+                            _logged_without(
+                                f"Could not stop {_argv_of(process)[0]} (process "
+                                f"group {pgid}) after an interrupt: {error}",
+                                _SPAWN_VALUES.get(),
+                            ),
+                            extra=NO_MARKUP,
+                        )
                 raise
             if process.poll() is not None and not _group_survives(pgid):
                 # The wait reaps the leader and can end with the group
