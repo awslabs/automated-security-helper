@@ -389,6 +389,105 @@ def test_a_verified_binary_that_lost_its_execute_bit_gets_it_back(
     assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0
 
 
+class _RecordingOs:
+    """The ``os`` module as the download module sees it, with the calls that open
+    the installed file or set a mode recorded; everything else is the real one."""
+
+    def __init__(self):
+        self.opens: list = []
+        self.fchmods: list = []
+        self.path_chmods: list = []
+
+    def open(self, path, flags, *args, **kwargs):
+        fd = os.open(path, flags, *args, **kwargs)
+        self.opens.append((os.fspath(path), flags, fd))
+        return fd
+
+    def fchmod(self, fd, mode):
+        self.fchmods.append((fd, mode))
+        return os.fchmod(fd, mode)
+
+    def chmod(self, *args, **kwargs):
+        self.path_chmods.append(args)
+        return os.chmod(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+@POSIX_ONLY
+def test_the_repair_hashes_and_sets_the_mode_on_one_descriptor(
+    receipt_home, tmp_path, monkeypatch
+):
+    """The digest and the mode are read and set through ONE open of the file
+    (O_NOFOLLOW), never through a second path lookup: the install directory may
+    be writable by others, and a file swapped in between a path-based hash and a
+    path-based chmod would have had its mode set on bytes nobody hashed."""
+    import hashlib
+
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    target = destination / "tool"
+    target.write_bytes(payload)
+    target.chmod(0o644)
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    recording = _RecordingOs()
+    monkeypatch.setattr(du, "os", recording)
+
+    def never(*args, **kwargs):
+        raise AssertionError("a path-based read or chmod of the installed file")
+
+    monkeypatch.setattr(du, "sha256_file", never)
+    monkeypatch.setattr(du, "make_executable", never)
+    assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
+    opens = [entry for entry in recording.opens if entry[0] == str(target)]
+    assert len(opens) == 1, recording.opens
+    assert opens[0][1] & os.O_NOFOLLOW, opens[0]
+    assert [fd for fd, _mode in recording.fchmods] == [opens[0][2]], recording.fchmods
+    assert recording.path_chmods == []
+    assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0o111
+
+
+@POSIX_ONLY
+def test_a_file_with_a_second_name_is_reinstalled_not_repaired(
+    receipt_home, tmp_path, caplog
+):
+    """A hard link shares its mode with its other name, so the repair would
+    change a file outside the install directory; the install replaces the name
+    instead."""
+    import hashlib
+
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    target = destination / "tool"
+    target.write_bytes(payload)
+    target.chmod(0o644)
+    os.link(target, tmp_path / "other-name")
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    with caplog.at_level(logging.WARNING):
+        assert not du._already_installed(
+            destination, "tool", "https://x.example/tool", digest
+        )
+    assert "another name" in caplog.text
+    assert stat.S_IMODE((tmp_path / "other-name").stat().st_mode) & 0o111 == 0
+    # The control: with the other name gone, the same file is repaired.
+    (tmp_path / "other-name").unlink()
+    assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
+    assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0o111
+
+
 # --- archive members ---------------------------------------------------------------
 
 
