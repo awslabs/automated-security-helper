@@ -74,18 +74,39 @@ def _chain(error: BaseException) -> Iterator[BaseException]:
         yield current
         pending.append(current.__context__)
         pending.append(current.__cause__)
-        # getattr's default covers AttributeError alone; an error whose lookup
-        # raises something else (a proxying error class) names no group, and a
-        # printer that raised here would replace the error it was printing, as
-        # carried_environment_values says of its carried-values read.
-        try:
-            members = getattr(current, "exceptions", None)
-        except Exception:  # noqa: BLE001 -- whatever the error's lookup raised
-            members = None
-        if isinstance(members, tuple):
-            pending.extend(
-                member for member in members if isinstance(member, BaseException)
-            )
+        pending.extend(_members_of(current))
+
+
+def _members_of(error: BaseException) -> List[BaseException]:
+    """The members of ``error`` when it is an exception group, else none."""
+    # getattr's default covers AttributeError alone; an error whose lookup
+    # raises something else (a proxying error class) names no group, and a
+    # printer that raised here would replace the error it was printing, as
+    # carried_environment_values says of its carried-values read.
+    try:
+        members = getattr(error, "exceptions", None)
+    except Exception:  # noqa: BLE001 -- whatever the error's lookup raised
+        return []
+    if not isinstance(members, tuple):
+        return []
+    return [member for member in members if isinstance(member, BaseException)]
+
+
+def _group_members(error: BaseException) -> List[BaseException]:
+    """Each member of ``error`` when it is a group, and of each group among them,
+    in order. Raised-from and raised-during links are not followed: this is what
+    the group itself holds, which its own text does not show."""
+    found: List[BaseException] = []
+    seen: Set[int] = {id(error)}
+    pending = list(reversed(_members_of(error)))
+    while pending:
+        member = pending.pop()
+        if id(member) in seen:
+            continue
+        seen.add(id(member))
+        found.append(member)
+        pending.extend(reversed(_members_of(member)))
+    return found
 
 
 def _own_text(error: BaseException) -> str:
@@ -226,6 +247,11 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
     values = list(environment_strings(values))
     text = _own_text(error)
     descriptions: List[str] = []
+    # A group's own text counts its members and names none ("2 sub-exceptions"),
+    # so a ValidationError that is one of them, found nowhere in that text,
+    # would be described by nothing at all.
+    members = {id(member) for member in _group_members(error)}
+    unquoted: List[str] = []
     withheld = False
     for validation_error in validation_errors_in(error):
         described = describe_validation_error(validation_error, values)
@@ -239,13 +265,18 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
             return _without_escape_codes(
                 _redacted_keeping_codes(described, values) if values else described
             )
+        quoting = text
         text, changed = _without_refused_inputs(text, validation_error, described)
         withheld = withheld or changed
         descriptions.append(described)
+        if text == quoting and id(validation_error) in members:
+            unquoted.append(described)
     if withheld:
         text = "; ".join(
             [f"{type(error).__name__} ({MESSAGE_WITHHELD})", *descriptions]
         )
+    elif unquoted:
+        text = "; ".join([text, *unquoted])
     text = _files_as_given(error, text)
     # Redacted as text_without_values redacts (the raw text first, so a value
     # that itself holds codes is matched as written, then stripped and matched
@@ -307,7 +338,9 @@ def error_text(error: BaseException, values: Iterable[str] = ()) -> str:
     whose message quotes it (``f"... {e}"``), has that quote replaced the same
     way. One that quotes it with neither link (raised after the ``except``
     block, say) is left as it is: the ValidationError is not in its chain
-    (_chain), so nothing here can know its inputs. An OSError in the
+    (_chain), so nothing here can know its inputs. A ValidationError that is a
+    member of an exception group, which the group's own text only counts
+    ("1 sub-exception"), is described after that text. An OSError in the
     chain names its files as given rather than by repr (see the module's
     docstring); any other error's text is ``str(error)`` unchanged. Every
     complete escape sequence is removed from the result, since the text is kept
@@ -900,6 +933,12 @@ def log_unexpected_error(
     # or source line can quote a value, and the file handlers write what they
     # are given.
     frames = "".join(traceback.format_tb(error.__traceback__))
+    # An exception group's members have frames of their own, which the group's
+    # traceback does not hold; each is headed by its type, never its message.
+    for member in _group_members(error):
+        frames += f"{type(member).__name__}, a member of the group:\n" + "".join(
+            traceback.format_tb(member.__traceback__)
+        )
     if values:
         frames = _without_escape_codes(_redacted_keeping_codes(frames, values))
     logger.debug(frames, extra=NO_MARKUP)

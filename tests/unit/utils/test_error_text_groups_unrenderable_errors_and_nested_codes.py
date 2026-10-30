@@ -71,6 +71,60 @@ def test_an_unexpected_group_is_logged_without_its_members_inputs():
         assert REFUSED not in str(call), call
 
 
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="exception groups")
+def test_a_validation_error_member_is_described_after_the_groups_own_text():
+    inner = _validation_error()
+    group = ExceptionGroup("several things failed", [ValueError("x"), inner])  # noqa: F821
+
+    text = error_text(group)
+
+    # A group's own text counts its members and names none.
+    assert text.startswith("several things failed (2 sub-exceptions)"), text
+    assert "1 validation error for _Counted" in text, text
+    assert "count" in text and REFUSED not in text, text
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="exception groups")
+def test_a_member_the_groups_own_text_quotes_is_described_once():
+    inner = _validation_error()
+
+    class _QuotingGroup(ExceptionGroup):  # noqa: F821
+        def __str__(self) -> str:
+            return f"failed: {inner}"
+
+    text = error_text(_QuotingGroup("several things failed", [inner]))
+
+    assert text.count("1 validation error for _Counted") == 1, text
+    assert REFUSED not in text, text
+
+
+def test_a_validation_error_that_is_a_cause_is_not_added_to_an_unrelated_text():
+    inner = _validation_error()
+    try:
+        try:
+            raise inner
+        except Exception as e:
+            raise RuntimeError("the run could not continue") from e
+    except RuntimeError as caught:
+        error = caught
+
+    assert error_text(error) == "the run could not continue"
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="exception groups")
+def test_an_unexpected_groups_debug_line_holds_its_members_frames():
+    inner = _validation_error()
+    group = ExceptionGroup("several things failed", [inner])  # noqa: F821
+    logger = MagicMock()
+
+    log_unexpected_error(logger, group)
+
+    (frames,), _ = logger.debug.call_args
+    assert "ValidationError, a member of the group:" in frames, frames
+    assert "_validation_error" in frames, frames
+    assert REFUSED not in frames, frames
+
+
 class _Unrenderable(RuntimeError):
     def __str__(self) -> str:
         raise ValueError("no text for this error")
