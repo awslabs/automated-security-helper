@@ -30,7 +30,7 @@ A config file inside the repository you scan, including the `.ashrc.yaml` that A
 
 ## Where ASH looks for its config {#discovery}
 
-`ash scan` looks in its source directory (`--source-dir`, by default the current directory), and so do `ash config get`, `ash config validate`, `ash config lint`, and `ash config validate-plugin-dependencies`, which take `--source-dir` too. `ash config init`, `ash config update`, and `ash config wizard` look in the current directory. ASH uses the first source it finds, in this order:
+`ash scan` looks in its source directory (`--source-dir`, by default the current directory), and so do `ash config get`, `ash config validate`, `ash config lint`, `ash config validate-plugin-dependencies`, `ash config update`, and `ash config wizard`, which take `--source-dir` too. `ash config init` writes in the current directory. ASH uses the first source it finds, in this order:
 
 1. `.ash.yml`, `.ash.yaml`, `.ash.json`, `ash.yml`, `ash.yaml`, `ash.json`. ASH tries each name in the directory and then in its `.ash/` subdirectory before it moves to the next name, so `.ash/.ash.yml` wins over `.ash.yaml`.
 2. `.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`, `.ashrc.json`, `ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json`, in the directory only.
