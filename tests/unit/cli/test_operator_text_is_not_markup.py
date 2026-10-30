@@ -800,6 +800,10 @@ def test_plugin_list_shows_a_plugins_config_and_error_as_text(in_tmp, monkeypatc
     result = CliRunner().invoke(app, ["plugin", "list", "--include-plugin-config"])
 
     assert result.exit_code == 0, result.output
-    # Once in bandit's config, once in semgrep's error.
-    assert result.output.count(text) == 2, result.output
+    # Each place the text is shown holds it whole: bandit's config column (the
+    # JSON-quoted value), semgrep's error column, and the warning bandit's config
+    # validation logs about the additional_formats value. A count would move with
+    # every new line that shows the value.
+    assert f'"{text}"' in result.output, result.output
+    assert f"cannot build: {text}" in result.output, result.output
     assert "\\[" not in result.output, result.output
