@@ -659,6 +659,35 @@ class TestLocationReadings:
         ]
         assert uris == ["secr%E9t.py"]
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="a Windows file name is UTF-16; the byte-wise percent form is POSIX's",
+    )
+    def test_a_percent_encoded_name_is_also_read_in_the_filesystem_encoding(
+        self, tmp_path, monkeypatch
+    ):
+        """On a host whose filesystem encoding is latin-1, git and the changed set
+        name the file ``secrét.py`` (U+00E9) while ``Path.as_uri()`` spelled the
+        byte as ``secr%E9t.py``; decoding it as UTF-8 with surrogateescape gave a
+        surrogate that names no file there, so the finding was still dropped. The
+        bytes are read through ``os.fsdecode`` too, here stood in by latin-1."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        name = "secrét.py"
+        changed = {(source_dir / name).resolve()}
+        monkeypatch.setattr(os, "fsdecode", lambda raw: bytes(raw).decode("latin-1"))
+        results = _make_results_with_sarif(
+            [_make_result("secr%E9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["secr%E9t.py"]
+
 
 @pytest.mark.unit
 class TestTheKeptCountIsSaidOnce:

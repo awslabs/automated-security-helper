@@ -13,6 +13,7 @@ counts, ``ash.sarif``, the aggregated results file and the exit code all leave
 out the same findings.
 """
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Mapping, Optional, Set
 from urllib.parse import unquote, urlparse
@@ -78,6 +79,32 @@ def _location_readings(uri: str) -> List[str]:
             if reading not in readings:
                 readings.append(reading)
     return readings
+
+
+def _filesystem_readings(readings: List[str]) -> List[str]:
+    """*readings*, plus each one's spelling in the filesystem encoding.
+
+    A percent-encoded byte that is not UTF-8 (``secr%E9t.py`` for latin-1) is
+    decoded with ``surrogateescape`` into the lone surrogate ``\\udce9``, the name
+    git and ``os.fsdecode`` give the file on a UTF-8 host. On a host whose
+    filesystem encoding is a legacy POSIX locale the same file is named
+    ``secrét.py``, so the surrogate reading matched nothing and the finding was
+    dropped though its file had changed. Each reading's bytes (the surrogates
+    turned back by the same handler) are therefore also read through
+    ``os.fsdecode``, the decoding git's names and the changed set are in. A
+    spelling equal to an earlier one is left out, so a UTF-8 host sees the
+    readings it did before; a text that cannot be re-encoded (a lone surrogate
+    outside the escape range) adds none.
+    """
+    spellings = list(readings)
+    for reading in readings:
+        try:
+            spelling = os.fsdecode(reading.encode("utf-8", "surrogateescape"))
+        except UnicodeEncodeError:
+            continue
+        if spelling not in spellings:
+            spellings.append(spelling)
+    return spellings
 
 
 def _converted_path(result) -> Optional[str]:
@@ -198,7 +225,7 @@ def filter_results_to_changed_files(
                 path_in_record_form(resolved)
                 for resolved in (
                     resolve_uri_reading(reading, base=Path(source_dir))
-                    for reading in readings
+                    for reading in _filesystem_readings(readings)
                 )
                 if resolved is not None
             ]
