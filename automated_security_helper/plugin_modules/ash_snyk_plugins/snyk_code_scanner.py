@@ -3,6 +3,7 @@
 
 import json
 from contextlib import ExitStack
+from datetime import datetime, timezone
 import logging
 import os
 import shutil
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, Iterable, List, Literal, Set
 
 import yaml
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -49,7 +50,12 @@ from automated_security_helper.utils.scanned_tree import (
     open_in_scanned_tree,
     relative_display,
 )
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    WAS_KILLED_ENDING,
+    find_executable,
+    in_tree_refusal,
+)
 
 # snyk code test reads exclusions from files in the tree it tests, at any depth,
 # and leaves the files they name out of the analysis. Its native implementation
@@ -180,13 +186,27 @@ def _hold(directory: Path) -> int | None:
         import fcntl
     except ImportError:
         return None
-    fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError:
+        # The directory cannot be opened for the lock (a filesystem that refuses
+        # the open, a directory gone already): unlocked, like one flock refuses,
+        # rather than raised out of _stage_source before the copy's removal is
+        # registered, which left the directory behind.
+        return None
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         os.close(fd)
         return None
     return fd
+
+
+def _scan_set_name(name: str) -> str:
+    """A scan-set line as the path it names: without the one line ending a cached
+    list leaves, and nothing more. ``rstrip`` took every trailing newline, so a file
+    whose name ends in one was copied under a different name, or skipped."""
+    return name.removesuffix("\n")
 
 
 def _sweep_abandoned_copies(
@@ -296,6 +316,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     # project detected.
     success_exit_codes: ClassVar[Set[int]] = {0, 1}
 
+    # How many files of the scan set the source copy left out (_stage_source), for
+    # the exit-3 reading in scan(). Reset per target.
+    _staged_refused: int = PrivateAttr(default=0)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = SnykCodeScannerConfig()
@@ -343,6 +367,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         snyk_binary = find_executable("snyk")
         if not snyk_binary or snyk_binary is None:
+            # A copy found only inside the scanned tree was refused, not missing:
+            # recorded as ScannerPluginBase.validate_plugin_dependencies records
+            # it, so the MISSING row says so rather than "not found on PATH".
+            refusal = in_tree_refusal("snyk")
+            if refusal is not None:
+                self.dependency_unavailable_reason = refusal
             return False
         return True
 
@@ -545,11 +575,17 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # _run_subprocess keeps the worst code of every run of this instance, and the
         # executor runs one instance over the source tree and then the converted one,
         # so after a source that exited 3 the converted target read 3 whatever its
-        # own run returned, and was graded SKIPPED with its findings unread.
+        # own run returned, and was graded SKIPPED with its findings unread. And
+        # the tool lines: a failed converted-target run otherwise records the
+        # source target's stderr as its own (exitCodeDescription, the failure text).
         self.targets_attempted = None
+        self.targets_failed = 0
         self.exit_code = 0
+        self.output = []
+        self.errors = []
+        self._staged_refused = 0
         # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
+        if _target_is_empty(target):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
@@ -559,6 +595,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 level=logging.INFO,
                 append_to_stream="stderr",
             )
+            # No tool runs for this target, so its record starts and ends now: a
+            # start time left from the previous target would give it that
+            # target's duration.
+            self.start_time = None
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -605,6 +645,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # match. The copy of the source target leaves the same files out as a second
         # guard; the converted target is tested where ASH wrote it, so these refusals
         # are the only guard it has.
+        # No exit code until snyk returns one, as the template's scan() has it: a
+        # target refused before the tool starts reports no exit code, not the 0
+        # set above. The refusals below are the first such path.
+        self.exit_code = None
         self._refuse_output_dir_inside(Path(target))
         self._refuse_links_leaving(Path(target))
         self._refuse_ignored_files(Path(target), global_ignore_paths)
@@ -616,6 +660,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
+            # A report left by an earlier run must not be read as this run's: snyk
+            # writes none when it fails, and the read below takes whatever is here.
+            results_file.unlink(missing_ok=True)
 
             tested = target
             if target_type == "source":
@@ -677,11 +724,20 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 )
 
             # No environment modifications are currently needed for Snyk Code.
+            effective_timeout = self._effective_scan_timeout()
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
-                timeout=self._effective_scan_timeout(),
+                timeout=effective_timeout,
             )
+            # The run is over: its end time is recorded here, before the invocation
+            # below reads it, so the first target's record carries this run's end
+            # rather than None and the second's rather than the first's.
+            self._post_scan(target=target, target_type=target_type)
+            # A run the subprocess layer flagged (timed out, could not start, its
+            # output not recorded, ended by a foreign signal) is refused before its
+            # file is read, whatever exit code it carries.
+            self._refuse_flagged_response(response, effective_timeout)
 
             # snyk exits 1 when it found issues, which is a completed scan, 2 when it
             # failed, and 3 when it found no supported project; see success_exit_codes.
@@ -693,6 +749,22 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # targets_attempted = 0 is what the executor grades SKIPPED. Exit 2 is
             # still a failure.
             if self.exit_code == _NO_SUPPORTED_FILES_EXIT_CODE:
+                if self._staged_refused:
+                    # Not SKIPPED: files in the scan set were refused from the copy
+                    # (_stage_source), so snyk may have been given none of the
+                    # supported files the tree holds. Those files were not judged,
+                    # and a SKIPPED row would read as "nothing here to scan".
+                    self._plugin_log(
+                        f"Snyk Code found no supported files in the copy of {target}, "
+                        f"but {_count(self._staged_refused, 'file')} of the scan set "
+                        "could not be copied for it (snyk exit code 3): the files it "
+                        "was not given were not judged, so the target is failed.",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                    )
+                    self.targets_attempted = 1
+                    self.targets_failed = 1
+                    return True
                 self._plugin_log(
                     f"Snyk Code found no supported files in {target}; nothing was "
                     "evaluated (snyk exit code 3).",
@@ -700,7 +772,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     level=logging.INFO,
                 )
                 self.targets_attempted = 0
-                self._post_scan(target=target, target_type=target_type)
                 return True
 
             if not self._exit_code_accepted():
@@ -758,10 +829,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                                 ),
                             )
                         ]
-                    self._post_scan(
-                        target=target,
-                        target_type=target_type,
-                    )
                     return sarif_report
                 except Exception as e:
                     self._plugin_log(
@@ -769,10 +836,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                         target_type=target_type,
                         level=logging.ERROR,
                         append_to_stream="stderr",
-                    )
-                    self._post_scan(
-                        target=target,
-                        target_type=target_type,
                     )
                     return
             else:
@@ -782,16 +845,65 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
 
         except Exception as e:
-            # Check if there are useful error details
+            # The run is over for this target, however it ended: the executor
+            # records end_time, and one left from the previous target would give
+            # this one an end before its start.
+            self.end_time = datetime.now(timezone.utc)
             raise ScannerError(f"Snyk Code scan failed: {str(e)}")
         finally:
             cleanup.close()
+
+    def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
+        """Raise for a run the subprocess layer flagged, before its file is read.
+
+        The four readings ``ScannerPluginBase.scan`` makes for every template
+        scanner, which this override of ``scan()`` left out: a killed tool writes
+        no results file, so the error would otherwise be "No such file or
+        directory" instead of the timeout; a tool that could not start the same; a
+        tool that ran while ASH could not record its output (exit 0, a file that
+        may be complete) is not graded on that file; a tool a signal ASH did not
+        send ended did not finish. The exit code alone does not say any of this: a
+        flagged response keeps the tool's own code, 0 included.
+        """
+        if not isinstance(response, dict):
+            return
+        name = self.__class__.__name__
+        if response.get("timed_out"):
+            limit = self._timeout_limit_token(timeout)
+            if self.scan_could_not_stop is not None:
+                ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
+            else:
+                ending = f"{WAS_KILLED_ENDING}, so it produced no"
+            raise ScannerError(
+                text_without_values(
+                    f"{name} timed out after {limit}{ending} results file. Raise "
+                    f"scanners.{getattr(self.config, 'name', '<scanner>')}.options"
+                    ".scan_timeout if this target legitimately needs longer, or set "
+                    "it to null to leave this scanner unbounded.",
+                    self._values_to_redact(),
+                )
+            )
+        if response.get("spawn_failed"):
+            raise ScannerError(
+                f"{name} could not start its tool, so it produced no results file."
+            )
+        if response.get("post_run_error"):
+            raise ScannerError(
+                text_without_values(
+                    f"{name} ran, but ASH could not record the scanner's output: "
+                    f"{response.get('error')}",
+                    self._values_to_redact(),
+                )
+            )
+        if response.get("signaled"):
+            raise ScannerError(
+                text_without_values(
+                    f"{name} did not finish: {response.get('error')}",
+                    self._values_to_redact(),
+                )
+            )
 
     @staticmethod
     def _exclusion_refusal(files: List[Path], target: Path) -> str:
@@ -916,8 +1028,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             run_id=getattr(self.context, "run_id", None),
             workspace_output_dir=getattr(self.context, "workspace_output_dir", None),
         ):
-            # Only the line ending a cached list leaves: "a.js " is its own file.
-            path = Path(name.rstrip("\n"))
+            # Only the line ending a cached list leaves: "a.js " is its own file,
+            # and so is a name that ends in a newline (_scan_set_name).
+            path = Path(_scan_set_name(name))
             try:
                 relative = path.relative_to(root)
             except ValueError:
@@ -980,6 +1093,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "a symlink, a file with a second hard link, a path outside the scanned "
             "tree, or unreadable"
         )
+        # Read by scan() when snyk reports no supported file: a copy that lacks
+        # files the scan set holds is not a tree with nothing to scan.
+        self._staged_refused = refused
         if refused:
             self._plugin_log(
                 f"{_count(refused, 'file')} in the scan set not copied "
@@ -1018,3 +1134,18 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 sandbox_scope(dataclasses.replace(scope, scan_target=staged))
             )
         return staged
+
+
+def _target_is_empty(target: Path) -> bool:
+    """Whether ``target`` is missing, or a directory with nothing in it.
+
+    A target that is a file is not empty, and a directory that cannot be listed
+    is left to the tool: the probe used to raise ``NotADirectoryError`` or
+    ``PermissionError`` out of ``scan()`` before its error handling began.
+    """
+    try:
+        if not target.exists():
+            return True
+        return target.is_dir() and not any(target.iterdir())
+    except OSError:
+        return False

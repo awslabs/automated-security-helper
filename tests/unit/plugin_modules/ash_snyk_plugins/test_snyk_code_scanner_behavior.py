@@ -159,7 +159,8 @@ def writes_sarif(sarif_text, exit_code=0):
             arg.split("=", 1)[1] for arg in command if arg.startswith(SARIF_OUTPUT_FLAG)
         )
         Path(destination).write_text(sarif_text, encoding="utf-8")
-        self.exit_code = max(self.exit_code, exit_code)
+        # scan() holds no exit code until snyk returns one, as the template does.
+        self.exit_code = max(self.exit_code or 0, exit_code)
         return {"stdout": "", "stderr": "", "returncode": exit_code}
 
     return _side_effect
