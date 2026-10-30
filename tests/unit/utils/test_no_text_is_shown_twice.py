@@ -174,22 +174,25 @@ _BY_DESIGN: Dict[Site, str] = {
         "cleanup_scan_resources",
         "Failed to cancel scan",
     ): "it logs the cancel result's message, which is raw; only its error is shown",
-    # get_scan_results returns the error-holding response of mcp_get_scan_results
-    # at its `"error" in results` check, before either call below, so what they
-    # are handed is the producer's success payload. The check takes the result of
-    # the producer for shown text whole, and the filters reach a log call.
+    # get_scan_results returns the producer's result as it is when it carries an
+    # error (`if "error" in results or results.get("success") is False: return
+    # results`, the guard right after the mcp_get_scan_results(...) call), so the
+    # two calls below run only on a success payload, which holds the scan's
+    # findings and no shown text. `results` reads as shown text to the check only
+    # because mcp_get_scan_results is a producer (its error response holds shown
+    # text), and the two calls sit in the check's doubling set through a callee.
     (
         "automated_security_helper/cli/mcp_server.py",
         "get_scan_results",
         "filter_actionable_only(results)",
-    ): "results is the producer's success payload: the error-holding response "
-    'returned at the `"error" in results` check above',
+    ): "by design: no shown text reaches the filter, the guard after the producer "
+    "call returns an error-holding result first",
     (
         "automated_security_helper/cli/mcp_server.py",
         "get_scan_results",
         "apply_content_filters(results, scanners, severities)",
-    ): "results is the producer's success payload: the error-holding response "
-    'returned at the `"error" in results` check above',
+    ): "by design: no shown text reaches the filter, the guard after the producer "
+    "call returns an error-holding result first",
 }
 
 
