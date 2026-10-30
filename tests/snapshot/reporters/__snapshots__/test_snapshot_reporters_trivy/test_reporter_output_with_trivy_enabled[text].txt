@@ -20,7 +20,7 @@ Scanner              Suppressed Critical     High   Medium      Low     Info   D
 trivy                         0        0        3        7        0        0      500ms         10 FAILED   MEDIUM (global)
 
 Actionable findings meet or exceed the scanner threshold. Suppressed findings are separate.
-PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED is disabled.
+PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED did not run (disabled, or nothing to scan).
 Threshold sources: global settings, scanner config, or scanner default.
 
 Top 2 Hotspots:

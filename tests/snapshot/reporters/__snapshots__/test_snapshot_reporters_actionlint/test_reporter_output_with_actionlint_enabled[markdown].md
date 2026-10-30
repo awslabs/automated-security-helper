@@ -26,7 +26,7 @@ Project: ASH · Scan executed: 2026-01-15T12:00:00+00:00
 
 **Actionable** counts findings at or above each scanner's threshold.
 
-**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = did not run (disabled, or nothing to scan); ERROR = execution error.
 
 **Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
 

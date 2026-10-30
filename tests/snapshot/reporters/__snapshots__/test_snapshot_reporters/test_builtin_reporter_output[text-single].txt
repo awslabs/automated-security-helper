@@ -34,7 +34,7 @@ semgrep                       0        0        0        0        1        1    
 syft                          0        0        0        0        0        0         2s          0 PASSED   MEDIUM (global)
 
 Actionable findings meet or exceed the scanner threshold. Suppressed findings are separate.
-PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED is disabled.
+PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED did not run (disabled, or nothing to scan).
 Threshold sources: global settings, scanner config, or scanner default.
 
 Top 4 Hotspots:

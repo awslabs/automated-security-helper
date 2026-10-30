@@ -20,7 +20,7 @@ Scanner              Suppressed Critical     High   Medium      Low     Info   D
 actionlint                    0        0        2        2        4        0      250ms          4 FAILED   MEDIUM (global)
 
 Actionable findings meet or exceed the scanner threshold. Suppressed findings are separate.
-PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED is disabled.
+PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED did not run (disabled, or nothing to scan).
 Threshold sources: global settings, scanner config, or scanner default.
 
 Top 1 Hotspots:

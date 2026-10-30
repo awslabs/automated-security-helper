@@ -306,7 +306,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             text_parts.extend(
                 [
                     "Actionable findings meet or exceed the scanner threshold. Suppressed findings are separate.",
-                    "PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED is disabled.",
+                    "PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED did not run (disabled, or nothing to scan).",
                     "Threshold sources: global settings, scanner config, or scanner default.",
                     "",
                 ]
