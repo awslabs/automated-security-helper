@@ -23,6 +23,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -470,12 +471,20 @@ def _payload(**projects):
 
 @pytest.fixture
 def scratch_under_tmp(policy_script, tmp_path: Path, monkeypatch):
-    """main() makes its scratch directory under tmp_path, not the system tmp."""
+    """main() makes its scratch directory under tmp_path, not the system tmp.
 
-    def mkdtemp(prefix: str = "") -> str:
-        scratch = tmp_path / f"{prefix}scratch"
-        scratch.mkdir()
-        return str(scratch)
+    The stand-in keeps the real signature and delegates, so a main() that
+    passes ``suffix`` or ``dir``, or switches to ``TemporaryDirectory`` (which
+    calls ``mkdtemp(suffix, prefix, dir)`` positionally), does not break these
+    tests for a reason unrelated to what they check. Only the parent directory
+    is redirected.
+    """
+    real_mkdtemp = tempfile.mkdtemp
+
+    def mkdtemp(suffix=None, prefix=None, _parent=None, **_keyword_parent):
+        # The third argument, positional or as the keyword tempfile names it,
+        # is the parent directory; it is what this fixture redirects.
+        return real_mkdtemp(suffix, prefix, str(tmp_path))
 
     monkeypatch.setattr(policy_script.tempfile, "mkdtemp", mkdtemp)
     return tmp_path
