@@ -37,6 +37,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import signal
@@ -613,7 +614,7 @@ class TestSarifRunIndex:
     def test_a_negative_index_is_refused(self, gate):
         """At the base -1 passed the upper bound and selected the last run."""
         project = _project(gate, "project-a")
-        project = gate.ProjectOutcome(**{**project.__dict__, "sarif_run_index": -1})
+        project = dataclasses.replace(project, sarif_run_index=-1)
         runs = [_run(gate, 0, "project-a")]
         violations = gate.check_one_run_per_project([project], runs)
         assert any("not an index into the runs" in v for v in violations)
@@ -814,19 +815,15 @@ class TestOutputSubtrees:
     def test_two_spellings_of_one_directory_are_shared(self, gate, tmp_path):
         """At the base the raw strings 'a/b' and 'a//b' read as two directories."""
         projects = [
-            gate.ProjectOutcome(
-                **{**_project(gate, "project-a").__dict__, "output_path": "a/b"}
-            ),
-            gate.ProjectOutcome(
-                **{**_project(gate, "project-b").__dict__, "output_path": "a//b/"}
-            ),
+            dataclasses.replace(_project(gate, "project-a"), output_path="a/b"),
+            dataclasses.replace(_project(gate, "project-b"), output_path="a//b/"),
         ]
         violations = gate.check_per_project_subtrees(projects, tmp_path)
         assert any("share the output path" in v for v in violations)
 
     def test_an_output_path_outside_the_output_dir_is_a_violation(self, gate, tmp_path):
-        project = gate.ProjectOutcome(
-            **{**_project(gate, "project-a").__dict__, "output_path": "../outside"}
+        project = dataclasses.replace(
+            _project(gate, "project-a"), output_path="../outside"
         )
         violations = gate.check_per_project_subtrees([project], tmp_path / "out")
         assert any("does not stay inside" in v for v in violations)
@@ -849,12 +846,8 @@ class TestRollupPerScanner:
         self._write(tmp_path / "a" / gate.RESULTS_FILENAME, {"bandit": 2, "checkov": 4})
         self._write(tmp_path / "b" / gate.RESULTS_FILENAME, {"bandit": 3, "checkov": 3})
         projects = [
-            gate.ProjectOutcome(
-                **{**_project(gate, "project-a").__dict__, "output_path": "a"}
-            ),
-            gate.ProjectOutcome(
-                **{**_project(gate, "project-b").__dict__, "output_path": "b"}
-            ),
+            dataclasses.replace(_project(gate, "project-a"), output_path="a"),
+            dataclasses.replace(_project(gate, "project-b"), output_path="b"),
         ]
         violations = gate.check_scanner_rollup_per_scanner(projects, tmp_path)
         assert len(violations) == 2
@@ -870,12 +863,8 @@ class TestRollupPerScanner:
         self._write(tmp_path / "a" / gate.RESULTS_FILENAME, {"bandit": 2, "checkov": 4})
         self._write(tmp_path / "b" / gate.RESULTS_FILENAME, {"bandit": 3, "checkov": 3})
         projects = [
-            gate.ProjectOutcome(
-                **{**_project(gate, "project-a").__dict__, "output_path": "a"}
-            ),
-            gate.ProjectOutcome(
-                **{**_project(gate, "project-b").__dict__, "output_path": "b"}
-            ),
+            dataclasses.replace(_project(gate, "project-a"), output_path="a"),
+            dataclasses.replace(_project(gate, "project-b"), output_path="b"),
         ]
         assert gate.check_scanner_rollup_per_scanner(projects, tmp_path) == []
 
@@ -896,12 +885,8 @@ class TestGateScannersRanInEveryProject:
 
     def _projects(self, gate):
         return [
-            gate.ProjectOutcome(
-                **{**_project(gate, "project-a").__dict__, "output_path": "a"}
-            ),
-            gate.ProjectOutcome(
-                **{**_project(gate, "project-b").__dict__, "output_path": "b"}
-            ),
+            dataclasses.replace(_project(gate, "project-a"), output_path="a"),
+            dataclasses.replace(_project(gate, "project-b"), output_path="b"),
         ]
 
     def test_both_scanners_run_and_tripped_in_every_project_is_clean(
@@ -1037,11 +1022,8 @@ class TestGateScannersRanInEveryProject:
 
     def test_an_incomplete_project_is_not_read(self, gate, tmp_path):
         _write_own_results(tmp_path / "a" / gate.RESULTS_FILENAME, {})
-        project = gate.ProjectOutcome(
-            **{
-                **_project(gate, "project-a", status="failed").__dict__,
-                "output_path": "a",
-            }
+        project = dataclasses.replace(
+            _project(gate, "project-a", status="failed"), output_path="a"
         )
         assert gate.check_gate_scanners_ran_in_every_project([project], tmp_path) == []
 
@@ -1163,7 +1145,15 @@ class TestPreconditionFailure:
         """At the base the mkdtemp directory stayed and paths never created were named."""
         made = tmp_path / "ash-multi-project-x"
         made.mkdir()
-        monkeypatch.setattr(gate.tempfile, "mkdtemp", lambda prefix: str(made))
+
+        def mkdtemp(suffix=None, prefix=None, dir=None):  # noqa: A002 - tempfile's own name
+            # tempfile.mkdtemp's full signature, so the stand-in survives the
+            # gate passing the parent directory or the prefix positionally; the
+            # prefix is still pinned, since it is what names the kept directory.
+            assert prefix == "ash-multi-project-"
+            return str(made)
+
+        monkeypatch.setattr(gate.tempfile, "mkdtemp", mkdtemp)
         monkeypatch.setattr(
             gate, "check_paths_outside_repo", lambda *paths: ["inside the repository"]
         )

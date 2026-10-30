@@ -603,7 +603,15 @@ class TestPreconditionFailure:
         """At the base the mkdtemp directory stayed and a fixture never written was named."""
         made = tmp_path / "ash-external-target-x"
         made.mkdir()
-        monkeypatch.setattr(gate.tempfile, "mkdtemp", lambda prefix: str(made))
+
+        def mkdtemp(suffix=None, prefix=None, dir=None):  # noqa: A002 - tempfile's own name
+            # tempfile.mkdtemp's full signature, so the stand-in survives the
+            # gate passing the parent directory or the prefix positionally; the
+            # prefix is still pinned, since it is what names the kept directory.
+            assert prefix == "ash-external-target-"
+            return str(made)
+
+        monkeypatch.setattr(gate.tempfile, "mkdtemp", mkdtemp)
         monkeypatch.setattr(
             gate, "check_paths_outside_repo", lambda *paths: ["inside the repository"]
         )

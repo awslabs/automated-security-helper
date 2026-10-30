@@ -274,8 +274,10 @@ class TestTimedOutScan:
         """At the base TimeoutExpired escaped main and no FAILED report was printed."""
         import subprocess
 
-        def mkdtemp(prefix: str = "") -> str:
-            scratch = tmp_path / f"{prefix}scratch"
+        def mkdtemp(suffix=None, prefix=None, dir=None) -> str:  # noqa: A002 - tempfile's name
+            # tempfile.mkdtemp's full signature, so the stand-in survives the
+            # gate passing the parent directory or the prefix positionally.
+            scratch = tmp_path / f"{prefix or ''}scratch"
             scratch.mkdir()
             return str(scratch)
 
