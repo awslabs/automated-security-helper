@@ -1386,10 +1386,13 @@ class ScanPhase(EnginePhase):
                                 display_name, reason=excluded_reason
                             )
 
-                            # Process the container through _process_results to store duration info
-                            aggregated_results = self._process_results(
-                                results=results_container,
-                                aggregated_results=aggregated_results,
+                            # Guarded like the other recorders for a scanner that
+                            # does not run: a refused write of this container used
+                            # to escape to the loop's own except and the row was
+                            # then recorded MISSING ("left filtering with no
+                            # status") over a scanner the operator excluded.
+                            aggregated_results = self._write_results_guarded(
+                                display_name, results_container, aggregated_results
                             )
 
                             # Do NOT add to completed scanners - this scanner was excluded and didn't run
