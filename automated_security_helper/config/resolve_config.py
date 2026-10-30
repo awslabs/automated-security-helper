@@ -4087,10 +4087,12 @@ _FALSE_SPELLINGS = frozenset({"0", "off", "f", "false", "n", "no"})
 def _disables_a_reporter(override: str) -> bool:
     """Whether a ``reporters`` override sets one section's ``enabled`` to false:
     ``reporters.<section>.enabled=<false>``, with either separator spelling of
-    the key and any value the model's ``enabled`` field reads as False
-    (``false`` in any case, ``0``, ``off``, ``no``, ``f``, ``n``): exactly the
-    values the override would set the field to, so the always-apply arm admits
-    every disable the section-wide application would have applied."""
+    the key and a value the model's ``enabled`` field reads as False: a parsed
+    bool False, a numeric zero, or one of the six lax-bool spellings (``false``,
+    ``0``, ``off``, ``no``, ``f``, ``n``, in any case, blanks stripped). A value
+    admitted here that the model then refuses is attempted alone by the
+    always-apply arm, fails validation there and is dropped, named among the
+    section's keys in the warning and not as an applied disable."""
     key, separator, value = override.partition("=")
     if not separator or key.endswith("+"):
         return False

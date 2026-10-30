@@ -2509,12 +2509,13 @@ def _resolved_reference_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
     or TOML file) or where the key is a quoted scalar (the implicit ``!ENV``
     resolver reads plain scalars only), so a written key that is itself a key
     of ``resolved`` came to itself. Otherwise the key is resolved by the
-    loader's own rule, read quietly (_quietly_resolved), and looked up as the
-    merge spells keys (_record_key: ``-`` for ``_``, and a plugin section's
-    other spelling, since environment_record_read folds the resolved mapping's
-    plugin sections onto their canonical spelling). A key that still names no
-    key of ``resolved`` (the variable unset, or set to a name the mapping does
-    not hold) is None, and _paired_keys pairs it by position."""
+    loader's own rule, read quietly (_quietly_resolved), and looked up by the
+    merge's spelling rule (_record_key without its plugin-section fold: ``-``
+    for ``_``, the twin environment_record_read folds a plugin section's
+    canonical spelling by too; a key resolving to another plugin's name is
+    not this mapping's entry). A key that still names no key of ``resolved``
+    (the variable unset, or set to a name the mapping does not hold) is None,
+    and _paired_keys pairs it by position."""
     text = _without_env_tag(written_key)
     if text in resolved:
         return text
