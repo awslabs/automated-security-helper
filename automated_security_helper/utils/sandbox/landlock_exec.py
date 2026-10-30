@@ -83,10 +83,14 @@ PR_SET_CHILD_SUBREAPER = 36
 PR_SET_PDEATHSIG = 1
 #: The signals that ask the wrapper to stop (ASH sends SIGTERM on a timeout).
 STOP_SIGNALS = frozenset({signal.SIGTERM, signal.SIGINT, signal.SIGHUP})
-#: The most /proc entries one fallback scan reads (``_parent_map``). A host can
-#: carry tens of thousands of processes and each entry costs an open and a read,
-#: so an unbounded scan could on its own outlast STOP_REAP_DEADLINE_SECONDS;
-#: processes listed past this many are not seen by that scan.
+#: How many /proc entries one fallback scan (``_parent_map``) reads whatever the
+#: clock says: the floor of every scan, so the newest processes (the scanner's own
+#: children, listed first) are met even by a pass that starts past its deadline,
+#: and the whole of a scan with no deadline (the first reap pass), so that one
+#: cannot outlast STOP_REAP_DEADLINE_SECONDS on a host with tens of thousands of
+#: processes, each entry an open and a read. A scan handed a deadline goes on past
+#: this many while the deadline allows; processes listed past it are seen by that
+#: scan alone.
 PROC_SCAN_LIMIT = 4096
 #: How long the wrapper keeps reaping after its scanner exits on its own. Below
 #: ASH's SANDBOX_STOP_GRACE_SECONDS (10), so the wrapper finishes before ASH gives up on it.
