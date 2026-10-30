@@ -53,6 +53,11 @@ A sink that then puts the text in ASCII (utils/log.py's WindowsSafeFilter, throu
 :func:`shown_in_ascii`) doubles a run only before the text of an escape one of
 the two would write there (``lookalikes="ascii"``): JSON's ``\\u00e9`` in a
 suggested command is left as it is, since the ASCII form of "é" is ``\\xe9``.
+For a console whose code page writes a character, ``writable`` says so, and the
+text of that character's escape is left as it is whatever its value, ``\\u0151``
+for "ő" on cp1250 included; for a character the code page cannot write, the
+escape is the same text as the message's own, so the message's has its run
+doubled.
 In JSON it writes JSON's own escapes instead (:func:`json_controls_shown`).
 
 :func:`shown_not_obeyed` and :func:`shown_on_one_line`, which also writes tab,
@@ -69,7 +74,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Literal
 
 #: The Unicode categories of the characters shown as escapes, not printed: control
@@ -141,12 +146,18 @@ def _reads_as_written_escape(after: str) -> bool:
     )
 
 
-def _reads_as_ascii_escape(after: str) -> bool:
+def _reads_as_ascii_escape(
+    after: str, writable: Callable[[str], bool] | None = None
+) -> bool:
     """Whether *after* is an escape this module or :func:`shown_in_ascii` writes.
 
     The text of a character outside ASCII, or of one :func:`is_shown_as_escape`
     names, in the form :func:`escape_for` gives it: ``\\xe9`` for "é", never
-    JSON's ``\\u00e9``, whose value is below U+0100.
+    JSON's ``\\u00e9``, whose value is below U+0100. With *writable*, the
+    characters it accepts are not escaped by :func:`shown_in_ascii`, so the text
+    of their escape is no escape it writes either: JSON's ``\\u0151`` is left
+    as it is on a console that writes "ő", where it would read as the escape
+    shown_in_ascii writes for it on one that does not.
     """
     match = _ESCAPE_TEXT.match(after)
     if match is None:
@@ -157,6 +168,12 @@ def _reads_as_ascii_escape(after: str) -> bool:
         return False
     if character.isascii() and not is_shown_as_escape(character):
         return False
+    if (
+        writable is not None
+        and not is_shown_as_escape(character)
+        and writable(character)
+    ):
+        return False
     return escape_for(character).lower() == "\\" + match.group().lower()
 
 
@@ -165,6 +182,7 @@ def controls_shown(
     *,
     keep_layout: bool = True,
     lookalikes: Literal["any", "written", "ascii"] = "any",
+    writable: Callable[[str], bool] | None = None,
 ) -> str:
     """*text* with each character :func:`is_shown_as_escape` names written as its
     escape, one to one.
@@ -181,7 +199,10 @@ def controls_shown(
     before the text of a character outside ASCII in the form :func:`escape_for`
     writes it, for text :func:`shown_in_ascii` then puts in ASCII: a JSON
     document's ``\\u00e9`` is left as it is, where "any" doubled its run and the
-    command that quoted it then read the text "u00e9".
+    command that quoted it then read the text "u00e9". *writable*, for "ascii"
+    only, says which characters outside ASCII the stream writes as they are
+    (:func:`shown_in_ascii` is given the same): the text of an escape for one of
+    them is no escape that function writes, so its run is not doubled either.
     """
 
     def shown(match: re.Match[str]) -> str:
@@ -193,7 +214,9 @@ def controls_shown(
             elif lookalikes == "written":
                 reads_as_escape = _reads_as_written_escape(text[after : after + 9])
             else:
-                reads_as_escape = _reads_as_ascii_escape(text[after : after + 9])
+                reads_as_escape = _reads_as_ascii_escape(
+                    text[after : after + 9], writable
+                )
             if reads_as_escape or (
                 after < len(text) and _escaped(text, after, keep_layout)
             ):
@@ -341,18 +364,23 @@ def hash_command_broken(match: re.Match[str]) -> str:
 
 
 def shown_not_obeyed(
-    text: str, *, lookalikes: Literal["any", "written", "ascii"] = "any"
+    text: str,
+    *,
+    lookalikes: Literal["any", "written", "ascii"] = "any",
+    writable: Callable[[str], bool] | None = None,
 ) -> ShownText:
     """*text* as a console or a CI log shows it: what it says, not what it commands.
 
     Tab and newline lay the text out and are kept. A :class:`ShownText` is
-    returned as it is, since it was shown already. *lookalikes* is
-    :func:`controls_shown`'s: "ascii" for text :func:`shown_in_ascii` then puts
-    in ASCII.
+    returned as it is, since it was shown already. *lookalikes* and *writable*
+    are :func:`controls_shown`'s: "ascii" for text :func:`shown_in_ascii` then
+    puts in ASCII, with the same *writable*.
     """
     if isinstance(text, ShownText):
         return text
-    return _as_shown(commands_broken(controls_shown(text, lookalikes=lookalikes)))
+    return _as_shown(
+        commands_broken(controls_shown(text, lookalikes=lookalikes, writable=writable))
+    )
 
 
 #: A tab, newline or carriage return, with the run of backslashes just before it,
@@ -395,6 +423,20 @@ def _outside_ascii_shown(match: re.Match[str]) -> str:
     return match.group(1) * 2 + escape_for(match.group(2))
 
 
+def _outside_ascii_shown_unless(
+    writable: Callable[[str], bool],
+) -> Callable[[re.Match[str]], str]:
+    """:func:`_outside_ascii_shown`, leaving each character *writable* accepts as
+    it is, with the run of backslashes before it."""
+
+    def shown(match: re.Match[str]) -> str:
+        if writable(match.group(2)):
+            return match.group()
+        return _outside_ascii_shown(match)
+
+    return shown
+
+
 def _joins_its_neighbors(replacement: str) -> bool:
     """Whether *replacement*, put in shown text, could read as something else.
 
@@ -416,7 +458,11 @@ def _joins_its_neighbors(replacement: str) -> bool:
     return all(digit in _HEX_DIGITS for digit in replacement[1 : 1 + digits])
 
 
-def shown_in_ascii(text: ShownText, replacements: Mapping[str, str]) -> ShownText:
+def shown_in_ascii(
+    text: ShownText,
+    replacements: Mapping[str, str],
+    writable: Callable[[str], bool] | None = None,
+) -> ShownText:
     """*text*, shown already, with nothing outside ASCII left in it.
 
     For a sink whose stream cannot encode more: utils/log.py's WindowsSafeFilter,
@@ -429,6 +475,12 @@ def shown_in_ascii(text: ShownText, replacements: Mapping[str, str]) -> ShownTex
     into a command or an escape the text never held. A value that could do the
     same is refused, as is a key with a character in ASCII, which could be part
     of an escape.
+
+    With *writable*, a function the stream's encoding answers, a character it
+    accepts is left as it is rather than written as its escape, so a console
+    whose code page writes "é", Cyrillic or CJK shows them, and only what that
+    code page cannot write is escaped. The caller leaves out of *replacements*
+    a key the stream can write.
     """
     if not isinstance(text, ShownText):
         raise TypeError("shown_in_ascii takes text an escaper here wrote")
@@ -439,9 +491,12 @@ def shown_in_ascii(text: ShownText, replacements: Mapping[str, str]) -> ShownTex
         if _joins_its_neighbors(value):
             raise ValueError(f"replacement {value!r} could join the text around it")
         replaced = replaced.replace(key, value)
-    return _as_shown(
-        commands_broken(_OUTSIDE_ASCII.sub(_outside_ascii_shown, replaced))
+    shown = (
+        _outside_ascii_shown
+        if writable is None
+        else _outside_ascii_shown_unless(writable)
     )
+    return _as_shown(commands_broken(_OUTSIDE_ASCII.sub(shown, replaced)))
 
 
 #: A whole run of backslashes, matched from its first, and the escape text after it.

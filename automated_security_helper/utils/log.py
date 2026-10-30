@@ -725,6 +725,50 @@ def _console_cannot_encode(encoding: Optional[str]) -> bool:
     return False
 
 
+def _encodings_of(*streams: Any) -> Optional[Tuple[str, ...]]:
+    """The encodings *streams* name, or None when one names none this Python knows."""
+    import codecs
+
+    names = []
+    for stream in streams:
+        try:
+            name = stream.encoding
+            if not isinstance(name, str):
+                return None
+            names.append(codecs.lookup(name).name)
+        except (AttributeError, TypeError, LookupError):
+            return None
+    return tuple(names)
+
+
+def _console_writes() -> Optional[Callable[[str], bool]]:
+    """What the console writes of a character outside ASCII, or None for nothing.
+
+    ``WindowsSafeFilter`` is on for every console whose encoding cannot write
+    ASH's own emoji, which is every code page but UTF-8, yet most of them write
+    more than ASCII: cp1252 writes "é", cp1251 Cyrillic, cp932 Japanese. A
+    function that says whether stdout and stderr both write a character, so the
+    filter escapes only what the code page cannot. None where nothing is known to
+    be written: a CI runner, whose log other tools read in an encoding this
+    process cannot see, and a stream that names no encoding Python knows.
+    """
+    if _on_a_ci_runner():
+        return None
+    names = _encodings_of(sys.stdout, sys.stderr)
+    if names is None:
+        return None
+
+    def writes(character: str) -> bool:
+        try:
+            for name in names:
+                character.encode(name)
+        except UnicodeEncodeError:
+            return False
+        return True
+
+    return writes
+
+
 def _detect_encoding_issues() -> bool:
     """Return True if running on Windows with an encoding that cannot represent Unicode."""
     if platform.system().lower() != "windows":
@@ -825,12 +869,37 @@ class WindowsSafeFilter(logging.Filter):
     outside the emoji map is written as its escape, where it used to be deleted
     (a path lost its accented letters). A message with arguments is formatted
     first, so the arguments go through the same rule.
+
+    On a console whose code page writes more than ASCII (cp1252's "é", cp1251's
+    Cyrillic, cp932's Japanese) only what both streams cannot write is escaped
+    (:func:`_console_writes`), and a replacement is made only for an emoji the
+    console cannot write. On a CI runner, or where a stream names no encoding
+    Python knows, everything outside ASCII is.
     """
 
     def __init__(self):
         super().__init__()
         self._active = _detect_encoding_issues()
-        self._emoji_map = _get_default_emoji_fallback_map()
+        #: Says whether the console writes a character outside ASCII as it is;
+        #: None puts everything in ASCII (a CI runner, an encoding not known).
+        self._writes = _console_writes() if self._active else None
+        self._emoji_map = {
+            key: value
+            for key, value in _get_default_emoji_fallback_map().items()
+            if not self._console_writes_all(key)
+        }
+
+    def _console_writes_all(self, text: str) -> bool:
+        """Whether the console writes each character of *text* as it is."""
+        return text.isascii() or all(
+            character.isascii()
+            or (
+                self._writes is not None
+                and not is_shown_as_escape(character)
+                and self._writes(character)
+            )
+            for character in text
+        )
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not self._active:
@@ -841,7 +910,7 @@ class WindowsSafeFilter(logging.Filter):
             # Shown already, so the sinks leave it as it is. Rebuilt as a plain
             # str, it was shown a second time; and a character dropped from it
             # could join "::" into a command (shown_in_ascii says how).
-            record.msg = shown_in_ascii(record.msg, self._emoji_map)
+            record.msg = shown_in_ascii(record.msg, self._emoji_map, self._writes)
         elif isinstance(record.msg, str):
             if getattr(record, "markup", False):
                 safe = self._in_ascii(record.msg)
@@ -862,15 +931,22 @@ class WindowsSafeFilter(logging.Filter):
                 folded = self._folded_message(record)
                 if folded is None:
                     record.msg = self._in_ascii(record.msg)
-                elif not folded.isascii():
+                elif not self._console_writes_all(folded):
                     # Shown for a sink that puts it in ASCII: a backslash run is
                     # doubled only before the text of an escape shown_in_ascii
                     # or shown_not_obeyed writes, so a message that quotes a
                     # path with an accented letter raw and as JSON's escape (the
-                    # suggested command above) keeps the escape as logged.
+                    # suggested command above) keeps the escape as logged. On a
+                    # console whose code page writes some of the characters
+                    # (cp1252's "é", cp1251's Cyrillic), only the rest are
+                    # escaped, and a run before the escape text of one of those
+                    # it writes is not doubled.
                     record.msg = shown_in_ascii(
-                        shown_not_obeyed(folded, lookalikes="ascii"),
+                        shown_not_obeyed(
+                            folded, lookalikes="ascii", writable=self._writes
+                        ),
                         self._emoji_map,
+                        self._writes,
                     )
                     record.args = ()
         if record.args:
@@ -882,7 +958,7 @@ class WindowsSafeFilter(logging.Filter):
 
     def _arg_in_ascii(self, value: Any) -> Any:
         if isinstance(value, ShownText):
-            return shown_in_ascii(value, self._emoji_map)
+            return shown_in_ascii(value, self._emoji_map, self._writes)
         if isinstance(value, str):
             return self._in_ascii(value)
         return value
@@ -913,8 +989,16 @@ class WindowsSafeFilter(logging.Filter):
         safe = _make_message_windows_safe(text, self._emoji_map)
         if safe.isascii():
             return safe
+        writes = self._writes
         return "".join(
-            character if character.isascii() else escape_for(character)
+            character
+            if character.isascii()
+            or (
+                writes is not None
+                and not is_shown_as_escape(character)
+                and writes(character)
+            )
+            else escape_for(character)
             for character in safe
         )
 
