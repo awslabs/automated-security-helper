@@ -476,38 +476,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # an unbounded ASH timeout is UNBOUNDED_TRIVY_TIMEOUT, since trivy reads 0s
         # as a deadline already passed.
         extra.append(f"--timeout={trivy_timeout(self._effective_scan_timeout())}")
-        # ASH's own output under the target holds the converted copies of
-        # archives and notebooks, which the converted target scans already, and
-        # reports and scanner results. Named directory by directory
-        # (ScannerPluginBase._ash_output_dirs_inside), not as the output directory
-        # whole: a file the repository committed under it is scanned, and a
-        # --skip-dirs on the whole directory hid it from trivy.
-        skipped = self._ash_output_dirs_inside(target)
-        if not skipped:
-            # The helper answers [] when naming the directories raises (OSError,
-            # TypeError or ValueError), and that cannot be told from "none inside".
-            # This run's output directory inside the target with nothing named for
-            # it means the helper did not answer. The drop after the scan does not
-            # cover that case (it names the same directories and drops nothing when
-            # that raises), so skip the output directory whole, as before.
-            whole = self._output_dir_inside(target)
-            if whole is not None:
-                inside = Path(target).as_posix()
-                self._plugin_log(
-                    f"ASH named no output directory to skip inside {inside} although "
-                    f"its output directory {whole.as_posix()} is there, so trivy is "
-                    f"told to skip {whole.as_posix()} whole. A file the repository "
-                    "committed to it is not scanned by trivy in this run.",
-                    level=logging.WARNING,
-                    target_type=target_type,
-                )
-                skipped = [whole]
-        for relative in skipped:
-            # None for a path trivy's CSV read cannot carry (a line break): the
-            # directory is read and ASH drops its findings there after the scan.
-            value = self._skip_dirs_value(relative, target_type)
-            if value is not None:
-                extra.append(f"--skip-dirs={value}")
+        # ASH's own output directories inside the target, each as its own
+        # --skip-dirs: the converted copies of archives and notebooks (which the
+        # converted target scans already) and reports and scanner results. One
+        # helper builds the tokens for this scanner and trivy-repo
+        # (TrivyScannerBase._output_dir_skip_args), so the two cannot drift apart.
+        extra.extend(self._output_dir_skip_args(target, target_type))
         # trivy reads trivy.yaml and .trivyignore from its working directory, which
         # is the scanned repository. Either can drop findings with nothing in the
         # report saying so, so ASH passes its own unless the operator chose one
