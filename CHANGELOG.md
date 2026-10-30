@@ -5460,7 +5460,7 @@
   1 included: the click that typer bundles reads a boolean from a JSON boolean or
   from text only. A number with a fraction or an exponent for a whole-number
   parameter (`"shard_index": 1.9`) was truncated by `int()` without a word, so
-  shard 1 ran. Both are usage errors now (exit 2) that name the key; `true`,
+  shard 1 ran. Both are usage errors now (exit 5) that name the key; `true`,
   `false`, whole numbers and the text forms click already read are unchanged.
 
 - **What an archive does to itself is an input error; what the run does is a tool
