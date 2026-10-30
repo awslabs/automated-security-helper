@@ -151,7 +151,15 @@ def test_a_record_of_this_pid_with_another_start_time_is_not_alive(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_an_exit_zero_that_says_no_such_container_is_not_a_removal(monkeypatch):
+def test_an_exit_zero_that_says_no_such_container_is_not_a_removal(
+    monkeypatch, tmp_path
+):
+    # The runtime is a stub file under the run's temp root, as the unit guard
+    # asks of every runtime a record names; the faked run_command never starts it.
+    stub = tmp_path / "docker"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+
     def run_command(cmd, **kwargs):
         return create_completed_process(
             args=[str(c) for c in cmd],
@@ -162,7 +170,7 @@ def test_an_exit_zero_that_says_no_such_container_is_not_a_removal(monkeypatch):
 
     monkeypatch.setattr(subprocess_utils, "run_command", run_command)
 
-    assert leftovers._removed(["docker"], "ash-scan-1-00000000") is leftovers._ABSENT
+    assert leftovers._removed([str(stub)], "ash-scan-1-00000000") is leftovers._ABSENT
 
 
 def test_a_container_the_runtime_never_had_is_not_reported_removed(

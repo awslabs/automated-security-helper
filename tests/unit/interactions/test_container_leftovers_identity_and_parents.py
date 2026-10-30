@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -246,11 +247,19 @@ def test_a_tmpdir_with_a_trailing_separator_is_the_normalized_parent(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv("TMPDIR", str(tmp_path) + os.sep)
+    # The other places tempfile reads are unset, and its cached answer dropped,
+    # so the one parent is TMPDIR's, spelled once.
+    monkeypatch.delenv("TEMP", raising=False)
+    monkeypatch.delenv("TMP", raising=False)
+    monkeypatch.setattr(tempfile, "tempdir", None)
     monkeypatch.setattr(container_leftovers, "_ENV_DIR_PARENTS", ())
 
-    assert container_leftovers._env_dir_parents() == [
-        os.path.normcase(os.path.abspath(str(tmp_path)))
-    ]
+    try:
+        assert container_leftovers._env_dir_parents() == [
+            os.path.normcase(os.path.abspath(str(tmp_path)))
+        ]
+    finally:
+        monkeypatch.setattr(tempfile, "tempdir", None)
 
 
 def _env_dir_record(state: Path, directory: Path, pid: int) -> Path:

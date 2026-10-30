@@ -126,13 +126,20 @@ def test_quiet_silences_the_local_path_line(installed_record, logged):
 
 
 def test_a_path_that_cannot_be_looked_at_is_refused(tmp_path, monkeypatch):
-    def exists(self):
-        raise PermissionError(13, "Permission denied", str(self))
+    unsearchable = (tmp_path / "under" / "unsearchable").resolve()
+    original = Path.exists
+
+    def exists(self, *args, **kwargs):
+        # Only the path under test is unsearchable; every other exists() (the
+        # fixtures' own) answers as before.
+        if self == unsearchable:
+            raise PermissionError(13, "Permission denied", str(self))
+        return original(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "exists", exists)
 
     with pytest.raises(ValueError):
-        rac.validate_path(tmp_path / "under" / "unsearchable")
+        rac.validate_path(unsearchable)
 
 
 # ---------------------------------------------------------------------------

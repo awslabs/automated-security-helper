@@ -198,7 +198,9 @@ def test_a_runtime_that_has_no_such_container_still_drops_a_matching_record(
     stub = _runtime(tmp_path, says="Error: No such container: x", code=1)
     record = _plant(state, dead_pid, **_known(stub))
 
-    assert container_leftovers.sweep_leftover_containers([str(stub)]) != []
+    # The record is dropped on its own runtime's word, and nothing was removed
+    # to report: a container the runtime never had is not in the names returned.
+    assert container_leftovers.sweep_leftover_containers([str(stub)]) == []
     assert not record.exists()
 
 
