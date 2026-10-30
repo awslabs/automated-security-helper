@@ -362,7 +362,11 @@ class ScannerStatisticsCalculator:
         a scan writes every report under the name it carries, so an entry without
         one is no report of this version's (``get_scanner_status_info`` reads it as
         no recorded status). The counters' readers in ``core.unified_metrics``
-        refuse the same entries. The key and the recorded name are matched in any
+        (``own_target_reports``) refuse a report that names ANOTHER scanner and keep
+        a name-less one: a status filed under the wrong key would flip a row, while
+        the counters and unscanned inputs are read for the key they sit under, as
+        the console summary and the partial-audit claim read them (see there). The
+        key and the recorded name are matched in any
         case (``reports_for``, ``_same_scanner``): the name a row is read under is
         the union's first spelling, and the reports can sit under another.
         """

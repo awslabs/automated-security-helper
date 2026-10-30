@@ -198,11 +198,18 @@ def own_target_reports(
 
     ``additional_reports`` is keyed by scanner name, and a results file merged from
     another, or written by hand, can file a report under the wrong key. A mapping
-    that names another scanner, or none, is not read as this scanner's, as the
-    calculator's status reader refuses it: a scan writes every report under the
-    name it carries, so an entry without one is no report of this version's.
-    Every reader of the per-target reports in this module goes through here, so
-    the counters, the exit code, the reasons and the unscanned inputs agree on
+    that names another scanner is not read as this scanner's; one that names no
+    scanner is kept and read for the key it is filed under. The counters, the exit
+    code, the reasons and the unscanned inputs of a name-less report are what the
+    console summary prints (tests/unit/core/test_metrics_table_names_unscanned_inputs.py)
+    and what a partial audit's "N of M targets unevaluated" is read from
+    (tests/unit/interactions/test_partial_audit_counts_as_ran.py); a results file
+    written before the field existed carries no name at all. The calculator's
+    status reader is the one reader that refuses a name-less report, because a
+    STATUS filed under the wrong key would flip a row (``_own_reports``); dropping
+    the name-less case here as well left Security Hub's archive scope blind to a
+    failed target and the two readers above with nothing to print. Every reader of
+    the per-target reports in this module goes through here, so they agree on
     which reports are the scanner's. The key and the recorded name are matched in
     any case, as the calculator's ``_own_reports`` matches them: the name a row is
     read under is the union's first spelling, and the reports can sit under
@@ -215,8 +222,11 @@ def own_target_reports(
         key: report
         for key, report in reports.items()
         if isinstance(report, dict)
-        and ScannerStatisticsCalculator._same_scanner(
-            report.get("scanner_name"), scanner_name
+        and (
+            report.get("scanner_name") is None
+            or ScannerStatisticsCalculator._same_scanner(
+                report.get("scanner_name"), scanner_name
+            )
         )
     }
 

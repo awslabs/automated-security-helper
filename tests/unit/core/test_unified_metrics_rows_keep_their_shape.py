@@ -5,8 +5,8 @@
 
 - ScannerMetrics keeps its text as given: the threshold shown is the threshold
   graded, and the scanner name is the key the row is written under.
-- The readers of the per-target reports skip a report that names another scanner,
-  or none.
+- The readers of the per-target reports skip a report that names another scanner
+  and keep one that names none (the key it is filed under is the scanner).
 - A non-list ``inputs_not_scanned`` value does not raise.
 - The rebuilt scanner_results row marks ``dependencies_satisfied`` and ``excluded``
   set only when the metrics or the existing row say so, writes the exit code as
@@ -75,16 +75,24 @@ class TestTheReportReaders:
         assert tool_exit_code(model, "bandit") is None
         assert inputs_not_scanned(model) == []
 
-    def test_a_report_naming_no_scanner_is_not_read(self):
-        """A scan writes every report under the name it carries, so an entry
-        without one is no report of this version's (the calculator's status
-        reader refuses it the same way)."""
+    def test_a_report_naming_no_scanner_is_still_read(self):
+        """A report filed under the scanner's key with no ``scanner_name`` (a results
+        file written before the field existed, a hand-built one) is the scanner's:
+        its counters feed the partial-audit claim and its unscanned inputs the
+        console summary. Only the calculator's STATUS reader refuses it."""
         model = AshAggregatedResults()
         model.additional_reports = {
-            "bandit": {"source": {"status": "PASSED", "targets_attempted": 4}}
+            "bandit": {
+                "source": {
+                    "status": "PASSED",
+                    "targets_attempted": 4,
+                    "inputs_not_scanned": [{"path": "a.lock", "reason": "offline"}],
+                }
+            }
         }
 
-        assert target_counts(model, "bandit") == (None, 0)
+        assert target_counts(model, "bandit") == (4, 0)
+        assert inputs_not_scanned(model) == [("bandit", "a.lock", "offline")]
 
     def test_a_non_list_inputs_not_scanned_value_does_not_raise(self):
         model = AshAggregatedResults()
