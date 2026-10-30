@@ -14,7 +14,8 @@ Each test here was red before its fix:
 - a scanner name that is not text names no scanner;
 - a rejected or under-review SARIF suppression does not suppress;
 - a saved suppression names its rule and no other, says what it covers, carries
-  the reason typed, and marks every listed finding it names;
+  the reason typed, and marks every listed finding the scan's own matcher says it
+  covers, a lineless entry's rule anywhere in its file included;
 - a search for "none" does not match a finding without a line;
 - a row key outside the list opens nothing;
 - the suppression config is found from the scanned directory, and a discovery
@@ -227,15 +228,66 @@ def test_the_dialog_says_a_lineless_suppression_covers_the_whole_file():
     assert "anywhere" not in tui._suppression_scope_note(_finding(line=3))
 
 
-def test_every_listed_finding_the_saved_entry_names_is_marked():
+def test_the_scope_note_describes_the_entry_the_dialog_saves():
+    """A line the dialog does not write (a missing key, or a line of 0, which it
+    reads as none) is one the note calls the whole file; the two read one test."""
+    for finding in (_finding(), _finding(line=0), _finding(line=None)):
+        entry = tui._suppression_for(dict(finding, file="a.py"), "r")
+        assert entry.line_start is None, finding
+        assert "anywhere in this file" in tui._suppression_scope_note(finding)
+    entry = tui._suppression_for(_finding(file="a.py", line=7), "r")
+    assert (entry.line_start, entry.line_end) == (7, 7)
+    assert "anywhere" not in tui._suppression_scope_note(_finding(line=7))
+
+
+def test_the_saved_entry_is_the_one_the_dialog_describes():
+    entry = tui._suppression_for(
+        _finding(rule_id="CKV[1]", file="./x[1].py", line=3), "r"
+    )
+
+    assert entry.rule_id == "CKV[[]1]"
+    assert entry.path == "x[[]1].py"
+    assert entry.reason == "r"
+
+
+def test_every_listed_finding_the_saved_entry_covers_is_marked():
+    """Covered as the scan decides it: the entry's rule pattern read without regard
+    to case, at the folded file, on the one line."""
     chosen = _finding(file="./src/a.py", line=3)
     twin = _finding(file="src/a.py", line=3)
+    other_case = _finding(rule_id="r1", file="src/a.py", line=3)
     other_line = _finding(file="src/a.py", line=4)
     other_rule = _finding(rule_id="R2", file="src/a.py", line=3)
+    other_file = _finding(file="src/b.py", line=3)
+    no_file = _finding(line=3)
+    listed = [chosen, twin, other_case, other_line, other_rule, other_file, no_file]
 
-    covered = tui._findings_named_alike([chosen, twin, other_line, other_rule], chosen)
+    covered = tui._findings_suppressed_by(listed, tui._suppression_for(chosen, "r"))
 
-    assert covered == [chosen, twin]
+    assert covered == [chosen, twin, other_case]
+
+
+def test_a_lineless_entry_marks_the_rule_anywhere_in_the_file():
+    chosen = _finding(file="src/a.py")
+    on_a_line = _finding(file="src/a.py", line=4)
+    other_file = _finding(file="src/b.py", line=4)
+
+    covered = tui._findings_suppressed_by(
+        [chosen, on_a_line, other_file], tui._suppression_for(chosen, "r")
+    )
+
+    assert covered == [chosen, on_a_line]
+
+
+def test_a_rule_id_with_glob_characters_marks_only_its_own_rule():
+    chosen = _finding(rule_id="CKV[1]", file="src/a.py", line=3)
+    glob_twin = _finding(rule_id="CKV1", file="src/a.py", line=3)
+
+    covered = tui._findings_suppressed_by(
+        [chosen, glob_twin], tui._suppression_for(chosen, "r")
+    )
+
+    assert covered == [chosen]
 
 
 # --- the explorer's handlers -------------------------------------------------------

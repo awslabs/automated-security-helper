@@ -58,6 +58,7 @@ from automated_security_helper.models.core import (
     expiration_date_problem,
     expiration_has_passed,
 )
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -450,12 +451,88 @@ def _suppression_rule_id(rule_id: object) -> str:
     return "".join(_GLOB_LITERAL.get(char, char) for char in str(rule_id))
 
 
+def _suppression_for(
+    finding: dict, reason: str, expiration: Optional[str] = None
+) -> AshSuppression:
+    """The entry the suppress dialog saves for *finding*: its rule as a pattern
+    naming that rule alone (``_suppression_rule_id``), its file as a pattern
+    naming that file alone (``_suppression_path``, which raises
+    PathNotExpressible for a file that has none), and the one line it reports as
+    both ends of the line range, or no range when it reports none.
+
+    The one place the entry's shape is written: the dialog saves what this
+    returns, ``_findings_suppressed_by`` marks what it covers, and
+    ``_suppression_scope_note`` describes it, so the three cannot drift apart.
+    """
+    line = finding.get("line")
+    line_number = int(line) if line else None
+    return AshSuppression(
+        rule_id=_suppression_rule_id(finding["rule_id"]),
+        path=_suppression_path(finding["file"]),
+        reason=reason,
+        expiration=expiration,
+        line_start=line_number,
+        line_end=line_number,
+    )
+
+
+def _as_scanned(finding: dict) -> Optional[FlatVulnerability]:
+    """*finding* as the record a suppression is matched against during a scan,
+    or None for a finding that names no file, which no saved entry covers.
+
+    The file is folded as the scan folds it before matching (``_folded_file``).
+    A line that is not a number is no line.
+    """
+    file_value = finding.get("file")
+    if not file_value:
+        return None
+    try:
+        line_number = int(finding.get("line"))
+    except (TypeError, ValueError):
+        line_number = None
+    rule_id = finding.get("rule_id")
+    return FlatVulnerability(
+        id="",
+        title="",
+        description="",
+        severity=str(finding.get("severity") or ""),
+        scanner=str(finding.get("scanner") or ""),
+        scanner_type="",
+        rule_id=None if rule_id is None else str(rule_id),
+        file_path=_folded_file(file_value),
+        line_start=line_number,
+        line_end=line_number,
+    )
+
+
+def _findings_suppressed_by(
+    findings: List[dict], suppression: AshSuppression
+) -> List[dict]:
+    """Every finding of *findings* the scan will suppress with *suppression*,
+    decided by the matcher the scan uses (``AshSuppression.matches``) over each
+    finding as the scan sees it (``_as_scanned``).
+
+    Matched by key equality on the rule id, the folded file and the line, the
+    marking disagreed with the scan: an entry saved for a finding with no line
+    covers its rule anywhere in the file, and the scan reads the rule id without
+    regard to case, so findings the entry covers stayed Active in the table, and
+    the summary's counts wrong, until a rescan.
+    """
+    covered = []
+    for candidate in findings:
+        scanned = _as_scanned(candidate)
+        if scanned is not None and suppression.matches(scanned):
+            covered.append(candidate)
+    return covered
+
+
 def _suppression_scope_note(finding: dict) -> str:
     """What the saved suppression covers, for the dialog: the finding's rule at
     its file, and the one line the finding reports, or the whole file when the
     result reports no line (a region without a startLine, or no region), since an
-    entry with no line range applies to that rule anywhere in the file."""
-    if finding.get("line") is None:
+    entry with no line range applies to that rule anywhere in the file. The test
+    is the one ``_suppression_for`` saves by, so the note describes the entry."""
+    if not finding.get("line"):
         return (
             "This finding reports no line, so the suppression covers this rule "
             "anywhere in this file. It will be excluded from actionable findings."
@@ -769,7 +846,7 @@ class SuppressDialog(ModalScreen[Optional[str]]):
             else:
                 problem = None
                 try:
-                    path = _suppression_path(self.finding["file"])
+                    _suppression_path(self.finding["file"])
                 except PathNotExpressible as exc:
                     problem = f"Could not save the suppression. {exc}"
             if problem is not None:
@@ -779,20 +856,9 @@ class SuppressDialog(ModalScreen[Optional[str]]):
                 return
 
             try:
-                suppression = AshSuppression(
-                    # As a pattern naming this rule alone: the scan reads the
-                    # field as a glob (_suppression_rule_id).
-                    rule_id=_suppression_rule_id(self.finding["rule_id"]),
-                    path=path,
-                    reason=reason,
-                    expiration=expiration,
-                    line_start=int(self.finding["line"])
-                    if self.finding.get("line")
-                    else None,
-                    line_end=int(self.finding["line"])
-                    if self.finding.get("line")
-                    else None,
-                )
+                # The rule as a pattern naming this rule alone, the file as the
+                # path checked above (_suppression_for).
+                suppression = _suppression_for(self.finding, reason, expiration)
                 saved = add_suppression_to_config(self.config_path, suppression)
                 # The reason the entry carries, so the detail view shows it for
                 # the finding it was saved for: read from the results, a finding
@@ -1571,11 +1637,12 @@ class FindingsExplorerApp(App):
         """Handle the result from the suppression dialog.
 
         *finding* is the one the dialog was opened for, and the one marked
-        suppressed, with every other listed finding the saved entry names too
-        (``_findings_named_alike``). Marking the row under the table's cursor
-        instead marked whatever row the cursor had moved to while the dialog was
-        open; marking that row alone left the other findings the entry covers
-        Active, and the summary's counts wrong, until a rescan.
+        suppressed, with every other listed finding the saved entry covers too,
+        read by the scan's own matcher (``_findings_suppressed_by``). Marking the
+        row under the table's cursor instead marked whatever row the cursor had
+        moved to while the dialog was open; marking that row alone left the other
+        findings the entry covers Active, and the summary's counts wrong, until a
+        rescan.
         """
         if result in (SuppressDialog.SAVED, SuppressDialog.ALREADY_SUPPRESSED):
             status_bar = self.query_one("#status_bar", Static)
@@ -1585,7 +1652,13 @@ class FindingsExplorerApp(App):
                 if idx is not None and idx < len(self.filtered_findings):
                     finding = self.filtered_findings[idx]
             if finding is not None:
-                for covered in _findings_named_alike(self.findings, finding):
+                # The entry as the dialog saved it; the reason is the one the
+                # dialog kept on the finding. The dialog saved it, so it has a
+                # rule, a file and a path pattern.
+                saved_entry = _suppression_for(
+                    finding, finding.get("suppression_reason") or "Not specified"
+                )
+                for covered in _findings_suppressed_by(self.findings, saved_entry):
                     covered["suppressed"] = True
                     if "suppression_reason" in finding:
                         covered["suppression_reason"] = finding["suppression_reason"]
@@ -1959,25 +2032,6 @@ def _applies(suppression: Any) -> bool:
     shown suppressed and hidden from the default view."""
     state = getattr(suppression, "state", None)
     return getattr(state, "value", state) not in ("rejected", "underReview")
-
-
-def _findings_named_alike(findings: List[dict], finding: dict) -> List[dict]:
-    """Every finding of *findings* a suppression saved for *finding* names too:
-    the same rule id at the same file (in the spelling the entry is written in,
-    ``_folded_file``) and the same line. The dialog writes exactly those three
-    (``SuppressDialog.on_button_pressed``), so these are the rows the scan will
-    suppress with the entry; *finding* itself is among them."""
-
-    def key(candidate: dict) -> tuple:
-        file_value = candidate.get("file")
-        return (
-            candidate.get("rule_id"),
-            _folded_file(file_value) if file_value else file_value,
-            candidate.get("line"),
-        )
-
-    wanted = key(finding)
-    return [candidate for candidate in findings if key(candidate) == wanted]
 
 
 def extract_findings(model: AshAggregatedResults) -> List[Dict[str, Any]]:
