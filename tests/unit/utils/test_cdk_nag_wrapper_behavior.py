@@ -3503,3 +3503,102 @@ def test_template_locations_answer_an_id_once_and_agree_with_the_one_shot_search
     assert locations.of("MyDataBucket") is first
     assert first == cdk_nag_wrapper._resource_location(lines, "MyDataBucket")
     assert locations.of("NoSuchResource") == (None, None)
+
+
+UNINDENTED_JSON_WITH_RESOURCE_METADATA = (
+    "{\n"
+    '"Resources": {\n'
+    '"First": {\n'
+    '"Type": "AWS::SNS::Topic",\n'
+    '"Properties": {"TopicName": {"Ref": "Next"}},\n'
+    '"Metadata": {"cdk_nag": {"rules_to_suppress": []}}},\n'
+    '"Next": {\n'
+    '"Type": "AWS::S3::Bucket",\n'
+    '"Properties": {"BucketName": "placeholder-name"}}\n'
+    "},\n"
+    '"Outputs": {"Out": {"Value": {"Ref": "Next"}}}\n'
+    "}\n"
+)
+
+
+def test_a_resource_level_metadata_in_unindented_json_is_not_a_section():
+    """``Metadata`` is a legal resource attribute (cdk_nag's suppressions live there) as
+    well as a top-level section. In unindented JSON a resource's Metadata sits at indent
+    0 like the sections do, and taken for one it excluded the lines after it from the
+    whole-file fallback, the next resource's declaration included; that finding then
+    went to the first mention of the id, an earlier ``"Ref"``. A section key is one only
+    outside the Resources object's braces."""
+    lines = UNINDENTED_JSON_WITH_RESOURCE_METADATA.splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    assert locations.of("Next") == (7, 1), lines[6]
+    assert locations.of("First") == (3, 1), lines[2]
+
+
+def test_a_resource_level_metadata_in_indented_yaml_is_not_a_section():
+    """The indented control: a resource's ``Metadata`` sits deeper than the Resources key
+    and is bounded by indent; the top-level Outputs section still is one."""
+    lines = (
+        "Resources:\n"
+        "  First:\n"
+        "    Type: AWS::SNS::Topic\n"
+        "    Properties:\n"
+        "      TopicName: !Ref Next\n"
+        "    Metadata:\n"
+        "      cdk_nag:\n"
+        "        rules_to_suppress: []\n"
+        "  Next:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "Outputs:\n"
+        "  Next:\n"
+        "    Value: !Ref Next\n"
+    ).splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    assert locations.of("Next") == (9, 2), lines[8]
+    assert locations.of("First") == (2, 2), lines[1]
+
+
+def test_an_id_that_ends_another_key_is_not_found_inside_it_on_a_one_line_section():
+    """``Bucket`` on a one-line section used to match inside ``"MyBucket":``."""
+    line = (
+        '{"Resources": {"MyBucket": {"Type": "AWS::S3::Bucket"}, '
+        '"Bucket": {"Type": "AWS::S3::Bucket"}}}\n'
+    )
+    locations = cdk_nag_wrapper._TemplateLocations([line])
+
+    assert locations.of("Bucket") == (1, line.index('"Bucket":') + 1)
+    assert locations.of("MyBucket") == (1, line.index('"MyBucket":') + 1)
+
+
+# ---------------------------------------------------------------------------
+# A failed pack's recorded error text stays on the failure reason, out of ash.log
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_packs_recorded_error_is_on_the_failure_reason_not_in_the_log(
+    cdk_doubles, template_file, outdir, monkeypatch, caplog
+):
+    """CDK writes a pack that threw as ``Validation plugin '<name>' failed: <message>``,
+    and the message can interpolate values resolved out of the template, which ash.log is
+    kept free of (the not-evaluated rows drop their description for the same reason).
+    The text stays on the per-template failure reason; the log names the pack only."""
+    _name_packs_by_class(monkeypatch)
+    entry = _plugin_report(
+        plugin_name="AwsSolutions", violations=[], conclusion="failure"
+    )
+    entry["error"] = "Validation plugin 'AwsSolutions' failed: resolved-template-value"
+    cdk_doubles.report_text = _report(entry)
+
+    with caplog.at_level("WARNING"):
+        response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None
+    assert "resolved-template-value" in response.failure
+    assert not any(
+        "resolved-template-value" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+    assert any(
+        "reported 'failure' with no violations and recorded an error" in r.getMessage()
+        for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]

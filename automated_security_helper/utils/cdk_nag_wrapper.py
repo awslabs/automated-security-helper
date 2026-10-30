@@ -222,6 +222,22 @@ class _TemplateLocations:
             (start, template_lines[start - 1][key_end:], self._body(start, indent))
             for indent, start, key_end in sorted(candidates)
         ]
+        # A key spelled like a top-level section is one only at the top level. A
+        # resource's own ``Metadata`` (where cdk_nag's suppressions live) sits deeper
+        # than the Resources key in an indented template, and inside the Resources
+        # object's braces in unindented JSON; taken for a section, it excluded the lines
+        # after it from the fallback, a following resource's declaration included, and
+        # that resource's finding went to the first mention of its id.
+        top_indent = min((indent for indent, _, _ in candidates), default=None)
+        inside_resources: set = set()
+        for _, start, key_end in candidates:
+            inside_resources.update(self._json_object_lines(start, key_end))
+        other_sections = [
+            (indent, start)
+            for indent, start in other_sections
+            if (top_indent is None or indent <= top_indent)
+            and start not in inside_resources
+        ]
         # The whole-file fallback never reads a line inside another top-level section:
         # its keys are not declarations at any depth, and in unindented JSON every key
         # sits at depth 0, so "shallowest" there meant "first in the file".
@@ -232,6 +248,42 @@ class _TemplateLocations:
         self._fallback_lines = [
             (i, line_str) for i, line_str in self._numbered if i not in excluded
         ]
+
+    def _json_object_lines(self, start: int, key_end: int) -> set:
+        """The lines after a JSON section's key line that its object spans, by brackets.
+
+        Empty when the key opens no brace (YAML nests by indentation and is bounded by
+        indent instead). Brackets inside quoted strings are not counted; an object that
+        never closes spans to the end of the template.
+        """
+        lines: set = set()
+        after_key = self._numbered[start - 1][1][key_end:]
+        if not after_key.lstrip().startswith("{"):
+            return lines
+        depth = 0
+        in_string: str | None = None
+        escaped = False
+        for i, line_str in self._numbered[start - 1 :]:
+            for ch in after_key if i == start else line_str:
+                if in_string is not None:
+                    if escaped:
+                        escaped = False
+                    elif ch == "\\":
+                        escaped = True
+                    elif ch == in_string:
+                        in_string = None
+                    continue
+                if ch in "\"'":
+                    in_string = ch
+                elif ch in "{[":
+                    depth += 1
+                elif ch in "}]":
+                    depth -= 1
+            if i != start:
+                lines.add(i)
+            if depth <= 0:
+                break
+        return lines
 
     def _body(
         self, start: int, section_indent: int, *, stop_at_sections: bool = False
@@ -268,7 +320,11 @@ class _TemplateLocations:
     def _locate(self, resource_log_id: str) -> tuple[int | None, int | None]:
         quoted = re.escape(resource_log_id)
         key_pattern = re.compile(r"^(\s*)[\"']?" + quoted + r"[\"']?\s*:")
-        inline_pattern = re.compile(r"[\"']?" + quoted + r"[\"']?\s*:")
+        # Bounded on the left so that ``Bucket`` is not found inside ``"MyBucket":`` on
+        # a one-line section.
+        inline_pattern = re.compile(
+            r"(?<![A-Za-z0-9_.-])[\"']?" + quoted + r"[\"']?\s*:"
+        )
 
         def shallowest_key(lines: List[tuple[int, str]]) -> tuple[int, int] | None:
             best: tuple[int, int, int] | None = None
@@ -1021,6 +1077,8 @@ def _violations_from_validation_report(
 
     per_pack: Dict[str, List[_NagFinding]] = {}
     failed_packs: List[str] = []
+    # The same packs without their recorded error text, for the logged reason.
+    failed_labels: List[str] = []
     # The names behind ``failed_packs`` (those carry a detail after the name), read by
     # the presence check below: a requested pack with no entry because it failed is
     # not a pack that never wrote one.
@@ -1070,6 +1128,7 @@ def _violations_from_validation_report(
                 or pack_name in expected_plugins
             ):
                 failed_packs.append(f"{pack_label}: {detail}")
+                failed_labels.append(f"{pack_label}: {detail}")
                 failed_names.add(pack_name)
                 ASH_LOGGER.error(
                     f"cdk-nag pack '{pack_label}' wrote a report ASH cannot read "
@@ -1092,23 +1151,30 @@ def _violations_from_validation_report(
             # and not counted. With no requested names known, or with one requested pack
             # whose name could not be read (its entry would be mistaken for an unrequested
             # plugin's), every failed entry counts.
+            # The error CDK recorded for the pack (``Validation plugin '<name>' failed:
+            # <the exception's message>``) goes on the failure reason, the per-template
+            # record, and not into this module's log lines: like a not-evaluated rule's
+            # description below, a pack's exception message can interpolate values
+            # resolved out of the template, and ash.log is kept free of template content.
             error = _plugin_error_text(plugin_report)
             detail = f": {error}" if error else ""
+            recorded = " and recorded an error" if error else ""
             if (
                 not expected_plugins
                 or not every_requested_named
                 or pack_name in expected_plugins
             ):
                 failed_packs.append(f"{pack_label}{detail}")
+                failed_labels.append(pack_label)
                 failed_names.add(pack_name)
                 ASH_LOGGER.error(
                     f"cdk-nag pack '{pack_label}' reported '{conclusion}' with no "
-                    f"violations, so it did not evaluate this template{detail}"
+                    f"violations{recorded}, so it did not evaluate this template"
                 )
             else:
                 ASH_LOGGER.warning(
                     f"validation plugin '{pack_label}', which was not requested, reported "
-                    f"'{conclusion}' with no violations{detail}; the requested packs' "
+                    f"'{conclusion}' with no violations{recorded}; the requested packs' "
                     "results are unaffected"
                 )
             continue
@@ -1286,23 +1352,29 @@ def _violations_from_validation_report(
                 "cannot be paired"
             )
     if failed_packs or missing:
-        parts = []
-        if failed_packs:
-            parts.append(
-                "pack(s) that reported failure without evaluating a rule: "
-                + "; ".join(failed_packs)
+
+        def _reason(packs: List[str]) -> str:
+            parts = []
+            if packs:
+                parts.append(
+                    "pack(s) that reported failure without evaluating a rule: "
+                    + "; ".join(packs)
+                )
+            if missing:
+                parts.append(
+                    "requested pack(s) with no entry in the report: "
+                    + ", ".join(missing)
+                )
+            return (
+                f"cdk-nag validation report {report_path} shows that not every "
+                f"requested pack evaluated this template ({'. '.join(parts)}). Its "
+                "findings, if any, say nothing about the rules of those packs."
             )
-        if missing:
-            parts.append(
-                "requested pack(s) with no entry in the report: " + ", ".join(missing)
-            )
-        reason = (
-            f"cdk-nag validation report {report_path} shows that not every requested pack "
-            f"evaluated this template ({'. '.join(parts)}). Its findings, if any, say "
-            "nothing about the rules of those packs."
-        )
-        ASH_LOGGER.error(reason)
-        return per_pack, reason
+
+        # The returned reason carries each failed pack's recorded error; the logged
+        # one names the packs only (see the failed-pack branch above).
+        ASH_LOGGER.error(_reason(failed_labels))
+        return per_pack, _reason(failed_packs)
     return per_pack, None
 
 
