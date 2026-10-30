@@ -478,6 +478,34 @@ class TestCompletedScannersAreTheOnesThatRan:
         assert info["coverage_complete"] is False
         assert "grype" in [row["scanner"] for row in info["incomplete_scanners"]]
 
+    def test_the_recorded_word_is_read_as_the_results_model_reads_it(self, tmp_path):
+        """An absent status is PASSED and the case does not matter (the
+        results model's reading); ERROR is still not a scanner that ran to an
+        end, as the test above says and get_scan_results counts. Reading the
+        word through the registry's status mapping counted ERROR as FAILED
+        and so as completed."""
+        out = tmp_path / "ash_output"
+        out.mkdir()
+        (out / "ash_aggregated_results.json").write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        "bandit": {},
+                        "semgrep": {"status": "passed"},
+                        "checkov": {"status": "Failed"},
+                        "trivy": {"status": "ERROR"},
+                        "grype": {"status": None},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["scanners_completed"] == ["bandit", "semgrep", "checkov"]
+        assert info["total_scanners"] == 3
+
     def test_a_scan_whose_scanners_all_ran_reads_as_covered(self, tmp_path):
         out = tmp_path / "ash_output"
         out.mkdir()

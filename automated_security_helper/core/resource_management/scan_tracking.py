@@ -119,6 +119,18 @@ def scanner_status_from_results(status: Any) -> MCScannerStatus:
     return MCScannerStatus.FAILED
 
 
+def _recorded_status_word(status: Any) -> Optional[str]:
+    """The status word a ``scanner_results`` entry recorded, upper-cased, or None.
+
+    The results model reads the word without regard to case; a value that is
+    not a string (null, a number) is no word. Callers that count the scanners
+    that ran to an end compare this with the recorded words PASSED and FAILED
+    (``get_scan_results``' rule), not with the registry view's status mapping,
+    which folds ERROR into FAILED for its status column.
+    """
+    return status.upper() if isinstance(status, str) else None
+
+
 #: The scanner states that are an ending: ``finished_scanners`` counts these.
 _FINISHED_SCANNER_STATUSES = frozenset(
     {MCScannerStatus.COMPLETED, MCScannerStatus.FAILED, MCScannerStatus.SKIPPED}
@@ -1683,15 +1695,16 @@ def get_scan_progress_info(
             ]
 
             # The scanners that ran to an end, as get_scan_results counts
-            # them: PASSED or FAILED. scanner_results names every scanner
-            # ASH considered, MISSING, SKIPPED and ERROR included, and
-            # listing them all here reported a tool that never ran as
-            # completed. The status is read as the registry's progress view
-            # reads it from the same document (scanner_status_from_results):
-            # an absent status is PASSED, as the results model reads it, and
-            # the case does not matter; compared as a string against two
-            # upper-case literals, {"bandit": {}} and {"status": "passed"}
-            # were one completed scanner there and none here.
+            # them: PASSED or FAILED, the recorded word. scanner_results names
+            # every scanner ASH considered, MISSING, SKIPPED and ERROR
+            # included, and listing them all here reported a tool that never
+            # ran as completed; ERROR is a tool that did not run to an end
+            # either, and it stays out, as it does in get_scan_results (the
+            # registry's progress view folds ERROR into its FAILED status
+            # column, which is a different question). The word is read as the
+            # results model reads it: an absent status is PASSED, and the case
+            # does not matter, so {"bandit": {}} and {"status": "passed"} count
+            # here as they do there.
             scanner_results = results.get("scanner_results")
             scanners_completed = [
                 name
@@ -1699,8 +1712,8 @@ def get_scan_progress_info(
                     scanner_results if isinstance(scanner_results, dict) else {}
                 ).items()
                 if isinstance(info, dict)
-                and scanner_status_from_results(info.get("status", "PASSED"))
-                in (MCScannerStatus.COMPLETED, MCScannerStatus.FAILED)
+                and _recorded_status_word(info.get("status", "PASSED"))
+                in ("PASSED", "FAILED")
             ]
 
             metadata = results.get("metadata")
