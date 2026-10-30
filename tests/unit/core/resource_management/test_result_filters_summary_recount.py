@@ -444,6 +444,35 @@ class TestActionableOnlySurvivesTheContentFilters:
         assert filtered["summary_stats"]["total"] == 3
         assert "actionable_only" not in filtered["_content_filters"]
 
+    def test_the_buckets_follow_the_kept_findings_under_a_scanners_filter(self):
+        """The scanners recount derives the summary from the per-scanner rows.
+        Under actionable_only those rows carry the kept findings' buckets, so
+        the recount agrees with the findings list: one actionable bandit
+        finding at HIGH, not the whole scan's high 1 / low 2 / total 3."""
+        results = TestActionableOnlyRecountsTheSeverityBuckets._with_sarif("MEDIUM")
+
+        filtered = apply_content_filters(
+            filter_actionable_only(results), scanners="bandit"
+        )
+
+        stats = filtered["summary_stats"]
+        assert stats["severity_counts"] == {
+            "critical": 0,
+            "high": 1,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
+        }
+        assert stats["total"] == 1
+        assert stats["actionable"] == 1
+        listed = [
+            result["ruleId"]
+            for run in filtered["raw_results"]["sarif"]["runs"]
+            for result in run["results"]
+        ]
+        assert listed == ["B-HIGH"]
+
 
 class TestTotalFollowsOneRule:
     """SummaryStats.total is the non-suppressed findings and ``suppressed`` a
