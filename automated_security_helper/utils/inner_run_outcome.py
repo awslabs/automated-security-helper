@@ -191,13 +191,22 @@ def record_reports_written(
     """List in ``results`` the report files this run wrote, each with its reporter's format.
 
     ``written`` holds ``(file name, format)`` pairs, the format being the name
-    ``--output-formats`` selects the reporter by (``reporter_format_name``). An
-    empty ``written`` records that the run wrote no report file.
+    ``--output-formats`` selects the reporter by (``reporter_format_name``).
 
     A record an earlier report phase of the same run left in ``results`` is kept
     and extended, not replaced: ``ash merge`` runs a second phase over the same
     results for an off-host reporter, and the first phase's entries (the
     ``ash.sarif`` the exit code is read from among them) are still this run's.
+    So an empty ``written`` adds nothing to an earlier record, and records that
+    the run wrote no report file only when there is none yet (run_ash_scan calls
+    it that way for a run whose report phase did not run).
+
+    Only this process's own record is ever extended: results read back from a
+    file carry no such record, because every loader strips the run records
+    first (:func:`without_run_records`: the orchestrator for ``--use-existing``,
+    ``ash merge`` for each shard and the merged model). A loader that did not
+    would hand this function an earlier run's files as this run's, so a new
+    loader of persisted results strips them the same way.
     """
     if results is None:
         return
