@@ -48,9 +48,12 @@ _RELEASE_PIN = re.compile(
     r"v(\d+\.\d+\.\d+)"
 )
 # The rest of one shell command: any text up to a newline that is not escaped, or to a
-# separator that starts another command. `convert` uses it to tell a `--branch v<version>`
-# that belongs to a clone of this repository from one that belongs to another project.
-_SAME_COMMAND = r"(?:\\\n|[^\n;&|])*"
+# separator that starts another command. A backtick, `)` or `]` ends it too: in prose,
+# several inline code spans and links share a line, and a command in one span is not
+# the command of the repository named in the next. `convert` uses it to tell a
+# `--branch v<version>` that belongs to a clone of this repository from one that
+# belongs to another project.
+_SAME_COMMAND = r"(?:\\\n|[^\n;&|`)\]])*"
 
 
 class VersionTemplateManager:

@@ -20,11 +20,17 @@ The ``--branch`` patterns also end the repository name where the name ends: a si
 repository whose name starts with this one's (``<name>-plugins.git``) is another project,
 as the ``rev:`` pattern already required.
 
+"The same command" ended only at a newline or a shell separator. In prose, a line holds
+several inline code spans and links, so a link to this repository followed by a span with
+another project's clone (or the reverse) was read as one command. A backtick, ``)`` or
+``]`` now ends it as well.
+
 What is asserted
 ----------------
 ``convert``, run in memory over example pages, rewrites the pin of this repository and
 leaves every other project's pin as written: a ``rev:`` under another ``repo:``, a clone
-of another URL before or after the flag, chained commands, and a repository name that only
+of another URL before or after the flag, chained commands, prose that mentions this
+repository and another project's clone on one line, and a repository name that only
 begins with this one's.
 """
 
@@ -155,6 +161,40 @@ class TestBranchPins:
     def test_a_pin_on_one_line_does_not_borrow_the_next_line(self):
         text = f"git clone --branch v1.2.3 {OTHER_URL}.git\ngit clone {ASH_URL}.git\n"
         assert _convert(text) == text
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # A link to this repository, then a span with another project's clone.
+            (
+                f"Clone [ASH]({ASH_URL}), then the rules: "
+                f"`git clone --branch v2.0.0 {OTHER_URL}.git`\n"
+            ),
+            # The same two mentions in the other order.
+            (
+                f"Run `git clone --branch v2.0.0 {OTHER_URL}.git`, then see "
+                f"[ASH]({ASH_URL}).\n"
+            ),
+            # A repository in square brackets, then a span with another clone.
+            f"See [{ASH_URL}] and `git clone --branch v2.0.0 {OTHER_URL}.git`\n",
+            # Two code spans: this repository's clone, then another project's.
+            (
+                f"Clone `git clone {ASH_URL}.git` and "
+                f"`git clone --branch v2.0.0 {OTHER_URL}.git`\n"
+            ),
+        ],
+    )
+    def test_prose_with_several_code_spans_on_a_line_keeps_the_other_tag(self, text):
+        """Red before: the rest of the line counted as one command, so a link or a span
+        naming this repository reached the next span's --branch."""
+        assert _convert(text) == text
+
+    def test_a_clone_in_a_code_span_is_still_templatized(self):
+        """The control for the prose cases: this repository's own span converts."""
+        text = f"Run `git clone --branch v3.4.0 {ASH_URL}.git` first.\n"
+        assert _convert(text) == (
+            f"Run `git clone --branch v{{{{VERSION}}}} {ASH_URL}.git` first.\n"
+        )
 
     @pytest.mark.parametrize(
         "text",
