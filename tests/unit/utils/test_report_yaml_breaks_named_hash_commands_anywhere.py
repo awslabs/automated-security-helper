@@ -72,12 +72,15 @@ def test_a_long_value_with_a_named_hash_form_stays_one_line():
     [
         "a##b " * 30,
         "C# and F# code",
-        "## Scan Metadata",
+        "scan## metadata",
         "x##1[",
         "tool_name::bandit",
     ],
 )
 def test_a_value_without_a_named_hash_form_is_written_as_yaml_dump_writes_it(value):
+    # A value that starts a line with "##" or "::" is a command start, which the
+    # dumper has always double-quoted (test_report_yaml_writes_no_command_line
+    # covers it), so no control here begins with either.
     for data in _containers(value):
         assert report_yaml(data, indent=2) == yaml.dump(data, indent=2)
 

@@ -7,8 +7,10 @@ A property bag's key is a name a tool or a repository chose, and a dump in JSON 
 UTF-8-encodes the keys, so an extra field whose name holds a lone surrogate failed
 the dump as a value would. RecordModel put only the extra VALUES in the record form,
 and the lone-surrogate tree check behind recorded() read only the values, so such a
-dump was re-raised instead of repaired. The names are built with chr(), so this file
-holds no lone surrogate itself.
+dump was re-raised instead of repaired. A validated model never carries such a name:
+pydantic-core refuses it as the extra field's name is validated, so the record form
+matters for a constructed model and a field filled in after the build. The names are
+built with chr(), so this file holds no lone surrogate itself.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from pydantic import ConfigDict
+from pydantic import ConfigDict, ValidationError
 
 from automated_security_helper.utils.undecodable_text import (
     RecordModel,
@@ -38,13 +40,24 @@ class _Bag(RecordModel):
     name: str = "x"
 
 
-def test_a_validated_model_records_the_extra_fields_names():
-    bag = _Bag.model_validate({"name": "x", RAW_NAME: 1})
+def test_a_validated_model_refuses_such_a_name_before_the_record_form():
+    """pydantic-core validates an extra field's NAME as a str and refuses one that
+    is not valid unicode (``string_unicode``), so a lone surrogate never reaches a
+    validated model's property bag and the record form has nothing to do there:
+    the refusal is loud, not a later dump failure. The record form is reached
+    through model_construct and a field filled in after the build (the next test)."""
+    with pytest.raises(ValidationError) as caught:
+        _Bag.model_validate({"name": "x", RAW_NAME: 1})
 
-    assert RECORDED_NAME in (bag.__pydantic_extra__ or {})
-    assert RAW_NAME not in (bag.__pydantic_extra__ or {})
-    assert bag.model_dump(mode="json") == {"name": "x", RECORDED_NAME: 1}
-    assert json.loads(bag.model_dump_json()) == {"name": "x", RECORDED_NAME: 1}
+    assert caught.value.error_count() == 1
+    assert caught.value.errors()[0]["type"] == "string_unicode"
+
+
+def test_a_validated_model_records_a_text_name_as_given():
+    bag = _Bag.model_validate({"name": "x", "plain": 1})
+
+    assert bag.model_dump(mode="json") == {"name": "x", "plain": 1}
+    assert json.loads(bag.model_dump_json()) == {"name": "x", "plain": 1}
 
 
 def test_a_constructed_model_with_such_a_name_still_dumps():
