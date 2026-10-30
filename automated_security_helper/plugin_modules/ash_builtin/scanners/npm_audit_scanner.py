@@ -2218,8 +2218,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         The raise was caught per lockfile and recorded as a failed audit, which
         failed the whole scan over two valid reports.
 
-        Two dicts merge recursively, two numbers add, two lists join, so the
-        per-severity ``vulnerabilities`` counters sum across lockfiles (a
+        Two dicts merge recursively, two numbers add, two lists join with each
+        item once, so the per-severity ``vulnerabilities`` counters sum across lockfiles (a
         ``dict.update`` kept only the last lockfile's). A number that meets a
         dict is read as that dict's ``total`` (pnpm's integer is npm's map's
         total), so the two merge and the shape is the map whichever lockfile
