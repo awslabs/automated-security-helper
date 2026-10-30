@@ -890,23 +890,30 @@ def _plain_gzip_name(archive_file: str) -> Optional[str]:
     return inner or None
 
 
-def _is_tar_header(block: bytes) -> bool:
+def _is_tar_header(block: bytes, *, empty_is_tar: bool) -> bool:
     """Whether ``block``, the first 512 bytes of a stream, is a tar header that
     ``tarfile.open`` would open the stream on.
 
     A header whose checksum holds, whatever its type (a member, a pax header, a
     GNU long name), with a size this Python's tarfile takes: ``TarInfo._block``
     refuses a negative one where tarfile does, and the member is then not read.
-    A block of zeros is not a tar header: tarfile opens no archive on one (its
-    "empty file"), so a stream that starts with an end-of-archive block, and a
-    gzip of zero bytes, is not a tar. A short block, or one whose checksum fails,
-    is not either.
+    A short block, or one whose checksum fails, is not a header.
+
+    An end-of-archive block of zeros is the one block the two callers read
+    differently, and ``empty_is_tar`` says which way. ``tarfile.open`` opens an
+    archive on it (a tar of end blocks only is an empty tar; ``is_tarfile`` says
+    True), which is what a file NAMED as a tar is held to (_holds_a_tar). A
+    ``.gz`` of one file is told from a tarball by its content, and a gzip whose
+    content starts with zeros is a file of zeros, not a tarball
+    (_gzip_holds_a_tar), the reading the plain-gzip decision has always made.
     """
     try:
         info = tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
         block_of = getattr(info, "_block", None)
         if block_of is not None:
             block_of(info.size)
+    except tarfile.EOFHeaderError:
+        return empty_is_tar
     except tarfile.HeaderError:
         return False
     return True
@@ -916,13 +923,15 @@ def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
     """Whether a gzip file's content starts with a tar header.
 
     Reads one block of the decompressed content. A damaged stream raises, and the
-    archive is then refused as unreadable.
+    archive is then refused as unreadable. Content that starts with a block of
+    zeros is one file of zeros, not a tarball (``empty_is_tar=False``): the
+    decision that sends a ``.gz`` to the plain-gzip path.
     """
     handle.seek(0)
     with gzip.GzipFile(fileobj=handle, mode="rb") as stream:
         block = stream.read(tarfile.BLOCKSIZE)
     handle.seek(0)
-    return _is_tar_header(block)
+    return _is_tar_header(block, empty_is_tar=False)
 
 
 def _holds_a_tar(handle: BinaryIO) -> bool:
@@ -946,7 +955,9 @@ def _holds_a_tar(handle: BinaryIO) -> bool:
         return False
     finally:
         handle.seek(0)
-    return _is_tar_header(block)
+    # A file named as a tar whose first block is zeros is an empty tar, as
+    # tarfile.open reads it (``is_tarfile`` says True): extracted to nothing.
+    return _is_tar_header(block, empty_is_tar=True)
 
 
 def _base_name(name: str) -> str:

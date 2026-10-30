@@ -110,11 +110,14 @@ def test_the_kind_of_a_tar_with_a_large_first_header_is_read_from_one_block(
 @pytest.mark.parametrize(
     ("content", "kind"),
     [
-        # tarfile opens no archive on a first block of zeros (its "empty file"),
-        # so neither does the probe; a gzip of zeros decompresses to one.
-        pytest.param(b"\0" * (2 * tarfile.BLOCKSIZE), None, id="end-blocks-only"),
+        # A file NAMED as a tar whose first block is zeros is an empty tar, as
+        # tarfile.open reads it (is_tarfile says True); the plain-gzip decision
+        # reads the same block the other way, below.
+        pytest.param(b"\0" * (2 * tarfile.BLOCKSIZE), "tar", id="end-blocks-only"),
         pytest.param(
-            gzip.compress(b"\0" * (300 * 1024), mtime=0), None, id="gz-of-zeros"
+            gzip.compress(b"\0" * (300 * 1024), mtime=0),
+            "tar",
+            id="gz-of-zeros-named-tar",
         ),
         pytest.param(b"\0" * 100, None, id="short-zeros"),
         pytest.param(b"x" * tarfile.BLOCKSIZE, None, id="a-block-of-text"),
@@ -126,4 +129,22 @@ def test_content_that_is_not_a_tar_header_is_not_a_tar(content, kind):
     handle = CountingHandle(content)
 
     assert archive_converter.archive_kind("lib/b.tar", handle) == kind
+    assert handle.tell() == 0
+
+
+@pytest.mark.parametrize(
+    ("content", "holds"),
+    [
+        pytest.param(b"\0" * (300 * 1024), False, id="zeros-are-one-file"),
+        pytest.param(b"x" * 600, False, id="text-is-one-file"),
+        pytest.param(pax_first_tar(), True, id="a-tar-is-a-tarball"),
+    ],
+)
+def test_the_plain_gzip_decision_reads_a_zero_block_as_a_file(content, holds):
+    """A ``.gz`` whose content starts with zeros is one file of zeros and goes to
+    the plain-gzip path; the same block in a file NAMED as a tar is an empty tar
+    (the test above). The two readings are the two callers of the header check."""
+    handle = io.BytesIO(gzip.compress(content, mtime=0))
+
+    assert archive_converter._gzip_holds_a_tar(handle) is holds
     assert handle.tell() == 0
