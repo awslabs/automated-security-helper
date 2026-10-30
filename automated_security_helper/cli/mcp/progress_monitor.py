@@ -520,11 +520,28 @@ def _results_file_state(output_dir: Path) -> Optional[Tuple[int, int, int, int]]
     return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
 
 
+ResultsFileState = Optional[Tuple[int, int, int, int]]
+
+
+def results_files_before(
+    project_outputs: Dict[str, Path],
+) -> Dict[str, ResultsFileState]:
+    """What each project's aggregated results file is now, keyed as ``project_outputs``.
+
+    For :func:`monitor_workspace_progress`'s ``before``: taken by the caller
+    before it touches the output directories, so the monitor compares against
+    the file the previous scan left, not against an absence its own set-aside
+    made.
+    """
+    return {key: _results_file_state(out) for key, out in project_outputs.items()}
+
+
 async def monitor_workspace_progress(
     report_progress: Callable[..., Awaitable[None]],
     project_outputs: Dict[str, Path],
     *,
     poll_interval: float = _WORKSPACE_POLL_INTERVAL_SECONDS,
+    before: Optional[Dict[str, ResultsFileState]] = None,
 ) -> None:
     """Report a workspace scan's progress as completed projects over total projects.
 
@@ -554,6 +571,13 @@ async def monitor_workspace_progress(
         project_outputs: ``{project key: that project's output directory}``. The
             monitor watches for ``ash_aggregated_results.json`` appearing in each.
         poll_interval: Seconds between sweeps.
+        before: What each project's aggregated results file was before the run
+            touched its directory (:func:`results_files_before`); read here when
+            not given. The workspace scan sets previous results aside before this
+            monitor starts, so a snapshot taken here read every file as absent,
+            and a failed project's restore of its previous file, which the run's
+            settle makes while this monitor still polls, counted as its
+            completion.
 
     Failure modes
     -------------
@@ -570,12 +594,16 @@ async def monitor_workspace_progress(
         return
 
     completed: set = set()
-    # What each project's aggregated results file was when the monitor started.
-    # A project is complete when that file is not what it was then: a file the
-    # previous scan left (clean_output off) or that a failed project's restore
-    # put back is the same file, and counted a project that never finished, or
-    # had not started, as complete.
-    before = {key: _results_file_state(out) for key, out in project_outputs.items()}
+    # What each project's aggregated results file was before the run touched
+    # the directories, or when the monitor started when the caller took no
+    # snapshot. A project is complete when that file is not what it was then: a
+    # file the previous scan left (clean_output off) or that a failed project's
+    # restore put back is the same file, and counted a project that never
+    # finished, or had not started, as complete.
+    if before is None:
+        before = results_files_before(project_outputs)
+    else:
+        before = {key: before.get(key) for key in project_outputs}
     connection_alive = await _safe_send(
         True,
         lambda: report_progress(

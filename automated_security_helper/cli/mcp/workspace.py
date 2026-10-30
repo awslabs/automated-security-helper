@@ -151,7 +151,9 @@ from typing import (
 
 from automated_security_helper.cli.mcp.profile_registry import session_client_rules
 from automated_security_helper.cli.mcp.progress_monitor import (
+    ResultsFileState,
     monitor_workspace_progress,
+    results_files_before,
 )
 from automated_security_helper.cli.mcp.sandbox import (
     caller_is_remote,
@@ -1833,8 +1835,14 @@ async def _execute(
     stop: Optional[CancelEvent] = None,
     cancel_events: Optional[Mapping[str, CancelEvent]] = None,
     on_thread_start: Optional[Callable[[], None]] = None,
+    results_before: Optional[Dict[str, ResultsFileState]] = None,
 ) -> Optional[WorkspaceRunResult]:
     """Run the workspace off the event loop, with a progress monitor beside it.
+
+    ``results_before`` is what each project's aggregated results file was before
+    the caller touched the output directories (``results_files_before``), handed
+    to the monitor as its baseline; without it the monitor reads its own as it
+    starts, which is after the previous results were set aside.
 
     Under the session's scan lock, taken on the worker thread as the single-target
     scan takes it, so a delivery into this session is refused while the scans
@@ -1943,7 +1951,9 @@ async def _execute(
     monitor: Optional["asyncio.Task[None]"] = None
     if progress_reporter is not None and project_outputs:
         monitor = asyncio.create_task(
-            monitor_workspace_progress(progress_reporter, dict(project_outputs))
+            monitor_workspace_progress(
+                progress_reporter, dict(project_outputs), before=results_before
+            )
         )
     try:
         return await asyncio.to_thread(_run)
@@ -2575,6 +2585,10 @@ async def _scan_workspace(
             settled = loop.create_future()
             _RUNNING[settled] = (registered, stop)
             settled.add_done_callback(lambda done: _RUNNING.pop(done, None))
+            # The monitor's baseline, read before the set-aside below: taken
+            # after it, every results file read as absent, and a failed
+            # project's restore of its previous file counted as completion.
+            results_before = results_files_before(project_outputs)
             if clean_output:
                 _set_previous_results_aside(project_outputs)
             result = await _execute(
@@ -2589,6 +2603,7 @@ async def _scan_workspace(
                 stop=stop,
                 cancel_events=cancel_events,
                 on_thread_start=_start_the_clock,
+                results_before=results_before,
             )
             if result is None:
                 # _execute answers None only from a thread that did not run

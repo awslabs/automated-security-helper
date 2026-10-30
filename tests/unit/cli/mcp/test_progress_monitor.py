@@ -607,6 +607,48 @@ class TestWorkspaceProgressCountsOnlyNewResults:
                 await task
 
     @pytest.mark.asyncio
+    async def test_a_previous_file_put_back_after_the_set_aside_is_not_complete(
+        self, tmp_path
+    ):
+        """Red at the base: the monitor took its own baseline as it started, which
+        is after the workspace scan had set the previous results aside, so it read
+        the file as absent and counted a failed project's restore of it as that
+        project's completion. The caller's snapshot from before the set-aside is
+        the baseline now."""
+        from automated_security_helper.cli.mcp.progress_monitor import (
+            monitor_workspace_progress,
+            results_files_before,
+        )
+
+        out = tmp_path / "projects" / "a"
+        out.mkdir(parents=True)
+        results = out / "ash_aggregated_results.json"
+        results.write_text("{}")
+        before = results_files_before({"a": out})
+        set_aside = tmp_path / "set-aside.json"
+        results.rename(set_aside)
+        report = AsyncMock()
+
+        task = asyncio.ensure_future(
+            monitor_workspace_progress(
+                report, {"a": out}, poll_interval=0.01, before=before
+            )
+        )
+        await asyncio.sleep(0.05)
+        set_aside.rename(results)
+        await asyncio.sleep(0.1)
+        try:
+            messages = [
+                str(call.kwargs.get("message", "")) for call in report.await_args_list
+            ]
+            assert not any("a complete" in m for m in messages), messages
+            assert not task.done()
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    @pytest.mark.asyncio
     async def test_a_rewritten_results_file_completes_the_project(self, tmp_path):
         """Control: the scan writing its own results is counted."""
         from automated_security_helper.cli.mcp.progress_monitor import (
