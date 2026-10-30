@@ -210,7 +210,12 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
                 order.append("lock held by another scan")
                 held.set()
                 released.wait(timeout=5)
-            order.append("lock released")
+                # Appended while the lock is still held, so it is ordered
+                # before anything the runner does once it takes the lock. A
+                # marker appended after the ``with`` raced the runner: the lock
+                # is free the moment the block ends, and the runner could take
+                # it and start its clock before this thread ran again.
+                order.append("releasing")
 
         holder = threading.Thread(target=hold_the_lock)
         holder.start()
@@ -227,15 +232,20 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
                     on_locked=lambda: order.append("clock started"),
                 )
 
-        runner = threading.Thread(target=run)
-        runner.start()
-        runner.join(timeout=0.5)
-        assert "clock started" not in order, order
-        released.set()
-        runner.join(timeout=5)
-        holder.join(timeout=5)
+        try:
+            runner = threading.Thread(target=run)
+            runner.start()
+            runner.join(timeout=0.5)
+            assert "clock started" not in order, order
+            released.set()
+            runner.join(timeout=5)
+            holder.join(timeout=5)
 
-        assert order.index("lock released") < order.index("clock started"), order
+            assert order.index("releasing") < order.index("clock started"), order
+        finally:
+            # The session claimed above does not stay in the shared registry
+            # for the tests that follow.
+            reset_default_registry_for_tests()
 
     def test_the_run_without_a_session_starts_its_clock_too(self, tmp_path):
         """Control: with no session there is no lock to wait for; the clock still starts."""
