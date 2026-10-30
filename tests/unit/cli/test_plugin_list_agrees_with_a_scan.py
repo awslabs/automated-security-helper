@@ -198,6 +198,23 @@ def test_a_registered_class_no_module_of_the_run_brings_in_is_not_listed(tmp_pat
     assert "StrayScanner" not in result.output
 
 
+def test_a_class_from_a_module_the_run_names_is_listed(tmp_path):
+    """The other half of the selection rule: a listing that kept the built-ins
+    alone, ignoring ash_plugin_modules, would pass the test above and drop every
+    plugin a configured module defines."""
+    kept = _stub("KeptScanner", BUILTIN_MODULE, _name="kept")
+    stray = _stub("StrayScanner", "stray_ash_plugins.scanner", _name="stray")
+    config = AshConfig.model_validate(
+        {"project_name": "probe", "ash_plugin_modules": ["stray_ash_plugins"]}
+    )
+
+    result = _listing(tmp_path, ["--no-color"], scanners=[kept, stray], config=config)
+
+    assert result.exit_code == 0, result.output
+    assert "KeptScanner" in result.output
+    assert "StrayScanner" in result.output
+
+
 def test_show_versions_matches_the_inventory_by_class_not_by_a_derived_name(
     tmp_path,
 ):

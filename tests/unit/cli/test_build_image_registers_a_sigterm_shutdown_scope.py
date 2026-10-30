@@ -59,9 +59,17 @@ def shutdown_state(monkeypatch):
     return cancellation
 
 
+@pytest.mark.parametrize(
+    "args",
+    [[], ["--no-build"], ["--no-run"]],
+    ids=["build-and-run", "no-build", "no-run"],
+)
 def test_the_container_scan_runs_inside_a_registered_shutdown_scope(
-    shutdown_state, monkeypatch
+    shutdown_state, monkeypatch, args
 ):
+    """Every path through the command (the image build is the long phase where
+    a SIGTERM is most likely) runs the scan inside the registered scope, and the
+    registration is gone once the command has returned."""
     seen: dict = {}
 
     def stand_in_scan(**kwargs):
@@ -72,7 +80,7 @@ def test_the_container_scan_runs_inside_a_registered_shutdown_scope(
     monkeypatch.setattr(
         "automated_security_helper.cli.image.run_ash_scan", stand_in_scan
     )
-    CliRunner().invoke(_build_image_app(), ["--no-build"])
+    CliRunner().invoke(_build_image_app(), args)
 
     assert isinstance(seen.get("event"), CancelEvent), (
         "the command must run the scan inside a cancel scope of its own"
@@ -81,6 +89,7 @@ def test_the_container_scan_runs_inside_a_registered_shutdown_scope(
         "the scan's scope is not registered with the shutdown handler, so a "
         "SIGTERM takes the default-kill branch"
     )
+    assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
 
 
 def test_a_stopped_scan_exits_terminated_with_one_line(shutdown_state, monkeypatch):
@@ -96,8 +105,10 @@ def test_a_stopped_scan_exits_terminated_with_one_line(shutdown_state, monkeypat
     result = CliRunner().invoke(_build_image_app(), [])
 
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
+    assert result.output.count("stopped by SIGTERM") == 1, result.output
     assert "ASH build-image stopped by SIGTERM" in result.output
     assert "did not complete" in result.output
+    assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
 
 
 def test_a_stopped_build_only_run_owes_no_verdict(shutdown_state, monkeypatch):
@@ -113,6 +124,7 @@ def test_a_stopped_build_only_run_owes_no_verdict(shutdown_state, monkeypatch):
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
     assert "ASH build-image stopped by SIGTERM" in result.output
     assert "did not complete" not in result.output
+    assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
 
 
 def test_a_sigterm_nothing_polled_still_ends_the_command_terminated(
@@ -134,6 +146,7 @@ def test_a_sigterm_nothing_polled_still_ends_the_command_terminated(
 
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
     assert "ASH build-image stopped by SIGTERM" in result.output
+    assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
 
 
 def test_an_interrupt_cancels_the_scope_before_the_exit(shutdown_state, monkeypatch):
@@ -157,3 +170,4 @@ def test_an_interrupt_cancels_the_scope_before_the_exit(shutdown_state, monkeypa
     event = seen["event"]
     assert event.is_set(), "the scope's event is left clear after the interrupt"
     assert event.stop_promptly is True
+    assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"

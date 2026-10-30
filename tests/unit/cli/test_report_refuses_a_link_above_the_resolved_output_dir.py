@@ -56,9 +56,24 @@ def _report(output_dir: Path):
         )
 
 
+def _flat(output: str) -> str:
+    """The output with its whitespace and panel borders removed, so a phrase and
+    a path are found wherever a line broke."""
+    return "".join(output.translate(str.maketrans("", "", "│╭╮╰╯─")).split())
+
+
+# The guard's own words (utils/output_dir_links.linked_output_component): the
+# component "is a symlink". A refusal for another reason that echoes the path
+# (pytest names tmp_path after the test, so a path under it holds "link") must
+# not pass for the guard's.
+REFUSAL = "isasymlink"
+
+
 def test_a_link_at_the_given_directorys_ash_outside_cwd_is_refused(tmp_path):
-    """The working directory is the test runner's, not under tmp_path."""
-    assert not Path.cwd().is_relative_to(tmp_path)
+    """tmp_path is outside the working directory: a basetemp inside the checkout
+    would let the working-directory guard see <dir>/.ash and leave the
+    parent-rooted guard untested."""
+    assert not tmp_path.resolve().is_relative_to(Path.cwd().resolve())
     real = tmp_path / "real"
     _write_results(real / ".ash" / "ash_output")
     target = tmp_path / "target"
@@ -68,12 +83,13 @@ def test_a_link_at_the_given_directorys_ash_outside_cwd_is_refused(tmp_path):
     result = _report(target)
 
     assert result.exit_code == 3, result.output
-    assert ".ash" in result.output
-    assert "symbolic link" in result.output or "link" in result.output
+    flat = _flat(result.output)
+    assert REFUSAL in flat, result.output
+    assert (target / ".ash").as_posix() in flat, result.output
 
 
 def test_a_link_at_the_given_directory_outside_cwd_is_refused(tmp_path):
-    assert not Path.cwd().is_relative_to(tmp_path)
+    assert not tmp_path.resolve().is_relative_to(Path.cwd().resolve())
     real = tmp_path / "real"
     _write_results(real / ".ash" / "ash_output")
     target = tmp_path / "target"
@@ -82,11 +98,13 @@ def test_a_link_at_the_given_directory_outside_cwd_is_refused(tmp_path):
     result = _report(target)
 
     assert result.exit_code == 3, result.output
-    assert "target" in result.output
+    flat = _flat(result.output)
+    assert REFUSAL in flat, result.output
+    assert target.as_posix() in flat, result.output
 
 
 def test_a_plain_given_directory_outside_cwd_is_still_read(tmp_path):
-    assert not Path.cwd().is_relative_to(tmp_path)
+    assert not tmp_path.resolve().is_relative_to(Path.cwd().resolve())
     real = tmp_path / "real"
     _write_results(real / ".ash" / "ash_output")
 
@@ -112,7 +130,9 @@ def test_a_link_at_the_parents_ash_is_refused_when_the_directory_is_given_as_dot
     result = _report(Path(".."))
 
     assert result.exit_code == 3, result.output
-    assert ".ash" in result.output
+    flat = _flat(result.output)
+    assert REFUSAL in flat, result.output
+    assert (repo / ".ash").as_posix() in flat, result.output
 
 
 def test_a_link_at_the_given_directorys_ash_under_cwd_is_refused(tmp_path, monkeypatch):
@@ -127,3 +147,4 @@ def test_a_link_at_the_given_directorys_ash_under_cwd_is_refused(tmp_path, monke
     result = _report(Path("target"))
 
     assert result.exit_code == 3, result.output
+    assert REFUSAL in _flat(result.output), result.output
