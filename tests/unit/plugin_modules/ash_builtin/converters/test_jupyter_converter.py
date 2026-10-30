@@ -328,7 +328,13 @@ class TestValidatePluginDependencies:
         True at once; see test_jupyter_converter_needs_a_notebook.py)."""
         source = Path(test_plugin_context.source_dir)
         source.mkdir(parents=True, exist_ok=True)
-        (source / "analysis.ipynb").write_text("{}", encoding="utf-8")
+        # A notebook by the converter's own pre-check (nbformat 4 with a cells
+        # list): a file that is not one is recorded as an input error before
+        # any launch and is no candidate, so it would not bring the check here.
+        (source / "analysis.ipynb").write_text(
+            '{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": []}',
+            encoding="utf-8",
+        )
 
     def test_uv_installed_tool_is_accepted(self, converter, ash_log_records):
         converter._get_tool_installation_info = Mock(
@@ -788,7 +794,13 @@ class TestAConstraintReadFromTheEnvironmentIsNotShown:
     def _a_notebook_to_convert(self, test_plugin_context):
         source = Path(test_plugin_context.source_dir)
         source.mkdir(parents=True, exist_ok=True)
-        (source / "analysis.ipynb").write_text("{}", encoding="utf-8")
+        # A notebook by the converter's own pre-check (nbformat 4 with a cells
+        # list): a file that is not one is recorded as an input error before
+        # any launch and is no candidate, so it would not bring the check here.
+        (source / "analysis.ipynb").write_text(
+            '{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": []}',
+            encoding="utf-8",
+        )
 
     def test_the_recorded_reason_and_warning_carry_no_value(
         self, test_plugin_context, tmp_path, monkeypatch, ash_log_records
@@ -1508,26 +1520,27 @@ class TestExecuteNbconvertViaUv:
             for m in messages_at(ash_log_records, logging.WARNING)
         )
 
-    def test_a_failing_module_import_escapes_every_handler(self, converter):
-        """Pins a real defect: the import failing is not handled at all.
-
-        The uv_tool_runner import sits inside the try block and binds
-        UVToolRunnerError as a local name. When the import statement itself
-        fails, Python evaluates the earlier ``except UVToolRunnerError`` clause
-        first; the name is unbound, so an UnboundLocalError is raised while
-        handling the original ImportError and propagates out of the method
-        instead of returning False. Hoisting the import to module scope, or
-        putting ``except ImportError`` first, fixes it -- and turns this test
-        red, which is the point.
+    def test_a_failing_module_import_is_handled_as_no_conversion(
+        self, converter, ash_log_records
+    ):
+        """The uv_tool_runner import sits inside the try block and binds
+        UVToolRunnerError as a local name. With ``except ImportError`` placed
+        before the clause that names that error, an import that fails is
+        handled as "uv could not run" and the method returns False, where it
+        once raised UnboundLocalError out of the handler.
         """
-        with (
-            patch.dict(
-                sys.modules,
-                {"automated_security_helper.utils.uv_tool_runner": None},
-            ),
-            pytest.raises(UnboundLocalError),
+        with patch.dict(
+            sys.modules,
+            {"automated_security_helper.utils.uv_tool_runner": None},
         ):
-            converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"])
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
+            )
+
+        assert any(
+            "UV tool runner module not available" in m
+            for m in messages_at(ash_log_records, logging.WARNING)
+        )
 
 
 class TestConvert:
@@ -2029,6 +2042,9 @@ class TestConvert:
             # context's config; the default config honors them.
             "honor_ignore_files": True,
             "run_id": RUN_ID,
+            # The workspace's output directory goes with the scan's own; a
+            # single-project scan has none.
+            "workspace_output_dir": None,
         }
 
 

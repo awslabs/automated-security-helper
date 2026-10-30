@@ -470,8 +470,16 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 # on the install alone: offline, uv then failed every notebook at
                 # conversion where the check could have said the converter is
                 # unavailable; it is verified another way below, as a copy from
-                # PATH is.
-                if source == "uv" and installation_info.get("uv_version"):
+                # PATH is. Only a report that carries the version field and
+                # answers None says the probe failed: a report with no such
+                # field (a caller that answers the source alone) made no probe,
+                # and the install stands on its own as it did before the probe
+                # was read here.
+                version_unreadable = (
+                    "uv_version" in installation_info
+                    and not installation_info["uv_version"]
+                )
+                if source == "uv" and not version_unreadable:
                     ASH_LOGGER.debug(f"{self.command} already installed via UV tool")
                     self._nbconvert_route = "uv"
                     return True
