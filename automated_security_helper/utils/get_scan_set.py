@@ -1889,8 +1889,9 @@ def report_ignore_file_exclusions(
     # found" would be untrue; scan_set says why they were not read instead.
     if not ignore_file_markers and honored and skipped_ignore_files:
         ASH_LOGGER.info(
-            "None of the %d ignore file(s) found for %s could be applied (see the "
-            "warnings above), so no ignore rules removed anything from the scan set.",
+            "None of the %d ignore file(s) found or named for %s could be applied (see "
+            "the warnings above), so no ignore rules removed anything from the scan "
+            "set.",
             skipped_ignore_files,
             path,
             extra=NO_MARKUP,
