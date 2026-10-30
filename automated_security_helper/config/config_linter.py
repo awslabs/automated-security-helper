@@ -201,6 +201,14 @@ class LintResult:
     # (ConfigCheck.resolved_data and shown_resolved).
     resolved_data: Any = None
     shown_resolved: Any = None
+    # The issues a fixer would have fixed in another file, un-marked by
+    # ``_clear_fixable_a_fixer_refuses`` because the fixer refuses this one (a
+    # TOML file, a JSON file for --fix-unused, a YAML file that reads the
+    # environment for --fix). ``fixable_issues`` leaves them out, so nothing
+    # tells the operator to run a fixer that then refuses; the CLI reads this
+    # list to refuse ``--fix`` with the reason when it was asked to rewrite
+    # such a file and had a fix to make.
+    fixes_refused: List[LintIssue] = field(default_factory=list)
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: ``<value>`` when
@@ -395,6 +403,13 @@ class ConfigLinter:
         with its value). ``--fix-unused`` edits the text instead, so it refuses
         TOML and JSON only. Left marked, the issues told the operator to run a
         fixer that then refuses the file.
+
+        Each un-marked issue is kept in ``result.fixes_refused``: the CLI still
+        refuses ``--fix`` on such a file, with the reason, when the lint found
+        something ``--fix`` would have rewritten (a TOML file with nothing to
+        fix passes ``lint --fix``, as the documented pre-commit invocation runs
+        it). Clearing the marks alone made that refusal silent: the CLI read no
+        fixable issue, found nothing to fix, and exited 0 where it refused.
         """
 
         def refused(issue: LintIssue) -> bool:
@@ -409,6 +424,7 @@ class ConfigLinter:
             if issue.fixable and refused(issue):
                 issue.fixable = False
                 issue.fix_description = ""
+                result.fixes_refused.append(issue)
 
     @classmethod
     def _merge_path_duplicates(cls, result: LintResult) -> None:

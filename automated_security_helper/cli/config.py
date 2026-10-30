@@ -1772,10 +1772,20 @@ def lint(
     # Why --fix would not rewrite this file, or None: a TOML file, or one that
     # reads the environment (--fix writes the values the references resolve to).
     # Read once, here: the hint below and the fix itself both need it.
+    # The lint un-marks the issues a fixer would refuse this file for
+    # (LintResult.fixes_refused), so for a TOML file or one that reads the
+    # environment `fixable` is empty; the refusal still has to fire when there
+    # was something to fix, or `--fix` would print "No fixable issues" and exit 0
+    # where it refuses to rewrite the file.
+    would_fix = fixable or [
+        i
+        for i in lint_result.fixes_refused
+        if i.category != LintCategory.SUPPRESSION_UNUSED
+    ]
     fix_refusal: str | None = None
-    if fixable and is_toml_file(config_path):
+    if would_fix and is_toml_file(config_path):
         fix_refusal = toml_refusal
-    elif fixable and uses_env_references(config_path):
+    elif would_fix and uses_env_references(config_path):
         fix_refusal = (
             f"❌ --fix rewrites the file from its parsed values, which would replace "
             f"each of the environment references (${{VAR}} or !ENV) in "

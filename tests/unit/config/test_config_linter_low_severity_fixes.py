@@ -131,6 +131,25 @@ class TestFixableMarks:
         assert [i.fixable for i in result.issues] == [True, False]
         assert result.issues[1].fix_description == ""
 
+    def test_the_un_marked_issues_are_kept_for_the_refusal(self, tmp_path):
+        """Red before the list existed: the marks were cleared and nothing kept
+        what was cleared, so ``ash config lint --fix`` on a TOML file holding a
+        fix to make read no fixable issue, printed "No fixable issues found" and
+        exited 0 where it refuses to rewrite a TOML file (the CLI's refusal fires
+        on ``fixable or lint_result.fixes_refused``)."""
+        config_path = tmp_path / "ash.toml"
+        config_path.write_text("[tool.ash]\n", encoding="utf-8")
+        result = LintResult(config_path=config_path)
+        expired = _issue(LintCategory.SUPPRESSION_EXPIRED)
+        not_fixable = _issue(LintCategory.INTERNAL_FIELD, fixable=False)
+        result.issues = [expired, not_fixable]
+
+        ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
+
+        assert result.fixes_refused == [expired]
+        assert expired.fixable is False
+        assert result.fixable_issues == []
+
     def test_a_plain_yaml_file_keeps_every_mark(self, tmp_path):
         config_path = tmp_path / "ash.yaml"
         config_path.write_text("project_name: demo\n", encoding="utf-8")
