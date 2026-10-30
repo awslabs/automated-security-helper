@@ -64,9 +64,11 @@ DIRECTORY = "points to a directory but matches no file in it"
 
 
 def _tree(tmp_path: Path) -> Path:
+    """The fixture tree under ``tmp_path``; a second call in one test finds it
+    built and returns the same root."""
     root = tmp_path / "root"
     for name in ("src/lib", "tests", "build", "vendor", "deep/a/node_modules"):
-        (root / name).mkdir(parents=True)
+        (root / name).mkdir(parents=True, exist_ok=True)
     (root / "app.py").write_text("x = 1\n", encoding="utf-8")
     return root
 
