@@ -768,7 +768,12 @@ def _run_child(
         os._exit(126)
 
 
-def _forward_stop(pid: int, signum: int, still_running: Callable[[], bool]) -> None:
+def _forward_stop(
+    pid: int,
+    signum: int,
+    still_running: Callable[[], bool],
+    stopped_at: List[float],
+) -> None:
     """Pass the stop signal ASH sent on to the scanner; SIGKILL it if it lingers.
 
     The scanner gets the signal ASH sent the wrapper (SIGTERM on a timeout), as the
@@ -776,11 +781,25 @@ def _forward_stop(pid: int, signum: int, still_running: Callable[[], bool]) -> N
     chooses and its exit is reported as that signal, not as a SIGKILL the wrapper
     made up. A scanner still running STOP_REAP_DEADLINE_SECONDS later is
     SIGKILLed by an interval timer's SIGALRM, so the stop still finishes inside the
-    grace ASH gives the wrapper.
+    grace ASH gives the wrapper. ``stopped_at`` records the first stop's clock
+    (the reap deadline counts from it), and the timer is armed by that first stop
+    alone: a second signal inside the quarter second (ASH's SIGTERM after a group
+    SIGINT, a repeated Ctrl-C, a supervisor that resends) is passed on, but a
+    timer re-armed by each would be pushed past the reap deadline, ASH would
+    SIGKILL the wrapper while it waited, and the scanner's tree would survive
+    its parent's death signal, which it already ignored.
     """
+    first = not stopped_at
+    if first:
+        stopped_at.append(time.monotonic())
+    if not still_running():
+        # Reaped, or about to be: its pid may already be another process's.
+        return
     try:
         os.kill(pid, signum)
     except OSError:
+        return
+    if not first:
         return
 
     def kill_if_lingering(_signum: int, _frame: object) -> None:
@@ -899,12 +918,7 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
         # ASH asks the wrapper to stop (a timeout, Ctrl-C, a cancelled scan): pass
         # it to the scanner now, and the loop below ends everything it started, by
         # STOP_REAP_DEADLINE_SECONDS from the first such signal.
-        if not stopped_at:
-            stopped_at.append(time.monotonic())
-        if scanner_exited:
-            # Reaped, or about to be: its pid may already be another process's.
-            return
-        _forward_stop(pid, signum, lambda: not scanner_exited)
+        _forward_stop(pid, signum, lambda: not scanner_exited, stopped_at)
 
     for signum in stop_signals:
         signal.signal(signum, stop)

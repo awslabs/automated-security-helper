@@ -614,6 +614,52 @@ def test_a_refused_parent_death_signal_is_noted_and_the_child_goes_on(
     assert noted.startswith("ash-landlock: ")
 
 
+@pytest.fixture
+def stop_calls(monkeypatch):
+    """Run ``_forward_stop`` with the kill, the handler, the timer and the clock
+    stood in for; return the calls and the list that records the first stop."""
+
+    def run(signals: List[Tuple[int, bool]]) -> Tuple[List[Tuple[str, tuple]], List]:
+        calls: List[Tuple[str, tuple]] = []
+        monkeypatch.setattr(landlock_exec, "os", _Recording(os, {"kill"}, calls))
+        monkeypatch.setattr(
+            landlock_exec, "signal", _Recording(signal, {"signal", "setitimer"}, calls)
+        )
+        monkeypatch.setattr(
+            landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
+        )
+        stopped_at: List[float] = []
+        for signum, running in signals:
+            landlock_exec._forward_stop(42, signum, lambda: running, stopped_at)
+        return calls, stopped_at
+
+    return run
+
+
+def test_repeated_stop_signals_arm_the_kill_timer_once(stop_calls):
+    """Every stop signal is passed on to the scanner, but the SIGKILL timer counts
+    from the first one, as the reap deadline does: a second signal inside the
+    quarter second does not push the kill past that deadline."""
+    calls, stopped_at = stop_calls(
+        [(signal.SIGINT, True), (signal.SIGTERM, True), (signal.SIGTERM, True)]
+    )
+
+    kills = [args for name, args in calls if name == "kill"]
+    assert kills == [(42, signal.SIGINT), (42, signal.SIGTERM), (42, signal.SIGTERM)]
+    timers = [args for name, args in calls if name == "setitimer"]
+    assert timers == [(signal.ITIMER_REAL, landlock_exec.STOP_REAP_DEADLINE_SECONDS)]
+    assert stopped_at == [10.0]
+
+
+def test_a_stop_after_the_scanner_exited_is_recorded_and_sends_nothing(stop_calls):
+    """The reap deadline still counts from the stop; the scanner's pid, reaped or
+    about to be, is not signalled, and no timer is armed for it."""
+    calls, stopped_at = stop_calls([(signal.SIGTERM, False)])
+
+    assert calls == []
+    assert stopped_at == [10.0]
+
+
 def test_the_socket_filter_route_restores_the_dispositions_before_its_exec(
     monkeypatch,
 ):
