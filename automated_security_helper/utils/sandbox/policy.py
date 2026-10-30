@@ -476,16 +476,27 @@ def _uv_directories() -> List[Path]:
 
 
 def _uv_tool_locks() -> List[Path]:
-    """The ``.lock`` file of uv's tools directory, where one exists."""
+    """The ``.lock`` file of uv's tools directory, where one exists.
+
+    Granted writable by every backend, since ``uv tool run`` takes uv's advisory
+    lock on it before it starts a tool. Only a regular file with this one name: a
+    symlink is not followed, and a file that has another name on disk (a hard
+    link, ``st_nlink`` above 1) is not granted either, since the grant would reach
+    the other name's file and a scanner could hold uv's lock on it through this
+    one. Read with lstat, so the link test and the name count come from one call.
+    """
     tool_dir, _pythons = _uv_data_directories()
     # Not the lock of a tools directory too broad to mount (_uv_directories warns).
     if tool_dir is None or _broader_than_a_tool(tool_dir):
         return []
     lock = tool_dir / ".lock"
     try:
-        return [lock.absolute()] if lock.is_file() and not lock.is_symlink() else []
+        info = os.lstat(lock)
     except OSError:
         return []
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        return []
+    return [lock.absolute()]
 
 
 def uv_cache_directory() -> Optional[Path]:
