@@ -231,15 +231,24 @@ def _copy_whole_body(response, sink, url: str) -> int:
     The bytes are counted against the declared length instead, and a shortfall
     is raised as the connection error it is, which the retry policy repeats.
 
+    The length is read as http.client reads it: not at all for a chunked body
+    (``Transfer-Encoding: chunked`` wins over a Content-Length, which the server
+    may have left stale, and http.client raises IncompleteRead itself on a
+    chunked body that is cut short), and only from an ASCII decimal header. A
+    header of any other shape (a non-ASCII digit that ``str.isdigit`` accepts
+    and ``int`` refuses, say) carries no usable length, so nothing is compared.
+
     Returns the number of bytes copied.
     """
     copied = 0
     for chunk in iter(lambda: response.read(_HASH_CHUNK_BYTES), b""):
         sink.write(chunk)
         copied += len(chunk)
+    if getattr(response, "chunked", False):
+        return copied
     declared = response.headers.get("Content-Length") if response.headers else None
-    if declared is not None and declared.strip().isdigit():
-        expected = int(declared)
+    if declared is not None and re.fullmatch(r"[0-9]+", declared.strip()):
+        expected = int(declared.strip())
         if copied != expected:
             raise ConnectionError(
                 f"the connection closed after {copied} of {expected} bytes of {url}"

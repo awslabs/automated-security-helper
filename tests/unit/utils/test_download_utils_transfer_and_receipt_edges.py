@@ -50,11 +50,14 @@ not_root = pytest.mark.skipif(
 
 
 class _Response:
-    """What urlopen yields: a body read in chunks and a Content-Length header."""
+    """What urlopen yields: a body read in chunks, a Content-Length header, and
+    http.client's ``chunked`` flag (True when Transfer-Encoding: chunked framed the
+    body, in which case http.client ignores any Content-Length)."""
 
-    def __init__(self, body: bytes, declared: int):
+    def __init__(self, body: bytes, declared, chunked: bool = False):
         self._body = io.BytesIO(body)
         self.headers = {"Content-Length": str(declared)}
+        self.chunked = chunked
 
     def read(self, amount=-1):
         return self._body.read(amount)
@@ -251,3 +254,38 @@ def test_the_staged_file_is_hashed_byte_for_byte_whatever_bytes_it_holds(tmp_pat
     assert landed == _BINARY_DIGEST
     assert target.read_bytes() == _BINARY_BODY
     assert not staging.exists()
+
+
+def test_a_chunked_body_is_not_held_to_a_stale_content_length(
+    monkeypatch, tmp_path, quick_retry
+):
+    """Transfer-Encoding: chunked frames the body and wins over any Content-Length,
+    which http.client ignores; a stale one must not fail every attempt here."""
+    attempts = []
+
+    def urlopen(url, **kwargs):
+        attempts.append(url)
+        return _Response(_BODY, declared=99, chunked=True)
+
+    monkeypatch.setattr(download_utils.urllib.request, "urlopen", urlopen)
+    installed = download_utils.download_file(
+        _URL, tmp_path / "bin", expected_sha256=_DIGEST
+    )
+    assert installed.read_bytes() == _BODY
+    assert len(attempts) == 1
+
+
+def test_a_content_length_that_is_not_an_ascii_number_carries_no_length(
+    monkeypatch, tmp_path, quick_retry
+):
+    """``str.isdigit`` admits a superscript digit that ``int`` refuses; such a header
+    is no length, so nothing is compared and nothing raises ValueError."""
+    monkeypatch.setattr(
+        download_utils.urllib.request,
+        "urlopen",
+        lambda url, **kwargs: _Response(_BODY, declared="3²"),
+    )
+    installed = download_utils.download_file(
+        _URL, tmp_path / "bin", expected_sha256=_DIGEST
+    )
+    assert installed.read_bytes() == _BODY
