@@ -29,8 +29,8 @@ Properties of ``utils/subprocess_utils.py``:
   group, so the zombie's own group id is not read as a survivor;
 - the lookup cache is bounded and keeps no miss;
 - a shell command refused under a sandbox scope is counted;
-- a streamed run stops its child on the scan's cancel and starts none in a
-  cancelled scan;
+- a streamed run stops its child on the scan's cancel, a child silent since
+  the cancel included, and starts none in a cancelled scan;
 - a process with pipes that fails to start runs its plan's cleanup, and bytes
   mode passes no encoding.
 """
@@ -42,6 +42,8 @@ import os
 import signal
 import subprocess  # nosec B404 - the module under test wraps subprocess
 import sys
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
@@ -571,6 +573,68 @@ def test_a_streamed_run_stops_its_child_on_the_scans_cancel(monkeypatch):
             spu.run_command_stream_output(["ash-u26-no-such-tool"])
     (child,) = _StreamingPopen.instances
     assert "terminate" in child.calls
+
+
+#: Longer than the stop should take by far, shorter than a test may hang.
+_SILENT_BOUND = 5.0
+
+
+class _SilentPopen(_FakeChild):
+    """A child that prints nothing and runs until it is stopped."""
+
+    instances: List["_SilentPopen"] = []
+
+    def __init__(self, args, **kwargs):
+        super().__init__()
+        self.args = list(args)
+        self.ended = threading.Event()
+        _SilentPopen.instances.append(self)
+        self.stdout = self._lines()
+
+    def _lines(self):
+        # The read blocks, as a pipe read does, until the child ends.
+        self.ended.wait(_SILENT_BOUND)
+        return
+        yield  # pragma: no cover - makes this a generator
+
+    def terminate(self):
+        super().terminate()
+        self.returncode = -15
+        self.ended.set()
+
+    def kill(self):
+        super().kill()
+        self.ended.set()
+
+    def wait(self, timeout=None):
+        self.calls.append(("wait", timeout))
+        if not self.ended.wait(_SILENT_BOUND):
+            raise subprocess.TimeoutExpired(self.args, _SILENT_BOUND)
+        return self.returncode if self.returncode is not None else 0
+
+
+def test_a_streamed_run_stops_a_child_silent_since_the_cancel(monkeypatch):
+    """Read between output lines alone, the cancel never reached a tool that
+    printed nothing more, and the wait on it had no bound."""
+    event = CancelEvent()
+    _SilentPopen.instances.clear()
+    monkeypatch.setattr(spu.subprocess, "Popen", _SilentPopen)
+    monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
+    monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda process: False)
+    cancel = threading.Timer(0.1, event.set)
+    began = time.monotonic()
+    with cancellation.cancel_scope(event):
+        cancel.start()
+        try:
+            with pytest.raises(ScanCancelled):
+                spu.run_command_stream_output(["ash-u26-no-such-tool"])
+        finally:
+            cancel.cancel()
+    took = time.monotonic() - began
+    (child,) = _SilentPopen.instances
+    assert "terminate" in child.calls
+    assert took < _SILENT_BOUND / 2, f"the cancel took {took:.2f}s to stop the tool"
 
 
 def test_a_streamed_run_starts_nothing_in_a_cancelled_scan(monkeypatch):
