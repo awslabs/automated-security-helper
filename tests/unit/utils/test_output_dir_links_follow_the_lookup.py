@@ -8,6 +8,10 @@
   an output directory spelled ``/opt/link/../x`` with ``/opt/link`` leading into
   the tree was examined at ``/opt/x``, a path the lookup never uses, and the
   repository link at ``<root>/x``, the directory the lookup reaches, was missed.
+  When the two readings name different directories the spelling is refused: the
+  writers open the path as written (``os.path.abspath``), so a check that passed
+  the directory the lookup reaches would have vetted one directory while the log
+  and the results went to another.
 - ``is_link`` reads ``os.lstat`` itself and answers False on any ``OSError``;
   ``Path.is_symlink`` let a ``PermissionError`` through on CPython 3.10-3.12.
 - ``ignore_output_dir_in_git`` writes nothing when git lists files committed under
@@ -74,12 +78,39 @@ def test_a_dotdot_after_an_operator_link_into_the_tree_lands_where_the_lookup_do
 
 
 @needs_symlinks
-def test_a_dotdot_after_an_operator_link_does_not_examine_the_lexical_path(tmp_path):
+def test_a_dotdot_after_a_link_that_names_another_directory_as_written_is_refused(
+    tmp_path,
+):
+    """The lookup reaches ``<root>/x``; written out, ``/opt/link/../x`` is
+    ``/opt/x``, which is what ASH's writers (``os.path.abspath``) would open. Two
+    directories for one spelling: the check vetted one and the log went to the
+    other. Such a spelling is refused, naming both, rather than examined at
+    either."""
     tree, root = _tree(tmp_path)
     (tree / "opt" / "link").symlink_to(root / "sub")
-    (tree / "opt" / "x").symlink_to(tree / "elsewhere")
+    (tree / "opt" / "x").mkdir()
     (root / "x").mkdir()
     output_dir = tree / "opt" / "link" / ".." / "x"
+
+    found = linked_output_component(root, output_dir)
+
+    assert found is not None
+    assert (root / "x").as_posix() in found
+    assert (tree / "opt" / "x").as_posix() in found
+    with pytest.raises(OutputDirLinkRefused):
+        refuse_linked_output_dir(root, output_dir)
+
+
+@needs_symlinks
+def test_control_a_dotdot_after_a_link_that_names_one_directory_is_accepted(tmp_path):
+    """``/alias -> <tree>``, output ``/alias/sub/../out``: as written it is
+    ``/alias/out`` and the lookup reaches ``<tree>/out``, one directory under two
+    names (macOS's ``/tmp`` is such a link). Nothing to refuse."""
+    tree, root = _tree(tmp_path)
+    alias = tree / "alias"
+    alias.symlink_to(tree)
+    (tree / "out").mkdir()
+    output_dir = alias / "opt" / ".." / "out"
 
     assert linked_output_component(root, output_dir) is None
 
