@@ -185,6 +185,13 @@
               # import paths baked into the executable rather than read from the
               # environment. Measured after unsetting: all four scanners still report
               # their versions, and ASH imports cleanly.
+              #
+              # The directories the operator's OWN PYTHONPATH named are lost with it, and
+              # an ASH (or a plugin module) importable only through them would not import
+              # inside the shell. They are not lost: interactions/run_ash_nix.py hands
+              # them to the inner command under ASH_NIX_OUTER_PYTHONPATH, and the command
+              # puts them back on sys.path before it imports ASH, so only nixpkgs'
+              # additions are dropped here.
               unset PYTHONPATH
 
               # Several scanners need DATA that no flake can pin, and ASH_OFFLINE above stops
