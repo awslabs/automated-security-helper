@@ -201,6 +201,13 @@ class ProjectPolicy:
         policy_scanners_gate: Whether those findings affect the project's exit
             code. Carried per project so a caller never has to reach back into
             the policy to interpret ``policy_scanners``.
+        package_paths_applied: The 1-based positions of the policy's
+            suppressions whose ``path`` reaches this project and whose
+            ``package_path`` named a package copy inside it.
+        package_paths_dropped: The same positions for a ``package_path`` that
+            named no copy inside this project, so the entry was dropped here.
+            The resolver reads both across every project
+            (:func:`refuse_package_paths_naming_no_project`).
     """
 
     effective_threshold: str | None
@@ -209,6 +216,8 @@ class ProjectPolicy:
     ignore_paths: tuple[IgnorePathWithReason, ...]
     policy_scanners: tuple[str, ...]
     policy_scanners_gate: bool
+    package_paths_applied: tuple[int, ...] = ()
+    package_paths_dropped: tuple[int, ...] = ()
 
 
 def _refuse(message: str) -> WorkspaceDefinitionError:
@@ -854,7 +863,7 @@ def _push_down(
     *,
     kind: PatternKind,
     quote_values: bool = True,
-) -> tuple[IgnorePathWithReason, ...]:
+) -> _PushedDown:
     """Rewrite each entry's path into *project_prefix*'s coordinates.
 
     ``kind`` is what the entries are, ``IGNORE_PATH`` or ``SUPPRESSION``: the two
@@ -872,6 +881,8 @@ def _push_down(
     as it is pushed into successive projects.
     """
     pushed: list[IgnorePathWithReason] = []
+    package_applied: list[int] = []
+    package_dropped: list[int] = []
     for position, entry in enumerate(entries, start=1):
         try:
             rewritten = to_project_pattern(entry.path, project_prefix, kind=kind)
@@ -896,8 +907,8 @@ def _push_down(
         # the same reading as the entry's path), and the policy writes it
         # relative to the workspace like the path, so it is rewritten like the
         # path. One that names a copy in another project drops the entry for
-        # this project, said in the log; one with no sound rewrite is refused
-        # like a path.
+        # this project, recorded for the resolver's cross-project read; one with
+        # no sound rewrite is refused like a path.
         package_path = getattr(entry, "package_path", None)
         if package_path is not None:
             try:
@@ -919,58 +930,130 @@ def _push_down(
                 ) from exc
             if rewritten_package is None:
                 # The path reaches this project and the package copy named does
-                # not, so the entry does not apply here. Said rather than
-                # silent: a package_path written relative to a project
-                # ("node_modules/left-pad", the form that matched before the
-                # value was pushed down) names no project's copy, so the entry
-                # would disappear from every project with nothing in the output
-                # to say so, against this module's own rule for a suppression.
-                ASH_LOGGER.warning(
-                    _package_path_outside_project(
-                        kind,
-                        position,
-                        package_path,
-                        Path(project_prefix).as_posix(),
-                        quote_values,
-                    )
-                )
+                # not, so the entry does not apply here. Recorded, not said: one
+                # project cannot tell a copy in a sibling project (the entry is
+                # right, and applies there) from a value that names no project's
+                # copy at all ("node_modules/left-pad", written relative to a
+                # project, the form that matched before the value was pushed
+                # down). The resolver reads every project's record and refuses
+                # the second shape (refuse_package_paths_naming_no_project).
+                package_dropped.append(position)
                 continue
             update["package_path"] = rewritten_package
+            package_applied.append(position)
         # model_copy rather than reconstruction, so every field the model gains
         # later is carried over without this call site needing to learn about it.
         pushed.append(entry.model_copy(update=update))
-    return tuple(pushed)
+    return _PushedDown(tuple(pushed), tuple(package_applied), tuple(package_dropped))
 
 
-def _package_path_outside_project(
-    kind: PatternKind,
-    position: int,
-    package_path: str,
-    project: str,
-    quote_values: bool,
-) -> str:
-    """The warning for an entry whose ``package_path`` names no copy in *project*.
+@dataclass(frozen=True)
+class _PushedDown:
+    """What :func:`_push_down` made of one kind of entry for one project.
 
-    Names the entry by kind and position, and the value when the file is the
-    operator's own (``quote_values``); a client's file has its value withheld as
-    the refusals do. Says how the value is read, because the one shape this
-    warning is most likely to meet is a ``package_path`` written relative to a
-    project, which reads as a top-level directory of the workspace that is no
-    project and so applies to none.
+    ``package_path_applied`` and ``package_path_dropped`` are the 1-based
+    positions of the suppressions whose ``path`` reaches the project and whose
+    ``package_path`` named a copy inside it, or named none. The resolver reads
+    them across every project (:func:`refuse_package_paths_naming_no_project`).
     """
-    shown = f" '{package_path}'" if quote_values else ""
-    return (
-        f"workspace policy {kind} entry {position} does not apply to project "
-        f"'{project}': its package_path{shown} names no package copy inside that "
-        f"project. A package_path is read relative to the workspace, like the "
-        f"entry's path; one written relative to a project (such as "
-        f"'node_modules/x') names no project's copy and applies nowhere."
-        + (
-            ""
-            if quote_values
-            else " The value is not shown because an MCP client supplied the file."
+
+    entries: tuple[IgnorePathWithReason, ...]
+    package_path_applied: tuple[int, ...]
+    package_path_dropped: tuple[int, ...]
+
+
+def refuse_package_paths_naming_no_project(
+    policy: WorkspacePolicyConfig,
+    resolved: Iterable[ProjectPolicy],
+    *,
+    every_project_prefix: Iterable[PathLike],
+    quote_values: bool = True,
+) -> None:
+    """Refuse a suppression whose ``package_path`` named no project's copy.
+
+    Read across the projects, because one project cannot tell the two shapes
+    apart. A ``package_path`` written relative to the workspace
+    (``api/node_modules/left-pad``) applies in ``api`` and is dropped, rightly,
+    from every other project its ``path`` reaches. One written relative to a
+    project (``node_modules/left-pad``) reads as a top-level directory of the
+    workspace that is no project, so it is dropped from every project, and the
+    suppression the operator stated applies nowhere with nothing in the output
+    to say so: the module docstring's rule for a suppression is that such an
+    entry is refused.
+
+    An entry whose ``path`` reached some scanned project, whose ``package_path``
+    matched none of them, and which names a copy in a project of the plan this
+    run does not scan (a skipped project) is right and merely inert this run:
+    logged once, not refused. An entry whose ``path`` reached no scanned project
+    is about other projects, as a dropped ``path`` is, and is left alone.
+
+    Args:
+        policy: The workspace policy block the projects were resolved from.
+        resolved: :func:`policy_for_project`'s result for each scanned project.
+        every_project_prefix: The workspace-relative path of every project of
+            the plan, skipped ones included.
+        quote_values: False for a client's policy file: the refusal names the
+            entry's position and not its value.
+
+    Raises:
+        WorkspaceDefinitionError: Exit code 4, listing each such entry.
+    """
+    applied: set[int] = set()
+    dropped: set[int] = set()
+    for project_policy in resolved:
+        applied.update(project_policy.package_paths_applied)
+        dropped.update(project_policy.package_paths_dropped)
+    nowhere = sorted(dropped - applied)
+    if not nowhere:
+        return
+
+    prefixes = [Path(prefix).as_posix() for prefix in every_project_prefix]
+    problems: list[str] = []
+    for position in nowhere:
+        package_path = policy.suppressions[position - 1].package_path or ""
+        elsewhere = [
+            prefix for prefix in prefixes if _names_a_copy_in(package_path, prefix)
+        ]
+        shown = f" '{package_path}'" if quote_values else ""
+        if elsewhere:
+            ASH_LOGGER.warning(
+                f"workspace policy suppression entry {position} applies to no "
+                f"project this run scans: its package_path{shown} names a copy in "
+                f"{', '.join(repr(prefix) for prefix in elsewhere)}, which the run "
+                f"skips, and no copy in the projects its path reaches."
+            )
+            continue
+        problems.append(
+            f"suppression entry {position}: its package_path{shown} names no "
+            f"project's package copy, so the entry would apply nowhere"
         )
+    if not problems:
+        return
+    raise WorkspaceDefinitionError.listing(
+        "A workspace policy suppression cannot be applied: a package_path is "
+        "read relative to the workspace, like the entry's path (the project's "
+        "directory first, 'api/node_modules/left-pad'), and these name a path "
+        "that is inside no project. A value written relative to a project "
+        "('node_modules/left-pad') matches no finding once the policy is "
+        "pushed down, so it is refused rather than dropped silently"
+        + (
+            ":"
+            if quote_values
+            else ". The values are not shown because an MCP client supplied the file:"
+        ),
+        problems,
     )
+
+
+def _names_a_copy_in(package_path: str, project_prefix: str) -> bool:
+    """Whether *package_path*, pushed down into *project_prefix*, still names a path."""
+    try:
+        return (
+            to_project_pattern(package_path, project_prefix, kind=SUPPRESSION)
+            is not None
+        )
+    except WorkspacePatternError:
+        return False
 
 
 def policy_for_project(
@@ -1033,6 +1116,12 @@ def policy_for_project(
             added.setdefault(folded, name)
     policy_scanners = tuple(added.values())
 
+    suppressions = _push_down(
+        policy.suppressions,
+        project_prefix,
+        kind=SUPPRESSION,
+        quote_values=quote_values,
+    )
     return ProjectPolicy(
         effective_threshold=effective,
         # "" and None are the same value to stricter_of (the gate off), so a
@@ -1042,19 +1131,16 @@ def policy_for_project(
             # _push_down returns the base type; suppressions keep their own type
             # because model_copy preserves the class it was called on.
             entry  # type: ignore[misc]
-            for entry in _push_down(
-                policy.suppressions,
-                project_prefix,
-                kind=SUPPRESSION,
-                quote_values=quote_values,
-            )
+            for entry in suppressions.entries
         ),
         ignore_paths=_push_down(
             policy.ignore_paths,
             project_prefix,
             kind=IGNORE_PATH,
             quote_values=quote_values,
-        ),
+        ).entries,
         policy_scanners=policy_scanners,
         policy_scanners_gate=policy.policy_scanners_gate,
+        package_paths_applied=suppressions.package_path_applied,
+        package_paths_dropped=suppressions.package_path_dropped,
     )

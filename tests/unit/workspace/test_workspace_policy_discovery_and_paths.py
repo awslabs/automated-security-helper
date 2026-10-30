@@ -30,6 +30,7 @@ from automated_security_helper.workspace.policy import (
     discover_workspace_policy_file,
     load_workspace_policy,
     policy_for_project,
+    refuse_package_paths_naming_no_project,
     resolve_workspace_policy,
 )
 
@@ -173,48 +174,30 @@ class TestAPackagePathIsPushedDownWithThePath:
     def test_a_package_copy_in_another_project_drops_the_entry(self):
         assert self._pushed("web") == ()
 
-    def test_the_drop_is_said_not_silent(self, caplog):
-        """A package_path written relative to a project ("node_modules/left-pad")
-        names no project's copy once it is read relative to the workspace, so
-        the entry would vanish from every project. The drop names the entry,
-        the value and the project, and says how the value is read."""
+    def test_the_drop_is_recorded_for_the_cross_project_read_not_said(self, caplog):
+        """One project cannot tell a copy in a sibling (right, and inert here)
+        from a value that names no project's copy. The per-project warning said
+        the first was wrong, N-1 times for one correct entry; the record is read
+        across the projects instead (refuse_package_paths_naming_no_project)."""
         with caplog.at_level(logging.WARNING):
-            assert self._pushed("web") == ()
-
-        (record,) = [
-            record for record in caplog.records if "package_path" in record.getMessage()
-        ]
-        message = record.getMessage()
-        assert record.levelno == logging.WARNING
-        assert "suppression entry 1" in message
-        assert "'api/node_modules/left-pad'" in message
-        assert "project 'web'" in message
-        assert "relative to the workspace" in message
-
-    def test_a_delivered_files_value_is_not_shown_in_the_warning(self, caplog):
-        with caplog.at_level(logging.WARNING):
-            pushed = policy_for_project(
+            for_web = policy_for_project(
                 self.POLICY,
                 project_prefix="web",
                 project_threshold="MEDIUM",
                 project_scanners=(),
-                quote_values=False,
-            ).suppressions
+            )
+            for_api = policy_for_project(
+                self.POLICY,
+                project_prefix="api",
+                project_threshold="MEDIUM",
+                project_scanners=(),
+            )
 
-        assert pushed == ()
-        (record,) = [
-            record for record in caplog.records if "package_path" in record.getMessage()
-        ]
-        message = record.getMessage()
-        assert "left-pad" not in message
-        assert "suppression entry 1" in message
-        assert "an MCP client supplied the file" in message
-
-    def test_a_copy_inside_the_project_is_no_warning(self, caplog):
-        with caplog.at_level(logging.WARNING):
-            (pushed,) = self._pushed("api")
-
-        assert pushed.package_path == "node_modules/left-pad"
+        assert for_web.suppressions == ()
+        assert for_web.package_paths_dropped == (1,)
+        assert for_web.package_paths_applied == ()
+        assert for_api.package_paths_applied == (1,)
+        assert for_api.package_paths_dropped == ()
         assert not [
             record for record in caplog.records if "package_path" in record.getMessage()
         ]
@@ -223,3 +206,120 @@ class TestAPackagePathIsPushedDownWithThePath:
         self._pushed("api")
 
         assert self.POLICY.suppressions[0].package_path == "api/node_modules/left-pad"
+
+
+class TestAPackagePathNamingNoProjectIsRefusedAcrossTheProjects:
+    """``node_modules/left-pad``, written relative to a project, reads as a
+    top-level workspace directory that is no project once the value is pushed
+    down, so the entry vanished from every project with a log line to show for
+    it; the module's rule for a stated suppression that cannot apply is a
+    refusal. The read is across the projects: the same drop in one project is
+    right when a sibling holds the copy."""
+
+    def _policy(self, package_path: str) -> WorkspacePolicyConfig:
+        return WorkspacePolicyConfig(
+            suppressions=[
+                AshSuppression(
+                    path="**/*.js", reason="vendored copy", package_path=package_path
+                )
+            ]
+        )
+
+    @staticmethod
+    def _resolved(policy, *prefixes, quote_values=True):
+        return [
+            policy_for_project(
+                policy,
+                project_prefix=prefix,
+                project_threshold="MEDIUM",
+                project_scanners=(),
+                quote_values=quote_values,
+            )
+            for prefix in prefixes
+        ]
+
+    def test_a_project_relative_value_is_refused_naming_the_entry(self):
+        policy = self._policy("node_modules/left-pad")
+        resolved = self._resolved(policy, "api", "web")
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            refuse_package_paths_naming_no_project(
+                policy, resolved, every_project_prefix=["api", "web"]
+            )
+
+        message = str(excinfo.value)
+        assert "suppression entry 1" in message
+        assert "'node_modules/left-pad'" in message
+        assert "relative to the workspace" in message
+        assert "names no project's package copy" in message
+
+    def test_a_delivered_files_value_is_not_shown_in_the_refusal(self):
+        policy = self._policy("node_modules/left-pad")
+        resolved = self._resolved(policy, "api", "web", quote_values=False)
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            refuse_package_paths_naming_no_project(
+                policy,
+                resolved,
+                every_project_prefix=["api", "web"],
+                quote_values=False,
+            )
+
+        message = str(excinfo.value)
+        assert "left-pad" not in message
+        assert "suppression entry 1" in message
+        assert "an MCP client supplied the file" in message
+
+    def test_a_value_applied_in_one_project_refuses_nothing_and_says_nothing(
+        self, caplog
+    ):
+        policy = self._policy("api/node_modules/left-pad")
+        resolved = self._resolved(policy, "api", "web", "worker")
+
+        with caplog.at_level(logging.WARNING):
+            refuse_package_paths_naming_no_project(
+                policy, resolved, every_project_prefix=["api", "web", "worker"]
+            )
+
+        assert not [
+            record for record in caplog.records if "package_path" in record.getMessage()
+        ]
+
+    def test_a_copy_in_a_project_this_run_skips_is_logged_once_not_refused(
+        self, caplog
+    ):
+        """``api`` is in the plan but skipped this run, so the entry is right
+        and merely inert; refusing it would block scanning a subset."""
+        policy = self._policy("api/node_modules/left-pad")
+        resolved = self._resolved(policy, "web", "worker")
+
+        with caplog.at_level(logging.WARNING):
+            refuse_package_paths_naming_no_project(
+                policy, resolved, every_project_prefix=["api", "web", "worker"]
+            )
+
+        (record,) = [
+            record for record in caplog.records if "package_path" in record.getMessage()
+        ]
+        message = record.getMessage()
+        assert "suppression entry 1" in message
+        assert "'api'" in message
+        assert "skips" in message
+
+    def test_an_entry_whose_path_reaches_no_project_is_left_alone(self):
+        """A dropped ``path`` is about other projects and is silent by design;
+        the package_path of such an entry is not judged either."""
+        policy = WorkspacePolicyConfig(
+            suppressions=[
+                AshSuppression(
+                    path="lib/**/*.js",
+                    reason="elsewhere",
+                    package_path="node_modules/x",
+                )
+            ]
+        )
+        resolved = self._resolved(policy, "api", "web")
+
+        refuse_package_paths_naming_no_project(
+            policy, resolved, every_project_prefix=["api", "web"]
+        )

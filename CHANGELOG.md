@@ -5525,6 +5525,16 @@
   exit-code legend when a scan runs, which the host used to suppress along with
   the container's copy.
 
+- **A workspace policy suppression's `package_path` is read relative to the
+  workspace, like the entry's `path`, and pushed down into each project with it.**
+  `api/node_modules/left-pad` applies in `api` as `node_modules/left-pad` and is
+  dropped from every other project the `path` reaches, silently, as the entry is
+  right. A value written relative to a project (`node_modules/left-pad`) names no
+  project's copy once it is pushed down, so the policy is refused (exit 4) naming the
+  entry and the value, instead of the suppression vanishing from every project with a
+  log line to show for it; a value that names a copy only in a project the run skips
+  is logged once and not refused. A policy an MCP client delivered is refused by the
+  entry's position, its value withheld.
 - **What an archive does to itself is an input error; what the run does is a tool
   error, and only the first can be accepted.** The archive converter graded every
   failure as a tool error, so no `ash-unconverted-input` suppression on an archive's

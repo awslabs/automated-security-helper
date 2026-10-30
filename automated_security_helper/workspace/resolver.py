@@ -182,6 +182,7 @@ from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.policy import (
     normalise_scanner_name,
     policy_for_project,
+    refuse_package_paths_naming_no_project,
     resolve_workspace_policy,
 )
 from automated_security_helper.workspace.scanner_pins import (
@@ -1577,6 +1578,16 @@ def _apply_workspace_policy(
             project_threshold=project.severity_threshold,
             project_scanners=project.scanners,
             # A delivered file's pattern is not quoted in its refusal.
+            quote_values=not delivered,
+        )
+    if workspace_policy is not None:
+        # Read across the projects, because one project cannot tell a package
+        # copy in a sibling project from a package_path that names no project's
+        # copy at all (workspace/policy.py, "Push-down").
+        refuse_package_paths_naming_no_project(
+            workspace_policy,
+            resolved_for.values(),
+            every_project_prefix=[project.relative_path for project in projects],
             quote_values=not delivered,
         )
     if delivered and source is not None and workspace_policy is not None:
