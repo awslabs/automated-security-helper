@@ -368,14 +368,18 @@ class CommandSafeStream:
         state is needed, and ``_safe`` was run whole to read its second value.
         The answer is the same: a line break puts the following piece at a line
         start, and a piece with anything past its lead (whitespace, terminal
-        sequences, escaped bytes) ends one. ``_safe``'s two substitutions each
-        put escape text in the place of one non-lead character, so they never
-        empty a piece's remainder and never change this answer.
+        sequences, escaped bytes) ends one. The hash-command substitution is
+        applied to the last piece first, as ``_safe`` applies it: a terminal
+        sequence whose intermediate bytes are ``##`` and whose final byte is
+        ``[`` is lead unbroken and text once its first ``#`` is escaped, so the
+        raw piece and the checked piece disagree on where the lead ends. The
+        colon escape puts non-lead text in the place of one non-lead character
+        past the lead, so it cannot move the answer.
         """
         pieces = _LINE_BREAK.split(text)
         if len(pieces) > 1:
             at_line_start = True
-        last = pieces[-1]
+        last = _NAMED_HASH_COMMAND.sub(_hash_command_broken, pieces[-1])
         if at_line_start:
             lead_match = _LINE_LEAD.match(last)
             lead = lead_match.end() if lead_match else 0
