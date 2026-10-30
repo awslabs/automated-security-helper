@@ -1383,11 +1383,13 @@ if [[ "${NO_RUN}" = "NO" ]]; then
 fi
 
 # Make the output directory and check that it takes a file, then set OUTPUT_DIR to
-# its resolved path. Called once, just before the build or the run (whichever comes
-# first), after every refusal of this script's own: made here, where its path was
-# checked, a run refused later (a non-numeric or zero container UID or GID, no
-# runner, a base-image value, a config file this script cannot carry) left a new
-# .ash/ash_output, or the given directory, behind.
+# its resolved path. Called once, right after the path checks above and before the
+# container runtime is looked for: a missing --output-dir is made, parents and all,
+# and one that cannot be made, entered or written is refused with 5 in `ash scan`'s
+# words, whether or not a runtime follows (tests/unit/cli/test_directory_refusals_agree.py
+# pins both on a PATH with no runtime). Making it later, just before the build or
+# the run, left those refusals behind "Unable to resolve an OCI_RUNNER" and the
+# directory unmade on a host with no runtime.
 OUTPUT_DIR_CREATED="NO"
 create_output_dir() {
   if [[ "${NO_RUN}" != "NO" || "${OUTPUT_DIR_CREATED}" = "YES" ]]; then
@@ -1424,6 +1426,7 @@ create_output_dir() {
   require_mountable --output-dir "${OUTPUT_DIR}" "${RESOLVED_DIR}"
   OUTPUT_DIR="${RESOLVED_DIR}"
 }
+create_output_dir
 
 # The config the scan reads: --config in the arguments, and the file the host's
 # ASH_CONFIG names, which a local scan reads as its base whatever names the
@@ -1791,9 +1794,6 @@ else
       # cache, and OS packages and offline databases are at most a day old.
       NOW_EPOCH="$(date +%s)"
       BUILD_DATE_EPOCH=$((NOW_EPOCH - NOW_EPOCH % 86400))
-      # The output directory is made now, after every refusal above, so a refused
-      # run leaves none behind.
-      create_output_dir
       echo "Building image $(shown "${ASH_IMAGE_NAME}") -- this may take a few minutes during the first build..." >&2
       # DOCKER_EXTRA_ARGS is this script's own (--no-cache, -q) and the caller's
       # environment, split on whitespace as it was.
@@ -1942,9 +1942,6 @@ else
           "${ASH_ARG_WORDS[@]:SANDBOX_OFF_AT}"
         )
       fi
-      # Made now when no build made it: after every refusal, so a refused run
-      # leaves no output directory behind.
-      create_output_dir
       echo "Running ASH scan using built image..." >&2
       # The mounted paths go in through ASH_SOURCE_DIR and ASH_OUTPUT_DIR rather than
       # as --source-dir/--output-dir in front of the arguments. A subcommand in the

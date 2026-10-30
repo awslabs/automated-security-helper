@@ -159,6 +159,51 @@ def test_no_runner_on_path(tmp_path, run_ash):
     assert calls == []
 
 
+def test_the_output_dir_is_made_before_a_runner_is_looked_for(tmp_path, run_ash):
+    """A missing --output-dir is made, parents and all, and a run that then finds no
+    runtime stops at the runner refusal with the directory in place: the shape
+    tests/unit/cli/test_directory_refusals_agree.py pins for a PATH with no runtime.
+    Making it just before the build or the run left it unmade here."""
+    tools_only = tmp_path / "tools-only"
+    tools_only.mkdir()
+    for tool in _TOOLS:
+        (tools_only / tool).symlink_to(shutil.which(tool))
+    out = tmp_path / "p" / "q" / "out"
+
+    result, calls = run_ash(
+        "--source-dir", "src", "--output-dir", str(out), path=tools_only
+    )
+
+    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    assert "Unable to resolve an OCI_RUNNER" in result.stderr
+    assert out.is_dir(), result.stdout + result.stderr
+    assert calls == []
+
+
+def test_an_output_dir_that_cannot_be_made_is_refused_before_a_runner_is_looked_for(
+    tmp_path, run_ash
+):
+    """The usage refusal, exit 5 in `ash scan`'s words, comes before the runtime
+    lookup, so it is the same with and without a runtime on PATH. Made just before
+    the build or the run, it came after "Unable to resolve an OCI_RUNNER"."""
+    tools_only = tmp_path / "tools-only"
+    tools_only.mkdir()
+    for tool in _TOOLS:
+        (tools_only / tool).symlink_to(shutil.which(tool))
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x\n", encoding="utf-8")
+    out = blocker / "out"
+
+    result, calls = run_ash(
+        "--source-dir", "src", "--output-dir", str(out), path=tools_only
+    )
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "Output directory cannot be created: " in result.stderr, result.stderr
+    assert "Unable to resolve an OCI_RUNNER" not in result.stderr, result.stderr
+    assert calls == []
+
+
 def test_a_malformed_base_oci_layout(tmp_path, run_ash, bare_path):
     result, calls = run_ash(
         "--source-dir",
