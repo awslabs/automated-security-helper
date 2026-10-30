@@ -1643,6 +1643,33 @@ def _on_windows() -> bool:
 #: The zip general-purpose flag that marks a member as encrypted.
 _ZIP_ENCRYPTED_FLAG = 0x1
 
+#: The zip general-purpose flag that marks a member's data as patched (PKWARE's
+#: "compressed patched data"), which zipfile does not read: ``open`` raises
+#: NotImplementedError for such a member.
+_ZIP_PATCHED_DATA_FLAG = 0x20
+
+_MEMBER_PATCHED_DATA = "it holds compressed patched data, which zipfile does not read"
+
+
+def _zip_method_available(method: int) -> bool:
+    """Whether this Python has the module zipfile reads a member compressed by
+    ``method`` with: bz2, lzma, or the zstd module, each of which a Python can
+    be built without. zipfile raises RuntimeError out of ``extractall`` when the
+    module is missing, and the converter then recorded the whole archive as a
+    failure of the run's kind, with the members already written removed; a member
+    no module here can read is refused alone instead, through zipfile's own check
+    where this zipfile has it.
+    """
+    check = getattr(zipfile, "_check_compression", None)
+    if check is None:
+        return True
+    try:
+        check(method)
+    except RuntimeError:
+        return False
+    return True
+
+
 #: The compression methods zipfile extracts; anything else (Deflate64, PPMd,
 #: an implode or shrink of old tools) raises NotImplementedError out of
 #: extractall.
@@ -1661,18 +1688,27 @@ _ZIP_METHODS_EXTRACTED = frozenset(
 
 def _zip_member_problem(member: zipfile.ZipInfo) -> Optional[str]:
     """Why zipfile could not extract this member's content, or None: it is
-    encrypted (zipfile asks for a password and the converter has none), or its
-    compression method is one zipfile does not implement. ``extractall`` raised
-    on the first such member and the converter then removed every member it had
-    already written, so one such member lost the whole archive; refused one by
-    one here, the rest of the archive is extracted and the refusal is recorded.
+    encrypted (zipfile asks for a password and the converter has none), its data
+    is patched (flag bit 5, which zipfile refuses), or its compression method is
+    one zipfile does not implement, or one whose module this Python was built
+    without (_zip_method_available). ``extractall`` raised on the first such
+    member and the converter then removed every member it had already written,
+    so one such member lost the whole archive; refused one by one here, the rest
+    of the archive is extracted and the refusal is recorded.
     """
     if member.flag_bits & _ZIP_ENCRYPTED_FLAG:
         return _MEMBER_ENCRYPTED
+    if member.flag_bits & _ZIP_PATCHED_DATA_FLAG:
+        return _MEMBER_PATCHED_DATA
     if member.compress_type not in _ZIP_METHODS_EXTRACTED:
         return (
             f"its compression method ({member.compress_type}) is not one zipfile "
             "can extract"
+        )
+    if not _zip_method_available(member.compress_type):
+        return (
+            f"its compression method ({member.compress_type}) needs a module this "
+            "Python does not have"
         )
     return None
 

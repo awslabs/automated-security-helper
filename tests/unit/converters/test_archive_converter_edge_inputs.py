@@ -276,6 +276,37 @@ def test_an_encrypted_or_unsupported_zip_member_is_refused_alone(
     assert "compression method (9)" in reasons["c.py"]
 
 
+def test_a_patched_or_module_less_zip_member_is_refused_alone(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """Two more members zipfile cannot read, which still raised out of extractall
+    and so failed the whole archive: one whose data is marked as patched (flag bit
+    5, NotImplementedError), and one compressed with bzip2 on a Python built
+    without the bz2 module (RuntimeError, graded as the run's failure). The
+    control first: with the module present the bzip2 member is admitted."""
+    converter = _converter(test_plugin_context)
+    plain = zipfile.ZipInfo("a.py")
+    bzipped = zipfile.ZipInfo("b.py")
+    bzipped.compress_type = zipfile.ZIP_BZIP2
+    patched = zipfile.ZipInfo("c.py")
+    patched.flag_bits |= 0x20
+
+    admitted = converter.inspect_members(
+        [bzipped], target_path=tmp_path, archive="a.zip"
+    )
+    assert admitted == [bzipped] and converter.refused_inputs == []
+
+    monkeypatch.setattr(zipfile, "bz2", None, raising=True)
+    kept = converter.inspect_members(
+        [plain, bzipped, patched], target_path=tmp_path, archive="a.zip"
+    )
+
+    assert kept == [plain]
+    reasons = {r.member: r.reason for r in converter.refused_inputs}
+    assert "needs a module this Python does not have" in reasons["b.py"]
+    assert "patched data" in reasons["c.py"]
+
+
 def test_a_later_name_bound_for_a_taken_path_is_refused_when_members_are_names(
     test_plugin_context, tmp_path
 ):
