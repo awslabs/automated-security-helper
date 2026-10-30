@@ -738,12 +738,26 @@ def test_one_artifact_holding_two_copies_is_not_two_artifacts(tmp_path):
     _zip_artifact(tmp_path / "two", "ash-shard-1", _aggregated())
     judged, problems = judge(read(tmp_path / "two"))
     assert judged is None and "the run kept 2 artifacts" in problems[0]
-    # A stored directory's copies group by the directory holding each file.
+    # A stored directory's copies group by the artifact's own directory in the store.
     stored = store / "1" / "ash-output"
     stored.mkdir()
     (stored / "ash_aggregated_results.json").write_text("{}", encoding="utf-8")
     (found_stored,) = [r for r in read(store) if r.name == "ash-output"]
     assert _api("reports", "artifact_key")(found_stored) == str(stored)
+    # The same workspace-scan upload kept as a directory: two copies under projects/*
+    # of ONE stored artifact are that, not two artifacts.
+    directory = tmp_path / "stored" / "1" / "ash-merged"
+    for project in ("a", "b"):
+        (directory / "projects" / project).mkdir(parents=True)
+        (directory / "projects" / project / "ash_aggregated_results.json").write_text(
+            json.dumps(_aggregated()), encoding="utf-8"
+        )
+    found = read(tmp_path / "stored")
+    assert found is not None and len(found) == 2
+    assert {_api("reports", "artifact_key")(r) for r in found} == {str(directory)}
+    judged, problems = judge(found)
+    assert judged is None and len(problems) == 1
+    assert "holds 2 copies" in problems[0] and "artifacts are named" not in problems[0]
 
 
 @pytest.mark.unit

@@ -33,7 +33,7 @@ import struct
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -1029,8 +1029,10 @@ class ArtifactResults:
     artifact holds none. ``mtime`` is when the store entry was written: the zip's, or
     the stored results file's. ``source`` is the zip, or the stored results file, and
     ``member`` the results file's name inside the zip (None for a stored file); the
-    two are what ``unpack_artifact`` reads, and ``source`` is what groups the copies
-    one artifact holds (``artifact_key``).
+    two are what ``unpack_artifact`` reads. ``entry`` is the store entry the results
+    came from, the artifact's own directory under the store (``<store>/<run>/<name>``),
+    set by ``results_from_artifact_store`` for a stored copy; it is what groups the
+    copies one artifact holds (``artifact_key``).
     """
 
     name: str
@@ -1040,13 +1042,17 @@ class ArtifactResults:
     mtime: float
     source: Path
     member: str | None = None
+    entry: str | None = None
 
 
 def artifact_key(results: ArtifactResults) -> str:
-    """The store entry the results came from: the zip, or the directory holding a
-    stored results file; two results with one key are copies inside one artifact."""
+    """The store entry the results came from: the zip, or the artifact's directory in
+    the store for a stored results file (``entry``, else the file's own directory);
+    two results with one key are copies inside one artifact."""
     source = Path(results.source)
-    return str(source if results.member is not None else source.parent)
+    if results.member is not None:
+        return str(source)
+    return results.entry if results.entry is not None else str(source.parent)
 
 
 def _zipped_results(path: Path, depth: int) -> list[tuple[int, ArtifactResults]]:
@@ -1130,9 +1136,18 @@ def results_from_artifact_store(store: Path) -> list[ArtifactResults] | None:
     for path in sorted(store.rglob("*")):
         if path.is_symlink() or not path.is_file():
             continue
-        depth = len(path.relative_to(store).parts)
+        parts = path.relative_to(store).parts
+        depth = len(parts)
         if path.name == AGGREGATED:
-            found += _stored_results(path, depth)
+            # The artifact's own directory, <store>/<run>/<name>: the copies a
+            # workspace scan's upload holds under projects/* share it.
+            entry = (
+                str(store.joinpath(*parts[: min(2, depth - 1)])) if depth > 1 else None
+            )
+            found += [
+                (found_depth, replace(results, entry=entry))
+                for found_depth, results in _stored_results(path, depth)
+            ]
         elif path.suffix == ".zip":
             found += _zipped_results(path, depth)
     if not found:
