@@ -439,8 +439,7 @@ def skipif_reason(report: Any) -> Optional[str]:
     if not _is_the_items_own_location(path, line, getattr(report, "location", None)):
         return None
     reason = str(text)
-    if reason.startswith("Skipped: "):
-        reason = reason[len("Skipped: ") :]
+    reason = reason.removeprefix("Skipped: ")
     if reason in GATE_SKIP_REASONS:
         return None
     return reason
