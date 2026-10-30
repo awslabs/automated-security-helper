@@ -1885,9 +1885,7 @@ def test_an_action_longer_than_the_probe_reads_is_a_failed_target(repo, monkeypa
     assert (attempted, failed) == (len(EXPECTED_INPUTS) + 1, 1)
 
 
-def test_a_cut_off_action_whose_runs_key_was_read_is_a_failed_target(
-    repo, monkeypatch
-):
+def test_a_cut_off_action_whose_runs_key_was_read_is_a_failed_target(repo, monkeypatch):
     """The read stopped inside the document, but the "runs" key is in the part
     that was read: an action, and a failed target."""
     body = b"runs:\n  using: composite\n  steps:\n" + b"    - run: echo\n" * 40
@@ -1940,7 +1938,14 @@ def test_another_tools_file_read_whole_is_still_inapplicable(repo, monkeypatch):
         (b"name: !custom x\nsteps: []\n", None),
         (b"", False),
     ],
-    ids=["action", "other-mapping", "sequence", "tagged-action", "tagged-other", "empty"],
+    ids=[
+        "action",
+        "other-mapping",
+        "sequence",
+        "tagged-action",
+        "tagged-other",
+        "empty",
+    ],
 )
 def test_the_action_probe_answers_in_three_ways(tmp_path, body, answer):
     path = tmp_path / "action.yml"
@@ -2070,9 +2075,7 @@ def _later_batch_sarif() -> str:
     return json.dumps(data)
 
 
-def test_a_joined_report_carries_every_batchs_rules_and_invocations(
-    repo, monkeypatch
-):
+def test_a_joined_report_carries_every_batchs_rules_and_invocations(repo, monkeypatch):
     """A rule that fires only in a later batch keeps its descriptor (help URI,
     description) in the joined report, each rule id appears once, the
     invocations of every run are kept in order, and a result's ruleIndex
