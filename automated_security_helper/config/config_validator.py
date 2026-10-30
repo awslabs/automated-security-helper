@@ -3570,6 +3570,9 @@ def _results_schema_names() -> frozenset:
 
 # check_config_file's default for config_data: read the file itself.
 _READ_THE_FILE: Any = object()
+#: An option the trusted base does not set (``_ignored_reporter_destinations``):
+#: distinct from ``None``, which a base can write as a value.
+_MISSING_OPTION: Any = object()
 
 
 @functools.lru_cache(maxsize=None)
@@ -4319,9 +4322,22 @@ class ConfigValidator:
         # that writes the base's own value (`ash config init` writes the
         # defaults) warns nothing. Never the value; a key the chain read from
         # the environment is redacted like any free text.
-        for place in cls._ignored_operator_only(
+        ignored_places = cls._ignored_operator_only(
             built, repository, config_overrides, ash_config
+        )
+        # The off-host reporters' destination and retry options, and their
+        # ``enabled``, which a scan, ``ash report`` and ``ash merge`` take from
+        # the trusted base and --config-overrides when a repository file writes
+        # them (config/reporter_trust.py REPORTER_DESTINATION_OPTIONS): the same
+        # warning, from the checked file's own document, so a config check says
+        # what a scan's log says. The operator-only table above names two of
+        # them too; each place is warned once.
+        for place in cls._ignored_reporter_destinations(
+            config_data, config_path, root_key, repository, config_overrides, ash_config
         ):
+            if place not in ignored_places:
+                ignored_places.append(place)
+        for place in ignored_places:
             result.warnings.append(
                 result.redact(
                     f"{place} is set in a config file inside the scanned tree, "
@@ -4394,6 +4410,148 @@ class ConfigValidator:
         return ignored_operator_only_options(
             built, trusted, config_overrides, repository
         )
+
+    @classmethod
+    def _ignored_reporter_destinations(
+        cls,
+        config_data: Any,
+        config_path: Path,
+        real_path: Path,
+        repository: Any,
+        config_overrides: Optional[List[str]],
+        ash_config: "_AshConfigCheck",
+    ) -> List[str]:
+        """The off-host reporters' destination options, retry options and
+        ``enabled`` the checked file writes that a scan, ``ash report`` and
+        ``ash merge`` ignore when the file is the repository's.
+
+        Those commands take them from the trusted base with the overrides
+        replayed onto it (reporter_trust.confine_reporter_destinations, the
+        table REPORTER_DESTINATION_OPTIONS and REPORTER_ENABLED_DEFAULTS) and log
+        what a repository file wrote for them; the config check said nothing,
+        because the operator-only table above names only two of these options.
+        Judged from the checked file's own document, as read (a reference the
+        file reads from the environment is compared as written, and the place
+        it names is redacted by the caller like any free text): the file is the
+        repository's by the check's own membership (``is_repository_file``, the
+        judgment the operator-only confinement uses); a reporter's section is
+        matched by its reduced name, an option under any mix of ``-`` and ``_``
+        in its name, as the merge reads them; a value the trusted base already
+        gives the option changes nothing and is not named, and neither is a
+        value an override writes the same, which is the operator's choice. A
+        base this file extends is not read: its writes are its own file's.
+        """
+        from automated_security_helper.config.ash_config import (
+            AshConfig,
+            reduced_plugin_name,
+        )
+        from automated_security_helper.config.reporter_trust import (
+            REPORTER_DESTINATION_OPTIONS,
+            REPORTER_ENABLED_DEFAULTS,
+        )
+
+        if not isinstance(config_data, dict):
+            return []
+        reporters = config_data.get("reporters")
+        if not isinstance(reporters, dict):
+            return []
+        if not repository.is_repository_file(real_path, config_path):
+            return []
+        trusted = AshConfig()
+        if ash_config.loaded is not None and not ash_config.in_tree:
+            trusted = ash_config.loaded
+
+        def folded(name: str) -> str:
+            return name.replace("-", "_")
+
+        def as_mapping(value: Any) -> Dict[str, Any]:
+            if value is None:
+                return {}
+            if isinstance(value, dict):
+                return value
+            dump = getattr(value, "model_dump", None)
+            if callable(dump):
+                try:
+                    dumped = dump(by_alias=True)
+                except (TypeError, ValueError):
+                    return {}
+                return dumped if isinstance(dumped, dict) else {}
+            return {}
+
+        def folded_value(mapping: Dict[str, Any], name: str) -> Any:
+            for key, value in mapping.items():
+                if isinstance(key, str) and folded(key) == folded(name):
+                    return value
+            return _MISSING_OPTION
+
+        def override_writes(segments: Sequence[str], value: Any) -> bool:
+            # An override of the place, or of a section above it, writes it; one
+            # that writes the value the file wrote is no reason to warn (the
+            # value stands), one that writes another is the operator's choice
+            # and the file's value is not kept, which the warning is about.
+            for override in config_overrides or []:
+                key_path, _, text = override.partition("=")
+                parts = key_path.removesuffix("+").strip().split(".")
+                if not parts or len(parts) > len(segments):
+                    continue
+                if any(
+                    not (
+                        folded(part) == folded(want)
+                        or (
+                            index == 1
+                            and reduced_plugin_name(part) == reduced_plugin_name(want)
+                        )
+                    )
+                    for index, (part, want) in enumerate(zip(parts, segments))
+                ):
+                    continue
+                if len(parts) < len(segments):
+                    return True
+                try:
+                    written = yaml.safe_load(text)
+                except yaml.YAMLError:
+                    written = text
+                return written == value
+            return False
+
+        places: List[str] = []
+        for key, section in reporters.items():
+            if not isinstance(key, str) or not isinstance(section, dict):
+                continue
+            plugin = next(
+                (
+                    name
+                    for name in REPORTER_DESTINATION_OPTIONS
+                    if reduced_plugin_name(name) == reduced_plugin_name(key)
+                ),
+                None,
+            )
+            if plugin is None:
+                continue
+            trusted_section = as_mapping(trusted.get_plugin_config("reporter", plugin))
+            trusted_options = as_mapping(trusted_section.get("options"))
+            if "enabled" in section:
+                trusted_enabled = trusted_section.get(
+                    "enabled", REPORTER_ENABLED_DEFAULTS.get(plugin)
+                )
+                if section["enabled"] != trusted_enabled and not override_writes(
+                    ("reporters", key, "enabled"), section["enabled"]
+                ):
+                    places.append(f"reporters.{key}.enabled")
+            options = section.get("options")
+            if not isinstance(options, dict):
+                continue
+            names = {folded(name) for name in REPORTER_DESTINATION_OPTIONS[plugin]}
+            for option, value in options.items():
+                if not isinstance(option, str) or folded(option) not in names:
+                    continue
+                kept = folded_value(trusted_options, option)
+                if kept is not _MISSING_OPTION and kept == value:
+                    continue
+                if override_writes(("reporters", key, "options", option), value):
+                    continue
+                places.append(f"reporters.{key}.options.{option}")
+        return places
 
     @classmethod
     def _ash_config_check(
