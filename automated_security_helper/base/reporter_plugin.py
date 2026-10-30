@@ -661,12 +661,14 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         return declared_config_model(cls)
 
     @classmethod
-    def _config_through_declared_model(
+    def _validated_by_declared_model(
         cls, config: Any, handler: ValidatorFunctionWrapHandler
     ) -> Any:
         """``config`` validated by the model this reporter class declares.
 
-        The class is the caller here for the same reason as above.
+        The class is the caller here for the same reason as above. Named
+        without a ``_config`` prefix: ``configure`` calls it, and the public
+        ``config`` field is the only ``config`` attribute its source names.
         """
         return config_validated_by_declared_model(
             cls, ReporterPluginConfigBase, config, handler
@@ -702,7 +704,8 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         model. Assignment alone is not validated here.
         """
         if config:
-            self.config = self._config_through_declared_model(config, _as_given)
+            config = self._validated_by_declared_model(config, _as_given)
+            self.config = config
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The files this reporter writes itself in the reports directory, beside its report.
