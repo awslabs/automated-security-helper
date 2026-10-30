@@ -13,6 +13,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 
+from automated_security_helper.utils import get_scan_set
 from automated_security_helper.utils.get_scan_set import get_changed_files
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.changed_files import (
@@ -670,12 +671,15 @@ class TestLocationReadings:
         name the file ``secrét.py`` (U+00E9) while ``Path.as_uri()`` spelled the
         byte as ``secr%E9t.py``; decoding it as UTF-8 with surrogateescape gave a
         surrogate that names no file there, so the finding was still dropped. The
-        bytes are read through ``os.fsdecode`` too, here stood in by latin-1."""
+        bytes are read through the codec git's names are decoded with too, here
+        stood in by latin-1; a reading with no surrogate gains no spelling."""
         source_dir = tmp_path / "repo"
         source_dir.mkdir()
         name = "secrét.py"
         changed = {(source_dir / name).resolve()}
-        monkeypatch.setattr(os, "fsdecode", lambda raw: bytes(raw).decode("latin-1"))
+        monkeypatch.setattr(
+            get_scan_set, "_git_output_codec", lambda: ("latin-1", "strict")
+        )
         results = _make_results_with_sarif(
             [_make_result("secr%E9t.py"), _make_result("other.py")]
         )
@@ -691,7 +695,7 @@ class TestLocationReadings:
     def test_a_byte_the_filesystem_encoding_refuses_adds_no_spelling(
         self, tmp_path, monkeypatch
     ):
-        """Windows decodes file names as UTF-8 with ``surrogatepass``, which refuses
+        """Windows decodes git's names as UTF-8 with ``surrogatepass``, which refuses
         a byte that is not UTF-8, so the filesystem spelling of ``secr%E9t.py``
         raised ``UnicodeDecodeError`` out of the filter and failed the scan. Such a
         reading adds no spelling: the finding is placed by its other readings, and
@@ -699,11 +703,9 @@ class TestLocationReadings:
         source_dir = tmp_path / "repo"
         source_dir.mkdir()
         changed = {(source_dir / "other.py").resolve()}
-
-        def refuse(raw):
-            raise UnicodeDecodeError("utf-8", bytes(raw), 4, 5, "invalid start byte")
-
-        monkeypatch.setattr(os, "fsdecode", refuse)
+        monkeypatch.setattr(
+            get_scan_set, "_git_output_codec", lambda: ("utf-8", "surrogatepass")
+        )
         results = _make_results_with_sarif(
             [_make_result("secr%E9t.py"), _make_result("other.py")]
         )

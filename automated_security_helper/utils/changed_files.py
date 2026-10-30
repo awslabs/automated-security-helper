@@ -13,7 +13,6 @@ counts, ``ash.sarif``, the aggregated results file and the exit code all leave
 out the same findings.
 """
 
-import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Mapping, Optional, Set, Tuple
@@ -116,20 +115,33 @@ def _filesystem_readings(readings: List[str]) -> List[str]:
     git and ``os.fsdecode`` give the file on a UTF-8 host. On a host whose
     filesystem encoding is a legacy POSIX locale the same file is named
     ``secrét.py``, so the surrogate reading matched nothing and the finding was
-    dropped though its file had changed. Each reading's bytes (the surrogates
-    turned back by the same handler) are therefore also read through
-    ``os.fsdecode``, the decoding git's names and the changed set are in. A
+    dropped though its file had changed. The bytes of each reading that holds
+    such a surrogate (turned back by the same handler) are therefore also read
+    through the codec git's names and the changed set are decoded with
+    (``get_scan_set._git_output_codec``: UTF-8 with ``surrogatepass`` on Windows
+    whatever the filesystem encoding says there, the filesystem's own codec
+    elsewhere), not ``os.fsdecode``, which differs from it under
+    ``PYTHONLEGACYWINDOWSFSENCODING``. A reading with no surrogate is left as it
+    is: re-reading ``secrét.py`` through a latin-1 filesystem codec would have
+    added the spelling ``secrÃ©t.py``, a name no changed file has unless an
+    unrelated one happens to, and that one would then have kept the finding. A
     spelling equal to an earlier one is left out, so a UTF-8 host sees the
     readings it did before; a text that cannot be re-encoded (a lone surrogate
-    outside the escape range) adds none, and neither does one the filesystem
-    encoding cannot decode (Windows decodes with ``surrogatepass``, which
-    refuses a byte that is not UTF-8), rather than that one location raising
-    out of the filter and failing the scan.
+    outside the escape range) adds none, and neither does one the codec cannot
+    decode (``surrogatepass`` refuses a byte that is not UTF-8), rather than that
+    one location raising out of the filter and failing the scan.
     """
+    from automated_security_helper.utils.get_scan_set import _git_output_codec
+
+    encoding, errors = _git_output_codec()
     spellings = list(readings)
     for reading in readings:
+        if not any("\udc80" <= char <= "\udcff" for char in reading):
+            continue
         try:
-            spelling = os.fsdecode(reading.encode("utf-8", "surrogateescape"))
+            spelling = reading.encode("utf-8", "surrogateescape").decode(
+                encoding, errors
+            )
         except (UnicodeEncodeError, UnicodeDecodeError):
             continue
         if spelling not in spellings:
