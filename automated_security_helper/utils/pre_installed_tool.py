@@ -293,7 +293,12 @@ def _in_user_site(executable: str) -> bool:
     import sysconfig
 
     try:
-        scripts = sysconfig.get_path("scripts", f"{os.name}_user")
+        # The platform's own user scheme: "<os.name>_user" is posix_user on
+        # every POSIX platform, but a macOS framework build (python.org,
+        # Homebrew) installs user scripts under osx_framework_user, below
+        # ~/Library/Python, and a copy there was judged against the system
+        # interpreter's environment.
+        scripts = sysconfig.get_path("scripts", sysconfig.get_preferred_scheme("user"))
     except (KeyError, ValueError):
         return False
     if not scripts:

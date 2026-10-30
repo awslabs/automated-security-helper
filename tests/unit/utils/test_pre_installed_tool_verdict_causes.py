@@ -33,6 +33,7 @@ import pytest
 from automated_security_helper.utils import pre_installed_tool
 from automated_security_helper.utils.pre_installed_tool import (
     _dry_run,
+    _in_user_site,
     _judge,
     find_tool_interpreter,
     reset_pre_installed_tool_cache,
@@ -97,6 +98,28 @@ class TestFindToolInterpreter:
         """The control: with nothing beside it, no environment is claimed."""
         wrapper = _executable(tmp_path / "bin" / "tool", b"#!/bin/sh\nexit 0\n")
         assert find_tool_interpreter(str(wrapper)) is None
+
+
+class TestTheUserSiteCheck:
+    def test_the_platforms_preferred_user_scheme_is_asked(self, tmp_path, monkeypatch):
+        """``pip install --user`` puts scripts where the platform's preferred user
+        scheme says (``osx_framework_user`` on a macOS framework build, whose
+        scripts sit under ``~/Library/Python``), not where ``<os.name>_user``
+        would; a copy there was judged against the wrong environment."""
+        import sysconfig
+
+        asked = []
+
+        def get_path(name, scheme=None, *args, **kwargs):
+            asked.append((name, scheme))
+            return str(tmp_path)
+
+        monkeypatch.setattr(
+            sysconfig, "get_preferred_scheme", lambda key: "osx_framework_user"
+        )
+        monkeypatch.setattr(sysconfig, "get_path", get_path)
+        assert _in_user_site(str(tmp_path / "bandit")) is True
+        assert asked == [("scripts", "osx_framework_user")]
 
 
 class TestAnExtraTheInstalledVersionDoesNotDeclare:
