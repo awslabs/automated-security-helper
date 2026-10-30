@@ -6,8 +6,12 @@
 ``syft_excludes`` wrote ``./<dir>/**`` for a directory whose every walked file is
 ignored. The walk never enters a link to a directory, but syft follows one whose
 target stays inside the tree, so the pattern also hid the files syft reaches
-through such a link, ignored or not. A directory holding one is now written as
-its ignored files, one by one.
+through such a link, ignored or not. A directory holding a link to scanned files
+is now written as its ignored files, one by one. A link leading to a directory
+whose files are all ignored (pnpm's ``node_modules/foo`` into
+``node_modules/.pnpm``) is written as ``./<link>/**`` itself where no directory
+holding it is: without it syft cataloged the ignored packages under the link's
+name, in an SBOM nothing filters.
 
 ``grep_ignore_names`` passed a bare ``--exclude`` name unless a component of the
 target's spelled (absolute) path had it; semgrep matches the name at every depth
@@ -59,7 +63,7 @@ def test_a_whole_ignored_directory_holding_an_inside_tree_link_is_not_hidden_who
     tree, target = _tree(tmp_path)
     (target / "dir" / "link").symlink_to(target / "other")
 
-    assert inside_tree_directory_links(target) == ["dir/link"]
+    assert inside_tree_directory_links(target) == {"dir/link": "other"}
     values = syft_excludes(target, target, _ignore("dir/a.txt"))
 
     assert values == ["./dir/a.txt"]
@@ -68,7 +72,7 @@ def test_a_whole_ignored_directory_holding_an_inside_tree_link_is_not_hidden_who
 def test_control_without_the_link_the_directory_is_hidden_whole(tmp_path):
     tree, target = _tree(tmp_path)
 
-    assert inside_tree_directory_links(target) == []
+    assert inside_tree_directory_links(target) == {}
     assert syft_excludes(target, target, _ignore("dir/a.txt")) == ["./dir/**"]
 
 
@@ -77,8 +81,48 @@ def test_control_a_directory_link_leaving_the_tree_changes_nothing(tmp_path):
     (tree / "outside").mkdir()
     (target / "dir" / "away").symlink_to(tree / "outside")
 
-    assert inside_tree_directory_links(target) == []
+    assert inside_tree_directory_links(target) == {}
     assert syft_excludes(target, target, _ignore("dir/a.txt")) == ["./dir/**"]
+
+
+def _pnpm_tree(tmp_path):
+    """pnpm's layout: ``node_modules/foo`` is a link into ``node_modules/.pnpm``,
+    where the package's files really are; one scanned file beside them."""
+    tree = Path(os.path.realpath(tmp_path))
+    target = tree / "proj"
+    store = target / "node_modules" / ".pnpm" / "foo@1.0.0" / "node_modules" / "foo"
+    store.mkdir(parents=True)
+    (store / "package.json").write_text("{}\n", encoding="utf-8")
+    (target / "node_modules" / "foo").symlink_to(store, target_is_directory=True)
+    (target / "app.py").write_text("x = 1\n", encoding="utf-8")
+    return target
+
+
+def test_a_link_into_an_ignored_directory_keeps_the_directory_hidden_whole(tmp_path):
+    target = _pnpm_tree(tmp_path)
+
+    assert inside_tree_directory_links(target) == {
+        "node_modules/foo": "node_modules/.pnpm/foo@1.0.0/node_modules/foo"
+    }
+    assert syft_excludes(target, target, _ignore("node_modules/")) == [
+        "./node_modules/**"
+    ]
+
+
+def test_a_link_to_an_ignored_directory_from_a_scanned_one_is_hidden_itself(tmp_path):
+    tree = Path(os.path.realpath(tmp_path))
+    target = tree / "proj"
+    (target / "third_party" / "lib").mkdir(parents=True)
+    (target / "third_party" / "lib" / "vendored.py").write_text("", encoding="utf-8")
+    (target / "src").mkdir()
+    (target / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "src" / "vendored").symlink_to(
+        target / "third_party" / "lib", target_is_directory=True
+    )
+
+    values = syft_excludes(target, target, _ignore("third_party/"))
+
+    assert values == ["./src/vendored/**", "./third_party/**"]
 
 
 def _aliased(tmp_path, ignored_name: str):

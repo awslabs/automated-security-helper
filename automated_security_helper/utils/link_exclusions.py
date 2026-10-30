@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Callable, Iterable, List, Sequence
+from typing import Callable, Dict, Iterable, List, Mapping, Sequence
 
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -74,12 +74,15 @@ def syft_excludes(
     files, links = walked_files(target)
     values = [f"./{doublestar_literal(relative)}" for relative in links]
     # syft follows a link to a directory inside the tree, which the walk does not
-    # enter, so a directory holding one is never written as ``./<dir>/**``: that
-    # would hide the files syft reaches through the link, ignored or not.
+    # enter. A directory holding a link to scanned files is never written as
+    # ``./<dir>/**``, which would hide what syft reaches through the link; a link
+    # to a directory whose every file is ignored is written as ``./<link>/**``
+    # itself, since syft would otherwise catalog the ignored files under the
+    # link's name (``ignored_entries``).
     directory_links = (
         inside_tree_directory_links(target)
         if source_dir is not None and ignore_paths
-        else []
+        else {}
     )
     for entry in _ignore_entries(
         target, source_dir, ignore_paths, files, directory_links=directory_links
@@ -165,15 +168,18 @@ def walked_files(target: str | Path) -> tuple[List[str], List[str]]:
     return sorted(files), links
 
 
-def inside_tree_directory_links(target: str | Path) -> List[str]:
-    """Every link to a directory below ``target`` whose target stays inside it, sorted.
+def inside_tree_directory_links(target: str | Path) -> Dict[str, str]:
+    """Every link to a directory below ``target`` whose target stays inside it, and
+    where each leads, sorted by the link.
 
     The same walk as ``walked_files`` makes (links to directories are not entered,
     ignore files are not read), listing what that walk steps over: the links a
-    tool that follows inside-tree directory links (syft) reads files behind.
-    Relative to ``target`` and ``/``-joined.
+    tool that follows inside-tree directory links (syft) reads files behind. Each
+    key is the link and its value the directory it leads to, with every link
+    resolved; both relative to ``target`` and ``/``-joined.
     """
-    found: List[str] = []
+    real_target = os.path.realpath(target)
+    found: Dict[str, str] = {}
     pending = [(os.fspath(target), "")]
     while pending:
         directory, prefix = pending.pop()
@@ -189,12 +195,15 @@ def inside_tree_directory_links(target: str | Path) -> List[str]:
                     if os.path.isdir(entry.path) and resolves_inside(
                         entry.path, target
                     ):
-                        found.append(relative)
+                        leads_to = os.path.relpath(
+                            os.path.realpath(entry.path), real_target
+                        )
+                        found[relative] = leads_to.replace(os.sep, "/")
                 elif entry.is_dir(follow_symlinks=False):
                     pending.append((entry.path, f"{relative}/"))
             except OSError:
                 continue
-    return sorted(found)
+    return dict(sorted(found.items()))
 
 
 def ignored_entries(
@@ -203,7 +212,7 @@ def ignored_entries(
     ignore_paths: Iterable[object],
     files: Sequence[str],
     matches: Callable[[str, str], bool] = ignore_path_matches,
-    directory_links: Iterable[str] = (),
+    directory_links: Mapping[str, str] = {},
 ) -> List[str]:
     """The paths below ``target`` that ``ignore_paths`` ignore, as few as possible.
 
@@ -213,11 +222,18 @@ def ignored_entries(
     with a trailing ``/``, and the files below it are not; any other ignored file is
     returned itself. Paths are relative to ``target`` and ``/``-joined.
 
-    ``directory_links`` are the links to directories the walk did not enter
-    (``inside_tree_directory_links``), relative to ``target``: a directory holding
-    one, at any depth, is never returned whole, since the files behind the link are
-    not among ``files`` and a tool that follows the link would be told to skip them
-    with the rest. Its ignored files are returned one by one instead.
+    ``directory_links`` are the links to directories the walk did not enter, each
+    with the directory it leads to (``inside_tree_directory_links``), relative to
+    ``target``. The files behind such a link are not among ``files`` under the
+    link's name, and a tool that follows the link (syft) reads them there. A link
+    leading to a directory that holds a walked file the patterns do not ignore
+    keeps every directory holding the link, at any depth, from being returned
+    whole, since ``./<dir>/**`` would tell the tool to skip those files with the
+    rest; the ignored files there are returned one by one instead. A link leading
+    to a directory whose walked files are all ignored (a pnpm ``node_modules/foo``
+    leading into ``node_modules/.pnpm``) is itself returned with a trailing ``/``,
+    unless a directory holding it is, so the tool skips the ignored files under
+    the link's name as well as under their own.
 
     Empty when ``target`` is not ``source_dir`` or a directory below it (ASH's work
     directory for converted files): the patterns name paths below the source
@@ -266,16 +282,24 @@ def ignored_entries(
     whole = {
         directory for directory, count in total.items() if hit.get(directory) == count
     }
-    for link in directory_links:
-        parts = link.split("/")
-        for depth in range(1, len(parts)):
-            whole.discard("/".join(parts[:depth]))
+    # A link whose destination holds a walked file that is not ignored: no
+    # directory holding the link is whole. Any other link leads only to ignored
+    # files (or to none the walk found) and is skipped under its own name.
+    links_to_ignored: List[str] = []
+    for link, leads_to in directory_links.items():
+        if total.get(leads_to, 0) > hit.get(leads_to, 0):
+            parts = link.split("/")
+            for depth in range(1, len(parts)):
+                whole.discard("/".join(parts[:depth]))
+        else:
+            links_to_ignored.append(link)
 
     def _under_whole(relative: str) -> bool:
         parts = relative.split("/")
         return any("/".join(parts[:depth]) in whole for depth in range(1, len(parts)))
 
     entries = [f"{directory}/" for directory in whole if not _under_whole(directory)]
+    entries += [f"{link}/" for link in links_to_ignored if not _under_whole(link)]
     entries += [relative for relative in ignored if not _under_whole(relative)]
     return sorted(entries)
 
@@ -285,7 +309,7 @@ def _ignore_entries(
     source_dir: str | Path | None,
     ignore_paths: Iterable[object] | None,
     files: Sequence[str],
-    directory_links: Iterable[str] = (),
+    directory_links: Mapping[str, str] = {},
 ) -> List[str]:
     """``ignored_entries``, or none when no source directory or ignore path is given."""
     if source_dir is None or not ignore_paths:
