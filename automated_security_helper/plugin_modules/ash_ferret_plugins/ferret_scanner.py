@@ -10,12 +10,19 @@ import logging
 import os
 import re
 import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set, Tuple
 from urllib.parse import quote, urljoin
 
 import yaml
-from pydantic import Field, PrivateAttr, ValidationError, model_validator
+from pydantic import (
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
@@ -54,7 +61,13 @@ from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
-from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    WAS_KILLED_ENDING,
+    find_executable,
+    in_tree_refusal,
+    spawn_run,
+)
 from automated_security_helper.utils.process_env import snapshot_environ
 
 # Path to the default ferret-scan config bundled with this plugin
@@ -81,7 +94,7 @@ def bundled_redaction_profiles() -> frozenset[str]:
     try:
         with open(DEFAULT_FERRET_CONFIG, "r", encoding="utf-8") as handle:
             document = yaml.safe_load(handle)
-    except (OSError, yaml.YAMLError):
+    except (OSError, ValueError, yaml.YAMLError):
         return frozenset()
     profiles = document.get("profiles") if isinstance(document, dict) else None
     if not isinstance(profiles, dict):
@@ -205,12 +218,46 @@ UNSUPPORTED_FERRET_OPTIONS = {
 _EXCLUDE_VALUE_BUDGET = 100_000
 
 
+def _ignored_relatives(
+    target: Path,
+    source_dir: Path | str | None,
+    ignore_paths: List[Any],
+    files: List[str],
+) -> Tuple[List[str], Set[str]]:
+    """The ignored entries below ``target`` (``ignored_entries``), and the walked
+    files among ``files`` that fall under them: an ignored file itself, or any file
+    below a fully ignored directory. Both empty when nothing is ignored, on Windows,
+    and for a target outside the source directory, as ``_ignore_exclude_patterns``
+    has it.
+    """
+    from automated_security_helper.utils.link_exclusions import ignored_entries
+
+    if os.sep != "/" or source_dir is None or not ignore_paths:
+        return [], set()
+    entries = ignored_entries(target, source_dir, ignore_paths, files)
+    if not entries:
+        return [], set()
+    whole_dirs = {entry for entry in entries if entry.endswith("/")}
+    ignored_files = set(entries) - whole_dirs
+
+    def _ignored(relative: str) -> bool:
+        parts = relative.split("/")
+        return relative in ignored_files or any(
+            "/".join(parts[:depth]) + "/" in whole_dirs
+            for depth in range(1, len(parts))
+        )
+
+    return entries, {relative for relative in files if _ignored(relative)}
+
+
 def _ignore_exclude_patterns(
     target: Path,
     source_dir: Path | str | None,
     ignore_paths: List[Any],
     walk: Tuple[List[str], List[str]],
     value: List[str],
+    *,
+    ignored: Tuple[List[str], Set[str]] | None = None,
 ) -> Tuple[List[str], List[str]]:
     """``--exclude`` patterns for what the global ignore paths ignore below ``target``,
     and the ignored paths left without one.
@@ -231,34 +278,27 @@ def _ignore_exclude_patterns(
     patterns already given, past ``_EXCLUDE_VALUE_BUDGET``. None on Windows, where the
     escaped form was not measured, and none for a target that is not the source
     directory or below it (``ignored_entries``).
+
+    ``ignored`` is ``_ignored_relatives``'s answer for the same walk, for a caller
+    that computed it already; it is computed here when not given.
     """
-    from automated_security_helper.utils.link_exclusions import ignored_entries
     from automated_security_helper.utils.scan_output_dirs import (
         PatternSyntax,
         escape_for_pattern,
     )
 
-    if os.sep != "/" or source_dir is None or not ignore_paths:
-        return [], []
     files, _ = walk
-    entries = ignored_entries(target, source_dir, ignore_paths, files)
+    if ignored is None:
+        ignored = _ignored_relatives(target, source_dir, ignore_paths, files)
+    entries, ignored_relatives = ignored
     if not entries:
         return [], []
-    whole_dirs = {entry for entry in entries if entry.endswith("/")}
-    ignored_files = set(entries) - whole_dirs
-
-    def _ignored(relative: str) -> bool:
-        parts = relative.split("/")
-        return relative in ignored_files or any(
-            "/".join(parts[:depth]) + "/" in whole_dirs
-            for depth in range(1, len(parts))
-        )
 
     root = os.fspath(target)
     kept = sorted(
         os.fspath(Path(target).joinpath(relative))
         for relative in files
-        if not _ignored(relative)
+        if relative not in ignored_relatives
     )
     # A kept path holds a pattern, which starts with the root, at its start, or
     # further in only where the root's text comes again below it.
@@ -283,10 +323,12 @@ def _ignore_exclude_patterns(
         if entry.endswith("/"):
             pattern += os.sep + "*"
         grown = size + len(os.fsencode(pattern)) + (1 if count else 0)
+        # The two cheap tests first: once the budget is spent, or the path holds a
+        # comma, the substring scan over the kept paths is not run for the entry.
         if (
             "," in full_path
-            or _held_by_a_kept_path(pattern)
             or grown > _EXCLUDE_VALUE_BUDGET
+            or _held_by_a_kept_path(pattern)
         ):
             left_out.append(entry)
             continue
@@ -301,8 +343,16 @@ def _link_exclude_patterns(
     *,
     directory_links: List[str] | None = None,
     substring_match: bool = True,
+    ignored: Set[str] | None = None,
 ) -> List[str]:
     """``--exclude`` patterns for each link whose target leaves ``target``.
+
+    ``ignored`` names the walked paths the global ignore paths cover
+    (``_ignored_relatives``). A link among them needs no pattern: the ignore
+    pattern for its directory, or for the link itself, leaves it out, so it is
+    neither given a pattern nor a reason to refuse the target. And such a path
+    does not count as another walked file in the substring test, since
+    ferret-scan does not read it either.
 
     ferret-scan walks the directory it is given. How it treats a link was not
     measured, so every link to a file whose target, every link resolved, leaves
@@ -339,9 +389,16 @@ def _link_exclude_patterns(
     )
 
     files, links = walk if walk is not None else walked_files(target)
-    walked = [os.fspath(Path(target).joinpath(relative)) for relative in files]
+    ignored = ignored or set()
+    walked = [
+        os.fspath(Path(target).joinpath(relative))
+        for relative in files
+        if relative not in ignored
+    ]
     patterns = []
     for relative in [*links, *(directory_links or [])]:
+        if relative in ignored:
+            continue
         full_path = os.fspath(Path(target).joinpath(relative))
         if "," in full_path:
             raise ScannerError(
@@ -367,17 +424,27 @@ def _link_exclude_patterns(
 def parse_version(version_str: str) -> Tuple[int, ...]:
     """Parse a version string into a tuple of integers for comparison.
 
+    A pre-release (``1.2.3-rc1``, ``1.2.3-beta``) sorts BELOW its release: the
+    tuple carries a trailing ``-1`` for it, so ``2.4.5-rc1`` is older than the
+    minimum ``2.4.5`` and is reported as such, where dropping the suffix read it as
+    the release. Build metadata (``1.2.3+build7``) ranks with its release, as
+    semantic versioning has it.
+
     Args:
         version_str: Version string like "1.2.3" or "1.2.3-beta"
 
     Returns:
-        Tuple of integers representing the version (e.g., (1, 2, 3))
+        Tuple of integers representing the version (e.g., (1, 2, 3)), with a
+        trailing -1 for a pre-release (e.g., (1, 2, 3, -1))
     """
-    # Remove any pre-release suffixes (e.g., -beta, -rc1)
-    version_str = re.split(r"[-+]", version_str)[0]
+    release, _, _build = version_str.partition("+")
+    release, _, pre_release = release.partition("-")
     # Extract numeric parts
-    parts = re.findall(r"\d+", version_str)
-    return tuple(int(p) for p in parts) if parts else (0,)
+    parts = re.findall(r"\d+", release)
+    numbers = tuple(int(p) for p in parts) if parts else (0,)
+    if pre_release:
+        return (*numbers, -1)
+    return numbers
 
 
 def compare_versions(v1: str, v2: str) -> int:
@@ -440,6 +507,13 @@ def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
     location whose ``uriBaseId`` is not declared is left as written, and
     ``originalUriBaseIds`` is dropped only when nothing still references it.
 
+    Every artifact location in the run is rewritten, wherever it sits: a result's
+    locations, related locations and analysis target, and also ``run.artifacts``,
+    code flows, fixes, and the invocations' notification locations, found by
+    walking the run for every mapping with a ``uriBaseId`` (the table itself
+    excepted). Rewriting the results alone and then dropping the table left any
+    other reference pointing at a base nothing defined.
+
     The relative ``uri`` is the file's path as ferret-scan spells it, not a URI
     reference, so it is percent-encoded before the join: joined as written, a
     name holding ``#`` or ``?`` would lose its tail to a fragment or a query, a
@@ -456,23 +530,12 @@ def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
             continue
 
         unresolved = False
-        artifact_locations = []
-        for result in run.get("results") or []:
-            if not isinstance(result, dict):
-                continue
-            if isinstance(result.get("analysisTarget"), dict):
-                artifact_locations.append(result["analysisTarget"])
-            for key in ("locations", "relatedLocations"):
-                for location in result.get(key) or []:
-                    physical = (
-                        location.get("physicalLocation")
-                        if isinstance(location, dict)
-                        else None
-                    )
-                    if isinstance(physical, dict) and isinstance(
-                        physical.get("artifactLocation"), dict
-                    ):
-                        artifact_locations.append(physical["artifactLocation"])
+        artifact_locations = [
+            node
+            for key, value in run.items()
+            if key != "originalUriBaseIds"
+            for node in _mappings_with_a_base_id(value)
+        ]
 
         for artifact in artifact_locations:
             base_id = artifact.get("uriBaseId")
@@ -491,6 +554,22 @@ def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
 
         if not unresolved:
             del run["originalUriBaseIds"]
+
+
+def _mappings_with_a_base_id(node: Any) -> List[dict]:
+    """Every mapping under ``node`` (itself included) that carries ``uriBaseId``,
+    in document order: the artifact locations a SARIF run holds, wherever the
+    run puts them."""
+    found: List[dict] = []
+    if isinstance(node, dict):
+        if "uriBaseId" in node:
+            found.append(node)
+        for value in node.values():
+            found.extend(_mappings_with_a_base_id(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_mappings_with_a_base_id(item))
+    return found
 
 
 class FerretScannerConfigOptions(ScannerOptionsBase):
@@ -560,7 +639,13 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
 
     exclude_patterns: Annotated[
         List[str],
-        Field(description="File patterns to exclude from scanning (glob patterns)"),
+        Field(
+            description="File patterns to exclude from scanning (glob patterns). "
+            "Passed to ferret-scan as one comma-separated --exclude value, so a "
+            "pattern cannot hold a comma (a brace alternation such as {a,b} is "
+            "refused: ferret-scan would read it as two patterns) and cannot be "
+            "empty (ferret-scan 2.4.x matches an empty pattern against every path)."
+        ),
     ] = []
 
     # Tool-specific behavior options (these affect ferret-scan behavior, not ASH logging)
@@ -690,14 +775,45 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = False
 
+    @field_validator("exclude_patterns")
+    @classmethod
+    def validate_exclude_patterns_can_be_passed(cls, patterns: List[str]) -> List[str]:
+        """Refuse a pattern the comma-separated ``--exclude`` value cannot carry.
+
+        The value is joined with commas and ferret-scan splits it on them, so an
+        entry holding a comma would reach ferret-scan as two patterns, neither the
+        one written; an empty entry would reach it as an empty pattern, which the
+        2.4.x line's substring test matches against every path. Either is refused
+        here, where the configuration is read, with the entry named.
+        """
+        for pattern in patterns:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError(
+                    "exclude_patterns holds an empty pattern; ferret-scan would "
+                    "match it against every path. Remove it."
+                )
+            if "," in pattern:
+                raise ValueError(
+                    f"exclude_patterns entry {pattern!r} holds a comma; the patterns "
+                    "are passed to ferret-scan as one comma-separated --exclude "
+                    "value, so it would be split into two patterns. Write the "
+                    "alternatives as separate entries."
+                )
+        return patterns
+
     @model_validator(mode="before")
     @classmethod
     def validate_no_unsupported_options(cls, data: Any) -> Any:
-        """Validate that no unsupported options are being used."""
+        """Validate that no unsupported options are being used.
+
+        A key that is not a string (an integer key YAML or a caller can write) is
+        compared by its text: ``str(key)``, so the check names the key in its
+        error instead of raising ``AttributeError`` out of the validator.
+        """
         if isinstance(data, dict):
             for key in data.keys():
                 # Normalize key to snake_case for comparison
-                normalized_key = key.lower().replace("-", "_")
+                normalized_key = str(key).lower().replace("-", "_")
                 if normalized_key in UNSUPPORTED_FERRET_OPTIONS:
                     error_msg = UNSUPPORTED_FERRET_OPTIONS[normalized_key]
                     raise ValueError(
@@ -900,8 +1016,16 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 version_match = re.search(r"(\d+\.\d+\.\d+(?:-[\w.]+)?)", output)
                 if version_match:
                     return version_match.group(1)
-                # If no match, return the whole output as version
-                return output
+                # Output with no X.Y.Z in it names no version: unknown, which the
+                # compatibility check reads as "cannot check". Returned whole, it
+                # was recorded as the tool's version and parsed as (0,), so every
+                # such build read as older than the minimum.
+                self._plugin_log(
+                    "ferret-scan --version printed no version number; the version "
+                    "is recorded as unknown.",
+                    level=logging.DEBUG,
+                )
+                return None
             return None
         except SandboxUnavailable as refusal:
             # The probe was refused, not answered: a scanner that asked for a
@@ -986,6 +1110,14 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         ferret_binary = find_executable("ferret-scan")
         if not ferret_binary:
+            # A copy found only inside the scanned tree was refused, not missing:
+            # recorded as ScannerPluginBase.validate_plugin_dependencies records
+            # it, so the MISSING row says so rather than "not installed".
+            refusal = in_tree_refusal("ferret-scan")
+            if refusal is not None:
+                self.dependency_unavailable_reason = refusal
+                self._plugin_log(refusal, level=logging.ERROR)
+                return False
             self._plugin_log(
                 "ferret-scan binary not found. Install it with "
                 "'ash dependencies install', which applies the version range this "
@@ -1120,10 +1252,18 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
             self.args.extra_args.append(ToolExtraArg(key="--show-match", value=None))
 
-        # Enable preprocessors (tool-specific behavior option)
+        # Enable preprocessors (tool-specific behavior option). Passed both ways:
+        # the bundled config turns preprocessing on (enable_preprocessors: true),
+        # and ferret-scan's own default is on, so leaving the flag out when the
+        # option is false changed nothing. A Go boolean flag takes an explicit
+        # value as one token (--flag=false), which outranks the config file.
         if options.enable_preprocessors:
             self.args.extra_args.append(
                 ToolExtraArg(key="--enable-preprocessors", value=None)
+            )
+        else:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--enable-preprocessors=false", value=None)
             )
 
         # Finding limit. ferret-scan defaults to 200 (silent truncation); ASH always
@@ -1210,18 +1350,30 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 operator_wrote_value,
             )
 
-            if not resolved_path(config_file, source_dir).exists():
-                self._plugin_log(
-                    text_without_values(
+            # The values hook is overridable and is read guarded, as every other
+            # log line of this plugin reads it (guarded_values_read): a hook that
+            # raises or answers no value set would otherwise abort the scanner's
+            # construction here, and must not print the path either, so the line
+            # then names no path at all.
+            read = guarded_values_read(self)
+            if not os.path.exists(resolved_path(config_file, source_dir)):
+                if read.values is None:
+                    message = (
+                        "Specified config file not found (the path is not shown: "
+                        f"the plugin's values hook {read.failure()}). Ferret-scan "
+                        "will run with the empty config file ASH writes; no config "
+                        "file is discovered from the scanned tree in its place."
+                    )
+                else:
+                    message = text_without_values(
                         f"Specified config file not found: "
                         f"{resolved_path(config_file, source_dir)}. Ferret-scan "
                         "will run with the empty config file ASH writes; no "
                         "config file is discovered from the scanned tree in its "
                         "place.",
-                        self._values_to_redact(),
-                    ),
-                    level=logging.WARNING,
-                )
+                        read.values,
+                    )
+                self._plugin_log(message, level=logging.WARNING)
                 return None
             path = honored_path(
                 config_file,
@@ -1240,19 +1392,39 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
             if path is None:
                 # Refused: the bundled default is ASH's own input, and no
-                # config file is discovered from the scanned tree instead.
+                # config file is discovered from the scanned tree instead. With
+                # use_default_config false there is no bundled default to run
+                # with, and the line says which config runs.
+                bundled = self._bundled_config()
+                runs_with = (
+                    "the default config bundled with ASH"
+                    if bundled is not None
+                    else "the empty config file ASH writes (use_default_config is "
+                    "false)"
+                )
                 self._plugin_log(
                     "Specified config file was not used because it is "
-                    "repository-influenced. Ferret-scan will run with the "
-                    "default config bundled with ASH; no config file is "
-                    "discovered from the scanned tree in its place.",
+                    f"repository-influenced. Ferret-scan will run with {runs_with}; "
+                    "no config file is discovered from the scanned tree in its "
+                    "place.",
                     level=logging.WARNING,
                 )
-                return self._bundled_config()
-            self._plugin_log(
-                f"Using explicitly specified config file: {path}",
-                level=logging.DEBUG,
-            )
+                return bundled
+            # Redacted, as the not-found line is: the configured value can come
+            # from the environment, and ash.log keeps DEBUG lines under --debug.
+            if read.values is None:
+                self._plugin_log(
+                    "Using explicitly specified config file (the path is not shown: "
+                    f"the plugin's values hook {read.failure()})",
+                    level=logging.DEBUG,
+                )
+            else:
+                self._plugin_log(
+                    text_without_values(
+                        f"Using explicitly specified config file: {path}", read.values
+                    ),
+                    level=logging.DEBUG,
+                )
             return path
 
         # 2. Search for config files in source directory
@@ -1411,12 +1583,16 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         if global_ignore_paths is None:
             global_ignore_paths = []
         # Per target; see ScannerPluginBase.scan(). No target claim unless this run
-        # lost coverage (exit 3, below).
+        # lost coverage (exit 3, below). The tool lines too: a failed
+        # converted-target run otherwise records the source target's stderr as
+        # its own (exitCodeDescription).
         self.exit_code = 0
+        self.output = []
+        self.errors = []
         self.targets_attempted = None
         self.targets_failed = 0
         # Check if the target directory is empty or doesn't exist
-        if not target.exists() or (target.is_dir() and not any(target.iterdir())):
+        if _target_is_empty(target):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
@@ -1426,6 +1602,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 level=logging.INFO,
                 append_to_stream="stderr",
             )
+            # No tool runs for this target, so its record starts and ends now: a
+            # start time left from the previous target would give it that
+            # target's duration.
+            self.start_time = None
             self._post_scan(target=target, target_type=target_type)
             return True
 
@@ -1441,6 +1621,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         if not self.dependencies_satisfied:
             self._post_scan(target=target, target_type=target_type)
             return False
+
+        # No exit code until ferret-scan returns one, as the template's scan() has
+        # it: a target refused before the tool starts (a link the --exclude value
+        # cannot carry) reports no exit code, not the 0 set above.
+        self.exit_code = None
 
         try:
             # Absolute, because ferret-scan runs from outside the source directory
@@ -1499,20 +1684,50 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 target, all_files=walked, directory_links=directory_links
             )
             walk = (sorted(walked), file_links)
+            # What the global ignore paths cover, read first: a link that leaves
+            # the tree from inside an ignored directory is left out by that
+            # directory's pattern, so it is neither written nor a reason to
+            # refuse the target, and an ignored file is not "another walked
+            # file" in the 2.4.x substring test.
+            ignored = _ignored_relatives(
+                target,
+                getattr(self.context, "source_dir", None),
+                global_ignore_paths,
+                walk[0],
+            )
             exclude_patterns.extend(
                 _link_exclude_patterns(
                     target,
                     walk,
                     directory_links=sorted(directory_links),
                     substring_match=self._exclude_matches_substrings(),
+                    ignored=ignored[1],
                 )
             )
+            # The value so far is the part that cannot be left out: the operator's
+            # patterns, ASH's output directories and the links leaving the tree.
+            # Linux refuses to start a program with one argument over 128 KiB
+            # (MAX_ARG_STRLEN), so past the budget ferret-scan could not start at
+            # all, and a link not excluded is a file it might read: the target is
+            # refused with the count, rather than run short of a pattern.
+            mandatory_size = len(os.fsencode(",".join(exclude_patterns)))
+            if mandatory_size > _EXCLUDE_VALUE_BUDGET:
+                raise ScannerError(
+                    f"Not running ferret-scan on {target.as_posix()}: its --exclude "
+                    f"value would be {mandatory_size} bytes over "
+                    f"{len(exclude_patterns)} patterns (the configured patterns, "
+                    "ASH's output directories and the links leaving the tree), past "
+                    f"the {_EXCLUDE_VALUE_BUDGET} bytes one argument may take, so "
+                    "ferret-scan could not be started with them all. Narrow "
+                    "exclude_patterns, or remove or ignore the links."
+                )
             ignore_patterns, left_out = _ignore_exclude_patterns(
                 target,
                 getattr(self.context, "source_dir", None),
                 global_ignore_paths,
                 walk,
                 exclude_patterns,
+                ignored=ignored,
             )
             exclude_patterns.extend(ignore_patterns)
             if left_out:
@@ -1566,6 +1781,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 )
 
             # Run ferret-scan with output to file
+            effective_timeout = self._effective_scan_timeout()
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
@@ -1573,10 +1789,16 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 stderr_preference="write",
                 cwd=self._subprocess_cwd(target_results_dir),
                 env={**snapshot_environ(), **FERRET_SUBPROCESS_ENV_OVERRIDES},
-                timeout=self._effective_scan_timeout(),
+                timeout=effective_timeout,
             )
 
             self._post_scan(target=target, target_type=target_type)
+            # A run the subprocess layer flagged (timed out, could not start, its
+            # output not recorded, ended by a foreign signal) is refused before its
+            # file is read, whatever exit code it carries: a response that keeps
+            # the tool's own 0 beside post_run_error would otherwise be graded
+            # and recorded as executionSuccessful.
+            self._refuse_flagged_response(response, effective_timeout)
             # Exit 1 is ferret-scan's error code; see success_exit_codes.
             self._record_target_exit_code(response)
             self._refuse_rejected_exit_code(results_file)
@@ -1612,61 +1834,6 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             try:
                 with open(results_file, "r", encoding="utf-8") as f:
                     scanner_results = json.load(f)
-
-                _resolve_sarif_uri_base_ids(scanner_results)
-
-                sarif_report: SarifReport = SarifReport.model_validate(scanner_results)
-
-                # Attach scanner details
-                sarif_report = attach_scanner_details(
-                    sarif_report=sarif_report,
-                    scanner_name=self.config.name,
-                    scanner_version=getattr(self, "tool_version", None),
-                    invocation_details={
-                        "command_line": shown_command,
-                        "arguments": recorded_arguments,
-                        "working_directory": get_shortest_name(input=target),
-                        "start_time": self.start_time.isoformat()
-                        if self.start_time
-                        else None,
-                        "end_time": self.end_time.isoformat()
-                        if self.end_time
-                        else None,
-                        "exit_code": self.exit_code,
-                    },
-                )
-
-                if sarif_report.runs:
-                    # ferret-scan's own runtime notices (validator panics, files
-                    # it could not fully scan) ride on its invocations; they are
-                    # kept on ASH's, which replaces the list: the not-evaluated
-                    # gate reads error-level ones, and the exit-3 message above
-                    # tells the reader to look for them.
-                    notifications = [
-                        notification
-                        for invocation in sarif_report.runs[0].invocations or []
-                        for notification in invocation.toolExecutionNotifications or []
-                    ]
-                    sarif_report.runs[0].invocations = [
-                        Invocation(
-                            commandLine=recorded_command_line,
-                            arguments=recorded_arguments,
-                            startTimeUtc=self.start_time,
-                            endTimeUtc=self.end_time,
-                            executionSuccessful=self.exit_code == 0,
-                            exitCode=self.exit_code,
-                            exitCodeDescription="\n".join(self.errors)
-                            if self.errors
-                            else None,
-                            workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=target),
-                            ),
-                            toolExecutionNotifications=notifications or None,
-                        )
-                    ]
-
-                return sarif_report
-
             except json.JSONDecodeError as e:
                 self._plugin_log(
                     f"Failed to parse Ferret output as JSON: {e}",
@@ -1676,6 +1843,14 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 )
                 return
 
+            _resolve_sarif_uri_base_ids(scanner_results)
+
+            # Only the validation sits in this try: an error raised after the
+            # SARIF validated (attaching the scanner details, building the
+            # invocation) is ASH's own and is reported as what it is by the outer
+            # handler, not as a results file that is not SARIF.
+            try:
+                sarif_report: SarifReport = SarifReport.model_validate(scanner_results)
             except ValidationError as e:
                 # Not returned as it is: the executor would store the raw document
                 # in additional_reports, outside the masking that keeps matched
@@ -1688,5 +1863,122 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     "could not be graded"
                 )
 
+            # Attach scanner details
+            sarif_report = attach_scanner_details(
+                sarif_report=sarif_report,
+                scanner_name=self.config.name,
+                scanner_version=getattr(self, "tool_version", None),
+                invocation_details={
+                    "command_line": shown_command,
+                    "arguments": recorded_arguments,
+                    "working_directory": get_shortest_name(input=target),
+                    "start_time": self.start_time.isoformat()
+                    if self.start_time
+                    else None,
+                    "end_time": self.end_time.isoformat() if self.end_time else None,
+                    "exit_code": self.exit_code,
+                },
+            )
+
+            if sarif_report.runs:
+                # ferret-scan's own runtime notices (validator panics, files
+                # it could not fully scan) ride on its invocations; they are
+                # kept on ASH's, which replaces the list: the not-evaluated
+                # gate reads error-level ones, and the exit-3 message above
+                # tells the reader to look for them.
+                notifications = [
+                    notification
+                    for invocation in sarif_report.runs[0].invocations or []
+                    for notification in invocation.toolExecutionNotifications or []
+                ]
+                sarif_report.runs[0].invocations = [
+                    Invocation(
+                        commandLine=recorded_command_line,
+                        arguments=recorded_arguments,
+                        startTimeUtc=self.start_time,
+                        endTimeUtc=self.end_time,
+                        executionSuccessful=self.exit_code == 0,
+                        exitCode=self.exit_code,
+                        exitCodeDescription="\n".join(self.errors)
+                        if self.errors
+                        else None,
+                        workingDirectory=ArtifactLocation(
+                            uri=get_shortest_name(input=target),
+                        ),
+                        toolExecutionNotifications=notifications or None,
+                    )
+                ]
+
+            return sarif_report
+
         except Exception as e:
+            # The run is over for this target, however it ended: the executor
+            # records end_time, and one left from the previous target would give
+            # this one an end before its start.
+            self.end_time = datetime.now(timezone.utc)
             raise ScannerError(f"Ferret scan failed: {e}")
+
+    def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
+        """Raise for a run the subprocess layer flagged, before its file is read.
+
+        The four readings ``ScannerPluginBase.scan`` makes for every template
+        scanner, which this override of ``scan()`` left out: a killed tool writes
+        no results file, so the error would otherwise be "No such file or
+        directory" instead of the timeout; a tool that could not start the same; a
+        tool that ran while ASH could not record its output (exit 0, a file that
+        may be complete) is not graded on that file; a tool a signal ASH did not
+        send ended did not finish. The exit code alone does not say any of this: a
+        flagged response keeps the tool's own code, 0 included.
+        """
+        if not isinstance(response, dict):
+            return
+        name = self.__class__.__name__
+        if response.get("timed_out"):
+            limit = self._timeout_limit_token(timeout)
+            if self.scan_could_not_stop is not None:
+                ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
+            else:
+                ending = f"{WAS_KILLED_ENDING}, so it produced no"
+            raise ScannerError(
+                text_without_values(
+                    f"{name} timed out after {limit}{ending} results file. Raise "
+                    f"scanners.{getattr(self.config, 'name', '<scanner>')}.options"
+                    ".scan_timeout if this target legitimately needs longer, or set "
+                    "it to null to leave this scanner unbounded.",
+                    self._values_to_redact(),
+                )
+            )
+        if response.get("spawn_failed"):
+            raise ScannerError(
+                f"{name} could not start its tool, so it produced no results file."
+            )
+        if response.get("post_run_error"):
+            raise ScannerError(
+                text_without_values(
+                    f"{name} ran, but ASH could not record the scanner's output: "
+                    f"{response.get('error')}",
+                    self._values_to_redact(),
+                )
+            )
+        if response.get("signaled"):
+            raise ScannerError(
+                text_without_values(
+                    f"{name} did not finish: {response.get('error')}",
+                    self._values_to_redact(),
+                )
+            )
+
+
+def _target_is_empty(target: Path) -> bool:
+    """Whether ``target`` is missing, or a directory with nothing in it.
+
+    A target that is a file is not empty, and a directory that cannot be listed
+    is left to the tool: the probe used to raise ``PermissionError`` out of
+    ``scan()`` before its error handling began.
+    """
+    try:
+        if not target.exists():
+            return True
+        return target.is_dir() and not any(target.iterdir())
+    except OSError:
+        return False

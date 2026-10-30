@@ -1000,9 +1000,11 @@ class TestFerretScanScannerVersionSupport:
             parse_version,
         )
 
-        assert parse_version("1.0.0-beta") == (1, 0, 0)
-        assert parse_version("2.0.0-rc1") == (2, 0, 0)
-        assert parse_version("1.2.3-alpha.1") == (1, 2, 3)
+        # A pre-release sorts below its release: a trailing -1 marks it.
+        assert parse_version("1.0.0-beta") == (1, 0, 0, -1)
+        assert parse_version("2.0.0-rc1") == (2, 0, 0, -1)
+        assert parse_version("1.2.3-alpha.1") == (1, 2, 3, -1)
+        # Build metadata ranks with its release.
         assert parse_version("1.0.0+build123") == (1, 0, 0)
 
     def test_compare_versions(self):

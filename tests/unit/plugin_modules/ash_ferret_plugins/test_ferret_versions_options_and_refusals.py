@@ -1,0 +1,486 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Readings of the ferret-scan plugin that went wrong before.
+
+- ``parse_version`` dropped a pre-release suffix, so ``2.4.5-rc1`` read as the
+  release ``2.4.5`` and passed a minimum it is older than.
+- ``enable_preprocessors: false`` passed no flag, and both the bundled config and
+  ferret-scan's own default turn preprocessing on, so the option did nothing.
+- An option key that is not a string raised ``AttributeError`` out of the
+  unsupported-options validator.
+- ``--version`` output with no ``X.Y.Z`` in it was recorded as the version and
+  parsed as ``(0,)``, so such a build read as older than the minimum.
+- An ``exclude_patterns`` entry holding a comma reached ferret-scan as two
+  patterns, and an empty entry as a pattern 2.4.x matches against every path.
+- A link leaving the tree from inside an ignored directory was given a pattern,
+  or refused the target, although the directory's own pattern leaves it out; and
+  an ignored file counted as "another walked file" in the substring test.
+- The mandatory ``--exclude`` value (the operator's patterns, ASH's output
+  directories, the links leaving the tree) had no bound, past which ferret-scan
+  cannot be started at all.
+- A run the subprocess layer flagged was graded on its file and exit code.
+- A target refused before the tool ran reported exit code 0; a scan that raised
+  kept the previous target's end time.
+- An error raised after the SARIF validated (attaching the scanner details) was
+  reported as a results file that is not SARIF.
+- With ``use_default_config`` off, the refused-config warning said ferret-scan
+  would run with the bundled default, which it does not.
+- ``_resolve_sarif_uri_base_ids`` rewrote the results' locations alone, then
+  dropped the base table every other reference pointed at.
+- A ferret-scan found only inside the scanned tree was reported as "not found".
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+from pydantic import ValidationError
+
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.plugin_modules.ash_ferret_plugins import (
+    ferret_scanner,
+)
+from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+    FerretScannerConfig,
+    FerretScannerConfigOptions,
+    FerretScanScanner,
+    _ignored_relatives,
+    _link_exclude_patterns,
+    _resolve_sarif_uri_base_ids,
+    compare_versions,
+    parse_version,
+)
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+pytestmark = pytest.mark.unit
+
+POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths")
+
+EMPTY_SARIF = {
+    "version": "2.1.0",
+    "runs": [{"tool": {"driver": {"name": "ferret-scan"}}, "results": []}],
+}
+
+
+def _scanner(context, **options) -> FerretScanScanner:
+    scanner = FerretScanScanner(
+        context=context,
+        config=FerretScannerConfig(options=FerretScannerConfigOptions(**options)),
+    )
+    scanner.dependencies_satisfied = True
+    return scanner
+
+
+def _tree(root: Path, files: list[str]) -> Path:
+    for relative in files:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x = 1\n", encoding="utf-8")
+    return root
+
+
+def _run_double(response: dict, document: dict | None, started: list | None = None):
+    def run(command, results_dir=None, **kwargs):
+        if started is not None:
+            started.append(list(command))
+        if document is not None:
+            Path(results_dir, "ferret-scan.sarif").write_text(
+                json.dumps(document), encoding="utf-8"
+            )
+        return response
+
+    return run
+
+
+def _scan(scanner, run, target: Path, ignore_paths: list | None = None):
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_run_subprocess", side_effect=run),
+        patch.object(scanner, "_plugin_log"),
+    ):
+        return scanner.scan(
+            target=target, target_type="source", global_ignore_paths=ignore_paths or []
+        )
+
+
+# --- versions -------------------------------------------------------------------------
+
+
+def test_a_pre_release_sorts_below_its_release():
+    assert parse_version("2.4.5-rc1") == (2, 4, 5, -1)
+    assert parse_version("2.4.5-rc1") < parse_version("2.4.5")
+    assert compare_versions("2.4.5-rc1", "2.4.5") == -1
+    assert compare_versions("2.4.5", "2.4.5-rc1") == 1
+
+
+def test_build_metadata_ranks_with_its_release():
+    assert parse_version("1.2.3+build7") == (1, 2, 3)
+    assert compare_versions("1.2.3+build7", "1.2.3") == 0
+
+
+@patch(
+    "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.find_executable"
+)
+def test_version_output_without_a_version_number_is_unknown(
+    mock_find_executable, mock_plugin_context
+):
+    mock_find_executable.return_value = "/usr/local/bin/ferret-scan"
+    scanner = FerretScanScanner(context=mock_plugin_context)
+
+    with patch(
+        "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.spawn_run"
+    ) as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="ferret-scan development build"
+        )
+        version = scanner._get_installed_version()
+
+    assert version is None
+
+
+# --- options --------------------------------------------------------------------------
+
+
+def test_preprocessors_off_is_passed_as_an_explicit_false(mock_plugin_context):
+    """The bundled config and ferret-scan's own default both turn preprocessing
+    on, so leaving the flag out changed nothing."""
+    scanner = _scanner(mock_plugin_context, enable_preprocessors=False)
+    scanner._process_config_options()
+
+    keys = [arg.key for arg in scanner.args.extra_args]
+    assert "--enable-preprocessors=false" in keys
+    assert "--enable-preprocessors" not in keys
+
+
+def test_control_preprocessors_on_is_passed_as_the_bare_flag(mock_plugin_context):
+    scanner = _scanner(mock_plugin_context, enable_preprocessors=True)
+    scanner._process_config_options()
+
+    keys = [arg.key for arg in scanner.args.extra_args]
+    assert "--enable-preprocessors" in keys
+    assert "--enable-preprocessors=false" not in keys
+
+
+def test_an_option_key_that_is_not_a_string_does_not_crash_the_validator():
+    try:
+        FerretScannerConfigOptions.model_validate({1: "x", "checks": "all"})
+    except AttributeError as error:  # pragma: no cover - the defect
+        pytest.fail(f"the validator read the key as a string: {error}")
+    except ValidationError:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("patterns", "word"),
+    [
+        (["{a,b}"], "comma"),
+        (["*.log", "vendor,build"], "comma"),
+        ([""], "empty"),
+        (["*.log", "   "], "empty"),
+    ],
+)
+def test_an_exclude_pattern_the_value_cannot_carry_is_refused(patterns, word):
+    with pytest.raises(ValidationError, match=word):
+        FerretScannerConfigOptions(exclude_patterns=patterns)
+
+
+def test_control_plain_exclude_patterns_are_accepted():
+    options = FerretScannerConfigOptions(exclude_patterns=["*.log", "vendor/**"])
+
+    assert options.exclude_patterns == ["*.log", "vendor/**"]
+
+
+# --- links under ignored paths ------------------------------------------------------
+
+
+@POSIX_ONLY
+def test_the_walked_paths_under_an_ignored_directory_are_named(mock_plugin_context):
+    root = mock_plugin_context.source_dir
+    files = ["a.py", "vendor/x.py", "vendor/sub/leaving.py"]
+
+    entries, ignored = _ignored_relatives(
+        root, root, [IgnorePathWithReason(path="vendor/", reason="x")], files
+    )
+
+    assert entries == ["vendor/"]
+    assert ignored == {"vendor/x.py", "vendor/sub/leaving.py"}
+
+
+@POSIX_ONLY
+def test_a_link_under_an_ignored_directory_needs_no_pattern(tmp_path):
+    target = tmp_path / "src"
+    files = ["a.py", "vendor/x.py"]
+    links = ["vendor/leaving.py"]
+
+    patterns = _link_exclude_patterns(
+        target, (files, links), ignored={"vendor/x.py", "vendor/leaving.py"}
+    )
+
+    assert patterns == []
+
+
+@POSIX_ONLY
+def test_control_a_link_nothing_ignores_gets_its_pattern(tmp_path):
+    target = tmp_path / "src"
+
+    patterns = _link_exclude_patterns(
+        target, (["a.py", "vendor/x.py"], ["vendor/leaving.py"]), ignored=set()
+    )
+
+    assert patterns == [os.fspath(target / "vendor" / "leaving.py")]
+
+
+@POSIX_ONLY
+def test_an_ignored_file_is_not_another_walked_file_in_the_substring_test(tmp_path):
+    """2.4.x also leaves out every path a pattern is a substring of; a path the
+    ignore paths cover is not read by ferret-scan, so it does not refuse the link."""
+    target = tmp_path / "src"
+    walk = (["conf.py", "conf.py.bak"], ["conf.py"])
+
+    with pytest.raises(ScannerError, match="another file's path holds its path"):
+        _link_exclude_patterns(target, walk, ignored=set())
+
+    assert _link_exclude_patterns(target, walk, ignored={"conf.py.bak"}) == [
+        os.fspath(target / "conf.py")
+    ]
+
+
+@POSIX_ONLY
+def test_a_scan_with_a_link_leaving_the_tree_under_an_ignored_directory_runs(
+    mock_plugin_context, tmp_path
+):
+    root = _tree(mock_plugin_context.source_dir, ["src/a.js", "vendor/x.js"])
+    outside = tmp_path / "outside.js"
+    outside.write_text("x\n", encoding="utf-8")
+    (root / "vendor" / "leaving.js").symlink_to(outside)
+    started: list[list[str]] = []
+
+    _scan(
+        _scanner(mock_plugin_context),
+        _run_double({"returncode": 0}, EMPTY_SARIF, started),
+        root,
+        [IgnorePathWithReason(path="vendor/", reason="third party")],
+    )
+
+    (argv,) = started
+    patterns = argv[argv.index("--exclude") + 1].split(",")
+    assert os.fspath(root / "vendor") + os.sep + "*" in patterns
+    assert os.fspath(root / "vendor" / "leaving.js") not in patterns
+
+
+# --- the mandatory exclude budget -----------------------------------------------------
+
+
+def test_a_mandatory_exclude_value_past_the_budget_refuses_the_target(
+    mock_plugin_context, monkeypatch
+):
+    root = _tree(mock_plugin_context.source_dir, ["a.txt"])
+    monkeypatch.setattr(ferret_scanner, "_EXCLUDE_VALUE_BUDGET", 10, raising=False)
+    scanner = _scanner(mock_plugin_context, exclude_patterns=["a" * 16])
+    started: list[list[str]] = []
+
+    with pytest.raises(ScannerError, match="could not be started"):
+        _scan(scanner, _run_double({"returncode": 0}, EMPTY_SARIF, started), root)
+
+    assert started == []
+    assert scanner.exit_code is None
+
+
+# --- flagged responses and times -----------------------------------------------------
+
+
+def test_a_run_whose_output_could_not_be_recorded_is_not_graded_on_its_file(
+    mock_plugin_context,
+):
+    root = _tree(mock_plugin_context.source_dir, ["a.txt"])
+
+    with pytest.raises(ScannerError) as raised:
+        _scan(
+            _scanner(mock_plugin_context),
+            _run_double(
+                {"returncode": 0, "post_run_error": True, "error": "disk full"},
+                EMPTY_SARIF,
+            ),
+            root,
+        )
+
+    assert "could not record" in str(raised.value)
+
+
+def test_a_timed_out_run_is_reported_as_a_timeout(mock_plugin_context):
+    root = _tree(mock_plugin_context.source_dir, ["a.txt"])
+
+    with pytest.raises(ScannerError) as raised:
+        _scan(
+            _scanner(mock_plugin_context),
+            _run_double({"returncode": -9, "timed_out": True}, None),
+            root,
+        )
+
+    assert "timed out" in str(raised.value)
+    assert "No such file" not in str(raised.value)
+
+
+def test_a_scan_that_raises_records_its_own_end_time(mock_plugin_context):
+    root = _tree(mock_plugin_context.source_dir, ["a.txt"])
+    scanner = _scanner(mock_plugin_context)
+    scanner.end_time = None
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_resolve_arguments", side_effect=RuntimeError("boom")),
+    ):
+        with pytest.raises(ScannerError, match="boom"):
+            scanner.scan(target=root, target_type="source")
+
+    assert scanner.end_time is not None
+
+
+def test_an_empty_target_does_not_keep_the_previous_targets_start_time(
+    mock_plugin_context, tmp_path
+):
+    scanner = _scanner(mock_plugin_context)
+    scanner.start_time = datetime.now(timezone.utc)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    with patch.object(scanner, "_post_scan"):
+        assert scanner.scan(target=empty, target_type="converted") is True
+
+    assert scanner.start_time is None
+
+
+def test_an_error_after_the_sarif_validated_is_not_called_a_bad_results_file(
+    mock_plugin_context, monkeypatch
+):
+    root = _tree(mock_plugin_context.source_dir, ["a.txt"])
+    try:
+        SarifReport.model_validate({"runs": "not a list"})
+    except ValidationError as error:
+        validation_error = error
+
+    def attach(**kwargs):
+        raise validation_error
+
+    monkeypatch.setattr(ferret_scanner, "attach_scanner_details", attach)
+
+    with pytest.raises(ScannerError) as raised:
+        _scan(
+            _scanner(mock_plugin_context),
+            _run_double({"returncode": 0}, EMPTY_SARIF),
+            root,
+        )
+
+    assert "not SARIF" not in str(raised.value)
+    assert "Ferret scan failed" in str(raised.value)
+
+
+# --- the refused-config warning ------------------------------------------------------
+
+
+def test_the_refused_config_warning_names_the_empty_config_when_no_default_is_used(
+    mock_plugin_context, mock_ferret_config_file
+):
+    scanner = _scanner(mock_plugin_context, use_default_config=False)
+    messages: list[str] = []
+
+    with patch.object(
+        scanner, "_plugin_log", side_effect=lambda m, **k: messages.append(str(m))
+    ):
+        chosen = scanner._find_config_file(mock_ferret_config_file)
+
+    assert chosen is None
+    (warning,) = [m for m in messages if "repository-influenced" in m]
+    assert "use_default_config is false" in warning
+    assert "bundled with ASH" not in warning
+
+
+def test_control_the_refused_config_warning_names_the_bundled_default(
+    mock_plugin_context, mock_ferret_config_file
+):
+    scanner = _scanner(mock_plugin_context)
+    messages: list[str] = []
+
+    with patch.object(
+        scanner, "_plugin_log", side_effect=lambda m, **k: messages.append(str(m))
+    ):
+        chosen = scanner._find_config_file(mock_ferret_config_file)
+
+    assert chosen is not None
+    (warning,) = [m for m in messages if "repository-influenced" in m]
+    assert "bundled with ASH" in warning
+
+
+# --- base ids everywhere in the run --------------------------------------------------
+
+
+def test_every_artifact_location_in_the_run_is_resolved():
+    base = "file:///work/src/"
+    document = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "ferret-scan"}},
+                "originalUriBaseIds": {"%SRCROOT%": {"uri": base}},
+                "artifacts": [{"location": {"uri": "a.txt", "uriBaseId": "%SRCROOT%"}}],
+                "invocations": [
+                    {
+                        "executionSuccessful": True,
+                        "toolExecutionNotifications": [
+                            {
+                                "message": {"text": "x"},
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {
+                                                "uri": "b.txt",
+                                                "uriBaseId": "%SRCROOT%",
+                                            }
+                                        }
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+                "results": [],
+            }
+        ],
+    }
+
+    _resolve_sarif_uri_base_ids(document)
+
+    run = document["runs"][0]
+    assert run["artifacts"][0]["location"] == {"uri": base + "a.txt"}
+    notified = run["invocations"][0]["toolExecutionNotifications"][0]["locations"][0]
+    assert notified["physicalLocation"]["artifactLocation"] == {"uri": base + "b.txt"}
+    assert "originalUriBaseIds" not in run
+
+
+# --- dependencies ---------------------------------------------------------------------
+
+
+def test_a_ferret_scan_refused_inside_the_scanned_tree_is_recorded_as_refused(
+    mock_plugin_context, monkeypatch
+):
+    monkeypatch.setattr(ferret_scanner, "find_executable", lambda name: None)
+    monkeypatch.setattr(
+        ferret_scanner,
+        "in_tree_refusal",
+        lambda command: f"a {command} inside the scanned tree was refused",
+    )
+    scanner = FerretScanScanner(context=mock_plugin_context)
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependency_unavailable_reason == (
+        "a ferret-scan inside the scanned tree was refused"
+    )
