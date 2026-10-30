@@ -172,7 +172,7 @@ class TestScanDirectoryValidation:
         assert result["error_category"] == "file_not_found"
         assert "Configuration file not found" in result["error"]
         assert (
-            "Ensure the file has a valid extension (.yaml, .yml, or .json)"
+            "Ensure the file has a valid extension (.yaml, .yml, .json, or .toml)"
             in result["suggestions"]
         )
 

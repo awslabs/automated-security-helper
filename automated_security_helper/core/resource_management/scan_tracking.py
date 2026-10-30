@@ -1263,8 +1263,10 @@ def create_scan_progress_from_files(
     owns the scan. There are three outcomes:
 
     * The file is a results document: ``completed``, with one entry per scanner.
-    * The file cannot be read as results -- it does not parse, is not a JSON object,
-      or has ``scanner_results``/``sarif`` of the wrong shape: ``failed``, with
+    * The file cannot be read as results -- it does not parse, is not a JSON object
+      (``safe_read_json_file`` refuses a list or a scalar with its INVALID_FORMAT
+      message, "Expected a JSON object in file ..., found list"), or has
+      ``scanner_results``/``sarif`` of the wrong shape: ``failed``, with
       ``error_message`` naming the file and what is wrong with it. Since the file is
       replaced atomically (utils/atomic_write.py) a reader never sees a write in
       progress, so this is a file that is corrupt, truncated on disk, or not ASH's.
@@ -1320,9 +1322,9 @@ def create_scan_progress_from_files(
             scan_progress.mark_failed(str(e))
             return scan_progress
 
-        if not isinstance(results, dict):
-            return unusable(f"expected a JSON object, found {type(results).__name__}")
-
+        # parse_aggregated_results returns a dict or raises: safe_read_json_file
+        # refuses a non-object document, so the list-valued case is the except
+        # arm above, with its message. (A type check here could never run.)
         if results.get("sarif") is None and results.get("scanner_results") is None:
             scan_progress.results_pending = True
             return scan_progress
