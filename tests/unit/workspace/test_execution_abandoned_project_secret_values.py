@@ -18,7 +18,11 @@ The contract these cases pin:
 
 - an abandoned project whose worker comes back (a caller-given event, the pool
   waits for the stop) has its values masked in the other projects' output;
-- its own reports are masked with the other projects' values;
+- its own reports do not survive the abandon: the late worker discards them with
+  the results they hold (they contradict the FAILED verdict), so no value another
+  project exposed can stay in clear in them; what the discard leaves under
+  ``projects/<key>`` is the tools' own output, which the masking leaves alone for
+  every project;
 - a worker that does not come back is named on the project's error and in the
   log, so the gap is loud rather than silent.
 """
@@ -109,9 +113,10 @@ def test_an_abandoned_workers_values_are_masked_in_the_other_projects_output(
     )
 
 
-def test_an_abandoned_projects_own_reports_are_masked_with_the_others_values(
+def test_an_abandoned_projects_own_output_keeps_no_other_projects_value_in_clear(
     tmp_path,
 ):
+    """The late worker discards the reports and keeps only the tools' own output."""
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"), ("quick", "MEDIUM"))
     release = threading.Event()
     FakeOrchestrator.behaviour["wedged"] = {"block": release}
@@ -120,6 +125,10 @@ def test_an_abandoned_projects_own_reports_are_masked_with_the_others_values(
         "secret_values": [QUICK_VALUE],
     }
     planted = _plant_report(tmp_path, "wedged", QUICK_VALUE)
+    tool_output = tmp_path / "out" / "projects" / "wedged" / "scanners" / "bandit"
+    tool_output.mkdir(parents=True, exist_ok=True)
+    raw = tool_output / "raw.txt"
+    raw.write_text(f"{QUICK_VALUE}\n", encoding="utf-8")
     timer = threading.Timer(PROJECT_TIMEOUT + 0.3, release.set)
     timer.start()
     try:
@@ -129,10 +138,14 @@ def test_an_abandoned_projects_own_reports_are_masked_with_the_others_values(
         release.set()
 
     assert _entry(outcome, "wedged").status is ProjectRunStatus.FAILED
-    assert QUICK_VALUE not in planted.read_text(encoding="utf-8"), (
-        "the abandoned project's own report, written by its scan, kept another "
-        "project's secret value in clear"
+    assert not planted.exists(), (
+        "the abandoned project's report survived the discard: it holds findings "
+        "the FAILED verdict says do not exist"
     )
+    assert raw.exists(), "the tools' own output is kept by the discard"
+    assert not (
+        tmp_path / "out" / "projects" / "wedged" / "ash_aggregated_results.json"
+    ).exists(), "the results file survived the discard"
 
 
 def test_a_worker_that_does_not_come_back_is_named_as_unmasked(

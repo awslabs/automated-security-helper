@@ -672,6 +672,73 @@ class TestParityWithComputeExitCode:
         assert standalone == 0
         assert self._mine([], threshold) == 0
 
+    @pytest.mark.parametrize(
+        ("scanners", "standalone_expected"),
+        [
+            (["bandit"], 0),
+            (["semgrep"], 2),
+            (["bandit", "semgrep"], 2),
+        ],
+        ids=["own-stricter", "project-wide", "both"],
+    )
+    def test_a_scanners_own_threshold_agrees_through_real_config(
+        self, tmp_path, scanners, standalone_expected
+    ):
+        """The per-scanner arm, read from a recorded config and not a monkeypatch.
+
+        bandit's own ``options.severity_threshold`` is CRITICAL under a
+        project-wide MEDIUM; a HIGH from bandit passes and a HIGH from semgrep
+        fails. ``_compute_exit_code`` on the left, the workspace counter with the
+        executor's resolver on the right, both reading the same ``AshConfig``.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.core.enums import ScannerStatus
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            ScannerTargetStatusInfo,
+        )
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.workspace.aggregation import (
+            actionable_results_by_scanner,
+        )
+        from automated_security_helper.workspace.execution import (
+            _scanner_threshold_resolver,
+        )
+
+        results = [
+            _result(level="warning", severity="HIGH", scanner=name) for name in scanners
+        ]
+        document = {"version": "2.1.0", "runs": [_run(*results)]}
+        reports = tmp_path / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "ash.sarif").write_text(json.dumps(document), encoding="utf-8")
+        config = AshConfig()
+        config.global_settings.severity_threshold = "MEDIUM"
+        config.scanners.bandit.options.severity_threshold = "CRITICAL"
+        model = AshAggregatedResults(ash_config=config)
+        model.sarif = SarifReport.model_validate(document)
+        for name in scanners:
+            model.scanner_results[name] = ScannerTargetStatusInfo(
+                status=ScannerStatus.PASSED, excluded=False, dependencies_satisfied=True
+            )
+
+        standalone = _compute_exit_code(
+            model, ScanOptions(source_dir=tmp_path, output_dir=tmp_path), None
+        )
+        project = _plan(tmp_path, "api").projects[0]
+        mine = actionable_results_by_scanner(
+            results, "MEDIUM", threshold_for=_scanner_threshold_resolver(model, project)
+        )
+
+        assert standalone == standalone_expected
+        assert (standalone == 2) == (sum(mine.values()) > 0)
+        assert mine.get("bandit", 0) == 0
+        assert mine.get("semgrep", 0) == (1 if "semgrep" in scanners else 0)
+
 
 class TestCompletenessParityWithComputeExitCode:
     """The other half of the same invariant, on the pass that was not mirrored.
@@ -689,14 +756,16 @@ class TestCompletenessParityWithComputeExitCode:
     """
 
     @staticmethod
-    def _model(scanner_statuses):
+    def _model(scanner_statuses, invocations=None):
         """One project's results, with ``scanner_results`` as a real scan writes it.
 
         ``scanner_statuses`` maps scanner name to ``(status, excluded,
         dependencies_satisfied)``. A finding is attributed to each scanner because
         ``ScannerStatisticsCalculator`` enumerates from both the SARIF and
         ``scanner_results``, and a scanner present in only one of them exercises a
-        different branch than a real scan reaches.
+        different branch than a real scan reaches. ``invocations`` replaces the
+        run's ``invocations`` list when given, for the run-level notifications a
+        rule that could not be evaluated leaves.
         """
         from automated_security_helper.config.ash_config import AshConfig
         from automated_security_helper.models.asharp_model import (
@@ -712,9 +781,10 @@ class TestCompletenessParityWithComputeExitCode:
         config = AshConfig()
         config.global_settings.severity_threshold = "CRITICAL"
         model = AshAggregatedResults(ash_config=config)
-        model.sarif = SarifReport.model_validate(
-            {"version": "2.1.0", "runs": [_run(*entries)]}
-        )
+        run = _run(*entries)
+        if invocations is not None:
+            run["invocations"] = invocations
+        model.sarif = SarifReport.model_validate({"version": "2.1.0", "runs": [run]})
         for name, (status, excluded, satisfied) in scanner_statuses.items():
             model.scanner_results[name] = ScannerTargetStatusInfo(
                 status=status,
@@ -900,6 +970,50 @@ class TestCompletenessParityWithComputeExitCode:
         assert (
             list(fields["incomplete_scanner_details"]) == fields["incomplete_scanners"]
         )
+
+    def test_an_unevaluated_rule_is_seen_by_both_derivations_with_the_gate_off(
+        self, tmp_path
+    ):
+        """The exit-1 arm no setting silences, on the field that carries it.
+
+        A run-level error notification naming a rule is ``unevaluated_rules`` to
+        ``_coverage_fields`` and exit 1 to ``_compute_exit_code`` with the
+        completeness gate OFF; the control, the same scanners with no
+        notification, is empty and 0. Pinned as an agreement, as the other cases
+        of this class are, so neither side can stop answering alone.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+
+        statuses = {"cdk-nag": ("PASSED", False, True)}
+        raised = [
+            {
+                "executionSuccessful": True,
+                "toolExecutionNotifications": [
+                    {
+                        "level": "error",
+                        "message": {"text": "AwsSolutions-S1 could not be evaluated"},
+                        "associatedRule": {"id": "AwsSolutions-S1"},
+                    }
+                ],
+            }
+        ]
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path,
+            fail_on_incomplete_scanners=False,
+        )
+
+        with_rule = self._model(statuses, invocations=raised)
+        clean = self._model(statuses)
+
+        assert _compute_exit_code(with_rule, opts, None) == 1
+        assert _coverage_fields(with_rule)["unevaluated_rules"] == ["AwsSolutions-S1"]
+        assert _coverage_fields(with_rule)["incomplete_scanners"] == []
+        assert _compute_exit_code(clean, opts, None) == 0
+        assert _coverage_fields(clean)["unevaluated_rules"] == []
 
     def test_a_project_whose_every_scanner_was_skipped_is_seen_by_both(self, tmp_path):
         """The set-level half, which the per-entry helper structurally cannot see.

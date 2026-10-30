@@ -113,6 +113,10 @@ class FakeOrchestrator:
             raise spec["raise"]
 
         model = AshAggregatedResults()
+        # The configuration the scan ran with, as the results record it, for a
+        # test of what the recorded config decides (a scanner's own threshold).
+        if "ash_config" in spec:
+            model.ash_config = spec["ash_config"]
         model.sarif = SarifReport.model_validate(spec.get("sarif") or _sarif(count=0))
 
         # A real scan writes a scanner_results entry for every scanner it ran --
@@ -152,6 +156,14 @@ class FakeOrchestrator:
         # exact; a test about what the scan left behind turns it on.
         if spec.get("save_results"):
             model.save_model(self.output_dir)
+            # The report phase writes the project's own reports beside the
+            # results, and the tools write their own output under scanners/.
+            reports = self.output_dir / "reports"
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / "ash.sarif").write_text("{}\n", encoding="utf-8")
+            tools = self.output_dir / "scanners" / "bandit"
+            tools.mkdir(parents=True, exist_ok=True)
+            (tools / "raw.json").write_text("{}\n", encoding="utf-8")
         # The SARIF report the scan's own SARIF reporter wrote, recorded on the
         # model as ReportPhase records it (record_reports_written), for a test of
         # what the verdict counts from. Off by default, so every other fixture's

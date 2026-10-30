@@ -1082,10 +1082,13 @@ def _scanner_threshold_resolver(
     other scanner, and a finding naming no scanner, by the project-wide threshold
     (``None`` here, which the counter reads as ``project.gate_threshold``).
 
-    The workspace ceiling still binds a scanner's own setting when the policy
-    tightened this project: a ceiling that could be stepped under by one scanner's
-    looser option would not be a ceiling. ``stricter_of`` is the same combination
-    the resolver used for the project-wide threshold.
+    The workspace ceiling binds a scanner's own setting whenever the workspace
+    declares one (``ProjectPlan.severity_ceiling``), not only when it moved the
+    project-wide value: a ceiling MEDIUM over a project declaring MEDIUM
+    tightened nothing, and a scanner's own CRITICAL option stepped under it. A
+    ceiling that could be stepped under by one scanner's looser option would not
+    be a ceiling. ``stricter_of`` is the same combination the resolver used for
+    the project-wide threshold.
 
     Memoised per name because the resolver dumps the scanners config on every
     call and a project's run carries one result per finding. Imported inside the
@@ -1107,12 +1110,19 @@ def _scanner_threshold_resolver(
                 value, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
                     results, scanner_name
                 )
-            except Exception:  # noqa: BLE001 -- an unreadable config grades as the project does
+            except Exception as error:  # noqa: BLE001 -- an unreadable config grades as the project does
                 value, source = None, "unavailable"
+                ASH_LOGGER.debug(
+                    f"Project '{project.key}': the threshold of scanner "
+                    f"'{scanner_name}' could not be read from the recorded "
+                    f"configuration ({error_text(error)}); its findings are graded "
+                    f"at the project's threshold",
+                    extra=NO_MARKUP,
+                )
             if source == "config" and isinstance(value, str) and value:
                 own = value.upper()
-                if project.threshold_tightened_by_policy:
-                    own = stricter_of(own, project.gate_threshold)
+                if project.severity_ceiling:
+                    own = stricter_of(own, project.severity_ceiling)
             cache[scanner_name] = own
         return cache[scanner_name]
 
@@ -1193,19 +1203,21 @@ def _scan_one_project(
     project: ProjectPlan,
     settings: ProjectScanSettings,
     orchestrator_factory: OrchestratorFactory,
-    abandoned: Optional[Event] = None,
+    abandoned: Optional["_AbandonGate"] = None,
     module_names: Optional[Mapping[str, str]] = None,
 ) -> _ProjectRun:
     """Scan one project in its own scope and reduce it to an outcome plus a run.
 
     Args:
-        abandoned: Set by the outer loop when this project has been given up on
-            at its timeout. The abandon also sets the project's cancel event,
-            but a scan between scope checks keeps running -- so this is checked
-            before writing, because the workspace has already recorded the
-            project as FAILED and a later write would leave
-            ``projects/<key>/ash_aggregated_results.json`` holding real findings
-            that the unified file says do not exist.
+        abandoned: The outer loop's gate for this project, set when it has been
+            given up on at its timeout. The abandon also sets the project's
+            cancel event, but a scan between scope checks keeps running -- so
+            the write below is claimed through the gate first
+            (``try_commit``): the workspace has already recorded an abandoned
+            project as FAILED, and a later write would leave
+            ``projects/<key>/`` holding real findings that the unified file says
+            do not exist. The claim and the abandon are taken under one lock, so
+            a project is either committed or abandoned, never both.
     """
     from automated_security_helper.core.enums import ExecutionStrategy, ExportFormat
 
@@ -1336,6 +1348,11 @@ def _scan_one_project(
         )
     except Exception as exc:  # noqa: BLE001 -- one project must not sink the workspace
         ASH_LOGGER.error(f"Project '{project.key}' failed: {error_text(exc)}")
+        if abandoned is not None and abandoned.is_set():
+            # The scan may have saved its results and reports under
+            # projects/<key>/ before it raised; the workspace already recorded
+            # this project FAILED at its timeout, so those leftovers go too.
+            _discard_project_output(project_output)
         return _failed_outcome(
             project,
             settings,
@@ -1457,22 +1474,24 @@ def _scan_one_project(
             not in policy_names
         ]
 
-    if abandoned is not None and abandoned.is_set():
+    if abandoned is not None and not _claim_commit(abandoned):
         # Given up on while this was running. Do not write, and do not return an
         # outcome -- the outer loop already recorded FAILED for this project, and
         # a per-project results file with real findings beside a unified file
         # saying finding_count=0 is a contradiction an operator would have to
-        # resolve by guessing which one to trust.
+        # resolve by guessing which one to trust. The claim above is what makes
+        # this exclusive: once it succeeds the outer loop can no longer abandon
+        # this project, and once the loop has abandoned it the claim fails.
         ASH_LOGGER.warning(
             f"Project '{project.key}' finished after being abandoned at its "
             f"timeout; discarding its results rather than contradicting the "
             f"workspace verdict already recorded for it."
         )
         # Skipping the write below is not enough: the scan phase saved
-        # projects/<key>/ash_aggregated_results.json itself before this check
-        # ran, so that file already holds the findings the verdict says do not
-        # exist. Removed, as the message above says.
-        _discard_project_results(project_output)
+        # projects/<key>/ash_aggregated_results.json and the project's reports
+        # itself before this check ran, so they already hold the findings the
+        # verdict says do not exist. Removed, as the message above says.
+        _discard_project_output(project_output)
         late = _failed_outcome(
             project,
             settings,
@@ -1481,11 +1500,13 @@ def _scan_one_project(
             duration_seconds=time.monotonic() - started,
         )
         # The verdict is discarded; the secret values the findings exposed are
-        # not. The scan wrote this project's reports before the abandon could be
-        # seen, and another project may pass one of these values on a command
-        # line, so they join the workspace masking set when the pool reads this
-        # result back (_run_projects), and the reports left here are masked
-        # with the other projects' values in turn.
+        # not. The scan ran before the abandon could be seen, and another
+        # project may pass one of these values on a command line, so they join
+        # the workspace masking set when the pool reads this result back
+        # (_run_projects). Nothing of this project's reports is left to mask
+        # with the other projects' values; what the discard leaves under
+        # projects/<key> is the tools' own output, which the masking leaves
+        # alone for every project.
         late.secret_values = exposed_secret_values(results)
         late.output_written = True
         return late
@@ -2242,9 +2263,11 @@ def _mask_project_output(
             continue
         if path.is_symlink() or not path.is_file():
             continue
-        # rglob follows a linked directory, so a file reached through one is a
-        # regular file whose rewrite lands outside this tree. Refused like the
-        # link itself.
+        # pathlib's ``**`` does not descend into a linked directory, so no file
+        # below one is reached here on the ordinary path. A directory that is
+        # replaced by a link between the walk and this read would be, and its
+        # rewrite would land outside this tree; refused like the link itself,
+        # as defence in depth rather than the common case.
         if any(
             (project_output / Path(*relative.parts[: index + 1])).is_symlink()
             for index in range(len(relative.parts) - 1)
@@ -2318,28 +2341,99 @@ def _scanner_reasons(results: Any, values: Iterable[str] = ()) -> Dict[str, str]
     return reasons
 
 
-def _discard_project_results(project_output: Path) -> None:
-    """Remove the per-project results file a scan saved before it was abandoned.
+class _AbandonGate:
+    """One project's commit-or-abandon decision, taken exactly once.
+
+    The deadline poll abandons an overrunning project and records it FAILED; the
+    worker, when its scan returns, writes the project's output. Between the
+    poll's read of the clock and its abandon, a worker could pass a plain
+    ``is_set()`` check, write real findings, and still be recorded FAILED with
+    none. So both sides take the decision under one lock: the worker's
+    :meth:`try_commit` wins only while nothing has abandoned the project, and
+    the poll's :meth:`set` wins only while nothing has committed it. The loser
+    does nothing of its own: an abandoned worker discards what the scan wrote,
+    and a poll that finds the project committed leaves it to be collected.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._abandoned = False
+        self._committed = False
+
+    def is_set(self) -> bool:
+        with self._lock:
+            return self._abandoned
+
+    def set(self) -> bool:
+        """Abandon the project. False, and nothing changes, once it has committed."""
+        with self._lock:
+            if self._committed:
+                return False
+            self._abandoned = True
+            return True
+
+    def try_commit(self) -> bool:
+        """Claim the write. False, and nothing changes, once the project is abandoned."""
+        with self._lock:
+            if self._abandoned:
+                return False
+            self._committed = True
+            return True
+
+
+def _claim_commit(abandoned: Any) -> bool:
+    """Claim the right to write this project's output; False once it is abandoned.
+
+    An :class:`_AbandonGate` takes the decision under its lock. A caller that
+    still hands in a plain event gets the old read, which cannot exclude the
+    abandon racing the write.
+    """
+    claim = getattr(abandoned, "try_commit", None)
+    if claim is not None:
+        return bool(claim())
+    return not abandoned.is_set()
+
+
+def _discard_project_output(project_output: Path) -> None:
+    """Remove what a scan wrote under ``projects/<key>/`` before it was abandoned.
 
     The scan phase writes ``projects/<key>/ash_aggregated_results.json`` on its
-    own (``AshAggregatedResults.save_model``) before ``_scan_one_project`` can
-    see that the project was abandoned, so declining the workspace's own write of
-    the same file left the scan's copy in place: real findings in the project's
-    subtree beside a unified file recording the project FAILED with none. The
-    file is this run's own output under the workspace output directory. A link
-    at its path is left alone, as every other write here refuses to follow one.
+    own (``AshAggregatedResults.save_model``), and its report phase writes the
+    project's own reports beside it, before ``_scan_one_project`` can see that
+    the project was abandoned. Declining the workspace's own write left all of
+    that in place: real findings in the project's subtree beside a unified file
+    recording the project FAILED with none. Everything there is this run's own
+    output under the workspace output directory, except the tools' own output
+    (``_TOOL_OUTPUT_DIRS``), which this run never rewrites. A link at any name
+    is left alone and never followed, as every other write here refuses to.
     """
-    path = project_output / RESULTS_FILENAME
+    import shutil
+
     try:
-        if path.is_symlink():
-            return
-        path.unlink(missing_ok=True)
+        entries = list(project_output.iterdir())
+    except FileNotFoundError:
+        return
     except OSError as error:
         ASH_LOGGER.warning(
-            f"Could not remove the abandoned project's results file "
-            f"{path}: {error_text(error)}",
+            f"Could not list the abandoned project's output {project_output}: "
+            f"{error_text(error)}",
             extra=NO_MARKUP,
         )
+        return
+    for path in entries:
+        if path.name in _TOOL_OUTPUT_DIRS or path.is_symlink():
+            continue
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink(missing_ok=True)
+        except OSError as error:
+            ASH_LOGGER.warning(
+                f"Could not remove the abandoned project's output {path}: "
+                f"{error_text(error)}",
+                extra=NO_MARKUP,
+            )
 
 
 def _write_project_results(project_output: Path, results: Any) -> None:
@@ -2564,9 +2658,9 @@ def execute_workspace(
                 # worker has not come back. What is there is a previous run's
                 # output, or still being written; rewriting it gave stale results
                 # a fresh mtime and nothing else. An abandoned project whose
-                # worker did come back has this run's reports there, written by
-                # the scan before the abandon could be seen, and they are masked
-                # with the other projects' values like every finished project's.
+                # worker did come back has only the tools' own output there (the
+                # worker discarded the reports with the results), which the walk
+                # below leaves alone as it does for every finished project.
                 continue
             project_output = _project_output_dir(settings, project)
             # The same refusal the scan made before writing there. A project whose
@@ -2718,8 +2812,11 @@ def _run_projects(
     start_times: Dict[str, float] = {}
     start_lock = Lock()
     # Set when a project is abandoned, so its worker can tell it has been given
-    # up on and stop before writing output the workspace has already contradicted.
-    abandoned: Dict[str, Event] = {project.key: Event() for project in active}
+    # up on and stop before writing output the workspace has already contradicted;
+    # the worker claims its write through the same gate, so the two cannot cross.
+    abandoned: Dict[str, _AbandonGate] = {
+        project.key: _AbandonGate() for project in active
+    }
 
     # Each project's effective cancel event, built here on the submitting
     # thread because the pool worker that enters its scope has no ambient
@@ -2842,6 +2939,12 @@ def _run_projects(
                     # as FAILED with no findings.
                     continue
                 elapsed = now - begin
+                if not abandoned[project.key].set():
+                    # The worker claimed its write between the clock read above
+                    # and this abandon: the scan has finished and its output
+                    # stands. Its result is collected at the next pass, as a
+                    # future found done above is.
+                    continue
                 stoppable = (cancel_events or {}).get(project.key) is not None
                 ASH_LOGGER.error(
                     f"Project '{project.key}' exceeded its {_budget_token(timeout)} "
@@ -2854,7 +2957,6 @@ def _run_projects(
                         "stop to finish."
                     )
                 )
-                abandoned[project.key].set()
                 abandoned_futures[future] = project
                 abandoned_at[future] = polls
                 if stoppable:
@@ -2959,9 +3061,11 @@ def _read_back_abandoned_workers(
     """Carry what an abandoned worker brought back onto its recorded outcome.
 
     The verdict recorded at the abandon stands. A worker that came back brought
-    the secret values its project's findings exposed and wrote this run's
-    reports under ``projects/<key>``, so the recorded run takes both and the
-    workspace masking covers them. A worker that has not come back (its scan is
+    the secret values its project's findings exposed, so the recorded run takes
+    them and the workspace masking covers the other projects' output with them.
+    It left only the tools' own output under ``projects/<key>`` (it discarded
+    the results and reports that contradicted the verdict), which the masking
+    leaves alone for every project. A worker that has not come back (its scan is
     between scope checks, and the pool did not wait for it) is named on the
     project's error, which the unified results and the workspace reports show,
     and in the log: the values its findings exposed are not in the masking set

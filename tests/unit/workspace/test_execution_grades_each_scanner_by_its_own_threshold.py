@@ -21,7 +21,12 @@ The contract these cases pin:
 - a project whose config gives one scanner a stricter threshold is judged by it
   inside a workspace;
 - the unified ``scanner_results`` actionable counts sum what the projects'
-  verdicts counted: a non-gating policy scanner's findings count zero there.
+  verdicts counted: a non-gating policy scanner's findings count zero there;
+- read from a real recorded config (no monkeypatch), a scanner's own looser
+  option stands when the workspace declares no ceiling, and is capped by the
+  ceiling whenever one exists, whether or not the ceiling moved the project-wide
+  threshold: a ceiling MEDIUM over a project declaring MEDIUM tightened nothing
+  and still grades a bandit option of CRITICAL at MEDIUM.
 """
 
 from __future__ import annotations
@@ -138,6 +143,67 @@ def test_a_scanner_with_its_own_stricter_threshold_is_judged_by_it(
     rollup = json.loads(outcome.results_path.read_text("utf-8"))["scanner_results"]
     assert rollup["bandit"]["actionable_finding_count"] == 0
     assert rollup["semgrep"]["actionable_finding_count"] == 1
+
+
+def _config_with_bandit_at(threshold: str):
+    """A real config: project-wide MEDIUM, bandit's own option at *threshold*."""
+    from automated_security_helper.config.ash_config import AshConfig
+
+    config = AshConfig()
+    config.global_settings.severity_threshold = "MEDIUM"
+    config.scanners.bandit.options.severity_threshold = threshold
+    return config
+
+
+def test_without_a_ceiling_a_scanners_own_looser_option_stands_through_real_config(
+    tmp_path,
+):
+    """The control for the ceiling case: no monkeypatch, the recorded config decides."""
+    _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+    assert plan.projects[0].severity_ceiling is None
+    FakeOrchestrator.behaviour["api"] = {
+        "ash_config": _config_with_bandit_at("CRITICAL"),
+        "sarif": _sarif_of(_finding("bandit")),
+        "scanner_results": {"bandit": _scanner("PASSED")},
+    }
+
+    outcome = _run(tmp_path, plan)
+    entry = outcome.payload.projects[0]
+
+    # bandit's HIGH is below the CRITICAL its own option set, as it is in
+    # `ash --source-dir P` with the same config.
+    assert entry.finding_count == 1
+    assert entry.actionable_finding_count == 0
+    assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+
+def test_a_ceiling_binds_a_scanners_own_looser_option_even_when_it_moved_nothing(
+    tmp_path,
+):
+    """Ceiling MEDIUM, project MEDIUM, bandit CRITICAL: bandit is graded at MEDIUM.
+
+    The ceiling tightened nothing project-wide (MEDIUM over MEDIUM), so binding
+    the scanner's own option only when the project-wide value moved let bandit's
+    CRITICAL step under the ceiling and a HIGH pass. Bound whenever a ceiling
+    exists, the HIGH is actionable.
+    """
+    _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+    plan.projects[0] = plan.projects[0].model_copy(
+        update={"severity_ceiling": "MEDIUM"}
+    )
+    assert plan.projects[0].threshold_tightened_by_policy is False
+    FakeOrchestrator.behaviour["api"] = {
+        "ash_config": _config_with_bandit_at("CRITICAL"),
+        "sarif": _sarif_of(_finding("bandit")),
+        "scanner_results": {"bandit": _scanner("PASSED")},
+    }
+
+    outcome = _run(tmp_path, plan)
+    entry = outcome.payload.projects[0]
+
+    assert entry.finding_count == 1
+    assert entry.actionable_finding_count == 1
+    assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
 
 
 def test_the_rollup_counts_what_the_verdict_counted_not_policy_origin_findings(
