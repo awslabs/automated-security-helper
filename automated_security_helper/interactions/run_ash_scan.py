@@ -174,7 +174,10 @@ from automated_security_helper.utils.inner_run_outcome import (
     release_records_completion,
     report_file_written_as,
 )
-from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+from automated_security_helper.utils.sarif_utils import (
+    _resolve_result_severity,
+    is_result_suppressed,
+)
 from automated_security_helper.utils.scan_output_dirs import WORKING_DIR_NAMES
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
@@ -2270,8 +2273,14 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
     graded ``low`` through its own default -- adding an ``info`` rank of 0 would
     change what ``--min-severity low`` accepts and would have to be mirrored in
     ``workspace.aggregation`` to keep the two paths answering alike.
+
+    A suppressed result is one with a suppression IN EFFECT
+    (``utils.sarif_utils.is_result_suppressed``): a suppression whose state is
+    ``rejected`` or ``underReview`` has not taken effect (SARIF 3.35.4) and hides
+    nothing, so the finding it sits on keeps the count standing, as it does for
+    the per-scanner counts, the flat finding and the workspace verdict.
     """
-    if result.suppressions:
+    if is_result_suppressed(result):
         return False
     return _SEVERITY_RANK.get(_resolve_result_severity(result), 1) >= min_sev_rank
 
@@ -6869,7 +6878,12 @@ def _compute_exit_code(
             file_has_qualifying = False
             for sarif_run in sarif_json.get("runs", []):
                 for r in sarif_run.get("results", []):
-                    if r.get("suppressions"):
+                    # A suppression hides the result only when it is in effect:
+                    # one whose state is rejected or underReview (SARIF 3.35.4)
+                    # was never an approval, so the finding counts and the scan
+                    # exits non-zero, as the per-scanner counts, the flat finding
+                    # and the workspace verdict already read it.
+                    if is_result_suppressed(r):
                         continue
                     props = r.get("properties", {}) or {}
                     threshold = _threshold_for(

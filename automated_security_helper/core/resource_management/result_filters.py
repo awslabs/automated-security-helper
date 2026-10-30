@@ -421,18 +421,21 @@ def _actionable_in_view(
 def _counts_toward_exit_2(result: Dict[str, Any], threshold: Optional[str]) -> bool:
     """Whether ``_compute_exit_code`` counts *result* toward exit 2 at *threshold*.
 
-    Its per-result test, step for step: a suppressed result never counts;
+    Its per-result test, step for step: a suppressed result never counts, where
+    suppressed means a suppression in effect (``sarif_utils.is_result_suppressed``:
+    a ``rejected`` or ``underReview`` one hides nothing, SARIF 3.35.4);
     ``properties.issue_severity`` decides when it names an ASH severity;
     otherwise the SARIF ``level`` does. Both comparisons are
     ``utils.severity_ladder``'s, so a falsy threshold counts nothing here too.
     """
+    from automated_security_helper.utils.sarif_utils import is_result_suppressed
     from automated_security_helper.utils.severity_ladder import (
         SEVERITIES,
         sarif_level_fails_threshold,
         severity_fails_threshold,
     )
 
-    if result.get("suppressions"):
+    if is_result_suppressed(result):
         return False
     props = result.get("properties")
     issue_severity = (
@@ -645,7 +648,12 @@ def _sarif_result_selected(
         if not isinstance(scanner, str) or scanner.lower() not in scanner_list:
             return False
     if severity_list:
-        if result.get("suppressions"):
+        from automated_security_helper.utils.sarif_utils import is_result_suppressed
+
+        # The same reading as the counts: a suppression in effect puts the
+        # result in the suppressed bucket; a rejected or underReview one leaves
+        # it in its own severity's.
+        if is_result_suppressed(result):
             return "suppressed" in severity_list
         return _get_finding_severity(result).lower() in severity_list
     return True

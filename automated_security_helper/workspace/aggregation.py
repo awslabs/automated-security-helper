@@ -592,12 +592,15 @@ def result_is_suppressed(result: Mapping[str, Any]) -> bool:
     that states none, does. Read as any-suppression, a finding whose only
     suppression awaited review was left out of a project's finding and actionable
     counts while the flat finding, the OCSF record and the per-scanner counts kept
-    it. Imported inside the function because ``sarif_utils`` imports the results
-    model this module also imports, and the module-level order is not fixed.
+    it. The answer is ``sarif_utils.is_result_suppressed``'s, the one the exit
+    code, the ``--min-severity`` gate, the statistics calculator, the result
+    filters and the JUnit reporter read too. Imported inside the function because
+    ``sarif_utils`` imports the results model this module also imports, and the
+    module-level order is not fixed.
     """
-    from automated_security_helper.utils.sarif_utils import suppressions_in_effect
+    from automated_security_helper.utils.sarif_utils import is_result_suppressed
 
-    return bool(suppressions_in_effect(result.get("suppressions")))
+    return is_result_suppressed(result)
 
 
 def actionable_results_by_scanner(

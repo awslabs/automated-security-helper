@@ -29,6 +29,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sarif_utils import suppressions_in_effect
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     SEVERITY_THRESHOLDS,
@@ -371,14 +372,19 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 # in one report and the right one in another.
                 project = extract_workspace_project(result)
 
-                # Add failure details for failed findings
-                if result.suppressions and len(result.suppressions) > 0:
+                # A suppression hides the finding only when it is in effect:
+                # one whose state is rejected or underReview (SARIF 3.35.4) was
+                # never an approval, so the finding is graded below as the exit
+                # code, the per-scanner counts and the workspace verdict grade
+                # it. Only the suppressions in effect are rendered as the skip.
+                in_effect = suppressions_in_effect(result.suppressions)
+                if in_effect:
                     test_case.result = [
                         Skipped(
                             message=_xml_text(suppression.justification),
                             type_="suppression",
                         )
-                        for suppression in result.suppressions
+                        for suppression in in_effect
                     ]
                 elif result.kind == "notApplicable":
                     # SARIF 2.1.0 3.27.9: "the rule specified by ruleId was not

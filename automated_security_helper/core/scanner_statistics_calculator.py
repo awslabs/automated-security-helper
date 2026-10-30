@@ -390,7 +390,10 @@ class ScannerStatisticsCalculator:
             - none -> info
             - (default) -> info
         """
-        from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+        from automated_security_helper.utils.sarif_utils import (
+            _resolve_result_severity,
+            is_result_suppressed,
+        )
 
         counts = ScannerSeverityCount()
 
@@ -404,7 +407,11 @@ class ScannerStatisticsCalculator:
                 ):
                     continue
 
-                if result.suppressions and len(result.suppressions) > 0:
+                # Suppressed means a suppression IN EFFECT: one whose state is
+                # rejected or underReview (SARIF 3.35.4) hides nothing, so its
+                # finding is counted under its severity, as the exit code, the
+                # flat finding and the workspace verdict count it.
+                if is_result_suppressed(result):
                     counts.increment("suppressed")
                 else:
                     counts.increment(_resolve_result_severity(result))
