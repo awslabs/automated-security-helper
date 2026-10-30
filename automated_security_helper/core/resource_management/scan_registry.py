@@ -125,13 +125,20 @@ def _owner(session_id: Optional[str]) -> str:
 
 
 def _empty_coverage() -> Dict[str, Any]:
-    """The coverage payload of a scan with no gap to report."""
+    """The coverage payload of a scan with no gap to report.
+
+    The same key set as ``ScanIncompleteness.to_payload()``, ``could_not_stop``
+    included: without it a progress response's keys depended on whether the
+    runner had recorded coverage, so a client reading the key of a running or
+    failed scan got KeyError where a finished one answered.
+    """
     return {
         "incomplete_scanners": [],
         "no_scanner_ran": False,
         "incomplete_converters": [],
         "unevaluated_rules": [],
         "stale_content_databases": [],
+        "could_not_stop": [],
     }
 
 
@@ -193,6 +200,10 @@ class ScanRegistryEntry:
         # an unrelated one.
         self.canonical_directory = _canonical_directory(directory_path)
         self.output_directory = output_directory
+        # The output directory as one comparable form too: two scans of
+        # different source directories that name the same output directory
+        # would write one tree, so register_scan refuses the second.
+        self.canonical_output_directory = _canonical_directory(output_directory)
         self.start_time = datetime.now()
         self.end_time: Optional[datetime] = None
         self.status = MCScanStatus.PENDING
@@ -231,6 +242,12 @@ class ScanRegistryEntry:
         # that restore. See occupies_its_directory.
         self.has_runner = False
         self.runner_done = Event()
+        # Set when check_scan_progress closed this entry from a results file
+        # while it was PENDING with no runner. That file can be a previous
+        # scan's, so the runner's later RUNNING claim is admitted for such an
+        # entry (and clears what the file put there); for an entry a cancel or
+        # a runner closed, the claim is refused.
+        self.closed_from_file = False
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -261,9 +278,19 @@ class ScanRegistryEntry:
 
         Args:
             process_id: Optional process ID of the scan process
+
+        A running scan has not ended: whatever an earlier close recorded (the
+        end time, an error message, coverage, an exit code) is cleared, so an
+        entry reopened from a file-derived close does not carry that file's
+        coverage and error text into the new run's result.
         """
         self.status = MCScanStatus.RUNNING
         self.process_id = process_id
+        self.end_time = None
+        self.error_message = None
+        self.coverage = None
+        self.exit_code = None
+        self.closed_from_file = False
 
     def mark_completed(self) -> None:
         """Mark the scan as completed."""
@@ -502,46 +529,67 @@ class ScanRegistry:
             # The refusal names the running scan's id, and how a stopping scan
             # ended, only to the session that owns it. Another session is told
             # the directory is busy, which it needs to know, and nothing that
-            # would let it address that scan or learn its outcome.
+            # would let it address that scan or learn its outcome: not even
+            # that the scan is stopping rather than running, which says that
+            # someone closed it.
             requested = _canonical_directory(directory_path)
+            requested_output = _canonical_directory(output_directory)
             for entry in self._registry.values():
-                if (
-                    entry.canonical_directory == requested
-                    and entry.occupies_its_directory()
-                ):
-                    owned = entry.session_id == _owner(session_id)
-                    named: Dict[str, Any] = {"directory_path": directory_path}
-                    if owned:
-                        named["scan_id"] = entry.scan_id
-                    if not entry.is_active():
-                        ending = f" ({entry.status.value})" if owned else ""
-                        raise MCPResourceError(
-                            f"Directory {directory_path} has a scan that is still "
-                            f"stopping{ending}",
-                            context={
-                                **named,
-                                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
-                                "suggestions": [
-                                    (
-                                        "Retry in a few seconds: the scan stops its "
-                                        "scanner and puts the previous results back "
-                                        "before the directory is free"
-                                    ),
-                                ],
-                            },
-                        )
+                if not entry.occupies_its_directory():
+                    continue
+                same_directory = entry.canonical_directory == requested
+                same_output = entry.canonical_output_directory == requested_output
+                if not same_directory and not same_output:
+                    continue
+                owned = entry.session_id == _owner(session_id)
+                named: Dict[str, Any] = {"directory_path": directory_path}
+                if owned:
+                    named["scan_id"] = entry.scan_id
+                if not same_directory:
+                    # Another source directory's scan writes into this output
+                    # directory: two scans on one output tree, each removing
+                    # and rewriting the other's files.
                     raise MCPResourceError(
-                        f"Directory {directory_path} already has an active scan",
+                        f"Output directory {output_directory} is in use by a scan "
+                        "of another directory",
+                        context={
+                            **named,
+                            "output_directory": output_directory,
+                            "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                            "suggestions": [
+                                "Wait for the existing scan to complete",
+                                "Use a different output directory for the new scan",
+                            ],
+                        },
+                    )
+                if owned and not entry.is_active():
+                    raise MCPResourceError(
+                        f"Directory {directory_path} has a scan that is still "
+                        f"stopping ({entry.status.value})",
                         context={
                             **named,
                             "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
                             "suggestions": [
-                                "Wait for the existing scan to complete",
-                                "Cancel the existing scan if it's no longer needed",
-                                "Use a different directory for the new scan",
+                                (
+                                    "Retry in a few seconds: the scan stops its "
+                                    "scanner and puts the previous results back "
+                                    "before the directory is free"
+                                ),
                             ],
                         },
                     )
+                raise MCPResourceError(
+                    f"Directory {directory_path} already has an active scan",
+                    context={
+                        **named,
+                        "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                        "suggestions": [
+                            "Wait for the existing scan to complete",
+                            "Cancel the existing scan if it's no longer needed",
+                            "Use a different directory for the new scan",
+                        ],
+                    },
+                )
 
             # Create and register the scan entry
             try:
@@ -612,25 +660,37 @@ class ScanRegistry:
         owner = _owner(session_id)
         return [e for e in self._registry.values() if e.session_id == owner]
 
-    def get_scan_by_directory(self, directory_path: str) -> Optional[ScanRegistryEntry]:
+    def get_scan_by_directory(
+        self, directory_path: str, session_id: Optional[str] = None
+    ) -> Optional[ScanRegistryEntry]:
         """
-        Get the active scan for a directory.
+        Get the scan that occupies a directory.
 
         Args:
             directory_path: Path to the directory
+            session_id: When given, only that session's scan is returned;
+                another session's answers None, as every session-scoped lookup
+                answers for a scan it does not own. None is the unscoped lookup.
 
         Returns:
-            Active scan registry entry or None if not found
+            The registry entry occupying the directory, or None if there is none
 
         Canonicalised on both sides, matching :meth:`register_scan`. The two have
         to agree: a caller told "directory /proj/ already has an active scan" and
         given that scan's id has to be able to reach the same entry by the same
-        string, and before this they could not.
+        string, and before this they could not. They agree on what occupies a
+        directory too (:meth:`ScanRegistryEntry.occupies_its_directory`): a
+        cancelled scan whose runner is still stopping is what register_scan
+        refuses the directory for, and this used to answer None for it, so a
+        directory reported free was refused.
         """
         requested = _canonical_directory(directory_path)
         with self._registry_lock:
-            for entry in self._registry.values():
-                if entry.canonical_directory == requested and entry.is_active():
+            for entry in self._entries_for(session_id):
+                if (
+                    entry.canonical_directory == requested
+                    and entry.occupies_its_directory()
+                ):
                     return entry
             return None
 
@@ -667,7 +727,20 @@ class ScanRegistry:
             error_message: Optional error message for failed scans
 
         Returns:
-            True if the scan was updated, False if not found
+            True if the scan was updated, False if not found, or if ``status``
+            is RUNNING and the entry has ended.
+
+        ``PENDING`` is refused with ValueError: it is the state an entry is
+        registered in and nothing moves one back to it, so the call used to
+        return True and log an update while changing nothing.
+
+        ``RUNNING`` over an ended entry is refused, so the runner's claim of its
+        entry cannot reopen a scan that a cancel closed before the runner's first
+        step, or that a runner closed. The one entry it may reopen is one that
+        :meth:`check_scan_progress` closed from a results file while the entry
+        was PENDING with no runner (``closed_from_file``): that file can be the
+        previous scan's, and the runner that then claims the entry owns its
+        lifecycle; ``mark_running`` clears what the file put there.
         """
         if status == MCScanStatus.INCOMPLETE:
             # finish_scan is the only way in, because it carries the coverage gap.
@@ -675,9 +748,24 @@ class ScanRegistry:
                 f"Scan {scan_id} cannot be marked incomplete without its coverage "
                 "gap; close it with finish_scan(..., coverage=...)"
             )
+        if status == MCScanStatus.PENDING:
+            raise ValueError(
+                f"Scan {scan_id} cannot be moved back to pending: it is the state a "
+                "scan is registered in"
+            )
         with self._registry_lock:
             entry = self._registry.get(scan_id)
             if entry is None:
+                return False
+            if (
+                status == MCScanStatus.RUNNING
+                and entry.status in ENDED
+                and not entry.closed_from_file
+            ):
+                self._logger.info(
+                    f"Scan {scan_id} stays {entry.status.value}: a scan that has "
+                    "ended is not reopened as running"
+                )
                 return False
             self._apply_status(scan_id, entry, status, error_message)
             return True
@@ -754,7 +842,10 @@ class ScanRegistry:
             True if the entry was closed, False if it was not found or had already
             left the active states.
         """
-        if status == MCScanStatus.INCOMPLETE and not coverage:
+        if status == MCScanStatus.INCOMPLETE and not coverage_has_gap(coverage):
+            # A non-empty payload whose every gap list is empty names no gap
+            # either: closed with it, the scan read "incomplete" beside
+            # coverage_complete true.
             raise ValueError(
                 f"Scan {scan_id} cannot be closed as incomplete without the coverage "
                 "gap that makes it so"
@@ -868,7 +959,12 @@ class ScanRegistry:
 
             # An in-process scan has no process ID. mark_cancelled below sets its
             # cancel event, which stops it; a scan with a process of its own is
-            # also signalled.
+            # also signalled. A signal the system refuses is recorded on the
+            # entry as a warning and does not stop the cancel: raising here left
+            # the entry active with its cancel event never set, so a scan whose
+            # recorded pid could not be signalled could not be cancelled at all.
+            # The pid is signalled as recorded; whether it still belongs to the
+            # scan is not checked, which no portable call answers.
             if entry.process_id:
                 try:
                     os.kill(entry.process_id, signal.SIGTERM)
@@ -883,17 +979,18 @@ class ScanRegistry:
                     self._logger.error(
                         f"Permission denied when trying to terminate process {entry.process_id}"
                     )
-                    raise MCPResourceError(
-                        f"Permission denied when trying to terminate process {entry.process_id}",
-                        context={"scan_id": scan_id, "process_id": entry.process_id},
+                    entry.add_warning(
+                        f"Permission denied when trying to terminate process "
+                        f"{entry.process_id}; the scan was cancelled through its "
+                        "cancel event only"
                     )
                 except OSError as e:
                     self._logger.error(
                         f"Error terminating process {entry.process_id}: {str(e)}"
                     )
-                    raise MCPResourceError(
-                        f"Error terminating process {entry.process_id}: {str(e)}",
-                        context={"scan_id": scan_id, "process_id": entry.process_id},
+                    entry.add_warning(
+                        f"Error terminating process {entry.process_id}: {str(e)}; "
+                        "the scan was cancelled through its cancel event only"
                     )
 
             # Mark the scan as cancelled, which also sets its cancel event
@@ -903,12 +1000,14 @@ class ScanRegistry:
             )
             return True
 
-    def cleanup_scan(self, scan_id: str) -> bool:
+    def cleanup_scan(self, scan_id: str, session_id: Optional[str] = None) -> bool:
         """
         Remove a scan from the registry.
 
         Args:
             scan_id: ID of the scan to remove
+            session_id: When given, only that session's scan is removed; another
+                session's id is treated as not found.
 
         Returns:
             True if the scan was removed, False if not found, or if its runner
@@ -923,7 +1022,7 @@ class ScanRegistry:
         new scan had written. Remove it again once the runner is done.
         """
         with self._registry_lock:
-            entry = self._registry.get(scan_id)
+            entry = self._visible(scan_id, session_id)
             if entry is None:
                 return False
             if entry.has_runner and not entry.runner_done.is_set():
@@ -1017,6 +1116,29 @@ class ScanRegistry:
                 counts[entry.status.value] += 1
             return counts
 
+    def get_scan_statistics(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """The total, active and per-status counts, read in one lock acquisition.
+
+        Args:
+            session_id: When given, count only that session's scans
+
+        Returns:
+            ``total_scans``, ``active_scans`` and ``status_counts``, which agree
+            with each other: read as three separate calls, a registration or a
+            close between two of them made the total disagree with the sum of
+            the status counts.
+        """
+        with self._registry_lock:
+            entries = self._entries_for(session_id)
+            counts = {status.value: 0 for status in MCScanStatus}
+            for entry in entries:
+                counts[entry.status.value] += 1
+            return {
+                "total_scans": len(entries),
+                "active_scans": sum(1 for entry in entries if entry.is_active()),
+                "status_counts": counts,
+            }
+
     def check_scan_progress(
         self, scan_id: str, session_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -1064,12 +1186,12 @@ class ScanRegistry:
             # Convert output directory to Path
             output_dir = Path(entry.output_directory)
 
-            # Validate output directory using our enhanced validation
-            error = validate_directory_path(output_dir)
-            if error:
-                # Add scan context to the error
-                error.context["scan_id"] = scan_id
-                raise error
+            # An output directory that is not there (never created, or removed
+            # since) is not an error of the poll: the entry's status is still
+            # the answer, with nothing read from files. Raising here made the
+            # failed status and reason of a scan whose directory was gone
+            # unreadable by polling.
+            output_missing = validate_directory_path(output_dir) is not None
 
             try:
                 # Create scan progress object from files, then reconcile it with
@@ -1104,7 +1226,7 @@ class ScanRegistry:
                     and other.start_time > entry.start_time
                     for other in self._registry.values()
                 )
-                foreign_output = previous_only or superseded
+                foreign_output = previous_only or superseded or output_missing
                 scan_progress = (
                     ScanProgress(scan_id=scan_id)
                     if foreign_output
@@ -1112,7 +1234,15 @@ class ScanRegistry:
                 )
                 results_path = output_dir / "ash_aggregated_results.json"
 
-                if entry.status == MCScanStatus.RUNNING:
+                # A PENDING entry a runner has claimed (has_runner) is the
+                # runner's to close, as a RUNNING one is: the file on disk is
+                # the previous scan's until the runner writes. Only a PENDING
+                # entry with no runner takes its status from the file.
+                owned_by_a_runner = entry.status == MCScanStatus.RUNNING or (
+                    entry.status == MCScanStatus.PENDING and entry.has_runner
+                )
+
+                if owned_by_a_runner:
                     scan_progress.mark_in_progress()
                 elif entry.status in (
                     MCScanStatus.FAILED,
@@ -1127,7 +1257,8 @@ class ScanRegistry:
                         # A PENDING entry, which no runner owns, so the file
                         # decides -- and it decides incomplete versus completed by
                         # the rule the runner's exit code uses, not by the file
-                        # merely parsing.
+                        # merely parsing. Recorded as closed from the file, so a
+                        # runner that claims the entry after all may reopen it.
                         model = load_aggregated_results_model(output_dir)
                         if model is None:
                             entry.mark_completed()
@@ -1137,6 +1268,7 @@ class ScanRegistry:
                                 entry.mark_incomplete()
                             else:
                                 entry.mark_completed()
+                        entry.closed_from_file = True
                 elif scan_progress.status == "failed":
                     # The results file exists and cannot be read as results.
                     # Only an entry no runner owns (PENDING) takes its status
@@ -1144,12 +1276,19 @@ class ScanRegistry:
                     # scan that did finish; a file that later reads as
                     # unusable is reported on the response, with its reason,
                     # and does not turn a read-only poll into a permanent
-                    # FAILED with a moved end_time.
+                    # FAILED with a moved end_time. Closed through
+                    # _apply_status, the one sink that redacts the message
+                    # with the entry's environment values; mark_failed called
+                    # directly skipped that.
                     if entry.status == MCScanStatus.PENDING:
-                        entry.mark_failed(
+                        self._apply_status(
+                            scan_id,
+                            entry,
+                            MCScanStatus.FAILED,
                             scan_progress.error_message
-                            or f"Aggregated results file {results_path} could not be read"
+                            or f"Aggregated results file {results_path} could not be read",
                         )
+                        entry.closed_from_file = True
                 elif scan_progress.results_pending:
                     # A JSON object with neither scanner_results nor sarif is not a
                     # results document. Before anything has closed the entry that
@@ -1162,7 +1301,12 @@ class ScanRegistry:
                             "scanner_results nor sarif, and the scan has ended, so it "
                             "never wrote its final results"
                         )
-                        entry.mark_failed(scan_progress.error_message)
+                        self._apply_status(
+                            scan_id,
+                            entry,
+                            MCScanStatus.FAILED,
+                            scan_progress.error_message,
+                        )
                 elif entry.status == MCScanStatus.COMPLETED:
                     # No results file, and whoever ran the scan closed the entry as
                     # completed. The entry owns the lifecycle here: a workspace
