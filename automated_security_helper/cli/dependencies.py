@@ -87,9 +87,11 @@ from automated_security_helper.utils.python_child import (
     uv_child_overrides,
 )
 from automated_security_helper.utils.python_installer import environment_rebuild_note
+from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
     find_executable,
+    shown_arguments,
 )
 from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
 
@@ -643,8 +645,14 @@ def _shown_command(args: Iterable[Any], values: Iterable[str]) -> str:
     A plugin declares its argv; one that puts a Path, or a number, in it is
     shown, and then fails in the child's spawn, instead of ``' '.join`` raising
     TypeError over the whole install run.
+
+    Built as the runner builds its own "Running command" log line
+    (``subprocess_utils.run_command``): ``shown_arguments`` writes each
+    ``--config-overrides`` value as its key, and ``value_tuple`` reads the values
+    as one value each, so the two lines about one child cannot drift apart.
     """
-    return text_without_values(" ".join(str(part) for part in args), values)
+    shown = " ".join(map(str, shown_arguments(list(args))))
+    return text_without_values(shown, value_tuple(values))
 
 
 def run_command(args: List[str], shell: bool = False):
@@ -1360,7 +1368,9 @@ def install_dependencies(
 
     ash_environment_requirements: List[str] = []
     # For run_command's lines about each child; reset once the installs are done.
-    install_values = _INSTALL_VALUES.set(tuple(environment_values))
+    # Through the one normalizer every redaction reads values with, so a lone
+    # string is one value, never its characters.
+    install_values = _INSTALL_VALUES.set(value_tuple(environment_values))
     for plugin_type, plugin_name, plugin_instance in selected:
         outcome = PluginInstallOutcome(
             name=plugin_name,

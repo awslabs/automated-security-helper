@@ -47,6 +47,27 @@ def test_a_command_line_is_shown_as_text_without_the_values():
     assert CANARY not in shown, shown
 
 
+def test_the_command_line_is_the_runners_own_form():
+    """Built with the runner's helpers: a --config-overrides value is written as
+    its key, as the runner's "Running command" log line writes it, so the two
+    lines about one child read the same."""
+    argv = ["ash", "--config-overrides", f"scanners.x.options.token={CANARY}"]
+    runners_line = " ".join(map(str, subprocess_utils.shown_arguments(argv)))
+
+    shown = dependencies_module._shown_command(argv, ())
+
+    assert shown == runners_line, (shown, runners_line)
+    assert CANARY not in shown, shown
+
+
+def test_a_lone_string_value_is_one_value_not_its_characters():
+    """The values reach the redactor through the one normalizer every sink
+    reads them with; tuple() of a lone string would be its characters, each
+    too short to redact, so the value would print whole."""
+    shown = dependencies_module._shown_command(["echo", CANARY], CANARY)
+    assert CANARY not in shown, shown
+
+
 @pytest.fixture
 def install_values():
     token = dependencies_module._INSTALL_VALUES.set((CANARY,))
