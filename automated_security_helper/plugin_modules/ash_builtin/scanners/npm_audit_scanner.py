@@ -3,12 +3,15 @@
 import copy
 import json
 import logging
+import os
 import re
 import secrets
+import shutil
+import tempfile
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal, Any, Sequence
+from typing import Annotated, ClassVar, Dict, List, Literal, Any, Sequence, Set
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -237,11 +240,81 @@ def _ndjson_lines(text: str) -> List[str]:
     return lines
 
 
+def _berry_deprecation_line(line: Any) -> bool:
+    """Whether a `yarn npm audit --json` (yarn 4) line lists a deprecation.
+
+    yarn 4 lists deprecated packages in the advisory stream, with an ID such as
+    ``"mkdirp (deprecation)"`` and no advisory URL. A deprecation is not a
+    vulnerability (npm audit does not report them either), but the line is
+    yarn's: it shows the audit ran, where an advisory-shaped line the reader
+    cannot read does not.
+    """
+    children = line.get("children") if isinstance(line, dict) else None
+    if not isinstance(children, dict):
+        return False
+    advisory_id = children.get("ID")
+    return isinstance(advisory_id, str) and advisory_id.endswith("(deprecation)")
+
+
+def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | None:
+    """``lock_file`` relative to the scanned target as a POSIX path, or None.
+
+    The place a yarn or pnpm result came from: those tools name no install
+    path, so without it findings from two projects for one package, version
+    and advisory were identical. Lexical, never resolved: a linked lockfile
+    is reported where it sits in the tree.
+    """
+    if lock_file is None:
+        return None
+    try:
+        return (
+            Path(os.path.abspath(lock_file))
+            .relative_to(Path(os.path.abspath(target_path)))
+            .as_posix()
+        )
+    except ValueError:
+        return None
+
+
 # Where a yarn audit's advisories sit in the per-lockfile document, after
 # _parse_yarn_audit has put all three yarn output formats into one shape.
 _YARN_ADVISORIES_KEY = "yarn_advisories"
 
 _SEMVER_MAJOR = re.compile(r"^\s*v?(\d+)\.\d+")
+
+#: Seconds the ``npm --version`` dependency probe may take. Every other
+#: subprocess the scanner starts is bounded; an unbounded probe could hold the
+#: dependency check (and so the scan) for as long as a wedged npm took.
+_VERSION_PROBE_TIMEOUT_SECONDS = 30.0
+
+#: The package manager each lockfile is audited with.
+_LOCKFILE_BINARY = {
+    "yarn.lock": "yarn",
+    "pnpm-lock.yaml": "pnpm",
+    "npm-shrinkwrap.json": "npm",
+    "package-lock.json": "npm",
+}
+
+
+def _machine_architecture() -> str:
+    """The host's architecture in the install-command table's vocabulary.
+
+    ``platform.machine()`` names the CPU (``x86_64``, ``AMD64``, ``aarch64``,
+    ``arm64``); the table keys are ``amd64`` and ``arm64``. Pointer width
+    decided this before, which read every 64-bit host, 64-bit ARM included,
+    as ``amd64`` and a 32-bit one as ``arm64``, so an ``arm64`` entry could
+    never be selected where it applied. A name outside both families is
+    returned as spelled, lowercased, and matches no entry.
+    """
+    import platform
+
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64", "x64"):
+        return "amd64"
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    return machine
+
 
 # In a Node crash dump: the "file.js:LINE" header above the offending source
 # line, and a line that names its error ("Error: ...", "Ls [RequestError]: ...").
@@ -299,6 +372,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     # run: validate_plugin_dependencies says no, as snyk-code's does.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
 
+    #: Lockfiles the ignore paths dropped from the last package selection
+    #: (``_package_manifests``), so ``_lockfile_beside`` never picks one of them
+    #: for a package whose manifest stayed in the scan set.
+    _ignored_lockfiles: Set[Path] = PrivateAttr(default_factory=set)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = NpmAuditScannerConfig()
@@ -345,6 +423,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         clean audit. The reason is recorded for the MISSING row; with no lockfile to
         audit ScanPhase records the scanner SKIPPED instead.
 
+        Online, True when a package manager that one of the source tree's
+        lockfiles needs is installed (npm when the tree names none): a yarn- or
+        pnpm-only project was reported MISSING when npm alone was absent, though
+        yarn or pnpm could audit it. A lockfile whose own manager is absent is
+        then a failed target in ``scan()``, as it was for yarn and pnpm.
+
+        The version probe (``npm --version``) is bounded like every other
+        subprocess here, runs in a fresh empty directory under the results
+        directory so npm reads no ``.npmrc`` of the scanned repository (its
+        default working directory was the scanned root), and its answer is kept
+        trimmed: the raw stdout, line feed included, went into every SARIF
+        driver version, and a probe that printed nothing was reported as version
+        ``1.0.0``. With nothing printed the version stays unknown.
+
         Returns:
             True if validation passes, False otherwise
 
@@ -361,15 +453,63 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._package_manifests("source"), "source"
             )
             return False
-        found = find_executable(self.command)
-        if found:
-            self.tool_version = self._run_subprocess(
+        needed = self._package_managers_needed() or {self.command}
+        available = {binary for binary in needed if find_executable(binary)}
+        if not available:
+            names = ", ".join(sorted(needed))
+            self.dependency_unavailable_reason = (
+                f"{names} not found on PATH; the lockfiles in the scanned tree are "
+                f"audited with {names}"
+            )
+            return False
+        if find_executable(self.command):
+            self._probe_npm_version()
+        return True
+
+    def _package_managers_needed(self) -> Set[str]:
+        """The package managers the source tree's lockfiles are audited with."""
+        needed: Set[str] = set()
+        try:
+            manifests = self._package_manifests("source")
+        except Exception as exc:  # the selection is scan()'s to fail loudly
+            ASH_LOGGER.debug(
+                f"npm-audit: could not list the packages for the dependency check: "
+                f"{type(exc).__name__}",
+                extra=NO_MARKUP,
+            )
+            return needed
+        for manifest in manifests:
+            lock_file = self._lockfile_beside(manifest)
+            if lock_file is not None:
+                needed.add(_LOCKFILE_BINARY.get(lock_file.name, self.command))
+        return needed
+
+    def _probe_npm_version(self) -> None:
+        """Record npm's version from ``npm --version``, trimmed; unknown when
+        it printed nothing. See ``validate_plugin_dependencies``."""
+        probe_dir: str | None = None
+        try:
+            results_dir = getattr(self, "results_dir", None)
+            if results_dir is not None:
+                Path(results_dir).mkdir(parents=True, exist_ok=True)
+                probe_dir = tempfile.mkdtemp(prefix="ash-npm-version-", dir=results_dir)
+        except OSError:
+            probe_dir = None
+        try:
+            response = self._run_subprocess(
                 command=[self.command, "--version"],
                 stderr_preference="return",
                 stdout_preference="return",
-            ).get("stdout", "1.0.0")
-
-        return found is not None
+                cwd=probe_dir,
+                timeout=_VERSION_PROBE_TIMEOUT_SECONDS,
+            )
+        finally:
+            if probe_dir is not None:
+                shutil.rmtree(probe_dir, ignore_errors=True)
+        printed = _ANSI_ESCAPE.sub("", str(response.get("stdout") or "")).strip()
+        lines = [line.strip() for line in printed.splitlines() if line.strip()]
+        if lines:
+            self.tool_version = lines[-1]
 
     #: Lockfiles npm-audit audits, in the order it looks for one beside a package.json.
     #: npm reads npm-shrinkwrap.json ahead of package-lock.json when both exist, and
@@ -425,6 +565,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         In a workspace scan the workspace's output directory is left out of the
         walk like the project's own (``workspace_output_dir``), as the other
         readers of the scan set leave it out.
+
+        The lockfile re-add is for the LINK case only: a regular package.json the
+        scan set left out was left out on purpose (an ignore path named it), and
+        re-adding it from its lockfile audited a package the ignore entry had
+        dropped. The lockfiles the ignore paths dropped are remembered
+        (``_ignored_lockfiles``) so ``_lockfile_beside`` never chooses one of
+        them for a package whose manifest stayed in the set: it probes the
+        filesystem, where an ignored yarn.lock otherwise won over the
+        package-lock.json beside it that the set kept.
         """
         ignore_paths = (
             self._scan_ignore_paths()
@@ -432,25 +581,29 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             else list(global_ignore_paths)
         )
         workspace_output = getattr(self.context, "workspace_output_dir", None)
-        orig_scannable = (
-            list(self.context.work_dir.glob("**/*.*"))
-            if target_type == "converted"
-            else drop_ignored(
-                scan_set(
-                    source=self.context.source_dir,
-                    output=self.context.output_dir,
-                    honor_ignore_files=honors_ignore_files(
-                        getattr(self.context, "config", None)
-                    ),
-                    run_id=getattr(self.context, "run_id", None),
-                    workspace_output_dir=(
-                        str(workspace_output) if workspace_output else None
-                    ),
+        ignored_lockfiles: Set[Path] = set()
+        if target_type == "converted":
+            orig_scannable = list(self.context.work_dir.glob("**/*.*"))
+        else:
+            walked = scan_set(
+                source=self.context.source_dir,
+                output=self.context.output_dir,
+                honor_ignore_files=honors_ignore_files(
+                    getattr(self.context, "config", None)
                 ),
-                self.context.source_dir,
-                ignore_paths,
+                run_id=getattr(self.context, "run_id", None),
+                workspace_output_dir=(
+                    str(workspace_output) if workspace_output else None
+                ),
             )
-        )
+            orig_scannable = drop_ignored(walked, self.context.source_dir, ignore_paths)
+            kept = {Path(f) for f in orig_scannable}
+            ignored_lockfiles = {
+                Path(f)
+                for f in walked
+                if Path(f).name in self.LOCKFILE_NAMES and Path(f) not in kept
+            }
+        self._ignored_lockfiles = ignored_lockfiles
         manifests = [Path(f) for f in orig_scannable if Path(f).name == "package.json"]
         listed = {manifest.parent for manifest in manifests}
         for f in orig_scannable:
@@ -459,18 +612,27 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             if (
                 pf.name in self.LOCKFILE_NAMES
                 and pf.parent not in listed
-                and (manifest.is_symlink() or manifest.exists())
+                and manifest.is_symlink()
             ):
                 listed.add(pf.parent)
                 manifests.append(manifest)
         return [manifest.as_posix() for manifest in manifests]
 
-    @classmethod
-    def _lockfile_beside(cls, package_file: str | Path) -> Path | None:
-        """The lockfile npm-audit audits for *package_file*, or None."""
-        for name in cls.LOCKFILE_NAMES:
+    def _lockfile_beside(self, package_file: str | Path) -> Path | None:
+        """The lockfile npm-audit audits for *package_file*, or None.
+
+        A lockfile the ignore paths dropped from the last selection is passed
+        over, so the next name in order (or none) is the answer. A link of a
+        lockfile's name that resolves to nothing counts as the lockfile: the
+        package is then refused in ``scan()`` with the link named and its
+        reason, where reading it as "no lockfile" passed the package over with
+        nothing recorded.
+        """
+        for name in self.LOCKFILE_NAMES:
             candidate = Path(package_file).parent.joinpath(name)
-            if candidate.exists():
+            if candidate in self._ignored_lockfiles:
+                continue
+            if candidate.is_symlink() or candidate.exists():
                 return candidate
         return None
 
@@ -496,10 +658,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _has_install_commands(self) -> bool:
         """Check if scanner has non-empty custom install commands."""
         import platform
-        import struct
 
         system = platform.system().lower()
-        arch = "amd64" if struct.calcsize("P") * 8 == 64 else "arm64"
+        arch = _machine_architecture()
 
         if system in self.custom_install_commands:
             if arch in self.custom_install_commands[system]:
@@ -552,13 +713,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         (None, None) when there is no lockfile, it is not an npm lockfile, or it
         is not under the scan root: node paths then cannot be tied to a place.
+
+        The relative path is lexical (absolute, not resolved): a lockfile that
+        is a link inside the tree is reported where it sits, with its
+        ``package_path`` under the link's directory, not the target's. The
+        index reads the lockfile through the link.
         """
         if lock_file is None or Path(lock_file).name not in NPM_LOCKFILE_NAMES:
             return None, None
         root = Path(target_path)
-        try:
-            rel = Path(lock_file).resolve().relative_to(root.resolve()).as_posix()
-        except ValueError:
+        rel = _shown_lockfile(Path(lock_file), root)
+        if rel is None:
             return None, None
         return rel, NpmLockIndex(root)
 
@@ -672,8 +837,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     ]
                 elif error:
                     parts.append(str(error))
-                reason = "; ".join(p for p in parts if p) or "no detail given"
-                return f"{binary} audit reported an error: {reason}"
+                reason = "; ".join(p for p in parts if p)
+                # The document's message, code and summary are the tool's own
+                # text, like its stderr: npm quotes the registry URL (with any
+                # token in it) and the proxy's reply back in them, so they are
+                # redacted with the same values the excerpt below is, and
+                # dropped when there are none to redact with.
+                if values is None:
+                    reason = "(the tool's error text is not shown)"
+                elif reason:
+                    reason = shown_tool_stderr(reason, values).strip()
+                return (
+                    f"{binary} audit reported an error: {reason or 'no detail given'}"
+                )
 
         if report_key is None:
             return None
@@ -935,8 +1111,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             "paths_key": "dependency_paths",
         }
 
-    @staticmethod
-    def _berry_advisory_record(line: Dict[str, Any]) -> Dict[str, Any] | None:
+    @classmethod
+    def _berry_advisory_record(cls, line: Dict[str, Any]) -> Dict[str, Any] | None:
         """One `yarn npm audit --json` (yarn 4) line as a record, or None.
 
         None for deprecation notices: yarn 4 lists deprecated packages in the
@@ -948,9 +1124,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         package = line.get("value")
         if not isinstance(children, dict) or not package:
             return None
-        advisory_id = children.get("ID")
-        if isinstance(advisory_id, str) and advisory_id.endswith("(deprecation)"):
+        if _berry_deprecation_line(line):
             return None
+        advisory_id = children.get("ID")
         return {
             "package": str(package),
             "id": advisory_id,
@@ -1108,11 +1284,32 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         saw_problem = True
                         continue
                     if isinstance(entry, dict) and "children" in entry:
-                        advisory_lines += 1
                         record = cls._berry_advisory_record(entry)
                         if record is not None:
                             records.append(record)
+                            advisory_lines += 1
+                        elif _berry_deprecation_line(entry):
+                            # A deprecation notice: not a finding, but yarn
+                            # did run and list it, so it is evidence of a
+                            # report like an advisory line.
+                            advisory_lines += 1
+                        else:
+                            # An advisory-shaped line the reader cannot read
+                            # (children not a mapping, no package): counting
+                            # it as evidence graded the output a clean audit
+                            # with that advisory dropped. It is a problem of
+                            # the output, kept raw like the others.
+                            problems.append(raw)
+                            saw_problem = True
                     elif isinstance(entry, dict) and "type" in entry:
+                        if entry.get("type") == "error":
+                            # yarn's own error event (yarn 2+ writes these on
+                            # stdout too): a problem, not narration, so an
+                            # error beside advisory lines, or with exit 0,
+                            # keeps the output from grading as a report.
+                            problems.append(raw)
+                            saw_problem = True
+                            continue
                         # A StreamReport event line (info, warning): the
                         # runner narrating, not a problem of the audit's --
                         # the yarn 1 loop and the detail reader both read a
@@ -1225,6 +1422,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         records: List[Dict[str, Any]],
         rules_dict: Dict[str, ReportingDescriptor],
         results: List[Result],
+        lockfile: str | None = None,
     ) -> None:
         """Rules and results for yarn and pnpm advisories, in the shape npm's take.
 
@@ -1233,7 +1431,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         the advisory, so it is a finding, not a rule with no result). The URI is
         the one the npm path gives a hoisted package, so path-based
         suppressions read the same; neither yarn nor pnpm says where a copy is
-        installed, so ``package_path`` is left out.
+        installed, so ``package_path`` is left out, and ``lockfile`` (the
+        audited lockfile, relative to the scanned target) says which project
+        the finding is from, where two projects' findings for one package,
+        version and advisory were otherwise identical. A record with no
+        installed version gets no ``installed_version``: the advisory's range
+        stood in for it, and a range is not a version.
+
+        A rule's ``helpUri`` is left unset for an advisory without a URL: the
+        SARIF model types it as a URL and refused the empty string.
         """
         for record in records:
             pkg_name = record["package"]
@@ -1262,7 +1468,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     fullDescription=MultiformatMessageString(
                         text=f"Vulnerability in {pkg_name}: {title}"
                     ),
-                    helpUri=record["url"],
+                    helpUri=record["url"] or None,
                     properties=PropertyBag(**rule_props),
                 )
             patched = record["patched_versions"]
@@ -1270,6 +1476,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             if patched is not None:
                 extra["patched_versions"] = patched
                 extra["fix_available"] = bool(patched) and patched != "<0.0.0"
+            if lockfile is not None:
+                extra["lockfile"] = lockfile
             # A record with no versions map (an advisory the tool listed with
             # no finding entries) is still the tool's finding: one result for
             # the package by name, its installed version unknown.
@@ -1278,6 +1486,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 per_copy = dict(extra)
                 if paths:
                     per_copy[record["paths_key"]] = paths
+                if version is not None:
+                    per_copy["installed_version"] = version
                 results.append(
                     Result(
                         ruleId=vuln_id,
@@ -1297,11 +1507,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         ],
                         properties=PropertyBag(
                             **identity_properties(pkg_name, version, None),
-                            installed_version=(
-                                version
-                                if version is not None
-                                else record["vulnerable_versions"]
-                            ),
                             vulnerable_versions=record["vulnerable_versions"],
                             recommendation=f"Update {pkg_name} to a non-vulnerable version",
                             severity=severity,
@@ -1315,10 +1520,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     @staticmethod
     def _advisory_id(pkg_name: str, via: Dict[str, Any]) -> str:
-        """Rule id of one advisory entry, the same for direct and root findings."""
-        return (
-            via.get("url", "").split("/")[-1] if via.get("url") else f"npm-{pkg_name}"
-        )
+        """Rule id of one advisory entry, the same for direct and root findings.
+
+        The URL's last path segment, trailing slashes dropped: a URL ending in
+        ``/`` gave the empty string, and every such advisory then shared one
+        empty-id rule. With no segment left, the package's own id.
+        """
+        url = str(via.get("url") or "")
+        segment = url.rstrip("/").split("/")[-1] if url else ""
+        return segment or f"npm-{pkg_name}"
 
     def _root_advisories(
         self,
@@ -1441,9 +1651,31 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # Create results list for SARIF
         results = []
 
+        # The place of these results: yarn and pnpm name no install path, so the
+        # audited lockfile is what tells one project's finding from another's.
+        lock_shown = _shown_lockfile(lock_file, target_path)
+        # (rule id, result URI) pairs already emitted for this lockfile: one
+        # GHSA can come back as several via entries with one URL (one per
+        # vulnerable range), which share a rule, and a copy whose version the
+        # lockfile does not give is kept under each, so it was reported once
+        # per range. One result per rule and place.
+        emitted: Set[tuple[str, str]] = set()
+
         # Process vulnerabilities
         if "vulnerabilities" in npm_audit_results:
             for pkg_name, vuln_info in npm_audit_results["vulnerabilities"].items():
+                if not isinstance(vuln_info, dict):
+                    # The evidence rule reads the map, not its entries; an
+                    # entry that is not an object is a report npm did not
+                    # write, and reading it as one crashed the conversion
+                    # with an attribute error the scan reported as its own
+                    # failure. Named instead, so the message says what the
+                    # report held.
+                    raise ScannerError(
+                        f"npm audit report entry for {pkg_name!r} is not an "
+                        f"object ({type(vuln_info).__name__}), so the report "
+                        "cannot be read"
+                    )
                 # Get severity
                 severity = vuln_info.get("severity", "moderate")
 
@@ -1459,6 +1691,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 for via in via_items:
                     # Skip if it's just a string reference to another package
                     if isinstance(via, str):
+                        continue
+                    if not isinstance(via, dict):
+                        # Neither a reference nor an advisory object: not a
+                        # shape npm writes. Reading its fields raised and
+                        # failed the scan; _root_advisories skips it, and so
+                        # does this loop, with the entry named in the log.
+                        ASH_LOGGER.warning(
+                            f"npm-audit: ignoring a via entry of {pkg_name} that "
+                            f"is neither a reference nor an advisory "
+                            f"({type(via).__name__})",
+                            extra=NO_MARKUP,
+                        )
                         continue
 
                     has_dict_via = True
@@ -1507,7 +1751,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             name=f"npm-audit-{vuln_id}",
                             shortDescription=MultiformatMessageString(text=title),
                             fullDescription=MultiformatMessageString(text=description),
-                            helpUri=via.get("url", ""),
+                            # Unset for an advisory without a URL: the model
+                            # types helpUri as a URL and refused "".
+                            helpUri=via.get("url") or None,
                             properties=PropertyBag(**rule_props),
                         )
                         rules_dict[vuln_id] = rule
@@ -1537,6 +1783,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             is False
                         ):
                             continue
+                        uri = f"node_modules/{pkg_location}/package.json"
+                        if (vuln_id, uri) in emitted:
+                            continue
+                        emitted.add((vuln_id, uri))
+                        # installed_version only when the lockfile gives one:
+                        # the advisory's range stood in for it, and a range is
+                        # not a version.
+                        known_version = (
+                            {"installed_version": identity[PACKAGE_VERSION_KEY]}
+                            if identity.get(PACKAGE_VERSION_KEY)
+                            else {}
+                        )
                         result = Result(
                             ruleId=vuln_id,
                             level=via_level,
@@ -1546,18 +1804,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri=f"node_modules/{pkg_location}/package.json"
-                                        ),
+                                        artifactLocation=ArtifactLocation(uri=uri),
                                         region=Region(startLine=1, startColumn=1),
                                     )
                                 )
                             ],
                             properties=PropertyBag(
                                 **identity,
-                                installed_version=identity.get(
-                                    PACKAGE_VERSION_KEY, vuln_info.get("range", "*")
-                                ),
+                                **known_version,
                                 vulnerable_versions=via_range,
                                 recommendation=f"Update {pkg_name} to a non-vulnerable version",
                                 severity=via_severity,
@@ -1572,9 +1826,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # Handle transitive-only vulnerabilities: all via entries
                 # are strings referencing other packages, so no Result was
                 # created above.  Build a minimal result from vuln_info.
-                if not has_dict_via and via_items:
+                via_names = [v for v in via_items if isinstance(v, str)]
+                if not has_dict_via and via_names:
                     vuln_id = f"npm-audit-transitive-{pkg_name}"
-                    via_refs = ", ".join(v for v in via_items if isinstance(v, str))
+                    via_refs = ", ".join(via_names)
                     title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
                     description = title
 
@@ -1617,6 +1872,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         identity_fields: Dict[str, Any] = dict(identity)
                         if root_advisories:
                             identity_fields[ROOT_ADVISORIES_KEY] = root_advisories
+                        if identity.get(PACKAGE_VERSION_KEY):
+                            identity_fields["installed_version"] = identity[
+                                PACKAGE_VERSION_KEY
+                            ]
                         result = Result(
                             ruleId=vuln_id,
                             level=level,
@@ -1635,9 +1894,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             ],
                             properties=PropertyBag(
                                 **identity_fields,
-                                installed_version=identity.get(
-                                    PACKAGE_VERSION_KEY, vuln_info.get("range", "*")
-                                ),
                                 vulnerable_versions=vuln_info.get("range", "*"),
                                 recommendation=f"Update {pkg_name} to a non-vulnerable version",
                                 severity=severity,
@@ -1651,7 +1907,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         if _YARN_ADVISORIES_KEY in npm_audit_results:
             self._add_yarn_results(
-                npm_audit_results[_YARN_ADVISORIES_KEY], rules_dict, results
+                npm_audit_results[_YARN_ADVISORIES_KEY],
+                rules_dict,
+                results,
+                lockfile=lock_shown,
             )
 
         # pnpm audit writes npm's v1 report, ``advisories`` and ``metadata``,
@@ -1662,6 +1921,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._v1_advisory_records(npm_audit_results["advisories"]),
                 rules_dict,
                 results,
+                lockfile=lock_shown,
             )
 
         # Add all rules to the tool component
@@ -1750,6 +2010,37 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _is_number(value: Any) -> bool:
         """An int or a float, and not a bool (a bool adds as 0 or 1)."""
         return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    @staticmethod
+    def _merge_keyed(
+        into: Dict[str, Any], incoming: Dict[str, Any], joined: Sequence[str]
+    ) -> None:
+        """Fold one lockfile's keyed entries into the merged results' map.
+
+        For results.json, the raw artifact written beside the SARIF. A key that
+        is new is copied in. A key both sides hold (a package vulnerable in two
+        lockfiles, an advisory found in two) keeps the first entry and joins the
+        ``joined`` lists of the second onto it, each item once, so the second
+        lockfile's nodes or findings are not lost; ``dict.update`` kept only the
+        last lockfile's entry. Two entries of other shapes keep the first. The
+        SARIF is converted per lockfile and never read from this map.
+        """
+        for key, entry in incoming.items():
+            if key not in into:
+                into[key] = copy.deepcopy(entry)
+                continue
+            current = into[key]
+            if not isinstance(current, dict) or not isinstance(entry, dict):
+                continue
+            for name in joined:
+                extra = entry.get(name)
+                if not isinstance(extra, list):
+                    continue
+                known = current.get(name)
+                if not isinstance(known, list):
+                    current[name] = copy.deepcopy(extra)
+                    continue
+                known.extend(copy.deepcopy(item) for item in extra if item not in known)
 
     @staticmethod
     def _response_summary(
@@ -1916,8 +2207,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 )
             ],
         )
-        # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
+        # Check if the target directory is empty or doesn't exist. The probe
+        # runs before the try below, so an OSError of its own (a target that is
+        # a file, one the scanning user cannot list) is turned into the
+        # ScannerError the method documents rather than escaping raw.
+        try:
+            nothing_there = not target.exists() or not any(target.iterdir())
+        except OSError as exc:
+            raise ScannerError(
+                f"Target directory {target} cannot be read: {type(exc).__name__}"
+            ) from exc
+        if nothing_there:
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
@@ -2069,9 +2369,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             continue
 
                         # Check that the binary is installed before
-                        # attempting to run it (#180).  npm is already
-                        # validated in validate_plugin_dependencies, but
-                        # yarn and pnpm may not be present.
+                        # attempting to run it (#180). The dependency check
+                        # asks only that SOME lockfile's package manager be
+                        # present, so any of the three may be missing here.
                         # A failed target, not a failed scan. Passing the lockfile
                         # over left its dependencies unchecked while the scan read as
                         # clean; failing the whole scan discarded the findings of
@@ -2081,7 +2381,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # executor refuses PASSED over a recorded name), and the
                         # completeness gate's partial-coverage arm still names the
                         # shortfall and exits 1.
-                        if binary != "npm" and find_executable(binary) is None:
+                        if find_executable(binary) is None:
                             message = (
                                 f"{lock_file}: {binary} is not installed, so it was "
                                 f"not audited. Install {binary} to audit it"
@@ -2256,15 +2556,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             if not all_results:
                                 all_results = audit_results
                             else:
-                                # Merge vulnerabilities
-                                if "vulnerabilities" in audit_results:
-                                    all_results.setdefault(
-                                        "vulnerabilities", {}
-                                    ).update(audit_results["vulnerabilities"])
-                                # pnpm's advisories, so results.json keeps them
+                                # Merge vulnerabilities: by package name, with
+                                # a package vulnerable in two lockfiles keeping
+                                # both lockfiles' nodes and advisories
+                                # (dict.update kept the last lockfile's entry).
+                                if isinstance(
+                                    audit_results.get("vulnerabilities"), dict
+                                ):
+                                    self._merge_keyed(
+                                        all_results.setdefault("vulnerabilities", {}),
+                                        audit_results["vulnerabilities"],
+                                        ("nodes", "via", "effects"),
+                                    )
+                                # pnpm's advisories, so results.json keeps them;
+                                # an advisory found in two lockfiles keeps both
+                                # lockfiles' findings.
                                 if isinstance(audit_results.get("advisories"), dict):
-                                    all_results.setdefault("advisories", {}).update(
-                                        audit_results["advisories"]
+                                    self._merge_keyed(
+                                        all_results.setdefault("advisories", {}),
+                                        audit_results["advisories"],
+                                        ("findings",),
                                     )
                                 # yarn's records, so results.json keeps every
                                 # yarn lockfile's advisories: with no branch
@@ -2293,12 +2604,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                         lock_file,
                                     )
                     except Exception as e:
+                        # The exception's text can quote the command line or a
+                        # tool line, either of which can carry a value the
+                        # config read from the environment, so it is redacted
+                        # like every other tool text here, and dropped when
+                        # there are no values to redact with (the hook raised).
+                        described = (
+                            shown_tool_stderr(str(e), record_values).strip()
+                            if record_values is not None
+                            else "(text not shown)"
+                        )
                         ASH_LOGGER.warning(
-                            f"Failed to run npm audit in {package_dir}: {str(e)}",
+                            f"Failed to run npm audit in {package_dir}: {described}",
                             extra=NO_MARKUP,
                         )
                         audit_failures.append(
-                            f"{lock_file}: the audit raised {type(e).__name__}: {e}"
+                            f"{lock_file}: the audit raised {type(e).__name__}: "
+                            f"{described}"
                         )
 
             # Save the combined results
@@ -2341,7 +2663,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
                 return sarif_report
             else:
-                # Return empty SARIF report
+                # Return empty SARIF report, with the npm version the
+                # dependency check detected (it read a literal 1.0.0).
                 return SarifReport(
                     version="2.1.0",
                     runs=[
@@ -2349,7 +2672,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             tool=Tool(
                                 driver=ToolComponent(
                                     name="npm-audit",
-                                    version="1.0.0",
+                                    version=self.tool_version,
                                     informationUri="https://docs.npmjs.com/cli/v8/commands/npm-audit",
                                 )
                             ),

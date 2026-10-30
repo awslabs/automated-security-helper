@@ -255,7 +255,8 @@ def test_has_install_commands_is_true_once_a_command_is_registered(
     import platform
 
     monkeypatch.setattr(platform, "system", lambda: "Linux")
-    # The arch key is derived from pointer size, so a 64-bit host reads "amd64".
+    # The arch key is the machine's family: an x86-64 host reads "amd64".
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     scanner.custom_install_commands["linux"]["amd64"] = [["echo", "install"]]
 
     assert scanner._has_install_commands() is True
@@ -274,11 +275,9 @@ def test_has_install_commands_is_false_when_the_arch_key_is_absent(
 ):
     """Windows has no arm64 entry, so an arm64 lookup falls through."""
     import platform
-    import struct
 
     monkeypatch.setattr(platform, "system", lambda: "Windows")
-    # Force the non-64-bit branch of the pointer-size check.
-    monkeypatch.setattr(struct, "calcsize", lambda fmt: 4)
+    monkeypatch.setattr(platform, "machine", lambda: "ARM64")
     scanner.custom_install_commands["windows"]["amd64"] = [["echo", "install"]]
 
     assert scanner._has_install_commands() is False, (
@@ -286,24 +285,29 @@ def test_has_install_commands_is_false_when_the_arch_key_is_absent(
     )
 
 
-def test_arch_key_is_derived_from_pointer_size_not_architecture(scanner, monkeypatch):
-    """The arch key comes from struct.calcsize('P'), not the real machine type.
+@pytest.mark.parametrize(
+    "machine,selected",
+    [("aarch64", "arm64"), ("arm64", "arm64"), ("x86_64", "amd64"), ("AMD64", "amd64")],
+)
+def test_arch_key_is_derived_from_the_machine_type(
+    scanner, monkeypatch, machine, selected
+):
+    """The arch key comes from platform.machine(), not from pointer width.
 
-    A 64-bit host reads "amd64" whatever its CPU is, so 64-bit ARM is labeled
-    amd64 and a 32-bit x86 host would be labeled arm64. This has no effect today
-    because every install-command list is empty, but it means the arm64 entries
-    can never be selected on a 64-bit machine.
+    Pointer width read every 64-bit host as "amd64", 64-bit ARM included, so
+    an arm64 install-command list could never be selected where it applied.
+    The entry for the machine's own family is the one consulted.
     """
     import platform
-    import struct
 
     monkeypatch.setattr(platform, "system", lambda: "Linux")
-    monkeypatch.setattr(struct, "calcsize", lambda fmt: 8)
-    scanner.custom_install_commands["linux"]["arm64"] = [["echo", "arm-install"]]
-    scanner.custom_install_commands["linux"]["amd64"] = []
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    other = "amd64" if selected == "arm64" else "arm64"
+    scanner.custom_install_commands["linux"][selected] = [["echo", "install"]]
+    scanner.custom_install_commands["linux"][other] = []
 
-    assert scanner._has_install_commands() is False, (
-        "the arm64 list is non-empty but a 64-bit pointer size selects amd64"
+    assert scanner._has_install_commands() is True, (
+        f"the {selected} list is non-empty and {machine} is a {selected} machine"
     )
 
 
