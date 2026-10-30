@@ -1658,7 +1658,11 @@ def record_converted_sources(
     ``/``, as ``scanned_tree.relative_display`` gives it). The file is
     :data:`CONVERTED_SOURCES_FILE_NAME` under *results_dir*; its keys are the
     written paths relative to *work_dir*, a directory's with a trailing ``/``, so
-    they are the ``converted_path`` a finding in that file carries. A path outside
+    they are the ``converted_path`` a finding in that file carries. That property
+    is written in the record form (:func:`path_in_record_form`: a name that is
+    not UTF-8 holds each lone surrogate as the text ``\\udcNN``), so the keys are
+    too; a key holding the surrogate itself matched no finding, and the filter
+    could not place a converted file whose name is not UTF-8. A path outside
     *work_dir* is left out, since no finding carries it. Nothing is written for an
     empty mapping.
 
@@ -1670,11 +1674,14 @@ def record_converted_sources(
     """
     from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
-    work = Path(work_dir).resolve()
+    # Both sides in the record form, as mark_converted_results compares them, so
+    # the key is the converted_path it writes, byte for byte.
+    work = path_in_record_form(Path(work_dir).resolve())
     recorded: Dict[str, str] = {}
     for written, source in sources.items():
         try:
-            relative = Path(written).resolve().relative_to(work).as_posix()
+            resolved = path_in_record_form(Path(written).resolve())
+            relative = resolved.relative_to(work).as_posix()
         except (OSError, ValueError):
             continue
         if not relative or relative == ".":
@@ -1686,9 +1693,9 @@ def record_converted_sources(
         return None
     target = Path(results_dir).joinpath(CONVERTED_SOURCES_FILE_NAME)
     try:
-        # UTF-8 with its escapes: a name that is not UTF-8 is read with surrogates
-        # (utils/undecodable_text.py), which the escaped form carries and reads
-        # back as the same text.
+        # The keys are in the record form, so the file holds text only: a name
+        # that is not UTF-8 is written as the text ``\\udcNN``, never as a lone
+        # surrogate, and reads back as the same text.
         data = json.dumps(recorded, sort_keys=True, indent=2).encode("utf-8")
         with open_for_write(target, binary=True, mode=0o644, make_parents=True) as out:
             out.write(data)
