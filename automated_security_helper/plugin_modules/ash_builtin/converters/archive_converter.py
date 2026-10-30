@@ -376,28 +376,38 @@ def _zip_directory_start(
     location: the current ``_EndRecData64`` moves it to the zip64 end record,
     right after the directory, while the releases before that fix leave it at
     the plain end record and have ``_RealGetContents`` take the zip64 end record
-    and its locator (76 bytes) off the start itself. Whichever this interpreter
-    does, the directory's first entry carries the entry signature, so the start
-    tried is the one that does. Before this the walk began 76 bytes into the
-    directory on the older shape, met no signature there and counted nothing,
-    so the member pre-count never refused a zip64 archive.
+    and its locator (76 bytes) off the start itself. Which shape this interpreter
+    reported is read from the record the location names: the zip64 end record's
+    own signature at the location means the current shape, and the plain end
+    record's means the older one, 76 bytes further on. The start that shape
+    gives is then checked for the entry signature, and None is answered where
+    it does not hold, as where the location names neither record. Before this,
+    both candidate starts were tried and the first whose bytes spelled the entry
+    signature won; an entry whose name or extra field held that signature at the
+    other candidate's offset could then start the walk inside an entry, out of
+    step, so the count stopped early and the member pre-count that keeps
+    ``ZipFile()`` from building every entry of an oversized directory did not
+    refuse it. (Before that, the walk began 76 bytes into the directory on the
+    older shape and counted nothing.)
     """
     location = end_record[_zipfile_private("_ECD_LOCATION")]
-    candidates = [location - directory_bytes]
+    start = location - directory_bytes
     if end_record[_zipfile_private("_ECD_SIGNATURE")] == _zipfile_private(
         "stringEndArchive64"
     ):
-        candidates.append(
-            candidates[0]
-            - _zipfile_private("sizeEndCentDir64")
-            - _zipfile_private("sizeEndCentDir64Locator")
-        )
-    for start in candidates:
-        if start < 0:
-            continue
-        handle.seek(start)
-        if handle.read(len(_ZIP_DIRECTORY_ENTRY)) == _ZIP_DIRECTORY_ENTRY:
-            return start
+        handle.seek(location)
+        named = handle.read(len(_ZIP_DIRECTORY_ENTRY))
+        if named == _zipfile_private("stringEndArchive"):
+            start -= _zipfile_private("sizeEndCentDir64") + _zipfile_private(
+                "sizeEndCentDir64Locator"
+            )
+        elif named != _zipfile_private("stringEndArchive64"):
+            return None
+    if start < 0:
+        return None
+    handle.seek(start)
+    if handle.read(len(_ZIP_DIRECTORY_ENTRY)) == _ZIP_DIRECTORY_ENTRY:
+        return start
     return None
 
 

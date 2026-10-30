@@ -102,17 +102,24 @@ def zip64_declaring_one_entry_everywhere(count: int, monkeypatch) -> bytes:
 def end_record_as_the_older_zipfile_reads_it(monkeypatch) -> None:
     """Make the end record read as the zipfile releases before the _EndRecData64
     fix read it: the zip64 fields filled in, the location left at the plain end
-    record, 76 bytes past the zip64 end record the current releases move it to."""
+    record, 76 bytes past the zip64 end record the current releases move it to.
+    The location is moved only when this zipfile reports the current shape (the
+    bytes at the location spell the zip64 end record's signature); on an
+    interpreter that already reports the older shape, as the oldest Pythons ASH
+    supports do, the record is left as read, since a location 76 bytes past the
+    plain end record is one no zipfile release reports."""
     real = archive_converter._zip_end_record
     names = vars(zipfile)
 
     def older(handle):
         record = real(handle)
         if record and record[names["_ECD_SIGNATURE"]] == names["stringEndArchive64"]:
-            record = list(record)
-            record[names["_ECD_LOCATION"]] += (
-                names["sizeEndCentDir64"] + names["sizeEndCentDir64Locator"]
-            )
+            handle.seek(record[names["_ECD_LOCATION"]])
+            if handle.read(4) == names["stringEndArchive64"]:
+                record = list(record)
+                record[names["_ECD_LOCATION"]] += (
+                    names["sizeEndCentDir64"] + names["sizeEndCentDir64Locator"]
+                )
         return record
 
     monkeypatch.setattr(archive_converter, "_zip_end_record", older)
@@ -133,6 +140,28 @@ def test_a_zip64_directory_is_counted_as_this_zipfile_locates_it(monkeypatch):
 
     assert archive_converter._zip_has_more_entries_than(io.BytesIO(raw), 10) is True
     assert archive_converter._zip_has_more_entries_than(io.BytesIO(raw), 20) is False
+
+
+def test_the_directory_start_is_read_from_the_record_the_location_names(monkeypatch):
+    """The shape zipfile reported is told by the signature at the location it
+    gave, never by trying both starts and taking the one whose bytes happen to
+    spell an entry signature: a location that names neither end record answers
+    None, and nothing is counted from a guessed start."""
+    raw = zip64_declaring_one_entry_everywhere(3, monkeypatch)
+    handle = io.BytesIO(raw)
+    record = archive_converter._zip_end_record(handle)
+    names = vars(zipfile)
+    directory_bytes = record[names["_ECD_SIZE"]]
+
+    start = archive_converter._zip_directory_start(handle, record, directory_bytes)
+    assert start is not None
+    handle.seek(start)
+    assert handle.read(4) == b"PK\x01\x02"
+
+    # The same record with its location pointed one byte off either signature.
+    off = list(record)
+    off[names["_ECD_LOCATION"]] += 1
+    assert archive_converter._zip_directory_start(handle, off, directory_bytes) is None
 
 
 # ---------------------------------------------------------------- pax allowance
