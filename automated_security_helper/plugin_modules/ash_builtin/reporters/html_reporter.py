@@ -39,6 +39,58 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 _SEVERITY_ORDER = {name: index for index, name in enumerate(SEVERITIES)}
 
 
+def _is_plain_text(text: str) -> bool:
+    """Whether *text* holds nothing a viewer acts on.
+
+    No control or format character other than tab, newline and a carriage
+    return before a newline, and no CI command form.
+    """
+    if commands_broken(text) != text:
+        return False
+    for index, character in enumerate(text):
+        if character in "\t\n":
+            continue
+        if character == "\r" and text.startswith("\n", index + 1):
+            continue
+        if is_shown_as_escape(character):
+            return False
+    return True
+
+
+def _shown_text(text: Any) -> str:
+    """Multi-line scan text as the report prints it.
+
+    Text with nothing in it a viewer acts on is printed as written. Showing it
+    anyway doubles the backslash of text that reads as an escape (a code
+    sample's ``\\x41``), so a reader sees a character the source does not hold.
+    Any other text is shown, not obeyed, keeping its lines.
+    """
+    value = "" if text is None else str(text)
+    return value if _is_plain_text(value) else str(shown_not_obeyed(value))
+
+
+def _shown_location(location: str) -> str:
+    """A file location as one shown line, as written when it needs no change.
+
+    A name with no control and no command form is printed as written: showing
+    it would only double the backslash of text that reads as an escape (a
+    Windows path's ``\\x64``), and the copy would name no file.
+    """
+    plain = commands_broken(location) == location and not any(
+        is_shown_as_escape(character) for character in location
+    )
+    return location if plain else str(shown_on_one_line(location))
+
+
+def _scanner_label(name: Any) -> str:
+    """A scanner's name as one shown line; never empty.
+
+    The scanner filter's "All scanners" entry has the empty value, so no
+    scanner may have it: an unnamed one is listed as ``unknown``.
+    """
+    return str(shown_on_one_line(name)) or "unknown"
+
+
 class HTMLReporterConfigOptions(ReporterOptionsBase):
     pass
 
@@ -117,7 +169,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         # printed. The filter's values are the same shown names the cards'
         # data-scanner attributes hold, so the filter still matches.
         scanners = sorted(
-            {str(shown_on_one_line(finding.scanner)) for finding in emitter.flat_vulns}
+            {_scanner_label(finding.scanner) for finding in emitter.flat_vulns}
         )
         scanner_options = "".join(
             f'<option value="{html.escape(scanner, quote=True)}">{html.escape(scanner)}</option>'
@@ -150,7 +202,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "completed": summary["completed"],
             "scanners": summary["scanners"],
             "skipped": summary["skipped"],
-            "unavailable": len(summary["unavailable"]),
+            "unavailable": summary["unavailable_count"],
             "severity_counts": counts,
             "coverage_notices": self._format_coverage_notices(summary),
             "workspace_nav": '<a href="#projects">Projects</a>' if workspace else "",
@@ -306,17 +358,13 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             else:
                 status, label = "below-threshold", "Below threshold"
             location = finding.file_path or "N/A"
-            if finding.line_start is not None:
+            # A line number locates a file; with no file it would read "N/A:12".
+            if finding.file_path and finding.line_start is not None:
                 location += f":{finding.line_start}"
             # The location comes from a file name in the scanned repository and
-            # is offered for copying, so it is one shown line. A name with no
-            # control and no command form is copied as written: showing it
-            # would only double the backslash of text that reads as an escape
-            # (a Windows path's "\x64"), and the copy would name no file.
-            plain = commands_broken(location) == location and not any(
-                is_shown_as_escape(character) for character in location
-            )
-            copied = location if plain else str(shown_on_one_line(location))
+            # is offered for copying, so it is one shown line, as written when
+            # it needs no change.
+            copied = _shown_location(location)
             safe_location = html.escape(copied, quote=True)
             # Each context value can be the scan's text: the project from the
             # results, the CVE and CWE from a scanner's report, the package and
@@ -334,27 +382,29 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             )
             snippet = (
                 # Shown, not obeyed: the snippet keeps its lines, and its
-                # controls and CI command forms are written out.
-                f'<pre role="region" tabindex="0" aria-label="Code snippet for finding {index}"><code>{html.escape(str(shown_not_obeyed(finding.code_snippet)))}</code></pre>'
+                # controls and CI command forms are written out. Source that
+                # holds none of them is printed as written.
+                f'<pre role="region" tabindex="0" aria-label="Code snippet for finding {index}"><code>{html.escape(_shown_text(finding.code_snippet))}</code></pre>'
                 if finding.code_snippet
                 else ""
             )
             suppression = (
                 '<p class="suppression-reason"><strong>Suppression reason:</strong> '
                 # The reason can come from the scan: shown, keeping its lines.
-                f"{html.escape(str(shown_not_obeyed(finding.suppression_justification or 'No reason provided')))}</p>"
+                f"{html.escape(_shown_text(finding.suppression_justification or 'No reason provided'))}</p>"
                 if finding.is_suppressed
                 else ""
             )
             # The scanner's name, as the filter's options show it.
-            scanner = str(shown_on_one_line(finding.scanner))
+            scanner = _scanner_label(finding.scanner)
             cards.append(
                 f'<article class="finding-card" aria-labelledby="finding-{index}" '
                 f'data-severity="{severity_class}" data-status="{status}" '
                 f'data-scanner="{html.escape(scanner, quote=True)}">'
                 '<div class="finding-card__inner">'
                 '<div class="finding-top">'
-                f'<span class="pill severity-{severity_class}">{html.escape(severity)}</span>'
+                # An additional report's severity is the results file's text.
+                f'<span class="pill severity-{severity_class}">{html.escape(str(shown_on_one_line(severity)))}</span>'
                 f'<span class="finding-status">{label}</span>'
                 f'<span class="finding-scanner">{html.escape(scanner)}</span></div>'
                 # The title (the rule ID) and the description come from the
@@ -366,7 +416,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 f'<button type="button" class="quiet-button copy-location js-only" '
                 f'aria-label="Copy location for finding {index}" data-copy-location="{safe_location}">Copy</button></span></p>'
                 f'<details><summary>Finding details</summary><div class="finding-body">'
-                f'<p class="finding-description">{html.escape(str(shown_not_obeyed(finding.description)))}</p>'
+                f'<p class="finding-description">{html.escape(_shown_text(finding.description))}</p>'
                 f"{context}{suppression}{snippet}</div></details></div></article>"
             )
         return "\n".join(cards)
@@ -449,10 +499,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         """
 
         for hotspot in hotspots:
-            # A path from the scanned repository: shown on one line.
-            location = html.escape(
-                str(shown_on_one_line(hotspot.get("location", "Unknown")))
-            )
+            # A path from the scanned repository: shown on one line, as the
+            # finding cards show it.
+            location = html.escape(_shown_location(hotspot.get("location", "Unknown")))
             section += f"""
             <tr>
                 <td>{hotspot.get("count", 0)}</td>
