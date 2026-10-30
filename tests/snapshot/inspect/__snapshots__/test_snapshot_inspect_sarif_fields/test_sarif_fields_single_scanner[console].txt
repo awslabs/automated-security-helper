@@ -23,5 +23,5 @@ Wrote HTML report to <INSPECT_OUT>/sarif_validation_report.html
 ┡━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
 │ bandit  │ 9            │ 9             │ 9                  │ 1                 │ 0.0%           │
 └─────────┴──────────────┴───────────────┴────────────────────┴───────────────────┴────────────────┘
-WARNING: Some fields are unexpectedly missing from the aggregate report
-[exit code: 1]
+WARNING: no aggregate report (reports/ash.sarif) was analyzed, so no field was checked against the aggregate
+[exit code: 0]

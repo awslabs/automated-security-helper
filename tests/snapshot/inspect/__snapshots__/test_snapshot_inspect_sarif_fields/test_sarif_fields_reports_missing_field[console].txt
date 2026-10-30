@@ -14,15 +14,15 @@ Wrote HTML report to <INSPECT_OUT>/sarif_validation_report.html
 │ Total unique fields (included)  │ 9     │
 │ Total unique fields (excluded)  │ 1     │
 │ Total unique scanners           │ 2     │
-│ Fields used by all scanners     │ 7     │
-│ Fields used by only one scanner │ 2     │
+│ Fields used by all scanners     │ 9     │
+│ Fields used by only one scanner │ 9     │
 └─────────────────────────────────┴───────┘
                                  Per-Scanner SARIF Field Statistics
 ┏━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┓
 ┃         ┃              ┃               ┃ Missing            ┃ Missing           ┃                ┃
 ┃ Scanner ┃ Total Fields ┃ Unique Fields ┃ (Unexpected)       ┃ (Intentional)     ┃ % in Aggregate ┃
 ┡━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
-│ bandit  │ 9            │ 2             │ 2                  │ 1                 │ 77.8%          │
+│ bandit  │ 9            │ 9             │ 2                  │ 1                 │ 77.8%          │
 └─────────┴──────────────┴───────────────┴────────────────────┴───────────────────┴────────────────┘
 WARNING: Some fields are unexpectedly missing from the aggregate report
 [exit code: 1]
