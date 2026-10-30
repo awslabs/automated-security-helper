@@ -4,7 +4,9 @@
 """The image's license check and the script's command line.
 
 * ``reports_version`` accepted a prerelease or distro build of the pinned version
-  (0.12.2rc1, 0.12.2-1) as the pinned release.
+  (0.12.2rc1, 0.12.2-1) as the pinned release. It still accepted the dotted
+  PEP 440 spellings (1.125.0.post1, 1.2.3.dev0, 1.2.3.rc1) and Debian's tilde
+  (1.2.3~rc1), which matter most for the Python tools.
 * ``version_output`` decoded the tool's output strictly, so a banner that was not
   valid text raised out of the whole verification.
 * ``verify_third_party`` left the index of an earlier passing run in place when the
@@ -57,6 +59,17 @@ installer = _load_script()
         ("cfn-lint 3.1.2-dev", "3.1.2", False),
         ("tool 1.2.3+local", "1.2.3", False),
         ("tool 1.2.3_extra", "1.2.3", False),
+        # PEP 440 post, dev and release-candidate suffixes join with a dot.
+        ("semgrep 1.125.0.post1", "1.125.0", False),
+        ("tool 1.2.3.dev0", "1.2.3", False),
+        ("tool 1.2.3.rc1", "1.2.3", False),
+        ("tool 1.2.3.RC1", "1.2.3", False),
+        # Debian joins a pre-release with a tilde.
+        ("tool 1.2.3~rc1", "1.2.3", False),
+        # Controls: a dot that ends a sentence is not a suffix.
+        ("tool 1.2.3.", "1.2.3", True),
+        ("tool 1.2.3. Built today", "1.2.3", True),
+        ("tool 1.2.3\n", "1.2.3", True),
     ],
 )
 def test_a_prerelease_or_distro_build_is_not_the_pinned_release(

@@ -1309,11 +1309,13 @@ def reports_version(output: str, bare_version: str) -> bool:
 
     Bounded on both sides, so 0.12.2 is not found inside 0.12.23 and 1.2 is not
     found inside 11.2. A suffix that makes it another build fails the match too:
-    0.12.2rc1, 0.12.2-1 and 3.1.2-dev are not 0.12.2 or 3.1.2.
+    0.12.2rc1, 0.12.2-1, 3.1.2-dev, 1.125.0.post1, 1.2.3.dev0, 1.2.3.rc1 and
+    1.2.3~rc1 are not 0.12.2, 3.1.2, 1.125.0 or 1.2.3. A dot that ends a sentence
+    (``v2.12.0.``, ``1.2.3. Built``) is punctuation and does not.
     """
     pattern = (
         rf"(?<![0-9.]){re.escape(bare_version)}"
-        r"(?![0-9A-Za-z_]|\.[0-9]|[-+][0-9A-Za-z])"
+        r"(?![0-9A-Za-z_]|\.[0-9A-Za-z]|[-+~][0-9A-Za-z])"
     )
     return re.search(pattern, output) is not None
 
