@@ -62,10 +62,13 @@ from tests.utils.tool_guard import (
     reset_tool_lookup_caches,
 )
 
-# e2e, not integration: the module-scoped fixture and the vendored-scanner test run
-# whole child scans through subprocess.run with 900- and 600-second timeouts, the
-# product driven as an operator would drive it.
-pytestmark = pytest.mark.e2e
+# integration, not e2e: the module-scoped fixture and the vendored-scanner test run
+# a child Python on a driver this file writes, with stub probes answering for every
+# scanner, so no real tool runs. By tests/NAMING_CONVENTIONS.md a child Python
+# running a test-written script is integration; e2e is the ash CLI or the MCP
+# server itself, driven with real scanners. The 900- and 600-second timeouts are
+# the scans' walls, not a tier.
+pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
