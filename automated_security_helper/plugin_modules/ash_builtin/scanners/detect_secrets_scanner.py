@@ -1364,6 +1364,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         operator's own settings name that same ``baseline_file``
         (``--config-overrides``, or a workspace's default config, beside a
         repository's own config).
+
+        A baseline the scan FOUND in the tree (``.secrets.baseline``,
+        ``.ash/.secrets.baseline``) is the repository's by structure, the same
+        rule ``_baseline_entries_trusted`` applies to its entries: the checkout
+        test is tried first so the reason names the checkout where it can, but a
+        found baseline is never the operator's when that test says nothing. It
+        was: with the configured scan root (``_scanned_root``) not holding the
+        source directory, the checkout test found nothing to say and the
+        repository's settings, its verification filter included, read as the
+        operator's.
         """
         if not self._baseline_in_use():
             return None
@@ -1382,6 +1392,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         why = scanned_checkout_reason(Path(judged), root)
         if why is None and Path(judged) != Path(baseline):
             why = scanned_checkout_reason(Path(baseline), root)
+        if why is None and not self._baseline_from_option:
+            why = (
+                "it was found in the scanned tree rather than named by the "
+                "operator's settings"
+            )
         if why is not None:
             return f"the baseline {Path(baseline).as_posix()} is used, and {why}"
         if record is None or same_baseline(

@@ -56,6 +56,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
 SECRET_TYPE = "AWS Access Key"
+# The filter detect-secrets writes into every baseline it generates; it sends
+# each candidate to the service that issued it, so only the operator's own
+# settings may turn it on.
+VERIFICATION_FILTER = (
+    "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
+)
 # Assembled at runtime so this file holds no key-shaped literal for ASH's own
 # self-scan to report. AWS's documentation placeholders.
 KEPT_SECRET = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002
@@ -372,14 +378,22 @@ def test_the_repositorys_baseline_is_never_the_operators_whatever_the_scan_root(
     checkout did, it found nothing to say against the tree's own
     ``.secrets.baseline`` and read it as the operator's: its known candidates
     left the report. Now a baseline the operator did not name is never trusted,
-    and the configured root changes nothing."""
+    and the configured root changes nothing.
+
+    The same structural rule holds for the baseline's SETTINGS: the file
+    carries the verification filter detect-secrets writes into every baseline
+    it generates, and under the same configured root the settings-trust rule
+    read it as the operator's too, so candidate secrets would have been sent
+    to the services that issued them. Offline mode would drop the filter
+    whatever its source, so it is off here."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     context = _context(tmp_path)
     source = Path(context.source_dir)
     (source / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
-    (source / ".secrets.baseline").write_text(
-        json.dumps(_baseline(KNOWN_ENTRIES)), encoding="utf-8"
-    )
+    document = _baseline(KNOWN_ENTRIES)
+    document["filters_used"] = [{"path": VERIFICATION_FILTER, "min_level": 2}]
+    (source / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     context.config._scanned_root = elsewhere
@@ -388,6 +402,13 @@ def test_the_repositorys_baseline_is_never_the_operators_whatever_the_scan_root(
 
     assert scanner._baseline_in_use()
     assert scanner._baseline_entries_trusted() is False
+    reason = scanner._untrusted_baseline_reason(None)
+    assert reason is not None and "found in the scanned tree" in reason, reason
+    assert not any(
+        item.path == VERIFICATION_FILTER
+        for item in scanner.config.options.scan_settings.filters_used
+    ), scanner.config.options.scan_settings.filters_used
+    assert scanner._verification_permitted is False
     _worker_returning(scanner, monkeypatch, {"settings.py": [(1, KEPT_SECRET)]})
     report = scanner.scan(target=source, target_type="source")
     assert _findings(report) == [("settings.py", 1)]
