@@ -38,19 +38,19 @@ here would emit n runs for one repository, each identical in root and differing
 only in which scanners contributed, which describes a workspace that does not
 exist and would make every consumer's per-run attribution meaningless.
 
-What merge_sarif_report does not do, and why there is an extra step
-------------------------------------------------------------------
+What merge_sarif_report does with a shard's tool components
+-----------------------------------------------------------
 ``merge_sarif_report`` was written to fold one *scanner's* SARIF into ASH's
-aggregate, so it reads each run's ``tool.driver`` and never looks at a run's
-``tool.extensions``. Merging two ASH *aggregates* is the case it was not
-written for: every shard's driver is ASH itself, and each shard's per-scanner
-tool components live in ``extensions``. Left alone, the rule metadata for every
-scanner owned by shards 1..n-1 would be silently dropped, and the merged report
-would carry results whose ``ruleId`` resolves to no rule -- findings with no
-description or help URI, which is a quiet quality loss rather than a visible
-error. :func:`_merge_tool_extensions` unions them afterwards, matching
-components on the same ``(name, fullName, organization)`` triple
-``merge_sarif_report`` itself uses so the two paths cannot disagree.
+aggregate, and merging two ASH *aggregates* is a different case: every shard's
+driver is ASH itself, and each shard's per-scanner tool components live in
+``runs[0].tool.extensions``. It folds both now: each incoming run's driver and
+every one of its ``extensions`` joins the aggregate's first run
+(``schemas/sarif_schema_model._fold_tool_component``), matched on the
+``(name, fullName, organization)`` triple, with a component already present
+taking the union of the rules by id. So the rule metadata of every scanner
+owned by shards 1..n-1 survives the merge, and a merged result's ``ruleId``
+still resolves to its rule's description and help URI. No second pass is
+needed here; a merge used to run one and union the same components again.
 
 Deduplication is deliberately absent, here as elsewhere. Two shards never own
 the same scanner (:func:`verify_shard_coverage` refuses that), so there is no
@@ -1469,62 +1469,6 @@ def _verify_shard_contributions(
 # ---------------------------------------------------------------------------
 
 
-def _merge_tool_extensions(
-    base: AshAggregatedResults, other: AshAggregatedResults
-) -> None:
-    """Union ``runs[0].tool.extensions`` from *other* into *base*.
-
-    Needed because ``merge_sarif_report`` reads each run's ``tool.driver`` and
-    never a run's ``tool.extensions``; see the module docstring. Components are
-    matched on the same triple
-    ``merge_sarif_report`` uses, and rules are unioned by id for a component that
-    already exists, so a scanner appearing on two shards -- which coverage
-    verification forbids, but which would otherwise corrupt rule metadata --
-    cannot produce duplicate components.
-    """
-    if base.sarif is None or other.sarif is None:
-        return
-    if not base.sarif.runs or not other.sarif.runs:
-        return
-
-    incoming = other.sarif.runs[0].tool.extensions or []
-    if not incoming:
-        return
-
-    target_run = base.sarif.runs[0]
-    if target_run.tool.extensions is None:
-        target_run.tool.extensions = []
-
-    # Copies, never the shard's own objects: merge_shard_results promises not to
-    # mutate its inputs, and a later shard's rules are appended to these
-    # components, so an aliased component would grow inside the shard it came
-    # from, and the secret masking that follows would mask the shard's own
-    # component text in place.
-    for component in incoming:
-        existing = next(
-            (
-                candidate
-                for candidate in target_run.tool.extensions
-                if candidate.name == component.name
-                and candidate.fullName == component.fullName
-                and candidate.organization == component.organization
-            ),
-            None,
-        )
-        if existing is None:
-            target_run.tool.extensions.append(component.model_copy(deep=True))
-            continue
-        if not component.rules:
-            continue
-        if existing.rules is None:
-            existing.rules = []
-        known_rule_ids = {rule.id for rule in existing.rules}
-        for rule in component.rules:
-            if rule.id not in known_rule_ids:
-                existing.rules.append(rule.model_copy(deep=True))
-                known_rule_ids.add(rule.id)
-
-
 def _merge_timing(
     base: AshAggregatedResults,
     shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
@@ -1664,8 +1608,9 @@ def merge_shard_results(
         if merged.sarif is None:
             merged.sarif = shard.sarif.model_copy(deep=True) if shard.sarif else None
         elif shard.sarif is not None:
+            # Folds the shard's driver and every per-scanner extension too; see
+            # the module docstring.
             merged.sarif.merge_sarif_report(shard.sarif)
-            _merge_tool_extensions(merged, shard)
 
         # Every shard read the same config, so each recorded the same config
         # warnings; those are kept once. Other checkpoints are per shard.

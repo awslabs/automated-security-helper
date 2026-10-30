@@ -17,6 +17,8 @@ name, were never folded in.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -285,6 +287,33 @@ class TestResultsKeepTheirRuleById:
 
 
 class TestTheIncomingRunsExtensionsAreFolded:
+    def test_a_captured_scanner_report_folds_into_an_aggregate_as_an_extension(
+        self,
+    ):
+        """A real scanner's SARIF (cfn-guard, captured under tests/test_data):
+        its driver joins the aggregate's extensions and every result keeps its
+        ruleId, the shape cli.merge relies on when two aggregates meet."""
+        captured = (
+            Path(__file__).resolve().parents[2]
+            / "test_data"
+            / "scanners"
+            / "cfn_lint_guard"
+            / "captured"
+            / "cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif"
+        )
+        incoming = SarifReport.model_validate_json(captured.read_text(encoding="utf-8"))
+        rule_ids = [result.ruleId for result in incoming.runs[0].results]
+        assert rule_ids and all(rule_ids)
+        aggregated = SarifReport(runs=[_run("ASH", [], [])])
+
+        aggregated.merge_sarif_report(incoming)
+        aggregated.merge_sarif_report(incoming)
+
+        names = [ext.name for ext in aggregated.runs[0].tool.extensions]
+        assert names.count(incoming.runs[0].tool.driver.name) == 1
+        merged_rule_ids = [result.ruleId for result in aggregated.runs[0].results]
+        assert merged_rule_ids == rule_ids + rule_ids
+
     def test_an_extension_of_the_incoming_run_joins_the_aggregate(self):
         aggregated = SarifReport(runs=[_run("aggregate", [], [])])
         incoming = SarifReport(

@@ -581,7 +581,7 @@ def _verify_selection_within_assignment(
                 )
 
     if trespasses:
-        raise ShardCoverageError(
+        message = (
             "These shards intended to run a scanner assigned to another shard: "
             f"{'; '.join(sorted(trespasses))}. A shard only runs what it was "
             "assigned, so the exclusion that implements the split did not take "
@@ -589,6 +589,16 @@ def _verify_selection_within_assignment(
             "findings would be counted once per shard. The assignments themselves "
             "are disjoint, so no other check here can see this."
         )
+        if any(item.endswith("assigned to no shard)") for item in trespasses):
+            # The header above speaks of two shards; a scanner outside every
+            # assignment ran on whichever shards selected it.
+            message += (
+                " A scanner assigned to no shard was selected by a run whose "
+                "exclusion did not take effect either: it ran on every shard that "
+                "selected it, outside the split, and its findings would be counted "
+                "once per such shard."
+            )
+        raise ShardCoverageError(message)
 
 
 def _verify_candidate_agreement(

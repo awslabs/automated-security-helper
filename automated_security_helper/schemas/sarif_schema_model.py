@@ -2728,8 +2728,9 @@ class SarifReport(RecordModel):
 
         # Both report-level lists are Optional: a file that writes them as null
         # validates to None, and the model's default only covers a file that
-        # omits them. Read before the merge is applied so the runs above are never
-        # left merged with the report-level fields half done.
+        # omits them. Folded after the runs, and independent of them: the two
+        # lists are read from the incoming report alone, so nothing here can
+        # fail on what the run merge above did.
         incoming_external = sarif_report.inlineExternalProperties or []
         if incoming_external:
             if self.inlineExternalProperties is None:

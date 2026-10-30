@@ -3,7 +3,7 @@
 
 """``merge_shard_results`` reads every shard's record as the shard wrote it.
 
-Six shapes a sharded fan-out produces that the merge read wrong:
+Seven shapes a sharded fan-out produces that the merge read wrong:
 
 * a shard written before ``selected_scanners`` existed beside shards that record
   it: its scanners were named as intended by no shard and said to show SKIPPED;

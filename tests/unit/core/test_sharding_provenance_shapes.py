@@ -121,6 +121,24 @@ class TestSelectingAScannerNoShardOwns:
             verify_shard_coverage(shards)
         assert "stray" in str(excinfo.value)
         assert "assigned to no shard" in str(excinfo.value)
+        # The header speaks of a scanner that ran on both shards; this case gets
+        # its own sentence.
+        assert "outside the split" in str(excinfo.value)
+
+    def test_a_selection_of_another_shards_scanner_keeps_the_two_shard_wording(
+        self,
+    ):
+        """The control: the pinned refusal text for the other-shard case is
+        unchanged (tests/snapshot/errors pins it)."""
+        shards = [
+            self._shard(0, ["bandit", "grype"], ["bandit", "grype", "semgrep"]),
+            self._shard(1, ["checkov", "semgrep"], ["checkov", "semgrep"]),
+        ]
+
+        with pytest.raises(ShardCoverageError) as excinfo:
+            verify_shard_coverage(shards)
+        assert "assigned to shard 1" in str(excinfo.value)
+        assert "outside the split" not in str(excinfo.value)
 
     def test_a_selection_within_the_assignment_passes(self):
         """The control, with the same shards and the stray selection removed."""
