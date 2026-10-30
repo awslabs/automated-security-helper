@@ -18,6 +18,8 @@ Each test here pins one reading that went wrong before:
   ``TRIVY_SKIP_FILES`` and config-file lists instead of adding to them.
 - a ``--skip-dirs`` path holding a line break was passed as written, which
   trivy's CSV read cuts at the break.
+- the operator's own skip entries, given back as flags, went through pflag's CSV
+  reader unquoted: a ``"`` failed the run and a line break skipped another path.
 - ``TRIVY_SEVERITY`` and the other filtering variables narrowed the report with
   nothing in the run saying so.
 - the offline cache check judged only ``TRIVY_CACHE_DIR`` and warned about every
@@ -414,6 +416,67 @@ def test_control_with_no_skip_flag_of_ashs_trivy_reads_the_operators_lists_itsel
     scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor"}
 
     assert scanner._operator_skip_args(["--format", "sarif"]) == []
+
+
+def test_an_operator_entry_holding_a_quote_is_passed_as_a_csv_field(tmp_path):
+    """As a flag the value goes through pflag's CSV reader, which the variable
+    never did; an unquoted ``"`` fails the whole trivy run as a bare quote."""
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": 'a"b'}
+
+    tokens = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
+
+    assert tokens == ['--skip-dirs="a""b"']
+
+
+def test_an_operator_config_entry_holding_a_comma_is_passed_as_one_field(tmp_path):
+    scanner = _repo_scanner(tmp_path)
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text("scan:\n  skip-dirs:\n    - 'x,y'\n", encoding="utf-8")
+
+    tokens = scanner._operator_skip_args(
+        [f"--config={operator.as_posix()}", "--skip-dirs=.ash/ash_output"]
+    )
+
+    assert tokens == ['--skip-dirs="x,y"']
+
+
+def test_an_operator_config_entry_holding_a_line_break_is_left_out_without_its_text(
+    tmp_path,
+):
+    """The CSV reader takes one line, so trivy would skip a different path; the
+    warning names the key and the entry's position, never the entry, which the
+    operator's file chose."""
+    scanner = _repo_scanner(tmp_path)
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        'scan:\n  skip-dirs:\n    - "zz-line\\nbreak-zz"\n    - vendor\n',
+        encoding="utf-8",
+    )
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        tokens = scanner._operator_skip_args(
+            [f"--config={operator.as_posix()}", "--skip-dirs=.ash/ash_output"]
+        )
+
+    assert tokens == ["--skip-dirs=vendor"]
+    (warning,) = messages
+    assert "entry 1 of scan.skip-dirs" in warning
+    assert "zz-line" not in warning and "\n" not in warning
+
+
+def test_control_an_operator_entry_without_csv_characters_is_passed_as_written(
+    tmp_path,
+):
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor/*"}
+
+    assert scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"]) == [
+        "--skip-dirs=vendor/*"
+    ]
 
 
 # --- a skip-dirs path holding a line break ------------------------------------------

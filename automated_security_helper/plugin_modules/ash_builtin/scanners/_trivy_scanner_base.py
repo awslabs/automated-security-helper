@@ -238,9 +238,21 @@ def skip_dirs_value(path: str) -> str:
     when it holds a comma, a quote or edge whitespace.
     """
     escaped = "".join("\\" + ch if ch in _GLOB_SPECIAL else ch for ch in path)
-    if any(ch in escaped for ch in ',"') or escaped != escaped.strip():
-        escaped = '"' + escaped.replace('"', '""') + '"'
-    return escaped
+    return _csv_field(escaped)
+
+
+def _csv_field(value: str) -> str:
+    """``value`` as one field of the CSV trivy reads a list flag as.
+
+    Quoted, with its quotes doubled, when it holds a comma, a double quote or
+    edge whitespace; otherwise as written. Glob characters are left alone: the
+    operator's own ``--skip-dirs`` entries are globs by intent, and
+    ``skip_dirs_value`` escapes ASH's before it calls this. An unquoted ``"``
+    is a bare-quote parse error that fails the whole trivy run.
+    """
+    if any(ch in value for ch in ',"') or value != value.strip():
+        return '"' + value.replace('"', '""') + '"'
+    return value
 
 
 def trivy_severity(
@@ -1000,6 +1012,15 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         the flag's own form, so trivy sees ASH's and the operator's together.
         Empty when ``final_args`` carries no skip flag of ASH's, since trivy then
         reads the operator's settings itself.
+
+        As a flag the value goes through pflag's CSV reader, which the variable
+        and the config file never did: each entry is passed as one CSV field
+        (``_csv_field``: a ``"`` in it would otherwise fail the whole run as a
+        bare quote), and an entry holding a line break is left out with a
+        warning, since the reader takes one line and trivy would skip a different
+        path (the reading ``_skip_dirs_value`` makes for ASH's own paths). The
+        warning names the variable or key and the entry's position, never its
+        text, which the environment or the operator's file chose.
         """
         if not any(
             argument.startswith(("--skip-dirs", "--skip-files"))
@@ -1012,10 +1033,24 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             ("--skip-files", "TRIVY_SKIP_FILES", "skip-files"),
         ):
             entries = self._environment_list(variable)
+            source = variable
             if not entries:
                 entries = self._config_file_list(final_args, "scan", key)
-            for entry in entries:
-                token = f"{flag}={entry}"
+                source = f"scan.{key} of the trivy config file"
+            for position, entry in enumerate(entries, start=1):
+                if "\n" in entry or "\r" in entry:
+                    refusal = f"operator-skip:line-break:{source}:{position}"
+                    if refusal not in self._warned_inputs:
+                        self._warned_inputs.add(refusal)
+                        self._plugin_log(
+                            f"Not passing entry {position} of {source} to trivy as "
+                            f"{flag}: the value is read as one line, and the entry "
+                            "holds a line break, so trivy would skip a different "
+                            "path. That entry does not apply to this scan.",
+                            level=logging.WARNING,
+                        )
+                    continue
+                token = f"{flag}={_csv_field(entry)}"
                 if token not in final_args and token not in tokens:
                     tokens.append(token)
         return tokens
