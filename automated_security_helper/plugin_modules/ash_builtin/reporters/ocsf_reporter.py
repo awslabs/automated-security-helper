@@ -19,9 +19,6 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
     skipped_project_detail,
     skipped_projects,
 )
-from automated_security_helper.plugin_modules.ash_builtin.reporters.shared_finding_ids import (
-    shared_ids_by_position,
-)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     AffectedCode,
@@ -43,7 +40,14 @@ from datetime import datetime, timezone
 import uuid
 from typing import Dict, Optional, List, Tuple
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sarif_utils import suppressions_in_effect
+from automated_security_helper.utils.sarif_utils import (
+    is_not_a_finding,
+    result_message_text,
+    result_rule_id,
+    result_scanner_name,
+    shared_finding_ids,
+    suppressions_in_effect,
+)
 from automated_security_helper.utils.severity_ladder import result_severity
 from automated_security_helper.utils.undecodable_text import recorded
 
@@ -51,12 +55,6 @@ from automated_security_helper.utils.undecodable_text import recorded
 #: cap was applied to the message part alone, so a long rule id and file name
 #: pushed a title past it, and the ellipsis was added after a full-width slice.
 TITLE_MAX_LENGTH = 120
-
-#: The SARIF result kinds that state no problem (3.27.9): the rule was evaluated
-#: and passed, did not apply, or produced information only. Such a result is no
-#: vulnerability finding and is left out of the array; emitted as one, a cdk-nag
-#: rule that was not evaluated reached a SIEM as a New vulnerability.
-_NON_FINDING_KINDS = frozenset({"pass", "notApplicable", "informational"})
 
 #: Marks a record built by the fallback path: a finding whose construction
 #: failed, kept with what could still be read of it (the gate's severity, the
@@ -88,22 +86,6 @@ def _file_name(path: str) -> str:
     return parts[-1] if parts else path
 
 
-def _message_text(result: Any) -> Optional[str]:
-    """The result's message as text: ``text``, else ``markdown``, else the ``id``
-    of the message string it names; None when it has none.
-
-    SARIF lets a message be given by ``id`` alone (resolved against the rule's
-    ``messageStrings``); read as ``text`` alone, such a result was described as
-    "No description" and titled so.
-    """
-    message_root = getattr(getattr(result, "message", None), "root", None)
-    for field in ("text", "markdown", "id"):
-        value = getattr(message_root, field, None)
-        if isinstance(value, str) and value:
-            return value
-    return None
-
-
 def _finding_title(rule_part: str, location_info: str, message_text: str) -> str:
     """The title ``<rule><location> - <message>`` at most :data:`TITLE_MAX_LENGTH`
     characters, the ellipsis counted, the prefix cut too when it alone is past
@@ -116,14 +98,6 @@ def _finding_title(rule_part: str, location_info: str, message_text: str) -> str
     if room > 0:
         return prefix + message_text[:room] + "..."
     return whole[: TITLE_MAX_LENGTH - 3] + "..."
-
-
-def _is_not_a_finding(result: Any) -> bool:
-    """Whether *result*'s ``kind`` says no problem was found. An absent kind is
-    ``fail``."""
-    kind = getattr(result, "kind", None)
-    kind_value = str(getattr(kind, "value", kind) or "fail")
-    return kind_value in _NON_FINDING_KINDS
 
 
 #: OCSF severity_id for each ASH severity (OCSF: 1 Informational, 2 Low,
@@ -204,29 +178,6 @@ def _identity_part(value: Any) -> str:
     )
 
 
-def _result_scanner(result: Any) -> str:
-    """The scanner that produced *result*, as the flattening reads it:
-    ``properties.scanner_name``, else ``properties.scanner_details.tool_name``,
-    else "". Guarded, like every read of the identity key."""
-    try:
-        props = getattr(result, "properties", None)
-        if props is None:
-            return ""
-        name = getattr(props, "scanner_name", None)
-        if not name:
-            extra = getattr(props, "model_extra", None)
-            name = extra.get("scanner_name") if isinstance(extra, dict) else None
-        if not name:
-            details = getattr(props, "scanner_details", None)
-            if isinstance(details, dict):
-                name = details.get("tool_name")
-            elif details is not None:
-                name = getattr(details, "tool_name", None)
-        return str(name or "")
-    except Exception:  # noqa: BLE001 -- see the docstring
-        return ""
-
-
 def _identity_key(result: Any, rule_id: str, message_text: Optional[str] = None) -> str:
     """A finding's identity from the result alone: scanner, workspace project,
     rule, message, file and lines, each part escaped (:func:`_identity_part`).
@@ -242,7 +193,7 @@ def _identity_key(result: Any, rule_id: str, message_text: Optional[str] = None)
     and a SIEM merged them into one. Two results identical in every part are
     told apart by the report (:func:`_fallback_identities`).
     """
-    parts: List[str] = [_identity_part(_result_scanner(result))]
+    parts: List[str] = [_identity_part(result_scanner_name(result) or "")]
     try:
         parts.append(_identity_part(extract_workspace_project(result)))
     except Exception:  # noqa: BLE001 -- see the docstring
@@ -288,55 +239,13 @@ def _fallback_identities(
         if shared_id:
             identities.append(None)
             continue
-        key = _identity_key(result, _rule_id(result) or "Unknown Rule")
+        key = _identity_key(result, result_rule_id(result) or "Unknown Rule")
         count = seen.get(key, 0)
         seen[key] = count + 1
         if count:
             key = _IDENTITY_SEPARATOR.join([key, "occurrence", str(count)])
         identities.append(key)
     return identities
-
-
-def _shared_finding_ids(
-    model: "AshAggregatedResults", all_results: List[Any]
-) -> List[Optional[str]]:
-    """The id every other ASH report gives each result, by position, else None.
-
-    ``to_flat_vulnerabilities`` builds one flattened finding per SARIF result in
-    ``get_all_results`` order (``utils/finding_identity``: scanner, rule, file,
-    line, column, fingerprints, message, an occurrence counter for findings that
-    still collide), so the uid derived from it is the same string the GitLab
-    SAST report and the flat JSON report carry, and distinct for two identical
-    results in one run. None where the flattening cannot vouch for a position
-    (:func:`shared_ids_by_position`), so that result's uid comes from
-    ``_identity_key`` instead of another finding's id. Only the flattening's
-    SARIF rows are paired: a scanner's list-form additional report adds rows
-    after them, and read as one list those rows made the lengths differ, so
-    every uid of the report fell back whenever such a report was present and
-    flipped back when it was not. The pairing runs inside the guard too, so a
-    result whose locations misbehave is a fallback uid at that position, never
-    an exception out of ``report()``.
-    """
-    try:
-        flat = list(model.to_flat_vulnerabilities())
-        return shared_ids_by_position(flat, all_results)
-    except Exception as e:  # noqa: BLE001 -- a fallback, see _identity_key
-        ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
-        return [None] * len(all_results)
-
-
-def _rule_id(result: Any) -> Optional[str]:
-    """The id of the rule *result* names: its ruleId, else its rule.id.
-
-    SARIF 2.1.0 lets a result name its rule either way (3.27.5, 3.27.7). Read
-    as ruleId alone, a result naming it as rule.id was emitted as "Unknown Rule".
-    """
-    rule_id = getattr(result, "ruleId", None)
-    if rule_id:
-        return rule_id
-    rule = getattr(result, "rule", None)
-    rule = getattr(rule, "root", rule)
-    return getattr(rule, "id", None) or None
 
 
 def _metadata_with_labels(metadata: Metadata, *labels: str) -> Metadata:
@@ -430,7 +339,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         try:
             # Safely extract rule ID first for logging context
             try:
-                rule_id = _rule_id(result) or rule_id
+                rule_id = result_rule_id(result) or rule_id
             except Exception as e:
                 ASH_LOGGER.debug(f"Error extracting rule ID: {str(e)}")
 
@@ -441,7 +350,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # Safely extract message text
             desc = ""
             try:
-                desc = _message_text(result) or ""
+                desc = result_message_text(result, default="")
                 ASH_LOGGER.debug(
                     f"Extracted message text for {rule_id}: {len(desc)} characters"
                 )
@@ -756,7 +665,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             metadata: OCSF metadata object
             current_time_ms: Current timestamp in milliseconds
             shared_id: the finding's id in every other report
-                (:func:`_shared_finding_ids`); the uid is derived from it, else
+                (``sarif_utils.shared_finding_ids``); the uid is derived from it, else
                 from *identity*, the result's own identity numbered within the
                 report (:func:`_fallback_identities`), else from the result's
                 own identity alone (:func:`_identity_key`)
@@ -768,7 +677,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         # Extract rule ID early for logging context
         rule_id = "Unknown Rule"
         try:
-            rule_id = _rule_id(result) or rule_id
+            rule_id = result_rule_id(result) or rule_id
         except Exception:  # nosec B110 — graceful fallback when ruleId attribute missing
             pass
 
@@ -796,7 +705,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
             try:
                 # Safely extract message text
-                message_text = _message_text(result) or message_text
+                message_text = result_message_text(result, default=message_text)
                 ASH_LOGGER.debug(
                     f"Extracted message text for finding info {rule_id}: {len(message_text)} characters"
                 )
@@ -1208,16 +1117,16 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         ASH_LOGGER.info(
             f"Processing {total_results_count} SARIF results for OCSF report"
         )
-        shared_ids = _shared_finding_ids(model, all_results)
+        shared_ids = shared_finding_ids(model, all_results)
         identities = _fallback_identities(all_results, shared_ids)
 
         for i, result in enumerate(all_results):
-            rule_id = _rule_id(result) or f"result_{i}"
+            rule_id = result_rule_id(result) or f"result_{i}"
             ASH_LOGGER.debug(
                 f"Processing SARIF result {i + 1}/{total_results_count}: {rule_id}"
             )
 
-            if _is_not_a_finding(result):
+            if is_not_a_finding(result):
                 # Evaluated and passed, not applicable, or informational: not
                 # a vulnerability finding, and neither a success nor a failure
                 # of the conversion.

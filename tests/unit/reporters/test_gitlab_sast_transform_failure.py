@@ -295,6 +295,15 @@ class TestMissingMessageText:
         GitlabSastReport.model_validate(report)
         assert [vuln["name"] for vuln in report["vulnerabilities"]] == ["B101"]
 
+    def test_a_message_of_spaces_alone_describes_nothing(self, reporter):
+        """Whitespace is no description: the value was written as-is before, so a
+        finding was described as three spaces."""
+        result = Result(ruleId="B101", message=Message(text="   "))
+
+        (vuln,) = json.loads(reporter.report(_model(result)))["vulnerabilities"]
+
+        assert vuln["description"] == ""
+
 
 # --------------------------------------------------------------------------- #
 # One bad result is skipped and counted; the run is not lost.
@@ -418,3 +427,26 @@ class TestRuleIdBindingIsTransparent:
             for identifier in vuln["identifiers"]
             if identifier["type"] == "ash-finding-id"
         ] == [flat.id]
+
+    def test_a_rule_named_by_reference_reaches_every_site_too(self, reporter):
+        """SARIF 2.1.0 lets a result name its rule as ``rule.id`` instead of
+        ``ruleId`` (3.27.5, 3.27.7). Read as ``ruleId`` alone, such a result had
+        no name, an empty rule-id detail and no rule identifier."""
+        result = Result.model_validate(
+            {
+                "rule": {"id": "B105"},
+                "message": {"text": "hardcoded password string"},
+                "properties": {"scanner_name": "bandit"},
+                "locations": [_located().model_dump(exclude_none=True)],
+            }
+        )
+
+        (vuln,) = json.loads(reporter.report(_model(result)))["vulnerabilities"]
+
+        assert vuln["name"] == "B105"
+        assert vuln["details"]["rule_id"]["value"] == "B105"
+        assert [
+            identifier["value"]
+            for identifier in vuln["identifiers"]
+            if identifier["type"] == "bandit-rule"
+        ] == ["B105"]

@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Literal, Tuple, TYPE_CHECKING
 
 from automated_security_helper.utils.sarif_utils import (
     get_finding_id,
+    is_not_a_finding,
+    result_message_text,
+    result_rule_id,
+    shared_finding_ids,
     suppressions_in_effect,
 )
 
@@ -18,9 +22,6 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
-from automated_security_helper.plugin_modules.ash_builtin.reporters.shared_finding_ids import (
-    shared_ids_by_position,
-)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 from automated_security_helper.utils.error_text import error_text
@@ -30,12 +31,6 @@ from automated_security_helper.utils.severity_ladder import result_severity
 from automated_security_helper.utils.undecodable_text import recorded
 from pydantic import Field
 from typing import Annotated
-
-#: The SARIF result kinds that state no problem: the rule was evaluated and
-#: passed, did not apply, or produced information only. Such a result is not a
-#: vulnerability and is left out of the report; written as one, a cdk-nag rule
-#: that was not evaluated became an Info vulnerability on the dashboard.
-_NON_FINDING_KINDS = frozenset({"pass", "notApplicable", "informational"})
 
 #: The GitLab security-report schema's maxLength for ``vulnerabilities[].solution``
 #: (schemas/gitlab/sast.py, the generated model). A suppression's justification is
@@ -149,11 +144,11 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         vulnerabilities: List[Dict[str, Any]] = []
         skipped_results = 0
         if all_results:
-            shared_ids = self._shared_finding_ids(model, all_results)
+            shared_ids = shared_finding_ids(model, all_results)
             legacy_ids_seen: Dict[str, int] = {}
             ASH_LOGGER.trace("Creating rule dict")
             for index, result in enumerate(all_results):
-                if self._is_not_a_finding(result):
+                if is_not_a_finding(result):
                     continue
                 # Scoped to one result so that a result this reporter cannot
                 # transform costs that result rather than the entire report. The
@@ -183,61 +178,6 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 model,
                 f"ASH could not assemble the GitLab SAST report: {error_text(e)}",
             )
-
-    @staticmethod
-    def _is_not_a_finding(result: Any) -> bool:
-        """Whether *result*'s ``kind`` says no problem was found (SARIF 3.27.9:
-        pass, notApplicable, informational). An absent kind is ``fail``."""
-        kind = getattr(result, "kind", None)
-        kind_value = str(getattr(kind, "value", kind) or "fail")
-        return kind_value in _NON_FINDING_KINDS
-
-    @staticmethod
-    def _message_text(result: Any) -> str:
-        """The result's message as text: its ``text``, else its ``markdown``, else
-        the ``id`` of the message string it names, else "".
-
-        SARIF lets a message be given by ``id`` alone, resolved against the
-        rule's ``messageStrings``; read as ``text`` alone, such a result had an
-        empty description and source extract.
-        """
-        message_root = getattr(getattr(result, "message", None), "root", None)
-        for field in ("text", "markdown", "id"):
-            value = getattr(message_root, field, None)
-            if isinstance(value, str) and value:
-                return value
-        return ""
-
-    @staticmethod
-    def _shared_finding_ids(
-        model: "AshAggregatedResults", all_results: List[Any]
-    ) -> List[str | None]:
-        """The id every other ASH report gives each result, by position.
-
-        ``to_flat_vulnerabilities`` builds one flattened finding per SARIF result
-        in ``get_all_results`` order, and its id (``utils/finding_identity``)
-        reads the scanner, the rule, the file, the line, the column, the
-        fingerprints and the message, with an occurrence counter for findings
-        that still collide. The legacy ``get_finding_id`` this reporter used
-        hashed the rule, file and line only, so two distinct findings of one rule
-        at one line shared an "unique" id and an ASH finding-id identifier, and
-        the id differed from the one in every other report of the same scan.
-
-        None at every position when the flattening fails or cannot be paired,
-        and at a position whose flattened row does not describe its result
-        (another rule, file or line), so a model this cannot read, and a result
-        the flattening drifted from, keep the legacy id rather than taking
-        another finding's; see :func:`shared_ids_by_position`. The pairing runs
-        inside the guard too: it reads each result's locations, and a result
-        whose locations misbehave is a legacy id at that position, never an
-        exception out of ``report()`` with no artefact written.
-        """
-        try:
-            flat = list(model.to_flat_vulnerabilities())
-            return shared_ids_by_position(flat, all_results)
-        except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
-            ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
-            return [None] * len(all_results)
 
     @staticmethod
     def _distinct_legacy_id(vuln: Dict[str, Any], seen: Dict[str, int]) -> None:
@@ -272,14 +212,16 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         None means "deliberately excluded" -- a suppressed finding under
         ``exclude_suppressed`` -- and is the only omission that is not counted as
         a skip, because the operator asked for it. *shared_id* is the finding's
-        id in every other report (:meth:`_shared_finding_ids`); without one the
+        id in every other report (``sarif_utils.shared_finding_ids``); without one the
         legacy rule-file-line id is used.
         """
-        # `ruleId` is optional in SARIF 2.1.0 and defaults to None, so bind it
-        # once here and read the binding at every site below. Reading
+        # `ruleId` is optional in SARIF 2.1.0 and defaults to None, and a result
+        # may name its rule as `rule.id` instead (3.27.5, 3.27.7), so bind the
+        # one reading here and read the binding at every site below. Reading
         # `result.ruleId` directly is what made one null rule id lose the whole
         # report: the raw_source_code_extract expression called .startswith() on
-        # it for every result, not only for secret findings.
+        # it for every result, not only for secret findings; and a rule named by
+        # reference had no name, an empty rule-id detail and no rule identifier.
         #
         # Empty rather than a placeholder, which is where this differs from
         # html_reporter's `result.ruleId or "UNKNOWN"`. That one is display text;
@@ -287,11 +229,11 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # collapse every rule-less finding in the project onto one invented rule
         # and make them look like recurrences of each other. The identifier is
         # omitted instead -- see the guard further down.
-        rule_id = result.ruleId or ""
+        rule_id = result_rule_id(result) or ""
         # Same reasoning for the message: `text` is optional beside `markdown`
         # and an `id`, and `message` itself is reached through a RootModel
-        # wrapper.
-        message_text = self._message_text(result)
+        # wrapper. Whitespace alone is no description.
+        message_text = result_message_text(result, default="")
 
         # Check if finding is suppressed: by a suppression in effect. One
         # rejected or under review has not taken effect (SARIF 3.35.4) and the

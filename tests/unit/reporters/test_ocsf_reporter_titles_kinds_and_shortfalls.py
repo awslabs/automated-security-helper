@@ -160,6 +160,16 @@ class TestFileNamesAndMessages:
         assert finding.vulnerabilities[0].desc == "default"
         assert finding.finding_info.title == "R1 - default"
 
+    def test_a_message_of_spaces_alone_is_no_description(self, reporter, metadata):
+        # Whitespace is no description: written as-is, it titled the finding
+        # "R1 -    " and described it as three spaces.
+        result = Result(ruleId="R1", level=Level.error, message=Message(text="   "))
+
+        finding = reporter._create_vulnerability_finding(result, metadata, _now_ms())
+
+        assert finding.finding_info.desc == "No description"
+        assert finding.finding_info.title == "R1 - No description"
+
 
 class TestNonFindingKinds:
     @pytest.mark.parametrize(
