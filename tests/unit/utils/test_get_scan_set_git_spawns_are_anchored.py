@@ -143,6 +143,29 @@ def test_the_root_lookup_and_the_diff_keep_a_work_tree_the_caller_names(
         assert (env.get("GIT_DIR"), env.get("GIT_WORK_TREE")) == (bare, tree)
 
 
+@pytest.mark.parametrize("ask", LAYOUT_HELPERS)
+def test_the_root_lookup_and_the_diff_make_a_relative_location_absolute(
+    tmp_path, monkeypatch, recorded, ask
+):
+    """A relative GIT_DIR or GIT_WORK_TREE is relative to the directory of the
+    process that exported it, this one; git is started in the scanned directory,
+    where ``.`` would name something else, so each is made absolute first."""
+    (tmp_path / "deployed").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GIT_DIR", "deploy.git")
+    monkeypatch.setenv("GIT_WORK_TREE", "deployed")
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+    here = os.getcwd()
+
+    ask(tmp_path / "deployed")
+
+    assert recorded, "git was not started"
+    for _argv, kwargs in recorded:
+        env = kwargs["env"]
+        assert env["GIT_DIR"] == os.path.join(here, "deploy.git")
+        assert env["GIT_WORK_TREE"] == os.path.join(here, "deployed")
+
+
 @pytest.mark.parametrize("ask", NESTING_HELPERS)
 def test_the_nesting_lookups_discover_even_when_the_caller_names_a_work_tree(
     tmp_path, monkeypatch, recorded, ask

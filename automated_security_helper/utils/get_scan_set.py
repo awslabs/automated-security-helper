@@ -2183,12 +2183,17 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     """The environment of the repository-root lookup and the diff started in *cwd*.
 
     :func:`_git_environ`, unless the caller names the work tree: with GIT_WORK_TREE
-    set to an existing directory, the location variables are passed through as
-    they are. A relative GIT_WORK_TREE is read against *cwd*, the directory git is
-    started in, since that is where git resolves it; read against this process's
-    own directory it could name a directory that git would not find, or the other
-    way round. A *cwd* of None is this process's own directory, which is where
-    :func:`subprocess.run` starts git when it is given no directory.
+    set to an existing directory, the location variables are passed through, each
+    relative one made absolute first. A relative value means "relative to the
+    directory of the process that exported it", and that is this process's own
+    directory: receive-pack starts a post-receive hook inside the repository with
+    ``GIT_DIR=.`` exported, and a hook that then exports ``GIT_WORK_TREE=/srv/app``
+    and scans ``/srv/app`` means the repository it runs in. Passed on as written to
+    a git started in *cwd*, the scanned directory, ``.`` named that directory
+    instead and git answered "not a git repository", so the scan lost its
+    changed-file filter in the very shape this passthrough is for. Made absolute
+    against this process's directory, the value keeps the exporter's meaning
+    wherever git is started.
     A bare repository driven as ``GIT_DIR=<bare> GIT_WORK_TREE=<tree>``
     (a post-receive hook deploying a checkout, a ``core.worktree`` layout) has no
     ``.git`` entry in the tree for git to discover, so dropping the pair there
@@ -2202,12 +2207,15 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     paths onto a path that does not exist.
     """
     environ = child_environ()
+    # os.path.abspath reads a relative value against this process's directory, the
+    # exporter's, and keeps an absolute one as it is; git started in *cwd* then
+    # reads the same directory the exporter meant.
+    for name in _GIT_LOCATION_ENV:
+        value = environ.get(name)
+        if value and not os.path.isabs(value):
+            environ[name] = os.path.abspath(value)
     work_tree = environ.get("GIT_WORK_TREE")
-    # os.path.join keeps an absolute work tree as it is and places a relative one
-    # under the directory git starts in, which is how git reads the variable from
-    # that directory. With no cwd, git starts in this process's directory.
-    started_in = os.getcwd() if cwd is None else cwd
-    if work_tree and os.path.isdir(os.path.join(started_in, work_tree)):
+    if work_tree and os.path.isdir(work_tree):
         return environ
     return _git_environ()
 
