@@ -339,12 +339,14 @@ class VersionBumper:
         # `set` refuses (3.8.0-rc1, written by an older set) or text that is not a
         # version at all (not-a-version) passed here as long as the pages matched,
         # and the advice below would have told the reader to run `set` with it.
-        writable = validate_version(current_version)
-        if not writable:
+        # Canonical is the spelling check only: a pre-release such as 2.0.0rc1 is
+        # canonical and passes, although `set` itself writes final versions only.
+        canonical = validate_version(current_version)
+        if not canonical:
             print(
-                f"Error: [project] version {current_version!r} is not a version "
-                "that set can write (PEP 440 with three release numbers, spelled "
-                f"as pip prints it); {fix_with_set(current_version)}"
+                f"Error: [project] version {current_version!r} is not a canonical "
+                "version (PEP 440 with three release numbers, spelled as pip prints "
+                f"it, no local part); {fix_with_set(current_version)}"
             )
             consistent = False
 
@@ -402,7 +404,7 @@ class VersionBumper:
                 print(f"Error: could not read {target}: {e}")
                 consistent = False
                 continue
-            if not (tables_agree and writable):
+            if not (tables_agree and canonical):
                 continue
             try:
                 expected = self.template_manager.render(

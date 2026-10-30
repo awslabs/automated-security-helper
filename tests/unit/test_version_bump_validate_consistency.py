@@ -25,10 +25,12 @@ What is asserted
 * It checks every target the template manager lists, as ``set`` counts them, so a
   listed target whose template is missing fails here too; a template that is not
   listed is not looked at.
-* The pyproject.toml version itself must be one ``set`` can write (PEP 440, three
-  release numbers, spelled as pip prints it). A spelling set refuses, or text that
-  is not a version, fails with advice naming a command ``set`` accepts: the
-  canonical spelling, or the final release for a pre-release set cannot write.
+* The pyproject.toml version itself must be canonical (PEP 440, three release
+  numbers, spelled as pip prints it). A spelling set refuses, or text that is not a
+  version, fails with advice naming a command ``set`` accepts: the canonical
+  spelling, or the final release for a pre-release set cannot write. A canonical
+  pre-release passes the spelling check even though ``set`` writes final versions
+  only; validate says "canonical", not "a version set can write".
 * It passes on a tree where all of them agree.
 * The version it prints comes from the pyproject.toml at the project root; with no
   such file it fails and prints no version that came from somewhere else.
@@ -299,7 +301,7 @@ class TestTheVersionItselfIsChecked:
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
-        assert "'1.02.3' is not a version that set can write" in out
+        assert "'1.02.3' is not a canonical version" in out
         assert "run 'set 1.2.3'" in out
         assert "set 1.02.3" not in out
         assert "not its template rendered" not in out
@@ -313,7 +315,7 @@ class TestTheVersionItselfIsChecked:
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
-        assert "'3.8.0-rc1' is not a version that set can write" in out
+        assert "'3.8.0-rc1' is not a canonical version" in out
         assert "run 'set 3.8.0'" in out
         assert "set 3.8.0-rc1" not in out
         assert "set 3.8.0rc1" not in out
@@ -329,19 +331,33 @@ class TestTheVersionItselfIsChecked:
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
-        assert "'not-a-version' is not a version that set can write" in out
+        assert "'not-a-version' is not a canonical version" in out
         assert "run 'set X.Y.Z' with a final version" in out
         assert "validation passed" not in out
 
     def test_a_canonical_pre_release_whose_pages_match_passes(
-        self, project, monkeypatch
+        self, project, monkeypatch, capsys
     ):
+        # Validate checks the spelling only, so it neither passes this version off
+        # as one `set` can write nor complains about it.
         _write_pyproject(project, "2.0.0rc1", "2.0.0rc1")
         project.joinpath("README.md").write_text(
             TEMPLATE.replace("{{VERSION}}", "2.0.0rc1"), encoding="utf-8"
         )
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is True
+        out = capsys.readouterr().out
+        assert "can write" not in out
+        assert "canonical" not in out
+
+    def test_set_and_validate_name_different_things_for_a_pre_release(
+        self, project, monkeypatch, capsys
+    ):
+        # Validate checks the spelling; set additionally requires a final version.
+        module = _load_version_bump(monkeypatch)
+        assert module.validate_version("2.0.0rc1") is True
+        assert _bumper(module, project).set_version("2.0.0rc1") is False
+        assert "is not a final release" in capsys.readouterr().out
 
     def test_a_stale_page_under_a_pre_release_is_not_advised_a_set_that_finalizes(
         self, project, monkeypatch, capsys
