@@ -383,6 +383,8 @@ class TestACoverageGapBesideFindingsIsADanger:
     @staticmethod
     def _model(with_finding: bool) -> AshAggregatedResults:
         model = AshAggregatedResults(ash_config=get_default_config())
+        # The same gate in both variants, so the two differ in the finding alone.
+        model.ash_config.global_settings.severity_threshold = "CRITICAL"
         if with_finding:
             model.sarif.runs[0].results = [
                 Result(
@@ -392,7 +394,6 @@ class TestACoverageGapBesideFindingsIsADanger:
                     properties=PropertyBag(scanner_name="bandit"),
                 )
             ]
-            model.ash_config.global_settings.severity_threshold = "CRITICAL"
         model.additional_reports["bandit"] = {
             "source": {
                 "scanner_name": "bandit",
