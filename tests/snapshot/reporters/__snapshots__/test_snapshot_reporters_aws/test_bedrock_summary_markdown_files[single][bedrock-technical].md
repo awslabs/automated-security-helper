@@ -23,6 +23,6 @@ Targets left unevaluated:
 
 Generated with Amazon Bedrock. Verify suggestions against the source findings.
 
-[stubbed model response 8]
+[stubbed model response 7]
 
 Build with <3 at Amazon Web Services
