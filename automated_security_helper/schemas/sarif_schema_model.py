@@ -62,6 +62,7 @@ from automated_security_helper.utils.undecodable_text import (
     undecodable_of_text,
 )
 from automated_security_helper.utils.uri_separators import (
+    is_windows_root,
     root_text,
     sanitized_uri_text,
 )
@@ -71,8 +72,9 @@ import re
 from datetime import datetime
 from enum import Enum
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Dict, List, Literal, Optional, Union
+from urllib.parse import unquote, urlparse
 
 from pydantic import AnyUrl, ConfigDict, Field, RootModel
 
@@ -2410,6 +2412,77 @@ _DRIVE_PREFIXED_ROOT = re.compile(r"^/[A-Za-z]:")
 _DRIVE_ROOT = re.compile(r"^[A-Za-z]:/")
 
 
+def _file_uri_path_text(uri: str) -> str:
+    """The path a ``file:`` URI names, as text; any other URI unchanged.
+
+    Parsed rather than sliced, as ``utils/sarif_utils._file_uri_to_path_text``
+    parses the sanitize path's URIs: the scheme is matched without regard to
+    case, the single-slash form ``file:/abs`` and the authority forms
+    ``file://localhost/abs`` and ``file://host/abs`` all name ``/abs`` (a host
+    segment never survives as a path segment), and the path is percent-decoded
+    the way the file system decodes a name (surrogateescape), so a name holding
+    a space, a non-ASCII character or a byte that is not UTF-8 reads back as the
+    file's own. Slicing ``file://`` off kept ``localhost/abs`` as a relative
+    path, left ``file:/abs`` untouched and kept ``my%20file`` encoded, so every
+    one of those results was dropped.
+    """
+    if uri[:5].lower() != "file:":
+        return uri
+    path = unquote(urlparse(uri).path, errors="surrogateescape")
+    # file:///C:/x -> /C:/x ; drop the slash that precedes a drive.
+    if _DRIVE_PREFIXED_ROOT.match(path):
+        path = path[1:]
+    return path
+
+
+def _relative_text(candidate: str, root: str, fold_case: bool) -> Optional[str]:
+    """*candidate* made relative to *root*, both ``/``-separated; None when it is
+    not under *root*. With *fold_case* the segments are compared without regard
+    to case and the candidate's own spelling of the tail is returned."""
+    candidate_parts = PurePosixPath(candidate).parts
+    root_parts = PurePosixPath(root).parts
+    if len(candidate_parts) <= len(root_parts):
+        return None
+
+    def key(segment: str) -> str:
+        return segment.lower() if fold_case else segment
+
+    if [key(s) for s in candidate_parts[: len(root_parts)]] != [
+        key(s) for s in root_parts
+    ]:
+        return None
+    return PurePosixPath(*candidate_parts[len(root_parts) :]).as_posix()
+
+
+def _resolved_relative_text(candidate: str, source_dir: object) -> Optional[str]:
+    """*candidate* made relative to *source_dir* once both are resolved.
+
+    The lexical comparison takes ``source_dir`` as given, while a scanner's URI
+    is whatever spelling the scanner was handed: a relative ``source_dir``, or
+    one reached through a symlink (``/tmp`` against ``/private/tmp`` on macOS),
+    never matched and every absolute URI was dropped. The sanitize path
+    (``utils/sarif_utils._sanitize_uri``) resolves in its fallback; this is the
+    same fallback, reached only when the lexical form already failed, so the
+    common case pays nothing for it. None when neither spelling matches or a
+    path cannot be resolved.
+    """
+    if isinstance(source_dir, PurePath) and not isinstance(source_dir, Path):
+        # A pure path of another flavor names no directory on this host.
+        return None
+    try:
+        resolved_root = root_text(Path(str(source_dir)).resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+    relative = _relative_text(candidate, resolved_root, False)
+    if relative is not None:
+        return relative
+    try:
+        resolved_candidate = root_text(Path(candidate).resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return _relative_text(resolved_candidate, resolved_root, False)
+
+
 class SarifReport(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -2495,9 +2568,17 @@ class SarifReport(RecordModel):
         # A URI holds a file name that is not UTF-8 in its record form (each lone
         # surrogate as \udcNN, utils/undecodable_text.py), and a listed name may
         # hold the surrogate: both are compared in the record form. The URI is read
-        # back as the name first, so its escapes are not taken for separators.
-        recorded_set = {text_of_undecodable(str(name)) for name in file_set}
-        source_posix = PurePosixPath(root_text(source_dir))
+        # back as the name first, so its escapes are not taken for separators. A
+        # listed name given as a path object is spelled with "/" whatever its
+        # flavor: str() of a Windows path writes backslashes, which no URI holds.
+        recorded_set = {
+            text_of_undecodable(
+                name.as_posix() if isinstance(name, PurePath) else str(name)
+            )
+            for name in file_set
+        }
+        source_text = root_text(source_dir)
+        windows_source = is_windows_root(source_dir)
         for run in self.runs:
             if not run.results:
                 continue
@@ -2513,34 +2594,38 @@ class SarifReport(RecordModel):
                 ):
                     filtered.append(result)
                     continue
-                uri = loc.physicalLocation.root.artifactLocation.uri or ""
+                uri = loc.physicalLocation.root.artifactLocation.uri
+                if uri is None:
+                    # The location names its artifact by index or by uriBaseId
+                    # alone, which this filter cannot resolve to a path, and a
+                    # result with no usable location is retained, as one with no
+                    # location is. Comparing it as "" dropped it.
+                    filtered.append(result)
+                    continue
                 # SARIF artifact URIs are POSIX-style by spec, so all comparison
                 # happens in PurePosixPath space. Using pathlib.Path here makes the
                 # result host-dependent: on Windows, Path("/tmp/src/x.py").is_absolute()
                 # is False (no drive), so a Linux-produced SARIF processed on Windows
                 # would skip normalisation entirely and drop every result.
-                candidate_str = undecodable_of_text(uri)
-                if candidate_str.startswith("file://"):
-                    candidate_str = candidate_str[len("file://") :]
-                    # file:///C:/x -> /C:/x ; drop the slash that precedes a drive.
-                    if _DRIVE_PREFIXED_ROOT.match(candidate_str):
-                        candidate_str = candidate_str[1:]
+                candidate_str = _file_uri_path_text(undecodable_of_text(uri))
                 # A backslash is a separator only in a drive-letter or UNC path,
                 # or under a Windows source_dir; elsewhere it is part of a POSIX
                 # file name, which file_set holds as written
                 # (utils/uri_separators.py).
                 candidate_str = sanitized_uri_text(candidate_str, source_dir)
-                candidate = PurePosixPath(candidate_str)
-                is_rooted = candidate_str.startswith("/") or bool(
-                    _DRIVE_ROOT.match(candidate_str)
-                )
+                drive_rooted = bool(_DRIVE_ROOT.match(candidate_str))
+                is_rooted = candidate_str.startswith("/") or drive_rooted
+                # A Windows file system compares names without regard to case, so
+                # a URI whose drive letter or directory case differs from
+                # source_dir still names a file under it.
+                fold_case = windows_source or drive_rooted
+                rel_str: Optional[str] = None
                 if is_rooted:
-                    try:
-                        rel_str = candidate.relative_to(source_posix).as_posix()
-                    except ValueError:
-                        rel_str = candidate.as_posix()
-                else:
-                    rel_str = candidate.as_posix()
+                    rel_str = _relative_text(candidate_str, source_text, fold_case)
+                    if rel_str is None and not fold_case:
+                        rel_str = _resolved_relative_text(candidate_str, source_dir)
+                if rel_str is None:
+                    rel_str = PurePosixPath(candidate_str).as_posix()
                 if text_of_undecodable(rel_str) in recorded_set:
                     filtered.append(result)
             run.results = filtered
@@ -2598,11 +2683,35 @@ class SarifReport(RecordModel):
                 report_run, include_invocation, include_driver, include_rules
             )
 
-        self.inlineExternalProperties.extend(sarif_report.inlineExternalProperties)
-        if sarif_report.properties.tags is not None:
+        # Both report-level lists are Optional: a file that writes them as null
+        # validates to None, and the model's default only covers a file that
+        # omits them. Read before the merge is applied so the runs above are never
+        # left merged with the report-level fields half done.
+        incoming_external = sarif_report.inlineExternalProperties or []
+        if incoming_external:
+            if self.inlineExternalProperties is None:
+                self.inlineExternalProperties = []
+            self.inlineExternalProperties.extend(
+                item.model_copy(deep=True) for item in incoming_external
+            )
+        incoming_tags = (
+            sarif_report.properties.tags
+            if sarif_report.properties is not None
+            else None
+        )
+        if incoming_tags:
+            if self.properties is None:
+                self.properties = PropertyBag()
             if self.properties.tags is None:
                 self.properties.tags = []
-            self.properties.tags.extend(sarif_report.properties.tags)
+            # A set of distinct strings, as the schema describes the field: a tag
+            # both reports carry is listed once, and a later merge of the same
+            # report adds nothing.
+            known_tags = set(self.properties.tags)
+            for tag in incoming_tags:
+                if tag not in known_tags:
+                    self.properties.tags.append(tag)
+                    known_tags.add(tag)
 
     def _merge_run(
         self,
@@ -2616,11 +2725,12 @@ class SarifReport(RecordModel):
         # Copies, never the incoming objects: ash merge promises not to mutate
         # its inputs, and a later merge appends to the aggregate's lists, so an
         # aliased invocation or rule would change the report it came from.
-        report_invocations = (
-            [invocation.model_copy(deep=True) for invocation in report_run.invocations]
-            if report_run.invocations is not None
-            else None
-        )
+        # A run whose invocations are null merges as no invocations: the list
+        # below is extended with it, and extending with None raised TypeError.
+        report_invocations = [
+            invocation.model_copy(deep=True)
+            for invocation in (report_run.invocations or [])
+        ]
         report_results = []
         # A run may carry no results list at all (SARIF allows omitting it, and a
         # scanner that failed leaves it so), which merges as no results.
@@ -2636,41 +2746,20 @@ class SarifReport(RecordModel):
                 # it the level its rule's defaultConfiguration names.
                 exclude_unset=True,
             )
+            _keep_the_rule_by_id(clean_result, res, report_tool)
             report_results.append(Result(**clean_result))
 
         if self.runs:
             self_run = self.runs[0]
             if include_driver:
-                if _same_tool_component(self_run.tool.driver, report_tool.driver):
-                    # The incoming tool is this run's own driver: the run was
-                    # adopted from an earlier report of the same tool. Its rules
-                    # are unioned into the driver and no extension is added, so a
-                    # tool merged twice into an empty aggregate is listed once.
-                    if include_rules:
-                        _union_rules(self_run.tool.driver, report_tool.driver.rules)
-                elif (
-                    self_run.tool.extensions is None
-                    or len(self_run.tool.extensions) == 0
-                ):
-                    self_run.tool.extensions = [
-                        report_tool.driver.model_copy(deep=True)
-                    ]
-                else:
-                    # Check if report_tool.driver.name already exists in self_run.tool.extensions
-                    existing_extension = next(
-                        (
-                            ext
-                            for ext in self_run.tool.extensions
-                            if _same_tool_component(ext, report_tool.driver)
-                        ),
-                        None,
-                    )
-                    if existing_extension is None:
-                        self_run.tool.extensions.append(
-                            report_tool.driver.model_copy(deep=True)
-                        )
-                    elif include_rules:
-                        _union_rules(existing_extension, report_tool.driver.rules)
+                _fold_tool_component(self_run, report_tool.driver, include_rules)
+                # A scanner's own SARIF can define rules in its tool.extensions
+                # (a rule pack or a plugin of the tool); results of that run then
+                # name rules the driver does not carry. Folding only the driver
+                # dropped those components and the metadata of every finding
+                # that referenced them.
+                for extension in report_tool.extensions or []:
+                    _fold_tool_component(self_run, extension, include_rules)
         else:
             # Adopt the incoming run's tool, properties and the rest, with its
             # results and invocations left out: the common tail below adds them
@@ -2706,6 +2795,80 @@ def _same_tool_component(
         and existing.fullName == incoming.fullName
         and existing.organization == incoming.organization
     )
+
+
+def _fold_tool_component(
+    self_run: "Run", component: "ToolComponent", include_rules: bool
+) -> None:
+    """Add *component* to *self_run*'s tool, or union its rules into the one it names.
+
+    The run's own driver first: an incoming component that names it is the tool
+    the run was adopted from, so its rules are unioned into the driver and no
+    extension is added, and a tool merged twice into an empty aggregate is listed
+    once. Otherwise the component joins ``extensions`` as a copy, or its rules
+    join the extension of the same name, fullName and organization.
+    """
+    if _same_tool_component(self_run.tool.driver, component):
+        if include_rules:
+            _union_rules(self_run.tool.driver, component.rules)
+        return
+    if self_run.tool.extensions is None:
+        self_run.tool.extensions = []
+    existing_extension = next(
+        (
+            ext
+            for ext in self_run.tool.extensions
+            if _same_tool_component(ext, component)
+        ),
+        None,
+    )
+    if existing_extension is None:
+        self_run.tool.extensions.append(component.model_copy(deep=True))
+    elif include_rules:
+        _union_rules(existing_extension, component.rules)
+
+
+def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") -> None:
+    """Make *dumped*, a result copied into the aggregate, name its rule by id.
+
+    The merged run reorders rules, so ``ruleIndex`` is dropped from the copy and
+    ``ruleId`` is what correlates a result to its rule afterwards. A result that
+    named its rule by index alone, or by a ``rule`` reference whose ``index``
+    points into the incoming driver's rules, lost the association: ``ruleId`` is
+    backfilled from that driver's rule here. The reference's own ``index`` and
+    ``toolComponent`` point into the incoming run's arrays, which the merged run
+    does not have, so they are dropped from the copy; a reference left with
+    neither id nor guid is dropped whole.
+    """
+    rules = report_tool.driver.rules or []
+    reference = dumped.get("rule")
+    rule_index = None
+    if result.ruleIndex is not None and result.ruleIndex >= 0:
+        rule_index = result.ruleIndex
+    elif isinstance(reference, dict):
+        index = reference.get("index")
+        component = reference.get("toolComponent")
+        # Only a reference into the driver: with a toolComponent the index names a
+        # rule of an extension, whose rules are not indexed here.
+        if (
+            isinstance(index, int)
+            and index >= 0
+            and not (isinstance(component, dict) and component.get("index", -1) != -1)
+        ):
+            rule_index = index
+    if dumped.get("ruleId") is None and rule_index is not None:
+        if rule_index < len(rules) and rules[rule_index].id:
+            dumped["ruleId"] = rules[rule_index].id
+    if isinstance(reference, dict):
+        kept = {
+            key: value
+            for key, value in reference.items()
+            if key not in ("index", "toolComponent")
+        }
+        if kept.get("id") is None and kept.get("guid") is None:
+            dumped.pop("rule", None)
+        else:
+            dumped["rule"] = kept
 
 
 def _union_rules(
