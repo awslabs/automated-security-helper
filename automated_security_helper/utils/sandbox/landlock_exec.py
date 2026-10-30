@@ -14,8 +14,11 @@ their sandbox: their mounts hide most socket paths, but not one that sits in a m
 directory (the Nix daemon's socket is under /nix), and with a network the scanner shares
 the host's network namespace and with it every abstract Unix socket bound there.
 
-Filesystem: Landlock rules grant read and execute beneath ``read_only`` and full access
-beneath ``writable``; every other path is denied. Sockets: a seccomp filter makes
+Filesystem: Landlock rules grant read and execute beneath ``read_only``, read alone
+beneath ``read_data`` (the scan's own data, which nothing runs from) and full access
+beneath ``writable``; every other path is denied. ``cwd``, when the policy names one,
+is the directory the wrapper changes into before it runs the command (a spawn with
+no working directory of its own). Sockets: a seccomp filter makes
 ``socket(AF_UNIX)`` and a datagram ``socketpair()`` fail with EACCES and
 ``io_uring_setup`` with ENOSYS always (see ``apply_socket_seccomp``), and ``socket()``
 fail for every family when the policy has no network. Landlock's own network rules
@@ -23,7 +26,10 @@ cover TCP only, so they are added on ABI 4+ as a second layer, not relied on. AB
 also scopes abstract Unix sockets and signals.
 
 Any failure to apply a restriction is fatal (exit 126): this program never execs the
-scanner with less confinement than it was asked for.
+scanner with less confinement than it was asked for. So is any failure of the
+wrapper's own before the scanner starts (a policy that is not the documented JSON
+document, a fork that fails): exit 126 with an ``ash-landlock:`` line, never the
+interpreter's traceback and exit 1, which many scanners use for "findings found".
 """
 
 import ctypes
@@ -32,13 +38,14 @@ import json
 import os
 import platform
 import re
+import resource
 import signal
 import stat
 import struct
 import time
 import sys
 import unicodedata
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Tuple
 
 SYS_LANDLOCK_CREATE_RULESET = 444
 SYS_LANDLOCK_ADD_RULE = 445
@@ -252,6 +259,11 @@ def apply_landlock(policy: Dict[str, Any], abi: int) -> None:
     read_rights = FS_EXECUTE | FS_READ_FILE | FS_READ_DIR
     for path in policy["read_only"]:
         add_path_rule(ruleset_fd, path, read_rights)
+    # The scan's data: read, never executed. Rules add up, so a data path under a
+    # path granted exec stays executable through it; one under no such path (the
+    # scanned tree under $HOME) is not.
+    for path in policy.get("read_data", ()):
+        add_path_rule(ruleset_fd, path, FS_READ_FILE | FS_READ_DIR)
     for path in policy["writable"]:
         add_path_rule(ruleset_fd, path, handled_fs)
     if libc.syscall(SYS_LANDLOCK_RESTRICT_SELF, ruleset_fd, 0) != 0:
@@ -368,11 +380,12 @@ def main(argv: List[str]) -> int:
         exec_with_socket_filter(argv[1] == "unix", argv[3:])
     if len(argv) < 4 or argv[0] != "--policy" or argv[2] != "--":
         fail("usage: landlock_exec.py --policy JSON -- argv...")
-    policy = json.loads(argv[1])
+    policy = _parse_policy(argv[1])
     command = argv[3:]
     abi = abi_version()
     if abi <= 0:
         fail("Landlock is not supported or not enabled on this kernel")
+    _enter_policy_cwd(policy)
 
     def restrict() -> None:
         # In the child only. The wrapper stays outside the scanner's Landlock
@@ -384,6 +397,63 @@ def main(argv: List[str]) -> int:
         apply_socket_seccomp(bool(policy["network"]))
 
     return run_and_reap(command, restrict)
+
+
+#: The policy document's keys, each with the type its value must have.
+_POLICY_KEYS: Dict[str, type] = {
+    "read_only": list,
+    "read_data": list,
+    "writable": list,
+    "network": bool,
+    "cwd": str,
+}
+_REQUIRED_POLICY_KEYS = ("read_only", "writable", "network")
+
+
+def _parse_policy(text: str) -> Dict[str, Any]:
+    """The ``--policy`` document, or exit 126 with what is wrong with it.
+
+    Checked here, in the wrapper, rather than met in the forked child: a document
+    that is not JSON raised out of main with the interpreter's traceback and exit
+    1, and a wrong value inside one failed in the child with exit 126 and no
+    message. Every path list holds strings; ``network`` is a boolean; ``cwd`` and
+    ``read_data`` are optional.
+    """
+    try:
+        policy = json.loads(text)
+    except ValueError as e:
+        fail(f"--policy is not valid JSON: {e}")
+    if not isinstance(policy, dict):
+        fail("--policy must be a JSON object")
+    for key in _REQUIRED_POLICY_KEYS:
+        if key not in policy:
+            fail(f"--policy lacks the key {key!r}")
+    for key, value in policy.items():
+        wanted = _POLICY_KEYS.get(key)
+        if wanted is None:
+            fail(f"--policy holds the unknown key {key!r}")
+        if not isinstance(value, wanted) or (wanted is bool) != isinstance(value, bool):
+            fail(f"--policy key {key!r} must be a {wanted.__name__}")
+        if wanted is list and not all(isinstance(item, str) for item in value):
+            fail(f"--policy key {key!r} must list paths as strings")
+    return policy
+
+
+def _enter_policy_cwd(policy: Dict[str, Any]) -> None:
+    """Change into the policy's ``cwd``, when it names one, or exit 126.
+
+    For a spawn ASH gives no working directory of its own (a version probe): the
+    child would otherwise inherit ASH's, which the policy need not grant, and the
+    tool failed reading it. The wrapper changes directory before the fork, so the
+    scanner starts there; the wrapper itself reads nothing from its directory.
+    """
+    cwd = policy.get("cwd")
+    if not cwd:
+        return
+    try:
+        os.chdir(cwd)
+    except OSError as e:
+        fail(f"cannot change into the working directory {cwd}: {e}")
 
 
 def exec_with_socket_filter(allow_ip: bool, command: List[str]) -> NoReturn:
@@ -490,6 +560,62 @@ def _children(pid: int = 0) -> List[int]:
     return _parent_map().get(pid or os.getpid(), [])
 
 
+def _parent_pid(pid: int) -> Optional[int]:
+    """The parent of ``pid`` from /proc/<pid>/stat, or None when it is gone or unreadable."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            fields = f.read().rsplit(b")", 1)[1].split()
+    except (OSError, IndexError):
+        return None
+    if len(fields) < 2:
+        return None
+    try:
+        return int(fields[1])
+    except ValueError:
+        return None
+
+
+def _kill_descendant(pid: int, tree: Set[int]) -> bool:
+    """SIGKILL ``pid`` if it is still a process of this wrapper's tree.
+
+    The pids a reap pass collects are read from /proc and killed afterwards; a
+    descendant that exited in between can have had its number reused by an
+    unrelated process of the same user, which a bare ``kill`` would then end. So
+    the process is pinned first where the kernel allows it (``pidfd_open``, Linux
+    5.3+, and ``pidfd_send_signal``), and its parent is read again: a process
+    whose parent is not in ``tree`` (the wrapper and the descendants listed with
+    it) is not one the scanner started and is left alone. A reused pid whose new
+    parent happens to be in the tree is a descendant after all. Returns whether a
+    signal was sent.
+    """
+    parent = _parent_pid(pid)
+    if parent is None or parent not in tree:
+        return False
+    pidfd_open = getattr(os, "pidfd_open", None)
+    pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+    if pidfd_open is not None and pidfd_send_signal is not None:
+        try:
+            fd = pidfd_open(pid)
+        except OSError:
+            return False
+        try:
+            # Read again with the process pinned: a reuse between the first read
+            # and the open would otherwise have pinned the new process.
+            if _parent_pid(pid) not in tree:
+                return False
+            pidfd_send_signal(fd, signal.SIGKILL)
+            return True
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
+    try:
+        os.kill(pid, signal.SIGKILL)
+        return True
+    except OSError:
+        return False
+
+
 def _descendants(until: Optional[float] = None) -> List[int]:
     """Every process below this one, at any depth, breadth first.
 
@@ -558,6 +684,123 @@ def _child_setup(restrict: Callable[[], None]) -> None:
     restrict()
 
 
+def _run_child(command: List[str], restrict: Callable[[], None]) -> NoReturn:
+    """The forked child: set up, restrict, become the scanner; never return.
+
+    A failure is reported for what it is: a restriction step that raised an
+    OSError says so (it used to be written as a failed exec of the scanner, which
+    had not been attempted), ``fail()``'s SystemExit has written its own line, and
+    any other exception is written with its type and text rather than exiting in
+    silence. Whatever happened, the child never returns into the wrapper's code; a
+    restriction that failed leaves it here, unrestricted, so it exits 126.
+    """
+    try:
+        _child_setup(restrict)
+    except SystemExit:
+        pass
+    except BaseException as e:  # noqa: BLE001 - the child reports and exits
+        sys.stderr.write(
+            _shown(f"ash-landlock: restricting the scanner: {type(e).__name__}: {e}")
+            + "\n"
+        )
+    else:
+        try:
+            os.execve(command[0], command, os.environ)
+        except OSError as e:
+            # The scanner's path, and the error that quotes it.
+            sys.stderr.write(_shown(f"ash-landlock: exec {command[0]}: {e}") + "\n")
+    os._exit(126)
+
+
+def _forward_stop(pid: int, signum: int, still_running: Callable[[], bool]) -> None:
+    """Pass the stop signal ASH sent on to the scanner; SIGKILL it if it lingers.
+
+    The scanner gets the signal ASH sent the wrapper (SIGTERM on a timeout), as the
+    same scanner run unwrapped would, so one that handles it ends the way it
+    chooses and its exit is reported as that signal, not as a SIGKILL the wrapper
+    made up. A scanner still running STOP_REAP_DEADLINE_SECONDS later is
+    SIGKILLed by an interval timer's SIGALRM, so the stop still finishes inside the
+    grace ASH gives the wrapper.
+    """
+    try:
+        os.kill(pid, signum)
+    except OSError:
+        return
+
+    def kill_if_lingering(_signum: int, _frame: object) -> None:
+        if still_running():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    signal.signal(signal.SIGALRM, kill_if_lingering)
+    signal.setitimer(signal.ITIMER_REAL, STOP_REAP_DEADLINE_SECONDS)
+
+
+def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
+    """Kill and reap what the scanner left, until the tree is empty or the deadline.
+
+    Returns the pids a pass still found once the loop ended: an empty list when
+    five quiet passes in a row found nothing, the survivors when the deadline
+    ended the loop first, so the caller can say that something outlived the stop.
+    An orphan is reparented here only once its own parent has exited, which can
+    trail the scanner's exit, so "no children" has to hold for a short while.
+    Every pass kills the whole remaining tree at once, so depth costs nothing;
+    bounded by time rather than by a pass count, and inside the grace ASH gives a
+    stopping process before it SIGKILLs this wrapper. At least one pass is made,
+    however late a stop left the scanner's exit.
+    """
+    quiet = 0
+    passes = 0
+    leftovers: List[int] = []
+    while passes == 0 or time.monotonic() < deadline():
+        passes += 1
+        leftovers = _descendants(until=deadline())
+        if not leftovers:
+            quiet += 1
+            if quiet >= 5:
+                break
+            time.sleep(0.01)
+            continue
+        quiet = 0
+        tree = {os.getpid(), *leftovers}
+        for child in leftovers:
+            _kill_descendant(child, tree)
+        while True:
+            try:
+                reaped, _ = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                break
+            if reaped == 0:
+                break
+    return leftovers
+
+
+def _die_of(died_of: int) -> int:
+    """End the wrapper with the scanner's death signal; return the fallback status.
+
+    ASH then sees -N exactly as it would for the scanner run unwrapped. The
+    wrapper's core dumps are turned off first: a core-dumping signal (SIGSEGV,
+    SIGABRT) re-raised here would otherwise write the unrestricted wrapper's core
+    into the scanner's working directory. 128+N is the fallback for a signal that
+    cannot be re-raised that way.
+    """
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except (OSError, ValueError):
+        pass
+    try:
+        if died_of not in (signal.SIGKILL, signal.SIGSTOP):
+            # SIGKILL and SIGSTOP cannot be caught, so need no reset.
+            signal.signal(died_of, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, {died_of})
+        os.kill(os.getpid(), died_of)
+    except (OSError, ValueError):
+        pass
+    return 128 + died_of
+
+
 def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     """Run the scanner and, once it exits, kill whatever it left running.
 
@@ -566,8 +809,8 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     directory after ASH has swept it, so this wrapper stays as a child subreaper
     (orphans are reparented to it, however they detached) and kills them all
     before it exits with the scanner's status. SIGTERM, SIGINT or SIGHUP to the
-    wrapper (ASH sends SIGTERM on a timeout) kills the scanner and then everything
-    it left, the same way.
+    wrapper (ASH sends SIGTERM on a timeout) is passed on to the scanner, which is
+    SIGKILLed if it lingers, and then everything it left is ended the same way.
     """
     if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
         fail(f"prctl(PR_SET_CHILD_SUBREAPER): {os.strerror(ctypes.get_errno())}")
@@ -575,36 +818,26 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     # Blocked across the fork, so a signal that arrives before the handler is in
     # place is held rather than killing the wrapper and orphaning the scanner.
     signal.pthread_sigmask(signal.SIG_BLOCK, stop_signals)
-    pid = os.fork()
+    try:
+        pid = os.fork()
+    except OSError as e:
+        fail(f"fork: {e}")
     if pid == 0:
-        try:
-            _child_setup(restrict)
-            os.execve(command[0], command, os.environ)
-        except OSError as e:
-            # The scanner's path, and the error that quotes it.
-            sys.stderr.write(_shown(f"ash-landlock: exec {command[0]}: {e}") + "\n")
-        except BaseException:  # noqa: BLE001 - fail() raises SystemExit
-            pass
-        # Whatever happened, the child never returns into the wrapper's code; a
-        # restriction that failed leaves it here, unrestricted, so it exits.
-        os._exit(126)
+        _run_child(command, restrict)
 
     stopped_at: List[float] = []
     scanner_exited = False
 
-    def stop(_signum: int, _frame: object) -> None:
-        # ASH asks the wrapper to stop (a timeout, Ctrl-C, a cancelled scan): end
-        # the scanner now, and the loop below ends everything it started, by
+    def stop(signum: int, _frame: object) -> None:
+        # ASH asks the wrapper to stop (a timeout, Ctrl-C, a cancelled scan): pass
+        # it to the scanner now, and the loop below ends everything it started, by
         # STOP_REAP_DEADLINE_SECONDS from the first such signal.
         if not stopped_at:
             stopped_at.append(time.monotonic())
         if scanner_exited:
             # Reaped, or about to be: its pid may already be another process's.
             return
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
+        _forward_stop(pid, signum, lambda: not scanner_exited)
 
     for signum in stop_signals:
         signal.signal(signum, stop)
@@ -630,50 +863,21 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
             )
         return exited_at + REAP_DEADLINE_SECONDS
 
-    # An orphan is reparented here only once its own parent has exited, which can
-    # trail the scanner's exit, so "no children" has to hold for a short while.
-    # Every pass kills the whole remaining tree at once, so depth costs nothing;
-    # bounded by time rather than by a pass count, and inside the grace ASH gives
-    # a stopping process before it SIGKILLs this wrapper. At least one pass is
-    # made, however late a stop left the scanner's exit.
-    quiet = 0
-    passes = 0
-    while passes == 0 or time.monotonic() < deadline():
-        passes += 1
-        leftovers = _descendants(until=deadline())
-        if not leftovers:
-            quiet += 1
-            if quiet >= 5:
-                break
-            time.sleep(0.01)
-            continue
-        quiet = 0
-        for child in leftovers:
-            try:
-                os.kill(child, signal.SIGKILL)
-            except OSError:
-                pass
-        while True:
-            try:
-                reaped, _ = os.waitpid(-1, os.WNOHANG)
-            except ChildProcessError:
-                break
-            if reaped == 0:
-                break
+    survivors = _reap_leftovers(deadline)
+    if survivors:
+        # The deadline ended the loop with processes still found: said, so ASH's
+        # log shows that something the scanner started outlived the stop, where
+        # the scanner's own status alone read as a clean end.
+        sys.stderr.write(
+            _shown(
+                f"ash-landlock: {len(survivors)} process(es) the scanner started "
+                "could not be ended before the deadline: "
+                + ", ".join(str(p) for p in survivors[:10])
+            )
+            + "\n"
+        )
     if os.WIFSIGNALED(status):
-        # Die of the same signal, so ASH sees -N exactly as it would for the
-        # scanner run unwrapped. 128+N is the fallback for a signal that cannot be
-        # re-raised that way.
-        died_of = os.WTERMSIG(status)
-        try:
-            if died_of not in (signal.SIGKILL, signal.SIGSTOP):
-                # SIGKILL and SIGSTOP cannot be caught, so need no reset.
-                signal.signal(died_of, signal.SIG_DFL)
-                signal.pthread_sigmask(signal.SIG_UNBLOCK, {died_of})
-            os.kill(os.getpid(), died_of)
-        except (OSError, ValueError):
-            pass
-        return 128 + died_of
+        return _die_of(os.WTERMSIG(status))
     return os.WEXITSTATUS(status)
 
 
