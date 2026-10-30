@@ -2183,31 +2183,30 @@ def apply_aggregated_suppressions(
     return populate_metrics_from_unified_source(aggregated_results=merged)
 
 
-#: The justification prefixes ``apply_suppressions_to_sarif`` writes for the
-#: suppressions ASH itself attaches: from the operator's configuration, from
-#: inline comments, and from a client-supplied configuration (an ignore path or a
-#: scanner exclusion a delivered config carried, written "(ASH, client-supplied
-#: config)" and marked ``clientSupplied``). A scanner's own suppression carries
-#: whatever the scanner wrote and starts with none of these.
-_ASH_APPLIED_JUSTIFICATION_PREFIXES = (
-    "(ASH) ",
-    "(ASH inline) ",
-    "(ASH, client-supplied config) ",
-)
-
-
 def _is_ash_applied_suppression(suppression: Any) -> bool:
     """Whether ``apply_suppressions_to_sarif`` attached *suppression*.
 
-    A client-supplied one counts: it is ASH's too, attached by the same function
-    and by nothing else, so a scan run with ``--ignore-suppressions``, which never
-    calls that function (``ScanResultProcessor``), never carries it.
+    Read from the structured mark first: every suppression that function attaches
+    carries ``properties.ashApplied`` (``sarif_utils.ash_applied_properties``),
+    and a client-supplied one ``clientSupplied`` as well, which counts too: it is
+    ASH's, attached by the same function and by nothing else, so a scan run with
+    ``--ignore-suppressions``, which never calls that function
+    (``ScanResultProcessor``), never carries it. A shard written before the mark
+    existed is read by the justification prefixes that module writes
+    (``ASH_SUPPRESSION_JUSTIFICATION_PREFIXES``); a scanner's own suppression
+    carries neither mark nor prefix.
     """
+    from automated_security_helper.utils.sarif_utils import (
+        ASH_SUPPRESSION_JUSTIFICATION_PREFIXES,
+    )
+
     properties = getattr(suppression, "properties", None)
+    if getattr(properties, "ashApplied", None) is True:
+        return True
     if getattr(properties, "clientSupplied", None) is True:
         return True
     justification = getattr(suppression, "justification", None) or ""
-    return justification.startswith(_ASH_APPLIED_JUSTIFICATION_PREFIXES)
+    return justification.startswith(ASH_SUPPRESSION_JUSTIFICATION_PREFIXES)
 
 
 def lift_ash_suppressions(sarif_report: Any) -> int:

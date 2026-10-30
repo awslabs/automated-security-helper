@@ -25,7 +25,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.cli.merge import apply_aggregated_suppressions
-from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     Kind1,
     PropertyBag,
@@ -181,3 +181,46 @@ def test_a_client_supplied_ignore_path_the_shard_applied_is_lifted(tmp_path):
         lifted.metadata.summary_stats.actionable
         == reference.metadata.summary_stats.actionable
     )
+
+
+def test_a_config_suppression_the_real_pass_wrote_is_marked_and_lifted(tmp_path):
+    # The shape a current shard writes: the real function marks what it attaches
+    # with properties.ashApplied, and the lift reads that mark, not the wording.
+    shard = build_shard(0, 1, SCANNERS)
+    shard.ash_config.global_settings.suppressions = [
+        AshSuppression(
+            rule_id=CONFIG_SUPPRESSED, path="src/bandit_0.py", reason="fixture"
+        )
+    ]
+    apply_suppressions_to_sarif(
+        shard.sarif, _context(tmp_path, shard.ash_config, ignore_suppressions=False)
+    )
+    attached = _result(shard, CONFIG_SUPPRESSED).suppressions
+    assert attached and len(attached) == 1, attached
+    assert getattr(attached[0].properties, "ashApplied", None) is True
+    assert attached[0].justification.startswith("(ASH) ")
+
+    lifted = apply_aggregated_suppressions(
+        shard, _context(tmp_path, shard.ash_config, ignore_suppressions=True)
+    )
+
+    assert _result(lifted, CONFIG_SUPPRESSED).suppressions is None
+
+
+def test_a_marked_suppression_is_lifted_whatever_its_wording(tmp_path):
+    # The mark decides; the prefixes are the fallback for a shard written before
+    # the mark existed (the hand-typed fixtures above).
+    model = build_shard(0, 1, SCANNERS)
+    _result(model, NATIVELY_SUPPRESSED).suppressions = [
+        Suppression(
+            kind=Kind1.inSource,
+            justification="worded by a future version",
+            properties=PropertyBag(ashApplied=True),
+        )
+    ]
+
+    lifted = apply_aggregated_suppressions(
+        model, _context(tmp_path, model.ash_config, ignore_suppressions=True)
+    )
+
+    assert _result(lifted, NATIVELY_SUPPRESSED).suppressions is None

@@ -979,9 +979,10 @@ def _apply_config_suppression(
                 f"Suppressing finding for rule '{result.ruleId}' in "
                 f"'{flat_finding.file_path}' with reason: {reason}"
             ),
-            # A suppression from the config of a tree an MCP client delivered,
-            # marked so a reader can tell it from the operator's.
-            properties=PropertyBag(clientSupplied=True) if client_supplied else None,
+            # Marked as ASH's own (ash_applied_properties), and a suppression from
+            # the config of a tree an MCP client delivered is marked so a reader
+            # can tell it from the operator's.
+            properties=ash_applied_properties(client_supplied=client_supplied),
         )
     )
     return True
@@ -1045,6 +1046,7 @@ def _apply_inline_suppression(
                 Suppression(
                     kind=Kind1.inSource,
                     justification=f"(ASH inline) {isup.reason}",
+                    properties=ash_applied_properties(),
                 )
             )
             return True
@@ -1144,9 +1146,7 @@ def _suppress_transitive_of_suppressed_roots(
                         f"(ASH) Suppressed because every root advisory is "
                         f"suppressed: {roots}"
                     ),
-                    properties=PropertyBag(clientSupplied=True)
-                    if client_supplied
-                    else None,
+                    properties=ash_applied_properties(client_supplied=client_supplied),
                 )
             ]
 
@@ -1167,6 +1167,32 @@ def _has_client_mark(result: Any) -> bool:
     return False
 
 
+#: The justification prefixes this module writes on the suppressions ASH itself
+#: attaches: from the operator's configuration (also a client-delivered one), from
+#: an inline comment, from a transitive root, and from a client-supplied ignore
+#: path or scanner exclusion. A reader of an older shard, written before the
+#: structured ``ashApplied`` mark, tells ASH's suppressions by these; a scanner's
+#: own suppression carries whatever the scanner wrote and starts with none.
+ASH_SUPPRESSION_JUSTIFICATION_PREFIXES = (
+    "(ASH) ",
+    "(ASH inline) ",
+    "(ASH, client-supplied config) ",
+)
+
+
+def ash_applied_properties(*, client_supplied: bool = False) -> PropertyBag:
+    """The property bag every suppression this module attaches carries.
+
+    ``ashApplied`` marks the suppression as ASH's own, whatever its wording, so a
+    reader (``ash merge --ignore-suppressions``, which lifts them) need not match
+    the justification text. ``clientSupplied`` is added for an entry a config or
+    workspace policy file an MCP client delivered supplied, as before.
+    """
+    if client_supplied:
+        return PropertyBag(ashApplied=True, clientSupplied=True)
+    return PropertyBag(ashApplied=True)
+
+
 def _add_client_suppression(result: Any, justification: str) -> None:
     """Suppress ``result`` for a client-supplied entry, marked ``clientSupplied``.
 
@@ -1181,7 +1207,7 @@ def _add_client_suppression(result: Any, justification: str) -> None:
         Suppression(
             kind=Kind1.external,
             justification=justification,
-            properties=PropertyBag(clientSupplied=True),
+            properties=ash_applied_properties(client_supplied=True),
         ),
     ]
 
