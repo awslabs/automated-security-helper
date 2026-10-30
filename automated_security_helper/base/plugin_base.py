@@ -923,10 +923,6 @@ class PluginBase(UVToolMixin, BaseModel):
     # through uv, or None. _run_subprocess reports it.
     _uv_run_failure: str | None = PrivateAttr(default=None)
 
-    # The ids of the responses _process_command_response has handled. The uv
-    # path hands some of its responses to it and not others (a failure after
-    # the child started, a response whose building raised), so _run_subprocess
-    # reads this to process a returned response exactly once.
     #: The responses ``_process_command_response`` has folded and no recorder
     #: has yet retired. Held as the objects themselves, never their ``id()``:
     #: a mark keyed on an address outlived its dict on the paths that never
@@ -1334,8 +1330,31 @@ class PluginBase(UVToolMixin, BaseModel):
             def shape(text: Any, _stream: str) -> Any:
                 return text
 
-        stdout_text = shape(response.get("stdout"), "stdout")
-        stderr_text = shape(response.get("stderr"), "stderr")
+        # The shaping hook is overridable like the values hook, and guarded the
+        # same way: a raise must not escape into the run's own outcome, and the
+        # unshaped text is not recorded in its place (the hook is what hides
+        # the plugin's own inputs from the lines), so that stream's lines are
+        # replaced by a value-free note.
+        shape_failed: List[str] = []
+
+        def shaped(text: Any, stream: str) -> Any:
+            try:
+                return shape(text, stream)
+            except Exception:  # noqa: BLE001
+                if text:
+                    shape_failed.append(stream)
+                return ""
+
+        stdout_text = shaped(response.get("stdout"), "stdout")
+        stderr_text = shaped(response.get("stderr"), "stderr")
+        if "stdout" in shape_failed:
+            self.output.append(
+                "(stdout not shown: the plugin's text-shaping hook raised)"
+            )
+        if "stderr" in shape_failed:
+            self.errors.append(
+                "(stderr not shown: the plugin's text-shaping hook raised)"
+            )
         # _values_to_redact is an overridable hook, called once for both
         # streams and guarded: without the values nothing can be redacted,
         # so a raising hook loses the lines (a value-free note takes their
