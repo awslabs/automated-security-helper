@@ -403,6 +403,29 @@ def test_an_unknown_kind_is_reported_low_and_logged_once(caplog):
         ),
         ({"errors": ["text"]}, 1, "not a JSON object"),
         ({"errors": [{"kind": "id", "message": "m", "line": 1}]}, 1, "missing"),
+        # The template writes an integer line for every error. Anything else is
+        # the output format having changed; read as "no position" it would drop
+        # every region silently, so it is ERROR (decision 5).
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": True}]},
+            1,
+            "no integer line",
+        ),
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": None}]},
+            1,
+            "no integer line",
+        ),
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": "3"}]},
+            1,
+            "no integer line",
+        ),
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a"}]},
+            1,
+            "no integer line",
+        ),
     ],
 )
 @pytest.mark.unit
@@ -411,14 +434,13 @@ def test_malformed_output_raises(payload, exit_code, match):
         build_sarif(payload, exit_code)
 
 
-@pytest.mark.parametrize(
-    "line", [0, True, None, "3"], ids=["zero", "bool", "none", "str"]
-)
+@pytest.mark.parametrize("line", [0], ids=["zero"])
 @pytest.mark.unit
-def test_an_error_without_a_valid_line_is_kept_without_a_region(line):
+def test_an_error_at_line_zero_is_kept_without_a_region(line):
     """actionlint reports line 0 for an error with no position (an empty workflow,
     invalid UTF-8, a YAML error before the first line). The finding stays, without
-    a region, and the other workflow's finding is not dropped with it."""
+    a region, and the other workflow's finding is not dropped with it. Only the
+    integer 0 is read that way; test_malformed_output_raises holds the rest."""
     payload = {
         "version": "1.7.12",
         "errors": [

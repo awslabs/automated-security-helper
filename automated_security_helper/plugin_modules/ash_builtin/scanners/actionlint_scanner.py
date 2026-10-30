@@ -519,9 +519,11 @@ def build_sarif(
 ) -> Dict[str, Any]:
     """Convert actionlint's ``ACTIONLINT_FORMAT`` output into a SARIF 2.1.0 dict.
 
-    An error whose ``line`` is not a positive integer (actionlint writes 0 for an
-    error with no position) is kept as a result with no region, so one such
-    workflow never drops the findings of every other workflow in the run.
+    An error whose ``line`` is 0 (actionlint writes 0 for an error with no
+    position) is kept as a result with no region, so one such workflow never
+    drops the findings of every other workflow in the run. The template always
+    writes an integer, so any other value that is not a positive integer is the
+    output format having changed, and raises (decision 5).
 
     ``uri_base``, when given, is joined in front of every ``filepath``: actionlint
     writes paths relative to its working directory, and the scan reads a relative
@@ -530,8 +532,9 @@ def build_sarif(
     it, which is how ASH tells a converted file's finding from a source file's.
 
     Raises:
-        ScannerError: if the payload is not the shape the template produces, or if
-            the exit code contradicts the findings (1 with none, 0 with some).
+        ScannerError: if the payload is not the shape the template produces (a
+            ``line`` that is not an integer included), or if the exit code
+            contradicts the findings (1 with none, 0 with some).
     """
     if not isinstance(payload, dict) or "errors" not in payload:
         raise ScannerError(
@@ -589,7 +592,15 @@ def build_sarif(
         # file, invalid UTF-8, a YAML error raised before the first line. That is
         # still a finding on the file, so it is kept without a region rather than
         # failing the whole run and dropping every other workflow's findings.
-        if isinstance(line, int) and not isinstance(line, bool) and line >= 1:
+        # Only that 0 goes region-less: the template writes an integer line for
+        # every error, so a bool, None, a string or a missing key means the
+        # output format changed, and reading it as "no position" would silently
+        # drop every region (line-scoped suppressions, line-keyed masking).
+        if type(line) is not int:
+            raise ScannerError(
+                f"actionlint error #{index} has no integer line: {line!r}"
+            )
+        if line >= 1:
             region: Dict[str, Any] = {"startLine": line, "endLine": line}
             if isinstance(column, int) and not isinstance(column, bool) and column >= 1:
                 region["startColumn"] = column
