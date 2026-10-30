@@ -179,7 +179,9 @@ def _working_directory() -> Path:
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
 
 
-def _refuse_a_config_a_scan_refuses(ash_config: AshConfig, frame: str) -> None:
+def _refuse_a_config_a_scan_refuses(
+    ash_config: AshConfig, frame: str, *, unfindable: bool = True
+) -> None:
     """Exit 3 before writing a config whose ``ash_plugin_modules`` a scan refuses.
 
     ``get``, ``validate`` and ``validate-plugin-dependencies`` refuse the same
@@ -187,13 +189,25 @@ def _refuse_a_config_a_scan_refuses(ash_config: AshConfig, frame: str) -> None:
     editors wrote with one, and reported written, was one every reader then
     refused. Checked with ASH_PLUGIN_MODULES, as those commands check it: a
     scan of the same directory reads the variable. ``frame`` opens the message.
+
+    The check has two halves: a name outside ASH's plugin namespace, which no
+    install can admit, and a name inside it that no installed package provides
+    yet. With ``unfindable=False`` only the first refuses: the wizard writes a
+    module an operator may install next, as it always did, and ``get`` and
+    ``validate`` say so when they read the file before that install.
     """
     from automated_security_helper.config.plugin_module_trust import (
         environment_plugin_modules,
     )
+    from automated_security_helper.plugins.loader import PluginModuleImportError
 
     try:
         refuse_plugin_modules_a_scan_refuses(ash_config, environment_plugin_modules())
+    except PluginModuleImportError as e:
+        if not unfindable:
+            return
+        secho(shown_on_one_line(f"{frame}: {e}"), fg=typer.colors.RED)
+        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
     except ASHConfigValidationError as e:
         secho(shown_on_one_line(f"{frame}: {e}"), fg=typer.colors.RED)
         raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
@@ -2404,10 +2418,14 @@ def wizard(
 
     replace_plugin_module_list(ash_config, kept_old_indices, added_modules)
 
-    # A typed module a scan's plugin loader refuses is refused here, before the
+    # A typed module outside ASH's plugin namespace is refused here, before the
     # write, as get and validate refuse it (exit 3); the wizard wrote it and
-    # reported success.
-    _refuse_a_config_a_scan_refuses(ash_config, f"Not writing {config_path}")
+    # reported success. A module inside the namespace that no installed package
+    # provides yet is written: the operator may install it next, and get and
+    # validate name it until then (unfindable=False).
+    _refuse_a_config_a_scan_refuses(
+        ash_config, f"Not writing {config_path}", unfindable=False
+    )
 
     # --- Write config ---
     comments = [SCHEMA_COMMENT]
