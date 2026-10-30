@@ -277,22 +277,34 @@ OUTPUT_RESTRICTING_TRIVY_ENV = (
     "TRIVY_IGNORED_LICENSES",
 )
 
-#: The spellings Go's strconv.ParseBool reads as false, lowercased. A filtering
-#: variable set to one of them turns its filter off and restricts nothing.
+#: The spellings Go's strconv.ParseBool reads as false, lowercased. A boolean
+#: filtering variable set to one of them turns its filter off and restricts
+#: nothing.
 _FALSE_SPELLINGS = frozenset({"0", "f", "false"})
 
+#: The filtering variables trivy reads as booleans, the only ones a spelling of
+#: false turns off. The others are lists and paths, which trivy reads literally:
+#: ``TRIVY_SKIP_DIRS=0`` skips a directory named ``0``.
+_BOOLEAN_FILTER_VARIABLES = frozenset({"TRIVY_IGNORE_UNFIXED"})
 
-def _restricting_value(value: Optional[str]) -> bool:
-    """Whether ``value``, a filtering TRIVY_ variable's, turns its filter on.
 
-    Set, not blank, and not a spelling of false: ``TRIVY_IGNORE_UNFIXED=false`` is
-    the default written out, and warning about it would train a reader to ignore
-    the warning, as grype's config-key warning reads a falsy key.
+def _restricting_value(name: str, value: Optional[str]) -> bool:
+    """Whether ``value``, the filtering TRIVY_ variable ``name``'s, turns its filter on.
+
+    Set and not blank; for a boolean variable, also not a spelling of false:
+    ``TRIVY_IGNORE_UNFIXED=false`` is the default written out, and warning about
+    it would train a reader to ignore the warning, as grype's config-key warning
+    reads a falsy key. A list or path variable has no false spelling: ``0`` and
+    ``false`` are values trivy matches literally.
     """
     if value is None:
         return False
     text = value.strip()
-    return bool(text) and text.lower() not in _FALSE_SPELLINGS
+    if not text:
+        return False
+    if name in _BOOLEAN_FILTER_VARIABLES:
+        return text.lower() not in _FALSE_SPELLINGS
+    return True
 
 
 def skip_dirs_value(path: str) -> str:
@@ -1779,7 +1791,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         found = [
             name
             for name in OUTPUT_RESTRICTING_TRIVY_ENV
-            if _restricting_value(environment.get(name))
+            if _restricting_value(name, environment.get(name))
         ]
         if not found:
             return

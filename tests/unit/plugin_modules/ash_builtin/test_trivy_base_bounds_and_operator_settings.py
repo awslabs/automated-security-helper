@@ -665,6 +665,26 @@ def test_control_a_filtering_variable_set_to_true_or_a_value_is_a_filter(tmp_pat
     assert "TRIVY_IGNORE_UNFIXED, TRIVY_PKG_TYPES are set" in warning
 
 
+@pytest.mark.parametrize(
+    ("name", "spelling"),
+    [("TRIVY_SKIP_DIRS", "0"), ("TRIVY_PKG_TYPES", "false"), ("TRIVY_SEVERITY", "f")],
+)
+def test_a_false_spelling_turns_off_only_the_boolean_filter(tmp_path, name, spelling):
+    """TRIVY_IGNORE_UNFIXED is the one boolean among the filtering variables. A
+    list or path variable set to ``0`` or ``false`` is a value trivy reads
+    literally (a directory named ``0`` is skipped), so it is a filter and is
+    warned about like any other value."""
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {name: spelling}
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._process_config_options()
+
+    (warning,) = [m for m in messages if "restrict" in m]
+    assert f"{name} is set" in warning
+
+
 def test_filtering_variables_in_trivys_environment_are_named_without_their_values(
     tmp_path,
 ):
