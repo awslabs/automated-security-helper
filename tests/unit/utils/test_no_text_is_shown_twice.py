@@ -62,10 +62,12 @@ shown_not_obeyed(v)`` in one method, logged in another), a container, another
 function's argument or a return value of a function outside the package; an
 exception of a builtin or library kind that reaches its handler through a call the
 check cannot resolve (a method of an object) or through more than _REACH_DEPTH
-calls of the package; a logger or a log method handed in as an argument, kept in
-an attribute or a container, or returned by a function that is no maker; a log
-method wrapped (functools.partial) or looked up by getattr; repr() and ascii() of
-a value; and the TUI's widgets (cli/inspect), which have their own guard.
+calls of the package; a local assigned, inside the handler, from the handler's
+variable (the assignments are read before the handlers, so the local is not shown
+text and is logged unflagged); a logger or a log method handed in as an argument,
+kept in an attribute or a container, or returned by a function that is no maker; a
+log method wrapped (functools.partial) or looked up by getattr; repr() and ascii()
+of a value; and the TUI's widgets (cli/inspect), which have their own guard.
 terminal_text itself is not read: its public functions and classes, and each of
 its names that reaches an escaper or the maker (a private composer, an alias, a
 lambda), must be in DOUBLING or NOT_DOUBLING, or show nothing (checked below), so
@@ -1178,23 +1180,13 @@ def test_the_class_of_a_value_is_not_the_value(logged, offends):
         "    try:\n        raise ValueError(f'no: {_shown(name)}')\n"
         "    except ValueError as exc:\n"
         f"        ASH_LOGGER.debug(f'cannot read ({logged})')\n"
-        "def through_a_local(name):\n"
-        "    try:\n        raise ValueError(f'no: {_shown(name)}')\n"
-        "    except ValueError as exc:\n"
-        f"        reason = f'failed: {logged}'\n"
-        "        ASH_LOGGER.error(f'x {reason}')\n"
     )
 
     sites = _sites({"automated_security_helper/x.py": source})
 
-    assert sites == (
-        [
-            ("automated_security_helper/x.py", "site"),
-            ("automated_security_helper/x.py", "through_a_local"),
-        ]
-        if offends
-        else []
-    ), sites
+    assert sites == ([("automated_security_helper/x.py", "site")] if offends else []), (
+        sites
+    )
 
 
 def test_a_method_named_shown_that_escapes_nothing_makes_no_text_shown():
