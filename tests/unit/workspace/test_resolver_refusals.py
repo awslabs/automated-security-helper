@@ -144,11 +144,12 @@ class TestEntriesAreComparedAsDirectoriesNotAsText:
         with pytest.raises(WorkspaceDefinitionError, match="is inside"):
             resolve_workspace(workspace)
 
-    def test_distinct_directories_on_a_case_sensitive_filesystem_still_pass(
-        self, tmp_path
+    def test_distinct_directories_still_pass_on_a_filesystem_that_folds_case(
+        self, tmp_path, case_folding_filesystem
     ):
-        """Without the folding filesystem the two are two directories; the
-        overlap check lets them through and the key check decides."""
+        """Control for the two refusals above, run under the same stub: names
+        that differ by more than case are two directories there too, so the
+        stub joins what folds together and nothing else."""
         _project(tmp_path, "api")
         _project(tmp_path, "docs")
         workspace = _workspace(tmp_path, ["api", "docs"])
@@ -305,7 +306,7 @@ class TestTheSessionComesFromOneSource:
 
 
 class TestPinsAreCheckedAsASetNotPairwise:
-    TRIO = {"a": ">=1,<3", "b": ">=2,<4", "c": "!=2.*"}
+    TRIO = {"api": ">=1,<3", "web": ">=2,<4", "docs": "!=2.*"}
 
     def test_the_trio_is_compatible_two_at_a_time(self):
         pins = list(self.TRIO.values())
@@ -324,8 +325,8 @@ class TestPinsAreCheckedAsASetNotPairwise:
 
         message = str(excinfo.value)
         assert "together" in message
-        for pin in self.TRIO.values():
-            assert pin in message
+        for key, pin in self.TRIO.items():
+            assert f"'{pin}' (required by {key})" in message
 
     def test_three_jointly_satisfiable_pins_are_accepted(self, tmp_path):
         projects = [
@@ -344,11 +345,15 @@ class TestPinsAreCheckedAsASetNotPairwise:
             ([">=1.0rc1"], PinVerdict.COMPATIBLE),
             ([">=1.0rc1", ">=1.0rc1", " >=1.0rc1"], PinVerdict.COMPATIBLE),
             ([">=1.0rc1", ">=2"], PinVerdict.UNDECIDABLE),
+            ([">=1", "<3"], PinVerdict.COMPATIBLE),
+            ([">=1", "<1"], PinVerdict.INCOMPATIBLE),
             ([">=1", ">=1", "<1"], PinVerdict.INCOMPATIBLE),
         ],
     )
     def test_compare_pin_set_reads_like_compare_pins(self, pins, expected):
         assert compare_pin_set(pins) is expected
+        if len(pins) == 2:
+            assert compare_pin_set(pins) is compare_pins(*pins)
 
 
 class TestARemoteClientsPolicyIsDelivered:
