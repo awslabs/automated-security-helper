@@ -15,6 +15,8 @@ it.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -107,3 +109,28 @@ def test_a_retired_mark_does_not_shadow_the_next_response(plugin_context):
     scanner._process_command_response(second)
 
     assert scanner.exit_code == 3
+
+
+def test_the_uv_handlers_failed_copy_takes_over_the_mark(plugin_context, monkeypatch):
+    """When processing a uv run's response raises after the response was marked,
+    the handler returns a copy with the error added, and that copy is what the
+    dispatcher sees. The mark has to move to the copy: left on the original,
+    the dispatcher read the copy as unprocessed and processed the same run's
+    output and error lines a second time."""
+    scanner = _scanner(plugin_context)
+    original = type(scanner)._process_command_response
+
+    def process_then_raise(self, response):
+        original(self, response)
+        raise RuntimeError("handling raised after the mark was set")
+
+    monkeypatch.setattr(type(scanner), "_process_command_response", process_then_raise)
+
+    failed = scanner._uv_response(
+        SimpleNamespace(stdout="", stderr="", returncode=0), None
+    )
+
+    assert failed.get("post_run_error") is True
+    assert scanner._was_processed(failed)
+    # The original response's mark is retired with the move: one mark, the copy's.
+    assert len(scanner._processed_responses) == 1
