@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -319,6 +320,11 @@ def _is_a_regular_file(stream: TextIO) -> bool:
         return False
 
 
+# A line feed that no carriage return precedes: the line end _write_report_data
+# writes as os.linesep. The line feed of a CRLF is left with its carriage return.
+_BARE_LINE_FEED = re.compile(r"(?<!\r)\n")
+
+
 def _write_report_data(content: str, stream: TextIO) -> None:
     """*content* to *stream* as the report phase writes it to reports/.
 
@@ -329,9 +335,13 @@ def _write_report_data(content: str, stream: TextIO) -> None:
     stream that checks what it is given for CI commands is written past. A stream
     with no byte buffer under it is written as text.
 
-    A line end the report already writes as CRLF (CSV rows) is one line end:
-    replacing the line feed alone turned it into CR CR LF on Windows, a blank
-    line per row.
+    A line end the report already writes as CRLF (CSV rows) is kept as it is:
+    only a line feed with no carriage return before it is written as os.linesep.
+    Replacing every line feed turned a CRLF into CR CR LF on Windows, a blank
+    line per row, and folding CRLF to LF before the replacement rewrote CSV rows
+    as LF wherever os.linesep is LF, so `ash report --format csv > out.csv` on
+    Linux or macOS wrote rows the reporter had not written, and a CRLF inside a
+    quoted field (a multi-line snippet) was changed with them.
     """
     stream.flush()
     binary = getattr(stream, "buffer", None)
@@ -339,7 +349,7 @@ def _write_report_data(content: str, stream: TextIO) -> None:
         stream.write(content)
         stream.flush()
         return
-    data = content.replace("\r\n", "\n").replace("\n", os.linesep)
+    data = _BARE_LINE_FEED.sub(os.linesep, content)
     binary.write(data.encode("utf-8", "backslashreplace"))
     binary.flush()
 

@@ -78,6 +78,18 @@ def test_a_crlf_line_end_stays_one_line_end(monkeypatch):
     assert stream.buffer.getvalue() == b"a,b\r\nc,d\r\n"
 
 
+def test_a_crlf_line_end_is_kept_where_the_line_separator_is_a_line_feed(monkeypatch):
+    """Folding CRLF to LF before writing os.linesep rewrote a CSV row's CRLF as LF
+    on Linux and macOS; only a line feed with no carriage return before it is the
+    writer's to replace, and a quoted field's CRLF is content."""
+    monkeypatch.setattr(report_module.os, "linesep", "\n")
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+
+    _write_report_data('a,b\r\n"x\r\ny",d\nlast', stream)
+
+    assert stream.buffer.getvalue() == b'a,b\r\n"x\r\ny",d\nlast'
+
+
 def test_non_json_text_from_a_json_format_reporter_is_written_on_a_terminal():
     """json.loads ran only on a terminal, so the same reporter output passed
     to a pipe and failed a terminal with 'Expecting value'."""
