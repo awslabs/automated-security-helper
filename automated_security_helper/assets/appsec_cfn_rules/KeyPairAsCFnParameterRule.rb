@@ -15,6 +15,15 @@ class KeyPairAsCFnParameterRule < BaseRule
     'APPSEC-IAM-UseEphemeralCreds-KeyPairAsCFnParam'
   end
 
+  # The parameter types that pass a key pair into the template: the key pair type
+  # itself, and the SSM parameter type that reads a key pair name from SSM when the
+  # stack is created. Only the first was matched, so a key pair passed through SSM
+  # was not reported.
+  KEY_PAIR_TYPES = [
+    'AWS::EC2::KeyPair::KeyName',
+    'AWS::SSM::Parameter::Value<AWS::EC2::KeyPair::KeyName>'
+  ].freeze
+
   def audit_impl(cfn_model)
 
     parameters = cfn_model.parameters.select do |name, properties|
@@ -25,7 +34,7 @@ class KeyPairAsCFnParameterRule < BaseRule
       # TODO: find way to preserve the line number from properties.type["line"]
       type = properties.type
       type = type["value"] if type.is_a?(Hash)
-      type == "AWS::EC2::KeyPair::KeyName"
+      KEY_PAIR_TYPES.include?(type)
     end
 
     parameters.values.map(&:id)
