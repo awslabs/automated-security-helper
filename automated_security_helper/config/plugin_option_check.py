@@ -59,6 +59,23 @@ def _options_class(config_class: type[BaseModel]) -> type[BaseModel] | None:
     return None
 
 
+def _read_from_environment(value: Any) -> bool:
+    """Whether ``value`` came from an environment reference in a config file.
+
+    Either the loader's marker for text it read from the environment or from a
+    reference's default (``utils.redacted_model.EnvResolvedScalar``, which an
+    external plugin's section keeps as the segment models never validate it),
+    or a reference the loader left as written, ``${VAR}`` (a name a config file
+    may not read, or one it could not resolve; ``ash_config.ENV_REFERENCE_PATTERN``).
+    """
+    from automated_security_helper.config.ash_config import ENV_REFERENCE_PATTERN
+    from automated_security_helper.utils.redacted_model import EnvResolvedScalar
+
+    if isinstance(value, EnvResolvedScalar):
+        return True
+    return isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value) is not None
+
+
 def _enabled_problems(
     config_class: type[BaseModel], section: Any, where: str, plugin: str
 ) -> list[str]:
@@ -68,14 +85,27 @@ def _enabled_problems(
     the config loads. A loaded plugin's section is a plain mapping until the
     plugin is built, so the declared type of ``enabled`` is checked here, with
     the same message the model gives, and the key is named by its location.
+
+    A value the config file read from the environment, or a reference the
+    loader left as written (``_read_from_environment``), is not checked here:
+    it takes the path the rest of the configuration gives an environment-read
+    scalar. The plugin's own config model names the variable, never the value,
+    when the plugin is built, and an off-host reporter whose section sets
+    ``enabled`` to such a value is warned of by the type it set and is not run
+    (core/phases/report_phase.py), while the scan goes on. Refused here, the
+    whole run ended with exit 3 at configuration time for a value the file
+    reads from the environment, where before this check it warned and ran.
     """
     if not isinstance(section, dict) or "enabled" not in section:
         return []
     field = config_class.model_fields.get("enabled")
     if field is None:
         return []
+    value = section["enabled"]
+    if _read_from_environment(value):
+        return []
     try:
-        TypeAdapter(field.annotation).validate_python(section["enabled"])
+        TypeAdapter(field.annotation).validate_python(value)
     except ValidationError as error:
         return [
             f"{where}.enabled ({plugin}): {item.get('msg', '')}"

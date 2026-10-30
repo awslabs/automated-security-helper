@@ -29,6 +29,7 @@ from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
     SnykCodeScanner,
 )
+from automated_security_helper.utils.redacted_model import env_resolved_scalar
 
 pytestmark = pytest.mark.unit
 
@@ -99,5 +100,24 @@ def test_an_enabled_value_of_the_wrong_type_is_refused():
 @pytest.mark.parametrize("enabled", [True, False, "true"])
 def test_control_an_enabled_value_the_model_accepts_is_not_refused(enabled):
     config = _config({"snyk-code": {"enabled": enabled}})
+
+    assert _refusal(config) is None
+
+
+def test_an_enabled_value_read_from_the_environment_is_left_to_the_plugin():
+    """The loader's marker for text read from the environment, holding text
+    the model would refuse: not this check's to refuse. The plugin that reads
+    the section names the variable when it is built, and an off-host reporter
+    is warned of by the type and not run, as before the check read enabled."""
+    value = env_resolved_scalar("maybe", "ASH_SNYK_ENABLED", "${ASH_SNYK_ENABLED}")
+    config = _config({"snyk-code": {"enabled": value}})
+
+    assert _refusal(config) is None
+
+
+def test_an_enabled_reference_left_as_written_is_left_to_the_plugin():
+    """A reference the loader left as written (a name a config file may not
+    read): the same path, not a refusal of the run."""
+    config = _config({"snyk-code": {"enabled": "${SNYK_ENABLED}"}})
 
     assert _refusal(config) is None
