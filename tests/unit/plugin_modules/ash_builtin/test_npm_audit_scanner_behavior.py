@@ -789,10 +789,10 @@ def test_a_numeric_metadata_key_shared_by_both_audits_is_summed(
 ):
     """A scalar metadata value present in both audits is added, not replaced.
 
-    The merge has three arms for a metadata key: dict values are updated,
-    int/float values are added, and unseen keys are inserted. npm's own metadata
-    contains only dicts, so the numeric arm is exercised here with a scalar of
-    the kind yarn and pnpm audit reports carry.
+    The merge walks a metadata key by type: two dicts merge recursively, two
+    numbers add, and an unseen key is inserted. npm's own metadata contains
+    only dicts, so the numeric arm is exercised here with a scalar of the kind
+    yarn and pnpm audit reports carry.
     """
     node_project(directory=scanner.context.work_dir / "packages" / "api")
     node_project(directory=scanner.context.work_dir / "packages" / "web")
