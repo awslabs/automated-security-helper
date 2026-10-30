@@ -1282,7 +1282,8 @@ class ASHScanOrchestrator(BaseModel):
         phase; this keeps that file on a failure after the scan phase, from
         the model the engine built. Whether the scan phase ran to its end is
         read from the phase's own record (``scan_phase_completed``: the
-        completeness checkpoint it appends as its last step), not from the
+        checkpoint named ``SCAN_PHASE_COMPLETION_CHECKPOINT`` in scan_phase.py,
+        which the phase records once its results are complete), not from the
         model's existence: the engine holds its model from construction, so a
         failure in the convert phase or anywhere before the scan phase, or a
         scan phase that raised midway, writes nothing, as the base did. Also
