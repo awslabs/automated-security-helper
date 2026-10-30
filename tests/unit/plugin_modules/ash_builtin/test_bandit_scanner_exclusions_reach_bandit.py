@@ -37,7 +37,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -57,6 +56,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils import pre_installed_tool
+from automated_security_helper.utils.pre_installed_tool import PreInstalledToolVerdict
 
 PluginContext.model_rebuild()
 
@@ -612,14 +612,25 @@ def test_an_operator_config_that_leaves_python_files_in_still_errors(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _checked(status: str, executable: str, detail: str):
-    """What ``verify_pre_installed_tool`` answers: the scanner reads status and detail."""
-    return SimpleNamespace(
-        status=status,
-        executable=executable,
-        requirement="bandit[sarif,toml]>=1.7.8,<2.0.0",
-        detail=detail,
-    )
+def _verifier(status: str, executable: str, detail: str):
+    """A stand-in for ``verify_pre_installed_tool`` that records each call and
+    answers the real verdict type. The scanner imports the verifier at call
+    time, so patching it on its module is live; the recorded calls are what
+    proves a test exercised the verified route rather than passing on the real
+    verifier's grade of a file that does not exist."""
+    calls: list[tuple[tuple, dict]] = []
+
+    def verify(*args, **kwargs):
+        calls.append((args, kwargs))
+        return PreInstalledToolVerdict(
+            status=status,
+            executable=executable,
+            requirement="bandit[sarif,toml]>=1.7.8,<2.0.0",
+            detail=detail,
+        )
+
+    verify.calls = calls
+    return verify
 
 
 def test_a_path_binary_that_falls_short_is_refused_when_uv_is_absent(
@@ -634,15 +645,11 @@ def test_a_path_binary_that_falls_short_is_refused_when_uv_is_absent(
     monkeypatch.setattr(
         bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
     )
-    monkeypatch.setattr(
-        pre_installed_tool,
-        "verify_pre_installed_tool",
-        lambda *args, **kwargs: _checked(
-            "unsatisfied", binary, "the sarif extra is not installed"
-        ),
-    )
+    verify = _verifier("unsatisfied", binary, "the sarif extra is not installed")
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
 
     assert scanner.validate_plugin_dependencies() is False
+    assert [call[0][0] for call in verify.calls] == [binary]
     assert scanner.dependencies_satisfied is False
     assert scanner.dependency_unavailable_reason is not None
     assert "cannot be used" in scanner.dependency_unavailable_reason
@@ -657,22 +664,18 @@ def test_the_refusal_names_the_package_that_provides_the_command(tmp_path, monke
     scanner = _scanner(source, tmp_path)
     scanner.uv_tool_package_name = "bandit-provider"
     binary = str(tmp_path / "bandit")
-    asked: list[str] = []
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
     monkeypatch.setattr(
         bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
     )
-
-    def _verify(executable, package, *args, **kwargs):
-        asked.append(package)
-        return _checked("unsatisfied", binary, "the sarif extra is not installed")
-
-    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", _verify)
+    verify = _verifier("unsatisfied", binary, "the sarif extra is not installed")
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
 
     assert scanner.validate_plugin_dependencies() is False
-    assert asked == ["bandit-provider"]
+    # The verifier is asked about the resolved binary and the providing package.
+    assert [call[0][:2] for call in verify.calls] == [(binary, "bandit-provider")]
     assert "bandit-provider[" in scanner.dependency_unavailable_reason
 
 
@@ -686,13 +689,11 @@ def test_a_verified_path_binary_runs_directly_when_uv_is_absent(tmp_path, monkey
     monkeypatch.setattr(
         bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
     )
-    monkeypatch.setattr(
-        pre_installed_tool,
-        "verify_pre_installed_tool",
-        lambda *args, **kwargs: _checked("satisfied", binary, "1.9.4 with the extras"),
-    )
+    verify = _verifier("satisfied", binary, "1.9.4 with the extras")
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
 
     assert scanner.validate_plugin_dependencies() is True
+    assert [call[0][0] for call in verify.calls] == [binary]
     assert scanner.use_uv_tool is False
     assert scanner.dependencies_satisfied is True
 
@@ -715,13 +716,11 @@ def test_after_a_failed_install_a_path_binary_runs_directly(tmp_path, monkeypatc
     monkeypatch.setattr(
         bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
     )
-    monkeypatch.setattr(
-        pre_installed_tool,
-        "verify_pre_installed_tool",
-        lambda *args, **kwargs: _checked("satisfied", binary, "1.9.4 with the extras"),
-    )
+    verify = _verifier("satisfied", binary, "1.9.4 with the extras")
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
 
     assert scanner.validate_plugin_dependencies() is True
+    assert [call[0][0] for call in verify.calls] == [binary]
     assert scanner.use_uv_tool is False, "the binary on PATH is what runs now"
     assert scanner.dependencies_satisfied is True
 

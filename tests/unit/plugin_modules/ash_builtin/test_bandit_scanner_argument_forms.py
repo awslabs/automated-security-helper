@@ -35,7 +35,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -55,6 +54,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     bandit_excluded_path_globs,
 )
 from automated_security_helper.utils import pre_installed_tool
+from automated_security_helper.utils.pre_installed_tool import PreInstalledToolVerdict
 
 PluginContext.model_rebuild()
 
@@ -443,14 +443,23 @@ def test_a_configured_tool_version_is_used_as_written(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _checked(status: str, executable: str, detail: str, version: str | None):
-    return SimpleNamespace(
-        status=status,
-        executable=executable,
-        requirement="bandit[sarif,toml]",
-        detail=detail,
-        version=version,
-    )
+def _verifier(status: str, executable: str, detail: str, version: str | None):
+    """A stand-in for ``verify_pre_installed_tool`` that records each call and
+    answers the real verdict type, so a test proves the scanner asked it."""
+    calls: list[tuple[tuple, dict]] = []
+
+    def verify(*args, **kwargs):
+        calls.append((args, kwargs))
+        return PreInstalledToolVerdict(
+            status=status,
+            executable=executable,
+            requirement="bandit[sarif,toml]",
+            detail=detail,
+            version=version,
+        )
+
+    verify.calls = calls
+    return verify
 
 
 def test_a_verified_path_binary_reports_its_own_version(tmp_path, monkeypatch):
@@ -465,15 +474,11 @@ def test_a_verified_path_binary_reports_its_own_version(tmp_path, monkeypatch):
     monkeypatch.setattr(
         bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
     )
-    monkeypatch.setattr(
-        pre_installed_tool,
-        "verify_pre_installed_tool",
-        lambda *args, **kwargs: _checked(
-            "satisfied", binary, "1.8.0 with the extras", "1.8.0"
-        ),
-    )
+    verify = _verifier("satisfied", binary, "1.8.0 with the extras", "1.8.0")
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
 
     assert scanner.validate_plugin_dependencies() is True
+    assert [call[0][0] for call in verify.calls] == [binary]
     assert scanner.use_uv_tool is False
     assert scanner.tool_version == "1.8.0"
 
@@ -488,16 +493,14 @@ def test_a_path_binary_with_no_version_answer_keeps_the_probes(tmp_path, monkeyp
     monkeypatch.setattr(
         bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
     )
-    monkeypatch.setattr(
-        pre_installed_tool,
-        "verify_pre_installed_tool",
-        lambda *args, **kwargs: _checked("unverifiable", binary, "no probe", None),
-    )
+    verify = _verifier("unverifiable", binary, "no probe", None)
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
     scanner.resolve_deferred_tool_version()
     before = scanner.tool_version
     assert before is not None
 
     assert scanner.validate_plugin_dependencies() is True
+    assert [call[0][0] for call in verify.calls] == [binary]
     assert scanner.tool_version == before
 
 
