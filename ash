@@ -1336,7 +1336,7 @@ if [[ "${NO_RUN}" = "NO" ]]; then
   # line, which quotes the path in its own way: GNU mkdir escapes control
   # characters, and others need not.
   if [[ -e "${OUTPUT_PATH}" && ! -d "${OUTPUT_PATH}" ]]; then
-    refuse_usage "Output directory is not a directory: $(shown "${OUTPUT_DIR}")"
+    refuse_usage "Output directory is not a directory: $(shown "${OUTPUT_DIR}")${OUTPUT_HINT}"
   fi
   # /out is mounted read-write and /src read-only: an output directory that is the
   # source directory or above it would hold the source tree, writable, at /out.
@@ -1404,26 +1404,25 @@ if [[ "${NO_RUN}" = "NO" ]]; then
       link="${current}"
     fi
     if [ -n "${link}" ]; then
-      refuse "Refusing the output directory '$(shown "$1")': the output directory path '$(shown "${link}")' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory."
+      refuse "Refusing the output directory '$(shown "$1")': the output directory path '$(shown "${link}")' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory${OUTPUT_HINT}."
     fi
   }
   refuse_linked_output_dir "${OUTPUT_DIR}"
 fi
 
 # Make the output directory and check that it takes a file, then set OUTPUT_DIR to
-# its resolved path. Called once, right after the path checks above and before the
-# container runtime is looked for: a missing --output-dir is made, parents and all,
-# and one that cannot be made, entered or written is refused with 5 in `ash scan`'s
-# words, whether or not a runtime follows (tests/unit/cli/test_directory_refusals_agree.py
-# pins both on a PATH with no runtime). Making it later, just before the build or
-# the run, left those refusals behind "Unable to resolve an OCI_RUNNER" and the
-# directory unmade on a host with no runtime.
-OUTPUT_DIR_CREATED="NO"
+# its resolved path. Called once, here, right after the path checks above and before
+# the container runtime is looked for, so that a missing --output-dir is made,
+# parents and all, and one that cannot be made, entered or written is refused with 5
+# in `ash scan`'s words whether or not a runtime follows
+# (tests/unit/cli/test_directory_refusals_agree.py pins both on a PATH with no
+# runtime); a --no-run has no output to make. The order matters: made any later,
+# after the runtime lookup, those refusals would stand behind "Unable to resolve an
+# OCI_RUNNER" and the directory would be left unmade on a host with no runtime.
 create_output_dir() {
-  if [[ "${NO_RUN}" != "NO" || "${OUTPUT_DIR_CREATED}" = "YES" ]]; then
+  if [[ "${NO_RUN}" != "NO" ]]; then
     return 0
   fi
-  OUTPUT_DIR_CREATED="YES"
   OUTPUT_EXISTED=NO
   if [[ -d "${OUTPUT_PATH}" ]]; then
     OUTPUT_EXISTED=YES
@@ -1448,7 +1447,7 @@ create_output_dir() {
     else
       WRITE_REASON="${WRITE_ERROR##*: }"
       WRITE_REASON="${WRITE_REASON//[![:print:]]/}"
-      refuse_usage "Output directory cannot be written: $(shown "${OUTPUT_DIR}") (${WRITE_REASON:-a file could not be made there})"
+      refuse_usage "Output directory cannot be written: $(shown "${OUTPUT_DIR}") (${WRITE_REASON:-a file could not be made there})${OUTPUT_HINT}"
     fi
   fi
   require_mountable --output-dir "${OUTPUT_DIR}" "${RESOLVED_DIR}"

@@ -212,6 +212,30 @@ def test_a_link_below_the_source_is_refused_when_spelled_through_a_linked_cwd(
     assert result.returncode == 3, shown
     assert "is a symlink" in result.stderr, result.stderr
     assert str(through / ".ash") in result.stderr, result.stderr
+    # The operator chose this output directory, so nothing names --output-dir.
+    assert "--output-dir to write elsewhere" not in result.stderr, result.stderr
+    assert calls == []
+    assert list(elsewhere.iterdir()) == [], "nothing is written where the link points"
+
+
+def test_a_committed_link_under_the_default_output_names_the_option(
+    runner, elsewhere, tmp_path
+):
+    """The repository commits `.ash -> elsewhere` and no --output-dir is given: the
+    default `<source>/.ash/ash_output` runs through that link, so it is refused as
+    any linked output is, with exit 3, and the refusal names --output-dir as the way
+    to write elsewhere, as every refusal of the default does
+    (tests/unit/test_ash_bash_entrypoint_refusals.py pins the usage refusals)."""
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / ".ash").symlink_to(elsewhere, target_is_directory=True)
+
+    result, calls = _run(runner, ["--no-build", "--source-dir", "src"], cwd=tmp_path)
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 3, shown
+    assert "/.ash' is a symlink" in result.stderr, result.stderr
+    assert "pass --output-dir to write elsewhere" in result.stderr, result.stderr
     assert calls == []
     assert list(elsewhere.iterdir()) == [], "nothing is written where the link points"
 

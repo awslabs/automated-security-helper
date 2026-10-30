@@ -439,6 +439,94 @@ def test_a_default_output_dir_that_cannot_be_created_names_the_option(
     assert calls == []
 
 
+def test_a_default_output_dir_that_is_a_file_names_the_option(
+    tmp_path, run_ash, bare_path
+):
+    """The hint goes on every refusal the default alone can draw, not only the one
+    of a directory that cannot be created: a file at `<source>/.ash/ash_output`
+    (here), a default that cannot be written (the next test), and one reached
+    through a link the repository commits
+    (tests/unit/test_ash_bash_entrypoint_output_paths.py)."""
+    (tmp_path / "src" / ".ash").mkdir()
+    (tmp_path / "src" / ".ash" / "ash_output").write_text("", encoding="utf-8")
+
+    result, calls = run_ash(
+        "--no-build",
+        "--source-dir",
+        "src",
+        OCI_RUNNER=str(bare_path / "recording-runner"),
+    )
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "Output directory is not a directory: " in result.stderr, result.stderr
+    assert ".ash/ash_output" in result.stderr, result.stderr
+    assert "pass --output-dir to write elsewhere" in result.stderr, result.stderr
+    assert calls == [], "the results were sent to the working directory instead"
+
+
+@pytest.mark.skipif(
+    # The module is skipped on Windows before this line is reached (the
+    # module-level skip above), so os.geteuid exists wherever it is evaluated.
+    os.geteuid() == 0,
+    reason="root writes into a directory whatever its mode says",
+)
+def test_a_default_output_dir_that_cannot_be_written_names_the_option(
+    tmp_path, run_ash, bare_path
+):
+    """A default output directory that is there but takes no file (read-only here)
+    is refused with the reason and names --output-dir, as the other refusals of a
+    default do."""
+    output = tmp_path / "src" / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    output.chmod(0o555)
+    try:
+        result, calls = run_ash(
+            "--no-build",
+            "--source-dir",
+            "src",
+            OCI_RUNNER=str(bare_path / "recording-runner"),
+        )
+    finally:
+        output.chmod(0o755)
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "Output directory cannot be written: " in result.stderr, result.stderr
+    assert "(Permission denied)" in result.stderr, result.stderr
+    assert "pass --output-dir to write elsewhere" in result.stderr, result.stderr
+    assert calls == []
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0,
+    reason="root writes into a directory whatever its mode says",
+)
+def test_an_output_dir_that_cannot_be_written(tmp_path, run_ash, bare_path):
+    """Control: an --output-dir the operator chose is refused with the reason, in
+    `ash scan`'s words, and with no hint, since the choice was already theirs."""
+    output = tmp_path / "out"
+    output.mkdir()
+    output.chmod(0o555)
+    try:
+        result, calls = run_ash(
+            "--no-build",
+            "--source-dir",
+            "src",
+            "--output-dir",
+            "out",
+            OCI_RUNNER=str(bare_path / "recording-runner"),
+        )
+    finally:
+        output.chmod(0o755)
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert (
+        "ERROR: Output directory cannot be written: out (Permission denied)"
+        in result.stderr.splitlines()
+    ), result.stderr
+    assert "--output-dir to write elsewhere" not in result.stderr, result.stderr
+    assert calls == []
+
+
 @pytest.mark.parametrize("option", _VALUE_OPTIONS)
 @pytest.mark.parametrize(
     "blank", [pytest.param(" ", id="space"), pytest.param("\t", id="tab")]
