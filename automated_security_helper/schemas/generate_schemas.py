@@ -1,6 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import contextlib
+import os
+import stat
+import tempfile
+from pathlib import Path
 from typing import Any, List, Literal
 
 from pydantic.json_schema import GenerateJsonSchema
@@ -21,6 +26,45 @@ ENV_REFERENCE_JSON_SCHEMA = {
         "The field is read with its default."
     ),
 }
+
+
+def _with_env_reference(json_schema: Any) -> Any:
+    """``json_schema`` with the environment reference admitted beside it."""
+    return {"anyOf": [json_schema, dict(ENV_REFERENCE_JSON_SCHEMA)]}
+
+
+class ConfigFileJsonSchema(GenerateJsonSchema):
+    """The configuration file's schema, which admits what the loader resolves.
+
+    A configuration file may write any scalar as a reference to the environment
+    (``${VAR}``, ``${VAR:default}``, a tagged ``!ENV ${VAR}``), and the loader
+    resolves it to the variable's value before the field is validated
+    (``ash_config.load_yaml_config``; ``config_sources`` for TOML). pydantic's own
+    schema lists a fixed-choice field's choices alone, and a boolean or number
+    field's type alone, so an editor validating a file against the published
+    ``AshConfig.json`` (``config_writer.SCHEMA_COMMENT`` points every saved file
+    at it) called invalid a file ASH itself reads and writes. Each such field
+    admits the reference (:data:`ENV_REFERENCE_JSON_SCHEMA`) beside its own
+    schema. A string field admits it already.
+
+    The workspace policy file resolves no reference (``ash_workspace_config``),
+    so its schema is pydantic's own.
+    """
+
+    def literal_schema(self, schema: Any) -> Any:
+        return _with_env_reference(super().literal_schema(schema))
+
+    def enum_schema(self, schema: Any) -> Any:
+        return _with_env_reference(super().enum_schema(schema))
+
+    def bool_schema(self, schema: Any) -> Any:
+        return _with_env_reference(super().bool_schema(schema))
+
+    def int_schema(self, schema: Any) -> Any:
+        return _with_env_reference(super().int_schema(schema))
+
+    def float_schema(self, schema: Any) -> Any:
+        return _with_env_reference(super().float_schema(schema))
 
 
 def _is_stored_config_model(cls: type) -> bool:
@@ -55,6 +99,13 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
     (:data:`ENV_REFERENCE_JSON_SCHEMA`). A fixed-choice field of any other model
     (a SARIF level, the CycloneDX ``bomFormat``) keeps its choices alone, as the
     load does.
+
+    The schema is generated in serialization mode, because a results file is
+    what ``model_dump_json`` writes: it carries every computed field (the
+    workspace's ``skipped_projects``, which downstream consumers read) and no
+    field a dump excludes. In pydantic's default validation mode a computed
+    field is absent from the schema, so a validator given a workspace results
+    file refused the key every such file carries.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -90,10 +141,55 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
         return json_schema
 
 
+def _write_if_changed(path: Path, content: str) -> bool:
+    """Write ``content`` to ``path`` unless it is already there; True when written.
+
+    The content goes to a temporary file beside ``path`` and is renamed over it,
+    so a reader of the committed schema never sees a truncated or partial file:
+    ``write_text`` truncates before it writes, and a run interrupted between the
+    two left an empty or half-written schema at the committed path. Unchanged
+    content is left alone, so pre-commit does not report an unchanged schema as
+    modified.
+
+    ``mkstemp`` creates its file readable by its owner alone, so the temporary
+    file takes the mode of the schema it replaces (``0o644`` for a new one);
+    without that, the rename would leave the schema unreadable to other users of
+    an installed package.
+    """
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return False
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+    handle, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
+    return True
+
+
+#: The ways ``generate_schemas`` can answer; anything else is refused.
+OUTPUTS = ("file", "json", "dict")
+
+
 def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
-    """Generate JSON schemas for the models."""
+    """Generate JSON schemas for the models.
+
+    ``output`` is one of :data:`OUTPUTS`. Any other value is a ``ValueError``:
+    the file-writing branch used to be the fallback for every unrecognized
+    value, so a mistyped mode rewrote the committed schemas in the package
+    directory and answered ``None``.
+    """
     import json
-    from pathlib import Path
+
+    if output not in OUTPUTS:
+        raise ValueError(f"output must be one of {', '.join(OUTPUTS)}, not {output!r}")
 
     from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.ash_workspace_config import (
@@ -112,7 +208,11 @@ def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
     for model in [AshConfig, AshAggregatedResults, AshWorkspaceConfig]:
         json_schema_path = schemas_dir.joinpath(f"{model.__name__}.json").resolve()
         if model is AshAggregatedResults:
-            schema = model.model_json_schema(schema_generator=StoredResultsJsonSchema)
+            schema = model.model_json_schema(
+                schema_generator=StoredResultsJsonSchema, mode="serialization"
+            )
+        elif model is AshConfig:
+            schema = model.model_json_schema(schema_generator=ConfigFileJsonSchema)
         else:
             schema = model.model_json_schema()
         if output == "dict":
@@ -135,13 +235,7 @@ def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
                 )
                 + "\n"
             )
-            # Only write if content actually changed to avoid triggering
-            # pre-commit "files were modified" on unchanged schemas
-            existing_content = ""
-            if json_schema_path.exists():
-                existing_content = json_schema_path.read_text(encoding="utf-8")
-            if new_content != existing_content:
-                json_schema_path.write_text(new_content, encoding="utf-8")
+            _write_if_changed(json_schema_path, new_content)
     return resp
 
 
