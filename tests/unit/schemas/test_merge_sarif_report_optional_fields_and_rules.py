@@ -294,6 +294,39 @@ class TestResultsKeepTheirRuleById:
 
         assert aggregated.runs[0].results[0].ruleId is None
 
+    def test_a_rule_references_set_fields_survive_and_its_unset_ones_stay_unset(
+        self,
+    ):
+        """The merged copy is built from a full dump of the result, which names
+        every field of the reference, the unset ones as None; the copy must not
+        read those as set, and must keep the ones the scanner did set."""
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [
+                        _finding(
+                            "T-0",
+                            rule={
+                                "id": "T-0",
+                                "index": 0,
+                                "properties": {"tags": ["kept"]},
+                            },
+                        )
+                    ],
+                    [],
+                    rules=[{"id": "T-0"}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        reference = aggregated.runs[0].results[0].rule.root
+        assert reference.model_fields_set == {"id", "properties"}
+        assert reference.properties.tags == ["kept"]
+
     def test_a_result_with_a_rule_id_keeps_it(self):
         """The control: a result already named by id is left as it was."""
         aggregated = SarifReport(runs=[_run("aggregate", [], [])])

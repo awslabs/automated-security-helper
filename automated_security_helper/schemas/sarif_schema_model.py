@@ -2901,10 +2901,16 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
         if rule_id:
             dumped["ruleId"] = rule_id
     if isinstance(reference, dict):
+        # Without the fields the reference never set: the result reaches this
+        # function as a full dump, which carries every field of the reference as
+        # None, and a None handed to the constructor marks the field set on the
+        # merged copy. Dropping them keeps the copy's set fields the reference's
+        # own, so a dump of the merged result shows what the scanner wrote, and
+        # the written SARIF (exclude_none, exclude_unset) is the same either way.
         kept = {
             key: value
             for key, value in reference.items()
-            if key not in ("index", "toolComponent")
+            if key not in ("index", "toolComponent") and value is not None
         }
         if kept.get("id") is None and kept.get("guid") is None:
             dumped.pop("rule", None)
