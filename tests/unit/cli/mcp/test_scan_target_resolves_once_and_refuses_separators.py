@@ -45,19 +45,23 @@ class TestTheTargetIsResolvedOnce:
         count below is the production code's alone: an earlier shape resolved
         ``target`` inside the assertion while the recorder was live, which added
         the test's own call to the count it was checking.
+
+        The gate resolves with ``os.path.realpath`` (``Path.resolve`` raised on a
+        looping link on Python 3.12 and older), so that is the call recorded: a
+        recorder on ``Path.resolve`` alone counted nothing once the gate moved.
         """
         target = tmp_path / "checkout"
         target.mkdir()
         expected = target.resolve()
         seen = []
-        real_resolve = Path.resolve
+        real_realpath = os.path.realpath
 
-        def recording_resolve(self, strict=False):
-            if self == target:
-                seen.append(str(self))
-            return real_resolve(self, strict=strict)
+        def recording_realpath(path, *args, **kwargs):
+            if os.fspath(path) == str(target):
+                seen.append(os.fspath(path))
+            return real_realpath(path, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "resolve", recording_resolve)
+        monkeypatch.setattr(os.path, "realpath", recording_realpath)
 
         resolution = resolve_scan_target(target)
 
