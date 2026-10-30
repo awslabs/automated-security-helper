@@ -1376,17 +1376,28 @@ def _scan_one_project(
         handed = True
         results = orchestrator.execute_scan(phases=list(settings.phases))
     except ScanCancelled:
-        # A BaseException, so the arm below does not see it: the worker records
-        # the project cancelled. Before it does, the output the scan saved
-        # before the cancel reached it goes the way of a raise's when the cancel
-        # was this project's abandon (the gate is taken): the results and
-        # reports it wrote hold findings the FAILED verdict says do not exist.
-        # Claimed through the gate for the reason given in the arm below. A
-        # cancel that is not an abandon (the run's, or the caller's) takes the
-        # claim and leaves the output; the run then writes no unified results.
+        # A BaseException, so the arm below does not see it. The cancelled
+        # outcome is built here, where ``handed`` is known, and not in the
+        # worker: the poll cancels ONE project at its budget and the run goes
+        # on to write unified results, so the reports that project saved before
+        # the cancel reached it are this run's files and the masking pass has
+        # to see them, as it does a raise's (the arm below). Was the cancel
+        # this project's abandon (the gate is taken)? Then that output goes the
+        # way of a raise's too: the results and reports hold findings the FAILED
+        # verdict already recorded says do not exist. Claimed through the gate
+        # for the reason given in the arm below. Any other cancel (the run's,
+        # the caller's) takes the claim and leaves the output in place.
+        ASH_LOGGER.info(f"Project '{project.key}' stopped: it was cancelled")
         if handed and abandoned is not None and not _claim_commit(abandoned):
             _discard_project_output(project_output)
-        raise
+        cancelled = _failed_outcome(
+            project,
+            settings,
+            "cancelled",
+            duration_seconds=time.monotonic() - started,
+        )
+        cancelled.output_written = handed
+        return cancelled
     except ASHConfigValidationError as exc:
         # The label the single-directory CLI prints ("Scan refused" for committed
         # files in the way), and the text logged as data: a committed file's name
@@ -3002,7 +3013,14 @@ def _run_projects(
                     module_names=module_names,
                 )
         except ScanCancelled:
-            ASH_LOGGER.info(f"Project '{project.key}' stopped: it was cancelled")
+            # Only the cancel before the scan reaches _scan_one_project lands
+            # here (a project cancelled while it waited for a worker); a cancel
+            # inside the scan returns its outcome from there, where whether the
+            # output was handed is known. Nothing was written: output_written
+            # keeps its default.
+            ASH_LOGGER.info(
+                f"Project '{project.key}' stopped: it was cancelled before it started"
+            )
             return _failed_outcome(
                 project,
                 settings,

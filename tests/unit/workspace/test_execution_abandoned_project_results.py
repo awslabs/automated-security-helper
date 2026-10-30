@@ -31,6 +31,10 @@ The contract these cases pin:
   write cannot be abandoned afterwards, and an abandoned worker cannot claim;
 - a scan stopped by its abandon's cancel (``ScanCancelled`` escapes the worker's
   ``except Exception``) has what it wrote before the cancel discarded too;
+- a scan stopped by a cancel that is not its abandon (the poll's per-project
+  budget cancels one project and the run goes on) records the FAILED outcome
+  with ``output_written`` set when its output had been handed, so the masking
+  pass rewrites the reports it left, and unset when the cancel came first;
 - the discard removes the two things a scan writes, the results file and the
   report directory, and leaves everything else an operator may have kept there.
 """
@@ -310,11 +314,12 @@ def test_a_worker_stopped_by_its_abandons_cancel_discards_what_the_scan_left(tmp
     gate = execution._AbandonGate()
     assert gate.set() is True
 
-    with pytest.raises(ScanCancelled):
-        execution._scan_one_project(
-            plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
-        )
+    run = execution._scan_one_project(
+        plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
+    )
 
+    assert run.outcome.status is ProjectRunStatus.FAILED
+    assert run.outcome.error == "cancelled"
     assert not (project_output / "ash_aggregated_results.json").exists(), (
         "the results file the scan saved before its cancel survived beside the "
         "FAILED verdict"
@@ -323,20 +328,53 @@ def test_a_worker_stopped_by_its_abandons_cancel_discards_what_the_scan_left(tmp
 
 
 def test_a_cancel_that_is_not_an_abandon_leaves_the_scans_output(tmp_path):
-    """Must-not-flag control: a cancel of the run (the gate untaken) discards
-    nothing; the run writes no unified results, so nothing is contradicted."""
+    """Must-not-flag control: a cancel that is not this project's abandon (the
+    gate untaken) discards nothing, and the outcome says the output was handed:
+    the poll's per-project budget cancels one project while the run goes on to
+    write unified results, so the masking pass has to cover what it left."""
     _, plan = _make_workspace(tmp_path, ("stopped", "MEDIUM"))
-    _SavesThenRaises.error = ScanCancelled("the run was cancelled")
+    _SavesThenRaises.error = ScanCancelled("the project was cancelled")
     project_output = tmp_path / "out" / "projects" / "stopped"
     gate = execution._AbandonGate()
 
-    with pytest.raises(ScanCancelled):
-        execution._scan_one_project(
-            plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
-        )
+    run = execution._scan_one_project(
+        plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
+    )
 
+    assert run.outcome.status is ProjectRunStatus.FAILED
+    assert run.outcome.error == "cancelled"
     assert (project_output / "ash_aggregated_results.json").exists()
     assert gate.set() is False, "the cancelled worker claimed its gate"
+    assert run.output_written is True, (
+        "a project cancelled after its output was handed must be masked like a "
+        "project that raised after writing"
+    )
+
+
+class _CancelsBeforeHanding:
+    """An orchestrator factory whose construction is where the cancel lands."""
+
+    @classmethod
+    def create(cls, **kwargs):
+        raise ScanCancelled("the project was cancelled")
+
+
+def test_a_cancel_before_the_output_was_handed_records_nothing_written(tmp_path):
+    """Must-not-flag control for the masking pass: nothing of this run's is under
+    projects/<key>/ when the cancel lands before an orchestrator exists, so the
+    outcome leaves output_written unset and a previous run's files there alone."""
+    _, plan = _make_workspace(tmp_path, ("stopped", "MEDIUM"))
+    project_output = tmp_path / "out" / "projects" / "stopped"
+    gate = execution._AbandonGate()
+
+    run = execution._scan_one_project(
+        plan.projects[0], _settings(tmp_path), _CancelsBeforeHanding.create, gate
+    )
+
+    assert run.outcome.status is ProjectRunStatus.FAILED
+    assert run.outcome.error == "cancelled"
+    assert run.output_written is False
+    assert not (project_output / "ash_aggregated_results.json").exists()
 
 
 class _QueuedFuture:
