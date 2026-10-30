@@ -70,6 +70,11 @@ from automated_security_helper.utils.error_text import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+#: Passed for a scanner's configured section when the caller has not read it,
+#: so the helpers below read it once; None is a real answer (no section).
+_UNREAD: Any = object()
+
+
 class ScanExecutionEngine:
     """Manages the execution of security scanners."""
 
@@ -573,33 +578,44 @@ class ScanExecutionEngine:
                 getattr(scanner_class, "__name__", "Unknown").lower(),
                 plugin_config_key(scanner_class).lower(),
             }
-            configured = self._selectable_scanner_name(scanner_class)
+            # The configured section is read once per class and handed to the
+            # name, the refusal and the constructor: read by each, the one call
+            # the lookup used to make became three, which a caller counting the
+            # config reads (and a config whose lookup is costly) sees.
+            section = self._scanner_section(scanner_class)
+            configured = self._selectable_scanner_name(scanner_class, section)
             if configured is not None:
                 names.add(configured.lower().strip())
             if lookup_name in names:
                 # The documented check: the parameter was accepted and never
                 # read, so an excluded or unselected scanner was returned.
                 if check_enabled:
-                    self._refuse_unselected_scanner(scanner_name, names, scanner_class)
+                    self._refuse_unselected_scanner(
+                        scanner_name, names, scanner_class, section
+                    )
+                if section is None and self._context.config:
+                    # No section was read: either none exists, or the lookup
+                    # raised and _scanner_section read that as none. The
+                    # constructor's own read answers None for the first and
+                    # raises for the second, as it did before the section was
+                    # shared.
+                    section = self._context.config.get_plugin_config(
+                        plugin_type="scanner",
+                        plugin_name=plugin_config_key(scanner_class),
+                    )
                 # Create and return the scanner instance
-                scanner = scanner_class(
-                    context=self._context,
-                    config=(
-                        self._context.config.get_plugin_config(
-                            plugin_type="scanner",
-                            plugin_name=plugin_config_key(scanner_class),
-                        )
-                        if self._context.config
-                        else None
-                    ),
-                )
+                scanner = scanner_class(context=self._context, config=section)
                 return scanner
 
         # If we get here, the scanner wasn't found
         raise ValueError(f"Scanner {lookup_name} not found")
 
     def _refuse_unselected_scanner(
-        self, scanner_name: str, names: Set[str], scanner_class: type
+        self,
+        scanner_name: str,
+        names: Set[str],
+        scanner_class: type,
+        section: Any = _UNREAD,
     ) -> None:
         """Raise ValueError when this engine's selection leaves the scanner out.
 
@@ -608,7 +624,8 @@ class ScanExecutionEngine:
         ScanPhase; an allowlist that was given and names none of them leaves the
         scanner out too, and so does a configured section that disables the
         scanner (ScanPhase records such a scanner SKIPPED, "disabled in the
-        configuration"). An empty allowlist means every scanner.
+        configuration"). An empty allowlist means every scanner. *section* is
+        the configured section when the caller has read it already.
         """
         excluded = {name.lower().strip() for name in self._init_excluded_scanners}
         if names & excluded:
@@ -621,7 +638,9 @@ class ScanExecutionEngine:
             raise ValueError(
                 f"Scanner {scanner_name} is not enabled: the selection does not name it"
             )
-        if not section_enabled(self._scanner_section(scanner_class)):
+        if section is _UNREAD:
+            section = self._scanner_section(scanner_class)
+        if not section_enabled(section):
             raise ValueError(
                 f"Scanner {scanner_name} is not enabled: its configuration "
                 "disables it (enabled: false)"
@@ -644,7 +663,9 @@ class ScanExecutionEngine:
         except Exception:  # noqa: BLE001 -- a section that cannot be read names nothing
             return None
 
-    def _selectable_scanner_name(self, plugin_class: type) -> Optional[str]:
+    def _selectable_scanner_name(
+        self, plugin_class: type, section: Any = _UNREAD
+    ) -> Optional[str]:
         """The name ``--scanners`` selects *plugin_class* by, or None.
 
         ScanPhase matches the selection against ``config.name`` on each
@@ -653,10 +674,12 @@ class ScanExecutionEngine:
         compare the same names, so the configured section's ``name`` is read
         first (a dict section as well as a model) and the declared name is the
         fallback; a class that declares none answers None, which defers the
-        refusal to the phase (see ensure_initialized).
+        refusal to the phase (see ensure_initialized). *section* is the
+        configured section when the caller has read it already.
         """
         declared = declared_plugin_name(plugin_class)
-        section = self._scanner_section(plugin_class)
+        if section is _UNREAD:
+            section = self._scanner_section(plugin_class)
         if section is None:
             return declared
         if isinstance(section, dict):
