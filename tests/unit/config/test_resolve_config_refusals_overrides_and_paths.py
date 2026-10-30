@@ -89,153 +89,131 @@ def test_read_config_document_refuses_a_yaml_constructor_error(tmp_path):
         read_config_document(path, log_failure=False)
 
 
-def test_one_inapplicable_reporters_override_does_not_drop_the_others():
-    from automated_security_helper.config.operator_only_options import reporter_section
-    from automated_security_helper.config.resolve_config import _with_reporter_overrides
-    from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
-        SecurityHubReporter,
+#: The reporters overrides tests below use DECLARED reporter sections (``sarif``,
+#: ``html``, ``gitlab-sast``): their ``options`` is a typed model, so an override
+#: that is no mapping fails the rebuilt configuration's validation, which is
+#: the only way the per-section fallback and the disable arm are reached. An
+#: undeclared section (an AWS plugin's, read by that plugin's own model when it
+#: loads) is an extra the configuration model does not validate, so an override
+#: of it never fails here, whatever it holds (the last test of the group).
+
+
+def _reporter_enabled(view, alias: str):
+    """The ``enabled`` the rebuilt configuration holds for the declared reporter
+    section ``alias`` (the spelling the dump uses)."""
+    return view.model_dump(by_alias=True)["reporters"][alias]["enabled"]
+
+
+def _trusted(**sections):
+    return AshConfig.model_validate(
+        {
+            "project_name": "op",
+            "reporters": {
+                name.replace("_", "-"): {"enabled": enabled}
+                for name, enabled in sections.items()
+            },
+        }
     )
 
-    trusted = AshConfig.model_validate(
-        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": True}}}
-    )
+
+def test_one_inapplicable_reporters_override_does_not_drop_the_others():
+    """``enabled=notabool`` fails the section's lax bool, so the section's
+    overrides are applied again one disable at a time: the ``false`` lands."""
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
 
     view = _with_reporter_overrides(
-        trusted,
-        [
-            "reporters.aws-security-hub.enabled=notabool",
-            "reporters.aws-security-hub.enabled=false",
-        ],
-        trusted,
+        _trusted(sarif=True),
+        ["reporters.sarif.enabled=notabool", "reporters.sarif.enabled=false"],
+        _trusted(sarif=True),
     )
 
-    section = reporter_section(view, SecurityHubReporter)
-    enabled = section.get("enabled") if isinstance(section, dict) else section.enabled
-    assert enabled is False, section
-
-
-def _security_hub_enabled(view):
-    from automated_security_helper.config.operator_only_options import reporter_section
-    from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
-        SecurityHubReporter,
-    )
-
-    section = reporter_section(view, SecurityHubReporter)
-    return section.get("enabled") if isinstance(section, dict) else section.enabled
+    assert _reporter_enabled(view, "sarif") is False, view.reporters
 
 
 def test_an_enable_does_not_land_when_its_sections_sibling_override_fails():
-    """All or nothing per reporter section: with the destination override
-    refused by the trusted base, the enable beside it is dropped too, so the
-    reporter does not send findings to the base's or the default destination."""
+    """All or nothing per reporter section: with the sibling override refused
+    by the trusted base (``options`` is a typed model, a bare string fails it),
+    the enable beside it is dropped too, so a reporter never runs with the
+    base's or the default settings in place of the ones written beside the
+    enable."""
     from automated_security_helper.config.resolve_config import _with_reporter_overrides
 
-    trusted = AshConfig.model_validate(
-        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": False}}}
-    )
+    trusted = _trusted(sarif=False)
 
     view = _with_reporter_overrides(
         trusted,
-        [
-            "reporters.aws-security-hub.enabled=true",
-            "reporters.aws-security-hub.options=notamapping",
-        ],
+        ["reporters.sarif.enabled=true", "reporters.sarif.options=notamapping"],
         trusted,
     )
 
-    assert _security_hub_enabled(view) is False, view.reporters
+    assert _reporter_enabled(view, "sarif") is False, view.reporters
 
 
 def test_a_disable_lands_although_its_sections_sibling_override_fails():
     from automated_security_helper.config.resolve_config import _with_reporter_overrides
 
-    trusted = AshConfig.model_validate(
-        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": True}}}
-    )
+    trusted = _trusted(sarif=True)
 
     view = _with_reporter_overrides(
         trusted,
-        [
-            "reporters.aws-security-hub.options=notamapping",
-            "reporters.aws-security-hub.enabled=false",
-        ],
+        ["reporters.sarif.options=notamapping", "reporters.sarif.enabled=false"],
         trusted,
     )
 
-    assert _security_hub_enabled(view) is False, view.reporters
+    assert _reporter_enabled(view, "sarif") is False, view.reporters
 
 
 @pytest.mark.parametrize("spelling", ["0", "no", "off", "NO", "f", "False"])
 def test_every_false_spelling_the_field_reads_lands_as_a_disable(spelling):
     """The model's ``enabled`` is a lax bool, so the section-wide application
-    read these as a disable; the always-apply arm admits the same set."""
+    read these as a disable; the always-apply arm admits the same set, and the
+    rebuilt section holds the bool the model read, not the spelling."""
     from automated_security_helper.config.resolve_config import _with_reporter_overrides
 
-    trusted = AshConfig.model_validate(
-        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": True}}}
-    )
+    trusted = _trusted(sarif=True)
 
     view = _with_reporter_overrides(
         trusted,
-        [
-            "reporters.aws-security-hub.options=notamapping",
-            f"reporters.aws-security-hub.enabled={spelling}",
-        ],
+        ["reporters.sarif.options=notamapping", f"reporters.sarif.enabled={spelling}"],
         trusted,
     )
 
-    assert _security_hub_enabled(view) is False, view.reporters
+    assert _reporter_enabled(view, "sarif") is False, view.reporters
 
 
 def test_another_sections_overrides_still_apply_when_one_section_fails():
     from automated_security_helper.config.resolve_config import _with_reporter_overrides
 
-    trusted = AshConfig.model_validate(
-        {
-            "project_name": "op",
-            "reporters": {
-                "aws-security-hub": {"enabled": True},
-                "cloudwatch-logs": {"enabled": True},
-            },
-        }
-    )
+    trusted = _trusted(sarif=True, html=True)
 
     view = _with_reporter_overrides(
         trusted,
-        [
-            "reporters.cloudwatch-logs.options=notamapping",
-            "reporters.aws-security-hub.enabled=false",
-        ],
+        ["reporters.html.options=notamapping", "reporters.sarif.enabled=false"],
         trusted,
     )
 
-    assert _security_hub_enabled(view) is False, view.reporters
-    reporters = view.model_dump(by_alias=True)["reporters"]
-    cloudwatch = reporters.get("cloudwatch-logs") or reporters.get("cloudwatch_logs")
-    assert cloudwatch is not None and cloudwatch["enabled"] is True, reporters
+    assert _reporter_enabled(view, "sarif") is False, view.reporters
+    assert _reporter_enabled(view, "html") is True, view.reporters
 
 
 def test_two_spellings_of_one_section_fall_together():
-    """The apply reads ``aws_security_hub`` and ``aws-security-hub`` as one
-    section, so the per-section fallback groups them as one: an enable under
-    one spelling never lands while the destination override under the other
-    fails."""
+    """The apply reads ``gitlab_sast`` and ``gitlab-sast`` as one section, so
+    the per-section fallback groups them as one: an enable under one spelling
+    never lands while the failing override under the other does."""
     from automated_security_helper.config.resolve_config import _with_reporter_overrides
 
-    trusted = AshConfig.model_validate(
-        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": False}}}
-    )
+    trusted = _trusted(gitlab_sast=False)
 
     view = _with_reporter_overrides(
         trusted,
         [
-            "reporters.aws_security_hub.enabled=true",
-            "reporters.aws-security-hub.options=notamapping",
+            "reporters.gitlab_sast.enabled=true",
+            "reporters.gitlab-sast.options=notamapping",
         ],
         trusted,
     )
 
-    assert _security_hub_enabled(view) is False, view.reporters
+    assert _reporter_enabled(view, "gitlab-sast") is False, view.reporters
 
 
 def test_an_override_of_the_reporters_mapping_falls_with_the_whole_set():
@@ -243,54 +221,61 @@ def test_an_override_of_the_reporters_mapping_falls_with_the_whole_set():
     one group: it is not applied while another override of the set fails."""
     from automated_security_helper.config.resolve_config import _with_reporter_overrides
 
-    trusted = AshConfig.model_validate(
-        {
-            "project_name": "op",
-            "reporters": {
-                "aws-security-hub": {"enabled": False},
-                "cloudwatch-logs": {"enabled": True},
-            },
-        }
-    )
+    trusted = _trusted(sarif=False, html=True)
 
     view = _with_reporter_overrides(
         trusted,
         [
-            'reporters={"aws-security-hub": {"enabled": true}}',
-            "reporters.cloudwatch-logs.options=notamapping",
+            'reporters={"sarif": {"enabled": true}}',
+            "reporters.html.options=notamapping",
         ],
         trusted,
     )
 
-    assert _security_hub_enabled(view) is False, view.reporters
+    assert _reporter_enabled(view, "sarif") is False, view.reporters
 
 
 def test_the_warning_names_the_disable_it_still_applies(caplog):
     from automated_security_helper.config.resolve_config import _with_reporter_overrides
 
-    trusted = AshConfig.model_validate(
-        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": True}}}
-    )
+    trusted = _trusted(sarif=True)
 
     with caplog.at_level("WARNING", logger="ash"):
         view = _with_reporter_overrides(
             trusted,
-            [
-                "reporters.aws-security-hub.options=notamapping",
-                "reporters.aws-security-hub.enabled=false",
-            ],
+            ["reporters.sarif.options=notamapping", "reporters.sarif.enabled=false"],
             trusted,
         )
 
-    assert _security_hub_enabled(view) is False, view.reporters
+    assert _reporter_enabled(view, "sarif") is False, view.reporters
     warnings = [
         r.getMessage() for r in caplog.records if "do not apply" in r.getMessage()
     ]
     assert warnings, [r.getMessage() for r in caplog.records]
-    assert "except the disable 'reporters.aws-security-hub.enabled'" in warnings[0], (
-        warnings
-    )
+    assert "except the disable 'reporters.sarif.enabled'" in warnings[0], warnings
     assert "which is applied on its own" in warnings[0], warnings
+
+
+def test_an_undeclared_sections_override_is_not_validated_here():
+    """A reporter section the configuration model does not declare (an AWS
+    plugin's) is an extra: no model validates its override at this level, so
+    the override lands as written and the per-section fallback never runs for
+    it. The plugin's own config model reads the section when it loads. Pinned
+    so the limit is on record: the fallback's protection reaches the declared
+    sections, and a change that validates extras here turns this test over on
+    purpose."""
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
+
+    trusted = AshConfig.model_validate(
+        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": False}}}
+    )
+
+    view = _with_reporter_overrides(
+        trusted, ["reporters.aws-security-hub.options=notamapping"], trusted
+    )
+
+    reporters = view.model_dump(by_alias=True)["reporters"]
+    assert reporters["aws-security-hub"]["options"] == "notamapping", reporters
 
 
 @pytest.mark.skipif(
