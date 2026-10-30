@@ -277,6 +277,7 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_USAGE_ERROR,
     ASH_WORK_DIR_NAME,
     PYTHON_ONLY_SKIPPED_REASON,
+    SHARD_SPLIT_REASON_PREFIX,
 )
 from automated_security_helper.core.enums import (
     AshLogLevel,
@@ -384,15 +385,6 @@ _RESULTS_DIR_CANDIDATES = (
 _NEVER_ATTEMPTED_STATUSES = frozenset(
     {ScannerStatus.ERROR.value, ScannerStatus.MISSING.value}
 )
-
-#: How ScanPhase begins the ``skipped_reason`` of a scanner it left to another shard
-#: (``"assigned to another shard (this run is shard i of n)"``, the row the shard
-#: split writes beside the ``excluded=True`` flag). The same flag marks an operator
-#: deselection, so :func:`_verify_scanner_union` reads this text to tell the two
-#: apart: an orphan every shard left to "another shard" is a partition hole, not a
-#: deselection. A literal coupling to the scan's text; hoisting it to one shared
-#: constant is the scan phase's follow-up.
-_SHARD_SPLIT_REASON_PREFIX = "assigned to another shard"
 
 
 def _each_value_once(*groups: Optional[Iterable[str]]) -> list[str]:
@@ -926,9 +918,10 @@ def _verify_scanner_union(
                 getattr(entry, "excluded", False)
             )
             reason = getattr(entry, "skipped_reason", None)
+            # The prefix is the scan phase's own spelling (core/constants.py), the one
+            # place both writer and reader take it from.
             left_to_another_shard[key] = left_to_another_shard.get(key, False) or (
-                isinstance(reason, str)
-                and reason.startswith(_SHARD_SPLIT_REASON_PREFIX)
+                isinstance(reason, str) and reason.startswith(SHARD_SPLIT_REASON_PREFIX)
             )
 
     # An unclaimed row is only an offence when it claims its scanner's outcome is
