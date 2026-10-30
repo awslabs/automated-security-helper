@@ -3337,12 +3337,18 @@ def merge_command(
     # The first write to disk, made only after every refusal has had its say.
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # Written after the suppression pass, not before. Writing first was the
-    # original order and it would now leave the merged results file describing a
-    # pre-suppression state while the reports and the exit code describe the
-    # post-suppression one -- two artifacts of the same run disagreeing about
-    # which findings are actionable.
     merged_file = output_dir_path.joinpath(RESULTS_FILE_NAME)
+    # A results file an earlier run left in a reused output directory goes now,
+    # before the report phases, so that no exit from them leaves it behind: a
+    # reporter that raises, a cancelled upload or a failed write below would
+    # otherwise leave the earlier run's file where a later ``ash report`` reads
+    # it as this merge's, and a reporter that reads the output directory while
+    # it runs would read it as this merge's results. Removing it only on the path
+    # refusal, as before, covered one of those exits. The sentence is kept for the
+    # refusal text, which still names what was removed.
+    earlier = _remove_an_earlier_results_file(merged_file)
+    if earlier:
+        logger.info(earlier.strip())
     if merged.ash_config is not None:
         # What the confinement took from the operator's config is recorded as
         # that file wrote it, as a shard records its own
@@ -3359,10 +3365,11 @@ def merge_command(
             ),
         )
     # The merged results file itself is written after the report phases below,
-    # as a scan writes its own after its report phase (interactions/run_ash_scan.py):
-    # a reporter that refuses its paths, or fails, then leaves no merged results
-    # file, where one written here had to be removed again on a refusal and
-    # survived a crash recording nothing of it.
+    # as a scan writes its own after its report phase (interactions/run_ash_scan.py),
+    # and after the suppression pass above: written first it described a
+    # pre-suppression state while the reports and the exit code described the
+    # post-suppression one, and a reporter that refused its paths, or failed,
+    # left it behind recording nothing of that. Now such a run leaves none.
 
     # The plugins were loaded above, before anything was written.
     # A reporter that sends findings off the host runs only when the operator
@@ -3498,10 +3505,9 @@ def merge_command(
         # Refused before any reporter wrote: a link at the reports directory or at
         # a report file, or a report file name outside it. Printed like the other
         # refusals here, without a traceback. The merged results file is written
-        # only below, so a refused merge leaves none of its own; one an earlier
-        # run left in a reused output directory is removed, or named when it
-        # cannot be, so a later ``ash report`` does not read it as this merge's.
-        earlier = _remove_an_earlier_results_file(merged_file)
+        # only below, so a refused merge leaves none of its own; the one an
+        # earlier run left in a reused output directory was removed above, or
+        # named when it could not be, and the refusal says which.
         print(
             f"[red]Refusing to write reports: {escape_markup(str(exc))} No merged "
             f"{RESULTS_FILE_NAME} was written.{escape_markup(earlier)}[/red]"
@@ -3745,13 +3751,14 @@ def _relocate_colliding_output_dir(output_dir: Path) -> Path:
 def _remove_an_earlier_results_file(merged_file: Path) -> str:
     """Remove a results file an earlier run left at *merged_file*; say what happened.
 
-    Called on a refusal in the report phases, when this run has written no
-    results file of its own. A file from an earlier run in a reused output
+    Called once the output directory exists and before the report phases, when
+    this run has written no results file of its own, so that no exit from those
+    phases leaves the file behind. A file from an earlier run in a reused output
     directory would otherwise be read by a later ``ash report`` as this merge's
     (the write-then-remove order this replaced removed it as a side effect).
-    Returns the sentence for the refusal text: empty when there was no file; a
-    file that cannot be removed is named rather than raised over, so the
-    refusal is still printed as a refusal.
+    Returns the sentence the log and a refusal text use: empty when there was no
+    file; a file that cannot be removed is named rather than raised over, so a
+    refusal is still printed as a refusal and the merge still runs.
     """
     if not merged_file.exists():
         return ""

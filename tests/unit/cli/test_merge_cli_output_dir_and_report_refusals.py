@@ -161,6 +161,31 @@ class TestARefusedReportLeavesNoMergedFile:
         )
         assert "wasremoved" in console, result.output
 
+    def test_an_earlier_runs_results_file_is_removed_before_the_reports_run(
+        self, tmp_path, monkeypatch
+    ):
+        """Any exit from the report phases, not only the path refusal, used to
+        leave the earlier run's file behind: a reporter that raises left a reused
+        output directory holding a results file a later ``ash report`` read as
+        this merge's. The file is removed before the phases run, so it is gone
+        whatever ends them."""
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(2))
+        output_dir = tmp_path / "merged"
+        output_dir.mkdir(parents=True)
+        earlier = output_dir / RESULTS_FILE_NAME
+        earlier.write_text("{}", encoding="utf-8")
+
+        def failing_execute(self, *args, **kwargs):
+            raise RuntimeError("a reporter failed")
+
+        monkeypatch.setattr(merge_module.ReportPhase, "execute", failing_execute)
+
+        result = _MergeCli()._invoke(_args(shard_paths, output_dir))
+
+        assert result.exit_code != 0, result.output
+        assert not earlier.exists(), result.output
+        assert not (output_dir / RESULTS_FILE_NAME).exists(), result.output
+
 
 class TestTheRelocatedOutputDirIsCheckedAgain:
     def test_a_cwd_inside_the_relocation_target_is_relocated_further(
