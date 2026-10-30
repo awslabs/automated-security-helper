@@ -456,29 +456,59 @@ class _JobCondition:
         results: Mapping[str, str],
         called: Iterable[str] = (),
         inputs: Mapping[str, Any] | None = None,
+        needs_of: Mapping[str, Iterable[str]] | None = None,
     ) -> None:
         self.results = dict(results)
         self.called = set(called)
         self.inputs = dict(inputs or {})
+        self.needs_of = {job: list(needs) for job, needs in (needs_of or {}).items()}
 
     def runs(self, job: Mapping[str, Any]) -> bool:
-        """Whether GitHub starts ``job`` given its ``needs`` and ``if``."""
-        needs = job.get("needs")
-        needs = [needs] if isinstance(needs, str) else list(needs or [])
+        """Whether GitHub starts ``job`` given its ``needs`` and ``if``.
+
+        An ``if`` that names no status function (``success()``, ``failure()``,
+        ``always()``, ``cancelled()``) is read as ``success() && (<if>)``, as GitHub
+        and act read it: a dependent of a failed job with ``if: needs.x.result ==
+        'failure'`` or ``if: github.event_name == 'push'`` does not start.
+        """
+        needs = _needs_of(job)
         condition = job.get("if")
         if condition is None:
-            return all(self.results.get(str(need)) == "success" for need in needs)
+            return self._success(needs)
         if isinstance(condition, bool):
-            return condition
+            return _and_values(self._success(needs), condition) is not False
         try:
-            value = self.evaluate(str(condition), needs)
+            tokens = _tokens(_expression_body(str(condition)))
+            value, rest = self._or(tokens, needs)
+            if rest:
+                raise ValueError(f"unread tail {rest!r}")
         except ValueError:
             return True
+        if not any(token in _STATUS_FUNCTIONS for token in tokens):
+            value = _and_values(self._success(needs), value)
         return value is not False
 
+    def _success(self, needs: list[str]) -> bool:
+        """``success()``: every job in ``needs`` ended as success."""
+        return all(self.results.get(str(need)) == "success" for need in needs)
+
+    def _failure(self, needs: list[str]) -> bool:
+        """``failure()``: a job in ``needs``, or one they need, transitively, failed."""
+        pending = [str(need) for need in needs]
+        seen: set[str] = set()
+        while pending:
+            job = pending.pop()
+            if job in seen:
+                continue
+            seen.add(job)
+            if self.results.get(job) == "failure":
+                return True
+            pending += [str(need) for need in self.needs_of.get(job, [])]
+        return False
+
     def evaluate(self, text: str, needs: list[str]) -> Any:
-        wrapped = _EXPRESSION_WRAP.match(text)
-        tokens = _tokens(wrapped["body"] if wrapped else text)
+        """The value of expression ``text`` alone, without the implicit ``success()``."""
+        tokens = _tokens(_expression_body(text))
         value, rest = self._or(tokens, needs)
         if rest:
             raise ValueError(f"unread tail {rest!r}")
@@ -500,12 +530,7 @@ class _JobCondition:
         value, tokens = self._not(tokens, needs)
         while tokens and tokens[0] == "&&":
             other, tokens = self._not(tokens[1:], needs)
-            left, right = _truth(value), _truth(other)
-            value = (
-                False
-                if left is False or right is False
-                else (True if left and right else None)
-            )
+            value = _and_values(value, other)
         return value, tokens
 
     def _not(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
@@ -544,9 +569,9 @@ class _JobCondition:
         if token == "cancelled()":
             return False
         if token == "success()":
-            return all(self.results.get(str(need)) == "success" for need in needs)
+            return self._success(needs)
         if token == "failure()":
-            return any(self.results.get(str(need)) == "failure" for need in needs)
+            return self._failure(needs)
         parts = token.split(".")
         if parts[0] == "needs" and len(parts) >= 3:
             job = parts[1]
@@ -580,6 +605,31 @@ def _truth(value: Any) -> bool | None:
     if isinstance(value, str):
         return value.lower() not in ("", "false", "0")
     return bool(value)
+
+
+def _and_values(left: Any, right: Any) -> bool | None:
+    """``left && right`` over GitHub truth, None where either side is unknown and the
+    other is not false."""
+    a, b = _truth(left), _truth(right)
+    if a is False or b is False:
+        return False
+    return True if a and b else None
+
+
+#: The status functions of a job-level ``if``; an ``if`` naming none of them is read
+#: with an implicit ``success() &&`` in front, as GitHub and act read it.
+_STATUS_FUNCTIONS = frozenset({"success()", "failure()", "always()", "cancelled()"})
+
+
+def _expression_body(text: str) -> str:
+    """``text`` without the ``${{ }}`` around it, when it has one."""
+    wrapped = _EXPRESSION_WRAP.match(text)
+    return wrapped["body"] if wrapped else text
+
+
+def _needs_of(job: Mapping[str, Any]) -> list[str]:
+    needs = job.get("needs")
+    return [str(needs)] if isinstance(needs, str) else [str(n) for n in needs or []]
 
 
 def call_inputs(job: Mapping[str, Any], target: Mapping[str, Any]) -> dict[str, Any]:
@@ -641,6 +691,8 @@ def act_job_plan(
     missing = []
     results: dict[str, str] = {}
     callers: set[str] = set()
+    jobs = workflow.get("jobs") or {}
+    needs_of = {str(k): _needs_of(v) for k, v in jobs.items() if isinstance(v, Mapping)}
 
     def add(job_id: str, entry: JobPlan) -> None:
         if job_id in plan:
@@ -650,10 +702,10 @@ def act_job_plan(
             )
         plan[job_id] = entry
 
-    for job_id, job in _in_dependency_order(workflow.get("jobs") or {}):
+    for job_id, job in _in_dependency_order(jobs):
         uses = str(job.get("uses") or "")
         runs = matrix_runs(job)
-        if not _JobCondition(results, callers).runs(job):
+        if not _JobCondition(results, callers, needs_of=needs_of).runs(job):
             results[job_id] = "skipped"
             continue
         if not uses:
@@ -670,13 +722,22 @@ def act_job_plan(
             continue
         inputs = call_inputs(job, target)
         called_results: dict[str, str] = {}
-        for called_id, called_job in _in_dependency_order(target.get("jobs") or {}):
+        called_jobs = target.get("jobs") or {}
+        called_needs = {
+            str(k): _needs_of(v)
+            for k, v in called_jobs.items()
+            if isinstance(v, Mapping)
+        }
+        for called_id, called_job in _in_dependency_order(called_jobs):
             if called_job.get("uses"):
                 raise ValueError(
                     f"{name}'s job {called_id} calls another workflow, "
                     f"{called_job['uses']}"
                 )
-            if not _JobCondition(called_results, inputs=inputs).runs(called_job):
+            condition = _JobCondition(
+                called_results, inputs=inputs, needs_of=called_needs
+            )
+            if not condition.runs(called_job):
                 called_results[called_id] = "skipped"
                 continue
             if name == SCAN_WORKFLOW:

@@ -279,15 +279,40 @@ def test_a_job_needing_a_failing_job_runs_only_when_its_if_admits_that():
         ("    if: ${{ !cancelled() }}\n", ["after"]),
         ("    if: failure()\n", ["after"]),
         ("    if: success()\n", []),
-        ("    if: needs.scan.result == 'failure'\n", ["after"]),
+        # No status function in the if: GitHub and act read `success() && (...)`, so
+        # a dependent of the failed scan does not start however its if reads.
+        ("    if: needs.scan.result == 'failure'\n", []),
+        ("    if: always() && needs.scan.result == 'failure'\n", ["after"]),
         ("    if: needs.scan.result == 'success'\n", []),
-        ("    if: ${{ github.event_name == 'push' }}\n", ["after"]),
+        ("    if: ${{ github.event_name == 'push' }}\n", []),
+        ("    if: true\n", []),
     ]:
         text = base + dependent.format(condition=condition)
         jobs = [job for job in plan(load(text), {}) if job != "scan"]
         assert jobs == expected, (condition, jobs)
     quiet = base.replace("ash scan .", "ash scan --no-fail-on-findings .")
-    assert "after" in plan(load(quiet + dependent.format(condition="")), {})
+    for condition in ["", "    if: ${{ github.event_name == 'push' }}\n"]:
+        text = quiet + dependent.format(condition=condition)
+        assert "after" in plan(load(text), {}), condition
+
+
+@pytest.mark.unit
+def test_failure_reads_every_ancestor_of_a_job():
+    """GitHub's ``failure()`` is true when any ancestor job failed, not only a job in
+    the direct ``needs``: a job two below the gated scan, behind an ``always()`` job,
+    runs under ``if: failure()`` after the scan fails and is skipped after it passes."""
+    load = _api("reports", "load_workflow")
+    plan = _api("reports", "act_job_plan")
+    chain = (
+        "on:\n  push:\njobs:\n"
+        "  scan:\n    steps:\n      - run: {command}\n"
+        "  mid:\n    needs: scan\n    if: always()\n    steps:\n      - run: echo\n"
+        "  last:\n    needs: mid\n    if: failure()\n    steps:\n      - run: echo\n"
+    )
+    failing = plan(load(chain.format(command="ash scan .")), {})
+    assert sorted(failing) == ["last", "mid", "scan"], sorted(failing)
+    passing = plan(load(chain.format(command="ash scan --no-fail-on-findings .")), {})
+    assert sorted(passing) == ["mid", "scan"], sorted(passing)
 
 
 @pytest.mark.unit
