@@ -334,6 +334,46 @@ class TestTheErrorArmsRedactWithOneGuardedRead:
         assert SECRET not in info["error"]
         assert not any(SECRET in line for line in plugin.logged()), plugin.logged()
 
+    def test_the_installation_info_reads_the_path_copy_when_uv_cannot_answer(self):
+        """The error arm's other half: uv raised (here the runner could not be
+        built), which says nothing about a copy on PATH, so that copy is read
+        on its own and the tool is reported available from it, with the uv
+        side's error kept. The found case was only ever pinned as not found."""
+        plugin = FakePlugin()
+        with (
+            patch(RUNNER, side_effect=RuntimeError("no runner")),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value="/usr/local/bin/bandit",
+            ),
+        ):
+            info = plugin._get_tool_installation_info()
+        assert info["available"] is True
+        assert info["preferred_source"] == "pre_installed"
+        assert info["is_pre_installed"] is True
+        assert info["pre_installed_path"] == "/usr/local/bin/bandit"
+        assert info["is_uv_installed"] is False
+        assert info["error"] == "RuntimeError"
+
+    def test_the_installation_info_reads_the_path_copy_through_its_own_failure(
+        self,
+    ):
+        """The PATH read beside the error is best effort: when it raises too,
+        the tool is reported absent, never a traceback out of the info call."""
+        plugin = FakePlugin()
+        with (
+            patch(RUNNER, side_effect=RuntimeError("no runner")),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                side_effect=OSError("PATH unreadable"),
+            ),
+        ):
+            info = plugin._get_tool_installation_info()
+        assert info["available"] is False
+        assert info["preferred_source"] == "none"
+        assert info["pre_installed_path"] is None
+        assert info["error"] == "RuntimeError"
+
     def test_the_install_decision_redacts_its_error(self):
         """An answer that cannot be read means install (the chain's shape); the
         line that says so is redacted."""
