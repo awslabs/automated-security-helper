@@ -526,6 +526,11 @@ def merged_honoring(records: Iterable[IgnoreFileExclusions]) -> Dict[str, Any]:
     disagree. A record that is itself merged counts as the scans it stands for
     (``IgnoreFileExclusions.scan_counts``), so merging merged records keeps their
     counts. ``ash merge`` and a workspace scan's merged results both use this.
+
+    A merged record whose scans all agreed carries no counts
+    (``_drop_counts_that_agree_with_honored``), so merging it with others counts
+    it as one scan, however many it covered. "honored by H of N" can then read H
+    or N smaller than the number of scans merged; ``honored`` itself stays right.
     """
     honoring = total = 0
     for record in records:
