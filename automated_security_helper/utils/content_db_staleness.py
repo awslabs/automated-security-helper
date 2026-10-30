@@ -603,11 +603,15 @@ def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
     built = status.get("built") if isinstance(status, dict) else None
     error = str(status.get("error") or "") if isinstance(status, dict) else ""
     path = status.get("path") if isinstance(status, dict) else None
-    # Absence first, whatever ``built`` says: a status document for a database
-    # that does not exist can still carry a zero-time ``built``, which read as
-    # a build time graded merely stale, under a policy warn can relax.
+    # grype's own word of absence comes first, whatever ``built`` says: a
+    # status document for a database that does not exist can still carry a
+    # zero-time ``built``, which read as a build time graded merely stale,
+    # under a policy warn can relax. The path alone decides nothing while
+    # ``built`` is given: grype answers from its own cache directory, which
+    # this process need not be able to see (another user's, a container's),
+    # and a stale database reports its path with an age error, not absence.
     if "does not exist" in error or (
-        isinstance(path, str) and path and not Path(path).exists()
+        not built and isinstance(path, str) and path and not Path(path).exists()
     ):
         # The error and path are grype's own output: values hidden, escapes
         # and controls removed, then cut (tool_output_excerpt).
