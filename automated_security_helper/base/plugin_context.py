@@ -379,8 +379,9 @@ def _record_derived_roots_on_config(context: Any) -> None:
 # group from inside a half-imported module), so a process that has imported the
 # models but not the config would fail on its first PluginContext with
 # PydanticUserError. So the reference is also resolved
-# on first use, the way models/asharp_model.py resolves AshAggregatedResults'; the
-# comments there explain the binding into globals() and the lock.
+# on first use, the way models/asharp_model.py resolves AshAggregatedResults'. Both
+# use the one OnceOnlyResolver in base/forward_refs.py, whose docstring explains
+# the binding into globals() and the lock.
 #: The one once-only resolver both models share (base/forward_refs.py); this
 #: module and models/asharp_model.py each carried a copy of its lock, flag and
 #: double-checked rebuild before.

@@ -2001,11 +2001,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # tool wrote: when they are all it holds, the tool's stderr log is
         # still unread, and is read below beside them.
         tool_said_nothing = not "\n".join(self._tool_error_lines()).strip()
-        values_read = False
+        values_were_read = False
         read_values: Optional[Tuple[str, ...]] = None
         stderr_withheld = False
         if stderr_text:
-            values_read, read_values = True, guarded_values(self)
+            values_were_read, read_values = True, guarded_values(self)
             if read_values is not None:
                 stderr_text = text_without_values(stderr_text, read_values)
             else:
@@ -2056,8 +2056,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # values the redaction hides.
             trim_inputs: Tuple[str, ...] = ()
             # Not asked a second time when ASH's notes were redacted above.
-            guarded = read_values if values_read else guarded_values(self)
-            values_read, read_values = True, guarded
+            guarded = read_values if values_were_read else guarded_values(self)
+            values_were_read, read_values = True, guarded
             if guarded is None:
                 # The hook raised or gave no usable answer BEFORE the log was
                 # read, so nothing here knows whether stderr was captured:
@@ -2175,7 +2175,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # path such a hook already returned above with the stderr log
             # named; this read is the rejected path's, and the one read for
             # a failure whose stderr block did not need the hook.)
-            if not values_read:
+            if not values_were_read:
                 read_values = guarded_values(self)
             reported = (
                 _error_notifications(results_path, read_values)
