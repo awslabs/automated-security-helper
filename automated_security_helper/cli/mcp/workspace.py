@@ -1283,8 +1283,11 @@ def _project_outputs(
     return outputs
 
 
-def _create_project_outputs(project_outputs: Dict[str, Path]) -> None:
-    """Create the projects' output directories, once _register_projects has claimed them.
+def _create_project_outputs(
+    project_outputs: Dict[str, Path], output_dir: Union[str, Path]
+) -> None:
+    """Create the workspace's output root and the projects' output directories,
+    once _register_projects has claimed them.
 
     Not before, so a workspace scan refused at max_concurrent_scans leaves no
     output tree under the workspace root for a
@@ -1293,21 +1296,29 @@ def _create_project_outputs(project_outputs: Dict[str, Path]) -> None:
     :func:`_refuse_output_files` refuses one it can tell beforehand, with the
     error's own reason: under a ``projects`` that cannot be written, it is known
     only now.
+
+    The root, ``output_dir``, is created on its own and first. It used to exist
+    only as a side effect of ``mkdir(parents=True)`` on the project folders, so a
+    run with no active project (every project missing under
+    ``allow_missing_projects``, say) created nothing here, the ``.gitignore``
+    writer that follows wrote nothing into a directory that was not there, and
+    ``execute_workspace`` then made the root and wrote the unified results beside
+    no ``.gitignore``: the first-scan gap, in one case.
     """
     from automated_security_helper.utils.directory_refusals import (
         output_dir_unmakeable,
     )
 
-    for project_output in project_outputs.values():
+    for directory in (Path(output_dir), *project_outputs.values()):
         try:
-            project_output.mkdir(parents=True, exist_ok=True)
+            directory.mkdir(parents=True, exist_ok=True)
         except OSError as error:
             raise OutputDirectoryNotUsableError(
                 output_dir_unmakeable(
-                    project_output, error.strerror or type(error).__name__
+                    directory, error.strerror or type(error).__name__
                 ),
                 context={
-                    "directory_path": str(project_output),
+                    "directory_path": str(directory),
                     "error_category": ErrorCategory.INVALID_PARAMETER.value,
                 },
             ) from None
@@ -2687,12 +2698,15 @@ async def _scan_workspace(
             )
             # Failing here closes the entries and, the thread never having
             # started, releases them (_settle) in the handler below.
-            _create_project_outputs(project_outputs)
-            # Once the output directory exists: ignore_output_dir_in_git writes
-            # nothing into a directory that is not there yet, and before the
-            # move a first workspace scan never wrote the .gitignore. A project
-            # at the workspace root would read every project's output below
-            # it; see ignore_output_dir_in_git. A link at the name raises
+            _create_project_outputs(project_outputs, settings.output_dir)
+            # Once the output directory exists (created above, on its own, so
+            # a run with no active project has it too): ignore_output_dir_in_git
+            # writes nothing into a directory that is not there yet, and before
+            # the move a first workspace scan never wrote the .gitignore. A
+            # project at the workspace root would read every project's output
+            # below it; see ignore_output_dir_in_git. A link at the name was
+            # refused before anything was registered (_project_outputs examines
+            # it with the other link checks); one made since raises
             # OutputLinkRefused, an OutputDirLinkRefused too.
             ignore_output_dir_in_git(plan.workspace_root, settings.output_dir)
             registry = get_scan_registry()

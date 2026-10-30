@@ -146,13 +146,56 @@ class TestTheGitignoreIsWrittenOnceTheOutputDirectoryExists:
         output_dir = Path(settings.output_dir)
         assert not output_dir.exists()
 
-        workspace_module._create_project_outputs(outputs)
+        workspace_module._create_project_outputs(outputs, settings.output_dir)
         wrote = workspace_module.ignore_output_dir_in_git(
             plan.workspace_root, settings.output_dir
         )
 
         assert output_dir.is_dir()
         assert wrote is False or (output_dir / ".gitignore").exists()
+
+    def test_the_output_root_is_created_when_no_project_is_active(self, tmp_path):
+        """Red at the base: the root existed only as a side effect of the project
+        folders' mkdir(parents=True), so a run with no active project (every
+        project missing under allow_missing_projects) created nothing, the writer
+        wrote nothing, and execute_workspace later wrote the unified results
+        beside no .gitignore."""
+        plan = _plan(tmp_path)
+        output_dir = Path(plan.workspace_root) / ".ash" / "ash_output"
+        assert not output_dir.exists()
+
+        workspace_module._create_project_outputs({}, output_dir)
+        wrote = workspace_module.ignore_output_dir_in_git(
+            plan.workspace_root, output_dir
+        )
+
+        assert output_dir.is_dir()
+        assert wrote is True
+        assert (output_dir / ".gitignore").exists()
+
+    def test_a_link_at_the_gitignore_name_is_refused_before_anything_is_made(
+        self, tmp_path
+    ):
+        """Control for the ordering: the link check that _project_outputs runs
+        before registration already examines the .gitignore name under an output
+        directory below the root (linked_output_component), so a refused call
+        creates no folder; nothing in this file changed that."""
+        plan = _plan(tmp_path)
+        output_dir = Path(plan.workspace_root) / ".ash" / "ash_output"
+        output_dir.mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.write_text("", encoding="utf-8")
+        try:
+            (output_dir / ".gitignore").symlink_to(elsewhere)
+        except (OSError, NotImplementedError) as e:
+            pytest.skip(f"this platform refuses to create a symlink: {e}")
+        settings = ProjectScanSettings(
+            output_dir=output_dir, phases=("scan",), max_parallel_projects=1
+        )
+
+        with pytest.raises(ValueError, match="gitignore"):
+            workspace_module._project_outputs(plan, settings)
+        assert not (output_dir / "projects").exists()
 
 
 def _registered(registry: ScanRegistry, tmp_path: Path, output: Path, name: str) -> str:
