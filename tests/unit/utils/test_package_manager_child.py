@@ -859,7 +859,14 @@ class TestLinkedDirectories:
 
         def counting_walk(top, *args, **kwargs):
             starts.append(os.path.realpath(top))
-            return real_walk(top, *args, **kwargs)
+            for root, dirs, files in real_walk(top, *args, **kwargs):
+                # The filesystem's listing order decides which of the two
+                # links is met first, and the deep-path assertion below needs
+                # ``a`` met before ``b`` at every level. Sorted in place: it is
+                # the list os.walk recurses through and the walk prunes, so
+                # both still see the one list.
+                dirs.sort()
+                yield root, dirs, files
 
         monkeypatch.setattr(os, "walk", counting_walk)
 
@@ -880,7 +887,8 @@ class TestLinkedDirectories:
             # The package's walk plus one per real directory (13), each entered
             # through the first link that reached it. Listed: the root
             # manifest, d0 under entry, and at each later level one walked
-            # manifest (through a) and one alias manifest (b's own).
+            # manifest (through a, met first by the sort above) and one alias
+            # manifest (b's own).
             assert len(starts) == depth + 2, starts
             assert len(manifests) == 1 + 1 + 2 * depth, manifests
             assert "entry/" + "a/" * depth + "package.json" in manifests
