@@ -4,6 +4,8 @@ Each test here was red before its fix:
 
 - a snippet's controls are written as escapes before it is cut, so the cap bounds
   what is drawn, and a CRLF line of exactly the cap is not marked truncated;
+- a message is prose: its cap is on the whole text, written after its escapes,
+  so a long paragraph is shown whole and a message of controls stays bounded;
 - a read excerpt's line numbers are the view's own layout, right-aligned, and do
   not count toward the cap on the source;
 - a file name recorded in its record form is read back before the file is opened;
@@ -36,8 +38,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.inspect import inspect_app
 from automated_security_helper.cli.inspect import inspect_findings_app as tui
 from automated_security_helper.cli.inspect.inspect_findings_app import (
+    MESSAGE_CHARS,
     SNIPPET_LINE_CHARS,
-    SNIPPET_LINES,
     SNIPPET_TRUNCATED,
     FindingsExplorerApp,
     extract_findings,
@@ -335,9 +337,32 @@ def _texts(widgets) -> list:
     return [getattr(widget.content, "plain", str(widget.content)) for widget in widgets]
 
 
+def test_a_message_written_as_one_paragraph_is_shown_whole():
+    """Prose wraps: a paragraph longer than a snippet line is no line to cut."""
+    paragraph = "w" * (SNIPPET_LINE_CHARS * 3)
+
+    assert tui._shown_prose(paragraph).plain == paragraph
+
+
+def test_a_message_over_the_cap_ends_truncated_after_the_cap():
+    shown = tui._shown_prose("m" * (MESSAGE_CHARS + 1)).plain
+
+    assert shown == "m" * MESSAGE_CHARS + "\n" + SNIPPET_TRUNCATED
+
+
+def test_a_messages_controls_are_escaped_before_it_is_cut():
+    """A message of control characters is drawn as escapes, four characters each;
+    cut first, the cap bounded a quarter of what was drawn."""
+    shown = tui._shown_prose("\x01" * MESSAGE_CHARS).plain
+
+    assert "\x01" not in shown
+    assert len(shown) <= MESSAGE_CHARS + 1 + len(SNIPPET_TRUNCATED)
+    assert shown.endswith(SNIPPET_TRUNCATED)
+
+
 @pytest.mark.asyncio
-async def test_the_message_is_capped_as_a_snippet_is(tmp_path):
-    message = "".join(f"line {n}\n" for n in range(1, 400))
+async def test_the_detail_view_shows_the_message_through_the_prose_cap(tmp_path):
+    message = "w" * (SNIPPET_LINE_CHARS + 100)
     app = FindingsExplorerApp(
         [_finding(message=message, file="a.py", line=1)],
         config_path=tmp_path / ASH_DEFAULT_CONFIG_FILE_NAME,
@@ -348,10 +373,7 @@ async def test_the_message_is_capped_as_a_snippet_is(tmp_path):
         await _settle(pilot)
         texts = _texts(app.screen.query(Static))
 
-    (shown,) = [text for text in texts if text.startswith("line 1\n")]
-    lines = shown.split("\n")
-    assert lines[-1] == SNIPPET_TRUNCATED
-    assert len(lines) == SNIPPET_LINES + 1
+    assert message in texts, [len(text) for text in texts]
 
 
 @pytest.mark.asyncio

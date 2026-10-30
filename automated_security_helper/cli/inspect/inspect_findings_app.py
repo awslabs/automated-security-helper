@@ -3,8 +3,8 @@
 A finding's rule id, file, message, suppression reason and code snippet come from
 the scanned repository or a scanner's output, and so does a scanner's name. None
 of it is markup or markdown here: each value reaches a widget through _shown,
-_text, _cell, _snippet or _metadata_table, as text with its terminal controls
-shown as escapes. Built into a markup string, "[@click=app.quit]" in a rule id was
+_shown_prose, _text, _cell, _snippet or _metadata_table, as text with its
+terminal controls shown as escapes. Built into a markup string, "[@click=app.quit]" in a rule id was
 an action a click ran (Textual's app actions include screenshot, which writes a
 file) and "[link=...]" a hyperlink; built into a Markdown document, a message's
 markdown link opened a browser and a "```" in a snippet ended its code fence.
@@ -92,6 +92,11 @@ from automated_security_helper.utils.ui_theme import (
 SNIPPET_LINES = 200
 SNIPPET_LINE_CHARS = 500
 SNIPPET_TRUNCATED = "(truncated)"
+
+#: The most characters of a finding's message the detail view shows: as much text
+#: as a snippet at its cap holds. A message is prose, which the view wraps, so the
+#: cap is on the whole text and not on each line (``_shown_prose``).
+MESSAGE_CHARS = SNIPPET_LINES * SNIPPET_LINE_CHARS
 
 #: What the detail view's Code section says for a finding that names a file whose
 #: lines are not shown: the results hold no snippet, and the file is not one the
@@ -470,6 +475,25 @@ def _text(value: object) -> str:
 def _shown(value: object) -> Content:
     """*value* as Textual content: text, never markup, its controls shown."""
     return Content(_text(value))
+
+
+def _shown_prose(value: object) -> Content:
+    """*value* as Textual content for a prose field, a finding's message: its
+    controls shown as escapes, then cut to MESSAGE_CHARS characters, with a
+    SNIPPET_TRUNCATED line after the cut when anything was cut.
+
+    Prose wraps, so a line of it has no cap of its own: capped as a snippet is
+    (``_capped``), a message written as one paragraph lost everything past its
+    first SNIPPET_LINE_CHARS characters while a message of short lines kept
+    SNIPPET_LINES of them. And that cut came before the escaping, so a message
+    of control characters was drawn as four times the cap, the same shape
+    ``_snippet`` escapes first for. The escapes are written here before the cut,
+    so the cap bounds what is drawn.
+    """
+    text = controls_shown(str(value))
+    if len(text) > MESSAGE_CHARS:
+        text = f"{text[:MESSAGE_CHARS]}\n{SNIPPET_TRUNCATED}"
+    return Content(text)
 
 
 def _shown_one_line(value: object) -> Content:
@@ -941,9 +965,9 @@ class FindingDetailScreen(Screen):
                 classes="title",
             )
             yield Static("What to review", classes="heading")
-            # Capped as a snippet is: a message is a scanner's text too, and a
-            # view draws every character of it on each resize (SNIPPET_LINES).
-            yield Static(_shown(_capped(str(self.finding.get("message") or ""))))
+            # Capped: a message is a scanner's text too, and a view draws every
+            # character of it on each resize (MESSAGE_CHARS).
+            yield Static(_shown_prose(self.finding.get("message") or ""))
             yield Static("Finding context", classes="heading")
             yield Static(_metadata_table(self.finding))
             if self.finding.get("suppressed"):

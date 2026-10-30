@@ -397,6 +397,7 @@ _CONTENT_KEYWORDS = {"content", "label", "message", "prompt", "renderable", "tit
 #: reads as markup.
 _TEXT_HELPERS = {
     "_shown",
+    "_shown_prose",
     "_shown_one_line",
     "_cell",
     "_snippet",
