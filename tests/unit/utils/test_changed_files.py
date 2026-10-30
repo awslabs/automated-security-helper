@@ -837,11 +837,16 @@ class TestFileUriForms:
         but ``My#Proj/a.cs`` is a name, so the whole path is read as well."""
         from automated_security_helper.utils.changed_files import _location_readings
 
+        if mark == "?" and sys.platform == "win32":
+            pytest.skip("a question mark cannot be part of a Windows file name")
         source_dir = tmp_path / "repo"
         target = source_dir / f"My{mark}Proj" / "a.cs"
         target.parent.mkdir(parents=True)
         target.write_text("x\n", encoding="utf-8")
-        uri = "file://" + str(target.resolve())
+        # Not Path.as_uri(), which percent-encodes the mark and defeats the test. The
+        # path in URI form: forward slashes, and a slash before a drive letter.
+        posix = target.resolve().as_posix()
+        uri = "file://" + ("" if posix.startswith("/") else "/") + posix
 
         readings = _location_readings(uri)
         kept = filter_results_to_changed_files(
@@ -850,8 +855,8 @@ class TestFileUriForms:
             source_dir,
         )
 
-        assert str(target.resolve()) in readings
-        assert str(target.resolve()).split(mark)[0] in readings
+        assert posix in readings
+        assert posix.split(mark)[0] in readings
         assert len(kept.sarif.runs[0].results) == 1
 
     @pytest.mark.parametrize(
