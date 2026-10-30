@@ -157,6 +157,28 @@ class TestCleanupWaitsForTheRunner:
         registry.cancel_scan.assert_called_once_with("scan-1")
         registry.cleanup_scan.assert_called_once_with("scan-1")
 
+    def test_a_cancelled_scan_whose_runner_still_stops_is_kept(
+        self, registry, tmp_path
+    ):
+        """The file's own sequence: a cancel closed the entry, the runner keeps
+        stopping, and only then is cleanup called. The wait is gated on
+        has_runner and runner_done, not on the entry being RUNNING; an
+        implementation that waited for RUNNING entries only would remove this
+        scan's output while its runner restored the previous results."""
+        entry = _entry(tmp_path, status=MCScanStatus.CANCELLED, has_runner=True)
+        output = _output_of(entry)
+        registry.get_scan.return_value = entry
+
+        with _use(registry), patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 0.05):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is False
+        assert "still stopping" in result["message"]
+        assert result["status"] == "cancelled"
+        registry.cancel_scan.assert_not_called()
+        registry.cleanup_scan.assert_not_called()
+        assert output.exists()
+
     def test_a_scan_with_no_runner_is_not_waited_for(self, registry, tmp_path):
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         registry.get_scan.return_value = entry
