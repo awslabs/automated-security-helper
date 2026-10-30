@@ -1,28 +1,45 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A source line read for a finding is masked before it is cut to the snippet cap.
+"""A source line read for a finding is masked before it is cut to the snippet cap,
+and a line too long to be read whole is not shown at all.
 
 The lines were cut to SNIPPET_LINE_CHARS + 1 characters as they were read, and
 masked afterwards: a secret value that started inside the cap and ended past it
 was no longer whole in the text the masker saw, so it was not matched and its head
 was shown. The cut now follows the masking, and the shown line is still capped.
+
+The same shape one level down: only the first _LINE_HEAD_BYTES bytes of a line are
+kept while reading, so a value that started inside the shown part and ended past
+that head (a one-line private key of some 1,500 ASCII characters; after multibyte
+text a 40-character token) still reached the masker cut and its start was shown.
+A line longer than its head is now shown as SOURCE_LINE_NOT_SHOWN.
 """
 
+import io
 from unittest.mock import MagicMock
 
 import pytest
 
 from automated_security_helper.cli.inspect.inspect_findings_app import (
     SNIPPET_LINE_CHARS,
+    SOURCE_LINE_NOT_SHOWN,
     FindingsExplorerApp,
     _cut_excerpt_lines,
     _line_text,
+    _read_lines,
 )
 
 pytestmark = pytest.mark.unit
 
 _TOKEN = "hunter2-" * 5
+#: A placeholder value long enough to end past the line head: the head holds
+#: (SNIPPET_LINE_CHARS + 1) * 4 bytes, so an ASCII value starting at the cap and
+#: this long reaches the masker cut.
+_LONG_TOKEN = "hunter2-" * 200
+#: A four-byte character: 495 of them take 1,980 of the head's 2,004 bytes, so a
+#: 40-character token after them is cut 24 characters in.
+_WIDE = "\U0001f512"
 
 
 def test_a_line_is_not_cut_as_it_is_read():
@@ -62,3 +79,77 @@ def test_a_value_straddling_the_cap_is_masked_whole(tmp_path):
     (line, rest) = snippet.split("\n")
     assert rest == ""
     assert len(line) <= len("→ 1: ") + SNIPPET_LINE_CHARS + 1, len(line)
+
+
+def _shown_lines(tmp_path, source_text: str, masked: str) -> str:
+    """The snippet the detail view builds for line 1 of a file holding
+    *source_text*, with *masked* replaced by *** when the masker sees it whole."""
+    source = tmp_path / "settings.py"
+    source.write_text(source_text, encoding="utf-8")
+    finding = {"rule_id": "S105", "file": "settings.py", "line": 1}
+    app = FindingsExplorerApp(
+        [finding],
+        mask_source=lambda uri, first, text: text.replace(masked, "***"),
+        scan_root=tmp_path,
+    )
+    app.push_screen = MagicMock()
+
+    app._show_detail(finding)
+
+    return finding["code_snippet"]
+
+
+class TestALineLongerThanItsHeadIsNotShown:
+    def test_an_ascii_value_ending_past_the_head(self, tmp_path):
+        # The value starts six characters before the cap, inside the shown part,
+        # and ends past the head, so the masker never saw it whole.
+        snippet = _shown_lines(
+            tmp_path,
+            "a" * (SNIPPET_LINE_CHARS - 5) + _LONG_TOKEN + "\nnext\n",
+            _LONG_TOKEN,
+        )
+
+        first, second, rest = snippet.split("\n")
+        assert first == f"→ 1: {SOURCE_LINE_NOT_SHOWN}", first
+        assert _LONG_TOKEN[:6] not in snippet, snippet
+        assert second == "  2: next"
+        assert rest == ""
+
+    def test_a_short_value_after_multibyte_text(self, tmp_path):
+        # 495 four-byte characters fill 1,980 of the head's 2,004 bytes; the
+        # 40-character token after them was cut 24 characters in, and its first
+        # six characters were shown.
+        snippet = _shown_lines(tmp_path, _WIDE * 495 + _TOKEN + "\n", _TOKEN)
+
+        line, rest = snippet.split("\n")
+        assert line == f"→ 1: {SOURCE_LINE_NOT_SHOWN}", line
+        assert _TOKEN[:6] not in snippet, snippet
+        assert rest == ""
+
+    def test_a_line_that_fits_its_head_is_shown_and_masked(self, tmp_path):
+        # 1,900 + 40 bytes fit the head: the line is masked whole, then cut to the
+        # cap, so its head is shown and nothing of the value is.
+        snippet = _shown_lines(tmp_path, "a" * 1900 + _TOKEN + "\n", _TOKEN)
+
+        line, rest = snippet.split("\n")
+        assert line == "→ 1: " + "a" * (SNIPPET_LINE_CHARS + 1), line
+        assert _TOKEN[:6] not in snippet, snippet
+        assert SOURCE_LINE_NOT_SHOWN not in snippet, snippet
+
+
+class TestReadLinesMarksTheLinesItCouldNotKeepWhole:
+    def test_a_long_line_among_short_ones(self):
+        handle = io.BytesIO(b"short\n" + b"x" * 5000 + b"\nafter\n")
+
+        assert _read_lines(handle, 1, 3) == ["short", SOURCE_LINE_NOT_SHOWN, "after"]
+
+    def test_a_line_of_exactly_the_head_is_kept(self):
+        head = b"y" * ((SNIPPET_LINE_CHARS + 1) * 4)
+        handle = io.BytesIO(head + b"\n")
+
+        assert _read_lines(handle, 1, 1) == [head.decode()]
+
+    def test_the_last_line_at_the_files_end_is_kept(self):
+        handle = io.BytesIO(b"one\ntwo")
+
+        assert _read_lines(handle, 1, 2) == ["one", "two"]

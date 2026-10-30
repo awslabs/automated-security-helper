@@ -104,8 +104,16 @@ SOURCE_READ_LIMIT = 64 * 1024 * 1024
 _CONTEXT_LINES = 5
 
 #: The bytes of each line kept while reading: enough for SNIPPET_LINE_CHARS + 1
-#: characters of UTF-8, so a line cut here still reads as longer than the cap.
+#: characters of UTF-8. A line longer than this is not shown at all
+#: (SOURCE_LINE_NOT_SHOWN): its head alone would reach the masker without the
+#: rest, so a value that started inside the shown part and ended past the head
+#: was not matched, and its start was shown. Nothing the masker could not check
+#: whole is shown.
 _LINE_HEAD_BYTES = (SNIPPET_LINE_CHARS + 1) * 4
+
+#: What an excerpt shows in place of a line longer than _LINE_HEAD_BYTES, or one
+#: the read limit ended inside. Not the head of the line: see _LINE_HEAD_BYTES.
+SOURCE_LINE_NOT_SHOWN = "(line too long to show)"
 
 #: The most bytes asked of the file at a time.
 _READ_CHUNK = 64 * 1024
@@ -133,7 +141,8 @@ def _line_text(head: bytes) -> str:
     to SNIPPET_LINE_CHARS + 1 characters after (``_cut_excerpt_lines``). Cut before
     the masking, a secret value or shape that started inside the cap and ended past
     it was no longer whole, so the masker did not match it and its head was shown.
-    The head is at most _LINE_HEAD_BYTES bytes, so the text here is bounded too.
+    The head is at most _LINE_HEAD_BYTES bytes, and a line that did not fit in it
+    is replaced by SOURCE_LINE_NOT_SHOWN (``_read_lines``) for the same reason.
     """
     text = head.decode("utf-8", errors="replace")
     return text.removesuffix("\n").removesuffix("\r")
@@ -215,8 +224,13 @@ def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
     At most SOURCE_READ_LIMIT bytes are read, the lines before *first* only counted
     (_offset_of_line), and only the head of each wanted line is kept, so a line
     that never ends (minified code, a sparse file) costs that many bytes of reading
-    and no more memory than its head. Fewer lines when the file, or the limit, ends
-    first. *handle* is a regular file, so it can seek back to where *first* starts.
+    and no more memory than its head. A line longer than its head, or one the limit
+    ended inside, is replaced by SOURCE_LINE_NOT_SHOWN: shown as its head alone, a
+    value that started in the shown part and ended past the head reached the masker
+    cut, was not matched, and its start was shown (an ASCII value of about 1,500
+    characters, such as a one-line private key; after multibyte text a far shorter
+    one). Fewer lines when the file, or the limit, ends first. *handle* is a regular
+    file, so it can seek back to where *first* starts.
     """
     start = _offset_of_line(handle, first, SOURCE_READ_LIMIT)
     if start is None:
@@ -226,6 +240,15 @@ def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
     budget = SOURCE_READ_LIMIT - start
     number = first
     head = bytearray()
+    overflowed = False
+
+    def keep(segment: bytes) -> None:
+        nonlocal overflowed
+        room = _LINE_HEAD_BYTES - len(head)
+        if len(segment) > room:
+            overflowed = True
+        head.extend(segment[:room])
+
     while number <= last and budget > 0:
         # Read in chunks and split at every line end (_LINE_END), not readline:
         # readline ends a line at "\n" alone, so a lone "\r" stayed inside a
@@ -237,20 +260,26 @@ def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
         budget -= len(chunk)
         position = 0
         for match in _LINE_END.finditer(chunk):
-            if len(head) < _LINE_HEAD_BYTES:
-                head += chunk[position : match.start()][: _LINE_HEAD_BYTES - len(head)]
-            kept.append(_line_text(bytes(head)))
+            keep(chunk[position : match.start()])
+            kept.append(
+                SOURCE_LINE_NOT_SHOWN if overflowed else _line_text(bytes(head))
+            )
             head.clear()
+            overflowed = False
             number += 1
             position = match.end()
             if number > last:
                 break
         else:
-            if len(head) < _LINE_HEAD_BYTES:
-                head += chunk[position:][: _LINE_HEAD_BYTES - len(head)]
+            keep(chunk[position:])
     if head and number <= last:
-        # The last line read: the file or the limit ended inside it.
-        kept.append(_line_text(bytes(head)))
+        # The last line read: the file or the limit ended inside it. Past the limit
+        # the line goes on unread, so it is not shown either; at the file's end it
+        # is whole.
+        if overflowed or (budget <= 0 and handle.read(1)):
+            kept.append(SOURCE_LINE_NOT_SHOWN)
+        else:
+            kept.append(_line_text(bytes(head)))
     return kept
 
 
