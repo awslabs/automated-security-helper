@@ -235,9 +235,11 @@ def _query_value(scope: Scope, name: str) -> Optional[str]:
 
 
 #: How long a session workspace may go unused before the sweep removes it, by
-#: default. Long enough that no live session loses its tree: a stateful session
-#: the SDK keeps is idle for at most 30 minutes, and every request naming a
-#: session refreshes its workspace.
+#: default. It bounds the sessions whose end this app cannot see: the sweep keeps
+#: every session the app still holds as issued whatever its age, so an open sse
+#: stream or a stateful session the SDK has not ended never loses its tree to a
+#: TTL shorter than its idle time, and every request naming a session refreshes
+#: its workspace.
 DEFAULT_SESSION_WORKSPACE_TTL_SECONDS = 24 * 60 * 60
 
 #: How often, at most, the sweep runs after the first request.
@@ -292,23 +294,26 @@ class SessionBoundary:
         RuntimeError: building a stateful boundary without ``handshake_versions``,
             if the SDK's list of handshake protocol versions cannot be imported.
 
-    Raises:
-        RuntimeError: building a stateful boundary, if the SDK's list of
-            handshake protocol versions cannot be imported.
-
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
-    session's ``DELETE``, answered 2xx only after the removal succeeded (when it
-    fails the answer is a 500 and the session stays issued, so the client can send
-    the ``DELETE`` again; a removal that waits for a running scan counts as
-    succeeded, because it completes when that scan returns); the SDK
-    answering 404 on its endpoint for a stateful session it discarded (a 404
-    for any other path is Starlette's, for a path with no route); an sse event stream
-    finishing; and every session this app issued when it shuts down. Sessions
-    whose end it cannot see -- every stateless one, and a stateful one the SDK
-    closed for being idle that no client asks about again -- are removed by the
-    TTL sweep, which runs before the first request is answered and then at most
-    every five minutes.
+    session's ``DELETE``, answered 2xx only after the removal succeeded (when the
+    removal raises, the answer is a 500 and the session stays issued, so the
+    client can send the ``DELETE`` again; a removal that waits for a running
+    scan, a change or a write of the session counts as succeeded, because it
+    completes when that holder returns, and so does one that leaves the tree for
+    the TTL sweep because the scan presence lock was refused); the SDK answering
+    404 on its endpoint for a stateful session it discarded (a 404 for any other
+    path is Starlette's, for a path with no route); an sse event stream
+    finishing; and every session this app still holds when it is asked to shut
+    down, ended at the shutdown request, before the app's own lifespan exit,
+    which can end the process, and again before shutdown is reported complete
+    for a removal that failed. Sessions whose end it cannot see -- every
+    stateless one -- are removed by the TTL sweep, which runs before the first
+    request is answered and then at most every five minutes, and which keeps
+    every session this app still holds as issued. A stateful session the SDK
+    closed for being idle that no client asks about again is such a session:
+    nothing tells this app it ended, so its id stays issued and its workspace is
+    kept from the sweep until the app shuts down.
     """
 
     def __init__(
@@ -448,7 +453,11 @@ class SessionBoundary:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         kind = scope.get("type")
         if kind == "lifespan":
-            await self.app(scope, receive, self._end_all_on_shutdown(send))
+            await self.app(
+                scope,
+                self._end_all_at_shutdown_request(receive),
+                self._end_all_on_shutdown(send),
+            )
             return
         if kind != "http":
             await self.app(scope, receive, send)
@@ -481,13 +490,45 @@ class SessionBoundary:
             return
         await self.app(scope, receive, send)
 
+    async def _end_all(self) -> None:
+        """End every session this app still holds as issued."""
+
+        for session_id in sorted(self._issued):
+            await self._end(session_id)
+
+    def _end_all_at_shutdown_request(self, receive: Receive) -> Receive:
+        """End the issued sessions as soon as the app is asked to shut down.
+
+        At the ``lifespan.shutdown`` message, before it reaches the app: the
+        app's own lifespan exit runs next, and it can end the process without
+        coming back (a signal ended the server while a scan was still running;
+        see ``cli/mcp/__init__._exit_if_a_signal_stopped_the_server``), so a
+        boundary that waited for ``lifespan.shutdown.complete`` ended nothing
+        then. The server has closed its connections by the time it asks for the
+        shutdown, so no request of these sessions is in flight. A session a
+        running scan or write still holds is deferred as on its ``DELETE``, and
+        completed when the holder returns (``sessions.finish_ended_session``),
+        which the app's cancellation of its scans brings about.
+        """
+
+        async def watched() -> Message:
+            message = await receive()
+            if message.get("type") == "lifespan.shutdown":
+                await self._end_all()
+            return message
+
+        return watched
+
     def _end_all_on_shutdown(self, send: Send) -> Send:
-        """End every session this app issued before reporting shutdown complete."""
+        """End what is still issued before reporting shutdown complete.
+
+        The second pass: a session whose removal failed at the shutdown request
+        stays issued and is tried once more here.
+        """
 
         async def watched(message: Message) -> None:
             if message.get("type") in _LIFESPAN_SHUTDOWN_DONE:
-                for session_id in sorted(self._issued):
-                    await self._end(session_id)
+                await self._end_all()
             await send(message)
 
         return watched
@@ -551,19 +592,29 @@ class SessionBoundary:
     async def _serve_event_stream(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        """Serve one sse stream; the session it carries ends when it finishes."""
+        """Serve one sse stream; the session it carries ends when it finishes.
 
-        opened: Dict[str, str] = {}
+        The session is read from the endpoint event, the first event the SDK
+        writes on the stream, and from nothing else: the first body chunk that
+        carries an event field decides it, with or without a ``session_id`` (a
+        ping before it is a comment line with no field, and is passed over).
+        Reading every later chunk would adopt an id a relayed message happens to
+        contain, such as a URL in a tool result, as a session this app issued.
+        """
+
+        opened: Dict[str, Optional[str]] = {}
 
         async def watched(message: Message) -> None:
             if "session" not in opened and message.get("type") == "http.response.body":
-                found = _ENDPOINT_SESSION.search(message.get("body") or b"")
-                session = _canonical_sse_session(
-                    found.group(1).decode("ascii") if found else None
-                )
-                if session:
+                body = message.get("body") or b""
+                if b"data:" in body:
+                    found = _ENDPOINT_SESSION.search(body)
+                    session = _canonical_sse_session(
+                        found.group(1).decode("ascii") if found else None
+                    )
                     opened["session"] = session
-                    self._issued.add(session)
+                    if session:
+                        self._issued.add(session)
             await send(message)
 
         try:
