@@ -37,15 +37,46 @@ def test_a_second_interrupt_still_raises_keyboard_interrupt_when_kill_is_refused
     process.wait.assert_not_called()
 
 
-def test_an_outlived_grace_returns_quietly_when_kill_is_refused():
+def test_an_outlived_grace_returns_false_when_kill_is_refused():
+    """The caller learns that the child may still run, and can say so in its
+    cancel, as the cancellable runner does for a stop the kernel refused."""
     process = _child_the_kernel_will_not_kill()
     timed_out = subprocess.TimeoutExpired(["tool"], 0.01)
     with patch.object(subprocess_utils, "_wait_out", side_effect=timed_out):
-        subprocess_utils.stop_after_interrupt(
+        stopped = subprocess_utils.stop_after_interrupt(
             process, grace=0.01, child_got_the_interrupt=True
         )
+    assert stopped is False
     process.kill.assert_called_once()
     process.wait.assert_not_called()
+
+
+def test_an_outlived_grace_whose_kill_is_accepted_returns_true():
+    process = MagicMock(spec=subprocess.Popen)
+    process.pid = 4242
+    process.returncode = None
+    timed_out = subprocess.TimeoutExpired(["tool"], 0.01)
+    with (
+        patch.object(subprocess_utils, "_wait_out", side_effect=timed_out),
+        patch.object(subprocess_utils, "discard_tool_pid_before_reap"),
+    ):
+        stopped = subprocess_utils.stop_after_interrupt(
+            process, grace=0.01, child_got_the_interrupt=True
+        )
+    assert stopped is True
+    process.kill.assert_called_once()
+
+
+def test_a_child_that_stops_within_the_grace_returns_true():
+    process = MagicMock(spec=subprocess.Popen)
+    process.pid = 4242
+    process.returncode = 0
+    with patch.object(subprocess_utils, "_wait_out", return_value=None):
+        stopped = subprocess_utils.stop_after_interrupt(
+            process, grace=0.01, child_got_the_interrupt=True
+        )
+    assert stopped is True
+    process.kill.assert_not_called()
 
 
 def test_a_kill_the_kernel_accepts_is_still_followed_by_the_reap():

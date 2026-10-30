@@ -1652,7 +1652,7 @@ def stop_after_interrupt(
     grace: float = INTERRUPT_GRACE_SECONDS,
     *,
     child_got_the_interrupt: Optional[bool] = None,
-) -> None:
+) -> bool:
     """Pass the operator's interrupt on to *process* and give it *grace* to stop.
 
     For a child that stops cleanly on Ctrl-C itself: a container runtime, which
@@ -1665,6 +1665,13 @@ def stop_after_interrupt(
     the grace is killed, and so is one when the operator presses Ctrl-C again while
     waiting: on Windows within one slice of the wait. The caller re-raises the
     interrupt.
+
+    Returns whether the child is stopped as far as this process can tell: True
+    when it exited within the grace, or outlived it and the kill was accepted;
+    False when the kill was refused (EPERM, a setuid program the tool became), so
+    the child may still run and a caller raising a cancel can say so, as
+    _run_cancellable's cancel does. A second Ctrl-C while waiting raises its
+    KeyboardInterrupt instead of returning; a kill refused there is logged.
 
     ``child_got_the_interrupt`` says whether the child already has the operator's
     interrupt. The default, None, asks the terminal, which is right for a
@@ -1708,9 +1715,11 @@ def stop_after_interrupt(
         raise
     except Exception:
         discard_tool_pid_once_exited(process)
-        if _kill_unless_refused(process):
-            discard_tool_pid_before_reap(process)
-            _wait_after_kill(process)
+        if not _kill_unless_refused(process):
+            return False
+        discard_tool_pid_before_reap(process)
+        _wait_after_kill(process)
+    return True
 
 
 def _kill_unless_refused(process: "subprocess.Popen[Any]") -> bool:
@@ -1719,8 +1728,11 @@ def _kill_unless_refused(process: "subprocess.Popen[Any]") -> bool:
     ``kill`` raises PermissionError on a child this process may not signal,
     such as a setuid program the tool became. Raised from a stop arm it
     replaced the KeyboardInterrupt or the cancel the caller re-raises with an
-    OSError, and a child the kernel would not kill is not waited for either:
-    it stays recorded for kill_running_groups, as a refused group stop does.
+    OSError, and a child the kernel would not kill is not waited for either.
+    The callers of stop_after_interrupt record their child by pid
+    (record_tool_pid), and the discard that follows a kill runs only on an
+    accepted one, so a refused kill leaves that pid recorded for the SIGTERM
+    handler's die-now kill, which tries it again.
     """
     try:
         process.kill()
