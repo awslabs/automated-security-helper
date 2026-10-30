@@ -177,12 +177,29 @@ def test_a_number_field_with_a_default_admits_a_reference(results_schema):
     assert not validator.is_valid({"install_timeout": "ten minutes"})
 
 
-def test_the_shape_keeping_serializers_are_exactly_the_models_any_typed_ones():
+#: Serializers anywhere in the results tree that are declared ``-> Any`` (or
+#: untyped) AND reshape their field, so they must NOT be in
+#: SHAPE_KEEPING_SERIALIZERS and are described as "anything" on purpose. None
+#: today; a serializer added later lands in one list or the other, never in
+#: neither, or the test below fails.
+RESHAPING_ANY_TYPED_SERIALIZERS: frozenset[str] = frozenset()
+
+#: Serializers in SHAPE_KEEPING_SERIALIZERS whose return type is not Any: listed
+#: because the return type hides what the dump writes (the enum behind the
+#: names), not because it says nothing.
+TYPED_SHAPE_KEEPING_SERIALIZERS = frozenset({"AshConfig._output_format_values"})
+
+
+def test_every_any_typed_serializer_in_the_results_tree_is_classified():
     """The generator describes a field by its own schema only for the serializers
-    named in SHAPE_KEEPING_SERIALIZERS. A serializer added to the results model
-    with no return type, or ``Any``, must be listed there when it keeps the
-    field's shape, or the field reads as "anything"; a reshaping one must not be.
-    This test fails on either omission so the choice is made on purpose."""
+    named in SHAPE_KEEPING_SERIALIZERS. A serializer with no return type, or
+    ``Any``, on ANY model the results file holds (AshConfig, WorkspaceResults, a
+    scanner's options, a base class whose qualname differs from the model's)
+    must be listed there when it keeps the field's shape, or that part of the
+    schema reads as "anything"; one that reshapes its field is listed in
+    RESHAPING_ANY_TYPED_SERIALIZERS instead. Every such serializer met during
+    the whole generation is classified on purpose, and every listed name was met,
+    so the lists cannot fall out of date."""
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.schemas.generate_schemas import (
         SHAPE_KEEPING_SERIALIZERS,
@@ -191,27 +208,30 @@ def test_the_shape_keeping_serializers_are_exactly_the_models_any_typed_ones():
     )
 
     any_typed: set[str] = set()
+    seen: set[str] = set()
 
     class Recording(StoredResultsJsonSchema):
         def ser_schema(self, schema):
             if schema.get("type") in ("function-plain", "function-wrap"):
                 name = _serializer_name(schema)
+                seen.add(name)
                 return_schema = schema.get("return_schema")
-                if name.startswith("AshAggregatedResults.") and (
-                    return_schema is None or return_schema.get("type") == "any"
-                ):
+                if return_schema is None or return_schema.get("type") == "any":
                     any_typed.add(name)
             return super().ser_schema(schema)
 
     AshAggregatedResults.model_json_schema(
         schema_generator=Recording, mode="serialization"
     )
-    # AshConfig._output_format_values is typed List[str] and listed for another
-    # reason (its return type hides the enum); every Any-typed serializer of the
-    # results model is listed, and nothing Any-typed is missing from the list.
-    assert any_typed == set(SHAPE_KEEPING_SERIALIZERS) - {
-        "AshConfig._output_format_values"
-    }
+    assert any_typed, "no serializer was met: the recorder read nothing"
+    unclassified = (
+        any_typed - set(SHAPE_KEEPING_SERIALIZERS) - RESHAPING_ANY_TYPED_SERIALIZERS
+    )
+    assert unclassified == set(), unclassified
+    assert set(SHAPE_KEEPING_SERIALIZERS) & RESHAPING_ANY_TYPED_SERIALIZERS == set()
+    stale = set(SHAPE_KEEPING_SERIALIZERS) - seen
+    assert stale == set(), stale
+    assert set(SHAPE_KEEPING_SERIALIZERS) - any_typed == TYPED_SHAPE_KEEPING_SERIALIZERS
 
 
 def _the_schema_admits(text: str) -> bool:
