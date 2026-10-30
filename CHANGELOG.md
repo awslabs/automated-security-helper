@@ -7997,6 +7997,28 @@
   records carry the label `ash_row_type:degraded_finding`. A reader that takes
   `vulnerabilities[0]` from every record skips the shortfall record by its label.
 
+- **The GitLab SAST report's `scan.status` reads `failure` whenever the scan was
+  incomplete, and `scan.messages` says why.** The status used to read `success`
+  unless a scanner had failed outright, so a scan that lost a converter, could
+  not evaluate a rule, ran against a content database past its age bound or
+  skipped a workspace project was uploaded as a complete, successful scan. The
+  status now follows the same incompleteness facts the exit code reads, and each
+  fact adds one `warn` message naming the scanner, converter, rule, database or
+  project and what is absent from the report because of it. Two findings of one
+  rule at one line that the flattening could not pair, which shared one `id` and
+  one ASH finding-id identifier so GitLab kept one of them, now carry distinct
+  ids: the first keeps the id it always had, the second is numbered.
+
+- **The GitLab SAST and OCSF reports read a result's rule and message as the
+  SARIF schema allows.** A result that names its rule as `rule.id` instead of
+  `ruleId` had no `name`, an empty rule-id detail and no rule identifier in the
+  GitLab report (OCSF already read it); it now reads as a rule named either way.
+  A message of whitespace alone was written as the description; it is now read
+  as absent, so the GitLab description is empty and the OCSF title and
+  description read "No description", as for a message with no text. Both
+  reports take these readings, and the kinds that state no finding, from one
+  shared definition, so they cannot drift apart again.
+
 - **The GitHub GHAS report leaves out results that state no failing finding, and
   names its category only when asked.** A result whose SARIF `kind` is `pass`,
   `open`, `review`, `notApplicable` or `informational` (a cdk-nag rule that was
