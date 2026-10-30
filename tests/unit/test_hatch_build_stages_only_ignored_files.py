@@ -83,11 +83,16 @@ def _staged_by_the_hook(monkeypatch, tree: Path) -> tuple[set[str], object]:
     before = _files(tree)
     build_data: dict = {"force_include": {}}
     object.__new__(hook.CustomBuildHook).initialize("standard", build_data)
-    # The control: the staging finished (it records "build-error" when it
-    # raises), and the guide was included.
+    staged = _files(tree) - before
+    # The control: the staging finished, and the guide was included. An error
+    # while staging the Dockerfile is caught and the build goes on, so the commit
+    # record no longer shows it; the generated Dockerfile does. The record is
+    # still checked, since "build-error" there means the commit step failed.
+    generated = hook.ASH_ASSETS_PATH.joinpath("Dockerfile")
+    assert generated.relative_to(hook.ASH_REPO_ROOT).as_posix() in staged, staged
     assert hook.ASH_INSTALLED_REVISION_PATH.read_text() != "build-error"
     assert build_data["force_include"], build_data
-    return _files(tree) - before, hook
+    return staged, hook
 
 
 def _ignored(paths: set[str], tree: Path) -> dict[str, bool]:
