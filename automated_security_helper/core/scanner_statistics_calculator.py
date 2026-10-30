@@ -1794,11 +1794,16 @@ class ScannerStatisticsCalculator:
             total_findings += stats["total"]
             total_actionable += stats["actionable"]
 
-            # The order get_scanner_status and unified_metrics decide a status
-            # in: a scanner that produced no usable results is counted as an
+            # The same order as the first five branches of unified_metrics:
+            # a scanner that produced no usable results is counted as an
             # error ahead of anything else, findings outrank the did-not-run
             # statuses, and a tracking scanner that attempted nothing is
-            # skipped, not passed. Read with .get: a stats row from an older
+            # skipped, not passed. Two things unified_metrics reads that this
+            # count does not: the per-target attempted/failed counters (an
+            # unusable one grades the row ERROR there) and the recorded row's
+            # own status (a recorded SKIPPED stays SKIPPED there), so such a
+            # scanner is counted as passed here and shown as ERROR or SKIPPED
+            # in the metrics table. Read with .get: a stats row from an older
             # writer may carry neither flag, and absence is "no claim".
             if stats.get("error", False):
                 error_count += 1

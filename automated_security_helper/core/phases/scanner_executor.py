@@ -826,8 +826,6 @@ class ScannerExecutor:
 
     def _process_each(
         self,
-        scanner_name: str,
-        scanner_plugin: Any,
         results_list: List[ScanResultsContainer],
         aggregated_results: AshAggregatedResults,
     ) -> AshAggregatedResults:
@@ -2252,7 +2250,7 @@ class ScannerExecutor:
                     )
                 else:
                     aggregated_results = self._process_each(
-                        scanner_name, scanner_plugin, results_list, aggregated_results
+                        results_list, aggregated_results
                     )
 
                     # A scanner with no row at all did not complete a scan: every
@@ -2547,7 +2545,7 @@ class ScannerExecutor:
                                 None,
                             )
                         aggregated_results = self._process_each(
-                            scanner_name, plugin_inst, results_list, aggregated_results
+                            results_list, aggregated_results
                         )
 
                         # As in run_sequential: no row at all is not a completed
