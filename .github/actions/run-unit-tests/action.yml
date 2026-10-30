@@ -201,7 +201,8 @@ runs:
     # exit status is left alone. The e2e legs stay in warn mode until the hosted run
     # shows every e2e leg executing a real test with the scanners installed, and then the
     # expression below is replaced by 1. A leg whose every skip is a skipif condition
-    # that held is admitted in both modes.
+    # that held is admitted in both modes: under 1 with a notice annotation, and in warn
+    # mode with a warning annotation, because an admitted leg executed no test either.
     #
     # --junit-xml names test-results/pytest.junit.xml; the report step's glob matches it.
     #
@@ -225,9 +226,10 @@ runs:
         ASH_TEST_SHARD: ${{ inputs.shard }}
         # 1 on the unit and integration legs, warn on the e2e legs until the hosted run
         # shows each of them executing a real test; see the comment block above. The
-        # warn mode is temporary: the run page's warning annotation on an e2e leg shows
-        # that the leg still executed no test, and when a run shows that warning on no
-        # e2e leg, the expression becomes 1.
+        # warn mode is temporary. The expression becomes 1 when a run shows neither
+        # a "tier run executed no test" warning nor a "tier run admitted on skipif
+        # skips" warning on any e2e leg: either title on the run page means that leg
+        # still executed no test.
         ASH_TEST_TIER_FLOOR: ${{ inputs.marker == 'e2e' && 'warn' || '1' }}
         MARKER: ${{ inputs.marker }}
       run: |

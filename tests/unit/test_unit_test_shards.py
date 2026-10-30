@@ -1038,6 +1038,7 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         "condition that held: 2 skipped (2 x 'not supported on this runner')"
     )
     NOTICE = f"::notice title=tier run admitted on skipif skips::{ADMITTED}"
+    ADMITTED_WARNING = f"::warning title=tier run admitted on skipif skips::{ADMITTED}"
 
     def test_a_leg_whose_every_test_is_a_skipif_that_held_is_admitted(self, tmp_path):
         self._plant(tmp_path, skipif=2)
@@ -1049,6 +1050,17 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         )
         assert "executed no test: " not in done.stdout, done.stdout
         assert "::error" not in done.stdout and "::warning" not in done.stdout
+
+    def test_the_same_leg_in_warn_mode_is_admitted_with_a_warning(self, tmp_path):
+        """Warn mode: the admitted line, then a warning annotation and no notice."""
+        self._plant(tmp_path, skipif=2)
+        done = self._run(tmp_path, floor="warn", gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert self.ADMITTED in done.stdout, done.stdout
+        assert self.ADMITTED_WARNING in done.stdout.splitlines(), (
+            "the warning starts its own line, which is where GitHub reads it"
+        )
+        assert "::notice" not in done.stdout and "::error" not in done.stdout
 
     def test_the_same_leg_is_admitted_under_xdist(self, tmp_path):
         """The keywords and the skip's place cross the worker boundary in the reports."""
@@ -1394,7 +1406,10 @@ class TestATierRunThatExecutedNoTestFails:
         assert not any(line.startswith("::") for line in written), written
 
     def test_an_admitted_leg_prints_a_notice_with_the_admitted_line(self):
-        """An admitted leg is visible on the run page, as a notice and never an error."""
+        """In ``1`` mode (the default of ``_session``) an admitted leg shows as a notice.
+
+        It is never an error; warn mode writes a warning for it instead.
+        """
         written: list[str] = []
         session = self._session(written)
         assert not sharding.fail_a_tier_run_that_executed_no_test(
@@ -1895,18 +1910,29 @@ class TestATierRunThatExecutedNoTestFails:
         assert not sharding.fail_a_tier_run_that_executed_no_test(session, 1, 2)
         assert session.exitstatus == pytest.ExitCode.OK and not written
 
-    def test_warn_mode_still_admits_a_skipif_leg_without_a_warning(self):
-        """The admitted leg prints its line and a notice, and no warning annotation."""
+    def test_warn_mode_marks_an_admitted_skipif_leg_with_a_warning(self):
+        """An admitted leg executed no test, so warn mode reports it as a warning.
+
+        The run page then shows every e2e leg that still ran nothing, admitted or
+        not, and one annotation is written per leg: the warning replaces the notice
+        that ``1`` mode writes (the test above this one runs in ``1`` mode).
+        """
         written: list[str] = []
         session = self._session(written, warn=True)
         assert not sharding.fail_a_tier_run_that_executed_no_test(
             session, 0, 3, {"not supported on this runner": 3}
         )
         assert session.exitstatus == pytest.ExitCode.OK
-        assert len(written) == 2, written
-        assert written[0].startswith("tier run executed no test;")
-        assert written[1].startswith(f"::notice title={sharding.ADMITTED_TITLE}::")
-        assert not any(line.startswith("::warning") for line in written), written
+        admitted = (
+            "tier run executed no test; admitted, because every skip is a skipif "
+            "condition that held: 3 skipped (3 x 'not supported on this runner')"
+        )
+        assert written == [
+            admitted,
+            f"::warning title={sharding.ADMITTED_TITLE}::{admitted}",
+        ], written
+        assert not any(line.startswith("::error") for line in written), written
+        assert not any(line.startswith("::notice") for line in written), written
 
     def test_a_worker_leaves_the_exit_status_to_the_controller(self):
         written: list[str] = []

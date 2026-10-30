@@ -113,8 +113,9 @@ condition is a missing tool (``skipif(shutil.which("x") is None)``) is admitted 
 any other, because it is declared, where a ``pytest.skip`` found at run time is not.
 That last case is the floor's main one on an integration leg, which has no leg
 assertion for its tools. Two things answer it: the admitted line is also written as a
-``::notice`` annotation titled "tier run admitted on skipif skips", so an admitted leg
-shows on the run page and is not silently green; and the fuller shape, not taken here,
+``::notice`` annotation titled "tier run admitted on skipif skips" (a ``::warning`` with
+that title in warn mode, see below), so an admitted leg shows on the run page and is not
+silently green; and the fuller shape, not taken here,
 is an allowlist of admitted reasons or a dedicated marker for "does not apply on this
 runner", which would change every test module that declares such a ``skipif``.
 
@@ -132,7 +133,11 @@ assertions back from each xdist worker through ``workeroutput`` and uses
 same line is printed with a warning prefix, followed by a GitHub warning annotation
 (``::warning title=tier run executed no test::<the line>``), and the exit status is left
 alone. The annotation puts the report on the workflow run's page, so a reader can see
-whether any e2e leg still executed no test without opening each step log. The e2e legs
+whether any e2e leg still executed no test without opening each step log. A leg admitted
+on its ``skipif`` skips also executed no test, so in warn mode its admitted line is
+followed by ``::warning title=tier run admitted on skipif skips::<the line>`` and not by
+the notice that ``1`` mode writes: one annotation per leg, and leaving warn mode is one
+search of the run page for either of the two warning titles. The e2e legs
 run in warn mode until a hosted run shows every one of them executing a real test with
 its scanners installed. An empty value leaves the floor off, and so do ``0``, ``false``
 and ``off`` in any letter case with blanks around them, which are the ways a developer
@@ -464,8 +469,11 @@ def fail_a_tier_run_that_executed_no_test(
     how many tests were skipped for it. When they account for every skip, the leg is
     admitted: it stays ``OK``, one line names the reasons and their counts and is
     followed by a GitHub notice annotation (``::notice title=...::<the line>``) so that
-    an admitted leg is visible on the run page, and this returns False. A gate skip, a
-    ``pytest.skip`` or a ``skip`` mark among the skips keeps the failure.
+    an admitted leg is visible on the run page, and this returns False. In warn mode the
+    annotation is a ``::warning`` with the same title and text instead, because an
+    admitted leg executed no test either and the warn mode is only left when no leg
+    reports one. A gate skip, a ``pytest.skip`` or a ``skip`` mark among the skips keeps
+    the failure.
 
     Any reason is admitted, a missing tool included. The fuller shape, not taken here,
     admits only the reasons of an explicit allowlist, or only a skip from a dedicated
@@ -519,7 +527,10 @@ def fail_a_tier_run_that_executed_no_test(
             f"condition that held: {skipped} skipped ({listed})"
         )
         _write_line(config, admitted)
-        _write_line(config, f"::notice title={ADMITTED_TITLE}::{admitted}")
+        # One annotation per leg. In warn mode it is a warning, so that the run page
+        # shows every e2e leg that still executed no test, admitted or not.
+        level = "warning" if config.stash.get(_FLOOR_WARN_KEY, False) else "notice"
+        _write_line(config, f"::{level} title={ADMITTED_TITLE}::{admitted}")
         return False
     counted = ""
     if leg_assertions > 0:
