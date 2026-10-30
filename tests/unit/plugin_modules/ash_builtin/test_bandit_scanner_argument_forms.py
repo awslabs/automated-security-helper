@@ -253,6 +253,19 @@ def test_the_windows_bound_counts_utf16_units():
     assert _exclude_fits("--exclude=" + "x" * 15340, rest, "nt")
 
 
+def test_a_lone_surrogate_in_the_line_is_measured_not_a_crash():
+    """Windows decodes an undecodable unit of a path into a lone surrogate
+    (``surrogatepass``), which a strict UTF-16 encode refuses; the bound check
+    answered with an exception instead of a bool. It counts the surrogate as
+    the one unit Windows passes."""
+    rest = ["bandit", "C:/src"]
+    lone = "\ud800"
+    with pytest.raises(UnicodeEncodeError):
+        lone.encode("utf-16-le")
+    assert _exclude_fits("--exclude=" + lone * 10, rest, "nt")
+    assert not _exclude_fits("--exclude=" + lone * (32767 - 2048), rest, "nt")
+
+
 def test_elsewhere_one_argument_is_bounded_on_its_own():
     """Linux refuses one argument of 128 KiB or more (MAX_ARG_STRLEN counts the
     terminating NUL), so the 120 KiB limit sits well under it and a token of

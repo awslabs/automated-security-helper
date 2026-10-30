@@ -117,8 +117,14 @@ def _command_line_units(line: str) -> int:
     ``len`` counts code points, and a character outside the Basic Multilingual
     Plane (an emoji in a path) is one code point but two UTF-16 units, so a
     line measured by ``len`` could pass the bound and still exceed it.
+
+    A lone surrogate can be in ``line`` on Windows: the filesystem encoding
+    there decodes an undecodable unit into one (``surrogatepass``), so a path
+    holding one reaches this measurement as text. A strict encode would raise
+    on it and turn a bound check into a crash; ``surrogatepass`` counts it as
+    the one WCHAR Windows passes.
     """
-    return len(line.encode("utf-16-le")) // 2
+    return len(line.encode("utf-16-le", "surrogatepass")) // 2
 
 
 def _exclude_fits(token: str, rest: Sequence[str], platform: str = os.name) -> bool:
