@@ -43,8 +43,14 @@ SH = "aws-security-hub"
 
 
 def _outside_tree_limit(value: object) -> RepositorySettings:
-    """A chain whose file outside the tree wrote detect-secrets' limit as *value*."""
+    """A chain in which a repository file wrote detect-secrets' limit (recorded
+    as ``confine`` records it, so the settle's walk over what the repository
+    wrote reaches the option) and a file outside the tree wrote it as *value*,
+    the merged document's value."""
     repository = RepositorySettings(trees=[])
+    repository.found.append(
+        ("scanners", "detect-secrets", "detect-secrets", "max_worker_output_mib", 512)
+    )
     repository.document = {
         "scanners": {"detect-secrets": {"options": {"max_worker_output_mib": value}}}
     }
@@ -55,7 +61,9 @@ def test_the_settle_list_a_validation_reads_changes_nothing():
     """``ignored_operator_only_options`` serves ``ash config validate``, which
     judges a file without changing the configuration; the option a file
     outside the tree set is listed for the confinement to write back, not
-    written back by the listing."""
+    written back by the listing. The repository wrote the option, so the
+    listing's walk reaches it; the configuration holds another value (a
+    client's override) and keeps it."""
     config = AshConfig.model_validate(
         {"scanners": {"detect-secrets": {"options": {"max_worker_output_mib": 2048}}}}
     )
