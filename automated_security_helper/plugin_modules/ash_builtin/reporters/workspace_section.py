@@ -240,10 +240,10 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # workspace_exit_code failed the run for that same project. The table
             # was the optimistic half of two disagreeing verdicts.
             #
-            # The suffix is not decoration: html_workspace_section derives its row
-            # class from result.startswith("FAILED"), so a state named anything
-            # else changes the text and leaves the row green. Renaming this string
-            # means changing that predicate in the same edit.
+            # The suffix is not decoration: the row's ``state`` below is derived
+            # from result.startswith("FAILED"), so a name that does not start
+            # with it changes the text and leaves the row green. Renaming this
+            # string means changing that predicate in the same edit.
             result = "FAILED (incomplete)"
         elif project.exceeds_threshold:
             result = "FAILED"
@@ -251,7 +251,10 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             result = "PASSED"
 
         label = project.display_label
-        if label != project.project:
+        # ``display_label`` already carries the key when two projects share a
+        # label (``svc (apps-a)``); appending it again read ``svc (apps-a)
+        # (apps-a)``.
+        if label != project.project and not label.endswith(f" ({project.project})"):
             label = f"{label} ({project.project})"
 
         detail = project.error or project.skip_detail or ""
@@ -262,6 +265,22 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # not run is the one fact the rest of the row cannot convey.
             unrun = "did not complete: " + ", ".join(project.incomplete_scanners)
             detail = f"{detail}; {unrun}" if detail else unrun
+        partial = getattr(project, "partial_coverage_scanners", None) or []
+        if partial:
+            # Evaluated some of their targets and not the rest: a different fact
+            # from a scanner that did not run, and the one the counts hide.
+            note = "partial coverage: " + ", ".join(partial)
+            detail = f"{detail}; {note}" if detail else note
+        if getattr(project, "no_scanner_ran", False):
+            # Every scanner was skipped, so nothing was measured; with the
+            # completeness gate off the row would otherwise read PASSED with
+            # zero findings, as a clean scan does.
+            note = "no scanner ran"
+            detail = f"{detail}; {note}" if detail else note
+        unscanned = getattr(project, "inputs_not_scanned", None) or []
+        if unscanned:
+            note = "inputs not scanned: " + _unscanned_input_list(unscanned)
+            detail = f"{detail}; {note}" if detail else note
         converters = getattr(project, "incomplete_converters", None) or {}
         if converters:
             # Named for the same reason: a converter that lost coverage (an
@@ -303,15 +322,35 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             dated = "stale content database: " + ", ".join(stale)
             detail = f"{detail}; {dated}" if detail else dated
 
+        # A project that was never scanned has no counts: its zeros are not a
+        # finding of none, and a row of zeros reads as a clean scan.
+        never_scanned = (
+            project.status in (ProjectRunStatus.FAILED, ProjectRunStatus.SKIPPED)
+            or project.skip_reason is not None
+            or bool(project.error)
+        )
+        # How the Result column is styled: red for a project that failed or was
+        # skipped by an error (the workspace exits non-zero for both), muted for
+        # a skip that is a successful no-op.
+        if result.startswith("FAILED") or result == "SKIPPED (error)":
+            state = "failed"
+        elif result.startswith("SKIPPED"):
+            state = "skipped"
+        else:
+            state = "passed"
+
         rows.append(
             {
                 "project": label,
                 "key": project.project,
                 "status": str(status).upper(),
-                "findings": project.finding_count,
-                "actionable": project.actionable_finding_count,
+                "findings": "n/a" if never_scanned else project.finding_count,
+                "actionable": "n/a"
+                if never_scanned
+                else project.actionable_finding_count,
                 "threshold": project.severity_threshold or "n/a",
                 "result": result,
+                "state": state,
                 "detail": detail,
             }
         )
@@ -342,6 +381,19 @@ def _refusal_text(record: Any) -> str:
     if getattr(record, "scan_incomplete", False):
         text += " [scan incomplete]"
     return text
+
+
+def _unscanned_input_list(records: Sequence[Any]) -> str:
+    """The first :data:`REFUSALS_SHOWN_IN_ROW` inputs a scanner did not scan, then a count."""
+    shown = [
+        f"{getattr(record, 'scanner', '')}: '{getattr(record, 'path', '')}' "
+        f"({getattr(record, 'reason', '')})"
+        for record in records[:REFUSALS_SHOWN_IN_ROW]
+    ]
+    rest = len(records) - len(shown)
+    if rest > 0:
+        shown.append(f"and {rest} more")
+    return ", ".join(shown)
 
 
 def _refusal_list(records: Sequence[Any]) -> str:
@@ -494,9 +546,13 @@ def html_workspace_section(model: "AshAggregatedResults") -> str:
     header = "".join(f"<th>{html_escape.escape(column)}</th>" for column in COLUMNS)
     body = []
     for row in rows:
-        cells = "".join(f"<td>{html_escape.escape(cell)}</td>" for cell in _cells(row))
-        css_class = "failed" if row["result"].startswith("FAILED") else "passed"
-        body.append(f'<tr class="{css_class}">{cells}</tr>')
+        values = _cells(row)
+        # The Result column carries the report stylesheet's status class, which
+        # the row class alone never had a rule for.
+        cells = "".join(
+            f"<td>{html_escape.escape(cell)}</td>" for cell in values[:-1]
+        ) + (f'<td class="status-{row["state"]}">{html_escape.escape(values[-1])}</td>')
+        body.append(f'<tr class="{row["state"]}">{cells}</tr>')
     notes = "".join(
         f"<li><strong>{html_escape.escape(label)}</strong>: {html_escape.escape(detail)}</li>"
         for label, detail in _notes(rows)
