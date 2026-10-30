@@ -246,7 +246,10 @@ def test_a_pattern_of_repeated_doublestars_answers_at_once():
     [
         ("**/**/a.py", "x/y/a.py", True),
         ("**/**/a.py", "a.py", True),
-        ("src/**", "src", False),
+        # ``**`` takes no component too, so ``src/**`` reaches ``src`` itself,
+        # as the recursive match did. Whether a file named ``src`` should be
+        # left to its tool is a reading of the tools, not of this match.
+        ("src/**", "src", True),
         ("src/**", "src/a.py", True),
         ("src/**/*.py", "src/a.py", True),
         ("src/**/*.py", "src/x/y/a.py", True),
