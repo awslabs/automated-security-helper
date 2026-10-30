@@ -134,26 +134,33 @@ verdict over projects. It is returned when nothing was attempted at all, and
 raised as ``WorkspaceDefinitionError`` before execution starts in every other
 case.
 
-When nothing was attempted, the skip reason decides
----------------------------------------------------
-A workspace where every project was skipped is not one situation but two, and
-they need opposite answers:
+A tolerated skip never colours the status
+-----------------------------------------
+A skip recorded by *resolution* -- a missing project tolerated under
+``--allow-missing-projects`` (an ``ERROR`` skip), or a project with no changed
+files (a ``NO_CHANGES`` skip) -- does not affect the status, whatever its
+siblings did. Failing on the former would make the flag mean nothing, and
+failing on the latter would make the optimisation useless. The project skipped
+by ERROR is reported in the results payload, not in the exit code. A project that
+fails during *execution* is ``FAILED``, not skipped, and does affect the status.
 
-* Every skip a ``NO_CHANGES`` skip -- ASH asked git what changed in each project
-  and git said nothing. Exit 0. This is the ordinary outcome of a precommit hook
-  in a monorepo when the edit landed outside every project directory, and
-  single-project mode exits 0 for exactly that case. Returning 4 here would fail
-  a clean no-op hook run and make the optimisation worse than not having it.
-* Any skip an ``ERROR`` -- that project was never looked at, whatever tolerated
-  it. Exit 4, because exiting 0 would report a clean result for code nothing
-  examined; an unchanged project beside it excuses nothing about it.
+So when no project completed or failed, the ERROR skips are set aside and what
+is left decides:
 
-A skip recorded by *resolution* alongside projects that did run -- a missing
-project tolerated under ``--allow-missing-projects``, or a project with no
-changed files -- does not affect the status at all. Failing on the former would
-make the flag mean nothing, and failing on the latter would make the
-optimisation useless. A project that fails during *execution* is ``FAILED``, not
-skipped, and does affect the status.
+* Something is left, and it can only be ``NO_CHANGES`` skips -- ASH asked git
+  what changed in each of those projects and git said nothing. Exit 0. This is
+  the ordinary outcome of a precommit hook in a monorepo when the edit landed
+  outside every project directory, and single-project mode exits 0 for exactly
+  that case. It stays 0 when an optional project is also absent: a hook that
+  exits 4 on every commit touching no project, and 0 on commits that do, would
+  be worse than not having the optimisation.
+* Nothing is left -- the definition named no project, or every project it named
+  was missing. Exit 4, because exiting 0 would report a clean result for code
+  nothing examined.
+
+The alternative rule, "nothing was scanned at all exits 4" (an unchanged
+project beside a missing one does not count as examined), was in force between
+2026-10-29 22:51Z and this change and is recorded for review.
 """
 
 from __future__ import annotations
@@ -218,7 +225,9 @@ class SkippedProjectReason(str, Enum):
 
     The distinction is load-bearing: ``NO_CHANGES`` is a successful
     optimisation, ``ERROR`` is a project the operator asked for that did not
-    run. Only the latter should affect the exit status.
+    run and that ``--allow-missing-projects`` tolerated. Neither colours the
+    exit status; see "A tolerated skip never colours the status" in the module
+    docstring for what decides when nothing was attempted.
     """
 
     NO_CHANGES = "no-changes"
@@ -1027,24 +1036,29 @@ def workspace_exit_code(
     failed = [entry for entry in entries if entry.status is ProjectRunStatus.FAILED]
 
     if not completed and not failed:
-        # Nothing was attempted, and the reason decides the status.
+        # Nothing was attempted. A resolution-time ERROR skip (a missing project
+        # --allow-missing-projects tolerated) never colours the status, whatever
+        # its siblings did, so those are set aside first; the project is reported
+        # in the payload, not in the exit code. See "A tolerated skip never
+        # colours the status" in the module docstring.
         #
-        # A project skipped as NO_CHANGES was examined: ASH asked git what
-        # changed and git said nothing. That is a successful no-op, and it is the
-        # ordinary outcome of a precommit hook in a monorepo where the edit
-        # landed outside every project directory. Single-project mode exits 0 for
-        # exactly this case, so a workspace of unchanged projects must too --
-        # anything else fails a clean hook run and makes the optimisation worse
-        # than not having it.
+        # What is left can only be NO_CHANGES skips: ASH asked git what changed
+        # in each of those projects and git said nothing. That is a successful
+        # no-op, the ordinary outcome of a precommit hook in a monorepo where the
+        # edit landed outside every project directory, and single-project mode
+        # exits 0 for exactly this case. It stays 0 beside an absent optional
+        # project: a hook that exits 4 on every commit touching no project and 0
+        # on commits that do would be worse than not having the optimisation.
         #
-        # A project skipped by ERROR was never looked at, whatever tolerated it.
-        # Exiting 0 would report a clean result for code nothing examined, so the
-        # unchanged skips have to be ALL of them: one unchanged project beside an
-        # ERROR skip used to read SUCCESS for a workspace that examined one
-        # project and never looked at the rest.
-        if entries and all(
-            entry.skip_reason is SkippedProjectReason.NO_CHANGES for entry in entries
-        ):
+        # Nothing left means no project was named, or every project named was
+        # missing: exiting 0 would report a clean result for code nothing
+        # examined.
+        examined = [
+            entry
+            for entry in entries
+            if entry.skip_reason is not SkippedProjectReason.ERROR
+        ]
+        if examined:
             return WorkspaceExitCode.SUCCESS
         return WorkspaceExitCode.WORKSPACE_ERROR
 

@@ -196,17 +196,26 @@ class TestWorkspaceExitCode:
         )
 
     def test_every_project_skipped_by_error_is_a_workspace_error(self):
-        """Nothing was looked at, whatever tolerated it."""
+        """Nothing was looked at: with the tolerated skips set aside, nothing is left."""
         assert (
             workspace_exit_code([_skipped("a", SkippedProjectReason.ERROR)])
             == WorkspaceExitCode.WORKSPACE_ERROR
         )
 
-    def test_a_mix_of_unchanged_and_tolerated_errors_is_a_workspace_error(self):
-        """One project was examined and had nothing to do; the other was never looked at.
+    def test_a_mix_of_unchanged_and_tolerated_errors_is_success(self):
+        """A tolerated resolution skip never colours the exit code, whatever its siblings did.
 
-        Reading SUCCESS here reported a clean result for code nothing examined:
-        the unchanged skip excuses nothing about the project skipped by ERROR.
+        The ERROR skip is a missing project that --allow-missing-projects
+        tolerated; the test above (a completed sibling) already pins that it does
+        not colour the status, and an unchanged sibling is no different. This
+        is the precommit no-op in a monorepo with one optional folder absent: it
+        exits 0 on a commit that touches no project, as it does on one that
+        touches a present project. The unscanned project is reported in the
+        results payload, not in the exit code.
+
+        Between 2026-10-29 22:51Z and this change the pinned answer was
+        WORKSPACE_ERROR ("nothing was scanned at all"); that alternative is
+        recorded for review, not kept.
         """
         assert (
             workspace_exit_code(
@@ -215,7 +224,7 @@ class TestWorkspaceExitCode:
                     _skipped("b", SkippedProjectReason.ERROR),
                 ]
             )
-            == WorkspaceExitCode.WORKSPACE_ERROR
+            == WorkspaceExitCode.SUCCESS
         )
 
 

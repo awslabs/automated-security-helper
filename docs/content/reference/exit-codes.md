@@ -148,7 +148,7 @@ With `--workspace`, ASH scans each project and combines their verdicts. The firs
 | 3 | A project's config, or the `--config` file, cannot be used or is invalid, as for a scan; or two plugins of one type that the scan loads have the same name or names that read as one, as for a scan. ASH detects this before it scans anything, also with `--dry-run`. |
 | 4 | The workspace file is missing or ambiguous (`--workspace auto` finds more than one); `--source-dir` is also given; the workspace policy file is not valid, including an unknown key in one of its suppressions or ignore paths; a project directory is missing and `--allow-missing-projects` is not set; or no project could be scanned |
 | 5 | A usage error, including a `--scanners` selection that matches no scanner or that `--exclude-scanners` cancels. ASH refuses it once, before it scans any project. |
-| 0 | `--dry-run`; or nothing was scanned because every project was skipped as unchanged |
+| 0 | `--dry-run`; or nothing was scanned because every project was skipped as unchanged, counting a missing project that `--allow-missing-projects` tolerated as neither scanned nor failed (it is listed in the results, not in the exit code) |
 
 A project that is incomplete exits 1 even when it also has findings, as the same project scanned alone does. Workspace mode checks the same unconditional causes as a single scan: a rule a scanner could not evaluate, a scanner tool ASH could not stop, and a stale content database under a `fail` policy each fail the project whatever `fail_on_incomplete_scanners` says.
 
