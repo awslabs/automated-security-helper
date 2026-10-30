@@ -103,7 +103,10 @@ from automated_security_helper.utils.report_path_links import (
     refuse_a_linked_reports_dir,
 )
 from automated_security_helper.utils.subprocess_utils import scanning_tree
-from automated_security_helper.core.cancellation import raise_if_cancelled
+from automated_security_helper.core.cancellation import (
+    ScanCancelled,
+    raise_if_cancelled,
+)
 from automated_security_helper.core.previous_results import PreviousResults
 
 # One lock for every instance's used-check in execute_scan. Module-level rather
@@ -1241,6 +1244,20 @@ class ASHScanOrchestrator(BaseModel):
             "scan" in phases and self.existing_results_path is None and self.output_dir
         )
 
+    def _remove_results_file_written_before_a_cancel(self) -> None:
+        """Remove the results file this run wrote when the cancel landed during
+        the write. Only its own file: the previous results, if any were kept,
+        sit in the held set, and the caller puts them back. A removal that fails
+        is logged; the cancel is what the caller sees."""
+        results_file = Path(self.output_dir) / "ash_aggregated_results.json"
+        try:
+            results_file.unlink(missing_ok=True)
+        except OSError as e:
+            ASH_LOGGER.warning(
+                f"The scan was cancelled while its results file was written, and "
+                f"the file could not be removed: {error_text(e)}"
+            )
+
     def _write_results_after_failure(self, phases: List[str]) -> None:
         """Write the results the engine holds when a phase AFTER the scan raised.
 
@@ -1736,7 +1753,11 @@ class ASHScanOrchestrator(BaseModel):
             # the write, not after: execute_scan checks once more when this
             # returns, and a file written in between stayed behind for a later
             # --use-existing to take for a finished scan when no previous results
-            # were set aside to be put back.
+            # were set aside to be put back. A cancel that lands while the file
+            # is being written is read once more after the write, and the file
+            # this run wrote goes with it: a client polling a cancelled scan
+            # reads that file as finished results, and the base's single write
+            # (the CLI's, after its own check) never left one behind.
             if self._writes_results_file(phases):
                 raise_if_cancelled()
                 if isinstance(asharp_model_results, AshAggregatedResults):
@@ -1744,6 +1765,11 @@ class ASHScanOrchestrator(BaseModel):
                         f"Saving AshAggregatedResults to {self.output_dir}"
                     )
                     asharp_model_results.save_model(self.output_dir)
+                    try:
+                        raise_if_cancelled()
+                    except ScanCancelled:
+                        self._remove_results_file_written_before_a_cancel()
+                        raise
                 else:
                     ASH_LOGGER.warning(
                         f"The engine returned {type(asharp_model_results).__name__}, "
