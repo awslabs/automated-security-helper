@@ -3,8 +3,9 @@
 
 """The slim GHAS result keeps the SARIF fields GitHub reads to classify it.
 
-* ``kind``: dropped, a result ASH marked notApplicable (a cdk-nag rule that was
-  not evaluated) was uploaded under SARIF's default kind, fail, as an alert.
+* ``kind``: a result ASH marked notApplicable (a cdk-nag rule that was not
+  evaluated) was uploaded as an alert: the slim copy dropped the kind, and GitHub
+  reads no kind anyway, so the result is left out of the file instead.
 * ``suppressions``: dropped, a suppressed result the file keeps (exclude_suppressed
   off) reached GitHub as an open alert like any other.
 * ``uriBaseId`` and the run's ``originalUriBaseIds``: dropped, a URI a scanner
@@ -37,6 +38,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PhysicalLocation,
     PropertyBag,
     Region,
+    ReportingDescriptor,
     Result,
     Run,
     SarifReport,
@@ -69,19 +71,47 @@ def _run(*results: Result, **run_kwargs) -> Run:
 
 
 class TestKind:
-    def test_a_not_applicable_result_keeps_its_kind(self, reporter):
-        result = Result(
+    @pytest.mark.parametrize(
+        "kind", [Kind.notApplicable, Kind.pass_, Kind.informational, Kind.open]
+    )
+    def test_a_result_whose_kind_is_not_fail_is_left_out(self, reporter, kind):
+        """GitHub's documented result properties do not include ``kind``, so a
+        notApplicable result it was given (a cdk-nag rule that was not
+        evaluated) opened an alert like a failing one."""
+        kept = Result(ruleId="R", level=Level.error, message=Message(text="m"))
+        other = Result(
             ruleId="CDK-NAG-1",
-            level=Level.none,
-            kind=Kind.notApplicable,
+            level=Level.error,
+            kind=kind,
             message=Message(text="not evaluated"),
         )
 
-        (slim,) = json.loads(reporter.report(_model(_run(result))))["runs"][0][
-            "results"
-        ]
+        out = json.loads(reporter.report(_model(_run(kept, other))))["runs"][0]
 
-        assert slim["kind"] == "notApplicable"
+        assert [r["ruleId"] for r in out["results"]] == ["R"]
+
+    def test_a_left_out_result_does_not_score_its_rule(self, reporter):
+        """One notApplicable error-level result and one failing note-level
+        result of a rule with no security-severity: the rule scores as the
+        result the file carries, not as the one it leaves out."""
+        rule = ReportingDescriptor(id="R")
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH", rules=[rule])),
+            results=[
+                Result(
+                    ruleId="R",
+                    level=Level.error,
+                    kind=Kind.notApplicable,
+                    message=Message(text="not evaluated"),
+                ),
+                Result(ruleId="R", level=Level.note, message=Message(text="m")),
+            ],
+        )
+
+        out = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        (slim_rule,) = out["tool"]["driver"]["rules"]
+        assert slim_rule["properties"]["security-severity"] == "3.0"
 
     def test_a_failing_result_carries_no_kind_key(self, reporter):
         result = Result(ruleId="R", level=Level.error, message=Message(text="m"))

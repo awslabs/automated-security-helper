@@ -199,6 +199,12 @@ def _result_scanner(result: Any) -> Optional[str]:
     return None
 
 
+def _result_kind(result: Any) -> str:
+    """*result*'s SARIF ``kind`` as text; an absent kind is ``fail`` (3.27.9)."""
+    kind = getattr(result, "kind", None)
+    return str(getattr(kind, "value", kind) or "fail")
+
+
 def _string_map(value: Any) -> Dict[str, str]:
     """*value*, a SARIF fingerprint map (a dict, or a model with extras), as
     ``{str: str}``; empty when it is neither."""
@@ -843,15 +849,24 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         return slim_rules
 
     def _left_out(self, result: Any) -> bool:
-        """Whether *result* is kept out of the file: suppressed, under
-        ``exclude_suppressed`` (the default). One test for the results list and
-        the rules' scores, so a result never scores a rule it is not in.
+        """Whether *result* is kept out of the file. One test for the results
+        list and the rules' scores, so a result never scores a rule it is not in.
 
-        Suppressed means a suppression in effect (``suppressions_in_effect``):
-        one ``rejected`` by the reviewer or still ``underReview`` has not taken
-        effect (SARIF 3.35.4), the gate still fails the scan on the finding,
-        and the file kept it out as if it were dismissed.
+        Two kinds of result are left out. A result whose ``kind`` is not
+        ``fail`` (SARIF 3.27.9: pass, open, review, notApplicable,
+        informational) states no failing finding. GitHub's documented result
+        properties do not include ``kind`` ("code scanning will only use the
+        following supported properties"), so a copy that carried it, or that
+        dropped it, was read under SARIF's default kind, fail, and a cdk-nag rule
+        ASH marked notApplicable was an open alert; such a result stays in the
+        other reports. And a suppressed result, under ``exclude_suppressed``
+        (the default): suppressed means a suppression in effect
+        (``suppressions_in_effect``); one ``rejected`` by the reviewer or still
+        ``underReview`` has not taken effect (SARIF 3.35.4), the gate still fails
+        the scan on the finding, and the file kept it out as if it were dismissed.
         """
+        if _result_kind(result) != "fail":
+            return True
         return bool(
             self.config
             and self.config.options.exclude_suppressed
@@ -906,19 +921,10 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             if rule_id:
                 result_dict["ruleId"] = rule_id
 
-            # Map level
+            # Map level. No kind: every result that reaches here is a failing
+            # one (_left_out), which is SARIF's default.
             level_val = effective_sarif_level(result)
             result_dict["level"] = level_val
-
-            # Kind, when it is not the default. SARIF reads an absent kind as
-            # "fail", so a result ASH marked notApplicable (a cdk-nag rule that
-            # was not evaluated) or pass was uploaded as a failing alert when
-            # the slim copy dropped it.
-            kind = getattr(result, "kind", None)
-            if kind is not None:
-                kind_val = _level_value(kind)
-                if kind_val != "fail":
-                    result_dict["kind"] = kind_val
 
             # Suppressions, when the file keeps a suppressed result
             # (exclude_suppressed off). Dropped, the result reached GitHub as an
