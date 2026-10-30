@@ -435,6 +435,44 @@ class TestFindingsAnAdditionalReportListsAreCounted:
         summary = ReportContentEmitter(model).get_scan_summary()
         assert set(summary["counts"]) == {"critical", "high", "medium", "low", "info"}
 
+    def test_a_stand_in_row_rated_outside_the_ladder_keeps_its_own_bucket(self):
+        """A row that bypasses the flattening and carries a sixth name.
+
+        The model never builds one (every flattened severity is read through
+        the ladder), so this is the count's own promise: such a row is counted
+        under its own lowercased name rather than dropped, which once made the
+        actionable count exceed the active count.
+        """
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {"title": "a", "severity": "HIGH", "file_path": "app.py"}
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        emitter.flat_vulns = [
+            SimpleNamespace(
+                scanner="custom-plugin",
+                severity="MODERATE",
+                is_suppressed=False,
+                workspace_project=None,
+                source_report="custom-plugin",
+            )
+        ]
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["counts"]["moderate"] == 1, summary
+        assert "unknown" not in summary["counts"], summary
+
 
 class TestACoverageGapBesideFindingsIsADanger:
     @staticmethod
