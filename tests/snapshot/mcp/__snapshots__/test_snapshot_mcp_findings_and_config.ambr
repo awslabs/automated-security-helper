@@ -835,6 +835,7 @@
           'extension': 'ghas.sarif',
           'name': 'github-ghas',
           'options': dict({
+            'emit_automation_details': False,
             'exclude_suppressed': True,
           }),
         }),
@@ -973,7 +974,7 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
-            'tool_version': '>=1.7.0,<2.0.0',
+            'tool_version': '>=1.7.8,<2.0.0',
           }),
         }),
         'cdk_nag': dict({
@@ -1424,6 +1425,7 @@
           'extension': 'ghas.sarif',
           'name': 'github-ghas',
           'options': dict({
+            'emit_automation_details': False,
             'exclude_suppressed': True,
           }),
         }),
@@ -1562,7 +1564,7 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
-            'tool_version': '>=1.7.0,<2.0.0',
+            'tool_version': '>=1.7.8,<2.0.0',
           }),
         }),
         'cdk_nag': dict({
