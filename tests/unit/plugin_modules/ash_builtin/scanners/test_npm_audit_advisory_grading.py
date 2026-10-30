@@ -17,8 +17,6 @@ rule and no result while the report's metadata counted the advisory.
 
 from __future__ import annotations
 
-import copy
-
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -300,7 +298,9 @@ def test_an_advisory_without_a_version_range_keeps_the_package_s(scanner):
 
 def test_an_npm_entry_with_no_nodes_still_produces_a_result(scanner):
     """npm counted the advisory in the report's metadata; a rule with no result
-    dropped it. One result for the package by name, no installed path."""
+    dropped it. One result for the package by name: its URI is the hoisted
+    location a copy of that name would have, and it carries no package_path or
+    package_version, since npm named no installed copy."""
     document = _report(pkg=("high", [_via("pkg", "high", score=0, vector=None)], []))
 
     report, grades = _graded(scanner, document)
@@ -481,9 +481,16 @@ def test_a_yarn_record_with_a_score_grades_from_it(scanner):
     assert grades[("GHSA-xvch-5gv4-984h", "0.0.8")] == "CRITICAL"
 
 
-def test_the_shape_of_the_result_is_otherwise_unchanged(scanner):
-    """The identity, URI and recommendation a scored npm result carried before
-    this change are still there."""
+def test_the_result_keeps_its_historical_uri_shape_and_recommendation(scanner):
+    """The identity, recommendation and CVSS object a scored npm result carried
+    before the per-advisory grading are still there, and so is the URI's
+    historical shape: every ``node_modules/`` in the node path is dropped, so a
+    nested copy at node_modules/a/node_modules/pkg is reported at
+    node_modules/a/pkg/package.json, a path that does not exist on disk. That
+    shape is kept on purpose, because the path-based suppressions users wrote
+    against it match it; the real install path is ``package_path`` (when the
+    lockfile gives one). A change of the URI is a change of the suppression
+    contract, not a fix this test stands in the way of."""
     document = _report(
         pkg=(
             "high",
@@ -492,7 +499,7 @@ def test_the_shape_of_the_result_is_otherwise_unchanged(scanner):
         )
     )
 
-    report, _ = _graded(scanner, copy.deepcopy(document))
+    report, _ = _graded(scanner, document)
 
     (result,) = report.runs[0].results
     location = result.locations[0].model_dump(by_alias=True, exclude_none=True)
