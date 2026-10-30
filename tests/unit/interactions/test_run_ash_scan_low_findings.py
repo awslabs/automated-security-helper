@@ -449,6 +449,38 @@ def test_a_findings_exit_from_the_container_is_not_logged_as_a_failure(
     ), logger.records["error"]
 
 
+def test_a_crash_that_exits_one_without_results_keeps_its_error_and_stderr(
+    tmp_path, monkeypatch
+):
+    """An incomplete scan and a crash share exit 1; a crash that exits 1 before
+    writing the results file has only the failure line and the captured stderr
+    to explain itself, and the file-not-found line names the container's code."""
+    opts = _opts(tmp_path, mode=RunMode.container, build=False)
+    monkeypatch.setattr(
+        ras,
+        "run_ash_container",
+        lambda **kwargs: create_completed_process(
+            args=["docker", "run"],
+            returncode=1,
+            stdout="",
+            stderr="Traceback (most recent call last): the scan raised",
+        ),
+    )
+    _quiet_container_side_effects(monkeypatch)
+    logger = _Logger()
+
+    with pytest.raises(SystemExit) as exited:
+        _run_container_mode(opts, logger)
+
+    assert exited.value.code == 1
+    errors = logger.records["error"]
+    assert any("Container execution failed with code 1" in m for m in errors), errors
+    assert any("the scan raised" in m for m in errors), errors
+    assert any(
+        "Results file not found" in m and "exited with code 1" in m for m in errors
+    ), errors
+
+
 # ---------------------------------------------------------------------------
 # _run_nix_mode: a refusal inside the shell past a kept results file
 # ---------------------------------------------------------------------------

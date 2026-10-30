@@ -5346,12 +5346,15 @@ def _run_container_mode(
         sys.exit(getattr(container_result, "returncode", 1) or 1)
 
     container_returncode_now = getattr(container_result, "returncode", 0)
-    if container_returncode_now in _CONTAINER_VERDICT_EXIT_CODES:
-        if container_returncode_now != 0:
-            # 1 and 2 are statuses the scan inside reached from its results file
-            # (an incomplete scan, actionable findings), which this process
-            # re-derives below; its output already streamed to the terminal as it
-            # ran, so neither is a failure to report nor stderr to print again.
+    if container_returncode_now in (0, 2):
+        if container_returncode_now == 2:
+            # 2 is the scan inside saying it found something, a status it reaches
+            # only after writing its results file, which this process re-derives
+            # below; its output already streamed to the terminal as it ran, so it
+            # is neither a failure to report nor stderr to print again. 1 is NOT
+            # quieted: an incomplete scan and a crash share it, and a crash that
+            # exits 1 before writing the results file has only this error and the
+            # captured stderr to explain itself.
             logger.debug(
                 f"The container exited with {container_returncode_now}, a status "
                 "re-derived from the results file below"
@@ -5484,7 +5487,12 @@ def _run_container_mode(
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
         return results
     else:
-        logger.error(f"Results file not found at {output_file}")
+        # The container's own status beside the missing file, as nix mode names the
+        # shell's: with nothing to read back it is the only diagnostic left.
+        logger.error(
+            f"Results file not found at {output_file}. The container exited with "
+            f"code {container_returncode}."
+        )
         sys.exit(1)
 
 
