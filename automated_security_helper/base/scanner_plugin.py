@@ -2126,6 +2126,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if stderr_text:
             stderr_text = head_and_tail(stderr_text, _STDERR_EXCERPT_LIMIT)
             detail += f". Stderr: {stderr_text}"
+            if log_unreadable and log_path is not None:
+                # Only ASH's notes are shown, and the log that holds the tool's
+                # text is there but could not be read: say so after them.
+                detail += (
+                    ". The tool's stderr log could not be read; see "
+                    f"{log_path.as_posix()}"
+                )
         elif stderr_withheld:
             detail += ". Stderr could not be shown"
             if log_path is not None:
