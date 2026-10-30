@@ -2810,16 +2810,12 @@ def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> N
             removes the directory they write into.
     """
 
-    # The binding select_profile made names the profile materialized in this
-    # workspace's config/ directory. Removing the workspace and keeping the
-    # binding left later scans with a bound profile whose file is gone, which
-    # the workspace tools refuse and the single-target scan ran without; the
-    # binding goes with the files it names, as it does when the session ends.
-    from automated_security_helper.cli.mcp.profile_registry import (
-        clear_session_state,
-    )
-
-    clear_session_state(session_id)
+    # The binding select_profile made is kept. It names the profile materialized
+    # in this workspace's config/ directory, which goes with the workspace; the
+    # binding is the source of truth and the resolver writes the file again from
+    # it when the file is gone (profile_registry.resolve_session_config_path),
+    # refusing the scan when it cannot. The binding ends with the session
+    # (sessions.end_session), not with its files.
     if not remove_session_workspace(session_id, workspace_root=workspace_root):
         _logger.warning(
             "could not delete the whole workspace of session %s; the entries that "
