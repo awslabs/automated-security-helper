@@ -40,6 +40,7 @@ from automated_security_helper.config.client_scanner_exclusions import (
     ClientScannerExclusion,
     _checkov_pattern,
     _reduced,
+    _scan_timeout_of,
     _trivy_ignore_exclusions,
     checkov_skips,
     glob_excludes,
@@ -203,6 +204,33 @@ def _strip(config, delivered: dict, operator: dict | None, tmp_path: Path):
         scanned_root=tmp_path,
         is_delivered=lambda path: Path(path) == tmp_path / "c.yaml",
     )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [float("inf"), float("nan"), 2_147_484, 10**400, 0, -5, True, "60"],
+    ids=[
+        "inf",
+        "nan",
+        "past-the-ceiling",
+        "past-a-float",
+        "zero",
+        "negative",
+        "bool",
+        "text",
+    ],
+)
+def test_a_scan_timeout_the_bound_cannot_hold_reads_as_the_default(value):
+    """A plain mapping gets no model validation, so these arrived as written
+    and the bound's wait raised inside the suppression pass; each now reads as
+    the scanners' default, as a non-positive value already did. An integer too
+    large for a float is read without an overflow of its own."""
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    default = ScannerOptionsBase.model_fields["scan_timeout"].default
+    assert _scan_timeout_of({"scan_timeout": value}) == default
+    assert _scan_timeout_of({"scan_timeout": 90}) == 90
+    assert _scan_timeout_of({"scan_timeout": None}) is None
 
 
 def _bandit_paths(config) -> list[str]:

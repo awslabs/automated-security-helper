@@ -1312,13 +1312,23 @@ def _set(options: Any, option: str, value: Any) -> None:
         setattr(options, option, value)
 
 
+# The largest scan_timeout the pattern bound waits for, in seconds: about 24.8
+# days, far past any scan. The wait behind the bound takes its timeout within a
+# limit of its platform (a C int of milliseconds for a poll on a pipe,
+# ``threading.TIMEOUT_MAX`` for a lock), and this ceiling sits under each.
+_LARGEST_SCAN_TIMEOUT = 2_147_483.0
+
+
 def _scan_timeout_of(options: Any) -> Optional[float]:
     """The section's ``scan_timeout`` as the scanner will run under it.
 
     The value the section sets; the scanners' default for a plain mapping that
-    leaves it unset, or for a value that is not a positive number (the scanner's
-    own validation refuses one); None for an explicit null, the scanner left
-    unbounded.
+    leaves it unset, or for a value that is not a finite positive number up to
+    ``_LARGEST_SCAN_TIMEOUT`` (the scanner's own validation refuses one); None
+    for an explicit null, the scanner left unbounded. A plain mapping gets no
+    model validation, so an infinite value (YAML ``.inf``), a NaN or one past
+    what the bound's wait can take arrived as written and reached that wait,
+    which raised in the suppression pass after the scan.
     """
     from automated_security_helper.base.options import ScannerOptionsBase
 
@@ -1334,7 +1344,16 @@ def _scan_timeout_of(options: Any) -> Optional[float]:
         value = getattr(options, "scan_timeout", default)
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+    # The two comparisons admit every finite number in range and refuse an
+    # infinity, with no float conversion an oversized integer could overflow;
+    # a NaN passes both, and is the one value unequal to itself.
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or value <= 0
+        or value > _LARGEST_SCAN_TIMEOUT
+        or value != value
+    ):
         return default
     return value
 
