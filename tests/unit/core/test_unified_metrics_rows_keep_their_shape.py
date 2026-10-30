@@ -10,8 +10,9 @@
 - A non-list ``inputs_not_scanned`` value does not raise.
 - The rebuilt scanner_results row marks ``dependencies_satisfied`` and ``excluded``
   set only when the metrics or the existing row say so, writes the exit code as
-  the metrics have it (None for a tool that never ran), and carries no skipped
-  reason the metrics do not have.
+  the metrics have it (None for a tool that never ran; a row whose tool ran keeps
+  its recorded code when the reports carry none), and carries no skipped reason
+  the metrics do not have.
 - An unrecognized status is counted as an error and rebuilt as ERROR, not PASSED.
 """
 
@@ -145,7 +146,9 @@ class TestTheRebuiltRow:
 
         row = model.scanner_results["tool"]
         assert row.dependencies_satisfied is True
-        assert row.exit_code is None
+        # The rebuilt status says the tool ran and the reports carry no code, so
+        # the row's recorded code is the only record of it and is kept.
+        assert row.exit_code == 3
 
         _populate_scanner_results_from_unified_metrics(
             model, [_metrics(status="MISSING", dependencies_missing=True, exit_code=2)]
@@ -153,6 +156,51 @@ class TestTheRebuiltRow:
         row = model.scanner_results["tool"]
         assert row.dependencies_satisfied is False
         assert row.exit_code == 2
+
+    def test_a_row_whose_tool_ran_keeps_its_recorded_code_when_the_reports_have_none(
+        self,
+    ):
+        """The metrics read the exit code from the per-target reports. A results
+        file whose rows carry a code and whose reports carry none (an older
+        writer, a merged file) has the row as the code's only record; the
+        rebuild used to erase it with the metrics' None. Red at the base: the
+        row read None after the rebuild."""
+        for ran in ("PASSED", "FAILED", "ERROR"):
+            model = AshAggregatedResults()
+            model.scanner_results["tool"] = ScannerTargetStatusInfo(
+                status=ScannerStatus.PASSED, exit_code=3
+            )
+
+            _populate_scanner_results_from_unified_metrics(
+                model, [_metrics(status=ran, exit_code=None)]
+            )
+
+            assert model.scanner_results["tool"].exit_code == 3, ran
+
+    def test_a_row_whose_tool_never_ran_carries_none_whatever_it_recorded(self):
+        """The control: a MISSING or SKIPPED tool ran nothing, so a code the row
+        recorded (a stale one from an earlier run) is not kept, and a code the
+        metrics do have replaces the row's."""
+        for never_ran in ("MISSING", "SKIPPED"):
+            model = AshAggregatedResults()
+            model.scanner_results["tool"] = ScannerTargetStatusInfo(
+                status=ScannerStatus.PASSED, exit_code=3
+            )
+
+            _populate_scanner_results_from_unified_metrics(
+                model, [_metrics(status=never_ran, exit_code=None)]
+            )
+
+            assert model.scanner_results["tool"].exit_code is None, never_ran
+
+        model = AshAggregatedResults()
+        model.scanner_results["tool"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.PASSED, exit_code=3
+        )
+        _populate_scanner_results_from_unified_metrics(
+            model, [_metrics(status="PASSED", exit_code=5)]
+        )
+        assert model.scanner_results["tool"].exit_code == 5
 
     def test_an_unrecognized_status_is_counted_and_rebuilt_as_error(self, monkeypatch):
         warnings = []

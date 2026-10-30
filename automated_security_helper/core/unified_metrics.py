@@ -1092,6 +1092,14 @@ def _row_fields(row: object) -> Dict[str, Any]:
     }
 
 
+#: The rebuilt statuses under which the scanner's tool ran: a recorded exit code
+#: on such a row is the tool's, and is kept when the per-target reports carry
+#: none. A MISSING or SKIPPED tool never ran, so its row carries None.
+_RAN_STATUSES = frozenset(
+    {ScannerStatus.PASSED, ScannerStatus.FAILED, ScannerStatus.ERROR}
+)
+
+
 def _populate_scanner_results_from_unified_metrics(
     aggregated_results: AshAggregatedResults, unified_metrics: List[ScannerMetrics]
 ) -> AshAggregatedResults:
@@ -1157,11 +1165,25 @@ def _populate_scanner_results_from_unified_metrics(
         # The exit code is written as the metrics have it, None included: the
         # model's default is 0, which reads as a tool that ran and exited clean,
         # so a tool that never ran (missing, excluded, refused before its start)
-        # has to carry an explicit None. The skipped reason is written when the
-        # metrics have one and dropped when they have none (the metrics are the
-        # authority: a row's stale reason is not kept), without passing a None
-        # that would mark the field set on every row.
-        fields["exit_code"] = metrics.exit_code
+        # has to carry an explicit None. One exception: the metrics read the
+        # code from the per-target reports, and a results file whose rows carry
+        # a code while its reports carry none (an older writer, a merged file)
+        # has the row as the code's only record. A row whose status says the
+        # tool ran keeps that code rather than having it erased by the rebuild.
+        # The skipped reason is written when the metrics have one and dropped
+        # when they have none (the metrics are the authority: a row's stale
+        # reason is not kept), without passing a None that would mark the field
+        # set on every row.
+        recorded_code = fields.get("exit_code")
+        if (
+            metrics.exit_code is None
+            and status in _RAN_STATUSES
+            and isinstance(recorded_code, int)
+            and not isinstance(recorded_code, bool)
+        ):
+            fields["exit_code"] = recorded_code
+        else:
+            fields["exit_code"] = metrics.exit_code
         if metrics.skipped_reason is None:
             fields.pop("skipped_reason", None)
         else:
