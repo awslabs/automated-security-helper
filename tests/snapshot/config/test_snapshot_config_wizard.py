@@ -48,8 +48,10 @@ def _answers(project_name: str, *, keep_existing_modules: int = 0) -> str:
     lines.append("y")  # the ASH_OFFLINE reminder comment
     lines += ["n"] * keep_existing_modules  # drop each module already configured
     # A top-level package ending in `_ash_plugins` is inside ASH's plugin namespace
-    # (plugins/loader.py); the wizard now refuses to write a config naming a module
-    # a scan would refuse, exit 3, so the answer names an admitted one.
+    # (plugins/loader.py); the wizard refuses to write a config naming a module
+    # outside it, exit 3, so the answer names one inside. It need not be installed:
+    # the wizard writes a module the operator may install next, and get and
+    # validate name it until then.
     lines += ["my_org_ash_plugins", ""]  # add one module, then finish
     return "\n".join(lines) + "\n"
 
