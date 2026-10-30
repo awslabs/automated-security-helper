@@ -197,10 +197,30 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     real_cwd = pathlib.Path(os.getcwd())
     real_mkdir = pathlib.Path.mkdir
 
-    def mkdir_below_the_real_cwd(self, *args, **kwargs):
+    def part_below_the_displayed_cwd(candidate):
+        """The part of ``candidate`` below the displayed cwd, or None when it is elsewhere.
+
+        The displayed name is rooted with no drive. On Windows, ``ntpath`` gives a
+        rooted path the current drive when it makes it absolute (``realpath`` of
+        a relative config path joins it onto the faked ``os.getcwd()``, then
+        ``abspath`` prefixes the drive), so a path the product derived under the
+        displayed cwd reads ``C:\\workspace\\demo-project\\...`` there and is
+        matched with its own drive in front of the displayed name too.
+        """
         try:
-            below = pathlib.PurePath(self).relative_to(native_cwd)
+            return candidate.relative_to(native_cwd)
         except ValueError:
+            pass
+        if not candidate.drive:
+            return None
+        try:
+            return candidate.relative_to(candidate.drive + native_cwd)
+        except ValueError:
+            return None
+
+    def mkdir_below_the_real_cwd(self, *args, **kwargs):
+        below = part_below_the_displayed_cwd(pathlib.PurePath(self))
+        if below is None:
             return real_mkdir(self, *args, **kwargs)
         return real_mkdir(real_cwd / below, *args, **kwargs)
 
@@ -218,9 +238,8 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
             return path
         if isinstance(text, bytes):
             return path
-        try:
-            below = pathlib.PurePath(text).relative_to(native_cwd)
-        except ValueError:
+        below = part_below_the_displayed_cwd(pathlib.PurePath(text))
+        if below is None:
             return path
         return str(real_cwd / below)
 
