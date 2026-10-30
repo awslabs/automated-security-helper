@@ -398,6 +398,45 @@ def test_an_unknown_kind_is_reported_low_and_logged_once(caplog):
     assert sum("brand-new-kind" in r.getMessage() for r in caplog.records) == 1
 
 
+@pytest.mark.unit
+def test_an_untrusted_input_message_in_an_unknown_shape_is_logged_once(caplog):
+    """The anchored shape keeps workflow-authored text from raising a finding to
+    HIGH; its other side is a reworded actionlint message quietly becoming LOW.
+    The severity stays what the shape decides, and the drift is logged once."""
+    payload = {
+        "version": "1.7.13",
+        "errors": [
+            {
+                "kind": "expression",
+                "message": 'note: "github.event.issue.title" is potentially untrusted.',
+                "filepath": "a.yml",
+                "line": 1,
+            },
+            {
+                "kind": "expression",
+                "message": 'note: "github.event.issue.body" is potentially untrusted.',
+                "filepath": "a.yml",
+                "line": 2,
+            },
+            {
+                "kind": "expression",
+                "message": '"github.event.issue.title" is potentially untrusted.',
+                "filepath": "a.yml",
+                "line": 3,
+            },
+        ],
+    }
+    with caplog.at_level(logging.WARNING):
+        sarif = build_sarif(payload, exit_code=1)
+    severities = [
+        r["properties"]["issue_severity"] for r in sarif["runs"][0]["results"]
+    ]
+    assert severities == ["LOW", "LOW", "HIGH"]
+    drift = [r for r in caplog.records if "potentially untrusted" in r.getMessage()]
+    assert len(drift) == 1
+    assert "not HIGH" in drift[0].getMessage()
+
+
 # --------------------------------------------------------------------------- #
 # Malformed or contradictory output fails closed
 # --------------------------------------------------------------------------- #

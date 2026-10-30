@@ -768,6 +768,7 @@ def build_sarif(
 
     results: List[Dict[str, Any]] = []
     kinds_seen: Dict[str, str] = {}
+    untrusted_shape_drift_logged = False
     credential_lines = _credential_lines(errors)
     for index, error in enumerate(errors):
         if not isinstance(error, dict):
@@ -795,6 +796,27 @@ def build_sarif(
             )
         severity = severity_for(kind, message)
         kinds_seen.setdefault(kind, KIND_SEVERITY.get(kind, UNKNOWN_KIND_SEVERITY))
+        # The HIGH for an untrusted-input finding is given by the message's
+        # shape (severity_for), so workflow-authored text holding the marker
+        # words is not raised. The other side of that anchoring: a message that
+        # holds the marker in a shape the pinned mapping does not know (a newer
+        # actionlint's wording, a prefix) would quietly become LOW, which passes
+        # the default gate. The severity stays as the shape decides; the drift
+        # is logged once per report so it is seen.
+        if (
+            not untrusted_shape_drift_logged
+            and kind == "expression"
+            and severity != "HIGH"
+            and UNTRUSTED_INPUT_MARKER in message
+        ):
+            untrusted_shape_drift_logged = True
+            ASH_LOGGER.warning(
+                "actionlint reported an expression finding whose message holds "
+                f"{UNTRUSTED_INPUT_MARKER!r} in a shape the severity mapping for "
+                f"actionlint {PINNED_VERSION} does not recognize; it is classified "
+                f"by its kind ({severity}), not HIGH. A newer actionlint may have "
+                "reworded the untrusted-input message; check the pinned mapping."
+            )
 
         # actionlint writes the platform's separator. On Windows that is the
         # backslash, rewritten to the SARIF form; on POSIX a backslash is a
