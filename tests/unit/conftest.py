@@ -127,6 +127,7 @@ PROBE_SUBJECT_MODULES = frozenset(
         "utils/test_parsed_child_output_ignores_the_callers_terminal.py",
         "utils/test_pre_installed_tool.py",
         "utils/test_pre_installed_tool_sandbox_grant.py",
+        "utils/test_pre_installed_tool_verdict_causes.py",
         "utils/test_the_uv_runner_keeps_the_stop_state.py",
         "utils/test_the_uv_tool_version_carries_no_piece_of_a_value.py",
         "utils/test_tool_lookups_follow_path_and_bin_path.py",
