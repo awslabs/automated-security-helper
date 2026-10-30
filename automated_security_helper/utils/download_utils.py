@@ -1235,11 +1235,13 @@ def install_binary_from_url(
         )
 
     # Download the file, keeping the digest that was verified as the bytes landed.
-    # Landed executable (0o755) as a binary, not with the data default: a
+    # Landed executable (0o755), the download's default mode, as a binary: a
     # make_executable that refuses below (a link or a non-regular file at the
-    # path) would otherwise leave a receipted install that cannot run.
+    # path) would otherwise leave a receipted install that cannot run. The
+    # default is relied on here rather than repeated: the data callers are the
+    # ones that say their mode.
     binary_path, installed_digest = _download_verified(
-        url, destination, rename_to, expected_sha256=expected_sha256, mode=0o755
+        url, destination, rename_to, expected_sha256=expected_sha256
     )
 
     # Make it executable
