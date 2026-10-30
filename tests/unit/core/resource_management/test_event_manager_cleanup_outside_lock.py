@@ -100,22 +100,30 @@ class TestTheCleanupRunsOutsideTheLock:
 
     @pytest.mark.asyncio
     async def test_a_slow_cleanup_does_not_stall_other_callers(self):
+        """The other caller is tried only once the slow cleanup has started, so
+        the test measures the lock being free DURING the cleanup. One
+        sleep(0) assumed the slow task had reached the cleanup, which held
+        only while unregister_subscription had no await before its lock."""
         manager = EventSubscriptionManager()
         release = asyncio.Event()
+        started = asyncio.Event()
 
         async def slow_cleanup():
+            started.set()
             await release.wait()
 
         await _register(manager, "slow", slow_cleanup)
         await _register(manager, "quick", None)
 
         slow = asyncio.create_task(manager.unregister_subscription("slow"))
-        await asyncio.sleep(0)
-        # Another caller gets through while the slow cleanup is still running.
-        assert await asyncio.wait_for(manager.unregister_subscription("quick"), 1)
-        assert not slow.done()
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            # Another caller gets through while the slow cleanup is running.
+            assert await asyncio.wait_for(manager.unregister_subscription("quick"), 1)
+            assert not slow.done()
+        finally:
+            release.set()
 
-        release.set()
         assert await asyncio.wait_for(slow, 1) is True
 
     @pytest.mark.asyncio
