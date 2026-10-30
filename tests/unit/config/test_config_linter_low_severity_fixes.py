@@ -443,6 +443,7 @@ class TestWhichSuppressionsTheReportLists:
         assert not any("No unused suppressions report found" in m for m in messages), (
             messages
         )
+        assert any(m.startswith("Unused suppression:") for m in messages), messages
 
     @pytest.mark.parametrize(
         "merged, found",
@@ -485,7 +486,6 @@ class TestWhichSuppressionsTheReportLists:
         ]
         not_found = any("No unused suppressions report found" in m for m in messages)
         assert not_found is (not found), messages
-        assert any(m.startswith("Unused suppression:") for m in messages), messages
 
     def test_only_the_files_own_entries_are_fixable(self, tmp_path, monkeypatch):
         """An entry an ``extends`` base supplies is reported unused with the
