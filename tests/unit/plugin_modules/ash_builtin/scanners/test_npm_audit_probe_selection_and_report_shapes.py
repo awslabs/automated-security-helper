@@ -390,9 +390,14 @@ class TestYarn4Lines:
 
 
 def test_a_url_ending_in_a_slash_gives_the_package_rule_id():
-    assert NpmAuditScanner._advisory_id("lodash", {"url": "https://x/advisories/"}) == (
-        "npm-lodash"
-    )
+    """Trailing slashes are dropped before the last segment is read, so an
+    advisory URL with one keeps its id; a URL with no segment left at all (the
+    empty string used to be the rule id, shared by every such advisory) falls
+    back to the package's own id. A URL whose last segment is a collection, not
+    an advisory ("https://x/advisories/"), is read as that segment: no shape of
+    an advisory id is assumed."""
+    assert NpmAuditScanner._advisory_id("lodash", {"url": "///"}) == "npm-lodash"
+    assert NpmAuditScanner._advisory_id("lodash", {"url": ""}) == "npm-lodash"
     assert NpmAuditScanner._advisory_id("lodash", {"url": f"{GHSA}/"}) == (
         "GHSA-xvch-5gv4-984h"
     )
