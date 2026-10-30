@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import subprocess  # nosec B404
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -162,6 +163,12 @@ class TestGetUvToolCommandMemo:
         """The control: a tool that answered under the wrapper is remembered."""
         from automated_security_helper.utils.sandbox import scope as sandbox_scope
 
+        # The memo serves a remembered command only while the uv that answered
+        # is still an executable file (_remembered_command). The fixture's uv
+        # is a path that exists nowhere, which every other test here is fine
+        # with (none asks the memo twice for a uv answer), so this one, which
+        # does, names a real executable as the uv the probe found.
+        monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: sys.executable)
         scoped = sandbox_scope.SandboxScope(
             backend=SimpleNamespace(name="zz-backend"),
             scanner_name="zz-scanner",
