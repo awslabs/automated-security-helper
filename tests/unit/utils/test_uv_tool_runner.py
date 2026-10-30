@@ -2302,9 +2302,12 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
     def _blocking_outcomes(first_block: float, second_block: float, windows: list):
         """Two attempts that occupy real time: the first fails, the second succeeds.
 
-        ``threading.Event().wait`` rather than ``time.sleep`` deliberately -- the
-        install harness patches the module's wait between attempts to record intervals,
-        so a sleep here would return instantly and occupy no time at all.
+        ``threading.Event().wait`` rather than ``time.sleep`` deliberately. The
+        install harness once patched the module's ``time.sleep`` to record the
+        intervals, which made a sleep here return instantly and occupy no time at
+        all; it now patches ``_sleep_between_attempts``, the wait between attempts,
+        and leaves ``time.sleep`` alone. The Event wait stays so this helper keeps
+        occupying real time whatever the harness stubs next.
         """
 
         def outcome(attempt_number):
@@ -2518,19 +2521,17 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
             arrives between these two marks came from a monitor outliving its own
             attempt, and no grace period is needed to say so.
 
-            The 0.4s backoff and the 0.02s monitor cadence are far enough apart to
-            tell apart by size, which matters because the pre-fix monitor polled
-            with the module's ``time.sleep``; the backoff itself arrives whole
-            through ``_sleep_between_attempts``, the seam patched below.
+            Only the backoff reaches this seam: it is patched onto
+            ``_sleep_between_attempts``, which the install loop calls once per
+            gap, while the monitor polls with the module's ``time.sleep``, which
+            stays real. So every call here is a backoff and marks the gap; no
+            size check is needed to tell a backoff from a monitor tick.
             """
-            if seconds > 0.1:
-                with lock:
-                    gap_marks.append(len(records))
-                threading.Event().wait(seconds)
-                with lock:
-                    gap_marks.append(len(records))
-            else:
-                threading.Event().wait(seconds)
+            with lock:
+                gap_marks.append(len(records))
+            threading.Event().wait(seconds)
+            with lock:
+                gap_marks.append(len(records))
 
         with (
             _install_harness(runner, _outcomes) as (installs, _),
@@ -3345,11 +3346,14 @@ class TestAMemoizedFailureIsRecoverable:
 class TestProbeLocksAreNamespaced:
     """The two probes must not share a lock object.
 
-    get_tool_version keys on "<tool>::<package>" and get_uv_tool_command on
-    "<tool>::<fallback_binary>", so get_tool_version("bandit", "bandit") and
-    get_uv_tool_command("bandit") both produced "bandit::bandit". These are
-    non-reentrant threading.Lock, so sharing one is a deadlock waiting for a
-    refactor that makes either call into the other.
+    Before the keys were namespaced, get_tool_version keyed on
+    "<tool>::<package>" and get_uv_tool_command on "<tool>::<fallback_binary>",
+    so get_tool_version("bandit", "bandit") and get_uv_tool_command("bandit")
+    both produced "bandit::bandit". These are non-reentrant threading.Lock, so
+    sharing one is a deadlock waiting for a refactor that makes either call into
+    the other. Today the version probe keys on "version::<tool>" (the tool alone,
+    see the second test) and the command probe on
+    "command::<tool>::<fallback_binary>::<environment>".
     """
 
     def test_the_two_probes_use_different_lock_keys(self, runner):
@@ -3394,6 +3398,44 @@ class TestProbeLocksAreNamespaced:
         # The collision the namespacing exists to prevent.
         assert "bandit::bandit" not in seen
         assert len(set(seen)) == 2
+
+    def test_two_spec_keys_of_one_tool_share_the_version_lock(self, runner):
+        """The version lock is keyed by the TOOL, not by the tool::spec memo key.
+
+        ``bandit`` and ``bandit==1.9.4`` are two memo keys that resolve to one
+        installed environment, and probing them under two locks reopened the
+        first-import race the lock exists to close. So both calls must take the
+        same lock, ``version::bandit``, while their memos stay apart (the second
+        call still probes, which is what the two subprocess runs show). A key
+        that carried the spec, ``version::bandit::bandit==1.9.4``, fails the
+        equality below.
+        """
+        import automated_security_helper.utils.uv_tool_runner as mod
+
+        real = mod._get_or_create_probe_lock
+        seen: list = []
+
+        def recording(cache_key):
+            seen.append(cache_key)
+            return real(cache_key)
+
+        runner._uv_available_cache = True
+        with (
+            patch.object(mod, "_get_or_create_probe_lock", recording),
+            patch(
+                "automated_security_helper.utils.subprocess_utils._run_plain"
+            ) as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="bandit 1.9.4\n", stderr=""
+            )
+            runner.get_tool_version("bandit", "bandit")
+            runner.get_tool_version("bandit", "bandit==1.9.4")
+
+        assert seen == ["version::bandit", "version::bandit"], seen
+        # Two memo keys, so the second call probed again rather than reading the
+        # first call's answer: the lock is shared, the memo is not.
+        assert mock_run.call_count == 2
 
 
 class TestRunToolContract:
