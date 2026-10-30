@@ -38,6 +38,7 @@ from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.core.previous_results import (
     HELD_DIR_NAME,
+    RESTORED_MARKER_NAME,
     PreviousResults,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -115,6 +116,56 @@ class TestAStaleHeldSetIsDiscardedWhenSetAsideFailed:
 
         assert own.read_text(encoding="utf-8") == "this scan"
         assert held.exists()
+
+    def test_the_stale_top_level_results_go_when_set_aside_failed(
+        self, tmp_path, monkeypatch
+    ):
+        """A set aside that failed leaves the previous results at the top level,
+        and this scan replaces them: they go when the output directory is
+        prepared, as for a scan that keeps nothing, so the previous results
+        file does not pass for this run's until its own write (the MCP progress
+        tracker reads the file's existence as a complete scan). The marker a
+        restore left beside them goes too: with it, holds_restored_results
+        read this scan's own output as put-back results."""
+        source, output = _dirs(tmp_path)
+        stale = output / "ash_aggregated_results.json"
+        stale.write_text("stale", encoding="utf-8")
+        marker = output / RESTORED_MARKER_NAME
+        marker.write_text("restored\n", encoding="utf-8")
+
+        def refuse(self):
+            raise PermissionError(13, "Permission denied", str(self.output_dir))
+
+        monkeypatch.setattr(PreviousResults, "set_aside", refuse)
+        orchestrator = ASHScanOrchestrator(
+            source_dir=source, output_dir=output, keep_previous_results=True
+        )
+        orchestrator._set_previous_results_aside()
+        orchestrator._prepare_output_dir()
+
+        # Red at the previous tip: the cleanup was gated on the handle being
+        # None, and the handle stays after a failed set aside, so the stale
+        # file and the marker stayed for the whole scan.
+        assert not stale.exists()
+        assert not marker.exists()
+
+    def test_a_completed_set_aside_keeps_the_cleanup_off(self, tmp_path):
+        """The control: once the previous results ARE set aside there is nothing
+        at the top level to remove, and the held set is left alone."""
+        source, output = _dirs(tmp_path)
+        (output / "ash_aggregated_results.json").write_text("prev", encoding="utf-8")
+
+        orchestrator = ASHScanOrchestrator(
+            source_dir=source, output_dir=output, keep_previous_results=True
+        )
+        orchestrator._set_previous_results_aside()
+        orchestrator._prepare_output_dir()
+
+        held = output / HELD_DIR_NAME
+        assert (held / "ash_aggregated_results.json").read_text(
+            encoding="utf-8"
+        ) == "prev"
+        assert not (output / "ash_aggregated_results.json").exists()
 
 
 class _CapturingEngine:

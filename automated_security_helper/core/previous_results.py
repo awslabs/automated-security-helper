@@ -190,7 +190,7 @@ class PreviousResults:
         if not self.output_dir.is_dir() or self._output_dir_is_a_link():
             return
         # A discard that stopped partway left its half-deleted set: finished here.
-        _remove(self.output_dir / DISCARDING_DIR_NAME)
+        self._remove_discarding_leftover()
         if self._real_dir(self.restoring):
             # A restore stopped halfway, or a directory of that name that outlived
             # a completed scan (its discard failed) or that a scanned repository
@@ -238,6 +238,42 @@ class PreviousResults:
         if _exists(self.marker):
             _remove(self.marker)
 
+    def forget_restored_marker(self) -> None:
+        """Drop the restore marker without moving anything. Never raises.
+
+        For a set aside that FAILED while the scan goes on: the orchestrator then
+        removes the previous results at the top level and this scan writes its
+        own there, so the marker, which says those files were put back after a
+        failed scan, would misreport this scan's output. A set aside that
+        completes removes the marker itself, once its moves are done.
+        """
+        try:
+            self._remove_marker()
+        except OSError as e:
+            ASH_LOGGER.warning(
+                f"Could not remove the restore marker {self.marker}: {e}; a reader "
+                "of holds_restored_results may take this scan's results for put-back "
+                "ones until the next scan removes it"
+            )
+
+    def _remove_discarding_leftover(self) -> None:
+        """Remove the half-deleted set a discard that stopped partway left.
+
+        Best effort: a refusal (a permission, a lock another process holds on a
+        file in it) is logged and the caller goes on. Raising here made every
+        later set aside and discard in the directory fail on the same leftover,
+        which turned keep-previous-results off for that directory for good; the
+        leftover's name is never taken for the held set, so leaving it costs
+        only the space it holds.
+        """
+        try:
+            _remove(self.output_dir / DISCARDING_DIR_NAME)
+        except OSError as e:
+            ASH_LOGGER.warning(
+                f"Could not remove {self.output_dir / DISCARDING_DIR_NAME}, left by a "
+                f"discard that stopped partway: {e}; it is left in place"
+            )
+
     def _put_back(self, staging: Path) -> None:
         """Move what staging holds back to the top level, then remove staging.
 
@@ -282,7 +318,7 @@ class PreviousResults:
         if self._output_dir_is_a_link():
             return
         discarding = self.output_dir / DISCARDING_DIR_NAME
-        _remove(discarding)
+        self._remove_discarding_leftover()
         if self._real_dir(self.held):
             try:
                 self.held.rename(discarding)
@@ -290,7 +326,11 @@ class PreviousResults:
                 # Deleted in place then; the rename is a precaution, not the
                 # discard itself.
                 pass
-        for path in (discarding, self.held, self.restoring):
+        # The held set before the leftover: when the rename above was refused
+        # because the leftover is still there, the held set is deleted in place
+        # first, so a leftover that cannot be removed does not shield it (the
+        # next set aside would take it for the last complete results).
+        for path in (self.held, self.restoring, discarding):
             if _exists(path):
                 _remove(path)
         _remove(self.output_dir / STAGING_DIR_NAME)

@@ -777,6 +777,13 @@ class ASHScanOrchestrator(BaseModel):
             # that stale set in place, and the next MCP scan took it for the
             # last complete results and deleted this scan's.
             self._previous_results_set_aside = False
+            # The scan goes on and replaces what is at the top level
+            # (_prepare_output_dir removes it), so the marker a restore left
+            # beside it no longer describes the directory: with it in place,
+            # holds_restored_results read this scan's own output as results put
+            # back after a failed scan. A set aside that completes removes the
+            # marker itself.
+            self._previous_results.forget_restored_marker()
 
     def _remove_kept_previous_results(self) -> None:
         """Without keep_previous_results: remove what a scan that kept them left.
@@ -802,12 +809,20 @@ class ASHScanOrchestrator(BaseModel):
 
         After the engine is built and the committed-files check has passed, so a
         refused command line leaves the output directory as it was.
+
+        The previous run's result files go unless this scan set them aside: a
+        set aside that FAILED leaves them at the top level (the handle stays,
+        for the stale held set it still discards), and this scan replaces them
+        as it writes, so they are removed here as they are for a scan that
+        keeps nothing. Left in place, the previous results file passed for this
+        run's until its own write, which the MCP progress tracker reads as a
+        complete scan.
         """
         ASH_LOGGER.verbose("Setting up working directories")
 
         self.ensure_directories()
 
-        if self.existing_results_path is None and self._previous_results is None:
+        if self.existing_results_path is None and not self._previous_results_set_aside:
             self._remove_previous_result_files()
 
     def _build_engine(self, config: AshConfig) -> None:
