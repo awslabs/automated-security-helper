@@ -557,13 +557,17 @@ class WalkJudgment:
     bound, an unreadable component, a name ``os.path.realpath`` raises on)
     rather than on anything found: the judgment is unchanged either way, but a
     sentence that explains it must then say the walk stopped instead of
-    claiming a location the walk never established. Not a bool on purpose: a
-    truth test would silently read every judgment as True, so a caller states
-    which field it reads.
+    claiming a location the walk never established. ``client_delivered`` is True
+    when the verdict is True only because an MCP client delivered the path
+    (``path_trust.scanned_tree_judgment``): it sits in no tree the walk found, so
+    a sentence must say a client delivered it, not that it is in the scanned
+    tree. Not a bool on purpose: a truth test would silently read every judgment
+    as True, so a caller states which field it reads.
     """
 
     verdict: bool
     decided: bool
+    client_delivered: bool = False
 
     def __bool__(self) -> bool:
         raise TypeError(

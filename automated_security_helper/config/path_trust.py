@@ -407,7 +407,8 @@ def scanned_tree_judgment(
     judged = confined_files([Path(path)], trees, named=[Path(path)])
     if judged.members:
         return WalkJudgment(verdict=True, decided=not judged.undecided)
-    return WalkJudgment(verdict=config_is_client_supplied(path), decided=True)
+    delivered = config_is_client_supplied(path)
+    return WalkJudgment(verdict=delivered, decided=True, client_delivered=delivered)
 
 
 def scanned_tree_reason(

@@ -522,6 +522,10 @@ def refusal_reason(
                         "decided (the walk of its location stopped before "
                         "the end), and an undecided location is refused"
                     )
+                if tree_judgment.client_delivered:
+                    # The verdict is the client-supplied arm's: the location sits
+                    # in no tree the walk found, so no tree is named.
+                    return "it is a file an MCP client delivered"
                 if root_judged:
                     return "it resolves inside the given root's trees"
                 if any_checkout:
