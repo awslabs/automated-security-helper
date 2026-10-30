@@ -110,13 +110,79 @@ class TestAConsistentTreePasses:
         assert "Found 1 template files" in out
         assert "Version consistency validation passed" in out
 
-    def test_the_installed_distribution_is_not_consulted(
-        self, project, monkeypatch, capsys
+    def test_the_installed_distribution_is_not_asked_for_its_version(
+        self, project, monkeypatch
     ):
-        monkeypatch.setattr(f"{MODULE}._installed_version", lambda: "9.9.9")
+        # A tripwire, not a regression test: with a pyproject.toml present the old
+        # code also read 1.2.3 and would pass this. The cases that tell old from new
+        # are the two in TestTheLabeledVersionComesFromThePyproject, where the file
+        # is missing or another project's and the old code printed the installed
+        # 9.9.9. This one fails if validate ever asks the distribution at all.
+        def asked():
+            raise AssertionError("validate asked the installed distribution")
+
+        monkeypatch.setattr(f"{MODULE}._installed_version", asked)
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is True
-        assert "9.9.9" not in capsys.readouterr().out
+
+
+class TestWhatValidateExpectsIsWhatSetWrites:
+    def test_a_tree_set_just_wrote_validates(self, project, monkeypatch):
+        # The other tests build the page with TEMPLATE.replace("{{VERSION}}", v),
+        # which repeats validate's own assumption. This one lets `set` write it:
+        # if validate and generate drift apart (a header, another placeholder, the
+        # field the version is read from), a tree `set` just wrote stops validating.
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        assert bumper.set_version("2.0.0") is True
+        assert project.joinpath("README.md").read_text(
+            encoding="utf-8"
+        ) == TEMPLATE.replace("{{VERSION}}", "2.0.0")
+        assert bumper.validate_consistency() is True
+
+    def test_a_bump_then_validate_round_trips_and_a_hand_edit_does_not(
+        self, project, monkeypatch
+    ):
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        assert bumper.bump_version("minor") is True
+        assert bumper.validate_consistency() is True
+        project.joinpath("README.md").write_text("edited\n", encoding="utf-8")
+        assert bumper.validate_consistency() is False
+
+
+class TestAFileThatCannotBeReadIsReportedNotRaised:
+    def test_a_page_that_is_not_utf8(self, project, monkeypatch, capsys):
+        # Red before: UnicodeDecodeError ended validate with a traceback.
+        project.joinpath("README.md").write_bytes(b"\xff\xfe\x00broken")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "could not read" in out
+        assert "README.md" in out
+        assert "validation failed" in out
+
+    def test_a_page_that_is_a_directory(self, project, monkeypatch, capsys):
+        project.joinpath("README.md").unlink()
+        project.joinpath("README.md").mkdir()
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        assert "could not read" in capsys.readouterr().out
+
+    def test_a_template_that_cannot_be_read_is_reported_and_the_rest_go_on(
+        self, project, monkeypatch, capsys
+    ):
+        project.joinpath("README.md.template").unlink()
+        project.joinpath("README.md.template").mkdir()
+        project.joinpath("OTHER.md.template").write_text(TEMPLATE, encoding="utf-8")
+        project.joinpath("OTHER.md").write_text("stale\n", encoding="utf-8")
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        bumper.template_manager.target_files = ["README.md", "OTHER.md"]
+        assert bumper.validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "could not render" in out
+        assert "OTHER.md is not its template rendered for 1.2.3" in out
 
 
 class TestADisagreementFailsTheValidation:

@@ -354,17 +354,30 @@ class VersionBumper:
                 )
                 consistent = False
                 continue
+            # A file that cannot be read (a directory, a permission, bytes that are
+            # not UTF-8) is one more thing to report, as `set` reports a template
+            # that fails to render; a traceback here ended the run and hid every
+            # target after it.
             try:
                 actual = target.read_text(encoding="utf-8")
             except FileNotFoundError:
                 print(f"Error: {target} does not exist; generate it from {template}")
                 consistent = False
                 continue
+            except (OSError, ValueError) as e:
+                print(f"Error: could not read {target}: {e}")
+                consistent = False
+                continue
             if not (tables_agree and writable):
                 continue
-            expected = self.template_manager.render(
-                template.read_text(encoding="utf-8"), current_version
-            )
+            try:
+                expected = self.template_manager.render(
+                    template.read_text(encoding="utf-8"), current_version
+                )
+            except (OSError, ValueError) as e:
+                print(f"Error: could not render {template}: {e}")
+                consistent = False
+                continue
             if actual != expected:
                 print(
                     f"Error: {target} is not its template rendered for "
