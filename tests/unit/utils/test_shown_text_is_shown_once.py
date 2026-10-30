@@ -112,7 +112,10 @@ def _ash_log(tmp_path, log) -> str:
         for handler in logger.handlers:
             handler.close()
         logger.handlers = []
-    return (tmp_path / f"{name}.log").read_bytes().decode("utf-8")
+    # Read as text, so the platform's line terminator (CR LF on Windows, where
+    # the file handler writes in text mode) comes back as "\n": the raw-control
+    # check below judges what the record wrote, not how the file ends its lines.
+    return (tmp_path / f"{name}.log").read_text(encoding="utf-8")
 
 
 def _live_panel(log) -> str:
@@ -1730,7 +1733,11 @@ def test_only_the_escapers_make_shown_text_in_the_package():
 
 def test_a_lone_surrogate_shown_on_one_line_encodes(monkeypatch):
     """A file name read from a byte that is not UTF-8, on a strict stdout."""
-    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+    # newline="\n": the bytes compared below are the text's own; without it the
+    # wrapper writes the platform's line terminator, CR LF on Windows.
+    stream = io.TextIOWrapper(
+        io.BytesIO(), encoding="utf-8", errors="strict", newline="\n"
+    )
     monkeypatch.setattr(sys, "stdout", stream)
     from automated_security_helper.utils.console import echo
 
