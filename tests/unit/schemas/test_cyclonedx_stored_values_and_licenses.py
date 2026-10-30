@@ -165,9 +165,23 @@ BOM = {
 
 
 def _as_the_reporter_emits(report: CycloneDXReport) -> dict:
-    """The document ``cyclonedx_reporter`` writes: the fields that were set."""
+    """The document ``cyclonedx_reporter`` writes.
+
+    The reporter dumps the fields that were set, and before dumping it marks the
+    envelope fields set (``CycloneDXReporter.report`` assigns ``bom.bomFormat``,
+    ``bom.specVersion`` and ``bom.version`` to themselves), so a BOM whose scanner
+    wrote no ``version`` is emitted with the spec default, 1, before and after a
+    results-file round trip alike. A bare exclude_unset dump reads ``version`` as
+    unset before the round trip and as set after it (the stored results file is a
+    full dump, which writes the default, and re-validation marks it set), and that
+    difference is the reporter's own envelope, not something the round trip added.
+    """
+    bom = report.model_copy()
+    bom.bomFormat = bom.bomFormat
+    bom.specVersion = bom.specVersion
+    bom.version = bom.version
     return json.loads(
-        report.model_dump_json(by_alias=True, exclude_unset=True, exclude_none=True)
+        bom.model_dump_json(by_alias=True, exclude_unset=True, exclude_none=True)
     )
 
 
