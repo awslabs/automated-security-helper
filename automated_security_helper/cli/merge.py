@@ -1003,7 +1003,7 @@ def _verify_scanner_union(
             f"--fail-on-incomplete-scanners rather than refused here."
         )
 
-    missing_from_owner = sorted(
+    unrecorded_by_owner = sorted(
         name
         for name, position in owner_by_scanner.items()
         if not any(
@@ -1011,10 +1011,40 @@ def _verify_scanner_union(
             for scanner in shards[position][1].scanner_results
         )
     )
-    # Whether or not another shard recorded the name. An owned scanner that no
-    # shard recorded at all is the worse case: there is no skip marker to adopt,
-    # so the scanner drops out of the merged report and out of the completeness
-    # gate, and nothing says it was ever assigned.
+    # Two shapes, split by whether some OTHER shard recorded the name. The
+    # refusal here covers only the first: another shard's skip marker is the sole
+    # trace, and the merge would adopt it, reporting a scanner that never ran as
+    # deliberately skipped. No flag can make that honest, so it is refused
+    # whatever was passed.
+    #
+    # The second shape, an owned scanner that NO shard recorded, belongs to the
+    # --fail-on-incomplete-scanners gate, not here: the scanner's whole shard may
+    # have run nothing, which is the gate's own case ("completed none of the
+    # scanners they owned"), and --no-fail-on-incomplete-scanners is documented as
+    # merging such a partial union anyway. An unconditional refusal here fired
+    # before that flag could be read, so a single shard whose scanners recorded
+    # nothing could no longer be merged to an exit code under the override, which
+    # it had always been. _verify_shard_contributions now refuses the shape under
+    # the gate, and the disclosure below is what remains of it when the gate is
+    # off: emitted whether or not the gated check goes on to raise, because this
+    # function cannot see the flag.
+    missing_from_owner = [name for name in unrecorded_by_owner if name in seen]
+    recorded_nowhere = [name for name in unrecorded_by_owner if name not in seen]
+    if recorded_nowhere:
+        unrecorded_detail = ", ".join(
+            f"{name} (owned by shard {shards[owner_by_scanner[name]][2].shard_index})"
+            for name in recorded_nowhere
+        )
+        ASH_LOGGER.warning(
+            shown_on_one_line(
+                f"{len(recorded_nowhere)} owned scanner(s) were recorded by no "
+                f"shard: {unrecorded_detail}. Nothing says they ran. Under "
+                f"--fail-on-incomplete-scanners the merge is refused for them; "
+                f"under --no-fail-on-incomplete-scanners the merged report leaves "
+                f"them out, and this line is the only record of it."
+            ),
+            extra=NO_MARKUP,
+        )
     if missing_from_owner:
         details = ", ".join(
             f"{_shown(name)} (owned by shard "
@@ -1023,11 +1053,9 @@ def _verify_scanner_union(
         )
         raise ShardCoverageError(
             f"The shard that owned these scanners recorded no result for them: "
-            f"{details}. Where another shard's skip marker is the only trace left, "
+            f"{details}. Another shard's skip marker is the only trace left, and "
             f"adopting it would report a scanner that never ran as deliberately "
-            f"skipped; where no shard recorded the scanner, the merged report would "
-            f"leave it out altogether. Check whether that shard's scan phase "
-            f"completed."
+            f"skipped. Check whether that shard's scan phase completed."
         )
 
     return owner_by_scanner
@@ -1325,11 +1353,15 @@ def _verify_shard_contributions(
     findings, the merged verdict is the same 0 a genuinely clean scan produces.
 
     Also names the case a status check structurally cannot: an owned scanner
-    with no entry at all, where there is no status to inspect, listed as ``(no
-    result recorded)``. In ``merge_shard_results`` that shape never reaches this
-    check, because :func:`_verify_scanner_union` refuses it first, whether or not
-    some other shard left a skip marker under the same name; the arm stays for a
-    caller of this function alone and is tested as such.
+    with no entry at all, where there is no status to inspect. On a shard that
+    completed none of its scanners it is listed as ``(no result recorded)``
+    beside the statuses. On a shard that did complete some, the scanners it owns
+    but never recorded are refused separately: nothing else reads them, so they
+    would drop out of the merged report and out of the completeness gate with
+    nothing saying they were ever assigned. :func:`_verify_scanner_union` handles
+    the one shape this gate must not: an owned scanner that some *other* shard
+    recorded, usually as a skip marker, is refused there whatever the flag,
+    because merging would adopt that marker.
 
     A shard that owns nothing is not an offender. A shard count above the scanner
     count leaves surplus shards with an empty assignment, which
@@ -1356,6 +1388,7 @@ def _verify_shard_contributions(
     )
 
     offenders: List[str] = []
+    unrecorded: List[str] = []
     for _, results, assignment in shards:
         owned = [_normalized(name) for name in assignment.assigned_scanners]
         if not owned:
@@ -1364,6 +1397,7 @@ def _verify_shard_contributions(
         entries = {
             _normalized(name): entry for name, entry in results.scanner_results.items()
         }
+        absent = [name for name in owned if name not in entries]
         # A scanner recorded ERROR because its clean result came from a database the
         # policy rejects ran, and the merged scan exits 1 on that database. Counted
         # as completed here, as it was when that result was recorded PASSED, so the
@@ -1385,6 +1419,13 @@ def _verify_shard_contributions(
             )
             for name in owned
         ):
+            # The shard ran something, so it is not listed below; what it owns
+            # and never recorded is still refused, on its own line.
+            if absent:
+                unrecorded.append(
+                    f"shard {assignment.shard_index} of {assignment.shard_count}: "
+                    f"{', '.join(_shown(name) for name in absent)}"
+                )
             continue
 
         detail = []
@@ -1410,6 +1451,15 @@ def _verify_shard_contributions(
             f"because there was nothing to find, so merging would report a partial "
             f"scan as a whole one. Check whether those CI jobs had the scanners' "
             f"tools available. Pass --no-fail-on-incomplete-scanners to merge anyway."
+        )
+    if unrecorded:
+        listed = "\n  ".join(unrecorded)
+        raise ShardCoverageError(
+            f"These shards owned scanners they recorded no result for:\n  {listed}\n"
+            f"Nothing says those scanners ran, so merging would leave them out of "
+            f"the report and out of the completeness gate, with nothing saying "
+            f"they were ever assigned. Check whether that shard's scan phase "
+            f"completed. Pass --no-fail-on-incomplete-scanners to merge anyway."
         )
 
 

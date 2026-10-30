@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""An owned scanner that no shard recorded refuses the merge.
+"""An owned scanner that no shard recorded is refused under the completeness gate.
 
 Why this file exists
 --------------------
@@ -9,12 +9,22 @@ Why this file exists
 scanner only when some other shard had recorded the name, usually as the skip
 marker a shard writes for a scanner it did not own. When no shard recorded it at
 all, the check passed, the scanner dropped out of the merged report and out of
-the completeness gate, and nothing said it had ever been assigned. The refusal
-now holds whether or not another shard recorded the name.
+the completeness gate, and nothing said it had ever been assigned.
+
+A first fix refused that shape in the union check too, whatever flags were
+passed. That put it in front of ``--no-fail-on-incomplete-scanners``: a single
+shard whose scanners all recorded nothing had always been merged to an exit code
+under that override, and could not be any more. The shape now belongs to the
+gate: ``_verify_shard_contributions`` refuses it by default, on its own line
+when the shard completed other scanners; under the override the merge proceeds
+and the union check's WARNING is the record. The other shape, a name some other
+shard did record, is still refused whatever the flag, because merging would
+adopt that shard's skip marker.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -34,28 +44,77 @@ def _as_loaded(models):
     return [(Path(f"shard-{index}.json"), model) for index, model in enumerate(models)]
 
 
-def test_an_owned_scanner_that_no_shard_recorded_is_refused():
+def _shards_with_bandit_recorded_nowhere():
     shards = build_shards(3)
     owner = next(
         model
         for model in shards
         if "bandit" in read_shard_assignment(model).assigned_scanners
     )
-    # Every shard, the owner included: no skip marker is left anywhere.
+    # Every shard, the owner included: no skip marker is left anywhere. The
+    # owner still completed its other scanners, so the whole-shard arm of the
+    # gate does not apply.
     for model in shards:
         model.scanner_results.pop("bandit", None)
         model.additional_reports.pop("bandit", None)
     assert "bandit" in read_shard_assignment(owner).assigned_scanners
     assert not any("bandit" in model.scanner_results for model in shards)
+    assert len(owner.scanner_results) > 0
+    return shards
+
+
+def test_under_the_gate_an_owned_scanner_that_no_shard_recorded_is_refused():
+    shards = _shards_with_bandit_recorded_nowhere()
+
+    with pytest.raises(ShardCoverageError) as excinfo:
+        merge_shard_results(_as_loaded(shards), require_scanner_completion=True)
+
+    message = str(excinfo.value)
+    assert "owned scanners they recorded no result for" in message
+    assert "bandit" in message
+    assert "--no-fail-on-incomplete-scanners" in message
+
+
+def test_under_the_override_the_merge_proceeds_and_the_warning_is_the_record(
+    caplog,
+):
+    shards = _shards_with_bandit_recorded_nowhere()
+
+    with caplog.at_level(logging.WARNING):
+        merged = merge_shard_results(
+            _as_loaded(shards), require_scanner_completion=False
+        )
+
+    assert "bandit" not in merged.scanner_results
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if "recorded by no shard" in record.getMessage()
+    ]
+    assert len(warnings) == 1, caplog.text
+    assert "bandit" in warnings[0]
+    assert "--no-fail-on-incomplete-scanners" in warnings[0]
+
+
+def test_a_name_another_shard_recorded_is_refused_whatever_the_flag():
+    # The other shape, unchanged: the owner recorded nothing, another shard left
+    # its skip marker, and adopting the marker would lie. Not gated.
+    shards = build_shards(3)
+    owner = next(
+        model
+        for model in shards
+        if "bandit" in read_shard_assignment(model).assigned_scanners
+    )
+    del owner.scanner_results["bandit"]
+    assert any("bandit" in model.scanner_results for model in shards)
 
     with pytest.raises(ShardCoverageError, match=r"recorded no result for them"):
-        merge_shard_results(_as_loaded(shards))
+        merge_shard_results(_as_loaded(shards), require_scanner_completion=False)
 
 
 def test_the_completion_check_names_an_owned_scanner_with_no_entry():
-    # merge_shard_results never reaches this arm (the union check refuses first),
-    # so the completion check is called on its own: a shard that owns scanners
-    # and recorded none of them is refused, each listed as "(no result recorded)".
+    # A shard that owns scanners and recorded none of them is refused under the
+    # whole-shard arm, each scanner listed as "(no result recorded)".
     shard = build_shard(0, 1, SCANNERS)
     for scanner in SCANNERS:
         shard.scanner_results.pop(scanner, None)

@@ -4088,17 +4088,16 @@ class TestShardContributionIsRefused:
 
     def test_a_scanner_absent_from_its_owners_results_is_refused(self):
         # The case a status-based check structurally cannot see: the owning shard
-        # recorded no entry at all, so there is no status to inspect.
-        # _verify_scanner_union refuses it first, whatever the shard count and
-        # whether or not another shard left a skip marker under the name, so the
-        # refusal read here is its own; the completion check behind it stays for
-        # the statuses it reads.
+        # recorded no entry at all, so there is no status to inspect. Reproduced
+        # with a single shard because with two or more, another shard's skip
+        # marker puts the name in _verify_scanner_union's `seen` set and that
+        # check catches it first.
         shard = build_shard(0, 1, SCANNERS)
         for scanner in SCANNERS:
             shard.scanner_results.pop(scanner, None)
             shard.additional_reports.pop(scanner, None)
 
-        with pytest.raises(ShardCoverageError, match=r"recorded no result for them"):
+        with pytest.raises(ShardCoverageError, match=r"completed none"):
             merge_shard_results(as_loaded([shard]), require_scanner_completion=True)
 
     def test_a_shard_that_completed_nothing_no_longer_merges_to_exit_zero(

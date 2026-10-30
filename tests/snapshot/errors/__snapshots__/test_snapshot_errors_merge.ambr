@@ -167,7 +167,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: The shard that owned these scanners recorded no result for them: semgrep (owned by shard 1). Where another shard's skip marker is the only trace left, adopting it would report a scanner that never ran as deliberately skipped; where no shard recorded the scanner, the merged report would leave it out altogether. Check whether that shard's scan phase completed.
+      Refusing to merge: The shard that owned these scanners recorded no result for them: semgrep (owned by shard 1). Another shard's skip marker is the only trace left, and adopting it would report a scanner that never ran as deliberately skipped. Check whether that shard's scan phase completed.
   
     ''',
   })
