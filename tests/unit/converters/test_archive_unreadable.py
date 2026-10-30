@@ -38,6 +38,7 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
 )
+from automated_security_helper.utils.scan_output_dirs import CONVERTED_SOURCES_FILE_NAME
 from tests.utils.archive_builders import tar_bytes
 
 pytestmark = pytest.mark.unit
@@ -232,10 +233,15 @@ def convert(context, monkeypatch, name: str, data: bytes):
 
 
 def files_under(converter) -> List[str]:
+    """Every file the converter extracted; its record of the sources is not one."""
     root = Path(converter.results_dir)
     if not root.exists():
         return []
-    return sorted(p.name for p in root.rglob("*") if p.is_file())
+    return sorted(
+        p.name
+        for p in root.rglob("*")
+        if p.is_file() and p != root / CONVERTED_SOURCES_FILE_NAME
+    )
 
 
 @pytest.mark.parametrize("name, data", UNREADABLE)
