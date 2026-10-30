@@ -761,6 +761,48 @@ def _error_text_read_once(error: BaseException, read: Any) -> str:
     )
 
 
+def _uv_interpreter_inside(
+    environment: Optional[Dict[str, str]], cwd: Path, tree: Path
+) -> bool:
+    """Whether ``UV_PYTHON`` in ``environment`` names an interpreter inside ``tree``.
+
+    ``environment`` is what the child gets (this process's when None). A value
+    that is a path, absolute or relative to ``cwd`` (where the child starts), is
+    inside the scanned tree when it lies below it by its spelling: a ``.venv``
+    python is a link to the interpreter it was made from, so a path resolved
+    through links would read as outside and let the tree's environment in. A
+    version request or a name looked up on PATH names no path and is not inside.
+    """
+    from automated_security_helper.utils.process_env import snapshot_environ
+
+    chosen = (snapshot_environ() if environment is None else environment).get(
+        "UV_PYTHON"
+    )
+    if not isinstance(chosen, str) or not chosen:
+        return False
+    if not (os.path.isabs(chosen) or "/" in chosen or "\\" in chosen):
+        return False
+    candidate = os.path.abspath(
+        os.path.join(os.fspath(cwd), os.path.expanduser(chosen))
+    )
+    # By its own spelling, and with its directory resolved: the tree may be
+    # reached through a link above it by either name.
+    spelled = [
+        candidate,
+        os.path.join(
+            os.path.realpath(os.path.dirname(candidate)), os.path.basename(candidate)
+        ),
+    ]
+    roots = {os.path.abspath(os.fspath(tree)), os.path.realpath(os.fspath(tree))}
+    return any(
+        os.path.normcase(path).startswith(
+            os.path.normcase(root).rstrip(os.sep) + os.sep
+        )
+        for path in spelled
+        for root in roots
+    )
+
+
 def _log_name(plugin: Any) -> str:
     """The name a plugin's own lines carry: its config's, else its class's.
 
@@ -1902,6 +1944,25 @@ class PluginBase(UVToolMixin, BaseModel):
             # run the tool on another Python than the one the caller asked for.
             # uv_child_overrides applies its own reading of UV_SYSTEM_PYTHON
             # (a "0" or "false" is no choice), so that is not redone here.
+            #
+            # Except an interpreter inside the scanned tree: the tree's own
+            # .venv python is what these overrides exist to keep uv from
+            # finding, and an env a scanner assembled (its extra_env merged over
+            # this process's) is not known to be the operator's alone. Such a
+            # UV_PYTHON is dropped before the choice is read, so ASH's
+            # interpreter is set in its place.
+            if _uv_interpreter_inside(env, working_dir, Path(self.context.source_dir)):
+                ASH_LOGGER.debug(
+                    "Ignoring a UV_PYTHON that names an interpreter inside the "
+                    "scanned tree."
+                )
+                env = {
+                    key: value
+                    for key, value in (
+                        snapshot_environ() if env is None else env
+                    ).items()
+                    if key != "UV_PYTHON"
+                }
             uv_overrides = python_child.uv_child_overrides(command, env)
             if uv_overrides:
                 child_env = snapshot_environ() if env is None else env
