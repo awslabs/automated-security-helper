@@ -1174,12 +1174,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         scan, as did an entry without the package or without those keys.
 
         A relative name is anchored where the entry was written: the directory
-        of the file that named it, per entry (``_wordlist_anchor``). The entry is
+        of the file that named it, per entry (``_wordlist_anchor``), and the
+        file it resolves to has to lie inside that directory or inside the
+        scanned tree, trusted or not: a ``..``, an absolute name or a link that
+        leaves both is refused. The entry is
         kept with the resolved absolute path and the defaults detect-secrets'
         own ``initialize`` uses for the keys it lacks; one its source may not
-        supply, one whose file is not a regular file, or one whose package is
-        not importable, is dropped with a warning that names the key, never the
-        value (which can come from the environment).
+        supply, one that resolves outside those places, one whose file is not a
+        regular file, or one whose package is not importable, is dropped with a
+        warning that names the key, never the value (which can come from the
+        environment).
         """
         settings = self.config.options.scan_settings
         filters_from_baseline = "filters_used" in loaded_from_baseline
@@ -1242,10 +1246,33 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 "it needs the pyahocorasick package, which is not installed for the "
                 "interpreter ASH and its detect-secrets worker run in"
             )
+        from automated_security_helper.config.sandbox_grants import is_within
+
+        anchor = self._wordlist_anchor(from_baseline)
         path = Path(os.path.expanduser(file_name))
         if not path.is_absolute():
-            path = self._wordlist_anchor(from_baseline) / path
+            path = anchor / path
         real = Path(os.path.realpath(path))
+        # Confined to where the entry was written or to the scanned tree, by the
+        # file the name resolves to: a ``..``, an absolute name or a link that
+        # leaves both is refused, trusted or not. The worker reads the file,
+        # and a word list is read only from the operator's own places.
+        config = getattr(self.context, "config", None)
+        scan_root = Path(
+            os.path.realpath(
+                getattr(config, "_scanned_root", None)
+                or getattr(self.context, "source_dir", None)
+                or "."
+            )
+        )
+        if not (is_within(real, anchor) or is_within(real, scan_root)):
+            return (
+                "its word list file (file_name) resolves outside the directory of "
+                "the file that named the entry and outside the scanned directory "
+                "(a `..`, an absolute name or a link that leaves both); a word "
+                "list is read only from where its entry was written or from the "
+                "scanned tree"
+            )
         if not real.is_file():
             return (
                 "its word list file (file_name) is not a regular file where the "

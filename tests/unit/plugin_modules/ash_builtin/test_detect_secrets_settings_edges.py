@@ -24,6 +24,8 @@ Each test pins one behavior the scanner lacked:
 * a configured wordlist entry's relative name was anchored at the baseline's
   directory whenever the baseline's filters were loaded, not at the config
   file that wrote it;
+* a word list name could reach any file the scanning user can read, through
+  ``..``, an absolute name or a link, once its entry was trusted;
 * a non-string exclude pattern raised TypeError past the ``re.error`` handler;
 * a request the scanner could not serialize was left part-written in the
   results directory;
@@ -356,6 +358,107 @@ def test_the_operators_own_word_list_entry_is_kept_beside_an_untrusted_baseline(
         tmp_path, monkeypatch, config_file=False
     )
     (entry,) = _wordlist_entries(scanner)
+    assert entry.file_name == expected.as_posix()
+    assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
+
+
+def _trusted_scanner_naming(tmp_path, monkeypatch, file_name: str):
+    """The operator's baseline at ``<tmp>/ops/baseline.json`` naming
+    ``file_name`` as its word list; ``<tmp>/secret/words.txt`` exists outside
+    both the baseline's directory and the scanned tree."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "_module_importable", lambda name: True)
+    context = _context(tmp_path)
+    (tmp_path / "ops").mkdir()
+    (tmp_path / "secret").mkdir()
+    (tmp_path / "secret" / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    baseline = tmp_path / "ops" / "baseline.json"
+    baseline.write_text(
+        json.dumps(
+            _baseline(
+                plugins_used=[{"name": "AWSKeyDetector"}],
+                filters_used=[{"path": WORDLIST_FILTER, "file_name": file_name}],
+            )
+        ),
+        encoding="utf-8",
+    )
+    return _scanner(context, baseline_file=str(baseline))
+
+
+def test_a_word_list_that_leaves_its_anchor_with_dot_dot_is_refused(
+    tmp_path, monkeypatch, caplog
+):
+    """A trusted entry still may not reach a file outside the directory that
+    named it and outside the scanned tree: the file is there, and refused."""
+    with caplog.at_level(logging.WARNING):
+        scanner = _trusted_scanner_naming(tmp_path, monkeypatch, "../secret/words.txt")
+    assert _wordlist_entries(scanner) == []
+    assert "resolves outside the directory of the file that named the entry" in (
+        caplog.text
+    )
+    assert "words.txt" not in caplog.text
+
+
+def test_an_absolute_word_list_outside_the_anchor_and_the_tree_is_refused(
+    tmp_path, monkeypatch, caplog
+):
+    with caplog.at_level(logging.WARNING):
+        scanner = _trusted_scanner_naming(
+            tmp_path, monkeypatch, str(tmp_path / "secret" / "words.txt")
+        )
+    assert _wordlist_entries(scanner) == []
+    assert "resolves outside the directory of the file that named the entry" in (
+        caplog.text
+    )
+
+
+def test_a_link_out_of_the_anchor_is_refused_by_what_it_resolves_to(
+    tmp_path, monkeypatch, caplog
+):
+    """The name stays inside the baseline's directory; the file it resolves to
+    does not. The link is laid before the scanner reads the baseline."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "_module_importable", lambda name: True)
+    context = _context(tmp_path)
+    (tmp_path / "ops").mkdir()
+    (tmp_path / "secret").mkdir()
+    (tmp_path / "secret" / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    try:
+        os.symlink(tmp_path / "secret" / "words.txt", tmp_path / "ops" / "words.txt")
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links cannot be made here")
+    baseline = tmp_path / "ops" / "baseline.json"
+    baseline.write_text(json.dumps(_WORDLIST_BASELINE), encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        scanner = _scanner(context, baseline_file=str(baseline))
+    assert _wordlist_entries(scanner) == []
+    assert "resolves outside the directory of the file that named the entry" in (
+        caplog.text
+    )
+
+
+def test_an_absolute_word_list_inside_the_anchor_is_kept(tmp_path, monkeypatch):
+    """Control: the confinement is on where the file resolves, not on the
+    spelling; an absolute name inside the baseline's directory is admitted."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "_module_importable", lambda name: True)
+    context = _context(tmp_path)
+    (tmp_path / "ops").mkdir()
+    words = tmp_path / "ops" / "words.txt"
+    words.write_text("AKIATEST\n", encoding="utf-8")
+    baseline = tmp_path / "ops" / "baseline.json"
+    baseline.write_text(
+        json.dumps(
+            _baseline(
+                plugins_used=[{"name": "AWSKeyDetector"}],
+                filters_used=[{"path": WORDLIST_FILTER, "file_name": str(words)}],
+            )
+        ),
+        encoding="utf-8",
+    )
+    scanner = _scanner(context, baseline_file=str(baseline))
+    (entry,) = _wordlist_entries(scanner)
+    expected = Path(os.path.realpath(words))
     assert entry.file_name == expected.as_posix()
     assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
 
