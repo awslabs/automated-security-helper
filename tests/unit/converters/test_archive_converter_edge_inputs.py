@@ -191,6 +191,22 @@ def test_a_bzip2_stream_is_still_read_as_bzip2():
     assert archive_kind("src.tar", io.BytesIO(compressed)) == "tar"
 
 
+def test_a_tar_whose_first_member_spells_the_whole_bzip2_head_is_a_tar(
+    test_plugin_context, monkeypatch
+):
+    """A member name is free to spell bzip2's signature, block size and block
+    magic; the tar header's checksum, not the first six bytes, says what it is."""
+    raw = tar_bytes({"BZh91AY&SY-notes.txt": "hello\n", "a.py": "x = 1\n"})
+    assert archive_converter._is_bzip2_head(raw[:6]) is True
+
+    assert archive_kind("src.tar", io.BytesIO(raw)) == "tar"
+
+    converter, results = _convert_one(test_plugin_context, monkeypatch, "src.tar", raw)
+    (extracted,) = results
+    assert (extracted / "a.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert converter.failed_inputs == []
+
+
 # ---------------------------------------------------------------- gzip trailing bytes
 
 

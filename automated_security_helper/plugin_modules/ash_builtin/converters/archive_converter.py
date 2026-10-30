@@ -749,22 +749,45 @@ def _is_bzip2_head(head: bytes) -> bool:
     )
 
 
+def _spells_a_tar_header(block: bytes) -> bool:
+    """Whether ``block`` holds a tar member header whose checksum holds.
+
+    The test that reads a stream as an uncompressed tar before any compressor's
+    magic is consulted. A short block, a block of zeros (the end-of-archive
+    block) and a block whose checksum fails all read False here, so those
+    streams keep the magic sniff; how an end-of-archive block counts for a
+    caller that asks "is this a tar" is _is_tar_header's decision, not this one.
+    """
+    try:
+        tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
+    except tarfile.HeaderError:
+        return False
+    return True
+
+
 @contextlib.contextmanager
 def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
     """The archive's tar stream, decompressed by its leading bytes, and bounded.
 
-    Chosen from the magic bytes rather than by letting tarfile try each
-    decompressor in turn: gzip (through _GzipMembersStream, which ends at bytes
-    after the gzip data instead of failing on them), bzip2 (by its whole
-    six-byte head, _is_bzip2_head), xz, and zstd where this Python has it. Any
-    other content is read as an uncompressed tar. archive_kind probes a tar
+    A first block that is a tar header (_spells_a_tar_header: its checksum
+    holds) is an uncompressed tar whatever its first bytes spell, since a member name is
+    free to start with a compressor's signature (``BZh91AY&SY-notes.txt`` spells
+    bzip2's whole head) and no compressed stream carries a valid tar checksum.
+    Otherwise the decompressor is chosen from the magic bytes rather than by
+    letting tarfile try each in turn: gzip (through _GzipMembersStream, which
+    ends at bytes after the gzip data instead of failing on them), bzip2 (by
+    its six-byte head, _is_bzip2_head), xz, and zstd where this Python has it.
+    Any other content is read as an uncompressed tar. archive_kind probes a tar
     through this same stream, so what it accepts and what is extracted agree.
     """
-    head = handle.read(6)
+    block = handle.read(tarfile.BLOCKSIZE)
     handle.seek(0)
+    head = block[:6]
     with contextlib.ExitStack() as stack:
         inner: Any = handle
-        if head[:2] == b"\x1f\x8b":
+        if _spells_a_tar_header(block):
+            pass
+        elif head[:2] == b"\x1f\x8b":
             inner = stack.enter_context(_GzipMembersStream(handle))
         elif _is_bzip2_head(head):
             inner = stack.enter_context(bz2.BZ2File(handle))
