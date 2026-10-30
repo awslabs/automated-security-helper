@@ -9,6 +9,7 @@ lexical check answered True for a file that is not in the tree, and a tool found
 outside the tree was refused as an in-tree one.
 """
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,13 @@ import pytest
 from automated_security_helper.utils.scanned_tree import is_inside_tree
 
 pytestmark = pytest.mark.unit
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"symlink creation unavailable on this platform: {error}")
 
 
 @pytest.fixture
@@ -59,6 +67,22 @@ def test_a_dot_dot_that_stays_below_the_root_is_inside(layout):
     root, _elsewhere = layout
     (root / "tool").write_text("", encoding="utf-8")
     assert is_inside_tree(root / "bin" / ".." / "tool", root) is True
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_tree_file_that_links_out_is_inside_when_reached_through_dot_dot(layout):
+    """``<root>/tools/../bin/git`` is the tree's own ``bin/git`` whatever it links
+    to (here a file outside the tree). Judging a ``..`` spelling by its resolved
+    path alone read the link's target and answered outside, so a repository could
+    have its link run as a system program; the directory-resolved spelling,
+    ``<real root>/bin/git``, says it is in the tree."""
+    root, elsewhere = layout
+    (root / "tools").mkdir()
+    _symlink_or_skip(root / "bin" / "git", elsewhere / "tool")
+
+    assert is_inside_tree(root / "tools" / ".." / "bin" / "git", root) is True
+    # The same link reached without ".." read inside before and still does.
+    assert is_inside_tree(root / "bin" / "git", root) is True
 
 
 def test_a_plain_path_below_the_root_is_inside(layout):

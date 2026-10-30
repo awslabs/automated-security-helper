@@ -209,14 +209,17 @@ def is_inside_tree(path: PathLike, root: PathLike) -> bool:
     ``/var`` for ``/private/var``. Components are compared through
     ``os.path.normcase``.
 
-    A spelling that holds ``..`` is judged only once resolved: ``<root>/../elsewhere/tool``
+    A spelling that holds ``..`` is not judged as written: ``<root>/../elsewhere/tool``
     starts with the root's components and leaves the tree in the next one, and
     its lexical parents include the root itself, so both the as-written prefix
     check and the as-written ancestor walk said "inside" for a tool outside the
-    tree, which was then refused as an in-tree one. The directory-resolved
-    spelling is skipped for it as well: ``<root>/..`` has the root as its
-    directory, so that spelling read ``<real root>/..``, which starts with the
-    root's components and names its parent.
+    tree, which was then refused as an in-tree one. Its directory-resolved
+    spelling is still asked, because the directory's real path has no ``..`` left
+    in it: ``<root>/tools/../bin/git`` is the tree's own ``bin/git`` whatever that
+    file links to. The one spelling whose last component is ``..`` has no such
+    form (``<root>/..`` has the root as its directory, so it read
+    ``<real root>/..``, the root's parent spelled inside the root) and is judged
+    by its resolved path alone.
     """
     named = _absolute(path)
     literal = ".." not in named.parts
@@ -224,16 +227,20 @@ def is_inside_tree(path: PathLike, root: PathLike) -> bool:
         return True
     real_root = Path(os.path.realpath(root))
     resolved = Path(os.path.realpath(named))
-    # As named, with its directory resolved, and fully resolved: a link on PATH
+    # As named with its directory resolved, and fully resolved: a link on PATH
     # whose directory is a link into the tree, and a file in the tree that is
-    # itself a link elsewhere, are both in the tree.
-    spellings = [resolved]
-    if literal:
-        spellings.insert(0, Path(os.path.realpath(named.parent)) / named.name)
-    for spelling in spellings:
-        if _starts_with(spelling, real_root):
+    # itself a link elsewhere, are both in the tree. The directory-resolved
+    # spelling is skipped only for a path that ends in "..": its directory is
+    # the path's own child and the spelling would name its parent.
+    through_directory = None
+    if named.name not in ("..", ""):
+        through_directory = Path(os.path.realpath(named.parent)) / named.name
+    for spelling in (through_directory, resolved):
+        if spelling is not None and _starts_with(spelling, real_root):
             return True
     if literal and _has_ancestor_file(named, root):
+        return True
+    if through_directory is not None and _has_ancestor_file(through_directory, root):
         return True
     return _has_ancestor_file(resolved, root)
 
