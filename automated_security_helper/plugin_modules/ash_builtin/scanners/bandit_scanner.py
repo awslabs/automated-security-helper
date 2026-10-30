@@ -884,9 +884,15 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             # a bandit on PATH, if there is one; it runs directly once verified
             # (_take_resolved_command). Any non-None answer used to turn uv off
             # and mark the dependency satisfied with no check of the sarif and
-            # toml extras or of tool_version.
+            # toml extras or of tool_version. The resolver is handed this
+            # scanner's own offline reading (_is_offline_mode): without it, it
+            # followed ASH's global mode alone, so its probe went online for a
+            # scanner held offline on its own, and its memo keyed that answer
+            # under the mode the probe ran in, not the one this scanner is in.
             command = get_uv_tool_command(
-                self.command, from_spec=self._uv_probe_from_spec()
+                self.command,
+                from_spec=self._uv_probe_from_spec(),
+                offline=self._is_offline_mode(),
             )
             if command is not None:
                 return self._take_resolved_command(command)
@@ -935,9 +941,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Final fallback: the consolidated UV-or-direct-binary resolver. Its
         # answer was tested for None and the route left as it was, so a binary on
         # PATH marked the dependency satisfied while use_uv_tool stayed True and
-        # the scan went back through the uv route that had just failed.
+        # the scan went back through the uv route that had just failed. The
+        # scanner's own offline reading reaches the resolver here as above.
         command = get_uv_tool_command(
-            self.command, from_spec=self._uv_probe_from_spec()
+            self.command,
+            from_spec=self._uv_probe_from_spec(),
+            offline=self._is_offline_mode(),
         )
         if command is None:
             return False

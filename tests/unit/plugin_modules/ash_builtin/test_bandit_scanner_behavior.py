@@ -310,6 +310,49 @@ def test_resolver_is_asked_about_the_scanners_own_command(scanner, monkeypatch):
     assert asked == ["bandit"]
 
 
+@pytest.mark.parametrize("offline", [True, False], ids=["offline", "online"])
+@pytest.mark.parametrize("route", ["uv-absent", "install-failed"])
+def test_the_resolver_is_handed_the_scanners_offline_mode(
+    scanner, monkeypatch, route, offline
+):
+    """Both resolver calls pass the scanner's own offline reading.
+
+    Read from ASH_OFFLINE here, as ``_is_offline_mode`` reads it. Without the
+    keyword the resolver followed ASH's global mode alone: a scanner held
+    offline on its own was probed online, and the resolver's memo filed that
+    answer under the mode the probe ran in, not the one the scanner is in.
+    """
+    if route == "uv-absent":
+        monkeypatch.setattr(
+            BanditScanner, "_validate_uv_tool_availability", lambda self: False
+        )
+    else:
+        monkeypatch.setattr(
+            BanditScanner, "_validate_uv_tool_availability", lambda self: True
+        )
+        monkeypatch.setattr(
+            BanditScanner,
+            "_get_tool_installation_info",
+            lambda self: {"available": False},
+        )
+        monkeypatch.setattr(
+            BanditScanner,
+            "_install_uv_tool",
+            lambda self, timeout, retry_config: False,
+        )
+    monkeypatch.setenv("ASH_OFFLINE", "YES" if offline else "NO")
+    asked = []
+
+    def _resolver(command, **kwargs):
+        asked.append(kwargs)
+
+    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", _resolver)
+
+    scanner.validate_plugin_dependencies()
+
+    assert [kwargs.get("offline") for kwargs in asked] == [offline]
+
+
 # ---------------------------------------------------------------------------
 # Config file selection
 # ---------------------------------------------------------------------------
