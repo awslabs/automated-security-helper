@@ -14,6 +14,7 @@ broke the config-suppression pass for the whole scanner.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -345,11 +346,15 @@ def test_the_written_spelling_is_probed_only_under_the_scan_root(tmp_path):
     )
     # A literal backslash is a separator to a Windows stat and is not folded, so
     # such a spelling is not probed even where a POSIX file of that name exists.
-    (tmp_path / "fixtures" / "a\\..%2Fb.json").write_text("{}", encoding="utf-8")
+    # A drive-relative spelling (``C:x``) is placed by a Windows join at the
+    # drive's current directory, outside the root, so it is not probed either.
+    # Neither name can be made on Windows (a backslash is a separator there and
+    # a colon is refused), so the files exist only on POSIX; on Windows the
+    # refusal is asserted with no such file present.
+    if os.name != "nt":
+        (tmp_path / "fixtures" / "a\\..%2Fb.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "C:x%2Fb.json").write_text("{}", encoding="utf-8")
     assert (
         _matched_path_text("fixtures/a\\..%2Fb.json", root) == "fixtures/a\\../b.json"
     )
-    # A drive-relative spelling (``C:x``) is placed by a Windows join at the
-    # drive's current directory, outside the root, so it is not probed either.
-    (tmp_path / "C:x%2Fb.json").write_text("{}", encoding="utf-8")
     assert _matched_path_text("C:x%2Fb.json", root) == "C:x/b.json"
