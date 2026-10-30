@@ -61,6 +61,15 @@ pytestmark = pytest.mark.unit
 # The ``capture`` fixture comes from this directory's conftest.
 
 
+def _result_named(model, rule_id: str):
+    return next(
+        result
+        for run in model.sarif.runs
+        for result in run.results or []
+        if result.ruleId == rule_id
+    )
+
+
 class TestAShardWithoutASelectionRecordIntendedWhatItOwned:
     def test_its_scanners_are_not_named_as_intended_by_no_shard(self, capture):
         shards = build_shards(3)
@@ -543,6 +552,73 @@ class TestIgnoreSuppressionsLiftsTheSuppressionAgreement:
         verify_verdict_settings_agree(as_loaded(shards), ignore_suppressions=True)
         with pytest.raises(ShardSettingsDisagreeError, match="suppressions"):
             verify_verdict_settings_agree(as_loaded(shards))
+
+    def test_under_the_flag_the_merged_report_reads_both_shards_alike(self, tmp_path):
+        """Why the agreement may be lifted: one shard suppressed a finding its
+        config named and the other shard's config did not, so the same finding
+        would read as suppressed or not by which shard found it; under the flag
+        the merge lifts what the shards applied, and the merged report then
+        treats the finding as a scan under the flag does, whichever shard it
+        came from. The no-raise above is not that assertion; this is."""
+        from automated_security_helper.utils.sarif_utils import (
+            apply_suppressions_to_sarif,
+        )
+
+        shards = build_shards(2)
+        owner = next(
+            shard
+            for shard in shards
+            if "bandit" in read_shard_assignment(shard).assigned_scanners
+        )
+        owner.ash_config.global_settings.suppressions = [
+            AshSuppression(
+                rule_id="bandit-RULE-0", path="src/bandit_0.py", reason="reviewed"
+            )
+        ]
+        # The owner's own pass, as the shard ran it without the flag.
+        apply_suppressions_to_sarif(
+            owner.sarif,
+            PluginContext(
+                source_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                config=owner.ash_config,
+                ignore_suppressions=False,
+            ),
+        )
+        suppressed = _result_named(owner, "bandit-RULE-0")
+        assert suppressed.suppressions and len(suppressed.suppressions) == 1
+
+        verify_verdict_settings_agree(as_loaded(shards), ignore_suppressions=True)
+        merged = merge_shard_results(as_loaded(shards))
+        lifted = apply_aggregated_suppressions(
+            merged,
+            PluginContext(
+                source_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                config=merged.ash_config,
+                ignore_suppressions=True,
+            ),
+        )
+
+        assert _result_named(lifted, "bandit-RULE-0").suppressions is None
+        never_applied = merge_shard_results(as_loaded(build_shards(2)))
+        reference = apply_aggregated_suppressions(
+            never_applied,
+            PluginContext(
+                source_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                config=never_applied.ash_config,
+                ignore_suppressions=True,
+            ),
+        )
+        assert (
+            lifted.metadata.summary_stats.suppressed
+            == reference.metadata.summary_stats.suppressed
+        )
+        assert (
+            lifted.metadata.summary_stats.actionable
+            == reference.metadata.summary_stats.actionable
+        )
 
     def test_a_verdict_setting_is_still_refused_under_the_flag(self):
         """The second control: the flag lifts the suppression setting only."""

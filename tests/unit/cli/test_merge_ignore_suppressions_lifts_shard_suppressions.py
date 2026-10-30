@@ -24,7 +24,10 @@ from __future__ import annotations
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.cli.merge import apply_aggregated_suppressions
+from automated_security_helper.cli.merge import (
+    apply_aggregated_suppressions,
+    lift_ash_suppressions,
+)
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     Kind1,
@@ -116,6 +119,41 @@ def test_the_flag_keeps_a_scanners_own_suppression(tmp_path):
 
     native = _result(merged, NATIVELY_SUPPRESSED).suppressions
     assert [s.justification for s in native] == ["nosec comment in source"]
+
+
+def test_a_result_holding_both_kinds_keeps_only_the_scanners_own(tmp_path):
+    """Every fixture result above carries one suppression, so the keep/drop over
+    a mixed list was never exercised: a lift that emptied the list whenever an
+    ASH suppression was present passed them all and would un-suppress a native
+    ``nosec`` finding beside it. The count the lift returns is pinned too."""
+    model = _results_as_the_shards_left_them()
+    _result(model, NATIVELY_SUPPRESSED).suppressions = [
+        Suppression(
+            kind=Kind1.inSource,
+            justification=f"(ASH) Suppressing finding for rule '{NATIVELY_SUPPRESSED}'",
+        ),
+        Suppression(kind=Kind1.inSource, justification="nosec comment in source"),
+    ]
+    _result(model, CONFIG_SUPPRESSED).suppressions = None
+    _result(model, INLINE_SUPPRESSED).suppressions = None
+    _result(model, CLIENT_SUPPRESSED).suppressions = None
+
+    removed = lift_ash_suppressions(model.sarif)
+
+    assert removed == 1
+    kept = _result(model, NATIVELY_SUPPRESSED).suppressions
+    assert [s.justification for s in kept] == ["nosec comment in source"]
+
+
+def test_the_lift_counts_every_suppression_it_removes(tmp_path):
+    """The four fixture results: three ASH-applied suppressions removed, the
+    scanner's own kept, and the count says three."""
+    model = _results_as_the_shards_left_them()
+
+    assert lift_ash_suppressions(model.sarif) == 3
+    assert _result(model, NATIVELY_SUPPRESSED).suppressions is not None
+    # A second pass finds nothing of ASH's left to remove.
+    assert lift_ash_suppressions(model.sarif) == 0
 
 
 def test_the_flag_clears_the_record_of_the_suppressions_the_shards_matched(tmp_path):
