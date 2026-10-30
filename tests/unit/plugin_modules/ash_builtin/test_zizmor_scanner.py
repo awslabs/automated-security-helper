@@ -2117,8 +2117,10 @@ def test_a_joined_report_carries_every_batchs_rules_and_invocations(repo, monkey
 
 def test_a_run_declined_after_earlier_batches_keeps_their_counters(repo, monkeypatch):
     """When the template declines a later batch (its dependency check says no),
-    the scan's answer is that refusal, and the counters still say how many
-    inputs the earlier batches audited, not the last run's own count."""
+    the scan's answer is that refusal, and the counters account for every
+    input: the two the earlier batches audited, and the three the declined
+    batch and the ones after it never ran, counted as attempted and failed so
+    no reader sees "two audited, nothing found" beside the refusal."""
     monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40, raising=False)
     scanner = _scanner(repo)
     _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
@@ -2136,15 +2138,15 @@ def test_a_run_declined_after_earlier_batches_keeps_their_counters(repo, monkeyp
 
     assert result is False
     assert len(checks) == 3
-    assert scanner.targets_attempted == 2
-    assert scanner.targets_failed == 0
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == len(EXPECTED_INPUTS) - 2
     assert scanner.exit_code == 0
 
 
 def test_batches_that_all_declined_leave_no_exit_code(repo, monkeypatch):
     """The template declined the first batch, so zizmor never ran: the exit
     code stays None, the base class's "the tool did not run", not a 0 that
-    reads as a clean run."""
+    reads as a clean run, and every input counts as attempted and failed."""
     monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40)
     scanner = _scanner(repo)
     _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
@@ -2153,7 +2155,8 @@ def test_batches_that_all_declined_leave_no_exit_code(repo, monkeypatch):
     result = scanner.scan(repo, "source", [])
 
     assert result is False
-    assert scanner.targets_attempted == 0
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == len(EXPECTED_INPUTS)
     assert scanner.exit_code is None
 
 

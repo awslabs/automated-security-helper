@@ -1308,7 +1308,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # (None, "the tool did not run") leaves the fold alone; max() with
         # "or 0" read a signal death as 0 and None as a clean run.
         worst_exit_code: Optional[int] = None
-        for batch in batches:
+        for index, batch in enumerate(batches):
             self._inputs = batch
             result = super().scan(
                 target, target_type, global_ignore_paths, config, *args, **kwargs
@@ -1316,11 +1316,16 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             if not isinstance(result, SarifReport):
                 # The template declined to run (dependencies, pre-scan); its
                 # answer is the scan's. The batches that did run are still
-                # counted: the declined run leaves the previous batch's own
-                # counters in place, so without this the executor read one
-                # batch's count as the whole target's.
-                self.targets_attempted = attempted
-                self.targets_failed = failed
+                # counted, and the inputs this batch and the ones after it never
+                # ran count as attempted and failed: every input of the target
+                # is accounted for, and a reader of the counters never sees
+                # "N audited, nothing found" beside a declined result. (The
+                # declined run leaves the previous batch's own counters in
+                # place, so without this the executor read one batch's count as
+                # the whole target's.)
+                never_ran = sum(len(rest) for rest in batches[index:])
+                self.targets_attempted = attempted + never_ran
+                self.targets_failed = failed + never_ran
                 self.exit_code = worst_exit_code
                 return result
             attempted += self.targets_attempted
