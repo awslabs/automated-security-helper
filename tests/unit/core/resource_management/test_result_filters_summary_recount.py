@@ -331,3 +331,73 @@ class TestActionableOnlyRecountsTheSeverityBuckets:
         filtered = filter_actionable_only(_results())
 
         assert filtered["summary_stats"]["severity_counts"]["low"] == 2
+
+
+class TestTotalFollowsOneRule:
+    """SummaryStats.total is the non-suppressed findings and ``suppressed`` a
+    count beside it. The scanners recount summed ``finding_count`` (which a
+    per-target file written before the metrics pass counts suppressed findings
+    into) and the severities recount summed all six buckets, so one scanner read
+    as 2 findings under one filter and 1 under the other."""
+
+    @staticmethod
+    def _results_with_a_suppressed_finding():
+        results = _results()
+        results["raw_results"]["scanner_results"]["bandit"] = {
+            "status": "PASSED",
+            # A per-target file's count: the suppressed finding counted in.
+            "finding_count": 2,
+            "actionable_finding_count": 1,
+            "suppressed_finding_count": 1,
+            "severity_counts": {
+                "critical": 0,
+                "high": 1,
+                "medium": 0,
+                "low": 0,
+                "info": 0,
+                "suppressed": 1,
+            },
+        }
+        results["summary_stats"]["severity_counts"]["low"] = 0
+        results["summary_stats"]["severity_counts"]["suppressed"] = 1
+        results["summary_stats"]["total"] = 3
+        return results
+
+    def test_the_scanners_recount_does_not_count_suppressed_findings(self):
+        filtered = apply_content_filters(
+            self._results_with_a_suppressed_finding(), scanners="bandit"
+        )
+
+        assert filtered["summary_stats"]["total"] == 1
+        assert filtered["summary_stats"]["severity_counts"]["suppressed"] == 1
+
+    def test_the_severities_recount_agrees_with_the_scanners_recount(self):
+        results = self._results_with_a_suppressed_finding()
+
+        by_scanner = apply_content_filters(results, scanners="bandit")
+        by_both = apply_content_filters(
+            results,
+            scanners="bandit",
+            severities="critical,high,medium,low,info,suppressed",
+        )
+
+        assert by_both["summary_stats"]["total"] == by_scanner["summary_stats"]["total"]
+        assert by_both["summary_stats"]["total"] == 1
+
+    def test_selecting_only_suppressed_lists_them_under_their_own_count(self):
+        filtered = apply_content_filters(
+            self._results_with_a_suppressed_finding(), severities="suppressed"
+        )
+
+        assert filtered["summary_stats"]["severity_counts"]["suppressed"] == 1
+        assert filtered["summary_stats"]["total"] == 0
+
+    def test_a_scanner_without_buckets_keeps_its_finding_count(self):
+        results = _results(with_summary_stats=False)
+        results["raw_results"]["scanner_results"] = {
+            "bandit": {"status": "PASSED", "finding_count": 4}
+        }
+
+        by_severity = filter_summary(results)["findings_summary"]["by_severity"]
+
+        assert by_severity["total"] == 4

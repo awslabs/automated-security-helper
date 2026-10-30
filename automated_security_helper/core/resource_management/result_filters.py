@@ -16,6 +16,16 @@ from automated_security_helper.utils.severity_ladder import result_severity
 #: them. ``suppressed`` is a bucket of its own, as it is in SummaryStats.
 _SEVERITY_KEYS = ("critical", "high", "medium", "low", "info", "suppressed")
 
+#: The buckets ``total`` counts. SummaryStats.total is "the sum of all
+#: non-suppressed severity counts" (models/asharp_model.py), and the per-scanner
+#: ``finding_count`` the aggregated file carries is ScannerMetrics.total, the same
+#: rule (core/unified_metrics.py). ``suppressed`` is a count beside the total, not
+#: part of it. Two recounts here used to define total differently: one summed
+#: ``finding_count``, the other every bucket including suppressed, so the same
+#: scanner read as 5 findings under a scanners filter and 6 under a severities
+#: filter that selected all six buckets.
+_COUNTED_SEVERITY_KEYS = ("critical", "high", "medium", "low", "info")
+
 #: ``scanner_results[*].status`` -> the SummaryStats outcome counter it lands in.
 _OUTCOME_COUNTERS = {
     "PASSED": "passed",
@@ -52,6 +62,11 @@ def _coverage_fields(results: Dict[str, Any]) -> Dict[str, Any]:
     return {key: results[key] for key in _COVERAGE_KEYS if key in results}
 
 
+def _total_of(counts: Dict[str, Any]) -> int:
+    """``total`` by the one rule: the non-suppressed buckets of *counts*."""
+    return sum(_count(counts.get(bucket)) for bucket in _COUNTED_SEVERITY_KEYS)
+
+
 def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     """The SummaryStats fields recomputed from the per-scanner entries.
 
@@ -60,6 +75,11 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     ``suppressed`` summed over them, and the outcome counters from their
     statuses. The summary of a filtered view is derived from this rather than
     copied from the whole scan's stats.
+
+    A scanner's ``total`` is its non-suppressed buckets when it records
+    ``severity_counts`` (the rule SummaryStats.total follows), else its
+    ``finding_count``: a per-target file written before the metrics pass can
+    carry a finding_count that counted suppressed findings too.
     """
     counts = dict.fromkeys(_SEVERITY_KEYS, 0)
     stats: Dict[str, Any] = {
@@ -70,11 +90,17 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     for data in scanner_results.values():
         if not isinstance(data, dict):
             continue
-        for severity, value in (data.get("severity_counts") or {}).items():
-            bucket = str(severity).lower()
-            if bucket in counts:
-                counts[bucket] += _count(value)
-        stats["total"] += _count(data.get("finding_count"))
+        severity_counts = data.get("severity_counts")
+        own_counts: Dict[str, int] = {}
+        if isinstance(severity_counts, dict):
+            for severity, value in severity_counts.items():
+                bucket = str(severity).lower()
+                if bucket in counts:
+                    counts[bucket] += _count(value)
+                    own_counts[bucket] = own_counts.get(bucket, 0) + _count(value)
+            stats["total"] += _total_of(own_counts)
+        else:
+            stats["total"] += _count(data.get("finding_count"))
         stats["actionable"] += _count(data.get("actionable_finding_count"))
         counter = _OUTCOME_COUNTERS.get(str(data.get("status") or "").upper())
         if counter is not None:
@@ -683,16 +709,17 @@ def apply_content_filters(
             )
         # The total is the findings in the selected buckets, not the whole
         # scan's: a view that lists only critical and high findings and says
-        # "total 17" reports findings it does not show.
+        # "total 17" reports findings it does not show. By the one rule, the
+        # suppressed bucket is not part of it: selecting "suppressed" lists the
+        # suppressed findings under their own count with a total of 0, as
+        # SummaryStats reports them.
         buckets = (
             summary_stats["severity_counts"]
             if isinstance(summary_stats.get("severity_counts"), dict)
             else summary_stats
         )
         if "total" in summary_stats:
-            summary_stats["total"] = sum(
-                _count(buckets.get(bucket)) for bucket in _SEVERITY_KEYS
-            )
+            summary_stats["total"] = _total_of(buckets)
         # actionable is recounted when the findings it counts are at hand: the
         # SARIF results kept above, judged by the thresholds the scan recorded.
         # Without the SARIF (the summary and minimal levels never load it) the
