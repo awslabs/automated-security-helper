@@ -15,6 +15,8 @@ of the report or one field of the SARIF result built from it:
   far as it can be, with a line for what was skipped, not an AttributeError;
 - a plugin entry with no ``pluginName`` keeps an empty pack, which is the scanner's
   "no pack recorded";
+- a pack whose report failed has no entry in the mapping; ``{pack: []}`` is the shape of
+  a compliant evaluation, and the failure text names the pack instead;
 - the not-evaluated warning names the rule and the pack, not cdk-nag's exception text;
 - SARIF columns count from 1 and ``endColumn`` is the character after the id;
 - a rule that never ran carries no in-template suppression;
@@ -204,7 +206,79 @@ def test_a_violations_entry_that_is_not_a_list_fails_the_requested_pack(tmp_path
 
     assert failure is not None
     assert "not a list" in failure
-    assert per_pack["AwsSolutions"] == []
+    assert "AwsSolutions" not in per_pack
+
+
+# ---------------------------------------------------------------------------
+# A pack that failed has no entry in the mapping
+# ---------------------------------------------------------------------------
+#
+# ``{pack: []}`` is what a compliant evaluation reads as, so a failed pack keyed the same
+# way was indistinguishable from one that ran and found nothing to a reader of the mapping
+# alone. The failure is carried by ``failure``; the mapping holds the packs that evaluated.
+
+
+def test_a_failed_pack_has_no_entry_in_the_mapping(tmp_path):
+    """At the base the failed pack read as ``{"AwsSolutions": []}``, a compliant shape."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "failure", "violations": []},
+    )
+    per_pack, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert failure is not None
+    assert per_pack == {}
+
+
+def test_a_report_of_only_failed_packs_is_not_an_empty_report(tmp_path):
+    """The guard for the change above: with no entry left, the "contains no plugin
+    reports" reason must not take over from the one that names the failed pack."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "failure", "violations": []},
+    )
+    _, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert "reported failure without evaluating a rule: AwsSolutions" in failure
+    assert "contains no plugin reports" not in failure
+
+
+def test_a_failed_pack_is_not_also_counted_as_missing(tmp_path):
+    """The second guard: a pack with no entry because it failed is not a pack that
+    never wrote one."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "failure", "violations": []},
+    )
+    _, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert "with no entry in the report" not in failure
+
+
+def test_a_requested_pack_that_never_wrote_an_entry_is_still_missing(tmp_path):
+    """The other side of that read: an absent pack is still named, beside the failed one."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "failure", "violations": []},
+    )
+    _, failure = _violations_from_validation_report(
+        report, ["AwsSolutions", "HIPAA.Security"]
+    )
+
+    assert "evaluating a rule: AwsSolutions" in failure
+    assert "with no entry in the report: HIPAA.Security" in failure
+
+
+def test_a_successful_pack_with_nothing_to_list_keeps_its_empty_entry(tmp_path):
+    """The negative control: compliant is still ``{pack: []}``."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "success", "violations": []},
+    )
+    per_pack, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert failure is None
+    assert per_pack == {"AwsSolutions": []}
 
 
 def test_a_constructs_entry_that_is_not_a_list_drops_only_that_violation(

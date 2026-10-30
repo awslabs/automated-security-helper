@@ -873,7 +873,9 @@ def _violations_from_validation_report(
     violation is a pack whose ``validate()`` did not finish: CDK records a pack that threw as
     a failed report with zero violations, and read as ``{pack: []}`` that was an evaluated,
     compliant template. The conclusion is read before the violations list, so a failed pack
-    with nothing to list is a failure. And a plugin named in ``expected_plugins`` (the packs
+    with nothing to list is a failure, and it has NO entry in ``per_pack``: ``{pack: []}``
+    is the shape of a compliant evaluation, so the mapping holds only the packs that
+    evaluated the template and ``failure`` names the ones that did not. And a plugin named in ``expected_plugins`` (the packs
     the caller registered, by their reported name) that has no entry at all never ran: the
     ``pluginReports`` emptiness guard below cannot see that once CDK's own
     ``CloudFormation Validate`` plugin writes an entry into every report, which it does from
@@ -926,6 +928,10 @@ def _violations_from_validation_report(
 
     per_pack: Dict[str, List[_NagFinding]] = {}
     failed_packs: List[str] = []
+    # The names behind ``failed_packs`` (those carry a detail after the name), read by
+    # the presence check below: a requested pack with no entry because it failed is
+    # not a pack that never wrote one.
+    failed_names: set[str] = set()
     plugin_reports = report.get("pluginReports", []) or []
     if not isinstance(plugin_reports, (list, tuple)):
         reason = (
@@ -952,7 +958,6 @@ def _violations_from_validation_report(
         # documents as "no pack recorded", and it keeps that documentation.
         pack_name = str(plugin_report.get("pluginName") or "")
         pack_label = pack_name or "unknown"
-        rows = per_pack.setdefault(pack_name, [])
         conclusion = _plugin_conclusion(plugin_report)
         raw_violations = plugin_report.get("violations")
         if raw_violations is not None and not isinstance(raw_violations, (list, tuple)):
@@ -968,6 +973,7 @@ def _violations_from_validation_report(
                 or pack_name in expected_plugins
             ):
                 failed_packs.append(f"{pack_label}: {detail}")
+                failed_names.add(pack_name)
                 ASH_LOGGER.error(
                     f"cdk-nag pack '{pack_label}' wrote a report ASH cannot read "
                     f"({detail}), so none of its rules count as evaluated"
@@ -997,6 +1003,7 @@ def _violations_from_validation_report(
                 or pack_name in expected_plugins
             ):
                 failed_packs.append(f"{pack_label}{detail}")
+                failed_names.add(pack_name)
                 ASH_LOGGER.error(
                     f"cdk-nag pack '{pack_label}' reported '{conclusion}' with no "
                     f"violations, so it did not evaluate this template{detail}"
@@ -1008,6 +1015,11 @@ def _violations_from_validation_report(
                     "results are unaffected"
                 )
             continue
+        # The entry is made only for a pack that evaluated the template, after the two
+        # failure branches above: ``{pack: []}`` is a compliant evaluation's shape, and a
+        # failed pack keyed that way was indistinguishable from one that ran and found
+        # nothing. The failed pack is carried by ``failure`` instead.
+        rows = per_pack.setdefault(pack_name, [])
         for violation in violations:
             if not isinstance(violation, Mapping):
                 # The top level and the plugin entries were type-checked; a violation
@@ -1091,17 +1103,24 @@ def _violations_from_validation_report(
     ASH_LOGGER.debug(
         f"cdk-nag validation report: {len(per_pack)} pack(s), {total} violation record(s)"
     )
-    if not per_pack:
+    if not per_pack and not failed_packs:
         # The report parsed but named no plugin. Every registered pack writes an entry even
         # when it found nothing -- a compliant template yields ``{pack: []}``, not ``{}`` -- so
         # an empty mapping here means no pack reported, which is not a clean scan either.
+        # A failed pack leaves no entry either, so the mapping is empty too when every
+        # pack that wrote an entry failed; that is ``failed_packs``' reason below, which
+        # names the packs, not this one.
         reason = (
             f"cdk-nag validation report {report_path} contains no plugin reports. No pack "
             "evaluated this template."
         )
         ASH_LOGGER.error(reason)
         return per_pack, reason
-    missing = [name for name in (expected_plugins or ()) if name not in per_pack]
+    missing = [
+        name
+        for name in (expected_plugins or ())
+        if name not in per_pack and name not in failed_names
+    ]
     if failed_packs or missing:
         parts = []
         if failed_packs:
