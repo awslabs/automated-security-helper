@@ -1028,10 +1028,14 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # The same rules the run's own scan set was built under, so a copy built
         # when the run's list is not read back leaves out what that list left out:
         # the ignore files as the config says, and the workspace's output directory.
+        # The switch is read from the config at the call, the shape every scan-set
+        # consumer passes (tests/unit/utils/test_scan_set_ignore_file_switch.py).
         for name in scan_set(
             source=str(root),
             output=str(self.context.output_dir),
-            honor_ignore_files=honor_gitignore,
+            honor_ignore_files=honors_ignore_files(
+                getattr(self.context, "config", None)
+            ),
             run_id=getattr(self.context, "run_id", None),
             workspace_output_dir=getattr(self.context, "workspace_output_dir", None),
         ):
