@@ -622,6 +622,23 @@ def test_a_multi_line_value_in_a_yarn_1_stdout_error_event_is_hidden(sep):
         assert part not in (reason or ""), (part, reason)
 
 
+@pytest.mark.parametrize("sep", [" ", "\u0085", "\x0c"])
+def test_an_error_event_holding_a_unicode_line_separator_keeps_its_message(sep):
+    """The detail reader splits the stream as the parse loops do, at line feeds
+    only. A yarn 1 error event whose data holds a separator str.splitlines
+    knows was cut in two here, neither half parsed, and the reason shown was
+    the event's raw opening instead of its message."""
+    event = json.dumps(
+        {"type": "error", "data": f"Request failed{sep}Error: ENOTFOUND host"},
+        ensure_ascii=False,
+    )
+
+    detail = NpmAuditScanner._yarn_error_detail(event + "\n", ())
+
+    assert detail.startswith("Request failed"), detail
+    assert "{" not in detail and '"type"' not in detail, detail
+
+
 def test_a_yarn_1_stdout_error_event_is_reduced_to_its_first_line():
     """An error event is reduced to its MESSAGE, the first line of its data,
     as the stderr events are: yarn writes the summary first and the Node

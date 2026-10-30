@@ -1040,14 +1040,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 segments.append(("plain", "".join(plain_run)))
                 plain_run.clear()
 
-        for raw in raw_text.splitlines(keepends=True):
+        # Split at line feeds only, as the parse loops do (_ndjson_lines): a
+        # yarn 1 error event whose data holds one of the other separators
+        # str.splitlines knows (U+2028, U+0085, a form feed) was cut in two
+        # here, neither half parsed, and the reason shown was a raw JSON
+        # fragment such as the event's opening, or nothing, instead of the
+        # message.
+        for raw in _ndjson_lines(raw_text):
             event = cls._yarn_event(raw)
             if isinstance(event, dict) and "type" in event:
                 if event.get("type") == "error":
                     data = str(event.get("data") or "").strip()
                     if data:
                         _close_plain()
-                        body = raw.splitlines()[0] if raw else ""
+                        body = raw.rstrip("\r\n")
                         segments.append(("event", data + raw[len(body) :]))
                 continue
             plain_run.append(raw)
