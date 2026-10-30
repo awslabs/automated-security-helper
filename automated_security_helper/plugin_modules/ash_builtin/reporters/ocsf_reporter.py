@@ -41,7 +41,7 @@ import json
 import re
 from datetime import datetime, timezone
 import uuid
-from typing import Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import suppressions_in_effect
 from automated_security_helper.utils.severity_ladder import result_severity
@@ -187,20 +187,73 @@ def _finding_uid(key: str) -> str:
     return str(uuid.uuid5(_FINDING_UID_NAMESPACE, key))
 
 
+#: Joins the parts of an identity key; a part's own separator is escaped.
+_IDENTITY_SEPARATOR = "|"
+
+
+def _identity_part(value: Any) -> str:
+    """*value* as one part of an identity key.
+
+    The separator and the escape are escaped inside a part, so that the parts
+    ``("a|b", "c")`` and ``("a", "b|c")`` give two keys; joined raw they gave one.
+    """
+    return (
+        str(value or "")
+        .replace("\\", "\\\\")
+        .replace(_IDENTITY_SEPARATOR, "\\" + _IDENTITY_SEPARATOR)
+    )
+
+
+def _result_scanner(result: Any) -> str:
+    """The scanner that produced *result*, as the flattening reads it:
+    ``properties.scanner_name``, else ``properties.scanner_details.tool_name``,
+    else "". Guarded, like every read of the identity key."""
+    try:
+        props = getattr(result, "properties", None)
+        if props is None:
+            return ""
+        name = getattr(props, "scanner_name", None)
+        if not name:
+            extra = getattr(props, "model_extra", None)
+            name = extra.get("scanner_name") if isinstance(extra, dict) else None
+        if not name:
+            details = getattr(props, "scanner_details", None)
+            if isinstance(details, dict):
+                name = details.get("tool_name")
+            elif details is not None:
+                name = getattr(details, "tool_name", None)
+        return str(name or "")
+    except Exception:  # noqa: BLE001 -- see the docstring
+        return ""
+
+
 def _identity_key(result: Any, rule_id: str, message_text: Optional[str] = None) -> str:
-    """A finding's identity from the result alone: rule, message, file and lines.
+    """A finding's identity from the result alone: scanner, workspace project,
+    rule, message, file and lines, each part escaped (:func:`_identity_part`).
 
     The fallback for a result the run-level flattening did not give an id (a
     direct call of the finding builder, or a model that cannot be flattened).
     Every read is guarded, because this is called on the error paths too.
+
+    The scanner and the project are in the key because two scanners can fire
+    one rule id at one line (grype and trivy on a CVE), and two workspace
+    projects can each hold ``src/index.js`` with the same finding in it; keyed
+    on the rule, message, file and lines alone, two such findings shared a uid
+    and a SIEM merged them into one. Two results identical in every part are
+    told apart by the report (:func:`_fallback_identities`).
     """
-    parts: List[str] = [str(rule_id)]
+    parts: List[str] = [_identity_part(_result_scanner(result))]
+    try:
+        parts.append(_identity_part(extract_workspace_project(result)))
+    except Exception:  # noqa: BLE001 -- see the docstring
+        parts.append("")
+    parts.append(_identity_part(rule_id))
     try:
         text = message_text
         if text is None:
             root = getattr(getattr(result, "message", None), "root", None)
             text = getattr(root, "text", None)
-        parts.append(str(text or ""))
+        parts.append(_identity_part(text))
     except Exception:  # noqa: BLE001 -- see the docstring
         parts.append("")
     try:
@@ -209,12 +262,39 @@ def _identity_key(result: Any, rule_id: str, message_text: Optional[str] = None)
             loc = getattr(physical, "root", physical)
             artifact = getattr(loc, "artifactLocation", None)
             region = getattr(loc, "region", None)
-            parts.append(str(getattr(artifact, "uri", None) or ""))
-            parts.append(str(getattr(region, "startLine", None) or ""))
-            parts.append(str(getattr(region, "endLine", None) or ""))
+            parts.append(_identity_part(getattr(artifact, "uri", None)))
+            parts.append(_identity_part(getattr(region, "startLine", None)))
+            parts.append(_identity_part(getattr(region, "endLine", None)))
     except Exception:  # noqa: BLE001 -- see the docstring
         pass
-    return "|".join(parts)
+    return _IDENTITY_SEPARATOR.join(parts)
+
+
+def _fallback_identities(
+    results: List[Any], shared_ids: List[Optional[str]]
+) -> List[Optional[str]]:
+    """The identity each result's uid is derived from when it has no shared id,
+    and None where it has one.
+
+    The identity is the result's :func:`_identity_key`; the second and later
+    results of the report that give the same key carry an occurrence number, so
+    two identical results in one run are two findings with two uids, as they are
+    in every other report (the flattened id's occurrence counter), instead of one
+    finding a SIEM sees twice and merges.
+    """
+    seen: Dict[str, int] = {}
+    identities: List[Optional[str]] = []
+    for result, shared_id in zip(results, shared_ids):
+        if shared_id:
+            identities.append(None)
+            continue
+        key = _identity_key(result, _rule_id(result) or "Unknown Rule")
+        count = seen.get(key, 0)
+        seen[key] = count + 1
+        if count:
+            key = _IDENTITY_SEPARATOR.join([key, "occurrence", str(count)])
+        identities.append(key)
+    return identities
 
 
 def _shared_finding_ids(
@@ -661,6 +741,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         metadata: Metadata,
         current_time_ms: int,
         shared_id: Optional[str] = None,
+        identity: Optional[str] = None,
     ) -> VulnerabilityFinding:
         """Build individual VulnerabilityFinding object.
 
@@ -670,7 +751,10 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             current_time_ms: Current timestamp in milliseconds
             shared_id: the finding's id in every other report
                 (:func:`_shared_finding_ids`); the uid is derived from it, else
-                from the result's own identity (:func:`_identity_key`)
+                from *identity*, the result's own identity numbered within the
+                report (:func:`_fallback_identities`), else from the result's
+                own identity alone (:func:`_identity_key`)
+            identity: see *shared_id*
 
         Returns:
             VulnerabilityFinding object for the individual result
@@ -758,7 +842,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
             # Create finding info with error handling
             ASH_LOGGER.debug(f"Creating FindingInfo object for {rule_id}")
-            identity = shared_id or _identity_key(result, rule_id, message_text)
+            identity = (
+                shared_id or identity or _identity_key(result, rule_id, message_text)
+            )
             try:
                 finding_uid = _finding_uid(identity)
                 finding_info = FindingInfo(
@@ -853,7 +939,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
                 fallback_finding_info = FindingInfo(
                     uid=_finding_uid(
-                        f"{shared_id or _identity_key(result, rule_id)}|fallback"
+                        f"{shared_id or identity or _identity_key(result, rule_id)}"
+                        "|fallback"
                     ),
                     title=f"Error processing finding {rule_id}",
                     desc="An error occurred while processing this security finding",
@@ -1088,6 +1175,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             f"Processing {total_results_count} SARIF results for OCSF report"
         )
         shared_ids = _shared_finding_ids(model, all_results)
+        identities = _fallback_identities(all_results, shared_ids)
 
         for i, result in enumerate(all_results):
             rule_id = _rule_id(result) or f"result_{i}"
@@ -1111,7 +1199,11 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             try:
                 # Create individual VulnerabilityFinding for this result
                 finding = self._create_vulnerability_finding(
-                    result, metadata, current_time_ms, shared_id=shared_ids[i]
+                    result,
+                    metadata,
+                    current_time_ms,
+                    shared_id=shared_ids[i],
+                    identity=identities[i],
                 )
                 vulnerability_findings.append(finding)
 
