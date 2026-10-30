@@ -2098,6 +2098,43 @@ class TestCandidateInputCount:
         assert converter.candidate_input_count() == 1
         assert started == []
 
+    def test_the_dependency_check_reads_as_far_as_the_first_candidate(
+        self, converter, monkeypatch
+    ):
+        """The check asks whether nbconvert is needed at all, not how many notebooks
+        need it. Answering through the count read and parsed every notebook in the
+        tree (up to 256 MiB each) before convert() parsed them all again; the
+        yes-or-no answer stops at the first candidate. The count still reads them
+        all, since the completeness gate needs the number."""
+        for name in ("one.ipynb", "two.ipynb", "three.ipynb"):
+            write_notebook(converter.context.source_dir, name)
+        parsed = []
+        real = type(converter)._would_hand_to_nbconvert
+
+        def counting(self, ipynb_file):
+            parsed.append(Path(ipynb_file).name)
+            return real(self, ipynb_file)
+
+        monkeypatch.setattr(type(converter), "_would_hand_to_nbconvert", counting)
+
+        assert converter._has_candidate_input() is True
+        assert len(parsed) == 1, parsed
+
+        parsed.clear()
+        assert converter.candidate_input_count() == 3
+        assert len(parsed) == 3, parsed
+
+    def test_without_candidates_the_check_answers_false_not_none(self, converter):
+        """The dependency check skips nbconvert only on a definite no: a tree with
+        no notebooks answers False, and the scan set it could not read answers
+        None, as the count does."""
+        (converter.context.source_dir).mkdir(parents=True, exist_ok=True)
+        (converter.context.source_dir / "template.yaml").write_text(
+            "Resources: {}\n", encoding="utf-8"
+        )
+
+        assert converter._has_candidate_input() is False
+
     def test_an_unreadable_scan_set_reports_no_count_rather_than_zero(
         self, converter, monkeypatch
     ):

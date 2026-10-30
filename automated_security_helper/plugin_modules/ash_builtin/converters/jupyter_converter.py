@@ -19,6 +19,7 @@ from typing import (
     ClassVar,
     ContextManager,
     Dict,
+    Iterator,
     List,
     Literal,
     NamedTuple,
@@ -451,9 +452,11 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         self.dependency_unavailable_reason = None
         self._nbconvert_route = None
         self._nbconvert_path = None
-        # Nothing to convert, so nbconvert is neither looked for nor installed. A
-        # count of None (the scan set could not be read) is not "no notebooks".
-        if self.candidate_input_count() == 0:
+        # Nothing to convert, so nbconvert is neither looked for nor installed. An
+        # answer of None (the scan set could not be read) is not "no notebooks".
+        # Read as far as the first candidate: the check needs no count, and the
+        # count parses every notebook in the tree (candidate_input_count).
+        if self._has_candidate_input() is False:
             return True
         # nbconvert is needed, so its version is worth asking for: `uv tool run
         # --from nbconvert`, which resolves and downloads nbconvert to answer.
@@ -943,6 +946,47 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 return ignore_path
         return None
 
+    def _candidate_notebooks(self) -> Iterator[str]:
+        """The notebooks convert() would hand to nbconvert, one at a time.
+
+        Less the notebooks convert() would refuse, judged by the same check it
+        opens them with, so a symlinked notebook is not counted as lost coverage,
+        less those it would skip for an ignore path, read as convert() reads them,
+        so a tree whose only notebooks are ignored does not fail the gate over
+        files the converter would not have touched, and less those it would record
+        as input errors before any launch (_would_hand_to_nbconvert), for the same
+        reason. A generator: the last check reads and parses each notebook (up to
+        _NOTEBOOK_MAX_BYTES), so a caller that only asks whether there is one stops
+        at the first (_has_candidate_input) instead of parsing the whole tree.
+        """
+        ignore_paths = self._ignore_paths_skipping_conversion()
+        for notebook in self._notebooks_in_scan_set():
+            if (
+                refusal_reason(notebook, self.context.source_dir) is None
+                and self._ignored_by(notebook, ignore_paths) is None
+                and self._would_hand_to_nbconvert(notebook)
+            ):
+                yield notebook
+
+    def _has_candidate_input(self) -> bool | None:
+        """Whether this converter would convert any notebook: ``candidate_input_count``
+        read only as far as its first candidate.
+
+        The dependency check asks only whether nbconvert is needed at all, and the
+        count parsed every notebook in the tree (hundreds of megabytes each, on a
+        tree of notebooks with embedded outputs) to answer a yes-or-no question;
+        convert() then parses them again. None when the scan set cannot be read,
+        as the count answers None: that is not evidence of no notebooks.
+        """
+        try:
+            return any(True for _notebook in self._candidate_notebooks())
+        except Exception as exc:  # pragma: no cover - defensive
+            ASH_LOGGER.debug(
+                f"Could not look for a .ipynb candidate for the jupyter converter "
+                f"({exc!r}); reporting no answer so the completeness gate stays strict"
+            )
+            return None
+
     def candidate_input_count(self) -> int | None:
         """How many notebooks this converter would convert, tool or no tool.
 
@@ -961,23 +1005,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         None and the gate stays strict.
         """
         try:
-            # Less the notebooks convert() would refuse, judged by the same check it
-            # opens them with, so a symlinked notebook is not counted as lost
-            # coverage, less those it would skip for an ignore path, read as
-            # convert() reads them, so a tree whose only notebooks are ignored does
-            # not fail the gate over files the converter would not have touched,
-            # and less those it would record as input errors before any launch
-            # (_would_hand_to_nbconvert), for the same reason.
-            ignore_paths = self._ignore_paths_skipping_conversion()
-            return len(
-                [
-                    notebook
-                    for notebook in self._notebooks_in_scan_set()
-                    if refusal_reason(notebook, self.context.source_dir) is None
-                    and self._ignored_by(notebook, ignore_paths) is None
-                    and self._would_hand_to_nbconvert(notebook)
-                ]
-            )
+            return sum(1 for _notebook in self._candidate_notebooks())
         except Exception as exc:  # pragma: no cover - defensive
             ASH_LOGGER.debug(
                 f"Could not count .ipynb candidates for the jupyter converter ({exc!r}); "
