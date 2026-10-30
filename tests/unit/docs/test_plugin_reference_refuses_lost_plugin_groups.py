@@ -137,6 +137,36 @@ def test_a_record_that_is_not_a_mapping_is_refused_as_unreadable(
     assert "not a mapping" in str(caught.value)
 
 
+@pytest.mark.parametrize("record", [[], "", 0, ()], ids=["list", "str", "int", "tuple"])
+def test_a_falsy_record_that_is_not_a_mapping_is_refused_too(
+    builtin_only, monkeypatch, record
+):
+    """An empty list or string is as unreadable as a non-empty one.
+
+    The record is read as "nothing failed" only when it is absent or an empty
+    mapping; a falsy value of another type says nothing about the groups and
+    must not pass as a clean load.
+    """
+    reference, ash_builtin = builtin_only
+    monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", record)
+    monkeypatch.setattr(ash_builtin, "retry_failed_plugin_groups", dict)
+
+    with pytest.raises(ImportError) as caught:
+        reference.discover("reporter")
+
+    assert "not a mapping" in str(caught.value)
+
+
+def test_control_an_absent_record_reads_as_a_clean_load(builtin_only, monkeypatch):
+    reference, ash_builtin = builtin_only
+    monkeypatch.delattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", raising=False)
+    monkeypatch.setattr(ash_builtin, "retry_failed_plugin_groups", dict)
+
+    plugins = reference.discover("reporter")
+
+    assert plugins
+
+
 def test_control_a_group_recovered_on_retry_is_listed(builtin_only, monkeypatch):
     reference, ash_builtin = builtin_only
     monkeypatch.setattr(

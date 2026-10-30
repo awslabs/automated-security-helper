@@ -163,7 +163,12 @@ def _refuse_lost_plugin_groups(package: str, module: Any) -> None:
         # For its effect only: the record of what still fails is the module's
         # own attribute, whatever the retry returns.
         retry()
-    errors = getattr(module, "ASH_PLUGIN_LOAD_ERRORS", None) or {}
+    # An absent record is a clean load; a record of any other type than a mapping
+    # is unreadable, an empty list or string included, so the type is checked
+    # before anything is read as "nothing failed".
+    errors = getattr(module, "ASH_PLUGIN_LOAD_ERRORS", None)
+    if errors is None:
+        errors = {}
     if not isinstance(errors, Mapping):
         raise ImportError(
             f"{package}.ASH_PLUGIN_LOAD_ERRORS is {type(errors).__name__}, not a "
