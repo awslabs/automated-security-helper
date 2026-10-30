@@ -198,6 +198,36 @@ class TestAdditionalReportEntries:
         description = model.additional_reports["semgrep"][0]["description"]
         assert description == f"the call uses {_mask_secret_value(WORD)} here"
 
+    def test_an_overlapping_entrys_identifiers_are_left_as_written(self):
+        """The file is named by the value a finding on its line exposed: the
+        entry's ``file_path``, ``rule_id`` and ``id`` are its identity, not text
+        it reports, so they keep the value while its text fields are masked."""
+        file_name = WORD + ".py"
+        model = _results(
+            [_result("B105", file_name, 2, HARDCODED + "'" + WORD + "'", "bandit")],
+            additional={
+                "semgrep": [
+                    _entry(
+                        id=WORD + "-1",
+                        rule_id="rules." + WORD,
+                        description=f"the call uses {WORD} here",
+                        file_path=file_name,
+                        line_start=2,
+                        line_end=2,
+                    )
+                ]
+            },
+        )
+
+        mask_secrets_in_results(model)
+
+        entry = model.additional_reports["semgrep"][0]
+        assert entry["file_path"] == file_name
+        assert entry["rule_id"] == "rules." + WORD
+        assert entry["id"] == WORD + "-1"
+        assert entry["line_start"] == 2
+        assert entry["description"] == f"the call uses {_mask_secret_value(WORD)} here"
+
     def test_an_entry_in_another_file_is_left_alone(self):
         """Control."""
         model = _results(

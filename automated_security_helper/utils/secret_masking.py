@@ -2082,9 +2082,18 @@ def _rename_masked_key(mapping: Dict[Any, Any], key: str, index: _SecretIndex) -
 
 
 def _mask_tree(
-    node: Any, index: _SecretIndex, seen: Set[int], parent: Optional[str] = None
+    node: Any,
+    index: _SecretIndex,
+    seen: Set[int],
+    parent: Optional[str] = None,
+    skipped_keys: Tuple[str, ...] = (),
 ) -> Any:
-    """Mask ``node`` in place; returns the replacement for a string or URL node."""
+    """Mask ``node`` in place; returns the replacement for a string or URL node.
+
+    ``skipped_keys`` names keys of a plain dict ``node`` under which nothing is
+    masked and whose names are kept, beyond ``_is_skipped_key``; it applies to
+    that dict alone, not to the dicts under it.
+    """
     if isinstance(node, Enum):
         # An enum member (Result.level, Suppression.kind) is a str as well, and
         # masking it wrote a value the model refuses (_ENUM_FIELDS).
@@ -2260,7 +2269,9 @@ def _mask_tree(
         return node
     if isinstance(node, dict):
         for key in list(node):
-            if isinstance(key, str) and _is_skipped_key(key, parent):
+            if isinstance(key, str) and (
+                key in skipped_keys or _is_skipped_key(key, parent)
+            ):
                 continue
             item = node[key]
             masked = _mask_tree(
@@ -2478,6 +2489,11 @@ def _additional_entry_is_secret(entry: Dict[str, Any], scanner_name: Any) -> boo
 
 #: The text fields of an additional-report entry the flat model shows.
 _ENTRY_TEXTS = ("description", "title")
+#: The fields of an additional-report entry that identify it and place it: its
+#: id, its rule, and the file and lines the flat model reads it at. They are not
+#: text the entry reports, so a secret value they happen to equal (a file named
+#: by a value) is left in them; rewriting ``file_path`` lost the entry's place.
+_ENTRY_IDENTIFIERS = ("id", "rule_id", "file_path", "line_start", "line_end")
 
 
 def _mask_additional_entry(
@@ -2509,7 +2525,7 @@ def _mask_additional_entry(
     if values:
         local = _SecretIndex()
         local.values = set(values)
-        _mask_tree(entry, local, set())
+        _mask_tree(entry, local, set(), skipped_keys=_ENTRY_IDENTIFIERS)
 
 
 def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], str]:
