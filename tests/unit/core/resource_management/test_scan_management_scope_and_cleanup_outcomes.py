@@ -54,7 +54,6 @@ def registry():
     registry = MagicMock(spec=ScanRegistry)
     registry.cleanup_scan.return_value = True
     registry.cancel_scan.return_value = True
-    registry.occupants_of_directory.return_value = []
     # The output delete goes through the registry, which runs the remover it
     # is handed and answers (reason, removed); the double runs it as a
     # registry that found no other scan on the directory does, so the rmtree

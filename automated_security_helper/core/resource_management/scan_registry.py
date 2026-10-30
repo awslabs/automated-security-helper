@@ -402,6 +402,19 @@ class ScanRegistryEntry:
         """Whether a scanner tool the stop could not end still runs, by its pid."""
         return any(_tool_may_be_running(pid) for _tool, pid in self.could_not_stop)
 
+    def tool_display_names(self) -> List[str]:
+        """The scanner tools the cancel could not end, by basename, in order, once each.
+
+        A tool is recorded as argv0 as spawned, which can be a full path on the
+        server; what leaves the registry in a refusal or a coverage payload is
+        the basename (:func:`_shown_tool_name`), as the entry's own warning
+        names it on a network transport (``record_cancel_outcome``): a remote
+        client has no use for the server's path and should not learn it.
+        """
+        return list(
+            dict.fromkeys(_shown_tool_name(tool) for tool, _pid in self.could_not_stop)
+        )
+
     def stopped_by_the_server(self) -> bool:
         """Whether a cancel, the scan timeout, or a cancelled runner task ended this scan.
 
@@ -574,6 +587,58 @@ class ScanRegistry:
         self._registry: Dict[str, ScanRegistryEntry] = {}
         self._registry_lock = Lock()
         self._logger = ASH_LOGGER
+
+    def _later_scans_holding(self, entry: ScanRegistryEntry) -> List[str]:
+        """The later scans whose files ``entry``'s output tree holds, oldest first.
+
+        The one reading of ``later_scan_ids`` every reader uses (the caller holds
+        the lock). ``later_scan_ids`` holds the later scans that CLAIMED the
+        tree (:meth:`_record_supersession`: marked running, or closed after
+        they ran; a scan registered and never run is not there), so a recorded
+        later scan counts unless it put the previous results back
+        (``output_holds_previous_results``); one the registry no longer holds
+        counts, because ``_forget_later_scan`` dropped the ids of the removed
+        scans that had put the previous results back, so a remaining id of a
+        removed scan is a scan whose files are what the tree holds. Before this
+        ``check_scan_progress`` and ``remove_output_of_scan`` each read the list
+        on their own (one counted a removed later scan, the other did not), and
+        the two readers disagreed: an earlier scan read as superseded while
+        cleaning it deleted the later scan's files.
+        """
+        holding: List[str] = []
+        for later in entry.later_scan_ids:
+            other = self._registry.get(later)
+            if other is None:
+                holding.append(later)
+            elif not other.output_holds_previous_results:
+                holding.append(later)
+        return holding
+
+    def _forget_later_scan(self, removed: ScanRegistryEntry) -> None:
+        """Drop ``removed`` from the earlier entries' ``later_scan_ids`` when its
+        files are not what the tree holds: it put the previous results back. A
+        removed scan whose own files are in the tree stays recorded (the caller
+        holds the lock); a scan that never claimed the tree was never recorded."""
+        if not removed.output_holds_previous_results:
+            return
+        for other in self._registry.values():
+            if removed.scan_id in other.later_scan_ids:
+                other.later_scan_ids = [
+                    later for later in other.later_scan_ids if later != removed.scan_id
+                ]
+
+    def _another_scan_occupies(self, entry: ScanRegistryEntry) -> bool:
+        """Whether another entry occupies ``entry``'s source directory or output
+        tree (the caller holds the lock)."""
+        for other in self._registry.values():
+            if other.scan_id == entry.scan_id:
+                continue
+            if (
+                other.canonical_directory == entry.canonical_directory
+                or other.canonical_output_directory == entry.canonical_output_directory
+            ) and other.occupies_its_directory():
+                return True
+        return False
 
     def register_scan(
         self,
@@ -878,12 +943,7 @@ class ScanRegistry:
                         # not know the transport, so it never shows the
                         # server path a tool was spawned as, and never a pid
                         # (the server's log has both).
-                        tools = ", ".join(
-                            dict.fromkeys(
-                                _shown_tool_name(tool)
-                                for tool, _pid in entry.could_not_stop
-                            )
-                        )
+                        tools = ", ".join(entry.tool_display_names())
                         raise MCPResourceError(
                             f"Directory {directory_path} has a stopped scan "
                             f"({entry.status.value}) whose scanner tool(s) could "
@@ -1089,27 +1149,6 @@ class ScanRegistry:
                     return entry.scan_id
             return None
 
-    def occupants_of_directory(
-        self, directory_path: str, except_scan_id: Optional[str] = None
-    ) -> List[str]:
-        """The ids of the scans that still occupy ``directory_path``.
-
-        Occupying is :meth:`ScanRegistryEntry.occupies_its_directory`: active, or
-        closed with a runner that has not settled the output directory yet. The
-        output directory of every scan of one source directory is the same
-        tree, so a caller about to remove it asks this first. ``except_scan_id``
-        leaves one scan out, the caller's own.
-        """
-        requested = _canonical_directory(directory_path)
-        with self._registry_lock:
-            return [
-                entry.scan_id
-                for entry in self._registry.values()
-                if entry.scan_id != except_scan_id
-                and entry.canonical_directory == requested
-                and entry.occupies_its_directory()
-            ]
-
     def remove_output_of_scan(
         self, entry: ScanRegistryEntry, remover: Callable[[], bool]
     ) -> Tuple[Optional[str], bool]:
@@ -1126,12 +1165,15 @@ class ScanRegistry:
         another scan's while that scan occupies it
         (:meth:`ScanRegistryEntry.occupies_its_directory`), and it holds a LATER
         scan's results once one has claimed it (``later_scan_ids``: marked
-        running, or closed after it ran), whatever that scan's state since:
-        ``cleanup_old_scans`` reaches here for an old scan while a newer,
-        completed scan's results sit in the shared tree, and removing them left
-        that scan reporting results_available over an empty directory. A later
-        scan that was registered and never ran holds nothing here, so it does
-        not refuse the removal.
+        running, or closed after it ran), whatever that scan's state since,
+        and whether or not that scan is still in the registry
+        (``_later_scans_holding``, the one reading ``check_scan_progress`` uses
+        for ``output_superseded``): ``cleanup_old_scans`` reaches here for an
+        old scan while a newer, completed scan's results sit in the shared tree,
+        and removing them left that scan reporting results_available over an
+        empty directory. A later scan that was registered and never ran holds
+        nothing here, so it does not refuse the removal; nor does one that ended
+        without writing and had the previous results put back.
 
         The check runs under the registry lock and the delete runs OFF it: the
         entry is marked as having its output removal in progress
@@ -1198,11 +1240,11 @@ class ScanRegistry:
                         ),
                         False,
                     )
-                if other.scan_id in entry.later_scan_ids:
-                    return (
-                        "a later scan holds its results in this output directory",
-                        False,
-                    )
+            if self._later_scans_holding(entry):
+                return (
+                    "a later scan holds its results in this output directory",
+                    False,
+                )
             removal = entry.output_removal = Event()
         try:
             return None, remover()
@@ -1237,6 +1279,14 @@ class ScanRegistry:
         was PENDING with no runner (``closed_from_file``): that file can be the
         previous scan's, and the runner that then claims the entry owns its
         lifecycle; ``mark_running`` clears what the file put there.
+
+        Not even that one once the tree has moved on: an entry closed from a
+        file no longer occupies its directory, so ``register_scan`` admits a
+        second scan of it, and reopening the first then put two RUNNING scans on
+        one output tree. The reopen is refused (False, logged) while another
+        entry occupies the directory or the output tree, or a later scan has
+        taken the tree (``_later_scans_holding``); the runner's claim fails and
+        it reports the scan as not started.
         """
         if status == MCScanStatus.INCOMPLETE:
             # finish_scan is the only way in, because it carries the coverage gap.
@@ -1253,16 +1303,22 @@ class ScanRegistry:
             entry = self._registry.get(scan_id)
             if entry is None:
                 return False
-            if (
-                status == MCScanStatus.RUNNING
-                and entry.status in ENDED
-                and not entry.closed_from_file
-            ):
-                self._logger.info(
-                    f"Scan {scan_id} stays {entry.status.value}: a scan that has "
-                    "ended is not reopened as running"
-                )
-                return False
+            if status == MCScanStatus.RUNNING and entry.status in ENDED:
+                if not entry.closed_from_file:
+                    self._logger.info(
+                        f"Scan {scan_id} stays {entry.status.value}: a scan that "
+                        "has ended is not reopened as running"
+                    )
+                    return False
+                if self._another_scan_occupies(entry) or self._later_scans_holding(
+                    entry
+                ):
+                    self._logger.info(
+                        f"Scan {scan_id} stays {entry.status.value}: it was closed "
+                        "from a results file and another scan has since taken its "
+                        "directory, so it is not reopened as running"
+                    )
+                    return False
             self._apply_status(scan_id, entry, status, error_message)
             return True
 
@@ -1612,6 +1668,7 @@ class ScanRegistry:
                 )
                 return False
             del self._registry[scan_id]
+            self._forget_later_scan(entry)
             self._logger.info(f"Removed scan {scan_id} from registry")
             return True
 
@@ -1647,7 +1704,8 @@ class ScanRegistry:
 
             # Remove the old scans
             for scan_id in scans_to_remove:
-                del self._registry[scan_id]
+                removed = self._registry.pop(scan_id)
+                self._forget_later_scan(removed)
 
             if scans_to_remove:
                 self._logger.info(
@@ -1828,14 +1886,10 @@ class ScanRegistry:
                 # does not count, nor one that was registered and never ran (a
                 # workspace batch rolled back), and one that has since been
                 # removed from the registry still does: its files are what the
-                # tree holds.
+                # tree holds (_later_scans_holding, the reading
+                # remove_output_of_scan uses too).
                 previous_only = entry.output_holds_previous_results
-                superseded_by = [
-                    later
-                    for later in entry.later_scan_ids
-                    if later not in self._registry
-                    or not self._registry[later].output_holds_previous_results
-                ]
+                superseded_by = self._later_scans_holding(entry)
                 superseded = entry.status in ENDED and bool(superseded_by)
                 foreign_output = previous_only or superseded or output_missing
                 scan_progress = (
@@ -1960,17 +2014,20 @@ class ScanRegistry:
                     and scan_progress.status == "failed"
                 )
                 # A finished scan with no results of its own to read for the
-                # other two reasons nothing was read above: its output directory
-                # is gone (never created, or removed since), or a later scan has
-                # taken the one output tree over (output_superseded). Both left
+                # other reasons nothing was read above (foreign_output): its
+                # output directory is gone (never created, or removed since), a
+                # later scan has taken the one output tree over
+                # (output_superseded), or the tree holds the previous scan's
+                # results put back (output_holds_previous_results). Each left
                 # the response at status completed / results_available True /
                 # total_findings 0 / error_message None, the same clean-scan
                 # reading the unreadable-file case had, and a client checking
                 # results_available found nothing wrong. The directory that is
                 # gone is named in error_message when the entry carries no
-                # reason of its own; a superseded scan is named by superseded_by.
-                results_absent = entry.status in FINISHED_WITH_RESULTS and (
-                    output_missing or superseded
+                # reason of its own; a superseded scan is named by superseded_by;
+                # a put-back is named by output_holds_previous_results.
+                results_absent = (
+                    entry.status in FINISHED_WITH_RESULTS and foreign_output
                 )
                 results_unavailable = results_unreadable or results_absent
                 output_missing_message = (
@@ -2127,10 +2184,11 @@ class ScanRegistry:
                     # whether they cover everything is `coverage_complete`.
                     "is_complete": entry.status in ENDED,
                     # False for a finished scan whose results file is now
-                    # unusable (results_unreadable above), whose output
-                    # directory is gone, or whose output tree a later scan
-                    # holds (results_absent above): the status says the scan
-                    # finished, this says its results cannot be read.
+                    # unusable (results_unreadable above), or whose results are
+                    # not in its output tree at all (results_absent above: the
+                    # tree is gone, a later scan holds it, or it holds the
+                    # previous scan's results put back): the status says the
+                    # scan finished, this says its results cannot be read.
                     "results_available": entry.status in FINISHED_WITH_RESULTS
                     and not results_unavailable,
                     "output_holds_previous_results": previous_only,

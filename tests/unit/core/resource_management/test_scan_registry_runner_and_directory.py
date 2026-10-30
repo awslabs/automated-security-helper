@@ -34,6 +34,7 @@ from unittest.mock import patch
 
 import pytest
 
+from automated_security_helper.core.resource_management import scan_registry
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
@@ -131,9 +132,13 @@ class TestCanonicalDirectorySurvivesAnUnresolvablePath:
             # path with the entry's resolved one: no match, no exception. The
             # scan is still found by the directory it was registered as.
             assert registry.get_scan_by_directory(str(link)) is None
-            assert registry.occupants_of_directory(str(link)) == []
+            assert (
+                registry.scan_writing_output(str(link / ".ash" / "ash_output")) is None
+            )
         assert registry.get_scan_by_directory(str(target)).scan_id == scan_id
-        assert registry.occupants_of_directory(str(target)) == [scan_id]
+        assert (
+            registry.scan_writing_output(str(target / ".ash" / "ash_output")) == scan_id
+        )
 
     def test_one_looping_historical_entry_does_not_break_registration(self, tmp_path):
         """The high finding end to end: register, retarget, register again."""
@@ -252,31 +257,36 @@ class TestCleanupKeepsAStoppingRunner:
         entry.runner_done.set()
         assert registry.cleanup_completed_scans(max_age_hours=1) == 1
 
-    def test_occupants_of_directory_names_the_other_scans(self, tmp_path):
+    def test_the_lookup_by_output_tree_names_the_occupying_scan(self, tmp_path):
         registry = ScanRegistry()
         project = tmp_path / "proj"
         project.mkdir()
+        output = project / ".ash" / "ash_output"
         first = _register(registry, project)
         registry.update_scan_status(first, MCScanStatus.COMPLETED)
         second = _register(registry, project)
 
-        assert registry.occupants_of_directory(str(project)) == [second]
-        assert (
-            registry.occupants_of_directory(str(project), except_scan_id=second) == []
-        )
-        assert registry.occupants_of_directory(str(project) + os.sep) == [second]
+        assert registry.scan_writing_output(str(output)) == second
+        assert registry.scan_writing_output(str(output) + os.sep) == second
 
 
 class TestRemovingAnOutputDirectoryAsksTheRegistry:
-    """occupants_of_directory counted only scans that were running or settling,
-    so cleanup of an old scan removed the shared output tree while a later,
-    completed scan's results sat in it, and the check ran long before the
+    """The directory-occupancy lookup counted only scans that were running or
+    settling, so cleanup of an old scan removed the shared output tree while a
+    later, completed scan's results sat in it, and the check ran long before the
     delete with the lock released in between. The first cure ran the delete
     under the registry lock, which held every synchronous registry caller (the
     event-loop thread's get_scan, list_scans, cancel_scan and register_scan
     among them) for as long as the tree took to remove. The delete now runs off
     the lock behind a per-entry mark: a registration of the same output tree
-    waits on the mark, a second removal is refused, and nothing else waits."""
+    waits on the mark (for a bounded time: see
+    TestARegistrationWaitsForARemovalForABoundedTime), a second removal is
+    refused, and nothing else waits.
+
+    The threaded tests release their remover in ``finally``, so an assertion
+    that fails leaves no thread blocked for its 10 s timeout, and they read the
+    fact that the registration waited from the removal mark's own event (its
+    ``wait`` is observed) rather than from a wall-clock join."""
 
     @staticmethod
     def _two_scans(registry, tmp_path, later_status):
@@ -336,7 +346,8 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
     @staticmethod
     def _removal_in_progress(registry, scan_id):
         """Start a removal of ``scan_id``'s tree whose remover blocks until
-        ``release`` is set; returns (thread, release) once the remover runs."""
+        ``release`` is set; returns (thread, release) once the remover runs.
+        Every caller sets ``release`` in a ``finally``."""
         started, release = threading.Event(), threading.Event()
 
         def remover():
@@ -352,30 +363,55 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert started.wait(timeout=10)
         return thread, release
 
-    def test_a_registration_of_the_tree_waits_and_other_callers_do_not(self, tmp_path):
+    @staticmethod
+    def _observed_wait(registry, scan_id):
+        """An Event set when something waits on ``scan_id``'s removal mark:
+        the fact that a registration waited, read from the wait itself."""
+        waited = threading.Event()
+        mark = registry.get_scan(scan_id).output_removal
+        original_wait = mark.wait
+
+        def wait(timeout=None):
+            waited.set()
+            return original_wait(timeout)
+
+        mark.wait = wait
+        return waited
+
+    def test_a_registration_of_the_tree_waits_and_other_callers_do_not(
+        self, tmp_path, monkeypatch
+    ):
         registry = ScanRegistry()
+        # The bound cannot fire under load: the test is about the wait, not
+        # the bound (the bound has its own tests above).
+        monkeypatch.setattr(scan_registry, "OUTPUT_REMOVAL_WAIT_SECONDS", 30.0)
         _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
         removing, release = self._removal_in_progress(registry, new)
         outcome = {}
+        registering = None
+        try:
+            waited = self._observed_wait(registry, new)
 
-        def register_a_third_scan():
-            outcome["scan_id"] = _register(registry, tmp_path / "proj")
-            # Registered only once the delete had ended and cleared its mark.
-            outcome["mark_after"] = registry.get_scan(new).output_removal
+            def register_a_third_scan():
+                outcome["scan_id"] = _register(registry, tmp_path / "proj")
+                # Registered only once the delete had ended and cleared its mark.
+                outcome["mark_after"] = registry.get_scan(new).output_removal
 
-        registering = threading.Thread(target=register_a_third_scan)
-        registering.start()
-        registering.join(timeout=0.5)
+            registering = threading.Thread(target=register_a_third_scan)
+            registering.start()
 
-        # The registration waits for the delete; a plain registry read does not.
-        assert registering.is_alive()
-        assert "scan_id" not in outcome
-        assert registry.get_scan(new).output_removal is not None
-        assert registry.get_scan_count() == 2
+            # The registration waits on the delete's mark; a plain registry
+            # read does not wait at all.
+            assert waited.wait(timeout=10)
+            assert "scan_id" not in outcome
+            assert registry.get_scan(new).output_removal is not None
+            assert registry.get_scan_count() == 2
+        finally:
+            release.set()
+            removing.join(timeout=10)
+            if registering is not None:
+                registering.join(timeout=10)
 
-        release.set()
-        removing.join(timeout=10)
-        registering.join(timeout=10)
         assert not registering.is_alive()
         assert registry.get_scan(outcome["scan_id"]) is not None
         assert outcome["mark_after"] is None
@@ -386,22 +422,25 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
         removing, release = self._removal_in_progress(registry, new)
         ran = []
+        try:
+            again = registry.remove_output_of_scan(
+                registry.get_scan(new), lambda: ran.append(1) or True
+            )
+            the_old_one = registry.remove_output_of_scan(
+                registry.get_scan(old), lambda: ran.append(1) or True
+            )
+        finally:
+            release.set()
+            removing.join(timeout=10)
 
-        again = registry.remove_output_of_scan(
-            registry.get_scan(new), lambda: ran.append(1) or True
-        )
-        the_old_one = registry.remove_output_of_scan(
-            registry.get_scan(old), lambda: ran.append(1) or True
-        )
-
-        release.set()
-        removing.join(timeout=10)
         assert again == ("this scan's output directory is already being removed", False)
         assert "in progress" in the_old_one[0]
         assert the_old_one[1] is False
         assert ran == []
 
-    def test_cleanup_keeps_an_entry_whose_output_is_being_removed(self, tmp_path):
+    def test_cleanup_keeps_an_entry_whose_output_is_being_removed(
+        self, tmp_path, monkeypatch
+    ):
         """The mark lives on the registry entry and register_scan's wait is
         keyed on entries in the registry. cleanup_scan and the age sweep
         dropped a marked entry (a second cleanup of the same scan during the
@@ -410,32 +449,36 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         registration of the tree arriving after the drop found no mark and did
         not wait: the window the lock-held delete closed, re-opened."""
         registry = ScanRegistry()
+        monkeypatch.setattr(scan_registry, "OUTPUT_REMOVAL_WAIT_SECONDS", 30.0)
         _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
         entry = registry.get_scan(new)
         entry.end_time = entry.end_time - timedelta(days=2)
         removing, release = self._removal_in_progress(registry, new)
-
-        # The second cleanup of the same scan, and the age sweep, during the
-        # first's delete.
-        assert registry.cleanup_scan(new) is False
-        assert registry.cleanup_completed_scans(max_age_hours=1) == 0
-        assert registry.get_scan(new) is entry
-
-        # So a registration of the tree arriving now still waits.
         outcome = {}
-        registering = threading.Thread(
-            target=lambda: outcome.setdefault(
-                "scan_id", _register(registry, tmp_path / "proj")
-            )
-        )
-        registering.start()
-        registering.join(timeout=0.5)
-        assert registering.is_alive()
-        assert "scan_id" not in outcome
+        registering = None
+        try:
+            # The second cleanup of the same scan, and the age sweep, during
+            # the first's delete.
+            assert registry.cleanup_scan(new) is False
+            assert registry.cleanup_completed_scans(max_age_hours=1) == 0
+            assert registry.get_scan(new) is entry
 
-        release.set()
-        removing.join(timeout=10)
-        registering.join(timeout=10)
+            # So a registration of the tree arriving now still waits.
+            waited = self._observed_wait(registry, new)
+            registering = threading.Thread(
+                target=lambda: outcome.setdefault(
+                    "scan_id", _register(registry, tmp_path / "proj")
+                )
+            )
+            registering.start()
+            assert waited.wait(timeout=10)
+            assert "scan_id" not in outcome
+        finally:
+            release.set()
+            removing.join(timeout=10)
+            if registering is not None:
+                registering.join(timeout=10)
+
         assert registry.get_scan(outcome["scan_id"]) is not None
         # With the delete finished, the entry is removable again.
         assert registry.cleanup_scan(new) is True
@@ -650,6 +693,11 @@ class TestProgressOfASupersededScanReadsNoFiles:
 
         assert progress["output_superseded"] is True
         assert progress["total_findings"] == 0
+        # Reading no files is having no results of this scan's to read: a
+        # superseded scan used to say results_available True over 0 findings,
+        # the shape of a clean scan, with only the new flag to tell them apart.
+        assert progress["results_available"] is False
+        assert progress["coverage_complete"] is None
         assert registry.check_scan_progress(new)["output_superseded"] is False
 
     def test_a_later_scan_that_put_the_previous_results_back_does_not_supersede(
@@ -910,12 +958,321 @@ class TestProgressOfASupersededScanReadsNoFiles:
         assert registry.check_scan_progress(old)["scanners"] == {}
 
 
+class TestSupersessionIsAboutWritingNotRegistering:
+    """later_scan_ids used to record registration, and a registered scan can end
+    without ever writing: refused at mkdir right after registering, or marked
+    CANCELLED by a workspace registration that rolled back. Counted as
+    superseding, such a scan hid the earlier scan's results while they sat on
+    disk; it is now recorded on the claim (_record_supersession), so it is never
+    there. And the two readers of the list disagreed, check_scan_progress
+    counting a removed later scan while remove_output_of_scan counted registered
+    ones only, so an old scan read as superseded by a scan whose files its
+    cleanup then deleted; both read _later_scans_holding now, and a removed
+    later scan that put the previous results back is forgotten on removal."""
+
+    @staticmethod
+    def _old_scan_with_results(registry, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+        return project, output, old
+
+    def test_a_later_scan_that_never_ran_does_not_supersede(self, tmp_path):
+        registry = ScanRegistry()
+        project, output, old = self._old_scan_with_results(registry, tmp_path)
+        # Registered, then refused at mkdir: closed FAILED with no runner.
+        new = _register(registry, project, output)
+        registry.finish_scan(new, MCScanStatus.FAILED, error_message="mkdir refused")
+
+        progress = registry.check_scan_progress(old)
+
+        assert progress["output_superseded"] is False
+        assert progress["superseded_by"] == []
+        assert "bandit" in progress["scanners"]
+        assert progress["results_available"] is True
+
+    def test_a_cancelled_registration_that_never_ran_does_not_supersede(self, tmp_path):
+        """The workspace rollback shape: registered, then CANCELLED, no runner."""
+        registry = ScanRegistry()
+        project, output, old = self._old_scan_with_results(registry, tmp_path)
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.CANCELLED)
+
+        assert registry.check_scan_progress(old)["output_superseded"] is False
+        # Never recorded: supersession is recorded on the claim, and a scan
+        # cancelled straight from PENDING with no runner never claimed the tree.
+        assert registry.get_scan(old).later_scan_ids == []
+
+    def test_removing_a_later_scan_that_never_ran_drops_it_from_the_record(
+        self, tmp_path
+    ):
+        """Once such a scan leaves the registry its id would read as a removed
+        scan whose files the tree holds; it never had any, so it is dropped."""
+        registry = ScanRegistry()
+        project, output, old = self._old_scan_with_results(registry, tmp_path)
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.CANCELLED)
+        assert registry.cleanup_scan(new) is True
+
+        assert registry.get_scan(old).later_scan_ids == []
+        assert registry.check_scan_progress(old)["output_superseded"] is False
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: True
+        )
+        assert (reason, removed) == (None, True)
+
+    def test_removing_a_later_scan_that_put_the_results_back_drops_it_too(
+        self, tmp_path
+    ):
+        """cleanup_scan(B), where B put the previous results back, used to turn A
+        superseded with nothing changed on disk."""
+        registry = ScanRegistry()
+        project, output, old = self._old_scan_with_results(registry, tmp_path)
+        new = _register(registry, project, output)
+        registry.get_scan(new).has_runner = True
+        registry.update_scan_status(new, MCScanStatus.RUNNING)
+        registry.finish_scan(new, MCScanStatus.FAILED, error_message="exit 1")
+        registry.get_scan(new).output_holds_previous_results = True
+        registry.get_scan(new).runner_done.set()
+        assert registry.check_scan_progress(old)["output_superseded"] is False
+
+        assert registry.cleanup_scan(new) is True
+
+        assert registry.get_scan(old).later_scan_ids == []
+        assert registry.check_scan_progress(old)["output_superseded"] is False
+        assert "bandit" in registry.check_scan_progress(old)["scanners"]
+
+    def test_the_age_sweep_drops_it_the_same_way(self, tmp_path):
+        registry = ScanRegistry()
+        project, output, old = self._old_scan_with_results(registry, tmp_path)
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.CANCELLED)
+        registry.get_scan(new).end_time -= timedelta(days=2)
+        registry.get_scan(old).end_time = registry.get_scan(old).end_time + timedelta(
+            days=1
+        )
+
+        assert registry.cleanup_completed_scans(max_age_hours=1) == 1
+
+        assert registry.get_scan(old) is not None
+        assert registry.get_scan(old).later_scan_ids == []
+
+    def test_cleaning_the_old_scan_keeps_a_removed_later_scans_files(self, tmp_path):
+        """The two readers agree: a removed later scan that wrote holds the tree
+        for check_scan_progress (superseded) AND for remove_output_of_scan
+        (refused), where the latter used to count registered scans only and
+        deleted the files the former called the later scan's."""
+        registry = ScanRegistry()
+        project, output, old = self._old_scan_with_results(registry, tmp_path)
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.COMPLETED)
+        assert registry.cleanup_scan(new) is True
+        ran = []
+
+        assert registry.check_scan_progress(old)["superseded_by"] == [new]
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+
+        assert "later scan" in reason
+        assert removed is False
+        assert ran == []
+
+
+class TestAFileClosedEntryIsNotReopenedOverAnotherScan:
+    """An entry a poll closed from a results file no longer occupies its
+    directory, so register_scan admits a second scan of it; the first runner's
+    RUNNING claim was still admitted (closed_from_file), and both scans were
+    RUNNING on one output tree."""
+
+    @staticmethod
+    def _file_closed(registry, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+        first = _register(registry, project, output)
+        registry.check_scan_progress(first)
+        assert registry.get_scan(first).closed_from_file is True
+        return project, output, first
+
+    def test_the_reopen_is_refused_while_a_second_scan_occupies_the_tree(
+        self, tmp_path
+    ):
+        registry = ScanRegistry()
+        project, output, first = self._file_closed(registry, tmp_path)
+        second = _register(registry, project, output)
+        registry.update_scan_status(second, MCScanStatus.RUNNING)
+
+        assert registry.update_scan_status(first, MCScanStatus.RUNNING) is False
+
+        assert registry.get_scan(first).status is not MCScanStatus.RUNNING
+        assert registry.get_scan(second).status is MCScanStatus.RUNNING
+
+    def test_the_reopen_is_refused_once_a_later_scan_has_taken_the_tree(self, tmp_path):
+        registry = ScanRegistry()
+        project, output, first = self._file_closed(registry, tmp_path)
+        second = _register(registry, project, output)
+        registry.update_scan_status(second, MCScanStatus.COMPLETED)
+
+        assert registry.update_scan_status(first, MCScanStatus.RUNNING) is False
+
+    def test_the_reopen_still_works_while_the_tree_is_its_own(self, tmp_path):
+        """The control: the case the reopen exists for."""
+        registry = ScanRegistry()
+        _project, _output, first = self._file_closed(registry, tmp_path)
+
+        assert registry.update_scan_status(first, MCScanStatus.RUNNING) is True
+        assert registry.get_scan(first).status is MCScanStatus.RUNNING
+
+
+class TestAFinishedScanWhoseOutputIsGoneHasNoResults:
+    """validate_directory_path's FILE_NOT_FOUND made the poll read no files, and
+    the empty progress then reached the COMPLETED arm and was marked completed:
+    status completed, results_available True, total_findings 0, error_message
+    None and, with a recorded gap-free coverage, coverage_complete True. A clean
+    scan, with nothing in the response saying the directory was gone."""
+
+    def test_a_completed_scan_with_a_missing_directory_says_so(self, tmp_path):
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        scan_id = _register(registry, project, output)
+        registry.finish_scan(
+            scan_id,
+            MCScanStatus.COMPLETED,
+            coverage={
+                "incomplete_scanners": [],
+                "no_scanner_ran": False,
+                "incomplete_converters": [],
+                "unevaluated_rules": [],
+                "stale_content_databases": [],
+                "could_not_stop": [],
+            },
+        )
+        output.rmdir()
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "completed"
+        assert progress["is_complete"] is True
+        assert progress["results_available"] is False
+        assert progress["coverage_complete"] is None
+        assert progress["total_findings"] == 0
+        assert progress["error_message"]
+        assert str(output) in progress["error_message"]
+        assert "missing" in progress["error_message"]
+        # The recorded gap lists still describe the run.
+        assert progress["incomplete_scanners"] == []
+
+    def test_a_running_scan_with_no_directory_yet_carries_no_message(self, tmp_path):
+        """The control: a scan whose output is not created yet is not finished,
+        so there are no results to be missing."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        scan_id = _register(registry, project)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "running"
+        assert progress["results_available"] is False
+        assert progress["error_message"] is None
+
+
+class TestAStoppedScansCoverageNamesTheToolsThatSurvived:
+    """_empty_coverage put could_not_stop [] into every response whose entry had
+    no coverage, which is every CANCELLED scan and every timed-out FAILED one:
+    the entries record_cancel_outcome fills. A client reading the key was told
+    no tool survived while the warnings said one did."""
+
+    def test_the_payload_names_the_tool_by_basename(self, tmp_path):
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / ".ash" / "ash_output").mkdir(parents=True)
+        scan_id = _register(registry, project)
+        entry = registry.get_scan(scan_id)
+        entry.has_runner = True
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+        registry.cancel_scan(scan_id)
+        registry.record_cancel_outcome(
+            scan_id, (("/opt/tools/bin/bandit", 4242),), name_process_ids=False
+        )
+        entry.runner_done.set()
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "cancelled"
+        assert progress["could_not_stop"] == [
+            {
+                "scanner": "bandit",
+                "reason": "bandit's tool was still running after the cancel",
+            }
+        ]
+        assert "4242" not in json.dumps(progress["could_not_stop"])
+        assert "/opt/tools" not in json.dumps(progress["could_not_stop"])
+
+    def test_a_scan_nothing_stopped_still_reads_an_empty_list(self, tmp_path):
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / ".ash" / "ash_output").mkdir(parents=True)
+        scan_id = _register(registry, project)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+        registry.cancel_scan(scan_id)
+
+        assert registry.check_scan_progress(scan_id)["could_not_stop"] == []
+
+
+class TestTheRefusalNamesASurvivingToolByBasename:
+    def test_the_servers_path_to_the_tool_is_not_shown(self, tmp_path):
+        """record_cancel_outcome reduces the name to its basename on a network
+        transport because argv0 can be the tool's full path on the server; the
+        directory-busy refusal joined the raw names and showed that path."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        scan_id = _register(registry, project)
+        entry = registry.get_scan(scan_id)
+        entry.has_runner = True
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+        registry.cancel_scan(scan_id)
+        registry.record_cancel_outcome(
+            scan_id, (("/opt/tools/bin/bandit", 4242),), name_process_ids=False
+        )
+        entry.runner_done.set()
+
+        with patch(f"{_MODULE}._tool_may_be_running", return_value=True):
+            with pytest.raises(MCPResourceError) as excinfo:
+                _register(registry, project)
+
+        assert "could not be stopped" in str(excinfo.value)
+        assert "bandit" in str(excinfo.value)
+        assert "/opt/tools" not in str(excinfo.value)
+        assert "4242" not in str(excinfo.value)
+
+
 class TestAReadOnlyPollDoesNotRecloseACompletedScan:
     """A COMPLETED entry whose results file later reads as unusable used to be
     turned FAILED, with a new end_time, by every progress poll: the "failed"
     file status was applied to any entry but RUNNING, FAILED, CANCELLED and
-    INCOMPLETE. Only an entry no runner owns (PENDING) takes its status from
-    the file; a finished scan keeps its status and reports the file problem.
+    INCOMPLETE. Only a PENDING entry no runner has claimed takes its status from
+    the file (a PENDING entry with a runner is that runner's to close, as a
+    RUNNING one is); a finished scan keeps its status and reports the file
+    problem.
 
     Keeping the status is not keeping the results: with the status kept, the
     response still said ``results_available`` True, ``total_findings`` 0 and
@@ -1157,6 +1514,32 @@ class TestAReadOnlyPollDoesNotRecloseACompletedScan:
 
         assert progress["status"] == "failed"
         assert registry.get_scan(scan_id).status is MCScanStatus.FAILED
+
+    def test_a_pending_entry_a_runner_has_claimed_is_not_closed_from_the_file(
+        self, tmp_path
+    ):
+        """In the MCP flow an entry stays PENDING while its runner task exists
+        but has not taken its first step, and the file on disk is then the
+        previous scan's: a stale, unreadable one must not close the entry FAILED
+        underneath the runner that owns it."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        scan_id = _register(registry, project, output)
+        registry.get_scan(scan_id).has_runner = True
+        (output / "ash_aggregated_results.json").write_text(
+            "{ not json", encoding="utf-8"
+        )
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "pending"
+        assert progress["is_complete"] is False
+        assert progress["error_message"] is None
+        assert registry.get_scan(scan_id).status is MCScanStatus.PENDING
+        assert registry.get_scan(scan_id).closed_from_file is False
 
 
 class TestAnEndedScanReportsNoRunningScanner:
