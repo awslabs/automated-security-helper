@@ -9,9 +9,24 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # conftest.py in this directory stubs out mcp.server.mcpserver before collection.
+from automated_security_helper.cli.mcp import progress_monitor
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _bounded_monitor_wait(monkeypatch):
+    """Cap the monitor's wait so a stub that never ends the scan fails, not hangs.
+
+    The loop polls until the registry reports a terminal status or
+    ``_MAX_WAIT_SECONDS`` (1800) pass, sleeping between polls. A stub that
+    answers no status, through a mistake in a test, made one test here run
+    the whole half hour under a real ``asyncio.sleep`` and the unit job's
+    600 s budget cut it. Sixty seconds is far above any test here (a real poll
+    sleep is 5 s) and far below any budget.
+    """
+    monkeypatch.setattr(progress_monitor, "_MAX_WAIT_SECONDS", 60)
 
 
 @pytest.fixture
@@ -349,12 +364,26 @@ class TestCompletionSummaryReadsTheResultsReply:
 
 
 def _progress_sequence(tmp_path, *statuses):
-    """A progress stub answering the scan-info lookup, then ``statuses`` in turn."""
+    """A progress stub answering the scan-info lookup, then ``statuses`` in turn.
+
+    ``monitor_scan_progress`` calls the progress tool once for the scan's
+    directory (``_fetch_initial_scan_info``) before its poll loop starts, so
+    the first call gets the directory and no status; each poll then takes the
+    next status, and the last one repeats once the sequence is spent. An
+    earlier shape of this stub spent a status on the lookup, so a one-status
+    sequence left every poll without one and the monitor waited out its whole
+    budget: the unit job hung at that test.
+    """
     answers = iter(statuses)
+    state = {"looked_up": False, "last": None}
 
     async def fake_progress(scan_id, **kwargs):
-        status = next(answers, None)
         reply = {"success": True, "directory_path": str(tmp_path)}
+        if not state["looked_up"]:
+            state["looked_up"] = True
+            return reply
+        status = next(answers, state["last"])
+        state["last"] = status
         if status is not None:
             reply["status"] = status
         return reply
