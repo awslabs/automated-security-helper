@@ -82,10 +82,27 @@ def test_a_posix_path_whose_third_character_is_a_colon_keeps_its_slash():
     assert file_paths_match("file:///1:/file.py", "/1:/file.py")
 
 
-def test_a_percent_escape_in_a_uri_is_decoded():
-    # A location URI is a URI: a%20b.py names "a b.py", as aggregation writes it.
+def test_a_percent_escape_in_a_file_uri_is_decoded_as_aggregation_decodes_it():
+    # Aggregation decodes a file:// URI when it turns it into a path, so the
+    # scanner's a%20b.py meets the aggregate's "a b.py".
     assert _normalize_file_path("file:///work/a%20b.py") == "/work/a b.py"
-    assert _normalize_file_path("src/caf%C3%A9.py") == "src/café.py"
+    assert _normalize_file_path("file:///work/caf%C3%A9.py") == "/work/café.py"
     assert file_paths_match("file:///work/app/src/a%20b.py", "src/a b.py")
+    # A relative URI is written as spelled, escapes included, so it is compared
+    # as spelled: decoding it read a%20b.py against the aggregate's a%20b.py as
+    # two files.
+    assert _normalize_file_path("src/caf%C3%A9.py") == "src/caf%C3%A9.py"
+    assert file_paths_match("src/a%20b.py", "src/a%20b.py")
     # A name with no escape in it is untouched.
     assert _normalize_file_path("src/100%.py") == "src/100%.py"
+
+
+def test_a_literal_escape_in_a_file_name_is_not_decoded_twice():
+    # A file named a%20b.py is spelled a%2520b.py in a file:// URI; aggregation
+    # decodes it once to a%20b.py. Decoding both sides read the aggregate's copy
+    # as "a b.py" and reported the location as lost.
+    assert _normalize_file_path("file:///work/app/src/a%2520b.py") == (
+        "/work/app/src/a%20b.py"
+    )
+    assert file_paths_match("file:///work/app/src/a%2520b.py", "src/a%20b.py")
+    assert not file_paths_match("file:///work/app/src/a%2520b.py", "src/a b.py")

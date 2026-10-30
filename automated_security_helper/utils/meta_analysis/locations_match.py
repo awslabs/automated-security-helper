@@ -156,16 +156,23 @@ def _line_ranges_compatible(start1, end1, start2, end2) -> bool:
 
 def _normalize_file_path(path: str) -> str:
     """*path* as aggregation would write it: a POSIX path without a ``file://``
-    scheme, ``./`` prefix, trailing separator or percent-escapes.
+    scheme, ``./`` prefix or trailing separator, percent-decoded exactly where
+    aggregation decodes it.
 
-    A location URI is a URI, so ``a%20b.py`` names ``a b.py``; aggregation
-    decodes it when it makes the URI relative to the scan root, and the two
-    spellings compared as text read as two files."""
+    Aggregation (``sarif_utils._sanitize_uri``) turns a ``file://`` URI into a
+    path and percent-decodes it there (``_file_uri_to_path_text``), so a
+    scanner's ``file:///work/a%20b.py`` is written ``a b.py``; a relative URI it
+    writes as spelled, escapes included. The same rule here keeps each side
+    decoded as many times as aggregation decoded it: the original
+    ``file:///work/a%20b.py`` meets the aggregate's ``a b.py``, a relative
+    ``a%20b.py`` meets the aggregate's ``a%20b.py``, and a file whose name holds
+    a literal escape (``file:///work/a%2520b.py``, written ``a%20b.py``) is not
+    decoded a second time into ``a b.py`` and reported as lost."""
     text = str(path).replace("\\", "/")
-    if "%" in text:
-        text = unquote(text)
     if text.startswith("file://"):
         text = text[len("file://") :]
+        if "%" in text:
+            text = unquote(text)
         # file:///C:/x -> C:/x. Only a drive letter: a POSIX path such as
         # /a:/file keeps its leading slash.
         if (
