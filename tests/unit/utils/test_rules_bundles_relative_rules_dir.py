@@ -43,3 +43,13 @@ def test_a_home_relative_rules_dir_is_expanded(monkeypatch, tmp_path):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv(RULES_DIR_ENV, os.path.join("~", "cfn-rules"))
     assert rules_root() == tmp_path / "cfn-rules"
+
+
+def test_an_empty_rules_dir_is_read_as_unset(monkeypatch, tmp_path):
+    """The commonest accidental "relative" value is an empty one (a CI template
+    or an env file with the name and no value): it is neither refused as a
+    relative path nor read as the working directory; the default root beside
+    the bin directory is used, as if the variable were absent."""
+    monkeypatch.setenv(RULES_DIR_ENV, "")
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "ash" / "bin"))
+    assert rules_root() == tmp_path / "ash" / "share" / "cfn-guard-rules"
