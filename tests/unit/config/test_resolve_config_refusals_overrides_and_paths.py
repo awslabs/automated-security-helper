@@ -114,6 +114,85 @@ def test_one_inapplicable_reporters_override_does_not_drop_the_others():
     assert enabled is False, section
 
 
+def _security_hub_enabled(view):
+    from automated_security_helper.config.operator_only_options import reporter_section
+    from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
+        SecurityHubReporter,
+    )
+
+    section = reporter_section(view, SecurityHubReporter)
+    return section.get("enabled") if isinstance(section, dict) else section.enabled
+
+
+def test_an_enable_does_not_land_when_its_sections_sibling_override_fails():
+    """All or nothing per reporter section: with the destination override
+    refused by the trusted base, the enable beside it is dropped too, so the
+    reporter does not send findings to the base's or the default destination."""
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
+
+    trusted = AshConfig.model_validate(
+        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": False}}}
+    )
+
+    view = _with_reporter_overrides(
+        trusted,
+        [
+            "reporters.aws-security-hub.enabled=true",
+            "reporters.aws-security-hub.options=notamapping",
+        ],
+        trusted,
+    )
+
+    assert _security_hub_enabled(view) is False, view.reporters
+
+
+def test_a_disable_lands_although_its_sections_sibling_override_fails():
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
+
+    trusted = AshConfig.model_validate(
+        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": True}}}
+    )
+
+    view = _with_reporter_overrides(
+        trusted,
+        [
+            "reporters.aws-security-hub.options=notamapping",
+            "reporters.aws-security-hub.enabled=false",
+        ],
+        trusted,
+    )
+
+    assert _security_hub_enabled(view) is False, view.reporters
+
+
+def test_another_sections_overrides_still_apply_when_one_section_fails():
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
+
+    trusted = AshConfig.model_validate(
+        {
+            "project_name": "op",
+            "reporters": {
+                "aws-security-hub": {"enabled": True},
+                "cloudwatch-logs": {"enabled": True},
+            },
+        }
+    )
+
+    view = _with_reporter_overrides(
+        trusted,
+        [
+            "reporters.cloudwatch-logs.options=notamapping",
+            "reporters.aws-security-hub.enabled=false",
+        ],
+        trusted,
+    )
+
+    assert _security_hub_enabled(view) is False, view.reporters
+    reporters = view.model_dump(by_alias=True)["reporters"]
+    cloudwatch = reporters.get("cloudwatch-logs") or reporters.get("cloudwatch_logs")
+    assert cloudwatch is not None and cloudwatch["enabled"] is True, reporters
+
+
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="the working directory cannot be removed while a process holds it",

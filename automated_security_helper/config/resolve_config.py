@@ -3755,10 +3755,14 @@ def _with_reporter_overrides(
     the operator's own choice, and nothing here can tell a decoy from a
     section a future plugin reads. The overrides are applied together first;
     when one of them does not apply to the trusted base, they are applied
-    again one at a time, so the ones that do apply (a disable of an off-host
-    reporter among them) still reach the view and only the ones that do not
-    are dropped, each with its own warning; for a dropped override the
-    off-host reporter keeps the base's setting, off unless the base turns it
+    again one reporter section at a time, all or nothing per section: a
+    section with a failing override is dropped whole, with one warning, so an
+    ``enabled=true`` never lands without the destination override written
+    beside it (which would send findings to the base's or the default
+    destination), and the other sections' overrides still apply. A
+    ``reporters.<section>.enabled=false`` is applied whatever else its section
+    asked for: a disable fails closed both ways. For a dropped section the
+    off-host reporter keeps the base's settings, off unless the base turns it
     on.
     """
     reporter_overrides = [
@@ -3777,35 +3781,87 @@ def _with_reporter_overrides(
             raise
         except ASHConfigValidationError:
             # One of them does not apply to the trusted base. They are applied
-            # again one at a time below, so the ones that do apply (a disable
-            # of an off-host reporter among them) still reach the view, and
-            # only the ones that do not are dropped, each with its own warning.
-            # Together first: a set that is valid only as a whole stays whole.
+            # again below, one reporter section at a time, so the sections
+            # whose overrides all apply still reach the view and only the
+            # section with a failing override is dropped, whole, with one
+            # warning. Together first: a set that is valid only as a whole
+            # stays whole.
             pass
         view = trusted.model_copy(deep=True)
-        for override in reporter_overrides:
+        for section_overrides in _reporter_overrides_by_section(reporter_overrides):
             try:
-                view = apply_config_overrides(view, [override])
+                view = apply_config_overrides(view, section_overrides)
+                continue
             except ASHRespelledOverrideError:
                 raise
             except ASHConfigValidationError as error:
+                # All or nothing per section: an `enabled=true` that applied
+                # while the destination override beside it failed would send
+                # findings to the base's or the default destination, so every
+                # override of the section is dropped with the failing one.
                 # The error can quote a section key the trusted file read from
                 # the environment, so the warning is redacted with that file's
-                # values; the override is named by its key only (never its
-                # value, which can be a credential), redacted the same way.
+                # values; the overrides are named by key only (never a value,
+                # which can be a credential), redacted the same way.
                 values = config_environment_values(trusted)
                 described = redact_values(str(error), values)
-                key = redact_values(override.partition("=")[0], values)
+                keys = ", ".join(
+                    redact_values(override.partition("=")[0], values)
+                    for override in section_overrides
+                )
                 ASH_LOGGER.warning(
                     "The --config-overrides under reporters do not apply to the "
-                    f"operator's own configuration for '{key}' ({described}), so "
-                    "a reporter that sends findings off the host keeps that "
-                    "configuration's setting for it; the other reporters "
-                    "overrides still apply.",
+                    f"operator's own configuration for '{keys}' ({described}), so "
+                    "none of that section's overrides is applied and a reporter "
+                    "that sends findings off the host keeps that configuration's "
+                    "settings for it; the other reporters sections' overrides "
+                    "still apply.",
                     extra=NO_MARKUP,
                 )
+            # A disable is applied whatever else the section asked for: it
+            # fails closed, and it can never send a finding anywhere.
+            for override in section_overrides:
+                if not _disables_a_reporter(override):
+                    continue
+                try:
+                    view = apply_config_overrides(view, [override])
+                except ASHRespelledOverrideError:
+                    raise
+                except ASHConfigValidationError:
+                    # The disable itself does not apply (its section is not a
+                    # mapping the trusted base knows); the warning above named
+                    # it among the section's keys.
+                    pass
         return view
     return trusted.model_copy(deep=True)
+
+
+def _reporter_overrides_by_section(overrides: List[str]) -> List[List[str]]:
+    """``overrides``, every one under ``reporters``, grouped by the reporter
+    section each names (the second segment of its key), in first-seen order;
+    an override of ``reporters`` itself is its own group."""
+    groups: Dict[str, List[str]] = {}
+    for override in overrides:
+        segments = override.partition("=")[0].removesuffix("+").strip().split(".")
+        section = segments[1].strip() if len(segments) > 1 else ""
+        groups.setdefault(section, []).append(override)
+    return list(groups.values())
+
+
+def _disables_a_reporter(override: str) -> bool:
+    """Whether a ``reporters`` override sets one section's ``enabled`` to false:
+    ``reporters.<section>.enabled=false``, with either separator spelling of
+    the key and any spelling ``_parse_config_value`` reads as False."""
+    key, separator, value = override.partition("=")
+    if not separator or key.endswith("+"):
+        return False
+    segments = [segment.strip().replace("-", "_") for segment in key.split(".")]
+    return (
+        len(segments) == 3
+        and segments[0] == "reporters"
+        and segments[2] == "enabled"
+        and _parse_config_value(value) is False
+    )
 
 
 def _with_operator_chain_scanners(
