@@ -1501,18 +1501,30 @@ def test_a_named_pipe_named_like_a_workflow_is_skipped_without_blocking(repo, ca
         with open(pipe, "w") as writer:
             writer.write("on: push\n")
 
-    threading.Thread(target=feed, daemon=True).start()
-    scanner = _scanner(repo)
+    writer_thread = threading.Thread(target=feed, daemon=True)
+    writer_thread.start()
+    try:
+        scanner = _scanner(repo)
 
-    with caplog.at_level(logging.WARNING):
-        workflows = scanner._workflow_files(repo, "source", [])
+        with caplog.at_level(logging.WARNING):
+            workflows = scanner._workflow_files(repo, "source", [])
 
-    assert workflows == [
-        ".github/workflows/clean.yml",
-        ".github/workflows/vulnerable.yml",
-    ]
-    assert "Not linting .github/workflows/pipe.yml" in caplog.text
-    assert "not a regular file" in caplog.text
+        assert workflows == [
+            ".github/workflows/clean.yml",
+            ".github/workflows/vulnerable.yml",
+        ]
+        assert "Not linting .github/workflows/pipe.yml" in caplog.text
+        assert "not a regular file" in caplog.text
+    finally:
+        # A scanner that behaves never opens the pipe, which would leave the
+        # writer blocked in open() for the rest of the session: open the read
+        # end so its open() and write return, and let it finish.
+        reader = os.open(pipe, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            writer_thread.join(timeout=5)
+        finally:
+            os.close(reader)
+        assert not writer_thread.is_alive()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
