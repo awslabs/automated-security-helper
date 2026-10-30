@@ -260,6 +260,9 @@ def _reference(
         # names can be set, so _value_read alone would record its value for
         # a place that holds the file's own text.
         and resolved != _without_tag(written)
+        # The same, for text with blanks around it (a quoted or TOML string):
+        # the resolver returns what it leaves as written stripped.
+        and resolved != _without_tag(written).strip()
     ):
         return None
     value = _value_read(written)
@@ -289,8 +292,15 @@ def _resolved_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
     answered when the value itself is not one. A key the loader never resolves
     (a TOML key, a quoted YAML key) came to its own text, whatever its value
     resolves to; an exact lookup of the value alone answered none for it, and
-    every environment read beneath the key went unrecorded.
+    every environment read beneath the key went unrecorded. Its own text is
+    looked up first: where the variable's value is also a key of the mapping,
+    the lookup of the value paired the literal key with that other entry and
+    recorded a key read from the environment that the loader never read. A
+    reference the resolver leaves as written comes back stripped of blanks
+    around it, so that spelling is looked up last.
     """
+    if written_key in resolved:
+        return written_key
     name = referenced_name(written_key)
     if name is not None and config_env_var_is_interpolatable(name):
         try:
@@ -307,7 +317,8 @@ def _resolved_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
                     and reduced_plugin_name(candidate) == folded
                 ):
                     return candidate
-    for key in (written_key, _without_tag(written_key)):
+    untagged = _without_tag(written_key)
+    for key in (untagged, untagged.strip()):
         if key in resolved:
             return key
     return _UNRESOLVED
@@ -526,10 +537,12 @@ def fill_environment_references(
     position of one of them, exactly the reference that copy wrote (without its
     tag), as ``AshConfig.save(as_written=True, env_tags=False)`` writes it for a
     position the client did not change, it gets the value the operator's copy
-    read there. Nothing else is read: a client that writes a reference anywhere
-    else has it left as text, and one that writes it at such a position gets the
-    value the operator's copy holds there, which is what the profile gives it
-    unpatched. A copy: ``data`` itself is not changed.
+    read there. A position is the reference's keys; in a list it is any entry of
+    the list the operator's copy wrote it in, since a client's patch can move
+    the entry (see ``placed``). Nothing else is read: a client that writes a
+    reference under other keys has it left as text, and one that writes it at
+    such a position gets the value the operator's copy holds there, which is
+    what the profile gives it unpatched. A copy: ``data`` itself is not changed.
 
     ``placed``, when given, is extended with a copy of each reference that was
     read, at the path ``data`` holds it at. The fill finds a list entry at any
@@ -546,8 +559,16 @@ def fill_environment_references(
 def environment_marker(written: str) -> str:
     """``<from ${VAR}>``, how a view of a configuration shows a value read from
     the environment: the reference without its tag, never the value. Told apart
-    from a reference left as written, which is shown as written."""
-    return f"<from {_bare(written)}>"
+    from a reference left as written, which is shown as written.
+
+    Text the file wrote after the reference is the file's own and follows the
+    marker (``<from ${VAR}>-a``), so two keys of one mapping read from one
+    variable with different tails stay two keys. A string the load changed is
+    marked inside, with the reference alone (``_Index._string``), and its own
+    text after the value is kept there."""
+    bare = _bare(written)
+    tail = _without_tag(written)[len(bare) :] if _reference_match(written) else ""
+    return f"<from {bare}>{tail}"
 
 
 #: How a check's message shows a value or key a config file read from the
@@ -602,6 +623,31 @@ class EnvironmentValueInPath(RuntimeError):
         )
         self.key_path = key_path
         self.variable = variable
+
+
+def _renamed_keys(
+    keys: Iterable[Any], references: Sequence[EnvironmentReference]
+) -> Dict[Any, EnvironmentReference]:
+    """The key reference that renames each of ``keys``, a mapping's keys.
+
+    A reference renames the key spelled as it resolved, or else one key spelled
+    the other way (``-`` or ``_``, any case), which is how the record keys a
+    built-in plugin's section by its field name. Each reference renames one
+    key: a mapping that holds both ``foo-bar`` and ``foo_bar`` renamed both to
+    the same reference, and one of the two entries was lost.
+    """
+    if not references:
+        return {}
+    spelled = {key: key if isinstance(key, str) else str(key) for key in keys}
+    renamed: Dict[Any, EnvironmentReference] = {}
+    for reference in references:
+        free = [key for key in spelled if key not in renamed]
+        exact = [key for key in free if spelled[key] == reference.resolved]
+        normal = _normal(reference.resolved)
+        found = exact or [key for key in free if _normal(spelled[key]) == normal]
+        if found:
+            renamed[found[0]] = reference
+    return renamed
 
 
 class _Index:
@@ -701,17 +747,15 @@ class _Index:
     ) -> Any:
         exact = path if exact is None else exact
         if isinstance(item, dict):
-            renames = self.keys.get(path, ())
+            renamed = _renamed_keys(item, self.keys.get(path, ()))
             result: Dict[Any, Any] = {}
             for key, value in item.items():
                 spelled = key if isinstance(key, str) else str(key)
                 recorded = self.record(
                     value, (*path, _normal(spelled)), (*exact, _normal(spelled))
                 )
-                for reference in renames:
-                    if _normal(spelled) == _normal(reference.resolved):
-                        key = self._whole(reference)
-                        break
+                if key in renamed:
+                    key = self._whole(renamed[key])
                 result[key] = recorded
             return result
         if isinstance(item, (list, tuple)):
@@ -806,7 +850,13 @@ class _Index:
             return text
         for reference in candidates:
             if reference.value in text:
-                text = text.replace(reference.value, self.mark(reference.written))
+                # The value's part alone takes the reference alone, as the
+                # unmarked record does (_recorded_string): the text the file
+                # wrote after the reference is still in ``text``, and the whole
+                # written reference put it there a second time.
+                text = text.replace(
+                    reference.value, self.mark(_bare(reference.written))
+                )
         return text
 
 
@@ -877,12 +927,7 @@ def recorded_names(
     """``names``, keys of the mapping at ``mapping``, each one read from the
     environment as the file wrote it: ``metadata.expected_scanners`` lists the
     keys of ``scanners``."""
-    renames = _Index(references).keys.get(_normal_path(mapping), [])
-    result = []
-    for name in names:
-        for reference in renames:
-            if _normal(name) == _normal(reference.resolved):
-                name = reference.written
-                break
-        result.append(name)
-    return result
+    renamed = _renamed_keys(
+        names, _Index(references).keys.get(_normal_path(mapping), [])
+    )
+    return [renamed[name].written if name in renamed else name for name in names]
