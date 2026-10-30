@@ -74,6 +74,7 @@ from automated_security_helper.utils.scan_output_dirs import (
     SCAN_SET_RUN_FILE_NAME,
     SCAN_START_FILE_NAMES,
     GitIndexAnswer,
+    GitIndexUnavailable,
     _an_enclosing_repository_tracks_the_root,
     _repository_root_of,
     _where_git_is_asked,
@@ -344,9 +345,23 @@ def _found_in_the_way(
     if answer.unanswered:
         unanswered = answer
     elif answer.names is not None:
-        committed = entries_at_results_paths(answer.base, answer.names)
-        if "" in answer.names or _an_enclosing_repository_tracks_the_root(answer):
-            committed.insert(0, answer.base)
+        # The superproject question can fail the same way
+        # committed_files_at_results_paths' own call fails (GitIndexUnavailable,
+        # a listing the enclosing repository could not give), and is folded the
+        # same way: the directory is unanswered, and what is on disk is
+        # reported instead.
+        try:
+            root_tracked = (
+                "" in answer.names or _an_enclosing_repository_tracks_the_root(answer)
+            )
+        except GitIndexUnavailable as unavailable:
+            unanswered = unavailable.answer
+            if failures is not None:
+                failures.remember(unanswered)
+        else:
+            committed = entries_at_results_paths(answer.base, answer.names)
+            if root_tracked:
+                committed.insert(0, answer.base)
     if unanswered is not None:
         root_files, cleared = results_path_names()
         skipped = {output_name_key(name) for name in not_on_disk}
