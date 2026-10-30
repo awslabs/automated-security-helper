@@ -1140,6 +1140,18 @@ def child_environment(base: Mapping[str, str] | None = None) -> Dict[str, str]:
 #: Seconds the scan child gets to shut down after SIGTERM before it is killed.
 SHUTDOWN_GRACE_SECONDS = 15.0
 
+#: Seconds to keep reading the child's output once it has been stopped.
+DRAIN_SECONDS = 15.0
+
+
+def _kill_process_group(process: Any) -> None:
+    """SIGKILL the child's process group, or the child alone without groups."""
+    if hasattr(os, "killpg") and hasattr(signal, "SIGKILL"):
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+    elif process.poll() is None:
+        process.kill()
+
 
 def _stop_process_group(
     process: Any, grace_seconds: float = SHUTDOWN_GRACE_SECONDS
@@ -1154,27 +1166,45 @@ def _stop_process_group(
     grace period for ASH to stop its tools, then SIGKILL to whatever is left.
     Where process groups are not available the child alone is terminated, then
     killed, which is what ``subprocess.run`` did minus the grace period.
+
+    The group is signaled even when the child has already exited: a process it
+    started can outlive it in the group and keep the output pipes open.
     """
-    if process.poll() is not None:
-        return
     group_signals = hasattr(os, "killpg") and hasattr(signal, "SIGKILL")
     if group_signals:
         with suppress(ProcessLookupError, PermissionError):
             os.killpg(process.pid, signal.SIGTERM)
-    else:
+    elif process.poll() is None:
         process.terminate()
     try:
         process.wait(timeout=grace_seconds)
         return
     except subprocess.TimeoutExpired:
         pass
-    if group_signals:
-        with suppress(ProcessLookupError, PermissionError):
-            os.killpg(process.pid, signal.SIGKILL)
-    else:
-        process.kill()
+    _kill_process_group(process)
     with suppress(subprocess.TimeoutExpired):
         process.wait(timeout=grace_seconds)
+
+
+def _drain_output(
+    process: Any, drain_seconds: float = DRAIN_SECONDS
+) -> Tuple[str, str]:
+    """Read what a stopped child wrote, without waiting for ever.
+
+    A process that outlives the child, outside its group, can hold the output
+    pipes open, and a bare ``communicate()`` then blocks until that process
+    exits. Read for *drain_seconds*; if the pipes are still open, kill the group
+    once more and read for the same time again; if they are still open after
+    that, return the output read so far and let the caller close the pipes.
+    """
+    try:
+        return process.communicate(timeout=drain_seconds)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+    try:
+        return process.communicate(timeout=drain_seconds)
+    except subprocess.TimeoutExpired as still_open:
+        return _as_text(still_open.stdout), _as_text(still_open.stderr)
 
 
 def run_scan(
@@ -1192,7 +1222,8 @@ def run_scan(
 
     Raises ``subprocess.TimeoutExpired`` carrying the output read so far when the
     scan outlives *timeout*; the child and its tools are stopped first
-    (``_stop_process_group``).
+    (``_stop_process_group``) and its output is read for a bounded time
+    (``_drain_output``).
     """
     command = build_scan_command(source_dir, output_dir)
     popen_options: Dict[str, Any] = {}
@@ -1215,7 +1246,7 @@ def run_scan(
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as expired:
             _stop_process_group(process)
-            stdout, stderr = process.communicate()
+            stdout, stderr = _drain_output(process)
             raise subprocess.TimeoutExpired(
                 command, timeout, output=stdout, stderr=stderr
             ) from expired
