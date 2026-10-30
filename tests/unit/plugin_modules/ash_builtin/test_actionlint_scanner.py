@@ -487,6 +487,29 @@ def test_malformed_output_raises(payload, exit_code, match):
         build_sarif(payload, exit_code)
 
 
+@pytest.mark.parametrize("line", [-1, -7], ids=["minus-one", "minus-seven"])
+@pytest.mark.unit
+def test_a_negative_line_is_not_read_as_no_position(line):
+    """Only the integer 0 is "no position": actionlint never writes a negative
+    line, so one means the output format changed, and giving it the line-0
+    treatment would silently drop the region (line-scoped suppressions,
+    line-keyed masking)."""
+    payload = {
+        "version": "1.7.12",
+        "errors": [
+            {
+                "kind": "syntax-check",
+                "message": "m",
+                "filepath": ".github/workflows/a.yml",
+                "line": line,
+                "column": 1,
+            }
+        ],
+    }
+    with pytest.raises(ScannerError, match="negative line"):
+        build_sarif(payload, exit_code=1)
+
+
 @pytest.mark.parametrize("line", [0], ids=["zero"])
 @pytest.mark.unit
 def test_an_error_at_line_zero_is_kept_without_a_region(line):

@@ -745,8 +745,8 @@ def build_sarif(
 
     Raises:
         ScannerError: if the payload is not the shape the template produces (a
-            ``line`` that is not an integer included), or if the exit code
-            contradicts the findings (1 with none, 0 with some).
+            ``line`` that is not an integer, or a negative one, included), or if
+            the exit code contradicts the findings (1 with none, 0 with some).
     """
     if not isinstance(payload, dict) or "errors" not in payload:
         raise ScannerError(
@@ -838,6 +838,12 @@ def build_sarif(
         if type(line) is not int:
             raise ScannerError(
                 f"actionlint error #{index} has no integer line: {line!r}"
+            )
+        if line < 0:
+            # Not a position actionlint writes; silently giving it the line-0
+            # treatment would drop the region.
+            raise ScannerError(
+                f"actionlint error #{index} has a negative line: {line!r}"
             )
         if line >= 1:
             region: Dict[str, Any] = {"startLine": line, "endLine": line}
