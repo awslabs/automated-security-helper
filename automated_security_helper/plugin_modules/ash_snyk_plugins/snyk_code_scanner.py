@@ -64,8 +64,9 @@ from automated_security_helper.utils.subprocess_utils import (
 # legacy one globs *.snyk, *.dcignore and *.gitignore by base name
 # (@snyk/code-client src/files.ts, collectFilePolicies). Neither has an option
 # that turns this off: code test takes no --policy-path. A file named exactly
-# .gitignore is left to snyk, since ASH's own scan set honors it too
-# (utils/get_scan_set.py).
+# .gitignore is left to snyk while ASH's own scan set honors it too
+# (utils/get_scan_set.py); with honor_ignore_files false it is kept out of the
+# copy and counts as an exclusion file (_stage_source, tree_exclusion_files).
 _POLICY_SUFFIX = ".snyk"
 _IGNORE_SUFFIXES = (".dcignore", ".gitignore")
 _POLICY_SECTIONS = ("code", "global")
@@ -1030,18 +1031,31 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # the ignore files as the config says, and the workspace's output directory.
         # The switch is read from the config at the call, the shape every scan-set
         # consumer passes (tests/unit/utils/test_scan_set_ignore_file_switch.py).
-        for name in scan_set(
-            source=str(root),
-            output=str(self.context.output_dir),
-            honor_ignore_files=honors_ignore_files(
-                getattr(self.context, "config", None)
-            ),
-            run_id=getattr(self.context, "run_id", None),
-            workspace_output_dir=getattr(self.context, "workspace_output_dir", None),
-        ):
-            # Only the line ending a cached list leaves: "a.js " is its own file,
-            # and so is a name that ends in a newline (_scan_set_name).
-            path = Path(_scan_set_name(name))
+        # Read whole before the copy: a link to a file the set holds is tested
+        # under that file's own name (_aliased_in_scan_set), whichever comes first.
+        # Only the line ending a cached list leaves: "a.js " is its own file, and
+        # so is a name that ends in a newline (_scan_set_name).
+        names = [
+            Path(_scan_set_name(name))
+            for name in scan_set(
+                source=str(root),
+                output=str(self.context.output_dir),
+                honor_ignore_files=honors_ignore_files(
+                    getattr(self.context, "config", None)
+                ),
+                run_id=getattr(self.context, "run_id", None),
+                workspace_output_dir=getattr(
+                    self.context, "workspace_output_dir", None
+                ),
+            )
+        ]
+        in_scan_set: Set[str] = set()
+        for path in names:
+            try:
+                in_scan_set.add(path.relative_to(root).as_posix())
+            except ValueError:
+                continue
+        for path in names:
             try:
                 relative = path.relative_to(root)
             except ValueError:
@@ -1075,6 +1089,19 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             try:
                 source = open_in_scanned_tree(path, root)
             except TreeInputRefused as refusal:
+                tested_as = _aliased_in_scan_set(path, root, in_scan_set)
+                if tested_as is not None:
+                    # A link to a file the scan set holds: not copied (a link is
+                    # never followed into the copy), but snyk evaluates its content
+                    # under the target's own name, so it is not an unevaluated
+                    # target and does not count as refused.
+                    self._plugin_log(
+                        f"{relative.as_posix()} not copied for Snyk: "
+                        f"{refusal.reason}; it is tested as {tested_as}",
+                        target_type="source",
+                        level=logging.DEBUG,
+                    )
+                    continue
                 _not_copied(relative.as_posix(), refusal.reason)
                 refused += 1
                 continue
@@ -1145,6 +1172,37 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 sandbox_scope(dataclasses.replace(scope, scan_target=staged))
             )
         return staged
+
+
+def _aliased_in_scan_set(path: Path, root: Path, in_scan_set: Set[str]) -> str | None:
+    """The scan-set name that *path*, a link in the tree, resolves to; else None.
+
+    *in_scan_set* holds the set's names relative to *root*. A file is an alias
+    only when a link on its path (the file itself, or a directory between it and
+    the root) resolves, as the filesystem resolves it (``os.path.realpath``), to a
+    regular file inside *root* whose name the set holds: snyk tests that content
+    under the target's name. A file refused for another reason (a second hard
+    link, not a regular file) resolves to its own name and is no alias; a link
+    whose target is outside the tree, or inside it under an ignore path, resolves
+    to a name the set does not hold and is no alias either.
+    """
+    try:
+        own = path.relative_to(root)
+        resolved = Path(os.path.realpath(path))
+        target = resolved.relative_to(Path(os.path.realpath(root)))
+    except (OSError, ValueError):
+        return None
+    if target == own:
+        return None
+    name = target.as_posix()
+    if name not in in_scan_set:
+        return None
+    try:
+        if not resolved.is_file():
+            return None
+    except OSError:
+        return None
+    return name
 
 
 def _target_is_empty(target: Path) -> bool:

@@ -346,15 +346,65 @@ def test_the_workspace_output_directory_is_left_out_of_the_copy(tmp_path, tested
 )
 def test_a_file_that_could_not_be_copied_is_an_unevaluated_target(tmp_path, tested):
     """An in-tree link passes the leaving-links refusal and is not copied (a link
-    is never followed into the copy); snyk never evaluates it, and the run says so."""
+    is never followed into the copy). Its target is a file the scan set leaves out
+    (named by the .gitignore), so its content is tested under no name: snyk never
+    evaluates it, and the run says so."""
     context = _context(tmp_path)
     _write(context.source_dir, "app.js")
-    (context.source_dir / "alias.js").symlink_to(context.source_dir / "app.js")
+    _write(context.source_dir, ".gitignore", "lib.js\n")
+    _write(context.source_dir, "vendor/lib.js")
+    (context.source_dir / "alias.js").symlink_to(
+        context.source_dir / "vendor" / "lib.js"
+    )
 
     scanner, _ = _scan(context)
 
-    assert tested["files"] == ["app.js"], tested
+    assert tested["files"] == [".gitignore", "app.js"], tested
     assert scanner.unevaluated_targets == ["alias.js"]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_a_link_to_a_file_the_scan_set_holds_is_tested_under_that_name(
+    tmp_path, tested
+):
+    """A link to a file the scan set holds is not copied either, but snyk evaluates
+    its content under the target's own name, so it is not an unevaluated target: a
+    tree holding ``CLAUDE.md -> AGENTS.md`` must not grade ERROR on every run."""
+    context = _context(tmp_path)
+    _write(context.source_dir, "app.js")
+    _write(context.source_dir, "AGENTS.md", "# agents\n")
+    (context.source_dir / "CLAUDE.md").symlink_to(context.source_dir / "AGENTS.md")
+
+    scanner, _ = _scan(context)
+
+    assert tested["files"] == ["AGENTS.md", "app.js"], tested
+    assert scanner.unevaluated_targets == []
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_a_run_with_an_in_tree_link_to_a_copied_file_is_graded_passed(tmp_path, tested):
+    context = _context(tmp_path)
+    _write(context.source_dir, "app.js")
+    _write(context.source_dir, "AGENTS.md", "# agents\n")
+    (context.source_dir / "CLAUDE.md").symlink_to(context.source_dir / "AGENTS.md")
+    executor = ScannerExecutor(
+        plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
+    )
+
+    (container,) = executor._execute_scanner(
+        "snyk-code",
+        SnykCodeScanner(context=context, config=SnykCodeScannerConfig()),
+        [{"path": context.source_dir, "type": "source"}],
+    )
+
+    assert container.status == ScannerStatus.PASSED, (
+        container.status,
+        container.errors,
+    )
 
 
 @pytest.mark.skipif(
@@ -363,7 +413,11 @@ def test_a_file_that_could_not_be_copied_is_an_unevaluated_target(tmp_path, test
 def test_a_run_with_an_uncopied_file_is_not_graded_passed(tmp_path, tested):
     context = _context(tmp_path)
     _write(context.source_dir, "app.js")
-    (context.source_dir / "alias.js").symlink_to(context.source_dir / "app.js")
+    _write(context.source_dir, ".gitignore", "lib.js\n")
+    _write(context.source_dir, "vendor/lib.js")
+    (context.source_dir / "alias.js").symlink_to(
+        context.source_dir / "vendor" / "lib.js"
+    )
     executor = ScannerExecutor(
         plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
     )
