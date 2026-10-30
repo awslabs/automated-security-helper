@@ -606,7 +606,13 @@ class TestTheStoredInstallCommand:
         plugin = FakePlugin(constraint="2")
         plugin._setup_uv_tool_install_commands()
         assert plugin.uv_tool_install_commands == []
-        assert any("refused" in line for line in plugin.logged()), plugin.logged()
+        # The logged line is the runner's own refusal, which opens "Refusing
+        # to pass the tool spec to uv"; the word "refused" appears only on the
+        # withheld-text branch (a values hook that raised), which this plugin
+        # does not take.
+        assert any(
+            "Refusing to pass the tool spec to uv" in line for line in plugin.logged()
+        ), plugin.logged()
 
     def test_the_plain_command_is_unchanged(self):
         """The control."""
