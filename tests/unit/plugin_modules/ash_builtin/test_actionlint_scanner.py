@@ -977,11 +977,88 @@ def test_the_scanned_trees_actionlint_config_is_not_read(
     with caplog.at_level(logging.INFO):
         scanner.scan(target=repo, target_type="source")
 
-    ((argv, _),) = fake.calls
+    ((argv, kwargs),) = fake.calls
     config = Path(argv[argv.index("-config-file") + 1])
     assert _ashs_own(config, repo)
     assert config.read_text().startswith("#")
     assert f".github/{name} in the scanned tree is not read" in caplog.text
+    assert kwargs["cwd"] == repo
+
+
+@pytest.mark.parametrize("name", ["actionlint.yaml", "actionlint.yml"])
+@pytest.mark.unit
+def test_a_tree_config_that_does_not_parse_moves_the_run_to_a_copy_outside_the_tree(
+    repo, monkeypatch, on_path, caplog, name
+):
+    """actionlint reads the tree's config while it looks for the project root,
+    whatever -config-file names, and exits 3 on one it cannot parse; the run
+    moves to a copy of the workflows that holds no project root."""
+    (repo / ".github" / name).write_text("paths: [\n")
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, kwargs),) = fake.calls
+    run_root = Path(kwargs["cwd"])
+    assert not run_root.resolve().is_relative_to(repo.resolve())
+    assert not (run_root / ".git").exists()
+    workflows = argv[argv.index("--") + 1 :]
+    assert workflows
+    for rel in workflows:
+        assert (run_root / rel).read_bytes() == (repo / rel).read_bytes()
+    config = Path(argv[argv.index("-config-file") + 1])
+    assert _ashs_own(config, repo)
+    assert f".github/{name} in the scanned tree cannot be read as YAML" in caplog.text
+    assert "local `uses: ./...` references are not resolved" in caplog.text
+
+
+@pytest.mark.unit
+def test_a_tree_config_that_parses_keeps_the_run_in_the_tree(
+    repo, monkeypatch, on_path, caplog
+):
+    """Aliases, which actionlint and PyYAML's safe loader both accept, are not a
+    reason to leave the tree; only a file actionlint would refuse is."""
+    (repo / ".github" / "actionlint.yaml").write_text(
+        "self-hosted-runner:\n  labels: &l [x]\nconfig-variables: *l\n"
+    )
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((_, kwargs),) = fake.calls
+    assert kwargs["cwd"] == repo
+    assert "cannot be read as YAML" not in caplog.text
+
+
+@pytest.mark.parametrize("body", ["paths: [\n", ": : :\n"])
+@pytest.mark.unit
+def test_tree_config_problem_names_the_first_candidate_and_its_problem(tmp_path, body):
+    """actionlint reads ``actionlint.yaml`` before ``actionlint.yml`` and takes
+    the first that exists, so the parseable ``.yml`` beside it changes nothing."""
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "actionlint.yaml").write_text(body)
+    (tmp_path / ".github" / "actionlint.yml").write_text("paths: {}\n")
+
+    problem = module.tree_config_problem(tmp_path)
+
+    assert problem is not None
+    name, text = problem
+    assert name == ".github/actionlint.yaml"
+    assert text
+
+
+@pytest.mark.unit
+def test_tree_config_problem_is_none_without_a_config_or_with_a_parseable_one(
+    tmp_path,
+):
+    (tmp_path / ".github").mkdir()
+    assert module.tree_config_problem(tmp_path) is None
+    (tmp_path / ".github" / "actionlint.yml").write_text("paths: {}\n")
+    assert module.tree_config_problem(tmp_path) is None
 
 
 @pytest.mark.parametrize("operator", [True, False])

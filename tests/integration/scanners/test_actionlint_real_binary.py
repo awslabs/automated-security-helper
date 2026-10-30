@@ -16,6 +16,7 @@ file must run in CI, not skip.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess  # nosec B404 - runs the real ash CLI under test
@@ -134,14 +135,15 @@ def test_the_real_binary_reports_the_fixture_findings(repo, tmp_path):
 
 @pytest.mark.parametrize("shape", ["malformed", "linked-out"])
 def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
-    repo, tmp_path, shape
+    repo, tmp_path, shape, caplog
 ):
     """ASH passes -config-file on every run, so the repository's own
-    .github/actionlint.yaml must not be read: not for its ignore patterns, and
-    not during project discovery for local references either. A malformed one
-    must not turn the run into exit 3, and one that is a link out of the tree
-    must not have the outside file quoted into actionlint's stderr. Measured
-    with the real binary; the unit tests replace the subprocess."""
+    .github/actionlint.yaml must not change the findings. A malformed one must
+    not turn the run into exit 3: actionlint parses it while it looks for the
+    project root (the fixture is a git root), whatever the flag names, so ASH
+    lints such a tree from a copy outside it and says so. One that is a link out
+    of the tree must not have the outside file quoted into actionlint's stderr.
+    Measured with the real binary; the unit tests replace the subprocess."""
     _require_actionlint()
     config = repo / ".github" / "actionlint.yaml"
     if shape == "malformed":
@@ -160,7 +162,8 @@ def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
         config=ActionlintScannerConfig(enabled=True),
     )
 
-    report = scanner.scan(target=repo, target_type="source")
+    with caplog.at_level(logging.WARNING):
+        report = scanner.scan(target=repo, target_type="source")
 
     rows = [
         (
@@ -173,6 +176,11 @@ def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
     ]
     assert rows == EXPECTED
     assert scanner.exit_code == 1
+    note = ".github/actionlint.yaml in the scanned tree cannot be read as YAML"
+    if shape == "malformed":
+        assert note in caplog.text
+    else:
+        assert note not in caplog.text
     stderr_log = Path(scanner.results_dir) / "source" / "ActionlintScanner.stderr.log"
     if stderr_log.exists():
         assert "OUTSIDE-MARKER-LABEL" not in stderr_log.read_text(
