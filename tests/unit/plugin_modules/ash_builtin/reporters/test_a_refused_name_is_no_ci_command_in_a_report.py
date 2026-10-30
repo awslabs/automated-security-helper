@@ -89,14 +89,16 @@ def _context(tmp_path: Path) -> PluginContext:
 
 
 def test_a_value_without_a_command_at_a_line_start_is_written_as_before():
-    """A tag's "::" and a "##vso[" inside a word are no command at a line start,
-    and a text with a line break and neither mark at all keeps PyYAML's own style
-    too: only a value that could start a line with one is quoted."""
+    """A tag's "::" inside a word is no command at a line start, and a text with
+    a line break and no mark at all keeps PyYAML's own style too: a "::" value is
+    quoted only when it could start a line. A "##name[" form is a command wherever
+    it sits in a line (the runners that read it match it anywhere), so one inside
+    a word is written broken, which
+    tests/unit/utils/test_report_yaml_breaks_named_hash_commands_anywhere.py pins."""
     from automated_security_helper.utils.report_yaml import report_yaml
 
     data = {
         "tag": "tool_name::bandit",
-        "inside": "a##vso[x]b",
         "no-mark": "no findings\nin the scan",
     }
 
