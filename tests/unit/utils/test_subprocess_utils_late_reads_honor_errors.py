@@ -16,7 +16,11 @@ from automated_security_helper.utils import subprocess_utils
 
 pytestmark = pytest.mark.unit
 
+#: A stray byte inside a line: Latin-1 bytes read as UTF-8.
 UNDECODABLE = b"caf\xe9\r\n"
+#: The shape a timeout produces: output cut off in the middle of a character,
+#: here the first byte of a two-byte UTF-8 sequence with the second never read.
+TRUNCATED = b"caf\xc3"
 
 
 @pytest.fixture(autouse=True)
@@ -34,9 +38,19 @@ def test_the_partial_read_uses_the_callers_handler():
 
 
 def test_a_strict_partial_read_falls_back_to_replacement_so_it_cannot_raise():
-    """A strict caller whose partial output ends mid-character: the timeout result
-    is reported, never a UnicodeDecodeError from inside the timeout handler."""
+    """A strict caller whose partial output ends mid-character, or carries a
+    stray byte: the timeout result is reported, never a UnicodeDecodeError from
+    inside the timeout handler."""
+    assert subprocess_utils._late_decoded(TRUNCATED, "utf-8", "strict") == "caf�"
     assert subprocess_utils._late_decoded(UNDECODABLE, "utf-8", "strict") == "caf�\n"
+
+
+def test_a_character_the_timeout_cut_in_half_reads_with_the_callers_handler():
+    assert (
+        subprocess_utils._late_decoded(TRUNCATED, "utf-8", "backslashreplace")
+        == "caf\\xc3"
+    )
+    assert subprocess_utils._late_decoded(TRUNCATED, "utf-8") == "caf�"
 
 
 ENTRY_POINTS = ["run_command", "run_command_with_output_handling"]
