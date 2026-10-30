@@ -162,7 +162,9 @@ def test_a_runtime_that_cannot_be_started_is_a_run_that_never_started(monkeypatc
 
     monkeypatch.setattr(rac, "run_cmd_direct", cannot_start)
 
-    result = rac._execute_container(["/nonexistent/docker", "run", "img", "ash"])
+    result = rac._execute_container(
+        ["/nonexistent/docker", "run", "img", "ash"], debug=False
+    )
 
     assert not rac.container_was_started(result)
     assert result.returncode == 1
@@ -208,7 +210,7 @@ def test_the_output_kept_on_a_result_hides_the_runs_carried_values(monkeypatch):
     monkeypatch.setattr(rac, "run_cmd_direct", completed)
 
     with subprocess_utils._spawn_values((carried,)):
-        result = rac._execute_container(["docker", "run", "img", "ash"])
+        result = rac._execute_container(["docker", "run", "img", "ash"], debug=False)
 
     assert carried not in result.stdout, result.stdout
     assert carried not in result.stderr, result.stderr
