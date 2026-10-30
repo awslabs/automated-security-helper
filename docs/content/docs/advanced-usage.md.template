@@ -80,6 +80,7 @@ ash --mode precommit
 
 ### Nix Mode
 
+<!-- doctest: illustrative reason="needs Nix" -->
 ```bash
 ash --mode nix
 ```
