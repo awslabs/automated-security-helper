@@ -148,8 +148,11 @@ def _empty_coverage() -> Dict[str, Any]:
 
 #: The order scans were registered in, process-wide. Two registrations inside
 #: one clock tick tie on ``start_time``, and a wall clock that steps back
-#: reverses them, so "a later scan of this directory" is decided by this
-#: counter and never by the clock.
+#: reverses them, so which of two scans of one output tree is the EARLIER one
+#: is read from this counter and never from the clock
+#: (``ScanRegistry._record_supersession``). Whether the later one supersedes
+#: the earlier is a separate question, answered when the later scan claims the
+#: tree: see ``ScanRegistryEntry.later_scan_ids``.
 _REGISTRATION_SEQUENCE = itertools.count(1)
 
 
@@ -222,12 +225,20 @@ class ScanRegistryEntry:
         self.start_time = datetime.now()
         # Position in the registration order; see _REGISTRATION_SEQUENCE.
         self.registration_seq = next(_REGISTRATION_SEQUENCE)
-        # The ids of the scans registered after this one for the same output
-        # tree, recorded by register_scan. Kept on this entry so the fact
+        # The ids of the later scans of this output tree that have CLAIMED it:
+        # recorded by ScanRegistry._record_supersession when such a scan is
+        # marked running, or is closed after it ran, never at registration. A
+        # scan registered and then cancelled or failed before anything ran (a
+        # workspace batch rolled back marks its entries CANCELLED) touched no
+        # file, so it is not here; recorded at registration, it hid this scan's
+        # results behind a scan that never wrote. Kept on this entry so the fact
         # survives the later scan's removal from the registry: worked out from
         # registry membership alone, cleaning the later scan up made this
         # scan read the later scan's files as its own again.
         self.later_scan_ids: List[str] = []
+        # Whether this scan has been recorded on the earlier scans of its output
+        # tree (_record_supersession). Recorded once, at the first claim.
+        self.claimed_output_tree = False
         self.end_time: Optional[datetime] = None
         self.status = MCScanStatus.PENDING
         self.severity_threshold = severity_threshold
@@ -402,6 +413,30 @@ class ScanRegistryEntry:
         if self.status == MCScanStatus.CANCELLED:
             return True
         return self.status == MCScanStatus.FAILED and self.cancel_event.is_set()
+
+
+def _claims_output_tree(
+    status: MCScanStatus, *, was_pending: bool, had_runner: bool
+) -> bool:
+    """Whether moving to ``status`` means the scan has written, or is writing, its tree.
+
+    Marked RUNNING, a scan is about to write its output tree; closed COMPLETED
+    or INCOMPLETE, it ran. Closed FAILED or CANCELLED, it ran only when it had
+    left PENDING or a runner had claimed it (``had_runner``): a scan registered
+    and then cancelled or failed before anything ran, as a workspace batch
+    rolled back is, touched no file. The earlier scans of the tree are recorded
+    as superseded on a claim and never on a registration
+    (``ScanRegistry._record_supersession``).
+    """
+    if status in (
+        MCScanStatus.RUNNING,
+        MCScanStatus.COMPLETED,
+        MCScanStatus.INCOMPLETE,
+    ):
+        return True
+    if status in (MCScanStatus.FAILED, MCScanStatus.CANCELLED):
+        return not was_pending or had_runner
+    return False
 
 
 def _tool_may_be_running(pid: int) -> bool:
@@ -813,15 +848,13 @@ class ScanRegistry:
                     requested_severity_threshold=requested_severity_threshold,
                     environment_values=value_tuple(environment_values),
                 )
-                # Every earlier scan of this output tree is now superseded by
-                # this one, and remembers so on its own entry: see
-                # ScanRegistryEntry.later_scan_ids.
-                for other in self._registry.values():
-                    if (
-                        other.canonical_output_directory
-                        == entry.canonical_output_directory
-                    ):
-                        other.later_scan_ids.append(scan_id)
+                # The earlier scans of this output tree are NOT recorded as
+                # superseded here. A scan that is registered and never runs (a
+                # workspace batch rolled back marks its entries CANCELLED without
+                # a run) touches no file, and recorded at registration it hid the
+                # earlier scan's results behind a scan that never wrote, and
+                # refused their removal. _record_supersession records this scan
+                # on them when it claims the tree (_apply_status).
                 self._registry[scan_id] = entry
                 self._logger.info(
                     f"Registered scan {scan_id} for directory {directory_path}"
@@ -974,11 +1007,13 @@ class ScanRegistry:
         another output directory shares nothing with this one. The tree is
         another scan's while that scan occupies it
         (:meth:`ScanRegistryEntry.occupies_its_directory`), and it holds a LATER
-        scan's results once one has been registered for it (``later_scan_ids``),
-        whatever that scan's state: ``cleanup_old_scans`` reaches here for an old
-        scan while a newer, completed scan's results sit in the shared tree, and
-        removing them left that scan reporting results_available over an empty
-        directory.
+        scan's results once one has claimed it (``later_scan_ids``: marked
+        running, or closed after it ran), whatever that scan's state since:
+        ``cleanup_old_scans`` reaches here for an old scan while a newer,
+        completed scan's results sit in the shared tree, and removing them left
+        that scan reporting results_available over an empty directory. A later
+        scan that was registered and never ran holds nothing here, so it does
+        not refuse the removal.
 
         The check runs under the registry lock and the delete runs OFF it: the
         entry is marked as having its output removal in progress
@@ -1136,6 +1171,8 @@ class ScanRegistry:
             )
 
             error_message = text_without_values(error_message, entry.environment_values)
+        was_pending = entry.status == MCScanStatus.PENDING
+        had_runner = entry.has_runner
         if status == MCScanStatus.RUNNING:
             entry.mark_running()
         elif status == MCScanStatus.COMPLETED:
@@ -1146,8 +1183,34 @@ class ScanRegistry:
             entry.mark_failed(error_message or "Unknown error")
         elif status == MCScanStatus.CANCELLED:
             entry.mark_cancelled()
+        if _claims_output_tree(status, was_pending=was_pending, had_runner=had_runner):
+            self._record_supersession(entry)
 
         self._logger.info(f"Updated scan {scan_id} status to {status.value}")
+
+    def _record_supersession(self, entry: ScanRegistryEntry) -> None:
+        """Record ``entry`` as a later scan on every earlier scan of its output tree.
+
+        The caller holds ``_registry_lock``. Called when the scan claims the
+        tree (:func:`_claims_output_tree`), once per entry: a scan that is
+        marked running and then closed is recorded at the first of the two.
+        "Earlier" is the registration order (``registration_seq``), never the
+        clock, and only an entry whose output tree is this one is touched: a
+        later scan of the same source that writes elsewhere leaves the others'
+        files untouched, so it supersedes none of them.
+        """
+        if entry.claimed_output_tree:
+            return
+        entry.claimed_output_tree = True
+        for other in self._registry.values():
+            if other.scan_id == entry.scan_id:
+                continue
+            if other.canonical_output_directory != entry.canonical_output_directory:
+                continue
+            if other.registration_seq > entry.registration_seq:
+                continue
+            if entry.scan_id not in other.later_scan_ids:
+                other.later_scan_ids.append(entry.scan_id)
 
     def finish_scan(
         self,
@@ -1368,8 +1431,17 @@ class ScanRegistry:
                         "the scan was cancelled through its cancel event only"
                     )
 
-            # Mark the scan as cancelled, which also sets its cancel event
+            # Mark the scan as cancelled, which also sets its cancel event. A
+            # scan cancelled while running may have written its output tree, so
+            # it is recorded on the earlier scans of the tree as a claim; one
+            # cancelled before anything ran is not (_claims_output_tree).
+            was_pending = entry.status == MCScanStatus.PENDING
+            had_runner = entry.has_runner
             entry.mark_cancelled()
+            if _claims_output_tree(
+                MCScanStatus.CANCELLED, was_pending=was_pending, had_runner=had_runner
+            ):
+                self._record_supersession(entry)
             self._logger.info(
                 f"Cancelled scan {scan_id}; it stops at its next cancellation check"
             )
@@ -1628,21 +1700,24 @@ class ScanRegistry:
                 # scan's results put back, the directory holds those: complete,
                 # parseable, and not this scan's. Nothing is read from it then.
                 #
-                # The same holds once a LATER scan of the same directory has been
-                # registered: every scan of a directory writes the one output
-                # tree under it, so after this scan ended the files there are the
-                # later scan's, whatever its state. Read as this scan's, they
+                # The same holds once a LATER scan of the same directory has
+                # claimed the tree (marked running, or closed after it ran):
+                # every scan of a directory writes the one output tree under
+                # it, so after this scan ended the files there are the later
+                # scan's, whatever its state since. Read as this scan's, they
                 # reported another scan's scanners and findings (another session's
                 # too) under this id, and could re-close this entry on them.
                 #
                 # Except a later scan that ended without writing and had the
                 # previous results put back: what the directory holds then is
                 # what was there before it, this scan's own results, and they
-                # are not hidden. The later scans are the ones register_scan
-                # recorded on this entry (later_scan_ids), keyed by the OUTPUT
-                # tree, so a later scan that wrote elsewhere does not count,
-                # and one that has since been removed from the registry still
-                # does: its files are what the tree holds.
+                # are not hidden. The later scans are the ones
+                # _record_supersession recorded on this entry (later_scan_ids),
+                # keyed by the OUTPUT tree, so a later scan that wrote elsewhere
+                # does not count, nor one that was registered and never ran (a
+                # workspace batch rolled back), and one that has since been
+                # removed from the registry still does: its files are what the
+                # tree holds.
                 previous_only = entry.output_holds_previous_results
                 superseded_by = [
                     later

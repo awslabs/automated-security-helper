@@ -533,6 +533,9 @@ class TestProgressOfASupersededScanReadsNoFiles:
         )
 
         new = _register(registry, project, output)
+        # The later scan ran (claimed the tree) and then failed: without the
+        # restore it would supersede, so this is the restore's exclusion.
+        registry.update_scan_status(new, MCScanStatus.RUNNING)
         registry.update_scan_status(new, MCScanStatus.FAILED, "ASH exited with code 1")
         registry.get_scan(new).output_holds_previous_results = True
 
@@ -540,6 +543,129 @@ class TestProgressOfASupersededScanReadsNoFiles:
 
         assert progress["output_superseded"] is False
         assert "bandit" in progress["scanners"]
+
+    def test_a_later_scan_that_never_ran_does_not_supersede(self, tmp_path):
+        """A workspace registration rolled back marks its never-run entries
+        CANCELLED (cli/mcp/workspace.py _register_projects). Recorded as a
+        later scan at registration, such an entry hid the earlier COMPLETED
+        scan's results (output_superseded True, scanners {}, 0 findings) behind
+        a scan that touched no file, and its removal was refused for it."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+
+        rolled_back = _register(registry, project, output)
+        registry.update_scan_status(rolled_back, MCScanStatus.CANCELLED)
+
+        progress = registry.check_scan_progress(old)
+        assert progress["output_superseded"] is False
+        assert progress["superseded_by"] == []
+        assert "bandit" in progress["scanners"]
+        assert registry.get_scan(old).later_scan_ids == []
+
+        ran = []
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+        assert reason is None
+        assert removed is True
+        assert ran == [1]
+
+    def test_a_later_scan_that_failed_before_running_does_not_supersede(self, tmp_path):
+        """FAILED straight from PENDING with no runner: nothing ran, nothing
+        was written. Same shape as the rollback, through the other closing status."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+
+        refused = _register(registry, project, output)
+        registry.update_scan_status(
+            refused, MCScanStatus.FAILED, "refused before start"
+        )
+
+        progress = registry.check_scan_progress(old)
+        assert progress["output_superseded"] is False
+        assert "bandit" in progress["scanners"]
+
+    def test_a_later_scan_cancelled_while_running_still_supersedes(self, tmp_path):
+        """A cancel of a RUNNING scan may land after it wrote: it claimed the
+        tree, so it supersedes, through update_scan_status and through
+        cancel_scan alike."""
+        for cancel in ("update", "cancel_scan"):
+            registry = ScanRegistry()
+            project = tmp_path / cancel
+            project.mkdir()
+            output = project / ".ash" / "ash_output"
+            output.mkdir(parents=True)
+            old = _register(registry, project, output)
+            registry.update_scan_status(old, MCScanStatus.COMPLETED)
+            new = _register(registry, project, output)
+            if cancel == "update":
+                registry.update_scan_status(new, MCScanStatus.RUNNING)
+                registry.update_scan_status(new, MCScanStatus.CANCELLED)
+            else:
+                registry.update_scan_status(new, MCScanStatus.RUNNING)
+                assert registry.cancel_scan(new) is True
+
+            progress = registry.check_scan_progress(old)
+            assert progress["output_superseded"] is True, cancel
+            assert progress["superseded_by"] == [new], cancel
+
+    def test_a_pending_later_scan_neither_supersedes_nor_frees_the_tree(self, tmp_path):
+        """Registered and not yet running, a later scan has written nothing, so
+        the earlier scan's results are still its own; the tree is still held
+        (the pending scan occupies it), so a removal is refused for occupancy."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+        _pending = _register(registry, project, output)
+
+        progress = registry.check_scan_progress(old)
+        assert progress["output_superseded"] is False
+        assert "bandit" in progress["scanners"]
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: True
+        )
+        assert "running or stopping" in reason
+        assert removed is False
+
+    def test_a_claim_is_recorded_once(self, tmp_path):
+        """Marked running and then closed, the later scan appears once in
+        superseded_by, not once per status change."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.RUNNING)
+        registry.update_scan_status(new, MCScanStatus.COMPLETED)
+
+        assert registry.get_scan(old).later_scan_ids == [new]
+        assert registry.check_scan_progress(old)["superseded_by"] == [new]
 
     def test_supersession_survives_the_later_scans_removal(self, tmp_path):
         """Worked out from registry membership alone, cleaning the later scan
