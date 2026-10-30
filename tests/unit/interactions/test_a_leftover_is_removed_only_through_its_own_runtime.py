@@ -135,8 +135,20 @@ def test_a_record_keeps_its_runtime_and_the_daemon_environment(state, monkeypatc
     assert record["runtime"] == "/opt/bin/docker"
     assert record["runner_argv"] == ["sudo", "-n"]
     # Every setting a runtime client picks its daemon from, with the one that
-    # is set carried as set; the key set is _daemon_environment's own.
-    assert set(record["daemon_env"]) == set(container_leftovers._daemon_environment())
+    # is set carried as set. The key set is spelled out here rather than read
+    # from _daemon_environment, which this record was written from: compared
+    # with itself, a key dropped from the product would drop from the
+    # expectation too and the test would still pass.
+    assert set(record["daemon_env"]) == {
+        "DOCKER_HOST",
+        "DOCKER_CONTEXT",
+        "DOCKER_CONFIG",
+        "docker_config_current_context",
+        "CONTAINER_HOST",
+        "CONTAINER_CONNECTION",
+        "CONTAINERD_ADDRESS",
+        "CONTAINERD_NAMESPACE",
+    }
     assert record["daemon_env"]["DOCKER_HOST"] == _SECRET_A
     assert record["daemon_env"]["DOCKER_CONTEXT"] is None
     assert record["daemon_env"]["CONTAINER_HOST"] is None
