@@ -15,7 +15,7 @@ import ast
 import fnmatch
 import re
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -136,21 +136,31 @@ def load_community_suppressions(
     return suppressions
 
 
-def suppression_has_expired(expiration) -> bool:
+def _today_utc() -> date:
+    """Today's date in UTC, the clock ASH's expiration rule reads."""
+    return datetime.now(timezone.utc).date()
+
+
+def suppression_has_expired(expiration, today: Optional[date] = None) -> bool:
     """ASH's rule for an entry's ``expiration``: YYYY-MM-DD, expired from the
-    start of that day. A date ASH cannot read counts as expired too, because ASH
-    refuses such an entry and never applies it.
+    start of that day in UTC. A date ASH cannot read counts as expired too,
+    because ASH refuses such an entry and never applies it.
 
     ``expiration`` was parsed from the config and never consulted, so this
     validator kept treating a suppression as active after ASH had stopped
     applying it, and a push went green that the CI scan then failed.
+
+    *today* is the clock, UTC by default; the tests pass a fixed date so the
+    boundary cases do not depend on the runner's timezone or the time of day.
     """
     if not expiration:
         return False
+    if today is None:
+        today = _today_utc()
     if isinstance(expiration, date):
-        return expiration <= date.today()
+        return expiration <= today
     try:
-        return datetime.strptime(str(expiration), "%Y-%m-%d").date() <= date.today()
+        return datetime.strptime(str(expiration), "%Y-%m-%d").date() <= today
     except ValueError:
         return True
 

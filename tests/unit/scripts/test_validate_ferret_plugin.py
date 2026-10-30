@@ -307,9 +307,11 @@ class TestExpiration:
         )
 
     def test_a_future_expiration_still_covers(self, validator):
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        # Far from today, so neither the runner's timezone nor the time of day
+        # moves it across the boundary; the boundary itself is pinned below.
+        far_off = (date.today() + timedelta(days=30)).isoformat()
         assert validator.suppression_covers(
-            _entry(expiration=tomorrow), "docs/a.md", 3, "SECRET-SECRET-KEYWORD"
+            _entry(expiration=far_off), "docs/a.md", 3, "SECRET-SECRET-KEYWORD"
         )
 
     def test_a_past_expiration_covers_nothing(self, validator):
@@ -318,7 +320,18 @@ class TestExpiration:
         )
 
     def test_the_expiration_date_itself_has_already_expired(self, validator):
-        assert validator.suppression_has_expired(date.today().isoformat())
+        """Pinned to a fixed clock: local date.today() flipped this test west of
+        UTC in the evening and east of UTC in the morning."""
+        today = date(2026, 6, 15)
+        assert validator.suppression_has_expired("2026-06-15", today=today)
+        assert validator.suppression_has_expired(date(2026, 6, 15), today=today)
+        assert not validator.suppression_has_expired("2026-06-16", today=today)
+        assert validator.suppression_has_expired("2026-06-14", today=today)
+
+    def test_the_default_clock_is_utc(self, validator):
+        from datetime import datetime, timezone
+
+        assert validator._today_utc() == datetime.now(timezone.utc).date()
 
     def test_an_unreadable_date_counts_as_expired(self, validator):
         assert validator.suppression_has_expired("next week")
