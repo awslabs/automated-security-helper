@@ -59,6 +59,7 @@ from typing import (
 
 import jsonpatch
 from pydantic import ValidationError
+from pydantic_core import to_jsonable_python
 
 from automated_security_helper.config.ash_config import (
     ALWAYS_DENIED_PATHS,
@@ -488,9 +489,11 @@ def _respellings(pattern: str, path: str, plugin_keys: PluginKeys) -> List[str]:
 
     Respelling lets the usual matching run on a path the lookup would read as a
     plugin the pattern names. The pattern's section segment may be a glob too
-    (``/*/trivy-repo/...``); each plugin section it matches is tried. A plugin
-    segment of ``*`` or ``**`` already matches every segment, and a section
-    segment of ``**`` already reaches every path below it.
+    (``/*/trivy-repo/...``); each plugin section it matches is tried. A section
+    segment of ``**`` is tried too: standing for the one section segment, it puts
+    the pattern's next segment at the plugin key (``/**/trivy-repo/**``), and
+    matched as written that segment reads the key in one spelling only. A plugin
+    segment of ``*`` or ``**`` already matches every segment.
     """
     pattern_segs = _path_segments(pattern)
     path_segs = _path_segments(path)
@@ -500,7 +503,7 @@ def _respellings(pattern: str, path: str, plugin_keys: PluginKeys) -> List[str]:
     section, written = path_segs[0], path_segs[1]
     if section not in _PLUGIN_SECTIONS or plugin in ("*", "**") or written == plugin:
         return []
-    if section_glob == "**" or not fnmatch.fnmatchcase(section, section_glob):
+    if not fnmatch.fnmatchcase(section, section_glob):
         return []
     key = _key_named_by(plugin, written, section, plugin_keys)
     if key is None or key == written:
@@ -1016,18 +1019,23 @@ def config_document_denials(
             environment_read = kind != "key" and _covered(
                 environment_pointers, path, plugin_keys
             )
+            # Both comparisons are of JSON values (_same_json_value): Python's
+            # == says True == 1 and 1 == 1.0, which exempted a write that
+            # changes a denied leaf's type.
             if (
                 present
                 and not environment_read
                 and (
                     (kind == "key" and repeats_trusted)
-                    or (kind != "key" and value == _as_json(op["value"]))
+                    or (
+                        kind != "key" and _same_json_value(value, _as_json(op["value"]))
+                    )
                 )
             ):
                 continue
             if present and not environment_read and kind != "key" and repeats_trusted:
                 read_present, read_value = as_read(path)
-                if read_present and value == read_value:
+                if read_present and _same_json_value(value, read_value):
                     continue
         denials.append(DocumentDenial(key, path, reason, kind == "patch"))
     return denials
@@ -1361,9 +1369,11 @@ def apply_runtime_patch(
                 # Against the configuration as written: a setting read from the
                 # environment holds the reference its file wrote, so a test op
                 # answers whether the client wrote that reference, never
-                # whether it guessed the value.
+                # whether it guessed the value. And as JSON, the form the op's
+                # own value has: the dump is a Python one, where a date or a
+                # path an operator's file set is an object no JSON value equals.
                 jsonpatch.apply_patch(
-                    _as_written(base, references.rewrites, patched),
+                    to_jsonable_python(_as_written(base, references.rewrites, patched)),
                     [op],
                     in_place=False,
                 )
@@ -2062,9 +2072,21 @@ def apply_runtime_override(
     its file wrote, as a test op compares. The override's text at that place
     is therefore an op whatever it is, unless it is the reference itself, so
     an override holding the value is answered as one holding any other text.
+
+    ``extends`` and ``patch`` are left out of every dump, so no op can express
+    them: an override that sets either differently from the base is refused
+    rather than bound without them.
     """
     from automated_security_helper.config.config_validator import record_of_config
 
+    # Compared as Python values: a patch op's value can be anything its YAML
+    # loaded (a date), which json.dumps would raise on.
+    if (override.extends, override.patch) != (base.extends, base.patch):
+        raise RuntimePatchDeniedError(
+            None,
+            "the override sets extends or patch, which a whole-document override "
+            "cannot apply; write the settings themselves",
+        )
     base_doc = record_of_config(base, base.model_dump(mode="json", by_alias=False))
     override_doc = override.model_dump(mode="json", by_alias=False)
     patch_ops = json_patch_between(base_doc, override_doc)
