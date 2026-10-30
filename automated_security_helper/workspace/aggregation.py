@@ -79,10 +79,17 @@ the project is scanned with its own path as ``source_dir`` and the URI reaches
 the aggregator already relativized, while a src-layout project's ordinary
 relative URI spells its own absolute path and was being relocated.
 
-These shapes are the default in workspace mode rather than an edge case.
-``scripts/verify_external_target_scan.py`` records three of them from one healthy
-run, and they appear whenever the process working directory differs from
-``source_dir`` -- which in workspace mode it must, for all but one project.
+An absolute URI is the ordinary shape in workspace mode, not an edge case:
+``scripts/verify_external_target_scan.py`` records it from one healthy run, and
+it appears whenever the process working directory differs from ``source_dir``,
+which in workspace mode it must for all but one project. The separator-stripped
+shape is NOT tried as absolute (above), and the cost of that choice is named
+here: an unrooted URI that does spell an absolute path with its separator gone
+is read as project-relative, placed at ``<project>/<uri>``, and not counted as a
+failure. That shape does not reach the aggregator from the scans ASH runs
+(``sanitize_sarif_paths`` relativizes it against the project's own
+``source_dir`` first); a reader that meets it in a results file fed from
+elsewhere sees a workspace_uri that names nothing, with no count beside it.
 
 An unconvertible path is counted, never dropped
 -----------------------------------------------
@@ -183,6 +190,20 @@ _STAMP_READ_LIMIT = 1 << 20
 #: changed between 3.11 and 3.12 and this project supports 3.10 through 3.14.
 _DRIVE_ANCHOR = re.compile(r"^[A-Za-z]:[/\\]")
 
+#: ``properties.origin`` of a finding from a scanner only the workspace policy
+#: added (``execution.POLICY_ORIGIN``; spelled here because execution imports
+#: this module). The verdict excludes such findings unless the policy gate is on.
+_POLICY_ORIGIN = "workspace-policy"
+
+
+def _is_policy_origin(result: Mapping[str, Any]) -> bool:
+    """Whether this SARIF result came from a scanner only the policy added."""
+    properties = result.get("properties")
+    if not isinstance(properties, Mapping):
+        return False
+    return properties.get("origin") == _POLICY_ORIGIN
+
+
 #: Stands in for a backslash that is part of a file name while a URI passes
 #: through the pattern converter (see to_workspace_uri).
 _NAME_BACKSLASH = "\x00"
@@ -270,6 +291,18 @@ def _posix_text(uri: str, project_path: Optional[str] = None) -> str:
     if len(text) > 2 and text[0] == "/" and text[2] == ":":
         text = text[1:]
     return text
+
+
+def _rooted(text: str) -> bool:
+    """Whether recorded path text is absolute on either platform's spelling.
+
+    A leading separator (POSIX, or a Windows path written with ``/``) or a
+    drive anchor (``C:\\`` or ``C:/``). ``PurePosixPath(text).is_absolute()``
+    reads a Windows absolute path as relative, so a converter's or scanner's
+    ``C:\\ws\\api\\nb.ipynb`` was shown as ``api/C:\\ws\\api\\nb.ipynb``, against
+    the fields' contract that an absolute recorded path is kept as recorded.
+    """
+    return text.startswith("/") or bool(_DRIVE_ANCHOR.match(text))
 
 
 def project_relative_uri(uri: str, project_path: str) -> Any:
@@ -946,11 +979,10 @@ def inputs_not_scanned_for_project(
         return []
     entries = []
     for scanner, path, reason in inputs_not_scanned(results):
-        recorded = PurePosixPath(path)
         shown = (
             path
-            if recorded.is_absolute()
-            else (PurePosixPath(relative_path) / recorded).as_posix()
+            if _rooted(path)
+            else (PurePosixPath(relative_path) / PurePosixPath(path)).as_posix()
         )
         entries.append(
             ProjectInputNotScanned(scanner=scanner, path=shown, reason=reason)
@@ -991,11 +1023,10 @@ def converter_refusals_for_project(
         return []
     records = []
     for refusal in converter_refusals(results):
-        recorded = PurePosixPath(refusal.path)
         shown = (
             refusal.path
-            if not refusal.path or recorded.is_absolute()
-            else (PurePosixPath(relative_path) / recorded).as_posix()
+            if not refusal.path or _rooted(refusal.path)
+            else (PurePosixPath(relative_path) / PurePosixPath(refusal.path)).as_posix()
         )
         records.append(
             ProjectConverterRefusal(
@@ -1232,12 +1263,27 @@ class WorkspaceAggregator:
                     )
         elif outcome.actionable_finding_count:
             # An outcome built without the split (a results file read back, a
-            # caller that assembled it by hand): derived from the run against the
-            # threshold the verdict was computed from, as before the split was
-            # carried. gate_threshold, not severity_threshold, so a workspace
-            # ceiling that tightened the project is honoured here too.
+            # caller that assembled it by hand): derived from the run the way the
+            # verdict derived it. Each scanner's own threshold where the outcome
+            # recorded one (threshold_for_scanner, the contract every regrading
+            # reader follows), the project's gate_threshold otherwise, so a
+            # workspace ceiling that tightened the project is honoured here too;
+            # and a finding from a scanner only the policy added is left out
+            # when the outcome says the policy gate was off, as the verdict left
+            # it out. Without both, this path again exceeded the project's own
+            # actionable_finding_count the comment above says the split fixed.
+            gate_off = outcome.policy_scanners_gate is False
             for name, results in by_scanner.items():
-                actionable = count_actionable_results(results, project.gate_threshold)
+                counted = [
+                    result
+                    for result in results
+                    if not (gate_off and _is_policy_origin(result))
+                ]
+                actionable = count_actionable_results(
+                    counted,
+                    project.gate_threshold,
+                    threshold_for=outcome.threshold_for_scanner,
+                )
                 self._scanner_actionable[name] = (
                     self._scanner_actionable.get(name, 0) + actionable
                 )

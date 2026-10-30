@@ -1562,6 +1562,66 @@ class TestAggregatorOutput:
         assert parsed["scanner_results"]["bandit"]["actionable_finding_count"] == 1
         assert parsed["scanner_results"]["bandit"]["finding_count"] == 2
 
+    def test_the_fallback_rollup_grades_each_scanner_by_its_own_threshold(
+        self, tmp_path
+    ):
+        """Red at the base: without a carried split, every scanner was graded by the
+        project gate, so a bandit MEDIUM counted under bandit's own CRITICAL and the
+        rollup exceeded the project's actionable_finding_count it claims to sum."""
+        plan = _plan(tmp_path, "api")
+        plan.projects[0].severity_threshold = "MEDIUM"
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        results = [
+            _result(level="warning", scanner="bandit"),
+            _result("iac/main.tf", level="error", scanner="checkov"),
+        ]
+        aggregator.add(
+            self._outcome(
+                "api",
+                scanners={"bandit": "FAILED", "checkov": "FAILED"},
+                actionable_finding_count=1,
+                scanner_thresholds={"bandit": "CRITICAL"},
+            ),
+            _run(*results),
+            plan.projects[0],
+        )
+        parsed = json.loads(
+            aggregator.write(exit_code=2, wall_clock_seconds=1.0).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert parsed["scanner_results"]["bandit"]["actionable_finding_count"] == 0
+        assert parsed["scanner_results"]["checkov"]["actionable_finding_count"] == 1
+
+    def test_the_fallback_rollup_leaves_policy_findings_out_when_the_gate_is_off(
+        self, tmp_path
+    ):
+        """Red at the base: a policy-origin finding counted though the verdict excluded it."""
+        plan = _plan(tmp_path, "api")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        policy = _result(level="error", scanner="bandit")
+        policy["properties"]["origin"] = "workspace-policy"
+        results = [policy, _result("src/two.py", level="error", scanner="semgrep")]
+        aggregator.add(
+            self._outcome(
+                "api",
+                scanners={"bandit": "FAILED", "semgrep": "FAILED"},
+                actionable_finding_count=1,
+                policy_scanners_gate=False,
+            ),
+            _run(*results),
+            plan.projects[0],
+        )
+        parsed = json.loads(
+            aggregator.write(exit_code=2, wall_clock_seconds=1.0).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert parsed["scanner_results"]["bandit"]["actionable_finding_count"] == 0
+        assert parsed["scanner_results"]["semgrep"]["actionable_finding_count"] == 1
+        # Reported, as the project's own finding_count reports it.
+        assert parsed["scanner_results"]["bandit"]["finding_count"] == 1
+
     def test_scanner_results_takes_the_worst_status(self, tmp_path):
         plan = _plan(tmp_path, "api", "web")
         aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
