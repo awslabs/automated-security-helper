@@ -415,8 +415,8 @@ class TestGetScanProgressInfo:
             {
                 "sarif": {
                     "runs": [
-                        {"results": [{"ruleId": "B105", "severity": "HIGH"}]},
-                        {"results": [{"ruleId": "B303", "severity": "LOW"}]},
+                        {"results": [{"ruleId": "B105", "level": "error"}]},
+                        {"results": [{"ruleId": "B303", "level": "note"}]},
                     ]
                 },
                 "scanner_results": {"bandit": {"status": "PASSED"}},
@@ -428,11 +428,16 @@ class TestGetScanProgressInfo:
         assert info["status"] == "completed"
         assert info["findings_count"] == 2
         assert info["scanners_completed"] == ["bandit"]
-        # No metadata.summary_stats, so the summary is derived from the findings.
-        assert info["findings_summary"]["high"] == 1
+        # No metadata.summary_stats, so the summary is derived from the findings,
+        # each graded by its SARIF level (utils.severity_ladder.result_severity):
+        # a SARIF result has no "severity" key to read.
+        assert info["findings_summary"]["critical"] == 1
         assert info["findings_summary"]["low"] == 1
+        assert info["findings_summary"]["unknown"] == 0
 
-    def test_summary_stats_in_metadata_are_used_verbatim(self, tmp_path):
+    def test_summary_stats_in_metadata_are_the_counts_and_are_returned_whole(
+        self, tmp_path
+    ):
         out = tmp_path / "ash_output"
         _write_results(
             out,
@@ -447,7 +452,11 @@ class TestGetScanProgressInfo:
 
         info = get_scan_progress_info(out)
 
-        assert info["findings_summary"] == {"critical": 7}
+        # The same bucket shape the running view has, from the stats' counts; the
+        # stats themselves come back as they were recorded.
+        assert info["findings_summary"]["critical"] == 7
+        assert sum(info["findings_summary"].values()) == 7
+        assert info["summary_stats"] == {"critical": 7}
         assert info["completion_time"] == "2024-05-05T00:00:00"
 
     def test_a_malformed_aggregated_file_is_reported_as_an_error_status(self, tmp_path):

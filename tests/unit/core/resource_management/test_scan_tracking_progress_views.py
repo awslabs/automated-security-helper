@@ -40,18 +40,23 @@ def _write_result(output_dir, scanner, target, text):
 
 
 class TestAnEmptyAggregatedDocumentDoesNotRaise:
-    def test_an_empty_object_reads_as_a_completed_scan_with_no_scanners(self, tmp_path):
+    def test_an_empty_object_reads_as_results_not_yet_written(self, tmp_path):
         out = tmp_path / "ash_output"
         out.mkdir()
         (out / "ash_aggregated_results.json").write_text("{}", encoding="utf-8")
 
         info = get_scan_progress_info(out)
 
-        assert info["status"] == "completed"
+        # A JSON object with neither scanner_results nor sarif is not a results
+        # document yet, which create_scan_progress_from_files calls
+        # results_pending; it is not a completed scan with no scanners.
+        assert info["status"] == "in_progress"
+        assert info["is_complete"] is False
+        assert info["results_pending"] is True
         assert info["scanners_completed"] == []
         assert info["total_scanners"] == 0
         assert info["findings_count"] == 0
-        assert info["findings_summary"] == {}
+        assert sum(info["findings_summary"].values()) == 0
 
     @pytest.mark.parametrize("text", ["[]", "null"])
     def test_a_non_object_document_is_an_error_not_a_crash(self, tmp_path, text):

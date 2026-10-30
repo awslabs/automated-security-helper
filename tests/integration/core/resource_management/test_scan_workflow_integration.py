@@ -706,10 +706,11 @@ class TestScanWorkflowIntegration:
         assert progress_info["is_complete"] is True
         assert set(progress_info["scanners_completed"]) == {"scanner1", "scanner2"}
         # findings_count on the completed branch counts SARIF results, and this
-        # document carries no SARIF. The per-scanner counts are in
-        # findings_summary, which is read verbatim from metadata.summary_stats.
+        # document carries no SARIF. The counts are in summary_stats, which is
+        # metadata.summary_stats as recorded; findings_summary has the severity
+        # buckets, in the shape the running view has.
         assert progress_info["findings_count"] == 0
-        assert progress_info["findings_summary"]["actionable"] == 3
+        assert progress_info["summary_stats"]["actionable"] == 3
         assert progress_info["findings_summary"]["critical"] == 1
 
         # Clean up the scan

@@ -1,0 +1,584 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The progress poll reads what the files hold and does not fail on what a scan does to them.
+
+Each group is pinned against the behavior it replaced:
+
+* ``find_scanner_result_files`` listed ``scanners/`` and the directories under it
+  with a bare ``iterdir``, so a directory that was removed, set aside or made
+  unreadable after the check that it was a directory failed the whole poll.
+* ``ScanProgress`` counted (scanner, target) pairs as scanners, so a scanner with
+  source and converted results was two of them while a scan ran and one once the
+  aggregated file existed.
+* The aggregated document was read more strictly than its model: a SARIF run whose
+  ``results`` is null, a ``finding_count`` of null and an ``scanner_results``
+  entry with no ``status`` each failed or mis-graded the whole view. Its SARIF
+  results were attributed to the run's tool, which is ASH's for every scanner, so
+  no scanner matched; its scanners got the time of the poll as an end time and no
+  duration.
+* ``summarize_scanner_statuses`` raised on a results file that is not UTF-8, read
+  the file with a plain read that fails during an atomic replace on Windows,
+  compared the status case-sensitively, read the string ``"false"`` as true, and
+  gave a ``MISSING`` scanner whose dependencies were satisfied the bare reason
+  ``skipped``.
+* ``get_scan_progress_info`` raised on null containers, called a file with neither
+  ``scanner_results`` nor ``sarif`` a completed scan, read SARIF results for a
+  ``severity`` key they do not have, returned the summary stats where the running
+  view returns severity buckets, and read the results put back after a scan that
+  ended without any as this scan's.
+* ``get_scan_results_with_error_handling`` looked for the put-back marker only
+  before it read the results.
+"""
+
+import errno
+import json
+from pathlib import Path
+
+import pytest
+
+from automated_security_helper.core.previous_results import RESTORED_MARKER_NAME
+from automated_security_helper.core.resource_management import scan_tracking
+from automated_security_helper.core.resource_management.scan_tracking import (
+    MCScannerStatus,
+    ScannerProgress,
+    ScanProgress,
+    create_scan_progress_from_files,
+    find_scanner_result_files,
+    get_scan_progress_info,
+    get_scan_results_with_error_handling,
+    summarize_scanner_statuses,
+)
+
+pytestmark = pytest.mark.unit
+
+_RESULTS_FILE = "ASH.ScanResults.json"
+
+
+def _write_scanner_file(output_dir, scanner, target, document):
+    path = output_dir / "scanners" / scanner / target / _RESULTS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+def _write_aggregated(output_dir, document):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "ash_aggregated_results.json").write_text(
+        json.dumps(document), encoding="utf-8"
+    )
+
+
+def _scanner(name, target, status):
+    progress = ScannerProgress(name, target)
+    progress.status = status
+    return progress
+
+
+def _fail_listing(monkeypatch, directory_name, error):
+    """Make ``Path.iterdir`` raise ``error`` for any directory named ``directory_name``."""
+    real_iterdir = Path.iterdir
+
+    def iterdir(self):
+        if self.name == directory_name:
+            raise error
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+
+
+class TestAListingThatFailsDoesNotFailThePoll:
+    def test_an_unreadable_scanner_directory_is_skipped_and_the_rest_are_read(
+        self, tmp_path, monkeypatch
+    ):
+        out = tmp_path / "ash_output"
+        _write_scanner_file(out, "bandit", "source", {"scanner_name": "bandit"})
+        _write_scanner_file(out, "semgrep", "source", {"scanner_name": "semgrep"})
+        _fail_listing(monkeypatch, "semgrep", PermissionError(errno.EACCES, "denied"))
+
+        found = find_scanner_result_files(out)
+
+        assert set(found) == {"bandit"}
+
+    def test_a_scanner_directory_removed_before_its_listing_is_skipped(
+        self, tmp_path, monkeypatch
+    ):
+        out = tmp_path / "ash_output"
+        _write_scanner_file(out, "bandit", "source", {"scanner_name": "bandit"})
+        _write_scanner_file(out, "bandit", "converted", {"scanner_name": "bandit"})
+        _write_scanner_file(out, "semgrep", "source", {"scanner_name": "semgrep"})
+        _fail_listing(monkeypatch, "bandit", FileNotFoundError(errno.ENOENT, "gone"))
+
+        found = find_scanner_result_files(out)
+
+        assert set(found) == {"semgrep"}
+
+    def test_a_scanners_directory_that_cannot_be_listed_reads_as_no_results(
+        self, tmp_path, monkeypatch
+    ):
+        out = tmp_path / "ash_output"
+        _write_scanner_file(out, "bandit", "source", {"scanner_name": "bandit"})
+        _fail_listing(monkeypatch, "scanners", FileNotFoundError(errno.ENOENT, "gone"))
+
+        assert find_scanner_result_files(out) == {}
+
+    def test_the_running_view_reports_the_scanners_it_could_list(
+        self, tmp_path, monkeypatch
+    ):
+        out = tmp_path / "ash_output"
+        _write_scanner_file(out, "bandit", "source", {"scanner_name": "bandit"})
+        _write_scanner_file(out, "semgrep", "source", {"scanner_name": "semgrep"})
+        _fail_listing(monkeypatch, "semgrep", PermissionError(errno.EACCES, "denied"))
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "in_progress"
+        assert info["scanners_completed"] == ["bandit"]
+
+
+class TestScannersAreCountedOnceWhateverTheirTargets:
+    def test_a_scanner_with_two_finished_targets_is_one_completed_scanner(self):
+        scan = ScanProgress("scan-1")
+        scan.add_scanner_progress(
+            _scanner("trivy", "source", MCScannerStatus.COMPLETED)
+        )
+        scan.add_scanner_progress(
+            _scanner("trivy", "converted", MCScannerStatus.COMPLETED)
+        )
+
+        assert scan.total_scanners == 1
+        assert scan.completed_scanners == 1
+        assert scan.finished_scanners == 1
+        assert scan.scanner_status_counts["passed"] == 1
+
+    def test_a_scanner_with_an_unfinished_target_has_not_finished(self):
+        scan = ScanProgress("scan-1")
+        scan.add_scanner_progress(
+            _scanner("trivy", "source", MCScannerStatus.COMPLETED)
+        )
+        scan.add_scanner_progress(
+            _scanner("trivy", "converted", MCScannerStatus.RUNNING)
+        )
+
+        assert scan.total_scanners == 1
+        assert scan.completed_scanners == 0
+        assert scan.finished_scanners == 0
+        assert scan.scanner_status_counts["running"] == 1
+        assert scan.scanner_status_counts["passed"] == 0
+
+    def test_a_failed_target_makes_the_scanner_failed(self):
+        scan = ScanProgress("scan-1")
+        scan.add_scanner_progress(_scanner("trivy", "source", MCScannerStatus.FAILED))
+        scan.add_scanner_progress(
+            _scanner("trivy", "converted", MCScannerStatus.COMPLETED)
+        )
+
+        assert scan.completed_scanners == 0
+        assert scan.finished_scanners == 1
+        assert scan.scanner_status_counts["failed"] == 1
+        assert scan.scanner_status_counts["passed"] == 0
+
+    def test_the_counts_do_not_change_when_the_aggregated_file_replaces_the_target_files(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        for target in ("source", "converted"):
+            _write_scanner_file(
+                out,
+                "bandit",
+                target,
+                {"scanner_name": "bandit", "status": "PASSED", "finding_count": 0},
+            )
+
+        running = create_scan_progress_from_files("scan-1", out)
+        _write_aggregated(
+            out,
+            {
+                "scanner_results": {
+                    "bandit": {"status": "PASSED", "finding_count": 0},
+                }
+            },
+        )
+        finished = create_scan_progress_from_files("scan-1", out)
+
+        assert running.total_scanners == finished.total_scanners == 1
+        assert running.completed_scanners == finished.completed_scanners == 1
+        assert running.finished_scanners == finished.finished_scanners == 1
+
+
+class TestTheAggregatedDocumentIsReadAsLeniblyAsItsModel:
+    def _bandit(self, **entry):
+        return {"scanner_results": {"bandit": entry}}
+
+    def test_a_run_whose_results_is_null_has_no_results_and_fails_nothing(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "sarif": {
+                    "runs": [{"tool": {"driver": {"name": "ASH"}}, "results": None}]
+                },
+                "scanner_results": {
+                    "bandit": {"status": "PASSED", "severity_counts": {}}
+                },
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+        info = get_scan_progress_info(out)
+
+        assert progress.status == "completed"
+        assert progress.error_message is None
+        assert info["status"] == "completed"
+        assert info["findings_count"] == 0
+
+    def test_a_null_finding_count_is_taken_from_the_breakdown(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            self._bandit(
+                status="PASSED", finding_count=None, severity_counts={"high": 2}
+            ),
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.status == "completed"
+        assert progress.error_message is None
+        assert progress.scanners["bandit"]["source"].finding_count == 2
+        assert progress.total_findings == 2
+
+    def test_an_entry_with_no_status_reads_as_passed_as_the_model_reads_it(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(out, self._bandit(finding_count=0, severity_counts={}))
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.scanners["bandit"]["source"].status == MCScannerStatus.COMPLETED
+        assert progress.completed_scanners == 1
+
+    def test_a_null_breakdown_is_no_breakdown(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out, self._bandit(status="FAILED", finding_count=1, severity_counts=None)
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.status == "completed"
+        assert progress.scanners["bandit"]["source"].finding_count == 1
+        assert progress.severity_counts["unknown"] == 1
+
+    def test_sarif_results_are_attributed_to_the_scanner_they_name(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "sarif": {
+                    "runs": [
+                        {
+                            # ASH writes one run for every scanner.
+                            "tool": {"driver": {"name": "ASH"}},
+                            "results": [
+                                {
+                                    "ruleId": "B105",
+                                    "level": "error",
+                                    "properties": {"scanner_name": "bandit"},
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "scanner_results": {"bandit": {"status": "FAILED"}},
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.finding_count == 1
+        assert source.severity_counts["critical"] == 1
+
+    def test_a_recorded_count_is_not_overwritten_by_results_that_matched_nothing(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(out, self._bandit(status="FAILED", finding_count=3))
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.finding_count == 3
+        # In the total, so in a bucket: the catch-all one.
+        assert source.severity_counts["unknown"] == 3
+        assert progress.total_findings == 3
+        assert sum(progress.severity_counts.values()) == 3
+
+    def test_a_scanner_carries_the_duration_the_document_recorded(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            self._bandit(
+                status="PASSED", finding_count=0, severity_counts={}, duration=2.5
+            ),
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.duration == 2.5
+        # The document records no end time for a scanner; the poll's is not one.
+        assert source.end_time is None
+
+
+class TestTheSkippedScannerSummaryReadsTheDocumentAsTheModelDoes:
+    def _write(self, output_dir, scanner_results):
+        _write_aggregated(output_dir, {"scanner_results": scanner_results})
+
+    def test_a_results_file_that_is_not_utf8_yields_the_empty_summary(self, tmp_path):
+        (tmp_path / "ash_aggregated_results.json").write_bytes(b"\xff\xfe{ not text")
+
+        summary = summarize_scanner_statuses(tmp_path)
+
+        assert summary == {"scanner_statuses": {}, "skipped_scanners": []}
+
+    def test_the_file_is_read_through_the_reader_that_retries_a_replace(
+        self, tmp_path, monkeypatch
+    ):
+        self._write(tmp_path, {"semgrep": {"status": "MISSING"}})
+        reads = []
+
+        def reader(path, encoding="utf-8"):
+            reads.append(Path(path).name)
+            return Path(path).read_bytes().decode(encoding)
+
+        monkeypatch.setattr(scan_tracking, "read_text_of_replaced_file", reader)
+
+        summary = summarize_scanner_statuses(tmp_path)
+
+        assert reads == ["ash_aggregated_results.json"]
+        assert [row["scanner"] for row in summary["skipped_scanners"]] == ["semgrep"]
+
+    def test_a_status_in_lower_case_is_read_as_its_member(self, tmp_path):
+        self._write(
+            tmp_path,
+            {"semgrep": {"status": "missing", "dependencies_satisfied": False}},
+        )
+
+        summary = summarize_scanner_statuses(tmp_path)
+
+        assert summary["skipped_scanners"] == [
+            {
+                "scanner": "semgrep",
+                "status": "MISSING",
+                "reason": "missing_dependencies",
+            }
+        ]
+
+    def test_the_strings_false_and_true_are_read_as_booleans(self, tmp_path):
+        self._write(
+            tmp_path,
+            {
+                "checkov": {
+                    "status": "SKIPPED",
+                    "excluded": "false",
+                    "dependencies_satisfied": "true",
+                },
+                "grype": {
+                    "status": "MISSING",
+                    "excluded": False,
+                    "dependencies_satisfied": "false",
+                },
+            },
+        )
+
+        summary = summarize_scanner_statuses(tmp_path)
+
+        reasons = {row["scanner"]: row["reason"] for row in summary["skipped_scanners"]}
+        assert reasons == {"checkov": "skipped", "grype": "missing_dependencies"}
+        assert summary["scanner_statuses"]["checkov"]["excluded"] is False
+
+    def test_a_missing_scanner_with_its_dependencies_says_why_it_did_not_run(
+        self, tmp_path
+    ):
+        self._write(
+            tmp_path,
+            {
+                "bandit": {
+                    "status": "MISSING",
+                    "dependencies_satisfied": True,
+                    "excluded": False,
+                    "missing_reason": "left filtering with no status",
+                }
+            },
+        )
+
+        summary = summarize_scanner_statuses(tmp_path)
+
+        assert summary["skipped_scanners"] == [
+            {
+                "scanner": "bandit",
+                "status": "MISSING",
+                "reason": "skipped",
+                "detail": "left filtering with no status",
+            }
+        ]
+
+    def test_a_skipped_scanner_with_no_recorded_reason_carries_no_detail(
+        self, tmp_path
+    ):
+        self._write(tmp_path, {"bandit": {"status": "SKIPPED", "excluded": True}})
+
+        summary = summarize_scanner_statuses(tmp_path)
+
+        assert "detail" not in summary["skipped_scanners"][0]
+
+
+class TestTheCompletedProgressInfoOnSparseDocuments:
+    def test_null_containers_beside_a_sarif_do_not_raise(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {"sarif": {"runs": []}, "scanner_results": None, "metadata": None},
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "completed"
+        assert info["scanners_completed"] == []
+        assert info["findings_count"] == 0
+        assert info["summary_stats"] == {}
+
+    def test_a_file_with_neither_results_nor_sarif_is_pending_not_completed(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(out, {"metadata": {"generated_at": "2024-01-01T00:00:00"}})
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "in_progress"
+        assert info["is_complete"] is False
+        assert info["results_pending"] is True
+
+    def test_the_summary_has_the_same_keys_running_and_completed(self, tmp_path):
+        running = tmp_path / "running"
+        _write_scanner_file(running, "bandit", "source", {"scanner_name": "bandit"})
+        done = tmp_path / "done"
+        _write_aggregated(
+            done,
+            {
+                "metadata": {
+                    "summary_stats": {
+                        "severity_counts": {"high": 2, "suppressed": 1},
+                        "total": 3,
+                        "actionable": 2,
+                    }
+                },
+                "scanner_results": {"bandit": {"status": "FAILED"}},
+            },
+        )
+
+        in_progress = get_scan_progress_info(running)
+        completed = get_scan_progress_info(done)
+
+        assert set(completed["findings_summary"]) == set(
+            in_progress["findings_summary"]
+        )
+        assert completed["findings_summary"]["high"] == 2
+        assert completed["findings_summary"]["suppressed"] == 1
+        # What the summary stats held beyond the buckets is still there.
+        assert completed["summary_stats"]["actionable"] == 2
+
+    def test_sarif_results_are_graded_and_a_suppressed_one_is_counted_as_suppressed(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "sarif": {
+                    "runs": [
+                        {
+                            "results": [
+                                {"ruleId": "B105", "level": "error"},
+                                {
+                                    "ruleId": "B303",
+                                    "level": "error",
+                                    "suppressions": [{"kind": "inSource"}],
+                                },
+                            ]
+                        }
+                    ]
+                },
+                "scanner_results": {"bandit": {"status": "FAILED"}},
+            },
+        )
+
+        info = get_scan_progress_info(out)
+
+        summary = info["findings_summary"]
+        assert info["findings_count"] == 2
+        assert summary["critical"] == 1
+        assert summary["suppressed"] == 1
+        assert summary["unknown"] == 0
+        assert sum(summary.values()) == info["findings_count"]
+
+    def test_results_put_back_after_a_scan_that_ended_without_any_are_not_this_scans(
+        self, tmp_path
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {"scanner_results": {"bandit": {"status": "PASSED", "finding_count": 0}}},
+        )
+        (out / RESTORED_MARKER_NAME).write_text("put back\n", encoding="utf-8")
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "error"
+        assert info["is_complete"] is False
+        assert info["context"]["output_holds_previous_results"] is True
+        assert info["context"]["error_category"] == "scan_incomplete"
+
+
+class TestPutBackResultsAreRefusedWhenARestoreLandsDuringTheRead:
+    def test_a_marker_written_after_the_first_check_refuses_the_results(
+        self, tmp_path, monkeypatch
+    ):
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {"scanner_results": {"bandit": {"status": "PASSED", "finding_count": 0}}},
+        )
+
+        def read_during_a_restore(output_dir, include_sarif=False):
+            # The restore writes its marker, then moves the previous results back,
+            # which is what this read returns.
+            (Path(output_dir) / RESTORED_MARKER_NAME).write_text(
+                "put back\n", encoding="utf-8"
+            )
+            return {"success": True, "status": "completed"}
+
+        monkeypatch.setattr(scan_tracking, "get_scan_results", read_during_a_restore)
+
+        response = get_scan_results_with_error_handling(out)
+
+        assert response["success"] is False
+        assert response["error_category"] == "scan_incomplete"
+        assert response["context"]["output_holds_previous_results"] is True
+
+    def test_results_with_no_marker_are_returned(self, tmp_path, monkeypatch):
+        out = tmp_path / "ash_output"
+        _write_aggregated(out, {"scanner_results": {}})
+        monkeypatch.setattr(
+            scan_tracking,
+            "get_scan_results",
+            lambda output_dir, include_sarif=False: {"success": True},
+        )
+
+        assert get_scan_results_with_error_handling(out) == {"success": True}

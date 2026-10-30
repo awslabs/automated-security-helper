@@ -25,12 +25,14 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     warning_of_dropped_keys,
 )
+from automated_security_helper.utils.atomic_write import read_text_of_replaced_file
 from automated_security_helper.utils.error_text import (
     error_text,
     log_unexpected_error,
     validation_errors_in,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.scanner_tool_types import result_scanner_name
 from automated_security_helper.utils.severity_ladder import result_severity
 
 # Configure module logger
@@ -239,6 +241,28 @@ class ScannerProgress:
         }
 
 
+#: The order in which one scanner's targets decide the scanner's own status. A
+#: scanner with a target still unfinished has not finished, whatever its other
+#: targets did. Of the finished ones a failure outranks a pass, and a pass outranks
+#: a skip: a scanner that ran on one target and had nothing to do on another ran.
+_SCANNER_STATUS_PRECEDENCE = (
+    MCScannerStatus.RUNNING,
+    MCScannerStatus.PENDING,
+    MCScannerStatus.FAILED,
+    MCScannerStatus.COMPLETED,
+    MCScannerStatus.SKIPPED,
+)
+
+
+def _status_of_scanner(targets: Dict[str, ScannerProgress]) -> MCScannerStatus:
+    """One scanner's status over its targets (source and converted)."""
+    statuses = {progress.status for progress in targets.values()}
+    for status in _SCANNER_STATUS_PRECEDENCE:
+        if status in statuses:
+            return status
+    return MCScannerStatus.SKIPPED
+
+
 class ScanProgress:
     """
     Aggregate progress information for a complete scan.
@@ -361,15 +385,20 @@ class ScanProgress:
         A scanner that failed, errored or never ran is not counted here; see
         :attr:`finished_scanners` for every scanner that has ended.
 
+        Every count here is of scanners, not of (scanner, target) pairs: one that
+        ran on the source and on its converted files is one scanner, as it is in
+        the aggregated results file, so the counts do not change when that file
+        replaces the per-target ones. A scanner's status over its targets is
+        :func:`_status_of_scanner`.
+
         Returns:
             Number of completed scanners
         """
-        count = 0
-        for scanner_dict in self.scanners.values():
-            for scanner_progress in scanner_dict.values():
-                if scanner_progress.status == MCScannerStatus.COMPLETED:
-                    count += 1
-        return count
+        return sum(
+            1
+            for targets in self.scanners.values()
+            if _status_of_scanner(targets) == MCScannerStatus.COMPLETED
+        )
 
     @property
     def finished_scanners(self) -> int:
@@ -382,9 +411,8 @@ class ScanProgress:
         """
         return sum(
             1
-            for scanner_dict in self.scanners.values()
-            for scanner_progress in scanner_dict.values()
-            if scanner_progress.status in _FINISHED_SCANNER_STATUSES
+            for targets in self.scanners.values()
+            if _status_of_scanner(targets) in _FINISHED_SCANNER_STATUSES
         )
 
     @property
@@ -396,9 +424,8 @@ class ScanProgress:
         always all present.
         """
         counts = dict.fromkeys(_SCANNER_STATUS_COUNT_NAMES.values(), 0)
-        for scanner_dict in self.scanners.values():
-            for scanner_progress in scanner_dict.values():
-                counts[_SCANNER_STATUS_COUNT_NAMES[scanner_progress.status]] += 1
+        for targets in self.scanners.values():
+            counts[_SCANNER_STATUS_COUNT_NAMES[_status_of_scanner(targets)]] += 1
         return counts
 
     @property
@@ -407,12 +434,10 @@ class ScanProgress:
         Get the total number of scanners.
 
         Returns:
-            Total number of scanners
+            Total number of scanners: one per scanner name, however many targets
+            it has results for
         """
-        count = 0
-        for scanner_dict in self.scanners.values():
-            count += len(scanner_dict)
-        return count
+        return len(self.scanners)
 
     @property
     def is_complete(self) -> bool:
@@ -567,6 +592,21 @@ def resolves_to_directory_inside(directory: Path, output_dir: Path) -> bool:
         return False
 
 
+def _list_directory(directory: Path) -> List[Path]:
+    """The entries of ``directory``, or none when it cannot be listed.
+
+    The poll that reads the results directories runs while a scan starts, ends or
+    cleans up, and each of those sets aside, restores or removes ``scanners/`` or a
+    directory under it. One that went between the check that it is a directory and
+    the listing, or that cannot be read, is a directory with no results yet, not a
+    reason to fail the whole poll.
+    """
+    try:
+        return list(directory.iterdir())
+    except OSError:
+        return []
+
+
 def find_scanner_result_files(
     output_dir: Path | None = None,
 ) -> Dict[str, Dict[str, Path]]:
@@ -575,7 +615,8 @@ def find_scanner_result_files(
 
     The scanners directory, each scanner's and each target's are followed only
     when they resolve to a directory inside ``output_dir``
-    (``resolves_to_directory_inside``).
+    (``resolves_to_directory_inside``). A directory that cannot be listed is
+    skipped (``_list_directory``).
 
     Args:
         output_dir: Path to the scan output directory
@@ -594,14 +635,18 @@ def find_scanner_result_files(
     if not resolves_to_directory_inside(scanners_dir, output_dir):
         return scanner_results
 
-    for scanner_dir in scanners_dir.iterdir():
+    # Each level is checked on its own before it is listed and again for every
+    # entry in it, so a directory swapped for a link between a check and its
+    # listing lists another tree's names, and none of them passes the check of the
+    # level below.
+    for scanner_dir in _list_directory(scanners_dir):
         if not resolves_to_directory_inside(scanner_dir, output_dir):
             continue
 
         scanner_name = scanner_dir.name
         targets: Dict[str, Path] = {}
 
-        for target_dir in scanner_dir.iterdir():
+        for target_dir in _list_directory(scanner_dir):
             if not resolves_to_directory_inside(target_dir, output_dir):
                 continue
 
@@ -795,7 +840,14 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
 
     Returns empty collections rather than raising. ``get_scan_progress`` polls
     this while a scan is still running, when the aggregated file does not exist
-    yet, so absence is the ordinary case and not an error.
+    yet, so absence is the ordinary case and not an error. A file that is not
+    UTF-8 is the same: the text is not decoded, so it is not a results document.
+
+    A ``MISSING`` scanner whose dependencies were satisfied did not run for a
+    reason other than a missing tool (its filtering raised, or it could not be
+    built). Its ``reason`` is the generic ``skipped``, so the reason the row
+    recorded (``missing_reason``, or ``skipped_reason``) is carried as ``detail``
+    on every skipped entry that has one.
     """
     empty: Dict[str, Any] = {"scanner_statuses": {}, "skipped_scanners": []}
 
@@ -805,13 +857,18 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
     if not is_regular_result_file(results_path, max_bytes=None):
         return empty
     try:
-        raw = results_path.read_text(encoding="utf-8")
-    except OSError:
+        # The file is replaced atomically while a scan writes it, and on Windows a
+        # read that lands in the replace fails with a PermissionError that
+        # passes a moment later: retried, where one read here reported a scan that
+        # had skipped scanners as having skipped none.
+        raw = read_text_of_replaced_file(results_path, encoding="utf-8")
+    except (OSError, ValueError):
+        # ValueError: UnicodeDecodeError, a file that is not UTF-8.
         return empty
 
     try:
         data = json.loads(raw)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         # A poll can land midway through the file being written.
         return empty
 
@@ -830,8 +887,10 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
             continue
 
         status = info.get("status")
-        excluded = bool(info.get("excluded", False))
-        dependencies_satisfied = bool(info.get("dependencies_satisfied", True))
+        excluded = _recorded_flag(info.get("excluded"), False)
+        dependencies_satisfied = _recorded_flag(
+            info.get("dependencies_satisfied"), True
+        )
 
         statuses[scanner_name] = {
             "status": status,
@@ -841,7 +900,10 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
 
         # FAILED and ERROR are deliberately not included. Those scanners ran;
         # reporting them as skipped would send a user looking for a missing tool.
-        if status not in ("MISSING", "SKIPPED"):
+        # The status is read in any case, as scanner_status_from_results reads it
+        # from the same document.
+        recorded_status = status.upper() if isinstance(status, str) else None
+        if recorded_status not in ("MISSING", "SKIPPED"):
             continue
 
         if not dependencies_satisfied:
@@ -851,9 +913,38 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
         else:
             reason = "skipped"
 
-        skipped.append({"scanner": scanner_name, "status": status, "reason": reason})
+        entry: Dict[str, Any] = {
+            "scanner": scanner_name,
+            "status": recorded_status,
+            "reason": reason,
+        }
+        detail = info.get("missing_reason") or info.get("skipped_reason")
+        if isinstance(detail, str) and detail:
+            entry["detail"] = detail
+        skipped.append(entry)
 
     return {"scanner_statuses": statuses, "skipped_scanners": skipped}
+
+
+def _recorded_flag(value: Any, default: bool) -> bool:
+    """A boolean the results document recorded, read as the results model reads it.
+
+    A real boolean is itself. The strings and integers the model accepts for one
+    (``"false"``, ``"0"``, ``0``) are read as it reads them, where ``bool()`` made
+    every non-empty string true. Anything else, an absent key included, is
+    ``default``, the model's own default for the field.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("true", "1", "yes", "on", "t", "y"):
+            return True
+        if text in ("false", "0", "no", "off", "f", "n"):
+            return False
+    return default
 
 
 def parse_aggregated_results(
@@ -1011,20 +1102,20 @@ def _add_aggregated_scanner_progress(
     """
     findings = []
 
-    # Try to extract findings from SARIF data if available
-    if "sarif" in results and results["sarif"] and "runs" in results["sarif"]:
-        for run in results["sarif"]["runs"]:
-            if "results" in run:
-                for result in run["results"]:
-                    # Convert SARIF result to a simplified finding
-                    finding = {
-                        "id": result.get("ruleId", "unknown"),
-                        "severity": result_severity(result),
-                        "scanner": run.get("tool", {})
-                        .get("driver", {})
-                        .get("name", "unknown"),
-                    }
-                    findings.append(finding)
+    # The findings of the SARIF, each with the scanner that reported it.
+    for run, result in _sarif_run_results(results.get("sarif")):
+        findings.append(
+            {
+                "id": result.get("ruleId", "unknown"),
+                "severity": result_severity(result),
+                # The scanner the result names, as every other reader of the
+                # aggregated SARIF attributes it (sarif_utils). The run's tool is
+                # the fallback only: ASH writes one run for all its scanners, so
+                # the driver name there is ASH's, and matched against a scanner
+                # name it found nothing.
+                "scanner": result_scanner_name(result) or _run_driver_name(run),
+            }
+        )
 
     scanner_results = results.get("scanner_results") or {}
     for scanner_name, scanner_info in scanner_results.items():
@@ -1034,56 +1125,97 @@ def _add_aggregated_scanner_progress(
                 f"{type(scanner_info).__name__}"
             )
 
-    # If no findings were found in SARIF, check scanner_results
-    if not findings:
-        for scanner_name, scanner_info in scanner_results.items():
-            # Create a finding for each scanner with severity counts
-            severity_counts = scanner_info.get("severity_counts", {})
-            for severity, count in severity_counts.items():
-                if count > 0:
-                    finding = {
-                        "id": f"{scanner_name}-{severity.lower()}",
-                        "severity": severity.upper(),
-                        "scanner": scanner_name,
-                        "count": count,
-                    }
-                    findings.append(finding)
-
     # Create scanner progress objects for each completed scanner
     for scanner_name, scanner_info in scanner_results.items():
         # Filter findings for this scanner
         scanner_findings = [f for f in findings if f.get("scanner") == scanner_name]
 
+        # What the document recorded for the scanner. A count the results model
+        # accepts as null is no recorded count, and neither is anything that is
+        # not an integer.
+        recorded_count = scanner_info.get("finding_count")
+        if isinstance(recorded_count, bool) or not isinstance(recorded_count, int):
+            recorded_count = None
+        recorded_counts = scanner_info.get("severity_counts")
+
         # Create scanner progress for source target, carrying the status the
-        # document recorded rather than assuming success.
-        mapped_status = scanner_status_from_results(scanner_info.get("status"))
+        # document recorded rather than assuming success. The results model reads a
+        # status that is absent as PASSED, and so does this.
+        mapped_status = scanner_status_from_results(
+            scanner_info.get("status", "PASSED")
+        )
         source_progress = ScannerProgress(
             scanner_name=scanner_name,
             target_type="source",
             status=mapped_status,
-            finding_count=scanner_info.get("finding_count", 0),
+            duration=_recorded_duration(scanner_info),
+            finding_count=recorded_count or 0,
         )
 
-        # Update severity counts from scanner_info
-        if "severity_counts" in scanner_info:
-            source_progress.severity_counts = scanner_info["severity_counts"]
-        else:
+        # The breakdown the scanner recorded; failing that, the one its SARIF
+        # results give. A recorded count with neither goes under the catch-all
+        # bucket, so it is not in the total and in no bucket, and the count of
+        # results that matched no scanner (none, when the SARIF names no scanner)
+        # does not replace it.
+        if isinstance(recorded_counts, dict):
+            source_progress.severity_counts = recorded_counts
+            if recorded_count is None:
+                source_progress.finding_count = sum(
+                    value
+                    for value in recorded_counts.values()
+                    if isinstance(value, int) and not isinstance(value, bool)
+                )
+        elif scanner_findings:
             source_progress.update_findings(scanner_findings)
+        elif recorded_count:
+            source_progress.severity_counts = empty_severity_counts()
+            source_progress.severity_counts[UNKNOWN_SEVERITY] = recorded_count
 
-        # mark_* and not a bare status assignment: each one also sets end_time,
-        # and a skipped scanner correctly gets none. This used to be an
-        # unconditional mark_completed(), which re-asserted COMPLETED over
-        # whatever the constructor was given and so would have defeated the
-        # mapping above.
-        if mapped_status is MCScannerStatus.COMPLETED:
-            source_progress.mark_completed()
-        elif mapped_status is MCScannerStatus.FAILED:
-            source_progress.mark_failed()
-        else:
-            source_progress.mark_skipped()
-
-        # Add to scan progress
+        # The status is the constructor's and no end_time is set: the document
+        # records how long a scanner took (the duration above), not when it ended,
+        # and the time of this poll is not that. mark_completed and mark_failed
+        # wrote it as the end_time, and left the duration unset.
         scan_progress.add_scanner_progress(source_progress)
+
+
+def _run_driver_name(run: Dict[str, Any]) -> str:
+    """The name of the tool a SARIF run records, or ``unknown``."""
+    tool = run.get("tool")
+    driver = tool.get("driver") if isinstance(tool, dict) else None
+    name = driver.get("name") if isinstance(driver, dict) else None
+    return name if isinstance(name, str) and name else "unknown"
+
+
+def _sarif_run_results(sarif: Any) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """Every ``(run, result)`` pair of a SARIF document, however sparse it is.
+
+    The progress views read the SARIF of a document that has been through
+    ``validate_result_structure``, which checks that ``runs`` is a list and not
+    what is in it. A run whose ``results`` is null, which the SARIF model allows
+    (``schemas/sarif_schema_model.py``), has no results, as one with no ``results``
+    key has none; a run or a result that is not an object is no run or result. None
+    of them fails the view.
+    """
+    pairs: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    if not isinstance(sarif, dict):
+        return pairs
+    runs = sarif.get("runs")
+    for run in runs if isinstance(runs, list) else []:
+        if not isinstance(run, dict):
+            continue
+        run_results = run.get("results")
+        for result in run_results if isinstance(run_results, list) else []:
+            if isinstance(result, dict):
+                pairs.append((run, result))
+    return pairs
+
+
+def _recorded_duration(scanner_info: Dict[str, Any]) -> Optional[float]:
+    """The ``duration`` a ``scanner_results`` entry recorded, or None."""
+    duration = scanner_info.get("duration")
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+        return None
+    return float(duration)
 
 
 def create_scan_progress_from_files(
@@ -1248,6 +1380,28 @@ def get_scan_progress_info(
     """
     Get comprehensive scan progress information.
 
+    What this returns describes the files in ``output_dir``, as
+    :func:`create_scan_progress_from_files` does, and no registry entry decides it.
+
+    * ``completed``: the aggregated results file is a results document. That is
+      not the scan having ended: the SCAN phase writes the document before the
+      REPORT phase runs, so a caller that needs to know the scan is over asks the
+      registry (``check_scan_progress``).
+    * ``in_progress`` with ``results_pending`` true: the file is a JSON object with
+      neither ``scanner_results`` nor ``sarif``, which is not a results document
+      yet.
+    * ``error``: the file cannot be read as results, or the directory holds the
+      results put back after a scan that ended without any
+      (:func:`restored_results_refusal`), which are not this scan's.
+
+    ``findings_summary`` has one shape in every state: the severity buckets
+    (``SEVERITY_BUCKETS`` and ``unknown``). For a completed scan they are
+    ``metadata.summary_stats``' counts, or, with no summary stats, the SARIF
+    results graded by ``result_severity``, a suppressed result counted in
+    ``suppressed`` and not by its severity, so the buckets add up to
+    ``findings_count``. The summary stats themselves are returned as
+    ``summary_stats``.
+
     Args:
         output_dir: Path to the scan output directory
 
@@ -1260,55 +1414,67 @@ def get_scan_progress_info(
     is_complete = check_scan_completion(output_dir)
 
     if is_complete:
+        from automated_security_helper.core.previous_results import (
+            holds_restored_results,
+        )
+        from automated_security_helper.core.resource_management.error_handling import (
+            ErrorCategory,
+        )
+
+        if holds_restored_results(Path(output_dir)):
+            return {
+                "status": "error",
+                "is_complete": False,
+                "error": (
+                    f"Scan of output_dir {output_dir} is not complete. Results are "
+                    "not available: the last scan there ended without results, and "
+                    "ASH put back the results of the scan before it, which are not "
+                    "that scan's."
+                ),
+                "context": {
+                    "output_dir": str(output_dir),
+                    "error_category": ErrorCategory.SCAN_INCOMPLETE.value,
+                    "output_holds_previous_results": True,
+                },
+            }
         try:
             # Parse aggregated results for completed scans
             results = parse_aggregated_results(output_dir)
+            if not isinstance(results, dict):
+                results = {}
 
-            # Extract key information from results. Bound before the branch:
-            # a results document that is an empty object is falsy, and these
-            # used to be assigned inside the branch only, so the return below
-            # raised UnboundLocalError for it.
-            findings = []
-            scanners_completed: List[str] = []
-            findings_summary: Dict[str, Any] = {}
+            if results.get("sarif") is None and results.get("scanner_results") is None:
+                # Not a results document yet; see create_scan_progress_from_files.
+                return {**_partial_progress_info(output_dir), "results_pending": True}
 
-            if results:
-                # Try to extract findings from SARIF data if available
-                if (
-                    "sarif" in results
-                    and results["sarif"]
-                    and "runs" in results["sarif"]
-                ):
-                    for run in results["sarif"]["runs"]:
-                        if "results" in run:
-                            findings.extend(run["results"])
+            # Every container is read as absent when it is null or the wrong
+            # type: validate_result_structure accepts a null scanner_results or
+            # metadata beside a SARIF, and a run whose results is null.
+            findings = [
+                result for _, result in _sarif_run_results(results.get("sarif"))
+            ]
 
-                # The scanners that ran to an end, as get_scan_results counts
-                # them: PASSED or FAILED. scanner_results names every scanner
-                # ASH considered, MISSING, SKIPPED and ERROR included, and
-                # listing them all here reported a tool that never ran as
-                # completed.
-                scanners_completed = [
-                    name
-                    for name, info in results.get("scanner_results", {}).items()
-                    if isinstance(info, dict)
-                    and info.get("status", "UNKNOWN") in ("PASSED", "FAILED")
-                ]
+            # The scanners that ran to an end, as get_scan_results counts
+            # them: PASSED or FAILED. scanner_results names every scanner
+            # ASH considered, MISSING, SKIPPED and ERROR included, and
+            # listing them all here reported a tool that never ran as
+            # completed.
+            scanner_results = results.get("scanner_results")
+            scanners_completed = [
+                name
+                for name, info in (
+                    scanner_results if isinstance(scanner_results, dict) else {}
+                ).items()
+                if isinstance(info, dict)
+                and info.get("status", "UNKNOWN") in ("PASSED", "FAILED")
+            ]
 
-                # Extract severity counts from metadata if available
-                if "metadata" in results and "summary_stats" in results["metadata"]:
-                    summary_stats = results["metadata"]["summary_stats"]
-                    findings_summary = summary_stats
-                else:
-                    findings_summary = extract_findings_summary(findings)
-
-            completion_time = (
-                results.get("metadata", {}).get(
-                    "generated_at", datetime.now().isoformat()
-                )
-                if results
-                else datetime.now().isoformat()
-            )
+            metadata = results.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            summary_stats = metadata.get("summary_stats")
+            if not isinstance(summary_stats, dict):
+                summary_stats = {}
 
             return {
                 "status": "completed",
@@ -1317,8 +1483,13 @@ def get_scan_progress_info(
                 "total_scanners": len(scanners_completed),
                 "findings_count": len(findings),
                 "findings": findings,
-                "findings_summary": findings_summary,
-                "completion_time": completion_time,
+                "findings_summary": _completed_findings_summary(
+                    summary_stats, findings
+                ),
+                "summary_stats": summary_stats,
+                "completion_time": metadata.get(
+                    "generated_at", datetime.now().isoformat()
+                ),
             }
         except MCPResourceError as e:
             # Handle errors parsing aggregated results
@@ -1329,36 +1500,69 @@ def get_scan_progress_info(
                 "context": e.context if hasattr(e, "context") else {},
             }
     else:
-        # Get partial progress for incomplete scans
-        scanner_progress = get_scanner_progress(output_dir)
-        completed_scanners = get_completed_scanners(output_dir)
+        return _partial_progress_info(output_dir)
 
-        # Aggregate findings from all scanners. The count and the summary come
-        # from what each scanner recorded (get_scanner_progress), so a scanner
-        # whose per-target file carries counts and no findings array is counted
-        # as the scanner counted it, not as 0.
-        all_findings = []
-        findings_count = 0
-        findings_summary = empty_severity_counts()
-        for scanner_info in scanner_progress.values():
-            all_findings.extend(scanner_info.get("findings", []))
-            findings_count += scanner_info.get("finding_count", 0)
-            for severity, value in scanner_info.get("severity_counts", {}).items():
-                bucket = severity if severity in findings_summary else UNKNOWN_SEVERITY
-                findings_summary[bucket] += value
 
-        return {
-            "status": "in_progress",
-            "is_complete": False,
-            "scanners_completed": list(completed_scanners),
-            "total_scanners": len(
-                completed_scanners
-            ),  # This is an estimate since we don't know the total yet
-            "findings_count": findings_count,
-            "findings": all_findings,
-            "findings_summary": findings_summary,
-            "scanner_progress": scanner_progress,
-        }
+def _completed_findings_summary(
+    summary_stats: Dict[str, Any], findings: List[Dict[str, Any]]
+) -> Dict[str, int]:
+    """The severity buckets of a completed scan, in the shape the running view has.
+
+    From the summary stats the results document carries when it has them: the
+    ``severity_counts`` they nest, or the flat bucket keys an older document puts
+    at the top. Without them, from the SARIF results.
+    """
+    summary = empty_severity_counts()
+    if summary_stats:
+        nested = summary_stats.get("severity_counts")
+        recorded = nested if isinstance(nested, dict) else summary_stats
+        for severity, value in recorded.items():
+            if severity in summary and isinstance(value, int):
+                summary[severity] = value
+        return summary
+
+    from automated_security_helper.utils.sarif_utils import is_result_suppressed
+
+    for result in findings:
+        bucket = (
+            "suppressed" if is_result_suppressed(result) else result_severity(result)
+        ).lower()
+        summary[bucket if bucket in summary else UNKNOWN_SEVERITY] += 1
+    return summary
+
+
+def _partial_progress_info(output_dir: Path) -> Dict[str, Any]:
+    """Progress from the per-scanner files, for a scan with no results document."""
+    # Get partial progress for incomplete scans
+    scanner_progress = get_scanner_progress(output_dir)
+    completed_scanners = get_completed_scanners(output_dir)
+
+    # Aggregate findings from all scanners. The count and the summary come
+    # from what each scanner recorded (get_scanner_progress), so a scanner
+    # whose per-target file carries counts and no findings array is counted
+    # as the scanner counted it, not as 0.
+    all_findings = []
+    findings_count = 0
+    findings_summary = empty_severity_counts()
+    for scanner_info in scanner_progress.values():
+        all_findings.extend(scanner_info.get("findings", []))
+        findings_count += scanner_info.get("finding_count", 0)
+        for severity, value in scanner_info.get("severity_counts", {}).items():
+            bucket = severity if severity in findings_summary else UNKNOWN_SEVERITY
+            findings_summary[bucket] += value
+
+    return {
+        "status": "in_progress",
+        "is_complete": False,
+        "scanners_completed": list(completed_scanners),
+        "total_scanners": len(
+            completed_scanners
+        ),  # This is an estimate since we don't know the total yet
+        "findings_count": findings_count,
+        "findings": all_findings,
+        "findings_summary": findings_summary,
+        "scanner_progress": scanner_progress,
+    }
 
 
 def extract_findings_summary(findings: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -1906,6 +2110,14 @@ def get_scan_results_with_error_handling(
 
         # Get scan results
         results = get_scan_results(output_dir, include_sarif=include_sarif)
+
+        # The check above ran before the read, and a restore can run between the
+        # two. It writes its marker first and moves the previous results back
+        # after it (core/previous_results.py), so results read after it put them
+        # back are followed by a marker that is there to see now.
+        refusal = restored_results_refusal(output_dir, "get_scan_results")
+        if refusal is not None:
+            return refusal
         return results
 
     except MCPResourceError as e:

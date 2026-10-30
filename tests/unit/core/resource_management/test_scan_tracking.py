@@ -401,7 +401,9 @@ class TestScanProgress:
         assert scan.total_findings == 3
         assert scan.severity_counts["high"] == 1
         assert scan.severity_counts["low"] == 1
-        assert scan.total_scanners == 2
+        # One scanner, two targets: the scanner counts once, as it does in the
+        # aggregated results file that replaces these entries.
+        assert scan.total_scanners == 1
 
     def test_update_totals_resets_and_recalculates(self):
         """update_totals recomputes from scratch each time."""
