@@ -12,7 +12,7 @@ of a reaped child means the id was reused.
 
 Every group read in _stop_tree goes through the zombie-aware ``_group_survives``,
 so every test here patches that seam and ``_wait_after_kill``: nothing reads the
-host's own process table, whatever pid 4242 is on the machine the tests run on.
+host's own process table, and the stand-in pid sits above the kernel's pid space.
 """
 
 import os
@@ -30,10 +30,15 @@ skip_on_windows = pytest.mark.skipif(
     os.name == "nt", reason="process groups are the POSIX arm of _stop_tree"
 )
 
+#: Outside any real pid range: _stop_tree runs for real here, with only the
+#: group signal replaced, and a small number can name a live process group on
+#: the test host.
+_NO_SUCH_PID = 2**30 + 4242
+
 
 def _child(returncode):
     process = MagicMock(spec=subprocess.Popen)
-    process.pid = 4242
+    process.pid = _NO_SUCH_PID
     process.returncode = returncode
     process.poll.return_value = returncode
     return process
@@ -55,7 +60,7 @@ def test_a_reaped_child_whose_pid_a_live_process_holds_is_not_signalled():
         patch.object(subprocess_utils, "_note_stop_refused") as refused,
     ):
         subprocess_utils._stop_tree(process, grace=0)
-    live.assert_called_once_with(4242)
+    live.assert_called_once_with(_NO_SUCH_PID)
     signal_group.assert_not_called()
     refused.assert_not_called()
 
@@ -76,7 +81,7 @@ def test_a_reaped_child_whose_group_outlives_it_is_still_stopped():
         patch.object(subprocess_utils, "_group_survives", side_effect=[True, False]),
     ):
         subprocess_utils._stop_tree(process, grace=0)
-    sg.assert_called_once_with(4242, signal.SIGKILL)
+    sg.assert_called_once_with(_NO_SUCH_PID, signal.SIGKILL)
 
 
 @skip_on_windows
@@ -92,7 +97,7 @@ def test_an_unreaped_child_is_stopped_without_asking_about_its_pid():
     ):
         subprocess_utils._stop_tree(process, grace=0)
     live.assert_not_called()
-    sg.assert_called_once_with(4242, signal.SIGKILL)
+    sg.assert_called_once_with(_NO_SUCH_PID, signal.SIGKILL)
 
 
 @skip_on_windows
@@ -103,11 +108,11 @@ def test_pid_liveness_reads_kill_zero():
     with patch.object(
         subprocess_utils.os, "kill", side_effect=ProcessLookupError
     ) as kill:
-        assert subprocess_utils._pid_names_a_live_process(4242) is False
-    kill.assert_called_once_with(4242, 0)
+        assert subprocess_utils._pid_names_a_live_process(_NO_SUCH_PID) is False
+    kill.assert_called_once_with(_NO_SUCH_PID, 0)
     with patch.object(subprocess_utils.os, "kill", side_effect=PermissionError) as kill:
-        assert subprocess_utils._pid_names_a_live_process(4242) is True
-    kill.assert_called_once_with(4242, 0)
+        assert subprocess_utils._pid_names_a_live_process(_NO_SUCH_PID) is True
+    kill.assert_called_once_with(_NO_SUCH_PID, 0)
     with patch.object(subprocess_utils.os, "kill", return_value=None) as kill:
-        assert subprocess_utils._pid_names_a_live_process(4242) is True
-    kill.assert_called_once_with(4242, 0)
+        assert subprocess_utils._pid_names_a_live_process(_NO_SUCH_PID) is True
+    kill.assert_called_once_with(_NO_SUCH_PID, 0)

@@ -27,6 +27,9 @@ POSIX_ONLY = pytest.mark.skipif(
 
 #: Outside any real pid range this test could collide with.
 _NO_SUCH_PGID = 2**30 + 4343
+#: Outside any real pid range: stop_after_interrupt runs for real on these
+#: stand-ins, and a small number can name a live process on the test host.
+_NO_SUCH_PID = 2**30 + 4242
 
 
 def test_an_interrupt_during_the_plain_stops_grace_survives_a_refused_kill():
@@ -135,7 +138,7 @@ def test_a_refused_kill_after_an_interrupt_in_the_tree_stop_marks_the_record(
 
 def _child_the_kernel_will_not_kill() -> MagicMock:
     process = MagicMock(spec=subprocess.Popen)
-    process.pid = 4242
+    process.pid = _NO_SUCH_PID
     process.returncode = None
     # `args` is set on a real Popen in __init__, not on the class, so a spec'd
     # mock lacks it; the refusal's WARNING names the program through it.
@@ -173,7 +176,7 @@ def test_an_outlived_grace_returns_false_when_kill_is_refused():
 
 def test_an_outlived_grace_whose_kill_is_accepted_returns_true():
     process = MagicMock(spec=subprocess.Popen)
-    process.pid = 4242
+    process.pid = _NO_SUCH_PID
     process.returncode = None
     timed_out = subprocess.TimeoutExpired(["tool"], 0.01)
     with (
@@ -189,7 +192,7 @@ def test_an_outlived_grace_whose_kill_is_accepted_returns_true():
 
 def test_a_child_that_stops_within_the_grace_returns_true():
     process = MagicMock(spec=subprocess.Popen)
-    process.pid = 4242
+    process.pid = _NO_SUCH_PID
     process.returncode = 0
     with patch.object(subprocess_utils, "_wait_out", return_value=None):
         stopped = subprocess_utils.stop_after_interrupt(
@@ -201,7 +204,7 @@ def test_a_child_that_stops_within_the_grace_returns_true():
 
 def test_a_kill_the_kernel_accepts_is_still_followed_by_the_reap():
     process = MagicMock(spec=subprocess.Popen)
-    process.pid = 4242
+    process.pid = _NO_SUCH_PID
     process.returncode = None
     with (
         patch.object(subprocess_utils, "_wait_out", side_effect=KeyboardInterrupt),
