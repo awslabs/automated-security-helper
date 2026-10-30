@@ -410,11 +410,13 @@ def _check_shape(param: Parameter, value: Any) -> str | None:
     """Why ``value`` cannot be this parameter's value, or None if it can.
 
     The checks are the ones argv makes impossible and JSON does not. A JSON
-    number for a true/false parameter is refused: click reads 0 and 1 as the
-    booleans, and every other number reached its text conversion and raised
-    AttributeError. A JSON number with a fraction for an integer parameter is
-    refused too, as ``--shard-index 3.5`` is: click's integer type truncated
-    ``3.5`` to 3 without a word.
+    number for a true/false parameter is refused: the click typer bundles reads
+    a boolean from a bool or from text (``"yes"``, ``"1"``), so every number, 0
+    and 1 included, reached its text conversion and raised AttributeError
+    (upstream click's ``BoolParamType`` takes 0 and 1 as the booleans; the
+    bundled copy does not). A JSON number with a fraction for an integer
+    parameter is refused too, as ``--shard-index 3.5`` is: click's integer type
+    truncated ``3.5`` to 3 without a word.
     """
     takes_list = param.multiple or param.nargs != 1
     items = value if isinstance(value, list) else [value]
