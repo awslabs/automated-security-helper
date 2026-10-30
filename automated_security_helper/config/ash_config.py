@@ -3533,6 +3533,32 @@ def _left_unchanged(reason: str, config_path: Path) -> ValueError:
     return ValueError(f"{reason}; {config_path} is unchanged")
 
 
+def _resolved_for_save(path: Path, config_path: Path) -> Path:
+    """``path`` with every link followed, for the save's containment check.
+
+    A symlink loop is refused here, in the save's own words, before anything
+    is staged. ``Path.resolve`` met one differently by version: 3.10 to 3.12
+    raised RuntimeError from the resolve itself, and 3.13 onward returned the
+    path with the loop unresolved, so the save failed at its stat with the
+    system's ELOOP. Neither was the save's refusal. ``os.path.realpath`` in
+    strict mode raises OSError(ELOOP) for a loop on every supported version; a
+    path that does not exist yet (a new config, or a dangling link's target,
+    which the containment check then judges) is resolved as far as it goes.
+    """
+    try:
+        return Path(os.path.realpath(path, strict=True))
+    except FileNotFoundError:
+        return Path(os.path.realpath(path))
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise _left_unchanged(
+                "the config path is a symlink loop, which the suppression save "
+                "does not write through",
+                config_path,
+            ) from None
+        raise
+
+
 def _sticky_refusal_applies(
     earlier_status: Optional[os.stat_result], parent_status: os.stat_result
 ) -> bool:
@@ -3608,13 +3634,13 @@ def _write_checked(
             f"saving the suppression would write a config that {problem}",
             config_path,
         )
-    target = config_path.resolve()
+    target = _resolved_for_save(config_path, config_path)
     # The file the save writes stays in the directory the config path names:
     # a symlinked config is written through to its target (so the link stays a
     # link), but only to a target inside that directory, as resolved. A link
     # placed in a repository that pointed outside it (dangling or not) made the
     # save create or edit a file wherever the link led, with no confinement.
-    inside = config_path.parent.resolve()
+    inside = _resolved_for_save(config_path.parent, config_path)
     if target.parent != inside and inside not in target.parents:
         raise _left_unchanged(
             "the config is a link to a file outside its own directory, which the "
