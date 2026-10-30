@@ -363,7 +363,8 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "'eu-west-1'], or ['ALL_REGIONS']. Empty validates against "
                 "us-east-1, or the regions a template names in its own cfn-lint "
                 "metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION "
-                "are not read."
+                f"are not read. {SET_BY_THE_OPERATOR} Set by such a config, it is "
+                "ignored with a warning."
             ),
         ),
     ] = []
@@ -771,12 +772,13 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         return False
 
     def _config_file_settings(self, config_file: Path) -> Dict[str, Any]:
-        """The operator's ``.cfnlintrc`` as a mapping, or {} when it cannot be read.
+        """The operator's ``.cfnlintrc`` as a mapping; a file ASH cannot read stops the scan.
 
         Read so that its ``ignore_checks`` can be left out of ``--mandatory-checks``
         and its ``configure_rules`` passed on the command line. A file that cannot
-        be parsed is reported with a warning; every check then runs and its
-        configure_rules do not apply.
+        be opened, decoded or parsed raises ``ScannerError``: cfn-lint would read
+        it whole, so handing it over unchecked would apply a ``merge_configs`` ASH
+        could not see.
 
         It is read with ``load_config_yaml``, which refuses YAML aliases as every
         YAML config ASH reads does. cfn-lint reads aliases, so a file that uses
@@ -797,10 +799,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 "read the rest of it, so cfn-lint is not run with a file ASH could "
                 "not check."
             ) from exc
-        except (OSError, yaml.YAMLError) as exc:
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
             # Closed, not open: the file is still handed to cfn-lint whole, so a
             # merge_configs it sets would apply with ASH unable to check it, and
-            # cfn-lint would read what ASH could not.
+            # cfn-lint would read what ASH could not. UnicodeDecodeError is a
+            # ValueError, not an OSError: a file that is not UTF-8 lands here too.
             raise ScannerError(
                 f"ASH could not read {Path(config_file).as_posix()} "
                 f"({type(exc).__name__}). ASH checks that file for merge_configs "
@@ -1145,7 +1148,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             discovery = discover_templates(
                 self.context, target_type, global_ignore_paths
             )
-            for shown, reason in [*discovery.refused, *discovery.unreadable]:
+            for shown, reason in discovery.refused:
                 # Not read, so not known to be CloudFormation: skipped and named, as
                 # cfn-nag skips it.
                 self._plugin_log(
@@ -1153,6 +1156,20 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     target_type=target_type,
                     level=logging.WARNING,
                     append_to_stream="stderr",
+                )
+            for shown, reason in discovery.unreadable:
+                # A candidate ASH could not open or decode: not known to be
+                # CloudFormation, and not known not to be. The tool-absent check
+                # counts it as a template (only MISSING cannot hide one), so with
+                # the tool present it is a target that was not evaluated, not a
+                # skip: the two runs give the same answer for the same file.
+                self.targets_attempted += 1
+                self.targets_failed += 1
+                self.record_unevaluated_target(shown)
+                self._plugin_log(
+                    f"cfn-lint did not evaluate {shown}: {reason}",
+                    target_type=target_type,
+                    level=logging.ERROR,
                 )
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
@@ -1249,23 +1266,27 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     # cfn-lint exits for the whole invocation on one template's
                     # fault (a region its Metadata names that this cfn-lint does
                     # not know exits 32), so every other template in the batch
-                    # read as not evaluated and its findings were discarded. Each
-                    # is linted on its own instead; only the faulty one fails.
+                    # read as not evaluated and its findings were discarded. The
+                    # same exit also comes from a fault of the run, not of one
+                    # template (an operator regions value this cfn-lint does not
+                    # know, a configure_rules key it refuses, a broken install),
+                    # and re-running every template alone would then repeat one
+                    # failure once per template, each a cfn-lint start-up with a
+                    # fresh scan_timeout. So the first and the last template are
+                    # re-run alone first: when both fail exactly as the batch did,
+                    # the failure is the run's and the templates between them are
+                    # recorded with it, not re-run; otherwise each is linted on
+                    # its own and only the faulty ones fail.
                     self._plugin_log(
                         f"cfn-lint did not evaluate {len(batch)} template(s) in one "
                         f"invocation ({failure}); linting each one on its own.",
                         target_type=target_type,
                         level=logging.WARNING,
                     )
-                    for position, argument in enumerate(arguments):
-                        if timed_out:
-                            fold(
-                                [shown_by_argument[argument]],
-                                _NOT_STARTED_AFTER_TIMEOUT,
-                                None,
-                            )
-                            continue
-                        failure, batch_report, response = self._lint_once(
+                    batch_failure = failure
+
+                    def lint_alone(position: int, argument: str):
+                        return self._lint_once(
                             [argument],
                             results_dir.joinpath(f"cfn-lint.{index}-{position}.sarif"),
                             option_args,
@@ -1273,6 +1294,45 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                             cwd,
                             child_env,
                         )
+
+                    remaining = list(enumerate(arguments))
+                    first_position, first_argument = remaining.pop(0)
+                    failure, batch_report, response = lint_alone(
+                        first_position, first_argument
+                    )
+                    timed_out = timed_out or bool(response.get("timed_out"))
+                    fold([shown_by_argument[first_argument]], failure, batch_report)
+                    if (
+                        failure == batch_failure
+                        and not timed_out
+                        and len(remaining) > 1
+                    ):
+                        last_position, last_argument = remaining.pop()
+                        failure, batch_report, response = lint_alone(
+                            last_position, last_argument
+                        )
+                        timed_out = timed_out or bool(response.get("timed_out"))
+                        fold([shown_by_argument[last_argument]], failure, batch_report)
+                        if failure == batch_failure:
+                            fold(
+                                [shown_by_argument[a] for _, a in remaining],
+                                f"{batch_failure} (read as a failure of the run, "
+                                "not of one template: the first and the last "
+                                "template of this batch failed alike when run "
+                                f"alone, so the {len(remaining)} between them were "
+                                "not re-run)",
+                                None,
+                            )
+                            continue
+                    for position, argument in remaining:
+                        if timed_out:
+                            fold(
+                                [shown_by_argument[argument]],
+                                _NOT_STARTED_AFTER_TIMEOUT,
+                                None,
+                            )
+                            continue
+                        failure, batch_report, response = lint_alone(position, argument)
                         timed_out = timed_out or bool(response.get("timed_out"))
                         fold([shown_by_argument[argument]], failure, batch_report)
                     continue

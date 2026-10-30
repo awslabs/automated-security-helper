@@ -208,14 +208,33 @@ def test_honored_template_ignores_merge_with_the_operators_ignore_checks(
     assert "--merge-configs" not in default.calls[0], default.calls[0]
 
 
-def test_an_operators_cfnlintrc_ash_cannot_read_stops_the_scan(ash_temp_path, tmp_path):
+@pytest.mark.parametrize(
+    "content, kind",
+    [
+        pytest.param(b"ignore_checks: [\n", "unparseable YAML", id="yaml"),
+        pytest.param(b"ignore_checks: [caf\xe9]\n", "not UTF-8", id="utf8"),
+        pytest.param(None, "a directory, not a file", id="oserror"),
+    ],
+)
+def test_an_operators_cfnlintrc_ash_cannot_read_stops_the_scan(
+    ash_temp_path, tmp_path, content, kind
+):
+    """Through scan(): cfn-lint is never started with a config file ASH could not
+    check (a merge_configs in it would apply unseen). The three ways a read fails
+    (YAMLError, UnicodeDecodeError, OSError) all end the scan; at the base the
+    UnicodeDecodeError escaped as the generic scanner failure."""
     repo = _repo(ash_temp_path, "a.yaml")
     operator_rc = tmp_path / "operator" / ".cfnlintrc"
     operator_rc.parent.mkdir()
-    operator_rc.write_text("ignore_checks: [\n", encoding="utf-8")
+    if content is None:
+        operator_rc.mkdir()
+    else:
+        operator_rc.write_bytes(content)
     scanner = _scanner(repo, config_file=str(operator_rc))
+    fake = RegionFaultCfnLint("no-such-template")
     with pytest.raises(ScannerError, match="could not read"):
-        scanner._config_file_settings(operator_rc)
+        _run(scanner, fake, repo)
+    assert fake.calls == [], f"cfn-lint was started with {kind}"
 
 
 def test_errors_are_reset_for_each_scan_call(ash_temp_path):
@@ -317,3 +336,77 @@ def test_the_scan_passes_its_redaction_values_to_the_failure_message(ash_temp_pa
     joined = "\n".join(scanner.errors)
     assert "cfn-lint exited 1" in joined
     assert "probe-value" not in joined and "not-print" not in joined
+
+
+class RunWideFaultCfnLint:
+    """Exits 32 with the same message for every invocation: the run's fault."""
+
+    def __init__(self):
+        self.calls: list = []
+
+    def __call__(self, command, **kwargs):
+        self.calls.append(list(command))
+        return {
+            "stdout": "",
+            "stderr": "Regions ['mars-north-1'] are unsupported.",
+            "returncode": 32,
+        }
+
+
+def test_a_run_wide_failure_is_not_repeated_once_per_template(ash_temp_path):
+    """At the base a batch of four that failed for the run's own reason was re-run
+    one template at a time: five cfn-lint start-ups to report one failure four
+    times. The first and the last template alone fail alike, so the two between
+    them are recorded with that failure and not re-run: three invocations."""
+    repo = _repo(ash_temp_path, "a.yaml", "b.yaml", "c.yaml", "d.yaml")
+    fake = RunWideFaultCfnLint()
+    scanner = _scanner(repo)
+
+    _run(scanner, fake, repo)
+
+    batches = [call[call.index("--") + 1 :] for call in fake.calls]
+    assert len(batches) == 3, batches
+    assert len(batches[0]) == 4
+    assert len(batches[1]) == 1 and batches[1][0].endswith("a.yaml")
+    assert len(batches[2]) == 1 and batches[2][0].endswith("d.yaml")
+    assert scanner.targets_attempted == 4
+    assert scanner.targets_failed == 4
+    assert any("read as a failure of the run" in e for e in scanner.errors)
+
+
+def test_a_faulty_first_template_does_not_hide_the_others(ash_temp_path):
+    """The first template alone fails as the batch did, the last alone passes, so
+    the failure is one template's and the rest are linted on their own."""
+    repo = _repo(ash_temp_path, "aaa-faulty.yaml", "mmm.yaml", "zzz.yaml")
+    fake = RegionFaultCfnLint("aaa-faulty.yaml")
+    scanner = _scanner(repo)
+
+    report = _run(scanner, fake, repo)
+
+    batches = [call[call.index("--") + 1 :] for call in fake.calls]
+    assert len(batches) == 4, batches
+    assert scanner.targets_failed == 1
+    assert not any("read as a failure of the run" in e for e in scanner.errors)
+    uris = sorted(
+        r.locations[0].physicalLocation.artifactLocation.uri
+        for r in report.runs[0].results
+    )
+    assert [u.rsplit("/", 1)[-1] for u in uris] == ["mmm.yaml", "zzz.yaml"]
+
+
+def test_an_unreadable_candidate_is_a_target_that_was_not_evaluated(ash_temp_path):
+    """A non-UTF-8 candidate: with the tool absent the check reads MISSING (only
+    MISSING cannot hide a template); at the base, with the tool present, it was a
+    WARNING and the run looked like one with no templates. Now it is counted."""
+    repo = ash_temp_path / "repo"
+    repo.mkdir()
+    (repo / "latin.yaml").write_bytes(b"Resources:\n  caf\xe9: {}\n")
+    fake = RegionFaultCfnLint("no-such-template")
+    scanner = _scanner(repo)
+
+    _run(scanner, fake, repo)
+
+    assert fake.calls == []
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1
+    assert any("could not be read" in e for e in scanner.errors), scanner.errors
