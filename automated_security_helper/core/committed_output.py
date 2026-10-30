@@ -75,9 +75,11 @@ from automated_security_helper.utils.scan_output_dirs import (
     SCAN_START_FILE_NAMES,
     GitIndexAnswer,
     GitIndexUnavailable,
+    _an_enclosing_repository_tracks_the_root,
     _repository_root_of,
     _resolved,
     committed_files_at_results_paths,
+    entries_at_results_paths,
     entries_on_disk,
     git_index_below,
     output_name_key,
@@ -197,7 +199,7 @@ def _absolute(path: str | Path) -> Path:
 
 
 class _GitFailures:
-    """The repositories git has failed to list during one composite check.
+    """What git has answered during one composite check.
 
     A workspace check asks git about the output root, the spool, the projects
     entry and every project's directory, each with a call of its own that may
@@ -205,21 +207,38 @@ class _GitFailures:
     answered for a repository, the next directory in it gets the same answer
     without another call, so a hung git costs one wait and not one per project.
     A directory in another repository (a nested checkout) is still asked.
+
+    A listing git DID give is kept too, by the directory it was asked for: the
+    root's spool check and its projects-entry check ask about the same
+    directory, and asked git once each, so a workspace check ran ``git
+    ls-files`` for the root three times and derived three answers from one
+    listing. The second ask for a directory now reads the first's answer. Only
+    answers that went through :func:`_index_below` are kept; the results-path
+    listing (``committed_files_at_results_paths``) asks git on its own.
     """
 
     def __init__(self) -> None:
         self._answers: dict[Path, GitIndexAnswer] = {}
+        self._listed: dict[Path, GitIndexAnswer] = {}
 
     def remember(self, answer: GitIndexAnswer) -> None:
         if answer.unanswered and answer.repository is not None:
             self._answers.setdefault(answer.repository, answer)
+        elif answer.names is not None:
+            self._listed.setdefault(_absolute(answer.base), answer)
 
     def known_for(self, directory: str | Path) -> Optional[GitIndexAnswer]:
-        """The answer remembered for the repository holding *directory*, spelled
-        for *directory*, or None."""
-        if not self._answers:
+        """The answer remembered for *directory*: the listing git gave for it
+        earlier in this check, else the failure remembered for the repository
+        holding it, spelled for *directory*; None when neither."""
+        if not self._answers and not self._listed:
             return None
         base = _absolute(directory)
+        listed = self._listed.get(base)
+        if listed is not None:
+            return listed
+        if not self._answers:
+            return None
         if not base.is_dir():
             return None
         root = _repository_root_of(_resolved(base))
@@ -301,9 +320,19 @@ def _found_in_the_way(
         if files is None and directories is None
         else ()
     )
-    unanswered = failures.known_for(output_dir) if failures is not None else None
+    known = failures.known_for(output_dir) if failures is not None else None
+    unanswered: Optional[GitIndexAnswer] = None
     committed: List[Path] = []
-    if unanswered is None:
+    if known is not None and known.names is not None:
+        # git listed this directory earlier in the same check: the results
+        # paths are read from that listing, as committed_files_at_results_paths
+        # reads them from its own.
+        committed = entries_at_results_paths(known.base, known.names)
+        if "" in known.names or _an_enclosing_repository_tracks_the_root(known):
+            committed.insert(0, known.base)
+    elif known is not None:
+        unanswered = known
+    else:
         try:
             committed = committed_files_at_results_paths(output_dir)
         except GitIndexUnavailable as unavailable:
