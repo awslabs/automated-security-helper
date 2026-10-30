@@ -51,7 +51,10 @@ reach, serving it over HTTP, and cleaning up after clients. Every option is list
 
 `ash mcp` exits with code 5 for an unknown option, a value of the wrong type, options that
 cannot be combined, or an `ASH_MCP_TRANSPORT` that names no transport, and with code 3 when
-a `--profile` file does not load or an HTTP transport cannot listen on its address. It also
+a `--profile` file does not load, is kept inside the MCP workspace root where a client could
+have supplied it (a config the server wrote there itself is fine), or sits inside a git checkout
+under a scan root `ASH_MCP_ALLOWED_ROOTS` grants, or when an HTTP transport cannot listen on
+its address. It also
 exits with code 3 when `ASH_CONFIG` names no config file it can load. It exits
 with code 1 when the MCP package is missing or the server fails, and prints the error to
 standard error even with `--quiet`. Ctrl-C stops the server, and `ash mcp` exits with code
