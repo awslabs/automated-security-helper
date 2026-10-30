@@ -7,8 +7,11 @@ Two stdio servers share the default session's ``config/`` directory, and each
 may register the same profile name for a different file. ``call_profile_filename``
 used to digest the name alone, so the two wrote one file for two profiles and a
 plan recorded by one server was scanned under the other's. The digest now covers
-the path the name is registered under; the same name for the same file still
-gives one name, and an unregistered name keeps the shape.
+the file the name is registered for, through the entry's digest of its absolute
+path: the same name for the same file gives one name whatever each server's
+spelling of the path (it used to digest the spelling, so one file under two
+spellings got two names, and two files that shared a relative spelling from two
+working directories got one), and an unregistered name keeps the shape.
 """
 
 from __future__ import annotations
@@ -37,10 +40,15 @@ def _fresh_registry():
 
 
 def _registered(name: str, path: Path) -> None:
+    # The entry's digest is the one register_profiles computes: over the
+    # absolute path, not the spelling.
     set_profile_registry(
         {
             name: ProfileEntry(
-                name=name, path=path, config=AshConfig(), path_sha256="0" * 64
+                name=name,
+                path=path,
+                config=AshConfig(),
+                path_sha256=profile_registry._sha256_of_path(path),
             )
         }
     )
@@ -55,6 +63,24 @@ def test_the_same_name_for_two_files_gives_two_names(tmp_path: Path) -> None:
     assert first != second
     assert is_call_profile_filename(first)
     assert is_call_profile_filename(second)
+
+
+def test_one_file_under_two_spellings_gives_one_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red at the base: the digest covered the path as spelled, so the same file
+    registered as an absolute path by one server and relative to its working
+    directory by another got two names, and two servers' plans for one profile
+    were scanned under different files."""
+    (tmp_path / "one").mkdir()
+    monkeypatch.chdir(tmp_path)
+    _registered("strict", tmp_path / "strict.yaml")
+    by_absolute_path = call_profile_filename("strict")
+    _registered("strict", Path("one") / ".." / "strict.yaml")
+    by_relative_spelling = call_profile_filename("strict")
+
+    assert by_absolute_path == by_relative_spelling
+    assert is_call_profile_filename(by_absolute_path)
 
 
 def test_the_same_name_for_one_file_gives_one_name(tmp_path: Path) -> None:

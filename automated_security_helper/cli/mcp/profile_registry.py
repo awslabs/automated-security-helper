@@ -566,18 +566,23 @@ def call_profile_filename(profile_name: str) -> str:
     profile, so two calls in one session that name different profiles do not
     replace the file the other's plan recorded and its scan reads.
 
-    The digest also covers the path the name is registered under, as the
-    operator spelled it, when the name is registered. Two stdio servers share
-    the default session's ``config/`` directory, and each may register the same
-    name for a different file; by the name alone the two would write one file
-    for two profiles, and a plan recorded by one server would be scanned under
-    the other's. Two servers that register the same name for the same file
-    write the same content, so one file serves both. An unregistered name,
-    which the workspace tools refuse before writing, is digested alone.
+    The digest also covers the file the name is registered for, when the name
+    is registered: the entry's ``path_sha256``, the digest of the file's absolute
+    path, not the path as the operator spelled it. Two stdio servers share the
+    default session's ``config/`` directory, and each may register the same name
+    for a different file; by the name alone the two would write one file for two
+    profiles, and a plan recorded by one server would be scanned under the
+    other's. Two servers that register the same name for the same file write the
+    same content, so one file serves both, and that holds whatever spelling each
+    gave the path (relative to its own working directory, through ``..``): by
+    the spelling, one file under two spellings got two names, and two files that
+    shared a relative spelling from different directories got one. An
+    unregistered name, which the workspace tools refuse before writing, is
+    digested alone.
     """
     with _lock:
         entry = _profile_registry.get(profile_name)
-    digested = profile_name if entry is None else f"{profile_name}\n{entry.path}"
+    digested = profile_name if entry is None else f"{profile_name}\n{entry.path_sha256}"
     digest = hashlib.sha256(digested.encode("utf-8")).hexdigest()
     return (
         f"{_CALL_PROFILE_STEM}-{digest[:_CALL_PROFILE_DIGEST_LENGTH]}"
