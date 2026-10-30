@@ -164,10 +164,13 @@ def test_install_binary_from_url(
 
     Driven through ``_download_verified`` rather than ``download_file``, because the
     receipt has to record the digest that was verified as the bytes landed. Re-hashing
-    the installed file here instead would read it back after ``make_executable`` and,
-    on macOS, after ``unquarantine_macos_binary`` has spawned ``xattr`` -- see
-    ``_finalize_staged``. ``download_file`` still returns a plain path for callers
-    outside this module.
+    the installed file here instead would read it back after ``unquarantine_macos_binary``
+    has spawned ``xattr`` on macOS -- see ``_finalize_staged``. ``download_file`` still
+    returns a plain path for callers outside this module.
+
+    The binary's mode is the download's business: the install names ``mode=0o755`` on
+    the call, and the staged file gets it on its own descriptor before the rename, so
+    no ``make_executable`` reopens the landed path by name afterwards.
     """
     # Setup mocks
     mock_download_verified.return_value = (Path("/test/destination/file"), "d" * 64)
@@ -182,14 +185,16 @@ def test_install_binary_from_url(
             expected_sha256="e" * 64,
         )
 
-        # expected_sha256 is threaded through to the download that verifies it.
+        # expected_sha256 is threaded through to the download that verifies it, and
+        # the executable mode is named on the same call.
         mock_download_verified.assert_called_once_with(
             "https://example.com/file",
             Path("/test/destination"),
             "renamed_file",
             expected_sha256="e" * 64,
+            mode=0o755,
         )
-        mock_make_executable.assert_called_once_with(Path("/test/destination/file"))
+        mock_make_executable.assert_not_called()
         mock_unquarantine.assert_called_once_with(Path("/test/destination/file"))
 
         # Verify result
