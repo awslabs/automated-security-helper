@@ -173,10 +173,21 @@ def test_an_unknown_key_holding_markup_is_named_as_given(tmp_path):
 
 
 def test_the_check_is_made_whatever_format_is_asked_for(tmp_path):
-    """A scan refuses the config whichever reporters it runs, so report does too."""
-    output = _project(tmp_path, "      max_retries: three\n")
+    """A scan refuses the config whichever reporters it runs, so report does too.
 
-    result = _report(tmp_path, output, "markdown")
+    The wrong-typed retry option is given through ``--config-overrides``, where
+    ``ash report`` reads an off-host reporter's retry options (a config file's
+    value for them is ignored, as the module docstring says), and the format
+    asked for is one whose reporter has no such option.
+    """
+    output = _project(tmp_path, "")
+
+    result = _report(
+        tmp_path,
+        output,
+        "markdown",
+        "reporters.aws-security-hub.options.max_retries=three",
+    )
 
     assert result.exit_code == 3, result.output
     assert "reporters.aws-security-hub.options.max_retries" in result.stderr
