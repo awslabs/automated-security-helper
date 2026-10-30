@@ -630,7 +630,7 @@ def test_invocation_replaces_the_placeholder_and_records_the_exit_code(
         (1, True),
         (2, True),
         (137, True),
-        (127, False),
+        (127, True),
         pytest.param(
             -9,
             False,
@@ -651,10 +651,14 @@ def test_execution_successful_treats_zero_and_one_as_success(
     {0, 1} set; both runs here rendered results and evaluated their target,
     so the count is findings, not failure -- 137 included, because through
     ``_run_subprocess`` a signal death arrives as a NEGATIVE code, never as
-    128+N. ASH's spawn-failure marker 127 and a negative code are no counts: the
-    plugin keeps a signal death as the run's cause, which is read before any
-    count, and records its code as the shell reports it (``exit_status``,
-    128+N), so the recorded 137 of a SIGKILL is never a count either.
+    128+N, and 127 included, because cfn_nag returns that number for 127
+    (mod 256) failing violations: whether the tool ran at all is read from the
+    recorded spawn failure, not from the code (see
+    ``test_a_clean_run_whose_code_counts_violations_is_successful``). A negative
+    code is no count: the plugin keeps a signal death as the run's cause, which
+    is read before any count, and records its code as the shell reports it
+    (``exit_status``, 128+N), so the recorded 137 of a SIGKILL is never a count
+    either.
 
     The code arrives the way the real ``_run_subprocess`` delivers it, through
     ``_process_command_response``: scan() starts each target with no exit code, so
@@ -1071,8 +1075,11 @@ def test_a_clean_run_whose_code_counts_violations_is_successful(scanner):
     (_evaluated_no_rule's rule), so a run that evaluated every attempted
     target and found two is a successful execution -- the count is findings,
     not failure (the base accepted set {0, 1} graded it False).
-    ASH's spawn-failure marker and a signal death still are not: neither is
-    a count cfn_nag returned."""
+    A recorded spawn failure and a signal death still are not: neither is
+    a count cfn_nag returned. The spawn-failure marker's VALUE alone is a
+    count, though: cfn_nag returns the same number for 127 (mod 256) failing
+    violations, so whether the tool ran is read from the recorded spawn
+    failure, never from the code."""
     from automated_security_helper.utils.subprocess_utils import (
         SPAWN_FAILURE_RETURNCODE,
     )
@@ -1082,7 +1089,10 @@ def test_a_clean_run_whose_code_counts_violations_is_successful(scanner):
     scanner.exit_code = 2
     assert scanner._sarif_execution_successful() is True
     scanner.exit_code = SPAWN_FAILURE_RETURNCODE
+    assert scanner._sarif_execution_successful() is True
+    scanner._scan_spawn_failure = "the command never ran"
     assert scanner._sarif_execution_successful() is False
+    scanner._scan_spawn_failure = None
     scanner.exit_code = -11
     assert scanner._sarif_execution_successful() is False
     # A failed target outranks any accepted count.
