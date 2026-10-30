@@ -189,10 +189,11 @@ TOLERATED_EXIT_CODES = (0, 2)
 #: The set is named because the runners do not have the other tools. This
 #: workflow's own comment records it: "On the Windows runner only bandit and
 #: checkov are available at all". Left unnarrowed, cfn-nag, grype, syft and the
-#: rest report MISSING. On its own that does not fail the run today, because
-#: ``fail_on_incomplete_scanners`` defaults to False and ``ash scan`` exits 0 on a
-#: results file full of MISSING -- and that is the reason to name the set rather
-#: than a reason not to. An unnarrowed run would land inside
+#: rest report MISSING. ``fail_on_incomplete_scanners`` defaults to True, so an
+#: unnarrowed run would exit 1 for the tools the runner lacks, and under an
+#: operator config that turns the gate off ``ash scan`` exits 0 on a results
+#: file full of MISSING -- either way the set has to be named. An unnarrowed
+#: run that did exit 0 would land inside
 #: TOLERATED_EXIT_CODES having exercised two scanners while appearing to cover ten,
 #: and ``check_some_scanner_ran`` would not catch it either, since it only fires
 #: when *every* scanner is missing. Naming the set is the difference between this
