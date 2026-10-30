@@ -77,10 +77,14 @@ QUICK_ABSOLUTE = "/scan/" + QUICK_RELATIVE
 NEVER_ENDING_PATTERN = r"(a+)+$"
 NEVER_ENDING_TEXT = "a" * 64 + "b"
 NEVER_ENDING_ABSOLUTE = "/scan/" + NEVER_ENDING_TEXT
-#: The bound an overrunning search is stopped at, and the time a bounded fast
-#: search may take (a child process has to start inside it).
+#: The bound an overrunning search is stopped at.
 TINY_TIMEOUT = 0.5
-FAST_TIMEOUT = 5.0
+#: The bound a fast bounded call must finish under, a worker start included.
+#: Where the start method is ``spawn`` (Windows, macOS) that start is a fresh
+#: interpreter importing this package, seconds on a loaded venue (5.0 lost three
+#: ids on a Windows run of eight workers), so the bound is generous: a green call
+#: returns in milliseconds, and no test asserts elapsed time against it.
+FAST_TIMEOUT = 60.0
 #: How long a test waits for the bounded call before reading it as unbounded.
 GUARD_LIMIT = 20.0
 
@@ -325,6 +329,9 @@ class _RecordingBudget(EvaluationBudget):
 
 def test_a_budget_spends_one_deadline_over_a_pass():
     budget = EvaluationBudget()
+    # Start the worker under a deadline of its own, so the one-second deadline
+    # below is spent on the sleeps and not on a spawn platform's interpreter start.
+    assert budget.evaluate(FAST_TIMEOUT, "warm", "warm", _five) == 5
     started = time.monotonic()
 
     budget.evaluate(1.0, "first", "k1", time.sleep, 0.6)
