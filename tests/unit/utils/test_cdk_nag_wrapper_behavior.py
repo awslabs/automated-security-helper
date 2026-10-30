@@ -217,11 +217,16 @@ def cdk_doubles(monkeypatch):
                 "validate() is CDK's to call during synth, not the wrapper's"
             )
 
+    # Each real cdk-nag 3.x pack exposes the name it writes its ``pluginReports[]``
+    # entry under as ``name`` (the ``IPolicyValidationPlugin`` property), which is also
+    # the prefix of every rule id it mints. Not derivable from the class name:
+    # ``HIPAASecurityChecks`` reports as ``HIPAA.Security`` (see the HIPAA fixture
+    # above). The doubles carry it so the real name reader is exercised against them.
     class AwsSolutionsChecks(NagPack):
-        pass
+        name = "AwsSolutions"
 
     class HIPAASecurityChecks(NagPack):
-        pass
+        name = "HIPAA.Security"
 
     class NotANagPack:
         """Present so the isclass/issubclass filter has something to reject."""
@@ -2746,28 +2751,33 @@ def test_a_successful_pack_with_no_violations_is_still_a_clean_evaluation(
 # that produced no entry. The packs are checked for presence by the name they report under.
 
 
-#: The name each real cdk-nag 3.x pack writes its ``pluginReports[]`` entry under, which is
-#: also the prefix of every rule id it mints. Not derivable from the class name:
-#: ``HIPAASecurityChecks`` reports as ``HIPAA.Security`` (see the HIPAA fixture above).
-_REPORTED_PACK_NAMES = {
-    "AwsSolutionsChecks": "AwsSolutions",
-    "HIPAASecurityChecks": "HIPAA.Security",
-}
-
-
-def _name_packs_by_class(monkeypatch):
-    """Give the doubles the reported name the real pack of that class has."""
-    monkeypatch.setattr(
-        cdk_nag_wrapper,
-        "_plugin_report_name",
-        lambda plugin: _REPORTED_PACK_NAMES[type(plugin).__name__],
+def test_the_real_name_reader_reads_the_doubles_as_the_real_packs_report(
+    cdk_doubles, template_file, outdir
+):
+    """The presence check depends on ``_plugin_report_name`` answering what CDK writes
+    as ``pluginName``; every other test here used to patch the reader away, so the one
+    real call in this file saw a nameless double and the reader's own answer was never
+    pinned. The doubles carry the real packs' ``name`` and the reader reads it."""
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="success"),
+        _plugin_report(
+            plugin_name="HIPAA.Security", violations=[], conclusion="success"
+        ),
     )
+
+    response = _run(
+        template_file, outdir, nag_packs=["AwsSolutionsChecks", "HIPAASecurityChecks"]
+    )
+
+    assert response.failure is None
+    assert [
+        cdk_nag_wrapper._plugin_report_name(pack) for pack in cdk_doubles.pack_instances
+    ] == ["AwsSolutions", "HIPAA.Security"]
 
 
 def test_a_requested_pack_absent_from_the_report_is_a_failure(
     cdk_doubles, template_file, outdir, monkeypatch
 ):
-    _name_packs_by_class(monkeypatch)
     cdk_doubles.report_text = _report(
         _plugin_report(
             plugin_name="CloudFormation Validate", violations=[], conclusion="success"
@@ -2787,7 +2797,6 @@ def test_a_requested_pack_present_in_the_report_is_not_a_failure(
     cdk_doubles, template_file, outdir, monkeypatch
 ):
     """The negative control: the requested pack's entry is there, beside CDK's own."""
-    _name_packs_by_class(monkeypatch)
     cdk_doubles.report_text = _report(
         _plugin_report(
             plugin_name="CloudFormation Validate", violations=[], conclusion="success"
@@ -2800,17 +2809,29 @@ def test_a_requested_pack_present_in_the_report_is_not_a_failure(
     assert response.failure is None
 
 
-def test_a_pack_whose_name_cannot_be_read_is_not_checked_for_presence(
-    cdk_doubles, template_file, outdir
+def test_a_pack_whose_name_cannot_be_read_is_stood_for_by_an_unrequested_entry_and_said(
+    cdk_doubles, template_file, outdir, monkeypatch, caplog
 ):
-    """The doubles expose no name, so nothing is looked for and nothing is invented."""
+    """The requested pack exposes no readable name, so its entry cannot be looked for by
+    name. The one entry that is neither a requested name nor CDK's own plugin's stands
+    for it, and the match is said at WARNING because the names cannot be paired; with
+    no such entry the template fails (the report_rows tests pin that side). This test
+    used to assert only ``failure is None`` on the same report, which also held when the
+    presence check was skipped for a nameless pack in silence."""
+    monkeypatch.setattr(cdk_nag_wrapper, "_plugin_report_name", lambda plugin: None)
     cdk_doubles.report_text = _report(
         _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="success")
     )
 
-    response = _run(template_file, outdir, nag_packs=["HIPAASecurityChecks"])
+    with caplog.at_level("WARNING"):
+        response = _run(template_file, outdir, nag_packs=["HIPAASecurityChecks"])
 
     assert response.failure is None
+    paired = [
+        r.getMessage() for r in caplog.records if "cannot be paired" in r.getMessage()
+    ]
+    assert len(paired) == 1, [r.getMessage() for r in caplog.records]
+    assert "'AwsSolutions'" in paired[0]
 
 
 # ---------------------------------------------------------------------------
@@ -3069,7 +3090,6 @@ def test_an_unrequested_plugins_failure_does_not_fail_the_template(
     says nothing about the requested packs' rules, so it is logged, not counted; before
     this read every failed entry counted, and an unrequested plugin's error failed every
     template and dropped every cdk-nag finding with it."""
-    _name_packs_by_class(monkeypatch)
     cdk_doubles.report_text = json.dumps(
         {
             "version": "54.0.0",
@@ -3104,7 +3124,6 @@ def test_a_requested_packs_failure_still_fails_the_template_when_names_are_known
     cdk_doubles, template_file, outdir, monkeypatch
 ):
     """The control for the previous test: the same failed entry under a requested name."""
-    _name_packs_by_class(monkeypatch)
     cdk_doubles.report_text = _report(
         _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="failure")
     )
@@ -3583,7 +3602,6 @@ def test_a_failed_packs_recorded_error_is_on_the_failure_reason_not_in_the_log(
     and the message can interpolate values resolved out of the template, which ash.log is
     kept free of (the not-evaluated rows drop their description for the same reason).
     The text stays on the per-template failure reason; the log names the pack only."""
-    _name_packs_by_class(monkeypatch)
     entry = _plugin_report(
         plugin_name="AwsSolutions", violations=[], conclusion="failure"
     )
