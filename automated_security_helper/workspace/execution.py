@@ -1407,11 +1407,17 @@ def _scan_one_project(
     )
     actionable = sum(actionable_by_scanner.values())
     if actionable and not has_finding_at_min_severity(
-        gating_results, settings.min_severity
+        gating_results,
+        settings.min_severity,
+        threshold,
+        threshold_for=scanner_threshold,
     ):
         # --min-severity is a whole-scan switch in _compute_exit_code, not a
         # per-finding filter. Mirrored here so the verdict matches, and the
-        # split carried to the rollup is zeroed with it.
+        # split carried to the rollup is zeroed with it. The gate is handed the
+        # same two thresholds the count used: a finding its own scanner's
+        # threshold made non-actionable was not counted above, so it is not the
+        # finding that keeps the count standing, here as in _compute_exit_code.
         actionable = 0
         actionable_by_scanner = dict.fromkeys(actionable_by_scanner, 0)
 

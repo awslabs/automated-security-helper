@@ -150,6 +150,7 @@ from automated_security_helper.utils.uri_separators import (
 )
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
+    result_fails_scanner_threshold,
     result_severity,
     sarif_level_fails_threshold,
     severity_fails_threshold,
@@ -603,6 +604,32 @@ def result_is_suppressed(result: Mapping[str, Any]) -> bool:
     return is_result_suppressed(result)
 
 
+def effective_threshold_resolver(
+    threshold: Optional[str],
+    threshold_for: Optional[ThresholdResolver] = None,
+) -> ThresholdResolver:
+    """The threshold each scanner's findings are graded against, memoised.
+
+    *threshold_for* answers a scanner's own ``options.severity_threshold`` (``None``
+    for a scanner with none, and for a finding that names no scanner); the
+    project-wide *threshold* governs those. Every answer is upper-cased, because
+    ``_compute_exit_code`` upper-cases the configured value and the ladder is
+    case-sensitive. One resolver for the actionable count and the
+    ``--min-severity`` gate, so the two cannot grade one finding against two
+    thresholds.
+    """
+    resolved: Dict[Optional[str], Optional[str]] = {}
+
+    def effective(scanner: Optional[str]) -> Optional[str]:
+        if scanner not in resolved:
+            own = threshold_for(scanner) if threshold_for is not None else None
+            value = own or threshold
+            resolved[scanner] = value.upper() if value else None
+        return resolved[scanner]
+
+    return effective
+
+
 def actionable_results_by_scanner(
     results: Iterable[Mapping[str, Any]],
     threshold: Optional[str],
@@ -641,14 +668,7 @@ def actionable_results_by_scanner(
         Scanner name to actionable count. A falsy effective threshold counts
         nothing for that scanner, which is how an operator turns the gate off.
     """
-    resolved: Dict[Optional[str], Optional[str]] = {}
-
-    def effective(scanner: Optional[str]) -> Optional[str]:
-        if scanner not in resolved:
-            own = threshold_for(scanner) if threshold_for is not None else None
-            value = own or threshold
-            resolved[scanner] = value.upper() if value else None
-        return resolved[scanner]
+    effective = effective_threshold_resolver(threshold, threshold_for)
 
     counts: Dict[str, int] = {}
     for result in results:
@@ -698,7 +718,11 @@ def count_actionable_results(
 
 
 def has_finding_at_min_severity(
-    results: Iterable[Mapping[str, Any]], min_severity: str
+    results: Iterable[Mapping[str, Any]],
+    min_severity: str,
+    threshold: Optional[str] = None,
+    *,
+    threshold_for: Optional[ThresholdResolver] = None,
 ) -> bool:
     """Whether any finding meets ``--min-severity``, the way ``_compute_exit_code`` does.
 
@@ -707,6 +731,17 @@ def has_finding_at_min_severity(
     folded into ``count_actionable_results`` because that is how the shipped
     behaviour works -- ``--min-severity`` is a whole-scan switch, not a per-
     finding filter that changes the count.
+
+    A qualifying finding is an ACTIONABLE one at or above the minimum. Given the
+    gate (*threshold*, the project-wide one, and *threshold_for*, each scanner's
+    own; the same two :func:`actionable_results_by_scanner` takes), a finding its
+    scanner's threshold made non-actionable does not qualify: it was not counted,
+    so it cannot be the finding that keeps the count standing
+    (``severity_ladder.result_fails_scanner_threshold``, the check the single scan
+    makes). Without the gate, severity alone decides, which is what read a
+    bandit MEDIUM under bandit's own CRITICAL as the finding that kept a semgrep
+    LOW actionable: the same project exited 0 as ``ash --source-dir P`` and 2
+    inside a workspace.
 
     Note that this scale is not the severity ladder's. It has no ``info``, and it
     treats ``critical`` and ``high`` as equal because SARIF's ``error`` covers
@@ -722,6 +757,8 @@ def has_finding_at_min_severity(
         )
     if min_rank <= 0:
         return True
+    gated = threshold is not None or threshold_for is not None
+    effective = effective_threshold_resolver(threshold, threshold_for)
     for result in results:
         if not isinstance(result, Mapping):
             continue
@@ -731,8 +768,11 @@ def has_finding_at_min_severity(
         # declared issue_severity first, a missing level as
         # MISSING_SARIF_LEVEL, and INFO (absent from the scale) as low. This
         # read the level alone, with a missing one as note.
-        if _MIN_SEVERITY_RANK.get(result_severity(result).lower(), 1) >= min_rank:
-            return True
+        if _MIN_SEVERITY_RANK.get(result_severity(result).lower(), 1) < min_rank:
+            continue
+        if gated and not result_fails_scanner_threshold(result, effective):
+            continue
+        return True
     return False
 
 

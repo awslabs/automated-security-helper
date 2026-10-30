@@ -623,10 +623,19 @@ class TestParityWithComputeExitCode:
         opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path)
         return _compute_exit_code(model, opts, None)
 
-    def _mine(self, results, threshold, min_severity="low"):
-        """The workspace verdict for one project, as the executor derives it."""
-        actionable = count_actionable_results(results, threshold)
-        if actionable and not has_finding_at_min_severity(results, min_severity):
+    def _mine(self, results, threshold, min_severity="low", threshold_for=None):
+        """The workspace verdict for one project, as the executor derives it.
+
+        The ``--min-severity`` gate is handed the same two thresholds the count
+        used, as ``_scan_one_project`` hands them, so a finding its own scanner's
+        threshold made non-actionable cannot be the one that keeps the count.
+        """
+        actionable = count_actionable_results(
+            results, threshold, threshold_for=threshold_for
+        )
+        if actionable and not has_finding_at_min_severity(
+            results, min_severity, threshold, threshold_for=threshold_for
+        ):
             actionable = 0
         return actionable
 
@@ -738,6 +747,76 @@ class TestParityWithComputeExitCode:
         assert (standalone == 2) == (sum(mine.values()) > 0)
         assert mine.get("bandit", 0) == 0
         assert mine.get("semgrep", 0) == (1 if "semgrep" in scanners else 0)
+
+    @pytest.mark.parametrize(
+        ("bandit_threshold", "standalone_expected"),
+        [("CRITICAL", 0), (None, 2)],
+        ids=["below-its-scanners-threshold", "control-no-own-threshold"],
+    )
+    def test_a_result_at_the_minimum_below_its_scanners_threshold_keeps_no_count(
+        self, tmp_path, bandit_threshold, standalone_expected
+    ):
+        """``--min-severity medium`` over a semgrep LOW and a bandit MEDIUM.
+
+        The semgrep LOW is actionable under the project-wide LOW and below the
+        minimum; the bandit MEDIUM meets the minimum. With bandit's own
+        ``options.severity_threshold`` CRITICAL that MEDIUM was never counted, so
+        no counted finding meets the minimum and the single scan exits 0. The
+        workspace gate read the bandit MEDIUM by severity alone and kept the
+        semgrep count standing, exit 2, for the same project. The control, with no
+        own threshold, has the bandit MEDIUM counted and qualifying on both sides.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.core.enums import ScannerStatus
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            ScannerTargetStatusInfo,
+        )
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.workspace.execution import (
+            _scanner_threshold_resolver,
+        )
+
+        results = [
+            _result(level="note", scanner="semgrep"),
+            _result(level="warning", scanner="bandit"),
+        ]
+        document = {"version": "2.1.0", "runs": [_run(*results)]}
+        reports = tmp_path / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "ash.sarif").write_text(json.dumps(document), encoding="utf-8")
+        config = AshConfig()
+        config.global_settings.severity_threshold = "LOW"
+        if bandit_threshold is not None:
+            config.scanners.bandit.options.severity_threshold = bandit_threshold
+        model = AshAggregatedResults(ash_config=config)
+        model.sarif = SarifReport.model_validate(document)
+        for name in ("semgrep", "bandit"):
+            model.scanner_results[name] = ScannerTargetStatusInfo(
+                status=ScannerStatus.PASSED, excluded=False, dependencies_satisfied=True
+            )
+
+        standalone = _compute_exit_code(
+            model,
+            ScanOptions(
+                source_dir=tmp_path, output_dir=tmp_path, min_severity="medium"
+            ),
+            None,
+        )
+        project = _plan(tmp_path, "api").projects[0]
+        mine = self._mine(
+            results,
+            "LOW",
+            min_severity="medium",
+            threshold_for=_scanner_threshold_resolver(model, project),
+        )
+
+        assert standalone == standalone_expected
+        assert (standalone == 2) == (mine > 0)
 
 
 class TestCompletenessParityWithComputeExitCode:

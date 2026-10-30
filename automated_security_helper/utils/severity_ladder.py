@@ -103,7 +103,7 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 # The ladder, as data. Ordered strictest to loosest -- see the module docstring
 # for why that is the opposite of the severity ordering.
@@ -345,6 +345,57 @@ def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) 
         return False
     severity = _SARIF_LEVEL_TO_SEVERITY[effective_sarif_level({"level": level})]
     return severity_fails_threshold(severity, threshold)
+
+
+#: Resolves the threshold governing one scanner's findings from the scanner's
+#: name as ``properties.scanner_name`` records it, ``None`` for a result that
+#: names none. The answer is the threshold the gate compares against: the
+#: scanner's own ``options.severity_threshold`` when it has one, else the
+#: scan's (``global_settings.severity_threshold``, or the workspace project's);
+#: a falsy answer turns the gate off for that scanner.
+ScannerThresholdResolver = Callable[[Optional[str]], Optional[str]]
+
+
+def result_scanner_name(result: object) -> Optional[str]:
+    """``properties.scanner_name`` of *result* (a ``Result`` or its JSON form), or None.
+
+    None for a result that names no scanner, or whose name is not a string: the
+    attribution ASH carries is this one property, and a resolver given None
+    answers with the scan-wide threshold, as ``_compute_exit_code`` judges a
+    finding it cannot attribute.
+    """
+    if isinstance(result, dict):
+        properties = result.get("properties")
+    else:
+        properties = getattr(result, "properties", None)
+    if isinstance(properties, dict):
+        name = properties.get("scanner_name")
+    else:
+        name = getattr(properties, "scanner_name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def result_fails_scanner_threshold(
+    result: object, threshold_for: ScannerThresholdResolver
+) -> bool:
+    """Whether *result* fails the gate of the scanner that reported it.
+
+    The per-result question ``_compute_exit_code`` asks when it counts actionable
+    findings: the threshold is the one *threshold_for* resolves for the result's
+    scanner (:func:`result_scanner_name`), and the severity is
+    :func:`result_severity`'s one reading. Shared by the single scan's
+    ``--min-severity`` gate and the workspace project verdict so a finding the
+    scanner's own threshold made non-actionable is read alike on both sides: not
+    counted, and not the finding that keeps the count standing. The same findings
+    exited 0 in ``ash --source-dir P`` and 2 for P inside a workspace while the
+    workspace's gate judged severity alone.
+
+    Suppressions are the caller's to read (``sarif_utils.suppressions_in_effect``;
+    this module cannot import it): a suppressed result never reaches the gate.
+    """
+    return severity_fails_threshold(
+        result_severity(result), threshold_for(result_scanner_name(result))
+    )
 
 
 def resolve_scanner_threshold(
