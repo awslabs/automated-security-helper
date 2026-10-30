@@ -236,11 +236,14 @@ With events, a project abandoned at its ``project_timeout`` has its event set
 too, and the pool is waited for before the run goes on: the abandoned project
 stops as a cancelled one does instead of running on unseen, and the caller can
 hold what it reserved for the run until its scanners have stopped. Its worker
-is then free again, so it does not count toward the bound in "An abandoned
-worker costs a pool slot permanently", which is about workers nothing can stop:
-a project still queued starts on it once the stop is done. Counted, it would fail
-every queued project as never started at a bound of one, the moment the first was
-abandoned, with its worker about to be free.
+is given ``_ABANDONED_STOP_GRACE_POLLS`` polls to come back before it counts
+toward the bound in "An abandoned worker costs a pool slot permanently": a
+project still queued starts on it once the stop is done. Counted at once, it
+would fail every queued project as never started at a bound of one, the moment
+the first was abandoned, with its worker about to be free; never counted, as it
+once was, a scan that never checks its scope held its slot for the rest of its
+run, the queued projects were never given up on, and neither ``project_timeout``
+nor the server's scan timeout bounded the run.
 
 The CLI passes no events. The pool then builds one per project, chained to the
 submitting thread's ambient scan-wide event when there is one, so an abandoned
@@ -2671,10 +2674,12 @@ def _run_projects(
     A project given up on at its ``project_timeout``, or because no worker is
     left to run it, has its effective event set, so it stops the way a
     cancelled scan stops, child processes included. With ``cancel_events``
-    its worker then comes back, does not count among the workers lost to
-    abandoned projects that decide when a queued project is given up on, and
-    the pool is waited for before this returns, which is bounded by how long
-    a stop takes. That is what lets the MCP server hold the workspace's
+    its worker is given ``_ABANDONED_STOP_GRACE_POLLS`` polls to come back
+    before it counts among the workers lost to abandoned projects, which decide
+    when a queued project is given up on (a scan that never checks its scope
+    held its slot uncounted, and the queued projects waited on it without any
+    bound), and the pool is waited for before this returns, which is bounded
+    by how long a stop takes. That is what lets the MCP server hold the workspace's
     max_concurrent_scans slot and its projects' directories until the scanners
     have stopped: ``project_timeout`` comes from the scanned workspace's own
     config, and without the wait a short one would leave scanners running
@@ -2764,17 +2769,22 @@ def _run_projects(
         }
         pending: Set[Future] = set(futures)
         timeout = settings.project_timeout
-        # Workers held by abandoned projects whose stop the pool will not wait
-        # for: each is a pool slot that does not come back until the project's
-        # scan next checks its scope. A project with a caller-given event is
-        # not counted: its worker comes back once the stop is done, and the
-        # pool waits for it at shutdown. Counted from the futures, not kept as
-        # a tally, so a worker whose project has since ended counts as free: a
-        # project still queued then starts on it instead of being failed as
-        # never started.
-        unstoppable: List[Future] = []
+        # The poll at which each abandoned project's worker was told to stop.
+        # Each such worker is a pool slot that does not come back until the
+        # project's scan next checks its scope. A project with a caller-given
+        # event is given _ABANDONED_STOP_GRACE_POLLS polls for its stop to free
+        # the slot before the slot is counted lost, because the pool waits for
+        # that stop at shutdown; a worker still busy after the grace is between
+        # scope checks and may never check again, and not counting it left the
+        # projects still queued waiting on it without any bound. Read from the
+        # futures each poll, not kept as a tally, so a worker whose project has
+        # since ended counts as free: a project still queued then starts on it
+        # instead of being failed as never started.
+        abandoned_at: Dict[Future, int] = {}
+        polls = 0
 
         while pending:
+            polls += 1
             done, pending = wait(
                 pending,
                 timeout=_DEADLINE_POLL_SECONDS if timeout else None,
@@ -2826,10 +2836,9 @@ def _run_projects(
                 )
                 abandoned[project.key].set()
                 abandoned_futures[future] = project
+                abandoned_at[future] = polls
                 if stoppable:
                     stoppable_futures.add(future)
-                else:
-                    unstoppable.append(future)
                 _cancel(project)
                 collected[project.key] = _failed_outcome(
                     project,
@@ -2840,12 +2849,19 @@ def _run_projects(
                 )
                 pending.discard(future)
 
-            if sum(1 for held in unstoppable if not held.done()) < bound:
+            held = [
+                future
+                for future, since in abandoned_at.items()
+                if not future.done()
+                and polls - since
+                >= (_ABANDONED_STOP_GRACE_POLLS if future in stoppable_futures else 0)
+            ]
+            if len(held) < bound:
                 continue
 
-            # Every worker is held by an abandoned project, so nothing still
-            # queued can ever start and waiting would block on threads that are
-            # never coming back. Without this the timeout bounded nothing
+            # Every worker is held by an abandoned project whose stop has not
+            # freed it, so nothing still queued can start and waiting would block
+            # on threads that may not be coming back. Without this the timeout bounded nothing
             # whenever the bound was smaller than the project count -- measured,
             # three projects at bound 1 with a 1s budget ran past 12s -- which
             # is precisely the shape the default bound of 4 produces for a
@@ -2865,9 +2881,9 @@ def _run_projects(
                 ASH_LOGGER.error(
                     f"Project '{project.key}' never started: all {bound} worker "
                     f"slot(s) are held by project(s) abandoned at the "
-                    f"{_budget_token(timeout)} project_timeout, and an abandoned "
-                    f"worker cannot "
-                    f"be reclaimed. Raise max_parallel_projects, raise "
+                    f"{_budget_token(timeout)} project_timeout whose stop has not "
+                    f"freed them, and a worker that has not stopped is not "
+                    f"waited for. Raise max_parallel_projects, raise "
                     f"project_timeout, or scan the slow project separately."
                 )
                 collected[project.key] = _failed_outcome(
