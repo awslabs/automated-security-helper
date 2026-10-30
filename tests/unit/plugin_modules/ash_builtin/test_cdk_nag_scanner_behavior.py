@@ -1146,15 +1146,31 @@ def test_the_installer_is_armed_by_a_missing_distribution_with_the_same_gate(
     scanner, monkeypatch
 ):
     """The control for the test above: with a distribution missing the install is the
-    remedy, and the command is emitted."""
+    remedy, and the command is emitted. The command builder is stubbed, as the options
+    file's install tests stub it: the real one probes the running interpreter for pip
+    or uv and raises where it finds neither, which is a fact about the test host, not
+    about the gate under test (it read red on a venue whose interpreter had neither)."""
     monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
     monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", ["aws-cdk-lib"])
     monkeypatch.setattr(cdk_nag_scanner, "_CDK_WRAPPER_IMPORT_ERROR", None)
     monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    from automated_security_helper.utils import python_installer
+
+    # The scanner imports the builder inside the method, so the stub goes on the
+    # installer module, where the options file's install tests put theirs.
+    monkeypatch.setattr(
+        python_installer,
+        "python_package_install_command",
+        lambda requirements: ["<installer>", "install", *requirements],
+    )
 
     commands = scanner.get_installation_commands("linux", "x86_64")
 
-    assert [command for command in commands if "pip" in command], commands
+    installs = [
+        command for command in commands if command[:2] == ["<installer>", "install"]
+    ]
+    assert len(installs) == 1, commands
+    assert any("cdk-nag" in requirement for requirement in installs[0][2:]), installs
 
 
 # ---------------------------------------------------------------------------
