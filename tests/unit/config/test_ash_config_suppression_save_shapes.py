@@ -171,6 +171,58 @@ def test_a_flow_style_top_level_mapping_takes_the_full_rewrite(tmp_path: Path):
     assert _rules(config_path) == ["NEW-1"]
 
 
+@pytest.mark.parametrize(
+    "head",
+    ["!!map ", "--- !!map "],
+    ids=["tag", "marker-and-tag"],
+)
+def test_a_flow_style_root_behind_a_tag_takes_the_full_rewrite(
+    tmp_path: Path, head: str
+):
+    """The tag before the brace does not make the root a block mapping.
+
+    Red at the base: the text edits ran on it and the save was refused as a
+    result that does not parse.
+    """
+    config_path = tmp_path / ".ash.yaml"
+    config_path.write_text(f"{head}{{project_name: demo}}\n", encoding="utf-8")
+
+    assert add_suppression_to_config(config_path, NEW) is True
+
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert data["project_name"] == "demo"
+    assert _rules(config_path) == ["NEW-1"]
+
+
+def test_a_config_swapped_for_a_directory_during_the_save_is_refused_as_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The re-read before the replace answers in the save's own words.
+
+    Red at the base: the re-read raised IsADirectoryError, which is no
+    ValueError, so the refusal never came.
+    """
+    config_path = tmp_path / ".ash.yaml"
+    config_path.write_text("global_settings:\n  suppressions: []\n", encoding="utf-8")
+    real_check = ash_config._why_it_would_not_load
+
+    def check_then_swap(*args, **kwargs):
+        problem = real_check(*args, **kwargs)
+        config_path.unlink()
+        config_path.mkdir()
+        return problem
+
+    monkeypatch.setattr(ash_config, "_why_it_would_not_load", check_then_swap)
+
+    with pytest.raises(ValueError) as refused:
+        add_suppression_to_config(config_path, NEW)
+
+    monkeypatch.undo()
+    assert "changed while" in str(refused.value), refused.value
+    assert config_path.is_dir()
+    assert [p.name for p in tmp_path.iterdir()] == [config_path.name]
+
+
 def test_the_full_rewrite_reads_references_from_the_text_it_edits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -181,12 +233,15 @@ def test_the_full_rewrite_reads_references_from_the_text_it_edits(
     )
     config_path.write_text(before, encoding="utf-8")
 
-    def refused_open(*args, **kwargs):
+    def refused_read(*args, **kwargs):
         raise PermissionError("planted: a second read of the config fails")
 
-    # Only config_sources' own module-level name: the save's first read goes
-    # through Path.read_bytes, which this leaves alone.
-    monkeypatch.setattr(config_sources, "open", refused_open, raising=False)
+    # Only config_sources' own module-level names: the save's first read goes
+    # through Path.read_bytes, which this leaves alone. Both are planted, the
+    # builtin open and read_config_bytes, so the test holds whichever of the
+    # two a second read of the file goes through.
+    monkeypatch.setattr(config_sources, "open", refused_read, raising=False)
+    monkeypatch.setattr(config_sources, "read_config_bytes", refused_read)
 
     with pytest.raises(ValueError) as refused:
         add_suppression_to_config(config_path, NEW)

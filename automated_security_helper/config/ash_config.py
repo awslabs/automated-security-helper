@@ -3810,11 +3810,21 @@ def _write_checked(
         # a change written to it since that read (an editor's save, a second
         # suppression save) would otherwise be replaced by bytes that never
         # held it. The window left is the one between this read and the
-        # replace below.
+        # replace below. Read as every other config read is: opened without
+        # waiting for a writer and held to a regular file, so a name swapped
+        # for a FIFO since the first read cannot stall the save. A file that
+        # can no longer be read that way is not the bytes the save was built
+        # from either.
+        from automated_security_helper.config.config_sources import read_config_bytes
+        from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+        current: Any
         try:
-            current: Optional[bytes] = target.read_bytes()
+            current = read_config_bytes(target)
         except FileNotFoundError:
             current = None
+        except (OSError, ASHConfigSourceError):
+            current = object()
         if current != earlier:
             raise _left_unchanged(
                 "the config changed while the suppression was being saved, so "
@@ -4419,7 +4429,8 @@ def _has_top_level_key(lines: list, key: str) -> bool:
 def _flow_style_root(lines: list) -> bool:
     """Whether the document's top-level mapping is written in flow style
     (``{project_name: demo}``): the first line holding anything but a
-    comment, a directive or a ``---`` marker starts with ``{``.
+    comment, a directive, a ``---`` marker or the document's anchor and tag
+    starts with ``{``.
 
     No text edit applies to such a file: each one inserts block lines, which
     cannot follow or sit inside a flow mapping, so the result never parsed
@@ -4429,6 +4440,9 @@ def _flow_style_root(lines: list) -> bool:
         stripped = line.strip()
         if stripped.startswith("---"):
             stripped = stripped[len("---") :].strip()
+        while stripped.startswith(("&", "!")):
+            parts = stripped.split(None, 1)
+            stripped = parts[1].strip() if len(parts) > 1 else ""
         if not stripped or stripped.startswith(("#", "%")):
             continue
         return stripped.startswith("{")
