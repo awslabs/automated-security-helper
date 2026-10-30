@@ -16,6 +16,7 @@ directory part is escaped; the pattern part is still a glob.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from typer.testing import CliRunner
@@ -23,6 +24,13 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 
 pytestmark = pytest.mark.unit
+
+#: A directory named with "*" cannot be made on Windows, where "*" is reserved in
+#: a file name, so the star case has no directory to read there; the glob-escape it
+#: checks is the same code path the character-class case runs on every OS.
+_NOT_A_WINDOWS_NAME = pytest.mark.skipif(
+    os.name == "nt", reason='"*" is not allowed in a Windows file name'
+)
 
 SARIF = {
     "version": "2.1.0",
@@ -53,7 +61,7 @@ def _plant_scanner(directory, stem):
     [
         pytest.param("plain", "plainer", id="control"),
         pytest.param("s[ab]", "sa", id="character-class"),
-        pytest.param("d*", "dz", id="star"),
+        pytest.param("d*", "dz", id="star", marks=_NOT_A_WINDOWS_NAME),
     ],
 )
 def test_only_the_named_directorys_files_are_read(tmp_path, name, sibling):
@@ -84,7 +92,7 @@ def test_only_the_named_directorys_files_are_read(tmp_path, name, sibling):
     [
         pytest.param("plain", "plainer", id="control"),
         pytest.param("s[ab]", "sa", id="character-class"),
-        pytest.param("d*", "dz", id="star"),
+        pytest.param("d*", "dz", id="star", marks=_NOT_A_WINDOWS_NAME),
     ],
 )
 def test_only_the_named_directorys_scanner_files_are_read(tmp_path, name, sibling):
