@@ -139,12 +139,16 @@ def _package(root: Path, lock_name: str) -> None:
     (root / lock_name).write_text("{}\n", encoding="utf-8")
 
 
-def _answers(by_binary: dict):
-    """A ``_run_subprocess`` side effect answering each tool with its document."""
+def _answers(by_binary: dict, order: list | None = None):
+    """A ``_run_subprocess`` side effect answering each tool with its document.
+
+    ``order``, when given, records the binary of each audit as it is started."""
 
     def _side_effect(self, command, **kwargs):
         if "--version" in command:
             return {"stdout": "10.9.4\n", "stderr": "", "returncode": 0}
+        if order is not None:
+            order.append(command[0])
         response = dict(by_binary[command[0]])
         self._process_command_response(response)
         return response
@@ -152,13 +156,13 @@ def _answers(by_binary: dict):
     return _side_effect
 
 
-def _scan(context, by_binary):
+def _scan(context, by_binary, order: list | None = None):
     scanner = NpmAuditScanner(context=context, config=NpmAuditScannerConfig())
     with patch.object(
         NpmAuditScanner,
         "_run_subprocess",
         autospec=True,
-        side_effect=_answers(by_binary),
+        side_effect=_answers(by_binary, order),
     ):
         report = scanner.scan(target=context.work_dir, target_type="converted")
     return scanner, report
@@ -220,31 +224,41 @@ def test_an_npm_and_a_pnpm_lockfile_in_one_scan_both_report(plugin_context):
 def test_the_merge_combines_whichever_report_comes_first(plugin_context, first):
     """The order the lockfiles are found in decides which type is merged into
     which; both orders have to survive. The converted tree is walked in the
-    filesystem's order, so the two cases together cover both orders only as
-    the filesystem lists them; ``test_merge_metadata_by_type`` pins each
-    direction of the type pair directly."""
+    filesystem's order, so the walk is pinned here to list package ``a``, which
+    holds ``first``'s lockfile, before ``b``, and the audits are recorded as
+    they start: each case then audits in the order it is named for, instead of
+    the two cases quietly repeating one order."""
     pnpm = json.loads(PNPM_CAPTURE.read_text(encoding="utf-8"))
     names = {"npm": "package-lock.json", "pnpm": "pnpm-lock.yaml"}
     second = "pnpm" if first == "npm" else "npm"
     _package(plugin_context.work_dir / "a", names[first])
     _package(plugin_context.work_dir / "b", names[second])
+    walk = NpmAuditScanner._package_manifests
 
-    scanner, report = _scan(
-        plugin_context,
-        {
-            "npm": {
-                "stdout": json.dumps(_npm_report(high=1, moderate=0, prod=3)),
-                "stderr": "",
-                "returncode": 1,
-            },
-            "pnpm": {
-                "stdout": pnpm["stdout"],
-                "stderr": pnpm["stderr"],
-                "returncode": pnpm["returncode"],
-            },
-        },
-    )
+    def a_first(self, *args, **kwargs):
+        found = walk(self, *args, **kwargs)
+        return sorted(found, key=lambda m: 0 if Path(m).parent.name == "a" else 1)
 
+    order: list = []
+    with patch.object(NpmAuditScanner, "_package_manifests", a_first):
+        scanner, report = _scan(
+            plugin_context,
+            {
+                "npm": {
+                    "stdout": json.dumps(_npm_report(high=1, moderate=0, prod=3)),
+                    "stderr": "",
+                    "returncode": 1,
+                },
+                "pnpm": {
+                    "stdout": pnpm["stdout"],
+                    "stderr": pnpm["stderr"],
+                    "returncode": pnpm["returncode"],
+                },
+            },
+            order,
+        )
+
+    assert order == [first, second], order
     assert scanner.errors == [], scanner.errors
     assert (scanner.targets_attempted, scanner.targets_failed) == (2, 0)
     assert len(report.runs[0].results) > 1
