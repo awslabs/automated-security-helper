@@ -263,6 +263,12 @@ class TestTheUvToolPathIsAlsoBounded:
             def _plugin_log(self, *args, **kwargs):
                 return None
 
+            def _process_command_response(self, response):
+                # The dispatch hands the run's response to its owner; a host
+                # without the hook raised inside the handler and the run read
+                # as a failure after the timeout had already been forwarded.
+                return None
+
             def _get_tool_package_extras(self):
                 return None
 

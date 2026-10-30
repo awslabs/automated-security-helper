@@ -117,14 +117,28 @@ class TestNixMetadataIsStagedOncePerDistribution:
         assert [p.name for p in target.iterdir()] == ["Foo_Bar-1.0.dist-info"]
 
     def test_two_distributions_both_stage(self, tmp_path):
-        """The control."""
+        """The control. Two distributions are two METADATA ``Name`` headers: the
+        staging keys on the header, not the directory stem, so a control whose
+        two headers both said ``x`` described one distribution twice."""
         site = tmp_path / "site"
-        for dist_info in ("a-1.0.dist-info", "b-1.0.dist-info"):
-            (site / dist_info).mkdir(parents=True)
-            (site / dist_info / "METADATA").write_text("Name: x\n")
+        for name in ("a", "b"):
+            dist_info = site / f"{name}-1.0.dist-info"
+            dist_info.mkdir(parents=True)
+            (dist_info / "METADATA").write_text(f"Name: {name}\n")
         target = tmp_path / "staged"
         target.mkdir()
         assert _stage_nix_metadata([str(site)], target) == 2
+
+    def test_two_directories_naming_one_distribution_stage_once(self, tmp_path):
+        """The shape the old control had: two dist-info directories whose
+        METADATA both name ``x`` are one distribution under two stems."""
+        site = tmp_path / "site"
+        for stem in ("a-1.0.dist-info", "b-1.0.dist-info"):
+            (site / stem).mkdir(parents=True)
+            (site / stem / "METADATA").write_text("Name: x\n")
+        target = tmp_path / "staged"
+        target.mkdir()
+        assert _stage_nix_metadata([str(site)], target) == 1
 
 
 def test_the_dry_run_may_judge_an_externally_managed_interpreter(monkeypatch):
