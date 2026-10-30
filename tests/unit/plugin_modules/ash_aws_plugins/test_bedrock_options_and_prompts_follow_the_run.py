@@ -331,3 +331,19 @@ def test_the_run_calls_the_spelling_the_listing_carries(monkeypatch, tmp_path):
     client = reporter._make_model_client(runtime)
 
     assert client._model_id == LISTED
+
+
+def test_a_reporter_built_without_init_calls_the_configured_model():
+    """A reporter built with ``model_construct`` (the retry-config tests' shape)
+    never ran ``__init__``, so it has no listed spelling to prefer; its client
+    is still built, on the configured model id."""
+    reporter = BedrockSummaryReporter.model_construct()
+    reporter.config = BedrockSummaryReporterConfig(
+        options=BedrockSummaryReporterConfigOptions(
+            aws_region=REGION, model_id=PRIMARY_MODEL
+        )
+    )
+
+    client = reporter._make_model_client(RuntimeDouble())
+
+    assert client._model_id == PRIMARY_MODEL

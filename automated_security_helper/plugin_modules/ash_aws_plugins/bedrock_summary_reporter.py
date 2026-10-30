@@ -1936,8 +1936,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         return BedrockModelClient(
             bedrock_runtime=bedrock_runtime,
             # The listing's spelling when the dependency check matched the
-            # configured id case-insensitively: Converse knows that one.
-            model_id=self._listed_model_id or opts.model_id,
+            # configured id case-insensitively: Converse knows that one. Read
+            # with a default: a reporter built by ``model_construct`` (the
+            # retry-config tests) has not run ``__init__``, so the attribute
+            # may not exist, and then the configured id is the one to call.
+            model_id=getattr(self, "_listed_model_id", None) or opts.model_id,
             temperature=opts.temperature,
             max_tokens=opts.max_tokens,
             top_p=opts.top_p,
