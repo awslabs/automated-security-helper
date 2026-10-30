@@ -636,6 +636,34 @@ def test_a_path_binary_that_falls_short_is_refused_when_uv_is_absent(
     assert "cannot be used" in scanner.dependency_unavailable_reason
 
 
+def test_the_refusal_names_the_package_that_provides_the_command(tmp_path, monkeypatch):
+    """The requirement a copy is held to is built from the package that provides
+    the command when one is named apart from it, as the mixin's own check
+    builds it; built from the command's name it named a package the scan does
+    not run under."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    scanner.uv_tool_package_name = "bandit-provider"
+    binary = str(tmp_path / "bandit")
+    asked: list[str] = []
+    monkeypatch.setattr(
+        BanditScanner, "_validate_uv_tool_availability", lambda self: False
+    )
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
+    )
+
+    def _verify(executable, package, *args, **kwargs):
+        asked.append(package)
+        return _checked("unsatisfied", binary, "the sarif extra is not installed")
+
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", _verify)
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert asked == ["bandit-provider"]
+    assert "bandit-provider[" in scanner.dependency_unavailable_reason
+
+
 def test_a_verified_path_binary_runs_directly_when_uv_is_absent(tmp_path, monkeypatch):
     source = _tree(tmp_path, ["app.py"])
     scanner = _scanner(source, tmp_path)

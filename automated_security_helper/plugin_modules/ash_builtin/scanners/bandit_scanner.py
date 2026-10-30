@@ -960,30 +960,50 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             build_requirement,
             verify_pre_installed_tool,
         )
-        from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
+        from automated_security_helper.utils.uv_tool_runner import (
+            find_uv_or_none,
+            shown_uv_output,
+        )
 
         executable = command[0]
         extras = self._get_tool_package_extras()
         constraint = self._get_tool_version_constraint()
-        requirement = build_requirement(self.command, extras, constraint)
+        # The package that provides the command, when named apart from it, as
+        # _select_tool_execution builds its requirement: the copy is verified
+        # against the requirement the scan runs under, not one named after the
+        # executable.
+        package = self.uv_tool_package_name or self.command
+        requirement = build_requirement(package, extras, constraint)
         # The constraint and the check's detail can hold a configured value, and a
-        # configured value can come from the environment: redacted, as the mixin
-        # redacts its own lines.
+        # configured value can come from the environment: redacted as the mixin
+        # redacts the same lines (shown_uv_output), since the verify detail can
+        # respell an environment-read tool_version in uv's own words, which the
+        # plain value match does not see. The reason reaches the reports through
+        # dependency_unavailable_reason.
         values = self._values_to_redact()
         checked = verify_pre_installed_tool(
             executable,
-            self.command,
+            package,
             extras,
             constraint,
             uv_executable=find_uv_or_none(),
             values=values,
         )
+
+        def _shown(text: str) -> str:
+            return shown_uv_output(
+                text,
+                values,
+                plugin_inputs=self._uv_run_inputs_for_records(),
+                tool_name=self.command,
+                limit=None,
+            )
+
         if checked.status == "unsatisfied":
-            reason = text_without_values(
+            reason = _shown(
                 f"{self.command} at {executable} cannot be used: {checked.detail}. "
                 f"Install one that satisfies {requirement!r}, e.g. "
-                f"`uv tool install '{requirement}'`.",
-                values,
+                f"`uv tool install '{requirement}'`."
             )
             self.dependency_unavailable_reason = reason
             self._plugin_log(reason, level=logging.ERROR)
@@ -991,21 +1011,19 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             return False
         if checked.status == "satisfied":
             self._plugin_log(
-                text_without_values(
+                _shown(
                     f"Using pre-installed {self.command} at {executable} directly; "
-                    f"it satisfies {requirement!r}",
-                    values,
+                    f"it satisfies {requirement!r}"
                 ),
                 level=logging.INFO,
             )
         else:
             self._plugin_log(
-                text_without_values(
+                _shown(
                     f"Using pre-installed {self.command} at {executable} directly "
                     f"though it could not be verified against {requirement!r}: "
                     f"{checked.detail}. No uv-managed {self.command} resolved "
-                    "instead (uv absent, or its install of the tool failed).",
-                    values,
+                    "instead (uv absent, or its install of the tool failed)."
                 ),
                 level=logging.WARNING,
             )
