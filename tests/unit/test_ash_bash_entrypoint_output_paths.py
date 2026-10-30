@@ -267,10 +267,12 @@ def test_the_wrappers_status_lines_and_the_build_output_go_to_stderr(runner, tmp
 def test_the_oci_layout_directory_reaches_the_build_as_one_argument(runner, tmp_path):
     """ASH_BASE_OCI_LAYOUT names a layout directory the action computed. Built into
     an unquoted string at the base, it was split on its spaces and globbed, so a
-    directory with a space in its name reached the build as two words."""
+    directory with a space in its name reached the build as two words, and one with
+    glob characters in it reached the build as whatever they matched. The name here
+    holds both a space and glob characters, so both halves are exercised."""
     source = tmp_path / "src"
     source.mkdir()
-    layout = tmp_path / "layout dir"
+    layout = tmp_path / "layout [1] * dir"
     layout.mkdir()
     # nerdctl and finch take the layout as a build context; the runtime is read from
     # the runner's name.

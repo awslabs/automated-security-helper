@@ -22,9 +22,11 @@ NUL-separated. Bash-wrapper tests are integration tier (tests/NAMING_CONVENTIONS
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -124,11 +126,14 @@ def _run(
     script: Optional[str] = None,
     stdin=subprocess.DEVNULL,
     stdout=subprocess.PIPE,
+    path_prefix: Optional[Path] = None,
 ):
     """Run ./ash against the recording runner: (result, calls).
 
     stdout is captured unless a caller hands in its own (a pseudo-terminal, to
-    make the wrapper see a terminal there); stderr is always captured."""
+    make the wrapper see a terminal there); stderr is always captured. A
+    *path_prefix* goes first on PATH, ahead of the fixed-id bin and the caller's
+    PATH, so a test can choose which `python` the wrapper finds."""
     program, log_dir = runner
     environment = with_fixed_ids(
         {k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV},
@@ -138,6 +143,10 @@ def _run(
         {"OCI_RUNNER": str(program), "FAKE_RUNNER_LOG_DIR": str(log_dir)}
     )
     environment.update(env or {})
+    if path_prefix is not None:
+        environment["PATH"] = os.pathsep.join(
+            [str(path_prefix), environment.get("PATH", "")]
+        )
     result = subprocess.run(  # nosec B603 B607 - fixed script path, list args, no shell
         ["bash", script or str(ASH_SCRIPT), *args],
         stdout=stdout,
@@ -176,6 +185,34 @@ def _inner(run: List[str], image: str = IMAGE) -> List[str]:
 def _runner_options(run: List[str], image: str = IMAGE) -> List[str]:
     assert image in run, f"the image name {image!r} is not one argument in {run}"
     return run[1 : run.index(image)]
+
+
+#: A group of short flags that holds i: `-i`, `-it`, `-ti`.
+_SHORT_FLAGS_WITH_I = re.compile(r"^-[A-Za-z]*i[A-Za-z]*$")
+
+
+def _keeps_stdin(options: List[str]) -> bool:
+    """Whether the runner's options keep the container's stdin open, in any of the
+    spellings a runtime takes: `-i`, `-it`, `-ti`, `--interactive`,
+    `--interactive=true`. A check for the exact word `-i` alone would pass a wrapper
+    that regressed to `-it`, the usual spelling for a terminal, in every case that
+    expects no -i."""
+    return any(
+        option in ("--interactive", "--interactive=true")
+        or _SHORT_FLAGS_WITH_I.match(option) is not None
+        for option in options
+    )
+
+
+#: The `python` beside the interpreter running the suite, which is the one that can
+#: import the CLI and its dependencies; `shutil.which("python")` alone found any
+#: python, and a venv's pytest run without activating it, or a system python with no
+#: CLI installed, failed the tests below with an import error instead of skipping.
+_PYTHON_BESIDE_THE_SUITE = Path(sys.executable).parent / "python"
+_NEEDS_THE_SUITES_PYTHON = pytest.mark.skipif(
+    not _PYTHON_BESIDE_THE_SUITE.is_file(),
+    reason="the wrapper runs `python`; none sits beside the interpreter running the suite",
+)
 
 
 def _dirs(tmp_path: Path):
@@ -315,7 +352,7 @@ def test_dash_v_is_the_scans_verbose_not_the_wrappers_version(runner, tmp_path):
     assert _inner(run) == ["ash", "scan", *SANDBOX_OFF, "-v"], run
 
 
-@pytest.mark.skipif(shutil.which("python") is None, reason="./ash -v runs python")
+@_NEEDS_THE_SUITES_PYTHON
 def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(runner, tmp_path):
     """`./ash -v`, with no subcommand before it, prints the version on the host and
     exits, as it always did: a habit or a health check must never fall through to a
@@ -324,6 +361,7 @@ def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(runner, tmp_
     result, calls = _run(
         runner,
         ["--no-build", "--source-dir", str(source), "--output-dir", str(out), "-v"],
+        path_prefix=_PYTHON_BESIDE_THE_SUITE.parent,
     )
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
@@ -331,9 +369,7 @@ def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(runner, tmp_
     assert calls == [], "the version is printed on the host; no image is built or run"
 
 
-@pytest.mark.skipif(
-    shutil.which("python") is None, reason="./ash --version runs python"
-)
+@_NEEDS_THE_SUITES_PYTHON
 def test_the_long_version_option_is_still_the_wrappers_own(runner, tmp_path):
     source, out = _dirs(tmp_path)
     result, calls = _run(
@@ -346,6 +382,7 @@ def test_the_long_version_option_is_still_the_wrappers_own(runner, tmp_path):
             str(out),
             "--version",
         ],
+        path_prefix=_PYTHON_BESIDE_THE_SUITE.parent,
     )
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
@@ -355,7 +392,7 @@ def test_the_long_version_option_is_still_the_wrappers_own(runner, tmp_path):
     assert calls == [], "the version is printed on the host; no image is built or run"
 
 
-@pytest.mark.skipif(shutil.which("python") is None, reason="./ash --help runs python")
+@_NEEDS_THE_SUITES_PYTHON
 def test_help_runs_the_wrappers_own_cli_not_a_package_in_the_working_directory(
     runner, tmp_path
 ):
@@ -369,7 +406,12 @@ def test_help_runs_the_wrappers_own_cli_not_a_package_in_the_working_directory(
     (planted / "main.py").write_text(
         "import sys\nprint('PLANTED-PACKAGE-RAN')\nsys.exit(7)\n", encoding="utf-8"
     )
-    result, calls = _run(runner, ["--help"], cwd=tmp_path / "checkout")
+    result, calls = _run(
+        runner,
+        ["--help"],
+        cwd=tmp_path / "checkout",
+        path_prefix=_PYTHON_BESIDE_THE_SUITE.parent,
+    )
     shown = result.stdout + result.stderr
     assert "PLANTED-PACKAGE-RAN" not in shown, shown
     assert result.returncode == 0, shown
@@ -437,21 +479,26 @@ def test_the_scripts_directory_is_read_with_cdpath_unset(runner, tmp_path):
     assert not any("\n" in word for word in build), build
 
 
-def test_the_containers_stdin_is_kept_open_for_piped_input(runner, tmp_path):
-    """An MCP client drives `./ash mcp` over stdin on the default stdio transport:
-    without -i the container got no input. mcp is one of the two subcommands the
-    wrapper keeps the container's stdin open for."""
+def test_an_mcp_run_over_a_pipe_keeps_stdin_open_and_asks_for_no_terminal(
+    runner, tmp_path
+):
+    """An MCP client drives `./ash mcp` over a pipe on the default stdio transport:
+    without -i the container got no input. Stdin here is a pipe, the client's shape
+    (the parametrized test below covers mcp, inspect and config, the three
+    subcommands that keep stdin open, with a regular file and /dev/null on stdin);
+    this one also pins that a captured stdout asks for no pseudo-terminal and that
+    the subcommand reaches the container whole."""
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,
         ["--no-build", "--source-dir", str(source), "--output-dir", str(out), "mcp"],
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
     )
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
     run = _only_run(calls, shown)
     options = _runner_options(run)
-    assert "-i" in options, options
+    assert _keeps_stdin(options), options
     # Captured stdout is not a terminal, so no pseudo-terminal is asked for.
     assert "-t" not in options, options
     assert _inner(run) == ["ash", "mcp"], run
@@ -479,26 +526,41 @@ def test_the_containers_stdin_is_kept_open_for_piped_input(runner, tmp_path):
         ),
     ],
 )
+@pytest.mark.parametrize("stdin_kind", ["a-regular-file", "dev-null"])
 def test_only_the_subcommands_that_read_stdin_keep_the_containers_stdin_open(
-    runner, tmp_path, words, kept_open
+    runner, tmp_path, words, kept_open, stdin_kind
 ):
-    """Stdin here is a file (the shape of `./ash --source-dir "$d" < dirs.txt` inside
-    a `while read` loop, or a job script fed to bash on stdin). A scan given -i
-    consumed that input, so the loop ended after one directory and the script lost
-    the commands after ./ash; only mcp, inspect and config read stdin, and any
-    subcommand given `--cli-json-input -` reads its parameters from it, so only those
-    get -i. The list is checked against the CLI's own readers in
-    test_ash_bash_entrypoint_subcommand_args.py."""
+    """Stdin is a regular file (the shape of `./ash --source-dir "$d" < dirs.txt`
+    inside a `while read` loop, or a job script fed to bash on stdin) or /dev/null.
+    A scan given -i consumed that input, so the loop ended after one directory and
+    the script lost the commands after ./ash; only mcp, inspect and config read
+    stdin, and any subcommand given `--cli-json-input -` reads its parameters from
+    it, so only those get -i. The list is checked against the CLI's own readers in
+    test_ash_bash_entrypoint_subcommand_args.py. The file's offset is read after the
+    run: the wrapper itself must consume none of it, whichever way it decides."""
     source, out = _dirs(tmp_path)
-    result, calls = _run(
-        runner,
-        ["--no-build", "--source-dir", str(source), "--output-dir", str(out), *words],
-        stdin=subprocess.DEVNULL,
-    )
+    arguments = [
+        "--no-build",
+        "--source-dir",
+        str(source),
+        "--output-dir",
+        str(out),
+        *words,
+    ]
+    if stdin_kind == "a-regular-file":
+        feed = tmp_path / "dirs.txt"
+        feed.write_text("one\ntwo\n", encoding="utf-8")
+        with feed.open("rb") as handle:
+            result, calls = _run(runner, arguments, stdin=handle)
+            # The child shares the file's offset; a read by the wrapper moves it.
+            consumed = handle.tell()
+        assert consumed == 0, "the wrapper read the caller's stdin"
+    else:
+        result, calls = _run(runner, arguments, stdin=subprocess.DEVNULL)
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
     options = _runner_options(_only_run(calls, shown))
-    assert ("-i" in options) is kept_open, options
+    assert _keeps_stdin(options) is kept_open, options
 
 
 @pytest.mark.parametrize(
@@ -554,11 +616,14 @@ def test_a_terminal_stdin_does_not_keep_the_containers_stdin_open(
             stdout=terminal,
         )
     finally:
+        # The terminal end first: with it closed the drain's read ends (EIO on
+        # Linux), the thread is joined, and only then is the controller closed, so
+        # the thread never reads a closed, or reused, descriptor.
         os.close(terminal)
+        reader.join(timeout=10)
         os.close(controller)
-    reader.join(timeout=10)
     shown = b"".join(printed).decode("utf-8", "replace") + result.stderr
     assert result.returncode == 0, shown
     run = _only_run(calls, shown)
     options = _runner_options(run)
-    assert ("-i" in options) is kept_open, options
+    assert _keeps_stdin(options) is kept_open, options
