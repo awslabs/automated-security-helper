@@ -3,9 +3,10 @@
 ``_pnpm_workspace_copy`` and ``_member_glob_stays_inside`` take bytes and
 strings and touch no filesystem, so these tests carry no POSIX dependency and
 run on Windows too, where the drive-letter and backslash-led patterns are the
-cases that matter. The copy-level tests of the same filter live in
-``test_package_manager_child_reads_and_settings.py``, a module that skips on
-Windows for its symlink fixtures.
+cases that matter. The tests that read the workspace file through the tool's
+private copy (what crosses with ``auditConfig``, the registry staying out,
+``--ignore-suppressions``) live in ``test_package_manager_child_reads_and_settings.py``,
+a module that skips on Windows for its symlink fixtures.
 """
 
 from __future__ import annotations
@@ -96,7 +97,9 @@ def test_globs_that_all_leave_the_package_drop_the_key():
     assert copied == {"auditConfig": AUDIT_CONFIG}
 
 
-def test_a_packages_value_that_is_not_a_list_of_globs_stays_out():
+def test_a_packages_value_that_is_not_a_list_of_globs_stays_out_of_the_copy():
+    """The direct read of the shape the copy-level module also tests on POSIX:
+    only the list-of-strings shape pnpm defines is read as member globs."""
     copied = _copy_of({"packages": {"glob": "packages/*"}, "auditConfig": AUDIT_CONFIG})
 
     assert copied == {"auditConfig": AUDIT_CONFIG}
