@@ -6,9 +6,15 @@ discovery in ``_process_config_options`` were unexecuted.
 
 The UV mixin hooks (``_validate_uv_tool_availability``,
 ``_get_tool_installation_info``, ``_install_uv_tool``) and the module-level
-``get_uv_tool_command`` are the seams; all are patched with ``autospec`` so a
-call that does not match the real signature fails rather than being absorbed.
-No test here shells out to bandit, and none is skipped when bandit is absent.
+``get_uv_tool_command`` are the seams. The hooks are replaced with lambdas of
+the real arity. The resolver is replaced with ``lambda command, **kwargs``: the
+scanner passes it the ``from_spec`` keyword, and a stub that names only
+``command`` raised on that call, so the stubs accept the keyword rather than
+pin its name; the resolver's own arguments are pinned by
+``test_resolver_is_asked_about_the_scanners_own_command``. The verified-binary
+route is pinned in test_bandit_scanner_exclusions_reach_bandit.py, whose
+verifier stubs record their calls. No test here shells out to bandit, and none
+is skipped when bandit is absent.
 
 One block is deliberately not covered: ``configure()``'s ``except Exception``
 arm. ``self.config = config`` is a plain attribute assignment on a model without
