@@ -490,19 +490,35 @@ class TestAReadOnlyPollDoesNotRecloseACompletedScan:
     turned FAILED, with a new end_time, by every progress poll: the "failed"
     file status was applied to any entry but RUNNING, FAILED, CANCELLED and
     INCOMPLETE. Only an entry no runner owns (PENDING) takes its status from
-    the file; a finished scan keeps its status and reports the file problem."""
+    the file; a finished scan keeps its status and reports the file problem.
 
-    def test_a_completed_entry_keeps_its_status_and_reports_the_file(self, tmp_path):
-        registry = ScanRegistry()
+    Keeping the status is not keeping the results: with the status kept, the
+    response still said ``results_available`` True, ``total_findings`` 0 and
+    ``coverage_complete`` True (when the runner had recorded coverage), so a
+    client reading those fields saw a clean scan that found nothing and the
+    reason sat in ``error_message`` alone. The results fields now follow the
+    file: there are none to read. The same holds for a results file that is a
+    JSON object with neither ``scanner_results`` nor ``sarif``, which used to
+    re-close a COMPLETED entry as FAILED while the unreadable file kept it."""
+
+    @staticmethod
+    def _closed_scan(tmp_path, registry, coverage=None):
         project = tmp_path / "proj"
         project.mkdir()
         output = project / ".ash" / "ash_output"
         output.mkdir(parents=True)
         scan_id = _register(registry, project, output)
-        registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+        if coverage is None:
+            registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+        else:
+            registry.finish_scan(scan_id, MCScanStatus.COMPLETED, coverage=coverage)
+        return scan_id, output / "ash_aggregated_results.json"
+
+    def test_a_completed_entry_keeps_its_status_and_reports_the_file(self, tmp_path):
+        registry = ScanRegistry()
+        scan_id, results_file = self._closed_scan(tmp_path, registry)
         entry = registry.get_scan(scan_id)
         closed_at = entry.end_time
-        results_file = output / "ash_aggregated_results.json"
         results_file.write_text("{ not json", encoding="utf-8")
 
         progress = registry.check_scan_progress(scan_id)
@@ -514,6 +530,79 @@ class TestAReadOnlyPollDoesNotRecloseACompletedScan:
         assert entry.status is MCScanStatus.COMPLETED
         assert entry.end_time == closed_at
         assert entry.error_message is None
+        # The results fields say what the status cannot: nothing to read.
+        assert progress["results_available"] is False
+        assert progress["coverage_complete"] is None
+        assert progress["total_findings"] == 0
+        assert progress["scanners"] == {}
+
+    def test_recorded_coverage_does_not_make_unreadable_results_complete(
+        self, tmp_path
+    ):
+        """The runner recorded a gap-free coverage when it closed the scan (the
+        workspace path closes project entries this way); the file is then
+        unreadable. coverage_complete read True from the record alone."""
+        registry = ScanRegistry()
+        scan_id, results_file = self._closed_scan(
+            tmp_path,
+            registry,
+            coverage={
+                "incomplete_scanners": [],
+                "no_scanner_ran": False,
+                "incomplete_converters": [],
+                "unevaluated_rules": [],
+                "stale_content_databases": [],
+                "could_not_stop": [],
+            },
+        )
+        results_file.write_text("{ not json", encoding="utf-8")
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "completed"
+        assert progress["results_available"] is False
+        assert progress["coverage_complete"] is None
+        # The recorded gap lists still describe the run.
+        assert progress["incomplete_scanners"] == []
+
+    def test_a_readable_results_file_still_reports_its_results(self, tmp_path):
+        """The control: the same closed entry with a results document."""
+        registry = ScanRegistry()
+        scan_id, results_file = self._closed_scan(tmp_path, registry)
+        results_file.write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "completed"
+        assert progress["results_available"] is True
+        assert progress["total_findings"] == 1
+        assert progress["error_message"] is None
+
+    def test_a_document_with_neither_results_nor_sarif_keeps_a_completed_entry(
+        self, tmp_path
+    ):
+        registry = ScanRegistry()
+        scan_id, results_file = self._closed_scan(tmp_path, registry)
+        entry = registry.get_scan(scan_id)
+        closed_at = entry.end_time
+        results_file.write_text(
+            json.dumps({"metadata": {"generated_at": "2024-01-01T00:00:00"}}),
+            encoding="utf-8",
+        )
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert entry.status is MCScanStatus.COMPLETED
+        assert entry.end_time == closed_at
+        assert progress["status"] == "completed"
+        assert progress["is_complete"] is True
+        assert progress["results_available"] is False
+        assert progress["coverage_complete"] is None
+        assert progress["total_findings"] == 0
+        assert "neither scanner_results nor sarif" in progress["error_message"]
+        assert str(results_file) in progress["error_message"]
 
     def test_a_pending_entry_still_takes_the_failure_from_the_file(self, tmp_path):
         """The case the file-decides rule exists for, preserved."""

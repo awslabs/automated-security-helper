@@ -95,8 +95,10 @@ class MCScanStatus(Enum):
 
 
 #: Terminal statuses whose run finished and left results to read: the
-#: ``results_available`` of a progress response. ``coverage_complete`` is the
-#: separate answer to "did it cover everything".
+#: ``results_available`` of a progress response, unless the results file has
+#: since become unreadable (``check_scan_progress`` then reports False with the
+#: reason in ``error_message``, the status unchanged). ``coverage_complete`` is
+#: the separate answer to "did it cover everything".
 FINISHED_WITH_RESULTS = frozenset({MCScanStatus.COMPLETED, MCScanStatus.INCOMPLETE})
 
 #: Every status a scan ends in. ``is_complete`` in a progress response is true for
@@ -1380,20 +1382,18 @@ class ScanRegistry:
                 elif scan_progress.results_pending:
                     # A JSON object with neither scanner_results nor sarif is not a
                     # results document. Before anything has closed the entry that
-                    # is "not finished"; once it was closed as completed, the final
-                    # document never arrived.
-                    if entry.status == MCScanStatus.COMPLETED:
-                        scan_progress.mark_failed()
-                        scan_progress.error_message = (
+                    # is "not finished"; once it was closed with results, the final
+                    # document never arrived. The same rule as the unreadable
+                    # file above: the runner's status stands, the poll reports
+                    # the file, and results_available below says there is
+                    # nothing to read. This branch used to re-close a COMPLETED
+                    # entry as FAILED while the one above kept it, so the two
+                    # unusable-file shapes answered differently.
+                    if entry.status in FINISHED_WITH_RESULTS:
+                        scan_progress.mark_failed(
                             f"Aggregated results file {results_path} has neither "
                             "scanner_results nor sarif, and the scan has ended, so it "
                             "never wrote its final results"
-                        )
-                        self._apply_status(
-                            scan_id,
-                            entry,
-                            MCScanStatus.FAILED,
-                            scan_progress.error_message,
                         )
                 elif entry.status == MCScanStatus.COMPLETED:
                     # No results file, and whoever ran the scan closed the entry as
@@ -1401,6 +1401,21 @@ class ScanRegistry:
                     # closes a project's entry this way when the run returned and
                     # nothing says the project did not.
                     scan_progress.mark_completed()
+
+                # A finished scan whose results file cannot be read as results
+                # (the two branches above that keep the entry's status). The
+                # status is the runner's and stands; what the response says
+                # about the RESULTS has to follow the file: there are none to
+                # read, so results_available is False and coverage_complete
+                # None, with error_message naming the file. Reported as
+                # status completed / results_available True / total_findings 0
+                # / coverage_complete True, this read as a clean scan that
+                # found nothing, with the reason in a field a client checking
+                # the counts never looks at.
+                results_unreadable = (
+                    entry.status in FINISHED_WITH_RESULTS
+                    and scan_progress.status == "failed"
+                )
 
                 # Convert scan progress to dictionary
                 progress_dict = scan_progress.to_dict()
@@ -1410,12 +1425,16 @@ class ScanRegistry:
                 # payload did not mention, a caller using update_scan_status) is
                 # assessed from the results file. None while the scan runs, and for
                 # a failed or cancelled one, because whether that covered everything
-                # is not a question with an answer.
+                # is not a question with an answer. The gap lists the runner
+                # recorded are kept below (they describe the run), but
+                # coverage_complete is None when the results cannot be read:
+                # coverage of results that are not there is not an answer either.
                 coverage = entry.coverage
                 if (
                     coverage is None
                     and entry.status in FINISHED_WITH_RESULTS
                     and not foreign_output
+                    and not results_unreadable
                 ):
                     # Guarded: this runs on every poll of such an entry, and a
                     # results set the assessment cannot read would otherwise
@@ -1432,7 +1451,11 @@ class ScanRegistry:
                         )
                         coverage = None
                 coverage_complete: Optional[bool] = None
-                if entry.status in FINISHED_WITH_RESULTS and coverage is not None:
+                if (
+                    entry.status in FINISHED_WITH_RESULTS
+                    and coverage is not None
+                    and not results_unreadable
+                ):
                     coverage_complete = not coverage_has_gap(coverage)
 
                 # Which scanners did not run, and why. The `scanners` map below
@@ -1497,7 +1520,11 @@ class ScanRegistry:
                     # `status`; whether there are results is `results_available`;
                     # whether they cover everything is `coverage_complete`.
                     "is_complete": entry.status in ENDED,
-                    "results_available": entry.status in FINISHED_WITH_RESULTS,
+                    # False for a finished scan whose results file is now
+                    # unusable (results_unreadable above): the status says the
+                    # scan finished, this says its results cannot be read.
+                    "results_available": entry.status in FINISHED_WITH_RESULTS
+                    and not results_unreadable,
                     "output_holds_previous_results": previous_only,
                     # True once a later scan of the same directory has taken the
                     # one output tree over: nothing below is read from the files,
