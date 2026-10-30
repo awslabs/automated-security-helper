@@ -166,6 +166,22 @@ class TestSessionSandboxRefusesTheIdsEveryOtherBuilderRefuses:
             "session-a",
             "a.b_c-d~e+f=g",
         ],
+        # Explicit ids: the hidden delete name carries a fresh uuid4 per
+        # process, and xdist refuses a file whose workers collect different ids.
+        ids=[
+            "dot",
+            "dotdot",
+            "slash",
+            "backslash",
+            "control-char",
+            "too-long",
+            "space",
+            "trailing-period",
+            "device-name",
+            "hidden-delete-shape",
+            "plain",
+            "punctuation-admitted",
+        ],
     )
     def test_the_sandbox_and_the_path_validator_agree(self, session_id):
         """Parity: the sandbox refuses an id exactly when the shared validator does.
