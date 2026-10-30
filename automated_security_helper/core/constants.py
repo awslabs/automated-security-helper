@@ -475,18 +475,20 @@ ASH_CONFIG_ENV_VAR_ALLOWLIST = [
 # The suffixes are the plain ends-with reading only. The one rule for a
 # config loader is :func:`is_refused_config_environment_name`, which reads
 # these, the names below, and the module's own secret-shaped reading
-# (:func:`is_secret_shaped_environment_name`); the loader
-# (config/ash_config.py, ``config_env_var_is_secret_shaped``) calls it, so a
-# name the masking rule classes as holding a secret is one a config file may
-# not read. The tuple was widened before the loader called the rule, so that
-# it alone already covered the words the masking rule names (until then a
-# config file inside the scanned tree could interpolate ASH_DB_PASS,
-# ASH_GITHUB_PAT, ASH_API_KEY_PROD, ASH_API_KEY2, ASH_APIKEY or
-# ASH_X_PASSPHRASE, every one of them a name the masking rule classes as
-# holding a secret). The one rule reads ``ASH_CONFIG_ENV_VAR_LIMIT_SUFFIXES``
-# (below) before this tuple and before the masking reading, so a limit named
-# after a word here (``ASH_BEDROCK_MAX_TOKENS``) is admitted while the word's
-# own names stay refused.
+# (:func:`is_secret_shaped_environment_name`). On a tree whose loader
+# (config/ash_config.py, ``config_env_var_is_secret_shaped``) returns this
+# rule's answer, a name the masking rule classes as holding a secret is one a
+# config file may not read; on a tree whose loader still reads this tuple and
+# the names below alone, only those two readings apply to a config file. The
+# tuple was widened before the loader was pointed at the rule, so that it
+# alone already covered the words the masking rule names (until then a config
+# file inside the scanned tree could interpolate ASH_DB_PASS, ASH_GITHUB_PAT,
+# ASH_API_KEY_PROD, ASH_API_KEY2, ASH_APIKEY or ASH_X_PASSPHRASE, every one of
+# them a name the masking rule classes as holding a secret). The one rule reads
+# ``ASH_CONFIG_ENV_VAR_READABLE_NAMES`` (below) before this tuple and before
+# the masking reading, so the one named setting that ends in a word here
+# (``ASH_BEDROCK_MAX_TOKENS``) is admitted while every other such name stays
+# refused.
 ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES = (
     "_KEY",
     "_KEYS",
@@ -517,14 +519,18 @@ ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES = (
 ASH_CONFIG_ENV_VAR_SECRET_NAMES = ("ASH_MCP_AUTH_HEADER_VALUE",)
 
 # ``ASH_`` names a config file MAY interpolate although they end in a listed
-# suffix: a limit named after the word, not the word's value. The one such
-# setting ASH reads is ``ASH_BEDROCK_MAX_TOKENS`` (``max_tokens`` of the Bedrock
-# summary reporter), which ``_TOKENS`` would refuse. :func:`is_refused_config_environment_name`
-# reads these before the suffixes and before the masking rule's reading, so a
-# name ending in one of them is admitted; a plural token name without the limit
-# word before it (``ASH_API_TOKENS``, ``ASH_X_TOKENS``) is still refused, and
-# the singular ``ASH_MAX_TOKEN`` is too (``_TOKEN`` names one token).
-ASH_CONFIG_ENV_VAR_LIMIT_SUFFIXES = ("_MAX_TOKENS",)
+# suffix, each named exactly: a limit named after the word, not the word's
+# value. The one such setting ASH reads is ``ASH_BEDROCK_MAX_TOKENS``
+# (``max_tokens`` of the Bedrock summary reporter), which ``_TOKENS`` would
+# refuse. :func:`is_refused_config_environment_name` reads these before the
+# suffixes and before the masking rule's reading, compared case-insensitively.
+# Names, not a suffix: a suffix allow (``_MAX_TOKENS``) also admitted
+# ``ASH_API_KEY_MAX_TOKENS`` and every other name an operator exports under that
+# ending, so a name here is admitted and nothing else is; ``ASH_X_MAX_TOKENS``,
+# ``ASH_API_KEY_MAX_TOKENS``, a plural token name without the limit word
+# (``ASH_API_TOKENS``, ``ASH_X_TOKENS``) and the singular ``ASH_MAX_TOKEN`` all
+# stay refused. A new limit setting is added here by name, with its reader.
+ASH_CONFIG_ENV_VAR_READABLE_NAMES = ("ASH_BEDROCK_MAX_TOKENS",)
 
 
 def is_refused_config_environment_name(name: str) -> bool:
@@ -541,14 +547,16 @@ def is_refused_config_environment_name(name: str) -> bool:
     secrets (qualified, glued and digit-suffixed forms among them).
 
     False, before the suffixes and the masking rule's reading, for a name
-    ending in one of ``ASH_CONFIG_ENV_VAR_LIMIT_SUFFIXES``: a limit named after
-    the word (``ASH_BEDROCK_MAX_TOKENS``), which both readings would otherwise
-    refuse for its plural ``TOKENS``. The listed names come first still.
+    listed in ``ASH_CONFIG_ENV_VAR_READABLE_NAMES``: the one limit setting
+    named after a word (``ASH_BEDROCK_MAX_TOKENS``), which both readings would
+    otherwise refuse for its plural ``TOKENS``. By exact name, so no other name
+    ending the same way (``ASH_API_KEY_MAX_TOKENS``) rides on it. The listed
+    secret names come first still.
     """
     upper = name.upper()
     if upper in ASH_CONFIG_ENV_VAR_SECRET_NAMES:
         return True
-    if upper.endswith(ASH_CONFIG_ENV_VAR_LIMIT_SUFFIXES):
+    if upper in ASH_CONFIG_ENV_VAR_READABLE_NAMES:
         return False
     return upper.endswith(
         ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES

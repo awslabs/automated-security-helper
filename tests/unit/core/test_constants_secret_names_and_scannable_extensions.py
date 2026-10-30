@@ -82,23 +82,36 @@ def test_a_plain_name_is_still_readable(name):
     assert is_refused_config_environment_name(name) is False
 
 
-@pytest.mark.parametrize(
-    "name", ["ASH_BEDROCK_MAX_TOKENS", "ash_bedrock_max_tokens", "ASH_X_MAX_TOKENS"]
-)
-def test_a_limit_named_after_the_word_is_readable(name):
+@pytest.mark.parametrize("name", ["ASH_BEDROCK_MAX_TOKENS", "ash_bedrock_max_tokens"])
+def test_the_named_limit_setting_is_readable(name):
     """The setting the Bedrock summary reporter reads for ``max_tokens``.
 
     Red at the base: ``_TOKENS`` is a listed suffix, and the masking rule's
     ends-with reading matches ``TOKENS`` too, so the one rule refused it and the
     loader that follows the rule left ``${ASH_BEDROCK_MAX_TOKENS}`` as written.
+    Admitted by exact name, read case-insensitively.
     """
     assert is_refused_config_environment_name(name) is False
 
 
-@pytest.mark.parametrize("name", ["ASH_API_TOKENS", "ASH_X_TOKENS", "ASH_MAX_TOKEN"])
-def test_the_control_a_token_name_without_the_limit_word_stays_refused(name):
-    """A plural token name without ``MAX`` before it, and the singular, are
-    still a credential's names: the allow is the limit's shape, not the word."""
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ASH_API_KEY_MAX_TOKENS",
+        "ASH_X_MAX_TOKENS",
+        "ASH_API_TOKENS",
+        "ASH_X_TOKENS",
+        "ASH_MAX_TOKEN",
+    ],
+)
+def test_the_control_every_other_token_name_stays_refused(name):
+    """The allow is the one name, not its ending: another name ending in
+    ``_MAX_TOKENS`` (one that also names a key), a plural token name without the
+    limit word, and the singular are all still a credential's names.
+
+    Red at the base for the first two: a ``_MAX_TOKENS`` suffix allow admitted
+    every name ending that way.
+    """
     assert is_refused_config_environment_name(name) is True
 
 
