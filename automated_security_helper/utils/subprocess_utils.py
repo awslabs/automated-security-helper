@@ -2267,15 +2267,23 @@ def _has_exited(process: subprocess.Popen) -> bool:
     """Whether the child has ended, read so that another thread's reap cannot
     make a dead child read as running.
 
-    ``Popen.poll`` answers from ``returncode`` alone when another thread holds
-    the reaping lock (the registry sweep's own poll, _forget_exited_groups), so
-    a child that thread was reaping read as still running, and a stop that
-    worked was flagged as one ASH could not perform. The exit is read from the
-    kernel with ``waitid`` and ``WNOWAIT`` where the build has it, which neither
-    reaps nor waits for the lock; a child already reaped (``ChildProcessError``)
-    has ended. Without ``waitid`` the poll is the answer.
+    The poll is asked first, once, and its answer stands when it says the child
+    ended, or when it raises (a caller's handler reads that raise as the
+    handling's own failure). ``Popen.poll`` answers from ``returncode`` alone
+    when another thread holds the reaping lock (the registry sweep's own poll,
+    _forget_exited_groups), so a child that thread was reaping read as still
+    running, and a stop that worked was flagged as one ASH could not perform.
+    A poll that says "running" is therefore checked against the kernel with
+    ``waitid`` and ``WNOWAIT`` where the build has it, which neither reaps nor
+    waits for the lock. A pid the kernel does not know as this process's child
+    (``ChildProcessError``: reaped by the other thread, or a recorded child
+    that was never spawned) answers with ``returncode``, which the reaper set
+    if it finished; the kernel is never asked to decide for a pid that is not
+    ours. Without ``waitid`` the poll is the answer.
     """
     if process.returncode is not None:
+        return True
+    if process.poll() is not None:
         return True
     if os.name != "nt" and hasattr(os, "waitid"):
         try:
@@ -2283,13 +2291,12 @@ def _has_exited(process: subprocess.Popen) -> bool:
                 os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
             )
         except ChildProcessError:
-            return True
-        except OSError:
-            return process.poll() is not None
+            return process.returncode is not None
+        except (OSError, TypeError, ValueError, OverflowError):
+            return False
         if waited is not None:
             return True
-        return process.returncode is not None
-    return process.poll() is not None
+    return process.returncode is not None
 
 
 def _text_of(error: BaseException) -> str:
@@ -4487,10 +4494,13 @@ def run_command(
         if result.returncode == 0:
             ASH_LOGGER.debug(f"Command succeeded with return code {result.returncode}")
         else:
-            ASH_LOGGER.log(
-                log_level if log_level < logging.INFO else logging.WARNING,
-                f"Command failed with return code {result.returncode}",
-            )
+            failure_line = f"Command failed with return code {result.returncode}"
+            if log_level < logging.INFO:
+                ASH_LOGGER.log(log_level, failure_line)
+            else:
+                # Through ``warning`` itself, the method a caller that watches
+                # this line patches or counts, never through ``log``.
+                ASH_LOGGER.warning(failure_line)
             # Built only when the record would be EMITTED: .debug() is gated
             # by the logger's level (isEnabledFor), and the record then has
             # to reach a handler whose level admits it (utils.log.delivers,
