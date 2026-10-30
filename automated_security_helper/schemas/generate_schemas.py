@@ -245,15 +245,19 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
     computed field is described and never required (``model_fields_schema``).
 
     A field a dump excludes (``Field(exclude=True)``) is left out, as pydantic
-    leaves it out: no results file carries one. The four excluded fields in the
-    product were excluded from the commit that added them (``AshConfig.extends``
-    and ``patch``, ``WorkspaceProjectResult.scanner_reasons``, the
-    orchestrator's ``config_base_gate``, which is not in the results tree), so
-    no released version wrote one, and the schema would otherwise publish
-    runtime-only fields as part of the results-file contract and generate the
-    schema of a field pydantic cannot describe (a callable), which fails the
-    whole generation. A version that starts writing an excluded field lists it
-    here deliberately, with the model and the version that wrote it.
+    leaves it out: no released results file carries one. Of the product's four
+    excluded fields, ``AshConfig.extends`` and ``patch`` were excluded in the
+    commit that added them, and the orchestrator's ``config_base_gate`` is not
+    in the results tree; ``WorkspaceProjectResult.scanner_reasons`` was added
+    unexcluded and excluded by the next day's commit, both on the unreleased
+    main line, so a results file from a checkout of that one day can carry it,
+    under a model whose ``extra="allow"`` keeps it and whose schema admits it
+    (``additionalProperties: true``). Describing every excluded field would
+    otherwise publish runtime-only fields as part of the results-file contract
+    and generate the schema of a field pydantic cannot describe (a callable),
+    which fails the whole generation. A version that starts writing an
+    excluded field under a model that refuses unknown keys lists it here
+    deliberately, with the model and the version that wrote it.
 
     A model that loads a field by its Python name as well as by its alias
     (``validate_by_name``: the CycloneDX models, whose ``bom-ref`` and
