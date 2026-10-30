@@ -159,6 +159,45 @@ def test_a_descendant_that_exited_before_its_read_has_no_children(procfs):
     assert "/proc" not in proc.listed
 
 
+def test_an_unreadable_task_list_of_the_wrapper_itself_falls_back_to_proc(
+    procfs, capsys
+):
+    """The wrapper cannot be gone, so its own task list failing to read means
+    /proc is not readable that way: it says so and the walk lists /proc, where
+    the scanner's children are still found."""
+    proc = procfs(
+        {
+            _task("self"): PermissionError(errno.EACCES, "denied"),
+            "/proc": ["1", str(ME), "101", "self"],
+            "/proc/1/stat": _stat(1, 0),
+            f"/proc/{ME}/stat": _stat(ME, 1),
+            "/proc/101/stat": _stat(101, ME),
+        }
+    )
+
+    assert landlock_exec._children_files() is None
+    assert landlock_exec._descendants() == [101]
+    assert proc.listed.count("/proc") == 1
+    noted = capsys.readouterr().err
+    assert "ash-landlock: cannot read /proc/self/task" in noted
+
+
+def test_an_unreadable_proc_is_said_rather_than_read_as_an_empty_tree(procfs, capsys):
+    """With /proc itself unreadable the walk can find nothing, and it says so
+    instead of reporting a tree with nothing left in it."""
+    procfs(
+        {
+            _task("self"): PermissionError(errno.EACCES, "denied"),
+            "/proc": PermissionError(errno.EACCES, "denied"),
+        }
+    )
+
+    assert landlock_exec._descendants() == []
+    noted = capsys.readouterr().err
+    assert "cannot list /proc" in noted
+    assert "nothing the scanner left can be found or ended" in noted
+
+
 def test_a_kernel_without_children_files_lists_proc_up_to_the_cap(procfs, monkeypatch):
     """The thread is there and has no children file: the fallback lists /proc, and
     a walk with no deadline (the first reap pass) reads no more entries than

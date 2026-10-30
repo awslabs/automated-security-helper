@@ -513,7 +513,10 @@ def _children_files(pid: int = 0) -> Optional[List[int]]:
 
     One read per thread. None when the kernel provides no children file
     (CONFIG_PROC_CHILDREN off), so the caller lists /proc instead. A process that
-    is gone has nothing left to reap, so its children are the empty list. A
+    is gone has nothing left to reap, so its children are the empty list; the
+    wrapper itself (``pid`` 0) cannot be gone, so its own task list unreadable
+    means /proc is not readable here, which is said on stderr and answered with
+    None, so the caller tries the /proc listing, which may say the same. A
     thread whose file cannot be read (it exited between the listing and the read,
     or the file is not readable) is skipped and the other threads' children are
     still read: a listing of /proc could not read that file either, so neither
@@ -525,8 +528,11 @@ def _children_files(pid: int = 0) -> Optional[List[int]]:
     found: List[int] = []
     try:
         tasks = os.listdir(f"{base}/task")
-    except OSError:
-        return found
+    except OSError as e:
+        if pid:
+            return found
+        _note(f"cannot read /proc/self/task ({e}); listing /proc instead")
+        return None
     read_one = False
     for tid in tasks:
         try:
@@ -565,7 +571,15 @@ def _parent_map(
     if limit is None:
         limit = PROC_SCAN_LIMIT
     parents: Dict[int, List[int]] = {}
-    pids = sorted(int(entry) for entry in os.listdir("/proc") if entry.isdigit())
+    try:
+        pids = sorted(int(entry) for entry in os.listdir("/proc") if entry.isdigit())
+    except OSError as e:
+        # No /proc to read: nothing the scanner left can be found, so nothing is
+        # ended; said rather than passed off as an empty tree.
+        _note(
+            f"cannot list /proc ({e}); nothing the scanner left can be found or ended"
+        )
+        return parents
     start = next((i for i, pid in enumerate(pids) if pid > os.getpid()), len(pids))
     for read, pid in enumerate(pids[start:] + pids[:start]):
         if read >= limit and (until is None or time.monotonic() >= until()):
