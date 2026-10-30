@@ -568,29 +568,53 @@ class ConvertPhase(EnginePhase):
             row_key = row_keys.get(id(plugin_instance), display_name)
             enabled = section_enabled(getattr(plugin_instance, "config", None))
             declined_by_python_only = False
+            python_only_check_failure: str | None = None
             if python_based_plugins_only:
                 try:
                     declined_by_python_only = not plugin_instance.is_python_only()
-                except Exception:
+                except Exception as e:  # noqa: BLE001 -- plugin code
                     # is_python_only is plugin-supplied, so the exception set is
-                    # open. An unanswerable question is not an exclusion; the
-                    # unexplained-drop arm below is what such an instance lands in.
+                    # open. An unanswerable question is not an exclusion, and
+                    # the pre-filter loop skipped this converter's dependency
+                    # check on the same answer (_answers_python_only), so its
+                    # row must not read as a missing tool either: it is the
+                    # failure it is, recorded below.
                     declined_by_python_only = False
-            # A disabled converter's check never ran (the loop above skips it), so
-            # True here is "not asked", not a claim about its tool.
+                    run_config = getattr(self.plugin_context, "config", None)
+                    python_only_check_failure = _failure_text(
+                        e,
+                        _redaction_values_or(
+                            plugin_instance,
+                            run_config,
+                            config_environment_values(run_config),
+                        ),
+                    )
+            # A check that never ran says nothing about the tool, so True here is
+            # "not asked", not a claim: a disabled converter's (the loop above
+            # skips it), a non-Python converter's on a Python-only run (skipped
+            # the same way), and one whose is_python_only() raised (skipped too).
             if id(plugin_instance) in dependency_answers:
                 checked = dependency_answers[id(plugin_instance)]
             else:
                 checked = bool(
                     getattr(plugin_instance, "dependencies_satisfied", False)
                 )
-            dependencies_satisfied = not enabled or checked
+            dependencies_satisfied = (
+                not enabled
+                or declined_by_python_only
+                or python_only_check_failure is not None
+                or checked
+            )
 
             drop_is_explained = (
                 not enabled or declined_by_python_only or not dependencies_satisfied
             )
             failure = None
-            if not drop_is_explained:
+            if python_only_check_failure is not None:
+                failure = (
+                    f"its is_python_only() check raised {python_only_check_failure}"
+                )
+            elif not drop_is_explained:
                 # Dropped although every predicate this method can evaluate says it
                 # should have survived, which leaves one cause: the instance's own
                 # enabled or dependency check raised inside filter_enabled_plugins,

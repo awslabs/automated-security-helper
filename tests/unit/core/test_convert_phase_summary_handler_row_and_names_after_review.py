@@ -109,6 +109,31 @@ class _ShellCountingConverter(ConverterPluginBase[_ShellCountingConfig]):
         return [Path("converted/shell.py")]
 
 
+class _UnanswerableConfig(ConverterPluginConfigBase):
+    name: Literal["unanswerable-converter"] = "unanswerable-converter"
+
+
+class _UnanswerableConverter(ConverterPluginBase[_UnanswerableConfig]):
+    """A converter whose is_python_only() raises, on a Python-only run."""
+
+    checks: int = 0
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _UnanswerableConfig()
+        return super().model_post_init(context)
+
+    def is_python_only(self) -> bool:
+        raise RuntimeError("cannot tell whether this converter is Python-only")
+
+    def validate_plugin_dependencies(self) -> bool:
+        type(self).checks += 1
+        return True
+
+    def convert(self, target: Path | str | None = None) -> List[Path]:
+        return []
+
+
 class TestANonPythonConverterIsNotAskedAboutItsDependenciesOnAPythonOnlyRun:
     def test_the_check_never_runs_and_the_row_is_excluded(self, plugin_context):
         _ShellCountingConverter.checks = 0
@@ -123,6 +148,35 @@ class TestANonPythonConverterIsNotAskedAboutItsDependenciesOnAPythonOnlyRun:
         # converter, so the check ran once for a converter the Python-only
         # filter was about to drop.
         assert _ShellCountingConverter.checks == 0
+        # A check that never ran says nothing about the tool: the row is an
+        # exclusion, not a missing dependency. Red at the previous tip: the
+        # skipped check left the instance's default False, and the row said its
+        # dependency check had failed.
+        assert row.dependencies_satisfied is True
+        assert row.dependency_unavailable_reason is None
+        assert row.failure is None
+
+    def test_a_converter_whose_python_only_check_raises_is_a_failure(
+        self, plugin_context
+    ):
+        """An unanswerable is_python_only() is neither an exclusion nor a missing
+        tool: the pre-filter loop skipped its dependency check on the same
+        answer, so the row records the failure and says nothing about its tool.
+        Red at the previous tip: the skipped check left dependencies_satisfied
+        False, the drop read as explained, and the row said "tool absent"."""
+        _UnanswerableConverter.checks = 0
+
+        results, _ = _run(
+            plugin_context, [_UnanswerableConverter], python_based_plugins_only=True
+        )
+
+        row = results.converter_results["unanswerable-converter"]
+        assert row.failure is not None
+        assert "RuntimeError" in row.failure
+        assert row.excluded is False
+        assert row.dependencies_satisfied is True
+        assert row.dependency_unavailable_reason is None
+        assert _UnanswerableConverter.checks == 0
 
     def test_the_control_run_still_asks(self, plugin_context):
         """The control: with every converter admitted, the check runs."""

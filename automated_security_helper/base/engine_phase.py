@@ -10,6 +10,7 @@ from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.error_text import (
     config_environment_values,
     error_text,
+    plugin_environment_values,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -288,10 +289,15 @@ class EnginePhase(ABC):
                 result.append(instance)
             except Exception as e:
                 # The exception is plugin-sourced text: redacted of the values
-                # the config read from the environment, and of escape sequences,
-                # as every other place that shows an error it did not raise.
-                values = config_environment_values(
-                    getattr(plugin_context, "config", None)
+                # the config read from the environment AND of the plugin's own
+                # (plugin_environment_values: a plugin can know a value the
+                # run's configuration does not, and its check's exception can
+                # quote it), and of escape sequences, as every other place that
+                # shows an error it did not raise. The text reaches the scan
+                # phase's ERROR row, ash.log and the reports.
+                values = plugin_environment_values(
+                    instance,
+                    config_environment_values(getattr(plugin_context, "config", None)),
                 )
                 described = f"{type(e).__name__}: {error_text(e, values)}"
                 if failures is not None:

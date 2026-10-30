@@ -193,3 +193,35 @@ class TestARaisingCheckIsReportedApartFromAnExclusion:
         # the same way.
         assert set(failures) == {id(raising)}
         assert "RuntimeError" in failures[id(raising)]
+
+    def test_the_failure_text_hides_the_plugins_own_environment_values(self):
+        """The text reaches the scan phase's ERROR row, ash.log and the reports;
+        it is redacted with the run's configuration values and with the values
+        the plugin itself read from the environment, as the phases' other
+        plugin-sourced lines are."""
+        run_secret = "zz-run-env-value-7731"
+        own_secret = "zz-plugin-env-value-7732"
+        context = _context()
+        context.config = SimpleNamespace(_environment_values=[run_secret])
+        phase = _FakePhase(plugin_context=context)
+        raising = MagicMock()
+        raising.config.enabled = True
+        raising._environment_values.return_value = [own_secret]
+        raising.is_python_only.side_effect = RuntimeError(
+            f"cannot tell with {run_secret} or {own_secret}"
+        )
+
+        failures: dict = {}
+        phase.filter_enabled_plugins(
+            plugin_instances=[raising],
+            plugin_context=phase.plugin_context,
+            python_only=True,
+            check_dependencies=False,
+            failures=failures,
+        )
+
+        text = failures[id(raising)]
+        assert "RuntimeError" in text
+        assert run_secret not in text, text
+        # Red at the previous tip: only the run's values were redacted.
+        assert own_secret not in text, text
