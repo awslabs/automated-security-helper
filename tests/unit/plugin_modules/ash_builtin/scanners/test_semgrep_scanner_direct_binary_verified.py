@@ -15,7 +15,9 @@ MISSING row; one that cannot be verified runs, with a warning, since it is the o
 route left.
 
 The check's answer is stood in for: verifying runs ``semgrep --version``, and no tool starts
-here. Building the scanner probes uv; the tool guard answers as a host without it.
+here. Building the scanner probes uv; the tool guard answers as a host without it. The
+host is stood in for as one semgrep publishes a build for: on Windows the dependency
+check refuses before it reaches the binary route these tests are about.
 """
 
 from __future__ import annotations
@@ -52,7 +54,10 @@ def _scanner(test_plugin_context, monkeypatch) -> SemgrepScanner:
         context=test_plugin_context,
         config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False)),
     )
-    # uv is missing, and PATH holds a semgrep binary.
+    # A host semgrep publishes a build for; uv is missing, and PATH holds a semgrep binary.
+    monkeypatch.setattr(
+        SemgrepScanner, "unsupported_platform_reason", lambda self: None
+    )
     monkeypatch.setattr(
         SemgrepScanner, "_validate_uv_tool_availability", lambda self: False
     )
