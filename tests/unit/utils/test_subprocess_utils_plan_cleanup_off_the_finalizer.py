@@ -27,11 +27,19 @@ def _plan_recording_its_thread(seen: dict, done: threading.Event) -> SpawnPlan:
     return SpawnPlan(argv=["tool"], env={}, cleanup=[cleanup])
 
 
+def _with_the_collector_on() -> None:
+    """The thread arm is taken only with the collector on; a session that runs
+    with it off (a plugin, an earlier test) cannot measure it, so skip there
+    rather than fail on the session's state."""
+    if not gc.isenabled():
+        pytest.skip("the garbage collector is off in this session")
+
+
 def test_with_the_collector_on_the_cleanup_runs_on_a_thread_of_its_own():
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
-    assert gc.isenabled()
+    _with_the_collector_on()
 
     subprocess_utils._run_cleanup_off_the_finalizer(plan)
 
@@ -45,11 +53,15 @@ def test_with_the_collector_off_the_cleanup_runs_inline():
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
+    # The collector is put back as it was found, never turned on for the rest
+    # of a session that ran with it off.
+    was_enabled = gc.isenabled()
     gc.disable()
     try:
         subprocess_utils._run_cleanup_off_the_finalizer(plan)
     finally:
-        gc.enable()
+        if was_enabled:
+            gc.enable()
     assert done.is_set()
     assert seen["thread"] == threading.get_ident()
 
@@ -60,7 +72,7 @@ def test_a_thread_that_cannot_start_while_finalizing_runs_the_cleanup_inline():
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
-    assert gc.isenabled()
+    _with_the_collector_on()
     with (
         patch.object(
             threading.Thread,
@@ -83,7 +95,7 @@ def test_a_thread_that_cannot_start_after_threadings_shutdown_runs_inline():
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
-    assert gc.isenabled()
+    _with_the_collector_on()
     with (
         patch.object(
             threading.Thread,
@@ -109,7 +121,7 @@ def test_a_thread_that_cannot_start_mid_run_leaves_the_cleanup_to_the_exit_pass(
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
-    assert gc.isenabled()
+    _with_the_collector_on()
     with (
         patch.object(
             threading.Thread,
