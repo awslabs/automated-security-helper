@@ -38,6 +38,14 @@ _VERSION_CHECK_ENV = "SEMGREP_ENABLE_VERSION_CHECK"
 _VERSION_CHECK_OFF = "0"
 
 
+def _command_words(command) -> List[str]:
+    """A resolver answer as its words: the list ``get_uv_tool_command`` returns, or
+    one word for a bare path given as a string."""
+    if isinstance(command, str):
+        return [command]
+    return list(command)
+
+
 def _is_uv_form(command: List[str]) -> bool:
     """Whether a resolver answer runs the tool through uv.
 
@@ -46,7 +54,8 @@ def _is_uv_form(command: List[str]) -> bool:
     words with ``["uv", "tool", "run"]`` read a uv named by its path as a
     semgrep binary, which is the mistake this reading replaces.
     """
-    return bool(command) and Path(command[0]).name in ("uv", "uv.exe")
+    words = _command_words(command)
+    return bool(words) and Path(words[0]).name in ("uv", "uv.exe")
 
 
 class SemgrepScannerConfigOptions(ScannerOptionsBase):
@@ -206,6 +215,10 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         of the tool failed, ``uv tool run`` would repeat that install at scan time
         (offline, it fails again), so only a semgrep binary on PATH satisfies the
         dependency, and the check reports MISSING otherwise.
+
+        A binary on PATH is verified against the scan's requirement before it is
+        taken (``_direct_binary_satisfies``), as ``_select_tool_execution``
+        verifies a pre-installed tool before running it directly.
         """
         command = get_uv_tool_command(
             self.command, from_spec=self._uv_probe_from_spec()
@@ -220,8 +233,89 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 level=logging.WARNING,
             )
             return False
+        if not uses_uv and not self._direct_binary_satisfies(
+            _command_words(command)[0]
+        ):
+            return False
         self.use_uv_tool = uses_uv
         self.dependencies_satisfied = True
+        return True
+
+    def _direct_binary_satisfies(self, executable: str) -> bool:
+        """Whether the semgrep binary the resolver found on PATH may run the scan.
+
+        Verified against the scan's requirement (the package, its extras and the
+        version constraint, ``utils/pre_installed_tool.verify_pre_installed_tool``),
+        as ``_select_tool_execution`` verifies a pre-installed tool before running
+        it directly. It used to run unverified: with uv missing, or after uv's
+        install of the tool failed, whatever ``semgrep`` PATH held ran the scan
+        and reported under this scanner's version constraint. A copy verified not
+        to satisfy the requirement is refused, with the reason recorded for the
+        MISSING row. One that cannot be verified (no uv to resolve the requirement
+        with, a probe the sandbox refused) runs, with a warning: it is the only
+        route left, and refusing it would make every host without uv MISSING.
+        """
+        from automated_security_helper.utils.pre_installed_tool import (
+            build_requirement,
+            verify_pre_installed_tool,
+        )
+        from automated_security_helper.utils.uv_tool_runner import (
+            find_uv_or_none,
+            shown_uv_output,
+        )
+
+        extras = self._get_tool_package_extras()
+        constraint = self._get_tool_version_constraint()
+        package = self.uv_tool_package_name or self.command
+        requirement = build_requirement(package, extras, constraint)
+        # Read once for the verify and every line below; see _select_tool_execution.
+        values = self._values_to_redact()
+        answer = verify_pre_installed_tool(
+            executable,
+            package,
+            extras,
+            constraint,
+            uv_executable=find_uv_or_none(),
+            values=values,
+        )
+
+        def _shown(text: str) -> str:
+            return shown_uv_output(
+                text,
+                values,
+                plugin_inputs=self._uv_run_inputs_for_records(),
+                tool_name=self.command,
+                limit=None,
+            )
+
+        if answer.status == "satisfied":
+            self._plugin_log(
+                _shown(
+                    f"Using {self.command} at {executable} directly; it satisfies "
+                    f"{requirement!r}"
+                ),
+                level=logging.INFO,
+            )
+            if answer.version:
+                self.tool_version = answer.version
+            return True
+        if answer.status == "unsatisfied":
+            reason = _shown(
+                f"{self.command} at {executable} cannot be used: {answer.detail}. "
+                "It is the only copy ASH can run here, so semgrep is missing. "
+                f"Install a copy that satisfies {requirement!r}, or install uv so "
+                "ASH can run one."
+            )
+            self.dependency_unavailable_reason = reason
+            self._plugin_log(reason, level=logging.ERROR)
+            return False
+        self._plugin_log(
+            _shown(
+                f"Using {self.command} at {executable} directly, unverified against "
+                f"{requirement!r}: {answer.detail}"
+            ),
+            level=logging.WARNING,
+        )
         return True
 
     def _get_uv_tool_version(

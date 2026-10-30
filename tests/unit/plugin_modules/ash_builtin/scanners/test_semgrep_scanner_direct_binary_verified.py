@@ -1,0 +1,153 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A semgrep binary found on PATH is verified before the scan runs it directly.
+
+``_direct_or_uv_command_found`` is the dependency check's fallback: with uv missing,
+or after uv's own install of semgrep failed, the resolver answers with a semgrep
+binary on PATH and the scan runs it directly. It used to run whatever that binary
+was, unverified against the scanner's version constraint, while the pre-installed
+route (``_select_tool_execution``) verifies a binary before running it directly.
+
+Now the binary is verified the same way (``utils/pre_installed_tool``): a copy that
+does not satisfy the requirement is refused, with the reason recorded for the
+MISSING row; one that cannot be verified runs, with a warning, since it is the only
+route left.
+
+The check's answer is stood in for: verifying runs ``semgrep --version``, and no tool starts
+here. Building the scanner probes uv; the tool guard answers as a host without it.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    semgrep_scanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
+    SemgrepScanner,
+    SemgrepScannerConfig,
+    SemgrepScannerConfigOptions,
+)
+from automated_security_helper.utils import pre_installed_tool
+from automated_security_helper.utils.pre_installed_tool import PreInstalledToolVerdict
+
+pytestmark = pytest.mark.unit
+
+BINARY = "/opt/tools/bin/semgrep"
+
+
+@pytest.fixture(autouse=True)
+def _no_tool_probe(monkeypatch):
+    from tests.utils.tool_guard import stub_tool_probes
+
+    stub_tool_probes(monkeypatch)
+
+
+def _scanner(test_plugin_context, monkeypatch) -> SemgrepScanner:
+    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+    monkeypatch.setattr(SemgrepScanner, "_scanner_offline", lambda self: False)
+    scanner = SemgrepScanner(
+        context=test_plugin_context,
+        config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False)),
+    )
+    # uv is missing, and PATH holds a semgrep binary.
+    monkeypatch.setattr(
+        SemgrepScanner, "_validate_uv_tool_availability", lambda self: False
+    )
+    monkeypatch.setattr(semgrep_scanner, "get_uv_tool_command", lambda name: [BINARY])
+    return scanner
+
+
+def _verdict(status: str, detail: str, version: str | None = None):
+    return PreInstalledToolVerdict(
+        status, BINARY, "semgrep>=1.125.0,<2.0.0", detail, version=version
+    )
+
+
+def _answer(monkeypatch, answer, seen: list):
+    def verify(executable, package, extras=None, version_constraint=None, **kwargs):
+        seen.append((executable, package, version_constraint))
+        return answer
+
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
+
+
+def test_a_binary_that_does_not_satisfy_the_constraint_is_refused(
+    test_plugin_context, monkeypatch
+):
+    """Verified unsatisfied: the dependency check says no and records why.
+
+    Fails at the base: the binary was taken without a verification, so the check
+    answered True and the scan ran it.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    seen: list = []
+    _answer(
+        monkeypatch,
+        _verdict("unsatisfied", "semgrep 1.100.0 does not satisfy >=1.125.0,<2.0.0"),
+        seen,
+    )
+
+    assert scanner._validate_tool_dependencies() is False
+    assert seen and seen[0][0] == BINARY, seen
+    assert seen[0][2] == scanner._get_tool_version_constraint()
+    reason = scanner.dependency_unavailable_reason or ""
+    assert BINARY in reason and "cannot be used" in reason, reason
+    assert "1.100.0" in reason, reason
+
+
+def test_a_binary_that_satisfies_the_constraint_runs_directly(
+    test_plugin_context, monkeypatch
+):
+    """The control: verified satisfied, the scan runs the binary directly and the
+    reports name its version."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    _answer(
+        monkeypatch, _verdict("satisfied", "semgrep 1.130.0", version="1.130.0"), []
+    )
+
+    assert scanner._validate_tool_dependencies() is True
+    assert scanner.use_uv_tool is False
+    assert scanner.dependencies_satisfied is True
+    assert scanner.dependency_unavailable_reason is None
+    assert scanner.tool_version == "1.130.0"
+
+
+def test_a_binary_that_cannot_be_verified_still_runs(test_plugin_context, monkeypatch):
+    """Unverifiable (no uv to resolve the requirement with, say): the only route
+    left is taken, with a warning rather than a refusal."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    _answer(monkeypatch, _verdict("unverifiable", "no uv to resolve against"), [])
+
+    assert scanner._validate_tool_dependencies() is True
+    assert scanner.use_uv_tool is False
+    assert scanner.dependency_unavailable_reason is None
+
+
+def test_the_last_resort_after_a_failed_install_is_verified_too(
+    test_plugin_context, monkeypatch
+):
+    """After uv's install of semgrep failed, the binary on PATH is the last resort,
+    and an unsatisfying one is refused there as well.
+
+    Fails at the base: the last-resort binary was taken unverified.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    monkeypatch.setattr(
+        SemgrepScanner, "_validate_uv_tool_availability", lambda self: True
+    )
+    monkeypatch.setattr(
+        SemgrepScanner,
+        "_get_tool_installation_info",
+        lambda self: {"available": False},
+    )
+    monkeypatch.setattr(
+        SemgrepScanner, "_install_uv_tool", lambda self, timeout=300: False
+    )
+    scanner.use_uv_tool = True
+    _answer(monkeypatch, _verdict("unsatisfied", "semgrep 0.9.0 is too old"), [])
+
+    assert scanner._validate_tool_dependencies() is False
+    assert "0.9.0" in (scanner.dependency_unavailable_reason or "")
