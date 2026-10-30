@@ -1007,11 +1007,15 @@ def finish_ended_session(session_id: Optional[str]) -> None:
         pending = session_id in _ended_while_scanning
     if not pending:
         return
-    if _is_the_stdio_session(session_id) and StdioServerPresence.a_server_is_live():
+    if not _is_the_stdio_session(session_id):
+        end_session(session_id)
+        return
+    # The end runs under the registry's lock, where the question is answered,
+    # so a server registering between the answer and the removal is counted or
+    # starts after it; a registry that cannot be read keeps the workspace.
+    if StdioServerPresence.a_server_is_live(if_none=lambda: end_session(session_id)):
         with _ended_lock:
             _ended_while_scanning.discard(session_id)
-        return
-    end_session(session_id)
 
 
 def _is_the_stdio_session(session_id: str) -> bool:
@@ -1487,22 +1491,48 @@ class StdioServerPresence:
         return live
 
     @staticmethod
-    def a_server_is_live() -> bool:
+    def a_server_is_live(*, if_none: Optional[Callable[[], None]] = None) -> bool:
         """Whether any stdio server holds a locked entry in the presence registry.
 
-        Read under the registry's lock file, as the exit check is. False when
-        there is no registry on this root, or it cannot be read or locked: a
-        server that could not register there left the default workspace alone
-        on exit for the same reason, so nothing is kept on its account.
+        Read under the registry's lock file, as the exit check is, and
+        ``if_none`` runs there, before the lock is dropped, when no server is
+        live: a server registering meanwhile is either counted or starts after
+        ``if_none`` ran, the promise the class makes for the exit check. The
+        answer is True as well when the registry cannot be made, read or
+        locked: a passing failure (a file table full, a directory read that
+        fails) must not read as "no server is live" and remove the default
+        workspace under a live sibling, so nothing runs on its account, the
+        way the exit check keeps the workspace on an error. Said out loud,
+        since the workspace then stays until the last server out removes it.
         """
+        from automated_security_helper.utils.log import ASH_LOGGER
+
         try:
             registry = StdioServerPresence._registry()
-            if not registry.is_dir():
-                return False
-            with open(registry / _STDIO_SERVERS_LOCK, "a+b") as guard:
+            registry.mkdir(exist_ok=True)
+            guard = open(registry / _STDIO_SERVERS_LOCK, "a+b")
+        except (OSError, RuntimeError) as exc:
+            ASH_LOGGER.warning(
+                "Could not read the stdio server presence registry (%s): the "
+                "default workspace is kept as if a server were live.",
+                exc,
+            )
+            return True
+        with guard:
+            try:
                 _lock_blocking(guard)
-                return StdioServerPresence._another_server_is_live(registry)
-        except (OSError, RuntimeError):
+                live = StdioServerPresence._another_server_is_live(registry)
+            except (OSError, RuntimeError) as exc:
+                ASH_LOGGER.warning(
+                    "Could not read the stdio server presence registry (%s): "
+                    "the default workspace is kept as if a server were live.",
+                    exc,
+                )
+                return True
+            if live:
+                return True
+            if if_none is not None:
+                if_none()
             return False
 
     def abandon_for_tests(self) -> None:

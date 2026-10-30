@@ -10,6 +10,13 @@ When a scan of that server was still running, the end was deferred and
 that had started in between had the default workspace, with the tree it had
 delivered, removed under it. The deferred end now keeps the workspace when a
 live server holds a registry entry, and completes when none does.
+
+The question and the removal are one step under the registry's lock file, as
+the exit check is: a server registering between them is counted, or starts
+after the removal. And the question fails closed: a registry that cannot be
+read (a file table full, a directory listing that fails) answers as a live
+server would, and the workspace stays; it was the exit check's answer to an
+error already, while the deferred end read it as "no server is live".
 """
 
 from __future__ import annotations
@@ -78,6 +85,55 @@ def test_a_deferred_end_completes_when_no_server_is_live(root) -> None:
 
     assert not sandbox.exists()
     assert DEFAULT_SESSION_ID not in sessions._ended_while_scanning
+
+
+def test_a_deferred_end_keeps_the_workspace_when_the_registry_cannot_be_read(
+    root, monkeypatch
+) -> None:
+    """A passing failure while the entries are read answers as a live server
+    would: the workspace stays, as it does when the exit check meets one. Read
+    as "no server is live", the failure removed the tree of a live sibling."""
+    sandbox = _default_workspace(root)
+    (root / sessions.STDIO_SERVERS_DIR).mkdir()
+
+    def cannot_list(registry: Path) -> bool:
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(
+        sessions.StdioServerPresence, "_another_server_is_live", cannot_list
+    )
+    sessions._ended_while_scanning.add(DEFAULT_SESSION_ID)
+
+    sessions.finish_ended_session(DEFAULT_SESSION_ID)
+
+    assert sandbox.is_dir(), "a read failure was taken as no live server"
+    assert DEFAULT_SESSION_ID not in sessions._ended_while_scanning
+
+
+def test_a_deferred_end_removes_the_workspace_under_the_registrys_lock(
+    root, monkeypatch
+) -> None:
+    """The removal runs where the question was answered, before the registry's
+    lock is dropped, so a server registering meanwhile is counted or starts after
+    it. Released first, the lock let a server register into the removal."""
+    sandbox = _default_workspace(root)
+    registry = root / sessions.STDIO_SERVERS_DIR
+    registry.mkdir()
+    lock_was_held: list = []
+    real_end_session = sessions.end_session
+
+    def end_session_reading_the_lock(session_id: str) -> bool:
+        with open(registry / sessions._STDIO_SERVERS_LOCK, "a+b") as probe:
+            lock_was_held.append(not sessions._try_lock(probe))
+        return real_end_session(session_id)
+
+    monkeypatch.setattr(sessions, "end_session", end_session_reading_the_lock)
+    sessions._ended_while_scanning.add(DEFAULT_SESSION_ID)
+
+    sessions.finish_ended_session(DEFAULT_SESSION_ID)
+
+    assert lock_was_held == [True], lock_was_held
+    assert not sandbox.exists()
 
 
 def test_a_deferred_end_of_another_session_does_not_ask_the_registry(root) -> None:
