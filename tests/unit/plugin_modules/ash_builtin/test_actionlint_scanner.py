@@ -66,6 +66,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+from automated_security_helper.utils.scan_output_dirs import mark_converted_results
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import COULD_NOT_STOP_REASON
 from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
@@ -1589,32 +1590,36 @@ def test_a_converted_finding_carries_an_absolute_uri_under_the_work_dir(
     """actionlint runs in the target, so its paths are relative to it. The scan
     reads a relative URI as relative to the source directory, so a converted
     workflow's finding was reported at a source path that does not exist and
-    was never marked as converted; a converted file's URI is absolute."""
+    was never marked as converted; a converted file's URI is absolute, names
+    the file where it is under the work directory, and that is what marks the
+    finding as converted."""
     output = repo.parent / "ash_output"
     work_dir = _converted_target(
         output, repo / ".github" / "workflows" / "vulnerable.yml"
     )
     scanner = _scanner(repo, output=output)
-    _through_the_base_class(
-        monkeypatch,
-        [
-            {
-                "returncode": 1,
-                "stdout": (FIXTURES / "actionlint-1.7.12-default.json").read_text(),
-            }
-        ],
-    )
+    # actionlint runs in the converted tree, where the extracted archive holds
+    # the workflow, so it prints the path the file has there.
+    where = "archive.zip/.github/workflows/vulnerable.yml"
+    stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
+    stdout = stdout.replace('".github/workflows/vulnerable.yml"', f'"{where}"')
+    assert where in stdout
+    _through_the_base_class(monkeypatch, [{"returncode": 1, "stdout": stdout}])
 
     converted = scanner.scan(target=work_dir, target_type="converted")
 
+    results = converted.runs[0].results
     uris = {
         result.locations[0].physicalLocation.root.artifactLocation.uri
-        for result in converted.runs[0].results
+        for result in results
     }
-    assert uris == {
-        (work_dir.absolute() / ".github/workflows/vulnerable.yml").as_posix()
-    }
-    assert all(Path(uri).is_absolute() for uri in uris)
+    expected = work_dir.absolute() / where
+    assert uris == {expected.as_posix()}
+    assert expected.is_file()
+    assert all(Path(uri).is_absolute() and Path(uri).is_file() for uri in uris)
+    # The mark the scan output step puts on a finding under the work directory.
+    assert mark_converted_results(converted, scanner.context) == len(results) > 0
+    assert {getattr(r.properties, "converted_path") for r in results} == {where}
 
 
 @pytest.mark.parametrize("converted_has_workflows", [True, False])
