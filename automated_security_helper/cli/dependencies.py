@@ -236,12 +236,19 @@ def _canonical_tool_name(resolved_name: str, available: Iterable[str]) -> str:
     return resolved_name
 
 
-#: The deprecated aliases by their selection key, so an alias is matched as a
-#: plugin name is: ``archiveconverter`` and ``" ArchiveConverter"`` resolve too.
-_DEPRECATED_ALIASES_BY_KEY: dict[str, str] = {
-    _selection_key(alias): replacement
-    for alias, replacement in DEPRECATED_TOOL_ALIASES.items()
-}
+def _deprecated_aliases_by_key() -> dict[str, str]:
+    """The deprecated aliases by their selection key, so an alias is matched as a
+    plugin name is: ``archiveconverter`` and ``" ArchiveConverter"`` resolve too.
+
+    Read from :data:`DEPRECATED_TOOL_ALIASES` at each call, not once at import:
+    the table is the one thing that resolves an alias, and a test that empties it
+    expects the old name refused as unknown, which a copy taken at import kept
+    resolving.
+    """
+    return {
+        _selection_key(alias): replacement
+        for alias, replacement in DEPRECATED_TOOL_ALIASES.items()
+    }
 
 
 def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
@@ -253,6 +260,7 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
     refused by the caller exactly as before.
     """
     resolved: dict[str, str] = {}
+    aliases_by_key = _deprecated_aliases_by_key()
     # Aliases match by selection key, so two spellings of one alias are one alias:
     # warned once, by key, not once per spelling.
     warned: set[str] = set()
@@ -260,7 +268,7 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
         if tool in resolved:
             continue
         key = _selection_key(tool)
-        replacement = _DEPRECATED_ALIASES_BY_KEY.get(key)
+        replacement = aliases_by_key.get(key)
         if replacement is None:
             resolved[tool] = tool.strip()
             continue

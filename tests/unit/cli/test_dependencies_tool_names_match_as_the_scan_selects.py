@@ -129,6 +129,16 @@ def test_two_spellings_of_one_alias_warn_once(monkeypatch):
     assert warnings.getvalue().count("Deprecated:") == 1, warnings.getvalue()
 
 
+def test_the_alias_table_is_read_when_a_name_is_resolved(monkeypatch):
+    """The table, not a copy of it taken at import, resolves an alias: emptied, the
+    old name resolves to itself and the caller refuses it as unknown."""
+    monkeypatch.setattr(dependencies_module, "DEPRECATED_TOOL_ALIASES", {})
+
+    resolution = dependencies_module._resolve_tool_aliases(["archiveconverter"])
+
+    assert resolution == {"archiveconverter": "archiveconverter"}
+
+
 class TestCanonicalToolName:
     """Two plugins whose names differ only in case: the exact spelling wins."""
 
