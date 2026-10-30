@@ -125,8 +125,14 @@ _LOCKFILE_PACKAGE_MANAGERS: dict[str, str] = {
     "pdm.lock": "pdm",
 }
 
-# The managers the ecosystem tables name that a lockfile can refine.
-_GENERIC_MANAGERS = frozenset({"npm", "pip"})
+# The managers a lockfile can refine, by the generic manager the ecosystem tables
+# give. A lockfile refines only within its own ecosystem: a yarn.lock never turns
+# a Python component's ``pip`` into ``yarn``, nor a poetry.lock an npm one into
+# ``poetry``.
+_REFINEMENTS: dict[str, frozenset[str]] = {
+    "npm": frozenset({"yarn", "pnpm"}),
+    "pip": frozenset({"poetry", "pipenv", "uv", "pdm"}),
+}
 
 # The basenames of the manifests and lockfiles a declared dependency comes from.
 # A location inside a vendored tree is reported by its basename only when it is
@@ -348,10 +354,15 @@ def _refined_package_manager(pm: str | None, path: str | None) -> str | None:
 
     The tables map an ecosystem to one manager, so every JavaScript component
     was labelled ``npm`` and every Python one ``pip`` whatever lockfile
-    declared it; the lockfile's name says which manager did.
+    declared it; the lockfile's name says which manager did. Only a manager of
+    *pm*'s own ecosystem refines it (see ``_REFINEMENTS``): a Python component
+    whose location is a yarn.lock stays ``pip``.
     """
-    if pm in _GENERIC_MANAGERS:
-        return _lockfile_package_manager(path) or pm
+    if pm is None:
+        return None
+    refined = _lockfile_package_manager(path)
+    if refined is not None and refined in _REFINEMENTS.get(pm, frozenset()):
+        return refined
     return pm
 
 
@@ -555,8 +566,11 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         ecosystem as the report-level package manager. Counted over every
         declared component, as it was, the metadata could pair ``pip`` with
         ``package-lock.json`` when a Python project vendored more JavaScript
-        files than it declared Python ones. Every component votes when none of
-        the dominant ecosystem has a location.
+        files than it declared Python ones. When the dominant ecosystem has
+        no component with a usable location the result is None, and the caller
+        falls back to that ecosystem's default lockfile; another ecosystem's
+        file is never returned. Every declared component votes only when no
+        ecosystem was found at all.
         """
         from collections import Counter
 
@@ -568,19 +582,18 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
 
         declared = _declared_components(_walk_components(components))
         if dominant_pm is not None:
-            same_ecosystem = [c for c in declared if _ecosystem_of(c)[0] == dominant_pm]
+            voters = [c for c in declared if _ecosystem_of(c)[0] == dominant_pm]
         else:
-            same_ecosystem = []
+            voters = declared
 
-        for group in (same_ecosystem, declared):
-            files: Counter[str] = Counter()
-            for component in group:
-                raw_path = _get_component_property(component, "syft:location:0:path")
-                normalized = _normalize_input_file_path(raw_path)
-                if normalized:
-                    files[normalized] += 1
-            if files:
-                return files.most_common(1)[0][0]
+        files: Counter[str] = Counter()
+        for component in voters:
+            raw_path = _get_component_property(component, "syft:location:0:path")
+            normalized = _normalize_input_file_path(raw_path)
+            if normalized:
+                files[normalized] += 1
+        if files:
+            return files.most_common(1)[0][0]
         return None
 
     def _build_minimal_empty_sbom(

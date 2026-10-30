@@ -106,6 +106,37 @@ class TestLockfileNamesTheManager:
         )
         assert pm == "pip"
 
+    def test_a_python_component_at_a_yarn_lock_stays_pip(self):
+        pm, lang = _resolve_package_manager_and_language(
+            _component("requests", "/yarn.lock", purl="pkg:pypi/requests@2.32.3"),
+            GitLabCycloneDXReporterConfigOptions(),
+        )
+        assert (pm, lang) == ("pip", "Python")
+
+    def test_a_javascript_component_at_a_poetry_lock_stays_npm(self):
+        pm, lang = _resolve_package_manager_and_language(
+            _component("left-pad", "/poetry.lock", purl="pkg:npm/left-pad@1.3.0"),
+            GitLabCycloneDXReporterConfigOptions(),
+        )
+        assert (pm, lang) == ("npm", "JavaScript")
+
+    def test_the_report_level_manager_ignores_another_ecosystems_lockfile(
+        self, tmp_path
+    ):
+        """A Python inventory with an operator-set input file named yarn.lock is
+        still pip: the lockfile is not a Python one."""
+        doc = _report(
+            _reporter(tmp_path, input_file_path_override="docs/yarn.lock"),
+            [
+                _component("a", "/requirements.txt", purl="pkg:pypi/a@1.0.0"),
+                _component("b", "/requirements.txt", purl="pkg:pypi/b@1.0.0"),
+            ],
+        )
+
+        props = _metadata_props(doc)
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "pip"
+        assert props["gitlab:dependency_scanning:input_file:path"] == "docs/yarn.lock"
+
     def test_the_report_level_manager_follows_the_report_level_lockfile(self, tmp_path):
         doc = _report(
             _reporter(tmp_path),
@@ -122,9 +153,34 @@ class TestLockfileNamesTheManager:
 
 class TestTheReportLevelSourceIsOneEcosystem:
     def test_the_input_file_belongs_to_the_dominant_ecosystem(self, tmp_path):
-        """Two Python components declared by requirements.txt, one JavaScript
-        component declared by package-lock.json: pip with requirements.txt, never
-        pip with package-lock.json."""
+        """Three Python components with a PURL and no location, two JavaScript
+        components declared by package-lock.json: Python wins the vote, no
+        Python component has a location, so the report names pip with the pip
+        default, requirements.txt, never pip with package-lock.json."""
+        doc = _report(
+            _reporter(tmp_path),
+            [
+                {"type": "library", "name": "requests", "purl": "pkg:pypi/requests@2"},
+                {"type": "library", "name": "flask", "purl": "pkg:pypi/flask@3.0.0"},
+                {"type": "library", "name": "click", "purl": "pkg:pypi/click@8.1.7"},
+                _component(
+                    "left-pad", "/package-lock.json", purl="pkg:npm/left-pad@1.3.0"
+                ),
+                _component(
+                    "lodash", "/package-lock.json", purl="pkg:npm/lodash@4.17.21"
+                ),
+            ],
+        )
+
+        props = _metadata_props(doc)
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "pip"
+        assert props["gitlab:dependency_scanning:language:name"] == "Python"
+        assert props["gitlab:dependency_scanning:input_file:path"] == "requirements.txt"
+
+    def test_a_larger_javascript_ecosystem_names_its_own_lockfile(self, tmp_path):
+        """Two Python components declared by requirements.txt, three JavaScript
+        components declared by package-lock.json: the larger ecosystem wins and
+        the file is its own."""
         doc = _report(
             _reporter(tmp_path),
             [
@@ -143,7 +199,6 @@ class TestTheReportLevelSourceIsOneEcosystem:
         )
 
         props = _metadata_props(doc)
-        # Three npm components outvote two pypi ones; the file is theirs too.
         assert props["gitlab:dependency_scanning:package_manager:name"] == "npm"
         assert (
             props["gitlab:dependency_scanning:input_file:path"] == "package-lock.json"
