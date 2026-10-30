@@ -630,15 +630,29 @@ def scanners_with_nothing_to_scan(
 _IGNORE_PATTERNS_SHOWN = 3
 
 
+#: The gate's way out of the nothing-to-scan exit, appended to the message when
+#: the gate is what clears it.
+_NOTHING_TO_SCAN_ACCEPT_REMEDY = (
+    " To accept a run that scanned nothing, set fail_on_incomplete_scanners: "
+    "false or pass --no-fail-on-incomplete-scanners."
+)
+
+
 def nothing_to_scan_message(
-    results: Optional[AshAggregatedResults], names: List[str]
+    results: Optional[AshAggregatedResults],
+    names: List[str],
+    *,
+    accept_remedy: bool = True,
 ) -> str:
     """Why a run whose scanners all had nothing to scan exits 1, and the remedy.
 
     Names global_settings.ignore_paths when the recorded config sets it, since
     ignored paths are left out of what each scanner reads and so can leave it
     nothing. The patterns may come from a config in the scanned tree, so each is
-    shown with its control characters escaped.
+    shown with its control characters escaped. The one text serves the log line
+    and the console, so the two cannot disagree; *accept_remedy* False leaves the
+    gate's way out off, for a console arm that adds it only when the gate is what
+    clears the exit (:func:`print_incompleteness_message`).
     """
     message = (
         f"No selected scanner had a file to scan: {', '.join(names)} "
@@ -662,10 +676,7 @@ def nothing_to_scan_message(
             "path it matches out of what the scanners read, which can leave them "
             "nothing to scan; narrow it to have those files scanned."
         )
-    return message + (
-        " To accept a run that scanned nothing, set fail_on_incomplete_scanners: "
-        "false or pass --no-fail-on-incomplete-scanners."
-    )
+    return message + (_NOTHING_TO_SCAN_ACCEPT_REMEDY if accept_remedy else "")
 
 
 def _partial_coverage(metric) -> tuple[int, int] | None:
@@ -1169,18 +1180,19 @@ def print_incompleteness_message(
     *,
     no_scanner_ran: bool = False,
     observed: Sequence[tuple[str, str]] = (),
-    nothing_to_scan: Sequence[str] = (),
+    nothing_to_scan: Optional[str] = None,
     unevaluated_rules: Sequence[str] = (),
     missing_reasons: Optional[Dict[str, str]] = None,
     could_not_stop: Sequence[tuple[str, str]] = (),
 ) -> None:
     """Explain an exit code of 1 in terms of what actually caused it.
 
-    *nothing_to_scan* names the scanners SKIPPED for having no file to scan
-    (``scanners_with_nothing_to_scan``). When every scanner was skipped and
-    those are among them, the no-scanner-ran arm gives that diagnosis and its
-    remedies, the ones ``_compute_exit_code`` logged, instead of the
-    selection-mistake advice, which would contradict the log.
+    *nothing_to_scan* is the log line's own text for scanners SKIPPED with no
+    file to scan (``nothing_to_scan_message`` with ``accept_remedy=False``), or
+    None. When every scanner was skipped and that text is given, the
+    no-scanner-ran arm prints it, with the gate's way out when the gate clears
+    the exit, instead of the selection-mistake advice, which would contradict
+    the log.
 
     WHY THIS IS A FUNCTION RATHER THAN THREE BRANCHES INLINE
     ------------------------------------------------------
@@ -1363,24 +1375,13 @@ def print_incompleteness_message(
             print(f"  [red]{escape_markup(_name)}: {escape_markup(_status)}[/red]")
         if nothing_to_scan:
             # The selected scanners had no file to scan: the cause is what they
-            # were given, not which were selected. The patterns in the remedy
-            # may come from a config in the scanned tree, so they are shown
-            # escaped, as the log line shows them.
-            print(
-                "[yellow]"
-                + escape_markup(
-                    f"{', '.join(nothing_to_scan)} "
-                    f"{'was' if len(nothing_to_scan) == 1 else 'were'} SKIPPED with "
-                    "nothing to scan. Narrow global_settings.ignore_paths if it "
-                    "leaves these scanners nothing to read, or "
-                    + ways_out(
-                        "set fail_on_incomplete_scanners: false",
-                        "pass --no-fail-on-incomplete-scanners to accept a run "
-                        "that scanned nothing",
-                    )
-                )
-                + ".[/yellow]"
-            )
+            # were given, not which were selected. The text is the log line's
+            # (nothing_to_scan_message: the config's ignore_paths named only when
+            # it sets them, each pattern shown inert), so console and log agree;
+            # the gate's way out follows only when the gate is what clears the
+            # exit, as the scanner arm offers it.
+            remedy = _NOTHING_TO_SCAN_ACCEPT_REMEDY if gate_clears_the_exit else ""
+            print(f"[yellow]{escape_markup(nothing_to_scan + remedy)}[/yellow]")
         else:
             print(
                 "[yellow]Each scanner's skipped_reason in ash_aggregated_results.json "
@@ -7867,13 +7868,18 @@ def _run_with_options(
                 opts.shard_index is not None or opts.shard_count is not None
             ),
         )
+        nothing_to_scan = scanners_with_nothing_to_scan(results)
         print_incompleteness_message(
             list(_incompleteness.scanners),
             list(_incompleteness.converters),
             list(_incompleteness.stale_content_databases),
             no_scanner_ran=_incompleteness.no_scanner_ran,
             observed=list(_incompleteness.observed),
-            nothing_to_scan=scanners_with_nothing_to_scan(results),
+            nothing_to_scan=(
+                nothing_to_scan_message(results, nothing_to_scan, accept_remedy=False)
+                if nothing_to_scan
+                else None
+            ),
             unevaluated_rules=list(_incompleteness.unevaluated_rules),
             missing_reasons=dict(_incompleteness.missing_reasons),
             could_not_stop=list(_incompleteness.could_not_stop),

@@ -784,18 +784,69 @@ def test_an_invalid_config_message_describes_the_error_without_its_input(capsys)
 # ---------------------------------------------------------------------------
 
 
+def _results_ignoring(*patterns: str) -> SimpleNamespace:
+    """Results whose recorded config sets global_settings.ignore_paths."""
+    return SimpleNamespace(
+        ash_config=SimpleNamespace(
+            global_settings=SimpleNamespace(ignore_paths=list(patterns))
+        )
+    )
+
+
 def test_the_console_names_nothing_to_scan_not_a_selection_mistake(capsys):
+    text = ras.nothing_to_scan_message(
+        _results_ignoring("vendor/**"), ["bandit"], accept_remedy=False
+    )
+
     print_incompleteness_message(
         [],
         [],
         no_scanner_ran=True,
         observed=[("bandit", ScannerStatus.SKIPPED.value)],
-        nothing_to_scan=["bandit"],
+        nothing_to_scan=text,
     )
 
     out = _plain(capsys.readouterr().out)
     assert "nothing to scan" in out
     assert "usual cause is --scanners" not in out
+    # The log line's own text: the pattern the config sets, and the gate's way
+    # out, since nothing else fails this run.
+    assert "vendor/**" in out
+    assert "--no-fail-on-incomplete-scanners" in out
+
+
+def test_the_console_withholds_the_gates_way_out_when_it_clears_nothing(capsys):
+    """A tool that could not be stopped fails the run whatever the gate says, so
+    the nothing-to-scan arm does not offer the gate flag beside it."""
+    text = ras.nothing_to_scan_message(
+        SimpleNamespace(ash_config=None), ["bandit"], accept_remedy=False
+    )
+
+    print_incompleteness_message(
+        [],
+        [],
+        no_scanner_ran=True,
+        observed=[("bandit", ScannerStatus.SKIPPED.value)],
+        nothing_to_scan=text,
+        could_not_stop=[("semgrep", "still running")],
+    )
+
+    out = _plain(capsys.readouterr().out)
+    assert "nothing to scan" in out
+    assert "ignore_paths" not in out
+    nothing_to_scan_arm = out.split("no scanner ran", 1)[1]
+    assert "--no-fail-on-incomplete-scanners" not in nothing_to_scan_arm
+
+
+def test_the_log_line_and_the_console_text_are_one_helper():
+    results = _results_ignoring("vendor/**")
+
+    logged = ras.nothing_to_scan_message(results, ["bandit"])
+    shown = ras.nothing_to_scan_message(results, ["bandit"], accept_remedy=False)
+
+    assert logged.startswith(shown)
+    assert logged.endswith("--no-fail-on-incomplete-scanners.")
+    assert "--no-fail-on-incomplete-scanners" not in shown
 
 
 def test_control_every_scanner_skipped_for_another_reason_keeps_the_advice(capsys):
