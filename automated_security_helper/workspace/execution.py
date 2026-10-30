@@ -2245,6 +2245,22 @@ def _verdict_results(
     The report was written before :func:`_tag_policy_origin_findings` tagged the
     model, so the file's entries are tagged here the same way; otherwise the
     ``policy_scanners_gate`` exclusion would silently stop excluding.
+
+    What is taken from the file is its FIRST run's ``results``, the same rule
+    :func:`_extract_run` applies to the model (``SarifReport.merge_sarif_report``
+    collapses every scanner into ``runs[0]``; more runs is a shape this code has
+    not seen, logged and not silently folded in); reading every run's results
+    into one list, as this once did, would have counted a second run's findings
+    that the carried run's ``tool`` and ``rules`` say nothing about. A file with
+    no run is unusable as a count and falls back to the model, as an unreadable
+    one does. The run carried into the unified file is the model's (its ``tool``,
+    ``rules`` and ``invocations``) with these results in it: the SARIF reporter
+    writes the model's rule table in the model's order and sets each result's
+    ``ruleIndex`` to its position there (the rule-index pass in
+    ``plugin_modules/ash_builtin/reporters/sarif_reporter.py``), so the indices
+    agree; what the reporter changes on the way out (the
+    suppressions it serializes, the masking it applied) is what the count must
+    see, and is why the file is read at all.
     """
     from automated_security_helper.base.reporter_plugin import confined_report_path
 
@@ -2275,13 +2291,24 @@ def _verdict_results(
         )
         return model_results
     runs = document.get("runs") if isinstance(document, dict) else None
-    entries: List[Dict[str, Any]] = []
-    for sarif_run in runs if isinstance(runs, list) else []:
-        if not isinstance(sarif_run, dict):
-            continue
-        entries.extend(
-            entry for entry in sarif_run.get("results") or [] if isinstance(entry, dict)
+    if not isinstance(runs, list) or not runs or not isinstance(runs[0], dict):
+        ASH_LOGGER.warning(
+            f"Project '{project.key}': its SARIF report {target.name} carries no "
+            f"run to count its verdict from; counted from the scan's own results "
+            f"instead.",
+            extra=NO_MARKUP,
         )
+        return model_results
+    if len(runs) > 1:
+        ASH_LOGGER.warning(
+            f"Project '{project.key}': its SARIF report {target.name} carries "
+            f"{len(runs)} runs; workspace mode expects one per project and counts "
+            f"only the first.",
+            extra=NO_MARKUP,
+        )
+    entries: List[Dict[str, Any]] = [
+        entry for entry in runs[0].get("results") or [] if isinstance(entry, dict)
+    ]
     _tag_policy_origin_entries(entries, project)
     return entries
 
