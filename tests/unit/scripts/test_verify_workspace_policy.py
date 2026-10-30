@@ -43,6 +43,24 @@ class TestFixtureShape:
         suppressed = tmp_path / "lax" / "src" / policy_script.LAX_SUPPRESSED_FILE
         assert suppressed.read_text(encoding="utf-8") == policy_script.LAX_SOURCE
 
+    def test_strict_carries_the_suppressed_path_too(
+        self, policy_script, tmp_path: Path
+    ):
+        """A suppression leaked to every project must have a file to match in strict.
+
+        Without strict/src/legacy.py a leaked `src/legacy.py` suppression matched
+        nothing in strict, so strict's finding_count could never move and the
+        findings-level leak check could never fail.
+        """
+        policy_script.build_fixture(tmp_path)
+        leaked = tmp_path / "strict" / "src" / policy_script.LAX_SUPPRESSED_FILE
+        assert leaked.is_file()
+        assert leaked.read_text(encoding="utf-8") == policy_script.STRICT_SOURCE
+        strict_sources = sorted(p.name for p in (tmp_path / "strict" / "src").iterdir())
+        assert strict_sources == sorted(
+            ["runner.py", policy_script.LAX_SUPPRESSED_FILE]
+        )
+
     def test_the_suppressed_path_is_not_the_lax_projects_only_source(
         self, policy_script, tmp_path: Path
     ):
@@ -129,30 +147,33 @@ class TestResultsFile:
 
 
 def _healthy_runs():
+    # Shaped like a real run: each lax file carries two bandit findings (the
+    # subprocess import and the shell call), the policy hides one whole file,
+    # so lax goes 4 -> 2; strict has the same two files and is untouched.
     projects_a = {
         "lax": {
-            "finding_count": 2,
+            "finding_count": 4,
             "actionable_finding_count": 0,
             "exceeds_threshold": False,
             "severity_threshold": "CRITICAL",
         },
         "strict": {
-            "finding_count": 1,
-            "actionable_finding_count": 1,
+            "finding_count": 2,
+            "actionable_finding_count": 2,
             "severity_threshold": "LOW",
         },
         "iac": {"finding_count": 3, "actionable_finding_count": 3},
     }
     projects_b = {
         "lax": {
-            "finding_count": 1,
-            "actionable_finding_count": 1,
+            "finding_count": 2,
+            "actionable_finding_count": 2,
             "exceeds_threshold": True,
             "severity_threshold": "MEDIUM",
         },
         "strict": {
-            "finding_count": 1,
-            "actionable_finding_count": 1,
+            "finding_count": 2,
+            "actionable_finding_count": 2,
             "severity_threshold": "LOW",
         },
         "iac": {
@@ -174,6 +195,52 @@ class TestEvaluateRuns:
         checks, notes = policy_script.evaluate_runs(projects_a, projects_b, 2, 2)
         assert _failed(checks) == []
         assert notes == []
+
+    def test_a_suppression_that_hides_one_whole_file_halves_the_lax_count(
+        self, policy_script
+    ):
+        """A correct push-down drops every finding of the suppressed file.
+
+        The check used to demand a drop of exactly one. Two byte-identical files
+        each carrying the same findings make that unreachable: a correct run
+        drops half, which the old check read as a failure.
+        """
+        projects_a, projects_b = _healthy_runs()
+        projects_a["lax"]["finding_count"] = 6
+        projects_b["lax"]["finding_count"] = 3
+        checks, _ = policy_script.evaluate_runs(projects_a, projects_b, 2, 2)
+        assert _failed(checks) == []
+
+    @pytest.mark.parametrize(
+        ("count_a", "count_b"),
+        [
+            (4, 3),  # the drop-of-one shape the old check accepted
+            (4, 4),  # the suppression did not reach the scan
+            (4, 0),  # the suppression took every finding, runner.py included
+            (0, 0),  # nothing scanned; 0 == 2 * 0 must not pass
+            (None, None),  # counts missing on both sides
+        ],
+    )
+    def test_a_lax_count_that_is_not_half_fails_the_suppression_check(
+        self, policy_script, count_a, count_b
+    ):
+        projects_a, projects_b = _healthy_runs()
+        projects_a["lax"]["finding_count"] = count_a
+        projects_b["lax"]["finding_count"] = count_b
+        checks, _ = policy_script.evaluate_runs(projects_a, projects_b, 2, 2)
+        assert (
+            "workspace suppression reaches the scan: lax keeps half its findings"
+            in (_failed(checks))
+        )
+
+    def test_a_suppression_that_leaks_into_strict_fails(self, policy_script):
+        """strict carries the same second file, so a leaked suppression lowers it."""
+        projects_a, projects_b = _healthy_runs()
+        projects_b["strict"]["finding_count"] = 1
+        checks, _ = policy_script.evaluate_runs(projects_a, projects_b, 2, 2)
+        assert "workspace suppression does NOT reach the other project's findings" in (
+            _failed(checks)
+        )
 
     def test_a_missing_actionable_count_on_both_sides_is_not_a_pass(
         self, policy_script

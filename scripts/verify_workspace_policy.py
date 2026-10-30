@@ -31,9 +31,12 @@ What it asserts, and why each one is here
    disclosure that appears unconditionally is noise and gets ignored.
 4. **A workspace suppression is pushed into one project and not another.**
    Checked on the resolved plan, because the suppression list is per project
-   there, and on the findings: the lax project holds two files that trip the
-   same bandit rule, the policy suppresses one of them, and the ceiling run has
-   to report one fewer unsuppressed finding for lax. The suppressed file is
+   there, and on the findings: the lax project holds two byte-identical files
+   that trip the same bandit rules, the policy suppresses one of them, and the
+   ceiling run has to report half the unsuppressed findings for lax (a
+   relationship, not a size: the per-file count depends on bandit's rules).
+   The strict project carries the same second file so that a suppression
+   wrongly applied to every project would lower its count. The suppressed file is
    deliberately not the one assertion 1 depends on -- suppressing the lax
    project's only finding would make the ceiling look decorative on a correct
    implementation, because there would be nothing left for it to tighten.
@@ -182,6 +185,11 @@ def build_fixture(root: Path) -> Path:
     _write(root / "lax" / ".ash" / "ash.yaml", _project_config("CRITICAL"))
 
     _write(root / "strict" / "src" / "runner.py", STRICT_SOURCE)
+    # The same second file as lax, at the same project-relative path. The policy
+    # names lax/src/legacy.py; a suppression wrongly applied to every project
+    # would match this file and lower strict's finding_count, which the findings
+    # check reads. Without it a leak could only show on the plan, not on the scan.
+    _write(root / "strict" / "src" / LAX_SUPPRESSED_FILE, STRICT_SOURCE)
     _write(root / "strict" / ".ash" / "ash.yaml", _project_config("LOW"))
 
     _write(root / "iac" / "main.tf", IAC_SOURCE)
@@ -471,18 +479,25 @@ def evaluate_runs(
         )
 
     # 3. Suppression scoping on the findings. finding_count is the unsuppressed
-    # count, so the suppressed copy of the lax finding drops out of it in run B
-    # and nothing else changes.
+    # count. The lax project's two source files are byte copies, so each carries
+    # the same findings (bandit reports the import and the shell call, two per
+    # file), and the policy suppresses one whole file by path, so a correct
+    # push-down halves the count. The check used to demand a drop of exactly
+    # one, a size no implementation of this fixture can produce: a correct one
+    # drops two or more and failed the gate, which also broke this script's own
+    # rule that it asserts relationships between the runs, never sizes.
+    lax_count_a = lax_a.get("finding_count") or 0
+    lax_count_b = lax_b.get("finding_count") or 0
     checks.append(
         (
-            "workspace suppression reaches the scan: lax loses one finding",
-            (lax_a.get("finding_count") or 0) - (lax_b.get("finding_count") or 0) == 1,
-            (
-                f"lax finding_count {lax_a.get('finding_count')} -> "
-                f"{lax_b.get('finding_count')}"
-            ),
+            "workspace suppression reaches the scan: lax keeps half its findings",
+            lax_count_b > 0 and lax_count_a == 2 * lax_count_b,
+            f"lax finding_count {lax_a.get('finding_count')} -> {lax_b.get('finding_count')}",
         )
     )
+    # strict carries the same two files, so a suppression that leaked to every
+    # project (as a project-relative src/legacy.py) would lower its count; a
+    # strict project without that file could not show a findings-level leak.
     checks.append(
         (
             "workspace suppression does NOT reach the other project's findings",
