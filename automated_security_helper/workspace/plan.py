@@ -306,8 +306,10 @@ class ProjectPlan(BaseModel):
             description=(
                 "Effective tool_version constraint per scanner the project "
                 "enables, including one inherited from a scanner's built-in "
-                "default. A disabled scanner's pin is not here: its tool does "
-                "not run, so it cannot conflict with another project's."
+                "default. A disabled scanner's pin is here only when the "
+                "workspace policy switches that scanner on (policy_scanners), "
+                "because the scan then applies it; otherwise its tool does not "
+                "run and its pin cannot conflict with another project's."
             ),
         ),
     ]
