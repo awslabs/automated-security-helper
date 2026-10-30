@@ -224,6 +224,23 @@ class TestTheEndOfAScan:
         # does not, so nothing wrote it.
         assert (orchestrator.output_dir / "ash_aggregated_results.json").is_file()
 
+    def test_the_default_phases_write_the_results_file(self, tmp_path, monkeypatch):
+        """execute_scan() with no phases runs every phase and writes the file.
+
+        The phases are resolved once, in execute_scan, before the phase runner
+        and the write read them; resolved only in the runner, the write read
+        None as no scan phase and the default call wrote no results file.
+        """
+        orchestrator = _with_stub_phases(tmp_path, monkeypatch)
+
+        orchestrator.execute_scan()
+
+        engine = orchestrator.execution_engine
+        engine.execute_phases.assert_called_once_with(
+            phases=["convert", "scan", "report"]
+        )
+        assert (orchestrator.output_dir / "ash_aggregated_results.json").is_file()
+
     def test_a_scan_with_no_existing_results_returns_the_engines_model(
         self, tmp_path, monkeypatch
     ):

@@ -1507,6 +1507,12 @@ class ASHScanOrchestrator(BaseModel):
                     "ASHScanOrchestrator for a new scan."
                 )
             self._scan_executed = True
+        # Resolved once, here, so the phases that ran and the phases the write
+        # reads are the same list: the write reads "scan" in them, and a None
+        # that reached it unresolved read as no scan, so the default call
+        # (every phase) wrote no results file.
+        if phases is None:
+            phases = ["convert", "scan", "report"]
         try:
             # The run id the plugin context recorded its directories under
             # (_build_engine), in this thread and in the scanner pool's copies
