@@ -103,6 +103,13 @@ def _tarball(member_bytes: bytes) -> bytes:
 
 
 class _FakeResponse(io.BytesIO):
+    """A urlopen response: a context manager with the headers the body copy
+    reads (``_copy_whole_body`` checks the copied bytes against Content-Length)."""
+
+    def __init__(self, payload: bytes = b""):
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
+
     def __enter__(self):
         return self
 

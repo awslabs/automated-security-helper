@@ -44,7 +44,16 @@ URL = "https://example.invalid/tool/tool.tar.gz"
 
 
 class _FakeResponse(io.BytesIO):
-    """urlopen returns a context manager; BytesIO alone is not one."""
+    """urlopen returns a context manager; BytesIO alone is not one.
+
+    It also carries the headers the body copy reads: ``_copy_whole_body`` checks
+    the bytes it copied against ``Content-Length``, so the stand-in declares its
+    own length (the real response's shape) instead of raising AttributeError.
+    """
+
+    def __init__(self, payload: bytes = b""):
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
 
     def __enter__(self):
         return self
@@ -144,7 +153,13 @@ class TestTransientFailuresAreRetried:
 
 
 class _TruncatedResponse(io.BytesIO):
-    """Yields some bytes, then raises, like a connection dropped mid-body."""
+    """Yields some bytes, then raises, like a connection dropped mid-body.
+
+    No Content-Length: the drop is the raise below, not a short body, and the
+    body copy reads the headers only once a read returns empty.
+    """
+
+    headers: dict = {}
 
     def __enter__(self):
         return self

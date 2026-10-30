@@ -98,7 +98,16 @@ def _make_zip(path: Path, member_names) -> bytes:
 
 
 class _FakeResponse(io.BytesIO):
-    """urlopen returns a context manager; BytesIO alone is not one."""
+    """urlopen returns a context manager; BytesIO alone is not one.
+
+    It also carries the headers the body copy reads: ``_copy_whole_body`` checks
+    the bytes it copied against ``Content-Length``, so the stand-in declares its
+    own length (the real response's shape) instead of raising AttributeError.
+    """
+
+    def __init__(self, payload: bytes = b""):
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
 
     def __enter__(self):
         return self
