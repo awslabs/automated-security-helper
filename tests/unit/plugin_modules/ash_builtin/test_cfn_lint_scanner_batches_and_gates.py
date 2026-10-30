@@ -408,7 +408,10 @@ def test_a_run_wide_failure_is_not_repeated_once_per_template(ash_temp_path):
     assert len(batches[0]) == 8
     assert len(batches[1]) == 1 and batches[1][0].endswith("a.yaml")
     assert len(batches[2]) == 1 and batches[2][0].endswith(".probe.yaml")
-    assert str(repo / ".ash") in batches[2][0], "the probe left the results dir"
+    # Compared as paths: the argument is POSIX-form, the repo path is the host's.
+    assert repo / ".ash" in Path(batches[2][0]).parents, (
+        "the probe left the results dir"
+    )
     assert scanner.targets_attempted == 8
     assert scanner.targets_failed == 8
     assert any("read as a failure of the run" in e for e in scanner.errors)
