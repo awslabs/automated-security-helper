@@ -783,9 +783,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """The uv path checkov uses, with the use_uv_tool flag kept consistent.
 
         The uv runner reports a tool "available" from a uv install or from a
-        binary on PATH. When the only zizmor it sees on PATH is the one the
-        version probe just rejected (``_rejected_executable``), that is not a uv
-        install and is not available: offline the scanner is MISSING, as the
+        binary on PATH. When the version probe rejected the zizmor on PATH
+        (``_rejected_executable``), nothing the runner found is selected unprobed,
+        whatever source it names: the binary may be a uv tool install's own shim,
+        reported as the uv source. Offline the scanner is MISSING, as the
         docstring of ``validate_plugin_dependencies`` says, and online uv
         installs the constrained release. After a constrained install that
         fails, only a uv route the constrained probe resolves satisfies the
@@ -798,13 +799,15 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             return False
         installation_info = self._get_tool_installation_info()
         if installation_info.get("available"):
-            if (
-                self._rejected_executable is not None
-                and installation_info.get("preferred_source") != "uv"
-            ):
+            if self._rejected_executable is not None:
+                # Whatever source the runner names: the PATH binary the version
+                # probe rejected may itself be a uv tool install's shim, which the
+                # runner reports as the uv source, and selecting it unprobed
+                # would run the release the probe just refused. Offline the
+                # scanner is MISSING below; online uv installs the constraint.
                 self._plugin_log(
-                    "The zizmor the uv runner found on PATH is the one the version "
-                    "check rejected; it is not used through uv either.",
+                    "The zizmor the uv runner found is the one the version check "
+                    "rejected; it is not used through uv either.",
                     level=logging.DEBUG,
                 )
             else:

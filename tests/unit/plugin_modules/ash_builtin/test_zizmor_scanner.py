@@ -1481,6 +1481,36 @@ def test_a_rejected_path_binary_is_not_handed_back_through_uv_offline(
     assert "does not satisfy" in scanner.dependency_unavailable_reason
 
 
+def test_a_rejected_binary_that_is_a_uv_shim_is_not_selected_unprobed(
+    repo, monkeypatch
+):
+    """The rejected PATH binary may be a uv tool install's own shim, which the
+    runner reports as the uv source; whatever the source, a rejected zizmor is
+    never selected unprobed."""
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    scanner = _scanner(repo)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {
+            "available": True,
+            "preferred_source": "uv",
+            "pre_installed_path": "/opt/bin/zizmor",
+        },
+    )
+
+    def must_not_select(info):
+        raise AssertionError("the rejected uv-installed zizmor was selected unprobed")
+
+    object.__setattr__(scanner, "_select_tool_execution", must_not_select)
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert "does not satisfy" in scanner.dependency_unavailable_reason
+
+
 def test_a_failed_install_does_not_fall_back_to_a_zizmor_the_probe_rejected(
     repo, monkeypatch
 ):
