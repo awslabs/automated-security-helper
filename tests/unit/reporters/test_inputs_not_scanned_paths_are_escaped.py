@@ -84,7 +84,9 @@ def test_the_console_line_escapes_control_characters():
     out = buffer.getvalue()
     assert "\x1b" not in out
     assert len(_lines_with(out, "Not scanned:")) == 1
-    assert "\\n## injected heading" in out, out
+    # The console writes the newline as terminal_text does (``\x0a``); the
+    # markdown and text summaries above keep display_text's named ``\n``.
+    assert "\\x0a## injected heading" in out, out
 
 
 def test_control_an_ordinary_path_is_unchanged(test_plugin_context):

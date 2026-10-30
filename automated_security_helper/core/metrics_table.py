@@ -284,16 +284,18 @@ def not_scanned_line(scanner_name: str, path: str, reason: str) -> str:
     """The console line for one input a scanner did not scan, as Rich markup.
 
     The path is the scanned repository's: escape_markup shows its control
-    characters (a terminal escape sequence, a newline) as escapes and neutralizes
-    its markup in one pass. Escaping the controls first and then the markup showed
-    them twice: the written ``\\x1b`` read as an escape to show, and its backslash
-    was doubled, so an ESC in a path printed the same as a literal ``\\x1b`` in a
-    name does. Shared by the single-directory table and the workspace summary, so
-    both print it one way.
+    characters as escapes and neutralizes its markup in one pass, and with
+    ``one_line`` it writes a newline, a tab or a carriage return as an escape too
+    (``\\x0a``, the console's spelling), so the path cannot start a line of its
+    own. Escaping the controls first and then the markup showed them twice: the
+    written ``\\x1b`` read as an escape to show, and its backslash was doubled, so
+    an ESC in a path printed the same as a literal ``\\x1b`` in a name does.
+    Shared by the single-directory table and the workspace summary, so both print
+    it one way.
     """
     return (
         f"[bold yellow]Not scanned:[/bold yellow] {escape(scanner_name)} did not "
-        f"scan {escape(path)}: {escape(reason)}"
+        f"scan {escape(path, one_line=True)}: {escape(reason)}"
     )
 
 

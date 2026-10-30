@@ -6,7 +6,7 @@
 - The threshold column writes a control character as an escape, like every other
   column built from the results file.
 - A path with a control character in a "Not scanned" line is shown once, not
-  escaped twice.
+  escaped twice, and a newline in it is written as an escape so the line stays one.
 - The help text names the SKIPPED row's second meaning and the (u)navailable
   threshold source the narrow table prints.
 - NO_COLOR is honored by the summary console.
@@ -72,6 +72,16 @@ class TestTheCells:
         assert ESC not in line
         assert line.count("\\x1b") == 1, line
         assert "\\\\x1b" not in line, line
+
+    def test_a_not_scanned_path_stays_on_one_line(self):
+        """A newline in the path is written as the console's escape, so the path
+        cannot start a line of its own; the escape sequence beside it is still
+        shown once."""
+        line = not_scanned_line("npm-audit", f"web\n## heading{ESC}[31m/a.lock", "x")
+
+        assert "\n" not in line, line
+        assert "\\x0a## heading" in line, line
+        assert line.count("\\x1b") == 1, line
 
 
 class TestTheHelpText:
