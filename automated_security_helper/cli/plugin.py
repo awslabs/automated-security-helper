@@ -25,7 +25,7 @@ from automated_security_helper.config.named_config import (
 )
 from automated_security_helper.config.operator_only_options import reporter_section
 from automated_security_helper.config.plugin_option_check import (
-    refuse_unknown_options_of_registered,
+    refuse_unknown_plugin_options,
 )
 from automated_security_helper.config.resolve_config import (
     find_config_file,
@@ -192,12 +192,6 @@ def list_plugins(
         # registered. The lists give the order, so the built-in tables keep it.
         from automated_security_helper.plugins import ash_plugin_manager
 
-        # Before any plugin is built, as the scan engine and ash report check: a
-        # configuration with an unknown or refused option of a plugin loaded from
-        # ash_plugin_modules is refused, exit 3 (below), and the refusal names no
-        # value or key read from the environment.
-        refuse_unknown_options_of_registered(ash_config, ash_plugin_manager)
-
         # Selected as a scan with this configuration selects them, in the engine's
         # three steps (core/execution_engine.py): of the registered classes, the
         # built-in plugins plus those the run's ash_plugin_modules define, bind
@@ -214,6 +208,15 @@ def list_plugins(
         selected = drop_untrusted_off_host_plugins(
             ash_config, selected, ash_plugin_modules
         )
+
+        # Before any plugin is built, as the scan engine and ash report check: a
+        # configuration with an unknown or refused option of a plugin the listing
+        # builds is refused, exit 3 (below), and the refusal names no value or
+        # key read from the environment. Checked for the plugins selected above,
+        # which are the ones built: the whole registry would refuse the listing
+        # for a section of a plugin no scan of this configuration selects, and
+        # would read the registry outside the scan's filter.
+        refuse_unknown_plugin_options(ash_config, selected)
 
         def _registered(plugin_type: str, declared: List) -> List:
             registered = list(selected[plugin_type])
