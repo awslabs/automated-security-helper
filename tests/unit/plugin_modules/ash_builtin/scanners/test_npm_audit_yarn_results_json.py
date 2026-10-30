@@ -29,14 +29,14 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 
 pytestmark = pytest.mark.unit
 
-CAPTURE = (
-    Path(__file__).resolve().parents[4]
-    / "test_data"
-    / "scanners"
-    / "npmaudit"
-    / "yarn"
-    / "classic-vuln.json"
+CAPTURES = (
+    Path(__file__).resolve().parents[4] / "test_data" / "scanners" / "npmaudit" / "yarn"
 )
+#: Lockfile ``a`` answers with advisories and ``b`` with a clean report: a merge
+#: that kept the first lockfile's records twice gave the same count as one that
+#: kept both when both answered alike, so the two differ.
+CAPTURE = CAPTURES / "classic-vuln.json"
+CLEAN_CAPTURE = CAPTURES / "classic-clean.json"
 
 
 @pytest.fixture
@@ -62,7 +62,14 @@ def _project(root):
 
 
 def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
-    capture = json.loads(CAPTURE.read_text(encoding="utf-8"))
+    """Lockfile ``a`` answers with the vulnerable capture and ``b`` with the
+    clean one, so the merged file holds exactly ``a``'s records: a merge that
+    kept the first lockfile's records once per lockfile read the same count as
+    one that kept both when the two captures were the same."""
+    vuln = json.loads(CAPTURE.read_text(encoding="utf-8"))
+    clean = json.loads(CLEAN_CAPTURE.read_text(encoding="utf-8"))
+    assert vuln["yarn_version"].split(".")[0] == clean["yarn_version"].split(".")[0]
+    by_project = {"a": vuln, "b": clean}
     _project(plugin_context.work_dir / "a")
     _project(plugin_context.work_dir / "b")
     audits = []
@@ -70,11 +77,13 @@ def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
     def respond(self, command, **kwargs):
         if "--version" in command:
             return {
-                "stdout": f"{capture['yarn_version']}\n",
+                "stdout": f"{vuln['yarn_version']}\n",
                 "stderr": "",
                 "returncode": 0,
             }
         audits.append(list(command))
+        manifest = json.loads((Path(kwargs["cwd"]) / "package.json").read_text())
+        capture = by_project[manifest["name"]]
         response = {
             "stdout": capture["stdout"],
             "stderr": capture["stderr"],
@@ -93,16 +102,20 @@ def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
     one_lockfile, _ = NpmAuditScanner._parse_yarn_audit(
         1,
         {
-            "stdout": capture["stdout"],
-            "stderr": capture["stderr"],
-            "returncode": capture["returncode"],
+            "stdout": vuln["stdout"],
+            "stderr": vuln["stderr"],
+            "returncode": vuln["returncode"],
         },
     )
-    per_lockfile = len(one_lockfile["yarn_advisories"])
-    assert per_lockfile > 0
-    # The SARIF already had both lockfiles' findings; results.json now does too.
-    assert len(report.runs[0].results) == 2 * per_lockfile
+    expected = one_lockfile["yarn_advisories"]
+    assert len(expected) > 0
+    # The SARIF already had both lockfiles' findings; results.json now does too:
+    # exactly a's records, named by lockfile, and none of b's (it had none).
+    assert len(report.runs[0].results) == len(expected)
     saved = json.loads(
         scanner.results_dir.joinpath("converted", "results.json").read_text()
     )
-    assert len(saved["yarn_advisories"]) == 2 * per_lockfile
+    assert len(saved["yarn_advisories"]) == len(expected)
+    assert sorted(r["url"] for r in saved["yarn_advisories"]) == sorted(
+        r["url"] for r in expected
+    )
