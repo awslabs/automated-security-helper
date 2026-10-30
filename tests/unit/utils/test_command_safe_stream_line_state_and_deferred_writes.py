@@ -172,6 +172,10 @@ def test_an_attribute_read_on_an_uninitialized_instance_is_an_attribute_error(cl
         "\n::x\n",
         "\udc80\udcff",
         "tail\rhead",
+        # A terminal sequence whose intermediate bytes are "##" and final byte
+        # "[": lead unbroken, text once the check escapes its first "#".
+        "\x1b[##[",
+        "\n\x1b[##[",
     ],
     ids=[
         "empty",
@@ -187,6 +191,8 @@ def test_an_attribute_read_on_an_uninitialized_instance_is_an_attribute_error(cl
         "break-colon-break",
         "escaped-bytes",
         "cr-head",
+        "csi-hash-intermediates",
+        "break-then-csi-hash-intermediates",
     ],
 )
 def test_the_line_state_read_alone_is_the_checked_models(text, at_line_start):
