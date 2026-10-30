@@ -915,12 +915,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         if self._scan_target_type != "converted":
             return list(self.args.extra_args)
         dropped = f"--exclude={CONVERTED_FILE_EXCLUDE}"
-        below_root = _parts_of_target_below_root(target)
-        covering = {
-            pattern
-            for pattern in SEMGREP_DEFAULT_IGNORES
-            if pattern.endswith("/") and pattern[:-1] in below_root
-        }
+        covering = _covering_default_ignores(target)
         return [
             arg
             for arg in self.args.extra_args
@@ -1041,7 +1036,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             ):
                 return True
         name = parts[-1] if parts else ""
-        for pattern in SEMGREP_DEFAULT_IGNORES:
+        # Only the defaults this target's command carries: the converted target
+        # drops the directory defaults that cover it (_extra_args_for_target), so a
+        # match there came from a pattern the operator wrote, whatever directory
+        # the converted files sit under.
+        for pattern in self._default_ignores_passed(target):
             if pattern.endswith("/"):
                 if pattern[:-1] in parts[:-1]:
                     return True
@@ -1052,17 +1051,29 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 return True
         return False
 
+    def _configured_exclude(self) -> List[str]:
+        """The configured ``exclude`` values as written, blanks left out, with no
+        logging: ``_configured_values`` warns about a blank entry each time it is
+        asked, and the grading asks once per target and once per excluded file."""
+        values = getattr(getattr(self.config, "options", None), "exclude", None)
+        return [str(value) for value in values or [] if str(value).strip()]
+
+    def _default_ignores_passed(self, target: Path) -> List[str]:
+        """The ``SEMGREP_DEFAULT_IGNORES`` the current target's command carries: all
+        of them on the source target; on the converted target, less the directory
+        defaults that cover the target itself (_extra_args_for_target)."""
+        if self._scan_target_type != "converted":
+            return list(SEMGREP_DEFAULT_IGNORES)
+        covering = _covering_default_ignores(target)
+        return [
+            pattern for pattern in SEMGREP_DEFAULT_IGNORES if pattern not in covering
+        ]
+
     def _default_excludes_passed(self) -> List[str]:
         """The ``DEFAULT_EXCLUDES`` the current target's command carries: those the
         configured ``exclude`` holds, less the converted-file pattern on the
-        converted target, which drops it (_extra_args_for_target). Read raw, not
-        through ``_configured_values``: this is asked once per excluded file, and
-        that reader warns about a blank entry each time it is asked."""
-        configured = {
-            str(value)
-            for value in getattr(getattr(self.config, "options", None), "exclude", None)
-            or []
-        }
+        converted target, which drops it (_extra_args_for_target)."""
+        configured = set(self._configured_exclude())
         return [
             pattern
             for pattern in DEFAULT_EXCLUDES
@@ -1071,6 +1082,16 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 pattern == CONVERTED_FILE_EXCLUDE
                 and self._scan_target_type == "converted"
             )
+        ]
+
+    def _operator_patterns(self) -> List[str]:
+        """The configured ``exclude`` values the operator wrote: the configured
+        values that are not the default value's (``DEFAULT_EXCLUDES``), which are
+        ASH's own wherever the value holds them."""
+        return [
+            pattern
+            for pattern in self._configured_exclude()
+            if pattern not in DEFAULT_EXCLUDES
         ]
 
     def _post_process_sarif(self, sarif_report, final_args: List[str], target: Path):
@@ -1134,18 +1155,23 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 ]
                 if not_ignored:
                     where = f"{self.command} scanned no file below {Path(target).as_posix()}"
-                    # The default value is ASH's own; only a pattern beyond it is
-                    # the operator's. The default configuration carries the two
-                    # default patterns, so a test on "any exclude configured"
-                    # blamed the operator on every default scan.
-                    operator_patterns = [
-                        pattern
-                        for pattern in self._configured_values(
-                            getattr(self.config, "options", None), "exclude"
+                    # The operator is blamed only for a file one of the operator's
+                    # own patterns can name (matched the way the tools match
+                    # --exclude: against the file's name and each directory of its
+                    # path below the project root). The default value is ASH's
+                    # own, so the default configuration has no operator pattern; a
+                    # test on "any exclude configured" blamed the operator on every
+                    # default scan, and one on "any operator pattern configured"
+                    # would blame a *.md pattern for a .py file it cannot match.
+                    operator_patterns = self._operator_patterns()
+                    blamed = [
+                        entry
+                        for entry in not_ignored
+                        if _matches_an_exclude_pattern(
+                            str(entry.get("path", "")), target, operator_patterns
                         )
-                        if pattern not in DEFAULT_EXCLUDES
                     ]
-                    if operator_patterns:
+                    if blamed:
                         raise ScannerError(
                             f"{where}: its --exclude patterns left out all "
                             f"{len(excluded)} files it found, so its result says "
@@ -1294,6 +1320,35 @@ def _pattern_anchor(target_abs: Path) -> Path:
         ),
         target_abs,
     )
+
+
+def _covering_default_ignores(target: Path) -> set:
+    """The directory entries of ``SEMGREP_DEFAULT_IGNORES`` that name one of the
+    target's own directories below the project root (``_parts_of_target_below_root``):
+    ``build/`` for a target under ``<repo>/build/ash``, say. The converted target's
+    command drops these (``_extra_args_for_target``), and its grading does not
+    credit them (``_left_out_by_ash``), the same set read in both places."""
+    below_root = _parts_of_target_below_root(target)
+    return {
+        pattern
+        for pattern in SEMGREP_DEFAULT_IGNORES
+        if pattern.endswith("/") and pattern[:-1] in below_root
+    }
+
+
+def _matches_an_exclude_pattern(path: str, target: Path, patterns: List[str]) -> bool:
+    """Whether one of ``patterns``, as the tools read an ``--exclude`` value, can
+    name the reported ``path``: a glob matched against the file's name and against
+    each directory of the path below the project root (a trailing ``/`` names a
+    directory), or against the whole reported path. Read permissively: a pattern
+    this says cannot match certainly did not leave the file out."""
+    parts = (*_parts_of_target_below_root(target), *_parts_below(path, target))
+    candidates = (*parts, Path(path).as_posix())
+    for pattern in patterns:
+        glob = pattern.rstrip("/") or pattern
+        if any(fnmatch.fnmatchcase(candidate, glob) for candidate in candidates):
+            return True
+    return False
 
 
 def _parts_of_target_below_root(target: Path) -> tuple[str, ...]:

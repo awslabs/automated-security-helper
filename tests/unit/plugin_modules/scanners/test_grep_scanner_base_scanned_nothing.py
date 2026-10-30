@@ -606,6 +606,92 @@ def test_on_the_converted_target_the_converted_file_pattern_is_the_operators(
     assert _grade(source, tmp_path, _excluded("notebook-converted.py")) == 0
 
 
+def test_an_operator_pattern_that_cannot_name_the_file_does_not_take_the_blame(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The operator wrote ``*.md``; the tool reports ``src/app.py`` as excluded by a
+    command-line pattern. No pattern of the operator's can name that file, so the
+    exclusion is one ASH does not recognize, and the refusal says so and names the
+    file instead of blaming the operator's patterns. A pattern that names a
+    directory of the path (``src/``) or the whole path is the operator's.
+
+    Fails at the base: every configured pattern took the blame, whatever it named.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.md"])
+    with pytest.raises(ScannerError) as refused:
+        _grade(scanner, tmp_path, _excluded("src/app.py"))
+    assert "does not recognize as its own" in str(refused.value), str(refused.value)
+    assert "src/app.py" in str(refused.value), str(refused.value)
+
+    for exclude in (["src/"], ["src"], ["src/app.py"], ["*.py"]):
+        named = _scanner(test_plugin_context, monkeypatch, exclude=exclude)
+        with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
+            _grade(named, tmp_path, _excluded("src/app.py"))
+
+
+@pytest.mark.parametrize("marker", ["directory", "file"])
+def test_a_converted_target_under_a_default_ignore_is_graded_by_the_operators_pattern(
+    test_plugin_context, monkeypatch, tmp_path, marker
+):
+    """``--output-dir build/ash`` inside a git work tree puts the converted target
+    at ``<repo>/build/ash/converted``. Its command drops ``--exclude build/``
+    (_extra_args_for_target), so a converted copy the tool excluded there was left
+    out by the operator's ``*.py``, and the scan is refused as the operator's
+    doing; the grading no longer credits the dropped ``build/`` default.
+
+    Fails at the base: every excluded file carried the ``build`` component, the
+    grading read it as the tools' default and graded the target SKIPPED with no
+    notebook scanned, for a pattern the command never carried.
+    """
+    scanner = _scanner(
+        test_plugin_context, monkeypatch, exclude=[*DEFAULT_EXCLUDES, "*.py"]
+    )
+    scanner._scan_target_type = "converted"
+    repo = tmp_path / "repo"
+    _git_marker(repo, marker)
+    target = repo / "build" / "ash" / "converted"
+    target.mkdir(parents=True)
+    paths_file = tmp_path / "paths.json"
+    paths_file.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "scanned": [],
+                    "skipped": _excluded((target / "notebook-converted.py").as_posix()),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    scanner.targets_attempted = None
+    with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
+        scanner._post_process_sarif(
+            _SARIF, [f"--json-output={paths_file.as_posix()}"], target
+        )
+
+    # The control: the source target keeps every default on its command, so a
+    # source tree under build/ excluded whole is the tools' own default, SKIPPED.
+    source = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
+    source_target = repo / "build" / "generated"
+    source_target.mkdir(parents=True)
+    paths_file.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "scanned": [],
+                    "skipped": _excluded((source_target / "app.py").as_posix()),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    source.targets_attempted = None
+    source._post_process_sarif(
+        _SARIF, [f"--json-output={paths_file.as_posix()}"], source_target
+    )
+    assert source.targets_attempted == 0
+
+
 def test_unread_files_beside_uncovered_ones_are_still_a_scanner_error(
     test_plugin_context, monkeypatch, tmp_path
 ):
