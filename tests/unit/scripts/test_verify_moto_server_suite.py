@@ -31,10 +31,20 @@ def _names(module: str, count: int, suffix: str = "") -> list[str]:
 
 
 def _healthy_names(moto) -> list[str]:
-    s3 = "test_deploy_s3_sync_moto_server"
-    names = _names(s3, 15, "[cdk-template]") + _names(s3, 15, "[terraform]")
-    names += _names("test_deploy_buildspec_ssm_moto_server", 11)
-    names += _names("test_deploy_mcp_entrypoint_secrets_moto_server", 8)
+    """One report comfortably above every floor the script declares.
+
+    Built from the script's own constants, so a floor that moves does not
+    silently turn this fixture into a shrunken suite.
+    """
+    names: list[str] = []
+    for module, floor in moto.REQUIRED_MODULES.items():
+        if module == moto.PARAMETRIZED_MODULE:
+            per_param = floor // len(moto.REQUIRED_PARAMS) + 5
+            for param in moto.REQUIRED_PARAMS:
+                names += _names(module, per_param, f"[{param}]")
+        else:
+            names += _names(module, floor + 3)
+    assert len(names) >= moto.MIN_TESTS, "the fixture must clear the overall floor"
     return names
 
 

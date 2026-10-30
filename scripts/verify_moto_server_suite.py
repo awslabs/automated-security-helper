@@ -16,13 +16,16 @@ right to exit 0 -- everything it collected passed. The problem is that "everythi
 it collected" is the quantity nobody is watching. So this gate asserts on the RUN
 rather than the status:
 
-  - a floor on how many tests executed, so a suite that shrank goes red
+  - a floor on how many tests the moto-server modules together executed
+    (``MIN_TESTS``; the rest of the directory does not count), so a suite that
+    shrank goes red even when unrelated modules keep the directory total up
   - zero skips, so the Windows-only guards in the suite cannot quietly widen and
     take the whole thing with them
-  - at least one test from each module, so losing a file is caught even if the
-    remaining one grew enough to clear the floor
-  - both parametrizations present, so the CDK copy silently ceasing to be
-    exercised is caught even though the Terraform copy would keep the count up
+  - a floor per module (``REQUIRED_MODULES``), so losing a file, or a file
+    shrinking to a handful of tests, is caught even if the others grew
+  - both parametrizations present in the S3 module, so the CDK copy silently
+    ceasing to be exercised is caught even though the Terraform copy would keep
+    the count up
 
 For completeness: a suite that collects NOTHING at all is the one case pytest does
 catch -- it exits 5. This gate reports it as "0 tests" and is red too, but that
