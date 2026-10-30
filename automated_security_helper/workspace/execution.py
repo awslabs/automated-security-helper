@@ -203,14 +203,15 @@ tooling.
 What is kept from such a worker is the set of secret values its findings
 exposed. Its reports were written before the abandon could be seen, and another
 project may pass one of those values on a command line, so once the pool has
-given the stop a bounded grace (``_ABANDONED_STOP_GRACE_POLLS``) a worker that
-came back puts its values into the workspace masking set and has its own reports
-masked with the other projects' values. A worker that has not come back is named
-on its project's error and in the log: its values are not in the set, and its
+given the stop a bounded grace (``_ABANDONED_STOP_GRACE_SECONDS``, measured on
+the clock from the abandon) a worker that came back puts its values into the
+workspace masking set and has its own reports masked with the other projects'
+values. A worker that has not come back is named on its project's error and in
+the log, with the grace it was given: its values are not in the set, and its
 output was not masked for the others' secrets.
 
 The residual exposure is process exit. The pool is shut down with ``wait=False``
-so the workspace reports immediately, but the interpreter's own exit handler
+so the workspace reports once that grace is spent, but the interpreter's own exit handler
 joins the abandoned thread, so a genuinely wedged project still delays the
 process from exiting. Two things bound it: scanners run as subprocesses with
 their own timeouts, so a hung *tool* is handled below this layer, and the
@@ -236,7 +237,7 @@ With events, a project abandoned at its ``project_timeout`` has its event set
 too, and the pool is waited for before the run goes on: the abandoned project
 stops as a cancelled one does instead of running on unseen, and the caller can
 hold what it reserved for the run until its scanners have stopped. Its worker
-is given ``_ABANDONED_STOP_GRACE_POLLS`` polls to come back before it counts
+is given ``_ABANDONED_STOP_GRACE_SECONDS`` to come back before it counts
 toward the bound in "An abandoned worker costs a pool slot permanently": a
 project still queued starts on it once the stop is done. Counted at once, it
 would fail every queued project as never started at a bound of one, the moment
@@ -414,24 +415,28 @@ from automated_security_helper.workspace.reporting import (
 #: that a timeout is reported promptly, large enough not to spin.
 _DEADLINE_POLL_SECONDS = 0.05
 
-#: How many polls (``_DEADLINE_POLL_SECONDS`` each: two seconds) an abandoned
+#: How long, in seconds from the abandon's own clock read, an abandoned
 #: project's worker is given to come back after its stop was requested. A stop
 #: reaches a scanner's child through the subprocess layer's terminate-then-kill
-#: well inside that, so a worker still busy after this many polls is between scope
+#: well inside that, so a worker still busy after this long is between scope
 #: checks and may not come back for the rest of its scan. Then its slot is counted
 #: lost for the projects still queued, and the secret values its findings exposed
 #: are declared missing from the workspace masking set rather than waited for
 #: without bound. Small against any ``project_timeout``, large against a stop.
-_ABANDONED_STOP_GRACE_POLLS = 40
+#: Measured on the clock and not in polls: a poll ends at every completion
+#: (``FIRST_COMPLETED``), so a grace counted in polls was spent in far less than
+#: the two seconds it named whenever other projects were finishing.
+_ABANDONED_STOP_GRACE_SECONDS = 2.0
 
-#: How many polls an abandoned worker WITHOUT a caller-given event is given
-#: before its slot is counted lost to the projects still queued. One: the pool
-#: does not wait for such a worker's stop, so the slot is written off almost at
-#: once, but never in the poll that abandoned it. Its pool-built event stops a
-#: scan that checks its scope within that poll, and the slot it frees then
-#: starts a queued project instead of that project being failed as never
-#: started in the same breath as the abandon.
-_REAPER_GRACE_POLLS = 1
+#: The grace for an abandoned worker WITHOUT a caller-given event before its
+#: slot is counted lost to the projects still queued: none, beyond never in the
+#: poll that abandoned it (the test below is strictly later than the abandon).
+#: The pool does not wait for such a worker's stop at shutdown, so the slot is
+#: written off at the next poll. Its pool-built event stops a scan that checks
+#: its scope within that poll, and the slot it frees then starts a queued
+#: project instead of that project being failed as never started in the same
+#: breath as the abandon.
+_REAPER_GRACE_SECONDS = 0.0
 
 #: The phase name that selects report generation, as ``run_ash_scan`` spells it.
 _REPORT_PHASE = "report"
@@ -2894,7 +2899,7 @@ def _run_projects(
     A project given up on at its ``project_timeout``, or because no worker is
     left to run it, has its effective event set, so it stops the way a
     cancelled scan stops, child processes included. With ``cancel_events``
-    its worker is given ``_ABANDONED_STOP_GRACE_POLLS`` polls to come back
+    its worker is given ``_ABANDONED_STOP_GRACE_SECONDS`` to come back
     before it counts among the workers lost to abandoned projects, which decide
     when a queued project is given up on (a scan that never checks its scope
     held its slot uncounted, and the queued projects waited on it without any
@@ -2992,22 +2997,22 @@ def _run_projects(
         }
         pending: Set[Future] = set(futures)
         timeout = settings.project_timeout
-        # The poll at which each abandoned project's worker was told to stop.
-        # Each such worker is a pool slot that does not come back until the
-        # project's scan next checks its scope. A project with a caller-given
-        # event is given _ABANDONED_STOP_GRACE_POLLS polls for its stop to free
-        # the slot before the slot is counted lost, because the pool waits for
-        # that stop at shutdown; a worker still busy after the grace is between
-        # scope checks and may never check again, and not counting it left the
-        # projects still queued waiting on it without any bound. Read from the
-        # futures each poll, not kept as a tally, so a worker whose project has
-        # since ended counts as free: a project still queued then starts on it
-        # instead of being failed as never started.
-        abandoned_at: Dict[Future, int] = {}
-        polls = 0
+        # The clock (time.monotonic) at which each abandoned project's worker was
+        # told to stop. Each such worker is a pool slot that does not come back
+        # until the project's scan next checks its scope. A project with a
+        # caller-given event is given _ABANDONED_STOP_GRACE_SECONDS for its stop
+        # to free the slot before the slot is counted lost, because the pool
+        # waits for that stop at shutdown; a worker still busy after the grace is
+        # between scope checks and may never check again, and not counting it
+        # left the projects still queued waiting on it without any bound. Read
+        # from the futures each poll, not kept as a tally, so a worker whose
+        # project has since ended counts as free: a project still queued then
+        # starts on it instead of being failed as never started. The same clock
+        # read feeds the bounded wait after the loop and the note a worker that
+        # never came back is given, so the grace they name is the one spent.
+        abandoned_at: Dict[Future, float] = {}
 
         while pending:
-            polls += 1
             done, pending = wait(
                 pending,
                 timeout=_DEADLINE_POLL_SECONDS if timeout else None,
@@ -3064,7 +3069,7 @@ def _run_projects(
                     )
                 )
                 abandoned_futures[future] = project
-                abandoned_at[future] = polls
+                abandoned_at[future] = now
                 if stoppable:
                     stoppable_futures.add(future)
                 _cancel(project)
@@ -3077,15 +3082,17 @@ def _run_projects(
                 )
                 pending.discard(future)
 
+            # Strictly later than the abandon's own clock read, so a worker is
+            # never counted held in the poll that abandoned it, whatever grace.
             held = [
                 future
                 for future, since in abandoned_at.items()
                 if not future.done()
-                and polls - since
-                >= (
-                    _ABANDONED_STOP_GRACE_POLLS
+                and now - since
+                > (
+                    _ABANDONED_STOP_GRACE_SECONDS
                     if future in stoppable_futures
-                    else _REAPER_GRACE_POLLS
+                    else _REAPER_GRACE_SECONDS
                 )
             ]
             if len(held) < bound:
@@ -3139,33 +3146,44 @@ def _run_projects(
                 continue
             break
 
-        # Every abandoned worker was told to stop. The ones with a caller-given
-        # event are waited for at shutdown below; give their stops a bounded
-        # grace first, so a worker that comes back inside it brings the secret
-        # values its project's findings exposed into the masking set. Bounded,
-        # never open: a worker still busy after it is between scope checks.
-        # Without caller-given events the workspace result does not wait for a
-        # stop at all (the shutdown below), so no grace is spent on those: a
-        # worker that has not come back by then is named as unmasked.
-        stopping = [future for future in stoppable_futures if not future.done()]
+        # Every abandoned worker was told to stop. Give the stops what is left of
+        # one bounded grace, measured from each abandon's own clock read, so a
+        # worker that comes back inside it brings the secret values its
+        # project's findings exposed into the masking set. Bounded, never open:
+        # a worker still busy after it is between scope checks. The wait is the
+        # same with or without caller-given events; what differs is the shutdown
+        # below. With events it then waits for every stop, so a worker that was
+        # still busy here is joined there all the same (the caller holds its
+        # limits until the stops are done). Without events the shutdown does not
+        # wait, so this grace is the only time such a worker is given to bring
+        # its values back; one that has not come back by then is named as
+        # unmasked, with the grace it was given.
+        stopping = [future for future in abandoned_futures if not future.done()]
         if stopping:
-            wait(stopping, timeout=_ABANDONED_STOP_GRACE_POLLS * _DEADLINE_POLL_SECONDS)
+            now = time.monotonic()
+            remaining = max(
+                _ABANDONED_STOP_GRACE_SECONDS - (now - abandoned_at[future])
+                for future in stopping
+            )
+            if remaining > 0:
+                wait(stopping, timeout=remaining)
     finally:
         # Without caller-given events, wait=False: an abandoned worker is told
         # to stop through its pool-built event, but its scan may not check its
-        # scope for a while, and waiting would delay the workspace result; the
-        # interpreter still joins it at exit (see the module docstring). With
-        # them every worker was told to stop, and the caller holds its limits
-        # until the stops are done.
+        # scope for a while, and waiting past the grace above would delay the
+        # workspace result; the interpreter still joins it at exit (see the
+        # module docstring). With them every worker was told to stop, and the
+        # caller holds its limits until the stops are done.
         pool.shutdown(wait=cancel_events is not None)
 
-    _read_back_abandoned_workers(abandoned_futures, collected)
+    _read_back_abandoned_workers(abandoned_futures, collected, abandoned_at)
     return collected
 
 
 def _read_back_abandoned_workers(
     abandoned_futures: Mapping[Future, ProjectPlan],
     collected: Dict[str, _ProjectRun],
+    abandoned_at: Mapping[Future, float],
 ) -> None:
     """Carry what an abandoned worker brought back onto its recorded outcome.
 
@@ -3177,12 +3195,12 @@ def _read_back_abandoned_workers(
     leaves alone for every project. A worker that has not come back (its scan is
     between scope checks, and the pool did not wait for it) is named on the
     project's error, which the unified results and the workspace reports show,
-    and in the log: the values its findings exposed are not in the masking set
-    and its own output was not masked for the other projects' secrets. Loud,
-    because a report that silently kept a value in clear is what the masking
-    exists to prevent.
+    and in the log, with the time it was given, read from *abandoned_at*'s clock:
+    the values its findings exposed are not in the masking set and its own output
+    was not masked for the other projects' secrets. Loud, because a report that
+    silently kept a value in clear is what the masking exists to prevent.
     """
-    grace = _ABANDONED_STOP_GRACE_POLLS * _DEADLINE_POLL_SECONDS
+    now = time.monotonic()
     for future, project in abandoned_futures.items():
         recorded = collected.get(project.key)
         if recorded is None:
@@ -3195,8 +3213,12 @@ def _read_back_abandoned_workers(
             recorded.secret_values = set(late.secret_values)
             recorded.output_written = late.output_written
             continue
+        # The grace this worker was in fact given, not the one configured: the
+        # note used to say "2s" whatever had elapsed, which on the path without
+        # caller-given events was often milliseconds.
+        given = now - abandoned_at.get(future, now)
         note = (
-            f"its scan had not stopped {grace:g}s after it was abandoned, so the "
+            f"its scan had not stopped {given:.1f}s after it was abandoned, so the "
             "secret values its findings exposed did not reach the workspace masking "
             "set and its own output was not masked for the other projects' secrets"
         )

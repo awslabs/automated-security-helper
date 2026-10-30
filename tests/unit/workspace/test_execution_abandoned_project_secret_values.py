@@ -43,6 +43,7 @@ of starting a project at all.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 
 import pytest
@@ -50,6 +51,7 @@ import pytest
 from automated_security_helper.core.cancellation import CancelEvent
 from automated_security_helper.models.workspace import ProjectRunStatus
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.workspace import execution
 from automated_security_helper.workspace.execution import execute_workspace
 from tests.unit.workspace.test_execution import (
     PROJECT_TIMEOUT,
@@ -164,7 +166,7 @@ def test_a_worker_that_does_not_come_back_is_named_as_unmasked(tmp_path, caplog)
 
     ``wedged`` blocks on a plain event this test releases only after the
     workspace has returned, so the worker has not come back whatever the host's
-    speed; without a caller-given event no grace is spent on it.
+    speed; without a caller-given event the one bounded grace is all it gets.
     """
     caplog.set_level(logging.ERROR, logger=ASH_LOGGER.name)
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"), ("quick", "MEDIUM"))
@@ -192,6 +194,14 @@ def test_a_worker_that_does_not_come_back_is_named_as_unmasked(tmp_path, caplog)
     assert entry.error.startswith("timed out"), entry.error
     assert "did not reach the workspace masking set" in entry.error, entry.error
     assert "did not reach the workspace masking set" in caplog.text, caplog.text
+    # The note names the grace the worker was in fact given, read from the
+    # abandon's clock: at least the bounded wait the pool spent on it, never the
+    # fixed "2s" it used to print whatever had elapsed.
+    given = re.search(r"had not stopped (\d+\.\d)s after it was abandoned", entry.error)
+    assert given is not None, entry.error
+    assert float(given.group(1)) >= execution._ABANDONED_STOP_GRACE_SECONDS - 0.1, (
+        entry.error
+    )
 
 
 def test_a_worker_that_comes_back_is_not_named_as_unmasked(tmp_path):

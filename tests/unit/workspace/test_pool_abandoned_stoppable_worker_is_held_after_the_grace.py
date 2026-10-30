@@ -7,9 +7,10 @@ its stop at shutdown and the worker is about to be free. A scan that never
 checks its scope is not about to be free: it held its slot for the rest of its
 run, the queued projects were never failed as never started, and the run was
 bounded by neither ``project_timeout`` nor the server's scan timeout. Such a
-worker now counts as held once ``_ABANDONED_STOP_GRACE_POLLS`` polls have passed
-since its stop was requested; one that comes back inside the grace frees its
-slot as before.
+worker now counts as held once ``_ABANDONED_STOP_GRACE_SECONDS`` have passed on
+the clock since its stop was requested (the grace was counted in polls, and a
+poll ends at every completion, so it was spent early whenever other projects
+finished); one that comes back inside the grace frees its slot as before.
 """
 
 import threading
@@ -30,9 +31,9 @@ from tests.unit.workspace.test_pool_projects_chain_to_the_scan_wide_cancel impor
 
 pytestmark = pytest.mark.unit
 
-#: Polls of grace for these cases: short enough that a red run ends, long enough
-#: that a worker released inside it is seen to come back.
-GRACE_POLLS = 4
+#: Seconds of grace for these cases: short enough that a red run ends, long
+#: enough that a worker released inside it is seen to come back.
+GRACE_SECONDS = 0.2
 
 
 def _project(tmp_path, key):
@@ -90,10 +91,8 @@ def test_a_stoppable_worker_that_never_stops_is_counted_held_after_the_grace(
     passed; the pool still waits for ``wedged`` at shutdown, as the caller's
     event asks.
     """
-    # raising=False: at a base without the constant the case still measures the
-    # behaviour (the queued project never given up on) rather than the attribute.
     monkeypatch.setattr(
-        execution_module, "_ABANDONED_STOP_GRACE_POLLS", GRACE_POLLS, raising=False
+        execution_module, "_ABANDONED_STOP_GRACE_SECONDS", GRACE_SECONDS
     )
     release = threading.Event()
     scan = _AScanThatIgnoresItsScope(release)
@@ -128,7 +127,7 @@ def test_a_stoppable_worker_that_stops_inside_the_grace_frees_its_slot(
     """Must-not-flag control: a scan that honours its scope comes back at once,
     and the queued project runs on its slot instead of being failed."""
     monkeypatch.setattr(
-        execution_module, "_ABANDONED_STOP_GRACE_POLLS", GRACE_POLLS, raising=False
+        execution_module, "_ABANDONED_STOP_GRACE_SECONDS", GRACE_SECONDS
     )
     scan = _AScanThatWaitsForItsCancel()
     release = threading.Event()
