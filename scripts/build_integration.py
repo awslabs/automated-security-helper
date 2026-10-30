@@ -63,6 +63,15 @@ class BuildIntegrator:
             print(f"Error generating documentation from templates: {e}")
             return False
 
+        # The manager keeps going past a template it could not render and lists
+        # it in ``failures``; a pre-build that printed the generated count over
+        # such a list reported success for a partial generation.
+        failures = self.template_manager.failures
+        if failures:
+            names = ", ".join(str(path) for path in failures)
+            print(f"Error: {len(failures)} template(s) were not generated: {names}")
+            return False
+
         # generate_all_from_templates reports a template it could not render by
         # leaving it out of the count, not by raising, so a count below the number
         # of templates found is a failed build step and not a success.

@@ -6,7 +6,8 @@
 * every action reads the version of the ``--project-root`` tree, not of the
   checkout the version module was imported from;
 * a template that failed to generate fails the pre-build step instead of being
-  counted out of a success;
+  counted out of a success, whether the count or the manager's failures list
+  says so;
 * ``validate`` refuses a root whose version is unknown, as ``pre-build`` does;
 * ``run_command`` returns False for a binary that cannot be started.
 """
@@ -40,9 +41,10 @@ def _project_root(tmp_path: Path, name: str = "automated-security-helper") -> Pa
 
 
 class _FakeTemplateManager:
-    def __init__(self, templates: int, generated: int):
+    def __init__(self, templates: int, generated: int, failures=()):
         self._templates = [Path(f"doc{i}.md.template") for i in range(templates)]
         self._generated = generated
+        self.failures = list(failures)
 
     def list_templates(self):
         return list(self._templates)
@@ -73,6 +75,20 @@ class TestPreBuild:
         integrator = build_integration.BuildIntegrator(_project_root(tmp_path))
         integrator.template_manager = _FakeTemplateManager(templates=3, generated=3)
         assert integrator.pre_build_check() is True
+
+    def test_a_template_the_manager_lists_as_failed_fails_the_step(
+        self, build_integration, tmp_path, capsys
+    ):
+        """At the base the manager's failures list was never read, so a count that
+        happened to match still printed success over a partial generation."""
+        integrator = build_integration.BuildIntegrator(_project_root(tmp_path))
+        integrator.template_manager = _FakeTemplateManager(
+            templates=3, generated=3, failures=[Path("docs/guide.md.template")]
+        )
+        assert integrator.pre_build_check() is False
+        out = capsys.readouterr().out
+        assert "1 template(s) were not generated: docs/guide.md.template" in out
+        assert "completed successfully" not in out
 
 
 class TestValidate:
