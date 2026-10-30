@@ -174,11 +174,15 @@ class TestAnUnstatableEntryDoesNotAbortTheScan:
         denied = mock_plugin_context.source_dir / "denied-target"
         denied.write_text("x")
         original_is_file = Path.is_file
+        refusals = {"count": 0}
 
-        def is_file_or_denied(self: Path) -> bool:
+        # The stub keeps Path.is_file's signature (follow_symlinks on 3.12+), so
+        # a caller passing it reaches the stub instead of a TypeError.
+        def is_file_or_denied(self: Path, *args, **kwargs) -> bool:
             if self.name == "denied-target":
+                refusals["count"] += 1
                 raise PermissionError(13, "Permission denied", str(self))
-            return original_is_file(self)
+            return original_is_file(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "is_file", is_file_or_denied)
 
@@ -187,6 +191,9 @@ class TestAnUnstatableEntryDoesNotAbortTheScan:
             aggregated_results=AshAggregatedResults(), parallel=False
         )
 
+        # The walk reached the refused entry: otherwise the assertions below hold
+        # for a walk that never stat'ed it, and the test measures nothing.
+        assert refusals["count"] >= 1, "the source walk never stat'ed denied-target"
         assert isinstance(results, AshAggregatedResults)
         cached = mock_plugin_context.cached_source_files
         assert str(mock_plugin_context.source_dir / "app.py") in cached
@@ -296,4 +303,7 @@ class TestALostBuiltinPackageIsLoud:
         # roster (no class from the built-in package was handed to the phase).
         row = results.scanner_results[_BUILTIN_PLUGIN_MODULE_PREFIX]
         assert row.status == ScannerStatus.ERROR
-        assert results.metadata.expected_scanners
+        # The roster is the config's declared scanners under the names their rows
+        # carry (the field alias, "detect-secrets"), not just any non-empty list.
+        assert "bandit" in results.metadata.expected_scanners
+        assert "detect-secrets" in results.metadata.expected_scanners

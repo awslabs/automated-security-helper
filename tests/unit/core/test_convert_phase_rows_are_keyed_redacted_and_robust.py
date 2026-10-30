@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, List, Literal
+from typing import Any, ClassVar, List, Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -236,11 +236,16 @@ class TestFailureTextsCarryNoEnvironmentValue:
     ):
         plugin_context.config._environment_values = [ENV_VALUE]
 
-        with caplog.at_level(logging.ERROR):
+        # Captured at DEBUG: the traceback goes out at that level, and a capture
+        # at ERROR would never see it, so "the value is not in the log" would
+        # hold with the value in the traceback line.
+        with caplog.at_level(logging.DEBUG):
             results, _ = _run(plugin_context, [_UnconstructableQuotingAValue])
 
         row = results.converter_results["_UnconstructableQuotingAValue"]
         assert row.failure and "ValueError" in row.failure
+        # The capture saw the failure line: an empty capture proves nothing.
+        assert "Error creating converter" in caplog.text
         # Red at the base: the value was recorded and logged as written.
         assert ENV_VALUE not in row.failure
         assert ENV_VALUE not in caplog.text
@@ -248,11 +253,17 @@ class TestFailureTextsCarryNoEnvironmentValue:
     def test_a_convert_failure_is_redacted_with_the_converters_values(
         self, plugin_context, caplog
     ):
-        with caplog.at_level(logging.ERROR):
+        with caplog.at_level(logging.DEBUG):
             results, progress = _run(plugin_context, [_LeakyConverter])
 
         row = results.converter_results["leaky-converter"]
         assert row.failure and "RuntimeError" in row.failure
+        # The capture saw the error line, the debug traceback line and the
+        # progress row that quotes the failure: each is a place the value had
+        # been written, and an empty capture or an empty row list proves nothing.
+        assert "Error in converter" in caplog.text
+        assert "Converter exception traceback" in caplog.text
+        assert any("Failed:" in text for text in _descriptions(progress))
         # Red at the base: results row, log line and progress row all quoted it.
         assert ENV_VALUE not in row.failure
         assert ENV_VALUE not in caplog.text
@@ -268,7 +279,9 @@ class _DisabledCountingConfig(ConverterPluginConfigBase):
 
 
 class _DisabledCountingConverter(ConverterPluginBase[_DisabledCountingConfig]):
-    dependency_checks: int = 0
+    # A class-level counter, not a model field: the tests reset and read it on
+    # the class, and the check below counts on the class.
+    dependency_checks: ClassVar[int] = 0
 
     def model_post_init(self, context):
         if self.config is None:
@@ -343,7 +356,7 @@ class _FlakyConfig(ConverterPluginConfigBase):
 
 
 class _FlakyDependencyConverter(ConverterPluginBase[_FlakyConfig]):
-    checks: int = 0
+    checks: ClassVar[int] = 0
 
     def model_post_init(self, context):
         if self.config is None:
