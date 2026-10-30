@@ -120,6 +120,13 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         return self
 
     def model_post_init(self, context):
+        # pydantic runs model_post_init inside the model's own schema, before an
+        # after-validator such as setup_paths, so the context is checked here too:
+        # without it a converter built with none raised AttributeError on the
+        # work directory below, and the ScannerError the validator names was
+        # never reached.
+        if self.context is None:
+            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
         if self.config is None:
             self.config = self._default_config()
         self.results_dir = self.context.work_dir.joinpath(
@@ -170,8 +177,25 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     def validate_plugin_dependencies(self) -> bool:
         """Validate converter configuration and requirements.
 
-        Defaults to returning True as most converter plugins are entirely Python based."""
-        return True
+        Most converter plugins are entirely Python based, so the default answers
+        from the converter's own ``dependencies_satisfied``: True unless the
+        converter declared otherwise. ``ConvertPhase`` assigns the answer back to
+        that field, so a fixed True here overwrote a converter's own False, and
+        its ``dependency_unavailable_reason`` named a missing tool the phase
+        then ran the converter without.
+        """
+        if not self.dependencies_satisfied:
+            ASH_LOGGER.debug(
+                f"{self.__class__.__name__}: its dependencies are recorded as "
+                "not satisfied"
+                + (
+                    f": {self.dependency_unavailable_reason}"
+                    if self.dependency_unavailable_reason
+                    else ""
+                ),
+                extra=NO_MARKUP,
+            )
+        return bool(self.dependencies_satisfied)
 
     def open_source_file(self, path: Path | str) -> BinaryIO:
         """Open a file from the scan set for reading, under the scanned-tree rule.
@@ -203,8 +227,12 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         model can hold. So the warning is shown here, once, with
         utils/terminal_text.py's shown_on_one_line, which writes a surrogate as its
         escape (``\\udce9``). Each field of the record is the text as given, with
-        only its lone surrogates written as escapes (utils/undecodable_text.py):
-        whatever prints the record shows it for its own sink.
+        only its lone surrogates written as escapes (utils/undecodable_text.py),
+        and then as the record model keeps it: ``RefusedInputInfo`` and
+        ``FailedInputInfo`` strip leading and trailing whitespace from every
+        string field (``str_strip_whitespace``), so a name that ends in a space
+        is recorded without it, while the warning shown here keeps it. Whatever
+        prints the record shows it for its own sink.
 
         Args:
             refusal: What :meth:`open_source_file` raised, or an equivalent built for
