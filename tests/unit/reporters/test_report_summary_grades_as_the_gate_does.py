@@ -241,6 +241,40 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         assert summary["title"] == "No actionable findings", summary
         assert summary["tone"] == "success", summary
 
+    def test_a_coverage_gaps_tone_follows_the_recount_when_a_project_gate_is_stricter(
+        self, tmp_path
+    ):
+        """The same project, with a coverage gap: the gap is a warning, not a danger.
+
+        The gap's tone read the rows' FAILED status directly, so a project gated
+        at HIGH with one MEDIUM finding and a partial scanner read "Scan
+        incomplete" in the danger tone over "0 actionable findings". The tone
+        follows the recount, as the title does.
+        """
+        model = _one_medium_finding_model("svc")
+        model.workspace = _workspace(
+            tmp_path, _project("svc", severity_threshold="HIGH")
+        )
+        model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
+        model.additional_reports["bandit"] = {
+            "source": {
+                "scanner_name": "bandit",
+                "status": "PASSED",
+                "duration": 1.0,
+                "targets_attempted": 4,
+                "targets_failed": 2,
+            }
+        }
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        rows = emitter.get_scanner_results()
+        assert any(row["status"] == "FAILED" for row in rows), rows
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["actionable"] == 0
+        assert summary["title"] == "Scan incomplete", summary
+        assert summary["tone"] == "warning", summary
+
     def test_the_same_finding_in_a_single_directory_scan_needs_review(self):
         """The control: with no workspace the default gate grades it, and the
         title says so."""

@@ -416,12 +416,10 @@ class ReportContentEmitter:
         finding_label = "finding" if actionable == 1 else "findings"
         # A coverage gap is a warning, but not when findings at the gate are also
         # on the page: the run fails on them, and a warning tone read as the
-        # lesser of the two.
-        gap_tone = (
-            "danger"
-            if actionable or any(result["status"] == "FAILED" for result in results)
-            else "warning"
-        )
+        # lesser of the two. The gate is read as the title reads it (the
+        # recount, and the rows' FAILED status only outside a workspace), so a
+        # project gated above ASH's default does not turn its gap into a danger.
+        gap_tone = "danger" if actionable or rows_failed else "warning"
 
         if not completed:
             title, tone = "No scanners completed", "warning"
