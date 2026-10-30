@@ -29,7 +29,8 @@ Each test here pins one reading that went wrong before:
 - ``trivy_timeout`` raised on a bound that is not a finite number.
 - the offline cache check judged only ``TRIVY_CACHE_DIR`` and warned about every
   offline scan whose default cache held a database; then it warned about a
-  database a scan without ``vuln`` never opens.
+  database a scan without ``vuln`` never opens; then it took any existing default
+  cache directory for one holding a database.
 - before the first scan the operator's config file was not read, so the offline
   dependency check judged trivy's default scanners for a scan whose
   ``scan.scanners`` sends it elsewhere.
@@ -692,7 +693,8 @@ def test_control_offline_with_a_default_cache_present_nothing_is_said(
 ):
     scanner = _repo_scanner(tmp_path, offline=True)
     present = tmp_path / "cache" / "trivy"
-    present.mkdir(parents=True)
+    (present / "db").mkdir(parents=True)
+    (present / "db" / "trivy.db").write_bytes(b"")
     monkeypatch.setattr(TrivyRepoScanner, "_trivy_cache_dir", lambda self: present)
     messages, logging_patch = _logged(scanner)
 
@@ -700,6 +702,25 @@ def test_control_offline_with_a_default_cache_present_nothing_is_said(
         scanner._check_offline_cache()
 
     assert messages == []
+
+
+def test_offline_a_default_cache_without_a_database_is_warned_about(
+    tmp_path, monkeypatch
+):
+    """An existing directory was taken as a cache with a database: a fresh XDG
+    directory, or a cache another tool made, passed in silence."""
+    scanner = _repo_scanner(tmp_path, offline=True)
+    empty = tmp_path / "cache" / "trivy"
+    empty.mkdir(parents=True)
+    monkeypatch.setattr(TrivyRepoScanner, "_trivy_cache_dir", lambda self: empty)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._check_offline_cache()
+
+    (warning,) = messages
+    assert empty.as_posix() in warning
+    assert "db/trivy.db" in warning
 
 
 def test_offline_with_trivy_cache_dir_set_the_validator_judges_that_directory(

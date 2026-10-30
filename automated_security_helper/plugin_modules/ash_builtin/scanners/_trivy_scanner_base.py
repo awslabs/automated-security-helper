@@ -1724,9 +1724,12 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         offline scan, including one whose default cache (``_trivy_cache_dir``, the
         XDG or platform directory) holds a current database. The validator runs
         only when the variable is set, where it reads the right directory; otherwise
-        the resolved default cache is checked for existence here, with the directory
-        named. The authoritative checks stay the dependency probe
-        (``validate_plugin_dependencies``) and the post-scan staleness check.
+        the resolved default cache is checked here, with the directory named, for
+        its existence and for the database file trivy reads from it
+        (``db/trivy.db``): a cache directory that exists but holds no database (a
+        fresh XDG directory, a cache another tool made) gave trivy nothing to read
+        and was passed in silence. The authoritative checks stay the dependency
+        probe (``validate_plugin_dependencies``) and the post-scan staleness check.
 
         Nothing is said for a scan whose scanners never open the vulnerability
         database (``_reads_vulnerability_db``): a missing database is no finding
@@ -1751,6 +1754,14 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 "not exist, so trivy has no vulnerability database to read. Download "
                 "one with network access, or set TRIVY_CACHE_DIR to a cache that "
                 "holds one.",
+                level=logging.WARNING,
+            )
+        elif not (cache / "db" / "trivy.db").is_file():
+            self._plugin_log(
+                f"Trivy offline mode: the cache directory {cache.as_posix()} holds "
+                "no vulnerability database (db/trivy.db), so trivy has none to read. "
+                "Download one with network access, or set TRIVY_CACHE_DIR to a cache "
+                "that holds one.",
                 level=logging.WARNING,
             )
 
