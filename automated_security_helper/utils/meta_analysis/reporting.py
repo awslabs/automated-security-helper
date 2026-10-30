@@ -67,10 +67,14 @@ def _jq_steps(steps: List[PathStep]) -> str:
 
 def _jq_condition(steps: List[PathStep]) -> str:
     """Whether the value at *steps* is set, with each array along the way read
-    as ``any(.array[]; ...)`` so the test is one boolean, not a generator."""
+    as ``any(.array[]; ...)`` so the test is one boolean, not a generator.
+
+    A path that ends in an array tests the elements themselves: ``tags[]``
+    reads as ``any(.tags[]; . != null)``. Without the ``.`` the condition was
+    the empty path, `` != null``, which jq refuses to compile."""
     arrays = [index for index, (kind, _) in enumerate(steps) if kind == "any"]
     if not arrays:
-        return f"{_jq_steps(steps)} != null"
+        return f"{_jq_steps(steps) or '.'} != null"
     first = arrays[0]
     head = _jq_steps(steps[: first + 1])
     return f"any({head}; {_jq_condition(steps[first + 1 :])})"
