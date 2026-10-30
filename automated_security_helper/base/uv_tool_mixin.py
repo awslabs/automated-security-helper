@@ -642,6 +642,12 @@ class UVToolMixin:
             )
             return None
         record_values: Tuple[str, ...] = read.values
+        # The plugin's inputs for the records are read inside the try, after
+        # the runner is in hand; the error arms below redact with them too, so
+        # a failure before that read (the runner's import, its lookup, the
+        # availability probe) must find a bound name: nothing has been built
+        # from those inputs by then, so there is nothing of them to hide.
+        record_inputs: Tuple[str, ...] = ()
         try:
             # Whether a stderr log already sits where this run would write its
             # own, for the offline explainer: a leftover from an earlier run in
