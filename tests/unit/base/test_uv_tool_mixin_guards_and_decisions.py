@@ -700,6 +700,40 @@ class TestTheStoredInstallCommand:
         plugin._setup_uv_tool_install_commands()
         assert plugin.uv_tool_install_commands == ["uv tool install bandit[sarif]>=1.7"]
 
+    def test_a_two_sided_constraint_keeps_its_spelling(self):
+        """A part with no whitespace is stored as the plugin wrote it.
+
+        ``packaging`` sorts specifiers and extras when it prints a requirement,
+        so canonicalizing every part stored the documented
+        ``bandit[sarif,toml]>=1.7.0,<2.0.0`` as ``bandit[sarif,toml]<2.0.0,>=1.7.0``;
+        the one-specifier control above could not see that.
+        """
+        plugin = FakePlugin(constraint=">=1.7.0,<2.0.0", extras=["sarif", "toml"])
+        plugin._setup_uv_tool_install_commands()
+        assert plugin.uv_tool_install_commands == [
+            "uv tool install bandit[sarif,toml]>=1.7.0,<2.0.0"
+        ]
+
+    def test_the_debug_line_hides_a_short_pin_in_a_two_specifier_constraint(self):
+        """The control for the record: a value too short for the plain layer,
+        pinned inside a two-specifier constraint, is hidden by the uv layer in
+        every spelling the stored command can carry. The layer hides a
+        plugin-built input piece by piece (each specifier is its own
+        spelling), so the order the parts are stored in does not decide it.
+        """
+        plugin = FakePlugin(values=("9.9",), constraint="==9.9,!=9.9.1")
+        plugin._setup_uv_tool_install_commands()
+        assert plugin.uv_tool_install_commands == [
+            "uv tool install bandit==9.9,!=9.9.1"
+        ]
+        (line,) = [
+            line
+            for line in plugin.logged()
+            if line.startswith("Set up UV tool install command")
+        ]
+        assert "9.9" not in line, line
+        assert "bandit" in line, line
+
     def test_the_with_dependencies_hook_is_read_once(self):
         """One read serves the checks, the spec builder and the stored command.
 

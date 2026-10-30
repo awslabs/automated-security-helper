@@ -255,9 +255,19 @@ def _uv_available(runner: Any) -> Tuple[bool, Optional[str]]:
 
 
 def _without_whitespace(requirement: str) -> str:
-    """``requirement`` in the canonical spelling ``packaging`` prints, which holds
-    no whitespace; the string as given when it is not a requirement at all (the
-    caller's check decides what to do with that)."""
+    """``requirement`` as given when it holds no whitespace; otherwise in the
+    canonical spelling ``packaging`` prints, which holds none; the string as
+    given when it is not a requirement at all (the caller's check decides what
+    to do with that).
+
+    Only a part that holds whitespace is respelled: ``packaging`` sorts a
+    requirement's specifiers and extras when it prints one, so canonicalizing
+    every part would store ``bandit[sarif,toml]>=1.7.0,<2.0.0`` (the spelling
+    the plugin wrote and its documentation shows) as
+    ``bandit[sarif,toml]<2.0.0,>=1.7.0``.
+    """
+    if not any(character.isspace() for character in requirement):
+        return requirement
     from packaging.requirements import InvalidRequirement, Requirement
 
     try:
