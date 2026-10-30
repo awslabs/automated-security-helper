@@ -561,7 +561,13 @@ sarif:
     - '
 
       '
-    originalUriBaseIds: null
+    originalUriBaseIds:
+      ROOTPATH:
+        description: null
+        index: -1
+        properties: null
+        uri: file:///src/
+        uriBaseId: null
     policies: []
     properties:
       tags: []
