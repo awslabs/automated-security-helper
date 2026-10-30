@@ -91,6 +91,26 @@ def test_the_tail_does_not_start_inside_a_backslash_run():
     assert tail.startswith("\\\\\\\\x41"), tail
 
 
+def test_the_head_does_not_end_inside_a_long_backslash_run():
+    # limit 80: the head would end at index 20, inside a run of 40 backslashes
+    # written over 1-40. The window the cut looks at opens 11 back, inside the run;
+    # the cut must move to the run's start, index 1, not to where the window opened.
+    text = "x" + "\\" * 40 + "y" * 100
+    excerpt = head_and_tail(text, 80)
+    head, _, _ = excerpt.partition(" ...[")
+    assert head == "x", head
+
+
+def test_the_tail_does_not_start_inside_a_long_backslash_run():
+    # limit 60: the tail would start at index 95, inside a run of 40 backslashes
+    # written over 80-119; it must start with the whole run.
+    text = "y" * 80 + "\\" * 40 + "z" * 20
+    assert len(text) == 140
+    excerpt = head_and_tail(text, 60)
+    _, _, tail = excerpt.partition("]... ")
+    assert tail == "\\" * 40 + "z" * 20, tail
+
+
 def test_a_cut_between_plain_characters_is_where_it_was():
     text = "abcdefghij" * 30
     excerpt = head_and_tail(text, 100)

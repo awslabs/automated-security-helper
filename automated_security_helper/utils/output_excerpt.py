@@ -42,6 +42,11 @@ def _cut_outside_escapes(text: str, index: int) -> int:
     it would otherwise fall inside of; unchanged when it falls between two
     characters that belong to no escape."""
     start = max(0, index - 11)
+    # The window can open inside a long backslash run, and a match found from
+    # there starts mid-run: the cut moved back to it left the run's other half on
+    # the other side. The window opens at the start of the run it fell in.
+    while start > 0 and text[start - 1] == "\\":
+        start -= 1
     for match in _ESCAPE_TEXT.finditer(text, start, min(len(text), index + 11)):
         if match.start() < index < match.end():
             return match.start()
