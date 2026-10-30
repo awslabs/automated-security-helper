@@ -129,3 +129,33 @@ def test_the_hint_keeps_the_working_directory_off_the_import_path():
 def test_the_hint_omits_a_flag_this_interpreter_does_not_accept():
     words = ash_install._uv_pip_install().split()
     assert words[1:3] == ["-m", "uv"], words
+
+
+class TestARecordedDirectoryOfTheProject:
+    """A record naming a directory INSIDE the project that encloses the module
+    (the percent-encoded fixture of the cdk container-deps tests names the
+    package's own utils directory) is the project's; an ancestor above the
+    project is another project's."""
+
+    MODULE = Path("/work/ash/src/automated_security_helper/utils/ash_install.py")
+    ACCEPTED = {Path("/work/ash/src"), Path("/work/ash")}
+
+    def test_a_directory_below_the_root_that_encloses_the_module_is_accepted(self):
+        inside = Path("/work/ash/src/automated_security_helper/utils")
+        assert ash_install._declares_this_module(inside, self.MODULE, self.ACCEPTED)
+
+    def test_the_install_roots_are_accepted(self):
+        for root in self.ACCEPTED:
+            assert ash_install._declares_this_module(root, self.MODULE, self.ACCEPTED)
+
+    def test_an_ancestor_above_the_project_is_refused(self):
+        """The control: the enclosing monorepo is still another project."""
+        for above in (Path("/work"), Path("/")):
+            assert not ash_install._declares_this_module(
+                above, self.MODULE, self.ACCEPTED
+            )
+
+    def test_a_directory_that_does_not_enclose_the_module_is_refused(self):
+        assert not ash_install._declares_this_module(
+            Path("/work/ash/src/other_package"), self.MODULE, self.ACCEPTED
+        )

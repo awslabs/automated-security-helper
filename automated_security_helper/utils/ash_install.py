@@ -238,13 +238,12 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
             project_dir = project_dir.resolve()
         except (OSError, ValueError):
             continue
-        # Only the directory a project providing this package is installed
-        # from, not any ancestor of this module: an editable project that
-        # merely ENCLOSES an ASH checkout (a monorepo, a workspace directory)
-        # records a file:// URL that is an ancestor too, and was taken for ASH
-        # (its reinstall source, its own "cdk" extra installed into ASH's
-        # environment).
-        if project_dir in accepted:
+        # A directory OF the project providing this package, never an ancestor
+        # above it: an editable project that merely ENCLOSES an ASH checkout (a
+        # monorepo, a workspace directory) records a file:// URL that is an
+        # ancestor too, and was taken for ASH (its reinstall source, its own
+        # "cdk" extra installed into ASH's environment).
+        if _declares_this_module(project_dir, here, accepted):
             if name not in located:
                 located.append(name)
 
@@ -278,6 +277,20 @@ def _project_directories_of(module_file: Path, root_package: str) -> set:
     if project_dir.name == "src" and project_dir.parent != project_dir:
         accepted.add(project_dir.parent)
     return accepted
+
+
+def _declares_this_module(project_dir: Path, module_file: Path, accepted: set) -> bool:
+    """Whether a recorded install directory belongs to the project providing
+    ``module_file``: one of the project's install directories (``accepted``,
+    from :func:`_project_directories_of`), or a directory INSIDE the project
+    that encloses the module (a record naming the package directory or one
+    below it). A directory above the project is another project's, however
+    many of this module's ancestors it is."""
+    if project_dir in accepted:
+        return True
+    if project_dir not in module_file.parents:
+        return False
+    return any(root == project_dir or root in project_dir.parents for root in accepted)
 
 
 def _extra_marker(extra: str) -> "re.Pattern[str]":
