@@ -21868,7 +21868,7 @@
       "type": "object"
     },
     "SkippedProjectReason": {
-      "description": "Why a project in the workspace was not scanned.\n\nThe distinction is load-bearing: ``NO_CHANGES`` is a successful\noptimisation, ``ERROR`` is a project the operator asked for that did not\nrun. Only the latter should affect the exit status.",
+      "description": "Why a project in the workspace was not scanned.\n\nThe distinction is load-bearing: ``NO_CHANGES`` is a successful\noptimisation, ``ERROR`` is a project the operator asked for that did not\nrun and that ``--allow-missing-projects`` tolerated. Neither colours the\nexit status; see \"A tolerated skip never colours the status\" in the module\ndocstring for what decides when nothing was attempted.",
       "enum": [
         "no-changes",
         "error"
@@ -26220,7 +26220,7 @@
         },
         "scan_incomplete": {
           "default": false,
-          "description": "Whether the completeness facts above fail this project -- the incomplete scanners or converters it names, or having run no scanner at all. Stored rather than derived from them for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes. Always true for a stale content database under a fail policy, an unevaluated rule or a tool ASH could not stop: no setting silences those in `ash --source-dir P` either.",
+          "description": "Whether the completeness facts above fail this project -- the incomplete scanners or converters it names, or having run no scanner at all. Stored rather than derived from them for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes. Always true for an unevaluated rule or a tool ASH could not stop: no setting silences those in `ash --source-dir P` either. A stale content database under a fail policy fails the project too, except when its scanner is one only the workspace policy added and policy_scanners_gate is off: then it is still listed in stale_content_databases but does not decide this flag, as that scanner's MISSING tool does not.",
           "title": "Scan Incomplete",
           "type": "boolean"
         },
@@ -26236,7 +26236,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Per scanner name (as properties.scanner_name records it), the threshold the verdict graded that scanner's findings by when it is the scanner's own options.severity_threshold, with the workspace ceiling folded in; a scanner not listed was graded by severity_threshold. The unified results carry no ash_config, so a reader that regrades a finding (the merged reporters, the MCP result filters) has no other source for the scanner's gate and judged every project at ASH's default. Empty in a workspace file written before the field existed.",
+          "description": "Per scanner name (as properties.scanner_name records it), the threshold the verdict graded that scanner's findings by when it is the scanner's own options.severity_threshold, with the workspace ceiling folded in; a scanner not listed was graded by severity_threshold. The unified results carry no ash_config, so a reader that regrades a finding (the merged reporters, the MCP result filters) has no other source for the scanner's gate and judged every project at ASH's default. A scanner whose own threshold the scan read from an environment variable is not listed either: the environment's value is not published here, as no report surface prints it, so a reader grades that scanner by severity_threshold. Empty in a workspace file written before the field existed.",
           "title": "Scanner Thresholds",
           "type": "object"
         },
