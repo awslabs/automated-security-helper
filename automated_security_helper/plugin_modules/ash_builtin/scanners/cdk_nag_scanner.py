@@ -800,20 +800,21 @@ _PACK_FLAG = TypeAdapter(bool)
 _UNDECLARED_PACKS_WARNED: set = set()
 
 
+# The packs to run, by cdk-nag class name; extra keys name packs ASH does not declare.
+#
+# ``extra="allow"`` is kept on purpose: a pack cdk-nag adds can be enabled before ASH
+# declares a field for it, and the wrapper refuses a name cdk-nag does not know out
+# loud. What the extras did NOT get was the declared fields' validation. Their values
+# passed through as written and the scanner tested ``bool(value)``, so ``"no"`` enabled
+# a pack, and a misspelled declared pack set to false (``AwsSolutionChecks: false``)
+# disabled nothing and said nothing, leaving the pack it meant at its default. Now an
+# extra key's value is read as the declared ones are, a value that is not a boolean is
+# refused with the key named, and an extra key set to false is said out loud with the
+# declared names beside it, because that spelling almost always means one of them.
+#
+# A comment, not a docstring: pydantic writes a model's docstring into the generated
+# JSON schema as the definition's description, and the committed schemas are golden.
 class CdkNagPacks(RedactedSection):
-    """The packs to run, by cdk-nag class name; extra keys name packs ASH does not declare.
-
-    ``extra="allow"`` is kept on purpose: a pack cdk-nag adds can be enabled before ASH
-    declares a field for it, and the wrapper refuses a name cdk-nag does not know out
-    loud. What the extras did NOT get was the declared fields' validation. Their values
-    passed through as written and the scanner tested ``bool(value)``, so ``"no"`` enabled
-    a pack, and a misspelled declared pack set to false (``AwsSolutionChecks: false``)
-    disabled nothing and said nothing, leaving the pack it meant at its default. Now an
-    extra key's value is read as the declared ones are, a value that is not a boolean is
-    refused with the key named, and an extra key set to false is said out loud with the
-    declared names beside it, because that spelling almost always means one of them.
-    """
-
     model_config = ConfigDict(extra="allow")
 
     @model_validator(mode="before")
