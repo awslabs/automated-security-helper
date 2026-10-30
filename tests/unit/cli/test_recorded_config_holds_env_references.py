@@ -39,7 +39,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pytest
 from typer.testing import CliRunner
@@ -354,8 +354,38 @@ def test_no_output_holds_an_env_value(runs, command, directory):
 @pytest.mark.parametrize(
     "command, directory", [("merge", "merged"), ("report", "shard/reports")]
 )
+def _report_document(stdout: str) -> Tuple[dict, str]:
+    """The pretty-printed document ``ash report`` writes to stdout when no output
+    file is asked for (its ``{`` and ``}`` stand on lines of their own), and the
+    rest of stdout around it."""
+    lines = stdout.splitlines(keepends=True)
+    opens = [index for index, line in enumerate(lines) if line.strip() == "{"]
+    closes = [index for index, line in enumerate(lines) if line.strip() == "}"]
+    assert opens and closes, stdout
+    first, last = opens[0], closes[-1]
+    document = json.loads("".join(lines[first : last + 1]))
+    return document, "".join(lines[:first] + lines[last + 1 :])
+
+
 def test_no_output_holds_an_override_value(runs, command, directory):
     channels = _channels(runs, command, runs["root"] / directory)
+    if command == "report":
+        # The report command prints the gitlab-cyclonedx document itself on
+        # stdout, and the document carries the reporter's category option as
+        # the GitLab property it is required to write, an empty inventory
+        # included. The override's value may stand there, once, and nowhere
+        # else on stdout.
+        document, rest = _report_document(channels.pop("report stdout"))
+        channels["report stdout outside the document"] = rest
+        holders = [
+            entry
+            for entry in document["metadata"]["properties"]
+            if OVERRIDE_VALUE in str(entry.get("value", ""))
+        ]
+        assert holders == [
+            {"name": "gitlab:dependency_scanning:category", "value": OVERRIDE_VALUE}
+        ], holders
+        assert json.dumps(document).count(OVERRIDE_VALUE) == 1
     leaked = [name for name, text in channels.items() if OVERRIDE_VALUE in text]
     assert leaked == [], leaked
     # The control: the merge applied the override, so its value was there to
