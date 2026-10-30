@@ -233,7 +233,14 @@ class TestRecordOfConfig:
     def test_a_value_inside_its_own_references_spelling_occurs_once(self, monkeypatch):
         """``AB`` under ``${TAB}``: the value is found again inside the reference
         once written. Counted on the string as held, it occurs once, so the
-        record holds one clean reference and the writer still writes it."""
+        record holds one clean reference.
+
+        For a file written to be loaded again the string is left as the
+        configuration holds it: the loader reads a reference the scalar starts
+        with (``resolve_env_references``), under a name the configuration may
+        interpolate, and this reference stands inside other text under a name it
+        does not admit, so nothing written would read back as the same string
+        and nothing is marked."""
         monkeypatch.setenv("TAB", "AB")
         config = SimpleNamespace(
             _written_references=[_value_rewrite(("a",), "${TAB}", "AB", "AB", "${TAB}")]
@@ -245,10 +252,32 @@ class TestRecordOfConfig:
             marks.append(text)
             return text
 
-        assert record_of_config(config, {"a": "xABy"}, mark=mark) == {
-            "a": "!ENV x${TAB}y"
+        assert record_of_config(config, {"a": "xABy"}, mark=mark) == {"a": "xABy"}
+        assert marks == []
+
+    def test_a_reference_the_loader_reads_back_is_written_tagged(self, monkeypatch):
+        """``AB`` under ``${ASH_TAB}`` at the start of the string: the value is
+        found again inside the reference once written and occurs once as held,
+        so the record holds one clean reference; the loader reads the reference
+        back to the same string (an admitted name, at the scalar's start), so a
+        file written to be loaded again gets it tagged, and marked."""
+        monkeypatch.setenv("ASH_TAB", "AB")
+        config = SimpleNamespace(
+            _written_references=[
+                _value_rewrite(("a",), "${ASH_TAB}", "AB", "AB", "${ASH_TAB}")
+            ]
+        )
+        assert record_of_config(config, {"a": "ABy"}) == {"a": "${ASH_TAB}y"}
+        marks: list = []
+
+        def mark(text):
+            marks.append(text)
+            return text
+
+        assert record_of_config(config, {"a": "ABy"}, mark=mark) == {
+            "a": "!ENV ${ASH_TAB}y"
         }
-        assert marks == ["!ENV x${TAB}y"]
+        assert marks == ["!ENV ${ASH_TAB}y"]
 
     def test_a_key_rename_onto_an_existing_key_keeps_both_entries(self):
         rewrite = EnvironmentRewrite("key", ("m",), "k", "${K}", "k", "${K}")
