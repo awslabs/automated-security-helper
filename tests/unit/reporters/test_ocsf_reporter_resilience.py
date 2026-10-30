@@ -341,17 +341,38 @@ class TestVulnerabilityExtractionFaults:
         assert vuln.severity == "MEDIUM"
         assert reporter._create_vulnerability_from_result(result).desc == vuln.desc
 
-    def test_fallback_title_is_unknown_rule_when_the_rule_id_is_absent(
-        self, reporter, monkeypatch
-    ):
-        self._reject_whole_vulnerabilities(monkeypatch)
+    def test_fallback_title_is_unknown_rule_when_the_rule_id_is_absent(self, reporter):
         result = Result(level=Level.error, message=Message(text="m"))
+        location = Location(
+            physicalLocation=PhysicalLocation(
+                root=PhysicalLocation2(
+                    artifactLocation=ArtifactLocation(uri="src/app.py"),
+                    region=Region(startLine=1),
+                )
+            )
+        )
+        location.physicalLocation.root.region.startLine = "not-a-line-number"
+        result.locations = [location]
 
         vuln = reporter._create_vulnerability_from_result(result)
 
         assert vuln.title == "Unknown Rule"
         assert vuln.desc == "m", "the message text survives the skipped location"
         assert not vuln.affected_code
+
+    def test_a_rejected_vulnerability_without_a_rule_id_is_titled_unknown_rule(
+        self, reporter, monkeypatch
+    ):
+        """The whole-record fallback without a rule id: the stub's title is the
+        unknown-rule text and the builder says the record is degraded."""
+        self._reject_whole_vulnerabilities(monkeypatch)
+        result = Result(level=Level.error, message=Message(text="m"))
+
+        vuln, degraded = reporter._build_vulnerability(result)
+
+        assert degraded is True
+        assert vuln.title == "Unknown Rule"
+        assert vuln.desc == "Error processing vulnerability details"
 
 
 # ---------------------------------------------------------------------------
