@@ -263,6 +263,27 @@ def test_a_hop_that_is_not_there_is_a_local_name(
     assert len(asked) == 1
 
 
+def test_a_reparse_point_that_is_no_symbolic_link_is_refused_unresolved(
+    tmp_path: Path, on_windows: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CPython raises ValueError, not OSError, from ``os.readlink`` for a
+    reparse point that is neither a symbolic link nor a junction."""
+    link = tmp_path / ".ash.yaml"
+    link.symlink_to(tmp_path / "anything.yaml")
+
+    def not_a_symlink(path, *args, **kwargs):
+        raise ValueError("not a symbolic link")
+
+    monkeypatch.setattr(os, "readlink", not_a_symlink)
+    resolved = _no_resolving(monkeypatch)
+    permit, asked = _recording_permit(True)
+
+    assert config_sources._permitted(link, permit) is False
+
+    assert asked == []
+    assert resolved == []
+
+
 def _chain(tmp_path: Path, links: int) -> Path:
     """``links`` symbolic links in a row, the last leading to a real file."""
     target = tmp_path / "target.yaml"

@@ -1567,7 +1567,10 @@ def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
     for _ in range(_LINK_HOPS):
         try:
             target = os.readlink(current)
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError: a reparse point that is neither a symbolic link nor a
+            # junction (a WSL link, say) is read as a link by the lstat test but
+            # has no target os.readlink can return.
             return None
         if _names_a_windows_share(target):
             return True
