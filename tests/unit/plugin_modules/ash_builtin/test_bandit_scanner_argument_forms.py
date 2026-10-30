@@ -33,6 +33,7 @@ from __future__ import annotations
 import fnmatch
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -210,24 +211,60 @@ def test_the_windows_bound_is_the_whole_command_line():
     for --exclude is what the other arguments leave: a fixed 24 KiB bound
     refused required entries of 24 to 31 KiB that fit the real line."""
     rest = ["bandit", "--recursive", "--format", "sarif", "C:/src"]
-    assert _exclude_fits("--exclude=" + "x" * 31000, rest, "nt")
+    assert _exclude_fits("--exclude=" + "x" * 30000, rest, "nt")
     assert not _exclude_fits("--exclude=" + "x" * 32760, rest, "nt")
     long_rest = ["x" * 2000]
-    assert not _exclude_fits("--exclude=" + "x" * 31000, long_rest, "nt")
-    # The 32,767 of CreateProcess counts the terminating NUL, so a line of
-    # 32,766 characters is the longest that fits and one of 32,767 is not.
-    assert _exclude_fits("x" * 32766, [], "nt")
-    assert not _exclude_fits("x" * 32767, [], "nt")
+    assert not _exclude_fits("--exclude=" + "x" * 30000, long_rest, "nt")
+    # The 32,767 of CreateProcess counts the terminating NUL, so under the
+    # margin a line of 32,766 characters less the margin is the longest that
+    # fits and one character more is not.
+    assert _exclude_fits("x" * (32766 - 2048), [], "nt")
+    assert not _exclude_fits("x" * (32767 - 2048), [], "nt")
+
+
+def test_the_windows_bound_keeps_a_margin_for_the_uv_wrapper():
+    """The measured command starts with bare ``bandit``; the scan runs it through
+    ``uv tool run --from ...``, a prefix of a hundred characters or more that the
+    measured line does not hold. A line filled to within a few characters of
+    32,767 went over it in CreateProcess once the prefix was added, so the
+    bound keeps a margin: a token that fits the bare limit does not fit."""
+    rest = ["bandit", "--recursive", "--format", "sarif", "C:/src"]
+    bare_limit_fits = "--exclude=" + "x" * 30700
+    assert len(subprocess.list2cmdline([*rest, bare_limit_fits])) < 32767
+    assert not _exclude_fits(bare_limit_fits, rest, "nt")
+    assert _exclude_fits("--exclude=" + "x" * (30700 - 2048), rest, "nt")
+
+
+def test_the_windows_bound_counts_utf16_units():
+    """Windows counts the command line in UTF-16 units; a character outside the
+    Basic Multilingual Plane is two of them and one code point, so a line
+    measured by ``len`` passed the bound and still exceeded it."""
+    rest = ["bandit", "C:/src"]
+    plane_two = "\U0001f600"
+    token = "--exclude=" + plane_two * 15340
+    line = subprocess.list2cmdline([*rest, token])
+    assert len(line) < 32767 - 2048
+    assert len(line.encode("utf-16-le")) // 2 > 32767 - 2048
+    assert not _exclude_fits(token, rest, "nt")
+    assert _exclude_fits("--exclude=" + "x" * 15340, rest, "nt")
 
 
 def test_elsewhere_one_argument_is_bounded_on_its_own():
+    """Linux refuses one argument of 128 KiB or more (MAX_ARG_STRLEN counts the
+    terminating NUL), so the 120 KiB limit sits well under it and a token of
+    exactly the limit still fits; the length is in UTF-8 bytes, as exec passes
+    an argument, so a two-byte character counts twice."""
     long_rest = ["x" * 200_000]
+    assert _EXCLUDE_ARGUMENT_LIMIT < 128 * 1024 - 1
     assert _exclude_fits(
         "--exclude=" + "x" * (_EXCLUDE_ARGUMENT_LIMIT - 10), long_rest, "posix"
     )
     assert not _exclude_fits(
         "--exclude=" + "x" * _EXCLUDE_ARGUMENT_LIMIT, long_rest, "posix"
     )
+    two_bytes_each = "--exclude=" + "\u00e9" * (_EXCLUDE_ARGUMENT_LIMIT // 2)
+    assert len(two_bytes_each) < _EXCLUDE_ARGUMENT_LIMIT
+    assert not _exclude_fits(two_bytes_each, long_rest, "posix")
     assert _exclude_fits("--exclude=vendor", [], os.name)
 
 

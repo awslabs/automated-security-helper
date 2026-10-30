@@ -93,24 +93,47 @@ _EXCLUDE_ARGUMENT_LIMIT = 120 * 1024
 #: Windows bounds the WHOLE command line CreateProcess is given, not one argument:
 #: "The maximum length of this string is 32,767 characters, including the Unicode
 #: terminating null character" (CreateProcessW, lpCommandLine), so the text itself
-#: has to stay one character shorter.
+#: has to stay one character shorter, and it is counted in UTF-16 units
+#: (``_command_line_units``).
 _WINDOWS_COMMAND_LINE_LIMIT = 32767
+
+#: What the Windows bound keeps free of the arguments measured here. The
+#: resolved command starts with bare ``bandit``, but the scan runs it through
+#: ``uv tool run --from <spec> ...`` (``_try_uv_tool_execution``, the default),
+#: whose own path and flags add a hundred characters or more that the measured
+#: line does not hold; a line filled to the limit went over it in CreateProcess
+#: (WinError 206) once that prefix was added. Two KiB covers the prefix, as the
+#: 8 KiB under MAX_ARG_STRLEN does for the rest of the line on Linux.
+_WINDOWS_COMMAND_LINE_MARGIN = 2048
+
+
+def _command_line_units(line: str) -> int:
+    """``line``'s length as Windows counts a command line: in UTF-16 units.
+
+    ``len`` counts code points, and a character outside the Basic Multilingual
+    Plane (an emoji in a path) is one code point but two UTF-16 units, so a
+    line measured by ``len`` could pass the bound and still exceed it.
+    """
+    return len(line.encode("utf-16-le")) // 2
 
 
 def _exclude_fits(token: str, rest: Sequence[str], platform: str = os.name) -> bool:
     """Whether the ``--exclude=...`` ``token`` fits the command line beside ``rest``.
 
-    ``rest`` is every other argument of the command. On Windows the whole line,
-    as ``subprocess`` builds it (``list2cmdline``), has to stay under 32,767
-    characters (that figure counts the terminating NUL), so the budget for the
-    token is what the other arguments leave;
-    elsewhere one argument is bounded on its own (``_EXCLUDE_ARGUMENT_LIMIT``,
-    in UTF-8 bytes as exec passes them, ``_argument_length``). A fixed 24 KiB
-    bound on Windows refused scans whose required entries fit the real line.
+    ``rest`` is every other argument of the resolved command. On Windows the
+    whole line, as ``subprocess`` builds it (``list2cmdline``), has to stay
+    under 32,767 UTF-16 units (that figure counts the terminating NUL) less
+    the margin the uv wrapper needs (``_WINDOWS_COMMAND_LINE_MARGIN``), so the
+    budget for the token is what the other arguments leave; elsewhere one
+    argument is bounded on its own (``_EXCLUDE_ARGUMENT_LIMIT``, in UTF-8 bytes
+    as exec passes them, ``_argument_length``). A fixed 24 KiB bound on Windows
+    refused scans whose required entries fit the real line.
     """
     if platform == "nt":
         line = subprocess.list2cmdline([*rest, token])
-        return len(line) < _WINDOWS_COMMAND_LINE_LIMIT
+        return _command_line_units(line) < (
+            _WINDOWS_COMMAND_LINE_LIMIT - _WINDOWS_COMMAND_LINE_MARGIN
+        )
     return _argument_length(token) <= _EXCLUDE_ARGUMENT_LIMIT
 
 
@@ -118,7 +141,9 @@ def _command_line_bound_text(platform: str = os.name) -> str:
     """The bound ``_exclude_fits`` applies on ``platform``, for an error message."""
     if platform == "nt":
         return (
-            f"the {_WINDOWS_COMMAND_LINE_LIMIT}-character command line Windows allows"
+            f"the {_WINDOWS_COMMAND_LINE_LIMIT}-character command line Windows "
+            f"allows, less the {_WINDOWS_COMMAND_LINE_MARGIN} characters kept for "
+            "the uv wrapper that runs bandit"
         )
     return f"one command-line argument ({_EXCLUDE_ARGUMENT_LIMIT} bytes)"
 
@@ -1593,11 +1618,15 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 f"does not fit {_command_line_bound_text()}."
             )
         left_out = 0
-        for entry in best_effort:
+        for index, entry in enumerate(best_effort):
             candidate = f"{token},{entry}" if entries else f"--exclude={entry}"
             if not _exclude_fits(candidate, rest):
-                left_out += 1
-                continue
+                # End at the first entry that does not fit, rather than go on
+                # trying every shorter one: that filled the line to within a few
+                # characters of the bound, which left nothing for what the
+                # measured line does not hold (the uv wrapper on Windows).
+                left_out = len(best_effort) - index
+                break
             entries.append(entry)
             token = candidate
         if left_out:
