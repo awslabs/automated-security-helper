@@ -22,6 +22,8 @@ carried it:
 
 from __future__ import annotations
 
+import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -141,6 +143,30 @@ class TestARaisingPhaseEventHandlerDoesNotAbortThePhase:
         with pytest.raises(RuntimeError) as ended:
             phase.execute(aggregated_results=AshAggregatedResults())
         assert ended.value is failure
+
+    def test_a_complete_handlers_failure_is_logged_redacted(self, caplog):
+        """The logged text carries no value the run's config read from the
+        environment, which a plugin's exception can quote."""
+        secret = "zz-quoted-env-value-4411"
+        context = _context()
+        context.config = SimpleNamespace(_environment_values=[secret])
+        phase = _FakePhase(plugin_context=context)
+
+        def raising_at_complete(event_type, **kwargs):
+            if event_type == AshEventType.SCAN_PHASE_COMPLETE:
+                raise RuntimeError(f"complete handler cannot use {secret}")
+
+        phase.notify_event = raising_at_complete  # type: ignore[method-assign]
+
+        with caplog.at_level(logging.ERROR):
+            phase.execute(aggregated_results=AshAggregatedResults())
+
+        logged = [m for m in caplog.messages if "Failed to notify" in m]
+        assert logged, caplog.messages
+        assert all("complete handler cannot use" in m for m in logged)
+        # Red at the previous tip: the line carried the value as the handler
+        # quoted it.
+        assert all(secret not in m for m in logged), logged
 
 
 class TestARaisingCheckIsReportedApartFromAnExclusion:

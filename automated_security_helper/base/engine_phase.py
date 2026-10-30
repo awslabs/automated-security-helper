@@ -128,13 +128,21 @@ class EnginePhase(ABC):
         handler's failure; this one did not, so one raising *_PHASE_COMPLETE
         handler discarded a finished phase's results. The START event is not
         guarded this way (``_notify_phase_event``).
+
+        The handler is plugin code and its exception can quote anything, a value
+        the run's configuration read from the environment included, so the text
+        is redacted with the configuration's values before it is logged, as the
+        engine's other error lines are.
         """
         try:
             self.notify_event(event, **kwargs)
         except Exception as error:  # noqa: BLE001 -- handlers are plugin-supplied
+            values = config_environment_values(
+                getattr(self.plugin_context, "config", None)
+            )
             ASH_LOGGER.error(
                 f"Failed to notify {event} event for phase {self.phase_name}: "
-                f"{error_text(error)}"
+                f"{error_text(error, values)}"
             )
 
     def execute(
