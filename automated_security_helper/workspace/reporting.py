@@ -420,19 +420,29 @@ def _remove_previous_workspace_reports(reports_dir: Path, selection) -> None:
     for a reporter that this run skips, that raises, or that returns nothing
     stayed beside this run's manifest and read as this run's. Only a regular
     file at a reporter's own name is removed; a link there was refused before
-    this ran, and the manifest is written after.
+    this ran.
+
+    The previous run's manifest goes with them. This step writes its own
+    manifest last, so a step that stops before then (a cancel before a reporter,
+    a link that appeared at a report's name after the pre-write check) would
+    otherwise leave the old manifest in place, naming as its artefacts the files
+    removed here.
     """
     for instance, _behaviour, _skipped in selection:
         for name in reporter_file_names(instance):
-            path = reports_dir / name
-            if Path(name).name != name or path.is_symlink() or not path.is_file():
-                continue
-            try:
-                path.unlink()
-            except OSError as exc:
-                ASH_LOGGER.warning(
-                    f"Could not remove the previous run's report {path}: {exc}"
-                )
+            _remove_previous_file(reports_dir, name)
+    _remove_previous_file(reports_dir, MANIFEST_FILENAME)
+
+
+def _remove_previous_file(reports_dir: Path, name: str) -> None:
+    """Remove the regular file at *name* in *reports_dir*, if that is what is there."""
+    path = reports_dir / name
+    if Path(name).name != name or path.is_symlink() or not path.is_file():
+        return
+    try:
+        path.unlink()
+    except OSError as exc:
+        ASH_LOGGER.warning(f"Could not remove the previous run's report {path}: {exc}")
 
 
 def _default_reporter_classes(plugin_modules: Sequence[str] = ()) -> List[type]:

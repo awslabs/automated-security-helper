@@ -22,6 +22,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.core.cancellation import ScanCancelled
 from automated_security_helper.workspace import reporting
 from automated_security_helper.workspace.aggregation import WorkspaceAggregator
 from automated_security_helper.workspace.reporting import (
@@ -239,6 +240,36 @@ class TestAPreviousRunsWorkspaceReportDoesNotOutliveThisRun:
         content = path.read_text(encoding="utf-8")
         assert "from an earlier run" not in content
         assert "RULE-API" in content
+
+    def test_the_previous_manifest_is_removed_with_the_reports(self, tmp_path):
+        """The manifest is written last, after every reporter. Removing the
+        reports and keeping the old manifest left a manifest naming files that
+        were gone whenever the step stopped before writing its own."""
+        reports = tmp_path / REPORTS_DIR_NAME
+        reports.mkdir()
+        manifest = reports / MANIFEST_FILENAME
+        manifest.write_text("{}", encoding="utf-8")
+
+        reporting._remove_previous_workspace_reports(reports, [])
+
+        assert not manifest.exists()
+
+    def test_a_step_that_stops_before_its_manifest_leaves_no_stale_one(
+        self, workspace, monkeypatch
+    ):
+        _, output_dir, _ = workspace
+        stale_report = self._stale(output_dir, "ash.merged.txt")
+        stale_manifest = self._stale(output_dir, MANIFEST_FILENAME)
+
+        def cancelled() -> None:
+            raise ScanCancelled("the scan was cancelled")
+
+        monkeypatch.setattr(reporting, "raise_if_cancelled", cancelled)
+        with pytest.raises(ScanCancelled):
+            _emit(workspace, FakeMergedReporter)
+
+        assert not stale_report.exists()
+        assert not stale_manifest.exists()
 
 
 class TestAWriteThatFailsDoesNotSinkTheManifest:
