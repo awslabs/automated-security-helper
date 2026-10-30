@@ -88,12 +88,15 @@ def test_control_the_workspace_policy_schema_keeps_its_choices_alone(schemas):
 
 
 class _Constrained(BaseModel):
-    """One field of each string-like kind the config schema has to treat."""
+    """One field of each scalar kind the config schema has to treat: the
+    string-like ones, and the two number kinds a timeout or a ratio is."""
 
     free: str = "x"
     patterned: str = Field("abc", pattern=r"^[a-z]+$")
     sized: str = Field("abc", min_length=2)
     amount: Decimal = Decimal("1.5")
+    count: int = 1
+    ratio: float = 0.5
 
 
 @pytest.fixture(scope="module")
@@ -102,19 +105,30 @@ def constrained_validator() -> jsonschema.Validator:
     return jsonschema.Draft202012Validator(schema)
 
 
-@pytest.mark.parametrize("field", ["free", "patterned", "sized", "amount"])
-def test_a_reference_in_a_constrained_or_decimal_field_is_valid(
+@pytest.mark.parametrize(
+    "field", ["free", "patterned", "sized", "amount", "count", "ratio"]
+)
+def test_a_reference_in_a_constrained_or_number_field_is_valid(
     constrained_validator, field
 ):
     """The reference is not the value a pattern, a length or a number describes,
-    but the loader resolves it before the field is validated."""
+    but the loader resolves it before the field is validated. An int or float
+    field is the commonest case (every timeout), and a generator that missed
+    ``int_schema`` or ``float_schema`` would fail only here."""
     assert constrained_validator.is_valid({field: "${ASH_VALUE:fallback}"})
 
 
 @pytest.mark.parametrize(
     "document",
-    [{"patterned": "ABC1"}, {"sized": "x"}, {"amount": "not a number"}],
-    ids=["patterned", "sized", "amount"],
+    [
+        {"patterned": "ABC1"},
+        {"sized": "x"},
+        {"amount": "not a number"},
+        {"count": "ten"},
+        {"count": 1.5},
+        {"ratio": "ten"},
+    ],
+    ids=["patterned", "sized", "amount", "count-text", "count-fraction", "ratio"],
 )
 def test_control_a_constrained_value_that_is_not_a_reference_stays_invalid(
     constrained_validator, document
@@ -124,8 +138,30 @@ def test_control_a_constrained_value_that_is_not_a_reference_stays_invalid(
 
 def test_control_a_constrained_value_that_fits_stays_valid(constrained_validator):
     assert constrained_validator.is_valid(
-        {"patterned": "abc", "sized": "ab", "amount": "2.5"}
+        {"patterned": "abc", "sized": "ab", "amount": "2.5", "count": 3, "ratio": 0.25}
     )
+
+
+def test_a_reference_in_a_real_timeout_field_is_valid(config_validator):
+    """A plugin option read from the environment: bandit's ``install_timeout``,
+    an int field under ``scanners.bandit.options``."""
+    document = {
+        "project_name": "x",
+        "scanners": {
+            "bandit": {"options": {"install_timeout": "${ASH_INSTALL_TIMEOUT}"}}
+        },
+    }
+    assert _messages(config_validator, document) == []
+    literal = {
+        "project_name": "x",
+        "scanners": {"bandit": {"options": {"install_timeout": 600}}},
+    }
+    assert _messages(config_validator, literal) == []
+    outside = {
+        "project_name": "x",
+        "scanners": {"bandit": {"options": {"install_timeout": "ten minutes"}}},
+    }
+    assert _messages(config_validator, outside) != []
 
 
 def test_a_reference_in_a_constrained_string_field_is_valid(config_validator):
