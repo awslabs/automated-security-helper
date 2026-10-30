@@ -417,9 +417,10 @@ def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
     reason: a base and a child are as likely to spell a section differently as a
     file and an override are.
 
-    A key that is not a string (a YAML number, boolean or null key) has no
+    A key that is not a string (a YAML number or boolean key) has no
     ``-``/``_`` twin and is matched only as itself; read as text, it made the
-    merge of any file holding one fail with an AttributeError.
+    merge of any file holding one fail with an AttributeError. A null key is
+    refused before this point (``deep_merge``).
     """
     if key in container or not isinstance(key, str):
         return key
@@ -3046,6 +3047,15 @@ def deep_merge(base: Any, overlay: Any, model: Optional[type[BaseModel]] = None)
     """
     if not isinstance(base, dict) or not isinstance(overlay, dict):
         return copy.deepcopy(overlay)
+    if None in overlay:
+        # A null key is what a key written as a reference to a set but empty
+        # variable resolves to (_empty_key_reference_names): it spells no key,
+        # and no later step reads it. It is refused here, as this merge has
+        # always refused it, so the chain's catch-all words the refusal and
+        # names the variable, and no scan runs on a file whose key the host
+        # and a container would read differently. Not an
+        # ASHConfigSourceError, which the catch-all passes through unworded.
+        raise ValueError("a mapping key is null")
     merged = copy.deepcopy(base)
     rest = dict(overlay)
     settings = _settings_of(model) if model is not None else {}
