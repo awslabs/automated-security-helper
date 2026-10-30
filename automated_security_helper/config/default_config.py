@@ -399,6 +399,9 @@ def default_config_document_for_tree(scan_root: Optional[Path] = None) -> Any:
     from automated_security_helper.config.operator_only_options import (
         repository_settings_for_root,
     )
+    from automated_security_helper.config.operator_paths import (
+        not_delivered_by_a_client,
+    )
     from automated_security_helper.config.resolve_config import resolve_config_source
     from automated_security_helper.config.sandbox_grants import working_directory
     from automated_security_helper.core.exceptions import ASHConfigValidationError
@@ -420,5 +423,8 @@ def default_config_document_for_tree(scan_root: Optional[Path] = None) -> Any:
             named,
             confine=settings.confine,
             repository_file=settings.is_repository_file,
+            # As get_default_config reads the file: the operator's relative
+            # paths are taken from its directory.
+            anchor_relative_paths=not_delivered_by_a_client,
         ),
     )
