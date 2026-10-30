@@ -400,13 +400,13 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             # config file the run passes (TrivyScannerBase._effective_scanners).
             pinned = self._pinned_config_args()
             inserted = [
+                f"--ignorefile={self._ignore_file()}",
+                f"--secret-config={self._secret_config_file(pinned)}",
+                *pinned,
                 # trivy's own deadline is five minutes and fails the scan when it
                 # passes; matched to ASH's scan_timeout, as the builtin trivy scanner
                 # does, so the bound the operator set is the one that applies.
                 f"--timeout={trivy_timeout(self._effective_scan_timeout())}",
-                f"--ignorefile={self._ignore_file()}",
-                f"--secret-config={self._secret_config_file(pinned)}",
-                *pinned,
                 # Each link leaving the target (trivy follows no link), and each
                 # path the global ignore paths ignore.
                 *self._link_skip_args(target, global_ignore_paths),

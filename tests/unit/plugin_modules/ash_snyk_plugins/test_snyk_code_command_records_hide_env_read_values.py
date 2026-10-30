@@ -172,11 +172,15 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
     assert MARKED_DIRECTORY not in invocation.commandLine, invocation.commandLine
     assert "<value>" in invocation.commandLine, invocation.commandLine
     assert not any(MARKED_DIRECTORY in a for a in invocation.arguments)
-    # The verbose log record of the command hides it the same way. The SARIF's
-    # own location fields still name the scanned directory: redaction covers the
-    # command records, not where the findings are.
+    # The verbose log record names the command that ran: the copy snyk was given,
+    # whose temporary name carries no value, so nothing in it is redacted and the
+    # directory name is absent from it. The SARIF's own location fields still name
+    # the scanned directory: redaction covers the command records, not where the
+    # findings are.
+    copy = next(a for a in argv[3:] if not a.startswith("--"))
+    assert MARKED_DIRECTORY not in copy, copy
+    assert any(copy in message for message in running), running
     assert all(MARKED_DIRECTORY not in message for message in running), running
-    assert any("<value>" in message for message in running), running
 
 
 def test_a_directory_name_written_out_is_recorded_whole(

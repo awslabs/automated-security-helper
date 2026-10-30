@@ -1622,9 +1622,13 @@ def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
     # The update gets the empty config ASH ships, not one from where ASH runs.
     assert Path(_value(update, "--config")) == refresh.EMPTY_TOOL_CONFIG
     (final,) = ran
-    assert final[:6] == [
+    # The command built here carries no mode flag, so the scan-time reconciliation
+    # adds the online one before the skip flags; a scanner's own command already
+    # carries it from construction.
+    assert final[:7] == [
         "trivy",
         "fs",
+        *trivy_base.ONLINE_FLAGS,
         "--skip-db-update",
         "--skip-java-db-update",
         _cache_flag(tmp_path),
@@ -1696,7 +1700,8 @@ def test_misconfig_also_fetches_the_checks_bundle_and_skips_it(tmp_path, monkeyp
 
     assert [c[1] for c in fake.calls] == ["image", "config"]
     assert Path(fake.calls[1][-1]).name == "empty-target"
-    assert ran[0][2:6] == [
+    assert ran[0][2:7] == [
+        *trivy_base.ONLINE_FLAGS,
         "--skip-db-update",
         "--skip-java-db-update",
         "--skip-check-update",
@@ -1838,11 +1843,14 @@ def test_offline_runs_no_update(tmp_path, monkeypatch):
 
     assert fake.calls == []
     # Still pointed at the cache: the sandbox drops XDG_CACHE_HOME, so trivy left to
-    # its own default could read another one.
+    # its own default could read another one. The command built here carries no
+    # mode flag, so the scan-time reconciliation adds the offline ones, which an
+    # offline scan never lacks.
     assert ran == [
         [
             "trivy",
             "fs",
+            *trivy_base.OFFLINE_FLAGS,
             _cache_flag(tmp_path),
             "--cache-backend=memory",
             "--exit-code=0",
@@ -1897,7 +1905,10 @@ def test_the_update_runs_outside_the_scanner_sandbox(tmp_path, monkeypatch):
 
     assert seen == [None]
     assert after is sandbox, "the scanner's own spawn runs back inside its sandbox"
-    assert ran[0][2] == "--skip-db-update"
+    assert ran[0][2 : 3 + len(trivy_base.ONLINE_FLAGS)] == [
+        *trivy_base.ONLINE_FLAGS,
+        "--skip-db-update",
+    ]
 
 
 def test_a_failed_update_fails_the_scan_with_trivys_reason(tmp_path, monkeypatch):
