@@ -10,6 +10,7 @@ server process -- never surfaced. The leaking test runs in a child pytest, so
 this suite itself stays green while the failure is measured.
 """
 
+import ast
 from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
 
@@ -29,9 +30,35 @@ pytestmark = pytest.mark.unit
 """
 
 
+_TIERS = {"unit", "integration", "e2e"}
+
+
+def _names_a_tier(source: str) -> bool:
+    """Whether a module-level ``pytestmark`` of *source* carries a tier mark.
+
+    Read with ``ast``: a ``pytestmark = pytest.mark.usefixtures(...)`` line, or
+    the word in a comment or docstring, is not a tier.
+    """
+    for statement in ast.parse(source).body:
+        if not isinstance(statement, ast.Assign) or not any(
+            isinstance(target, ast.Name) and target.id == "pytestmark"
+            for target in statement.targets
+        ):
+            continue
+        for node in ast.walk(statement.value):
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr in _TIERS
+                and isinstance(node.value, ast.Attribute)
+                and node.value.attr == "mark"
+            ):
+                return True
+    return False
+
+
 def _with_a_tier(source: str) -> str:
     """*source* with the collection hook's one-tier requirement satisfied."""
-    if "pytestmark" in source:
+    if _names_a_tier(source):
         return source
     return source + _A_TIER_FOR_THE_PROBE
 
@@ -66,6 +93,40 @@ def _run_probe(
         extra_files=extra_files,
     )
     return completed.returncode, completed.stdout + completed.stderr
+
+
+@pytest.mark.unit
+def test_a_probe_without_a_tier_is_given_one():
+    source = "def test_zz():\n    pass\n"
+
+    tiered = _with_a_tier(source)
+
+    assert tiered.startswith(source)
+    assert tiered.count("pytestmark = pytest.mark.unit") == 1
+
+
+@pytest.mark.unit
+def test_a_probe_whose_pytestmark_is_not_a_tier_is_still_given_one():
+    """``pytestmark = pytest.mark.usefixtures(...)`` names no tier, so the child
+    would refuse to collect the probe; the word alone is not the test."""
+    source = (
+        "import pytest\n\n"
+        'pytestmark = pytest.mark.usefixtures("tmp_path")\n\n\n'
+        "def test_zz():\n    pass\n"
+    )
+
+    tiered = _with_a_tier(source)
+
+    assert tiered.startswith(source)
+    assert tiered.count("pytest.mark.unit") == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tier", ["unit", "integration", "e2e"])
+def test_a_probe_that_marks_its_own_tier_is_left_as_written(tier):
+    source = f"import pytest\n\npytestmark = pytest.mark.{tier}\n\n\ndef test_zz():\n    pass\n"
+
+    assert _with_a_tier(source) == source
 
 
 _LEAKING_TEST = """\
