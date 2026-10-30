@@ -516,10 +516,19 @@ def test_a_skipped_files_uri_spells_the_same_path_as_its_metrics_key(uri, key, w
     )
 
 
-def test_the_platform_reading_of_a_skipped_files_uri_defaults_to_the_host():
+@pytest.mark.parametrize(
+    "platform, expected",
+    [("nt", "C:/x.py"), ("posix", "/C:/x.py")],
+    ids=["windows", "posix"],
+)
+def test_the_platform_reading_of_a_skipped_files_uri_defaults_to_the_host(
+    monkeypatch, platform, expected
+):
     """Without ``windows`` the spelling reads the running platform, so the
-    scanner's own calls need no argument."""
-    expected = _spelled_path("file:///C:/x.py", uri=True, windows=os.name == "nt")
+    scanner's own calls need no argument: the drive reading on Windows, the
+    POSIX one elsewhere. Both platforms are read here, on any host, so the
+    default is pinned to the platform and not to whichever host runs the test."""
+    monkeypatch.setattr(os, "name", platform)
     assert _spelled_path("file:///C:/x.py", uri=True) == expected
 
 
