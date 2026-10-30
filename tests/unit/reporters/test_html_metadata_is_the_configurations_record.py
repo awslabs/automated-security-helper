@@ -100,7 +100,14 @@ def test_an_env_read_project_name_prints_as_its_reference(
 def test_the_markdown_and_text_project_lines_print_the_reference(
     tmp_path, monkeypatch, test_plugin_context, module, cls
 ):
-    """The three human reports read the name from one place; all three record it."""
+    """The three human reports read the name from one place; all three record it.
+
+    The Markdown report writes the reference with a backslash before each
+    Markdown-significant character (``$\\{ASH\\_...\\}``), as it writes every
+    results-file text, so the reference is read with those backslashes removed;
+    the text report writes it as it is. What matters in both is that the
+    resolved value is nowhere in the document.
+    """
     import importlib
 
     reporter_module = importlib.import_module(
@@ -110,7 +117,7 @@ def test_the_markdown_and_text_project_lines_print_the_reference(
 
     document = getattr(reporter_module, cls)(context=test_plugin_context).report(model)
 
-    assert "${" + PROJECT_VAR + "}" in document
+    assert "${" + PROJECT_VAR + "}" in document.replace("\\", "")
     assert "zz-secret-project" not in document
 
 
