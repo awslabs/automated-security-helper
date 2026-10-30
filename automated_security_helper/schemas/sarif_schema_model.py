@@ -2909,21 +2909,50 @@ def _detach_run_scoped_references(
     ``uri`` (and ``uriBaseId``) of ``incoming.artifacts[index].location``, then
     the index is dropped; a location that already names its file loses the index
     only. Logical-location and thread-flow indices are dropped; the names stay.
-    A ``uriBaseId`` is kept when the aggregate defines the same base the same
-    way, folded into the aggregate's ``originalUriBaseIds`` when the aggregate
-    does not define it, and otherwise expanded into the ``uri`` from the
-    incoming run's definition (following a base's own ``uriBaseId`` chain) so the
-    two runs' roots cannot be confused. A base id the incoming run never
-    defined is left as written: there is nothing to read it against.
+    A ``uriBaseId`` is kept only when the aggregate defines the same base the
+    same way along its whole chain (each link's definition equal, down to a base
+    with no ``uriBaseId`` of its own); otherwise it is expanded into the ``uri``
+    from the incoming run's definitions, following the chain, so the two runs'
+    roots cannot be confused. Nothing is ever added to the aggregate's
+    ``originalUriBaseIds``: a copied definition re-rooted every OTHER run's
+    results that used the id without defining it (the aggregate's first run
+    starts with no table, so the first scanner to define ``SRCROOT`` set it for
+    all), and a copy of one link left the rest of its chain behind. A base id
+    the incoming run never defined is left as written: there is nothing to read
+    it against. A chain that ends at a base the incoming run does not define
+    keeps that last id on the location after the expansion, for the same reason.
     """
     incoming_bases = incoming.originalUriBaseIds or {}
     artifacts = incoming.artifacts or []
 
-    def base_definition(base_id: str) -> Optional[Dict]:
-        base = incoming_bases.get(base_id)
+    aggregate_bases = aggregate.originalUriBaseIds or {}
+
+    def definition(bases: Dict, base_id: str) -> Optional[Dict]:
+        base = bases.get(base_id)
         if base is None:
             return None
         return base.model_dump(exclude_none=True, exclude={"index"})
+
+    def base_definition(base_id: str) -> Optional[Dict]:
+        return definition(incoming_bases, base_id)
+
+    def same_chain(base_id: Optional[str]) -> bool:
+        """Whether the aggregate defines *base_id* and every base it chains to
+        exactly as the incoming run does. One equal link is not enough: two
+        ``SRCROOT``s spelled alike that sit on different ``REPOROOT``s name
+        different places."""
+        seen: set = set()
+        while base_id is not None and base_id not in seen:
+            seen.add(base_id)
+            incoming_definition = base_definition(base_id)
+            if incoming_definition is None:
+                # The incoming run does not define it: nothing to compare, and
+                # the id is left as written on the location below.
+                return True
+            if definition(aggregate_bases, base_id) != incoming_definition:
+                return False
+            base_id = incoming_bases[base_id].uriBaseId
+        return True
 
     def expand(uri: Optional[str], base_id: str) -> tuple:
         """*uri* prefixed by the incoming run's definition of *base_id*."""
@@ -2954,18 +2983,9 @@ def _detach_run_scoped_references(
         base_id = location.get("uriBaseId")
         if base_id is None:
             return
-        incoming_definition = base_definition(base_id)
-        if incoming_definition is None:
+        if base_definition(base_id) is None:
             return
-        kept = (aggregate.originalUriBaseIds or {}).get(base_id)
-        if kept is None:
-            if aggregate.originalUriBaseIds is None:
-                aggregate.originalUriBaseIds = {}
-            aggregate.originalUriBaseIds[base_id] = incoming_bases[base_id].model_copy(
-                deep=True
-            )
-            return
-        if kept.model_dump(exclude_none=True, exclude={"index"}) == incoming_definition:
+        if same_chain(base_id):
             return
         expanded, remaining = expand(location.get("uri"), base_id)
         if remaining == base_id:

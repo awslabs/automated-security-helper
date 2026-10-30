@@ -360,8 +360,11 @@ def _run_with_tables(driver: str, results, artifacts=None, bases=None) -> Run:
     if artifacts is not None:
         fields["artifacts"] = [{"location": {"uri": uri}} for uri in artifacts]
     if bases is not None:
+        # A plain string is the base's uri; a dict is the whole definition, for
+        # a base that sits on another (``{"uri": "src/", "uriBaseId": "REPOROOT"}``).
         fields["originalUriBaseIds"] = {
-            key: {"uri": value} for key, value in bases.items()
+            key: (value if isinstance(value, dict) else {"uri": value})
+            for key, value in bases.items()
         }
     return Run(**fields)
 
@@ -439,7 +442,10 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
             "file:///repo-one/"
         )
 
-    def test_a_base_id_only_the_incoming_run_defines_is_folded_and_kept(self):
+    def test_a_base_id_only_the_incoming_run_defines_is_expanded_not_folded(self):
+        """Folding the definition into the aggregate's table set the id for every
+        run that used it without defining it, so the uri is expanded instead and
+        the aggregate's table stays as it was."""
         aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
         incoming = SarifReport(
             runs=[
@@ -454,9 +460,93 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         aggregated.merge_sarif_report(incoming)
 
         location = _first_artifact_location(aggregated)
-        assert location.uri == "src/x.py"
-        assert location.uriBaseId == "TARGET"
-        assert aggregated.runs[0].originalUriBaseIds["TARGET"].uri == "file:///target/"
+        assert location.uri == "file:///target/src/x.py"
+        assert location.uriBaseId is None
+        assert aggregated.runs[0].originalUriBaseIds is None
+
+    def test_a_later_run_using_the_id_without_defining_it_is_not_re_rooted(self):
+        """The shape behind the fold: scanner A defines TARGET, scanner B uses it
+        without defining it. With A's definition copied into the aggregate, B's
+        result read A's root. B's location is left as written, over no table."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        defines = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool-a",
+                    [_located(uri="a.py", uri_base_id="TARGET")],
+                    bases={"TARGET": "file:///tool-a-root/"},
+                )
+            ]
+        )
+        uses = SarifReport(
+            runs=[
+                _run_with_tables("tool-b", [_located(uri="b.py", uri_base_id="TARGET")])
+            ]
+        )
+
+        aggregated.merge_sarif_report(defines)
+        aggregated.merge_sarif_report(uses)
+
+        location = _first_artifact_location(aggregated, position=1)
+        assert (location.uri, location.uriBaseId) == ("b.py", "TARGET")
+        assert aggregated.runs[0].originalUriBaseIds is None
+
+    def test_a_chain_that_differs_below_an_equal_first_link_is_expanded(self):
+        """Two SRCROOTs spelled alike that sit on different REPOROOTs name
+        different places; comparing the first link alone read them as equal."""
+        aggregated = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "aggregate",
+                    [],
+                    bases={
+                        "SRCROOT": {"uri": "src/", "uriBaseId": "REPOROOT"},
+                        "REPOROOT": "file:///repo-one/",
+                    },
+                )
+            ]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="x.py", uri_base_id="SRCROOT")],
+                    bases={
+                        "SRCROOT": {"uri": "src/", "uriBaseId": "REPOROOT"},
+                        "REPOROOT": "file:///repo-two/",
+                    },
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert location.uri == "file:///repo-two/src/x.py"
+        assert location.uriBaseId is None
+        assert aggregated.runs[0].originalUriBaseIds["REPOROOT"].uri == (
+            "file:///repo-one/"
+        )
+
+    def test_a_chain_both_runs_define_alike_is_kept(self):
+        """The control: the same two links on both sides keep the id."""
+        chain = {
+            "SRCROOT": {"uri": "src/", "uriBaseId": "REPOROOT"},
+            "REPOROOT": "file:///repo/",
+        }
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [], bases=chain)])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool", [_located(uri="x.py", uri_base_id="SRCROOT")], bases=chain
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert (location.uri, location.uriBaseId) == ("x.py", "SRCROOT")
 
     def test_a_base_id_both_runs_define_alike_is_kept(self):
         aggregated = SarifReport(
