@@ -73,6 +73,126 @@ class TestOutputPath:
         assert docx_script.OUTPUT_PATH.parent.parent.parent.parent.parent == REPO_ROOT
 
 
+class _FakeCoreProperties:
+    def __init__(self):
+        self.created = None
+        self.modified = None
+
+
+class _FakeDocument:
+    """A python-docx Document stand-in that records paragraphs and saves a zip.
+
+    ``save`` writes a zip whose members would carry the current time, as
+    python-docx's does, so the reproducibility of the saved bytes is the
+    script's work and not the fake's.
+    """
+
+    instances: list[_FakeDocument] = []
+
+    def __init__(self):
+        self.paragraphs: list[str] = []
+        self.core_properties = _FakeCoreProperties()
+        _FakeDocument.instances.append(self)
+
+    def add_heading(self, text, level=1):
+        self.paragraphs.append(f"# {text}")
+
+    def add_paragraph(self, text):
+        self.paragraphs.append(text)
+
+    def save(self, target):
+        import zipfile
+
+        with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("word/document.xml", "\n".join(self.paragraphs))
+            zf.writestr(
+                "docProps/core.xml",
+                f"{self.core_properties.created}|{self.core_properties.modified}",
+            )
+
+
+@pytest.fixture
+def docx_script_with_document(docx_script):
+    docx_script.Document = _FakeDocument
+    _FakeDocument.instances.clear()
+    return docx_script
+
+
+class TestReproducibility:
+    def test_two_runs_write_the_same_bytes(self, docx_script_with_document, tmp_path):
+        """At the base each save stamped the zip members with the current time."""
+        script = docx_script_with_document
+        script.main(tmp_path / "a.docx")
+        script.main(tmp_path / "b.docx")
+        assert (tmp_path / "a.docx").read_bytes() == (tmp_path / "b.docx").read_bytes()
+
+    def test_every_zip_member_carries_the_fixed_timestamp(
+        self, docx_script_with_document, tmp_path
+    ):
+        import zipfile
+
+        docx_script_with_document.main(tmp_path / "a.docx")
+        with zipfile.ZipFile(tmp_path / "a.docx") as zf:
+            stamps = {info.date_time for info in zf.infolist()}
+        assert stamps == {docx_script_with_document.FIXED_ZIP_DATE_TIME}
+
+    def test_a_second_main_in_one_process_draws_the_same_data(
+        self, docx_script_with_document, tmp_path
+    ):
+        """At the base the PRNG was seeded once at import, so a second main() differed."""
+        script = docx_script_with_document
+        script.main(tmp_path / "a.docx")
+        script.random.random()  # disturb the process-global PRNG between runs
+        script.main(tmp_path / "b.docx")
+        first, second = _FakeDocument.instances[-2:]
+        assert first.paragraphs == second.paragraphs
+
+    def test_the_module_does_not_reseed_the_prng_at_import(self, docx_script):
+        import importlib.util
+
+        docx_script.random.seed(123)
+        before = docx_script.random.random()
+        docx_script.random.seed(123)
+        spec = importlib.util.spec_from_file_location("_ash_docx_reimport", SCRIPT)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert docx_script.random.random() == before
+
+
+class TestFixtureContent:
+    def test_ssn_area_numbers_are_ones_a_validator_accepts(self, docx_script):
+        """At the base every area number was 900-999, the never-issued range."""
+        docx_script.random.seed(7)
+        for _ in range(300):
+            area, group, serial = docx_script.fake_ssn().split("-")
+            assert 100 <= int(area) <= 899, area
+            assert int(area) != 666
+            assert len(group) == 2 and len(serial) == 4
+
+    def test_mrz_lines_are_td3_length(self, docx_script):
+        assert len(docx_script.MRZ_LINES) == 2
+        for line in docx_script.MRZ_LINES:
+            assert len(line) == 44, line
+            assert line.startswith("P<")
+
+    def test_the_approved_card_narrative_names_its_own_last_four(
+        self, docx_script_with_document, tmp_path
+    ):
+        """At the base the text said 'ending in 3020' beside a random number."""
+        docx_script_with_document.main(tmp_path / "a.docx")
+        narrative = next(
+            p
+            for p in _FakeDocument.instances[-1].paragraphs
+            if "MasterCard ending in" in p
+        )
+        head, _, rest = narrative.partition("ending in ")
+        last_four = rest[:4]
+        card = rest[rest.index("(") + 1 : rest.index(")")]
+        assert card.endswith(last_four)
+        assert "3020" not in narrative or card.endswith("3020")
+
+
 class TestCardNumbers:
     @pytest.mark.parametrize(
         "generator, prefix, length",
