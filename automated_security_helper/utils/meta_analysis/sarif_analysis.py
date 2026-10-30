@@ -116,6 +116,15 @@ def validate_sarif_aggregation(
     Validate that all important fields from original scanner reports
     are preserved in the aggregated report.
 
+    Per scanner, ``match_statistics`` carries ``match_rate`` (matched results
+    over results) and ``field_preservation_rate`` (the share of the compared
+    fields of the matched results that the aggregate preserved, from
+    ``fields_compared`` and ``fields_missing``). The latter used to be the match
+    rate under the other name, so a scanner whose every matched result had lost
+    critical fields still read 1.0. Two scanner names that normalize to one
+    (``SCANNER_NAME_MAP``) share one entry and their counts add up; each used to
+    reset the other's statistics while the summary totals kept both.
+
     Args:
         original_reports: Dict mapping scanner names to their SARIF reports
         aggregated_report: The combined ASH SARIF report
@@ -124,6 +133,7 @@ def validate_sarif_aggregation(
         Dict with validation results and statistics
     """
     from automated_security_helper.utils.meta_analysis.field_mapping import (
+        comparable_field_paths,
         compare_result_fields,
     )
 
@@ -154,41 +164,47 @@ def validate_sarif_aggregation(
         # Map scanner name to ASH configuration name if available
         normalized_scanner_name = SCANNER_NAME_MAP.get(scanner_name, scanner_name)
 
-        validation_results["missing_fields"][normalized_scanner_name] = {
-            "critical": [],
-            "important": [],
-            "informational": [],
-        }
-        validation_results["match_statistics"][normalized_scanner_name] = {
-            "total_results": 0,
-            "matched_results": 0,
-            "field_preservation_rate": 0,
-            "critical_fields_missing": 0,
-            "important_fields_missing": 0,
-            "informational_fields_missing": 0,
-        }
+        validation_results["missing_fields"].setdefault(
+            normalized_scanner_name,
+            {"critical": [], "important": [], "informational": []},
+        )
+        stats = validation_results["match_statistics"].setdefault(
+            normalized_scanner_name,
+            {
+                "total_results": 0,
+                "matched_results": 0,
+                "match_rate": 0,
+                "fields_compared": 0,
+                "fields_missing": 0,
+                "field_preservation_rate": 0,
+                "critical_fields_missing": 0,
+                "important_fields_missing": 0,
+                "informational_fields_missing": 0,
+            },
+        )
 
         # Process each result of every run in the original report
         for orig_result in _all_results(original_report):
-            validation_results["match_statistics"][normalized_scanner_name][
-                "total_results"
-            ] += 1
+            stats["total_results"] += 1
             validation_results["summary"]["total_findings"] += 1
 
             # Find matching result in aggregated report
             matched_result = find_matching_result(
-                orig_result, agg_results, exclude_ids=taken_ids
+                orig_result,
+                agg_results,
+                exclude_ids=taken_ids,
+                scanner_name=normalized_scanner_name,
             )
 
             if matched_result:
                 taken_ids.add(id(matched_result))
-                validation_results["match_statistics"][normalized_scanner_name][
-                    "matched_results"
-                ] += 1
+                stats["matched_results"] += 1
                 validation_results["summary"]["matched_findings"] += 1
 
                 # Compare fields between original and matched result
                 missing_fields = compare_result_fields(orig_result, matched_result)
+                stats["fields_compared"] += len(comparable_field_paths(orig_result))
+                stats["fields_missing"] += len(missing_fields)
 
                 # Categorize missing fields by importance. compare_result_fields
                 # writes IMPORTANCE_LEVELS, the names these buckets carry; a name
@@ -215,13 +231,15 @@ def validate_sarif_aggregation(
                     extract_result_summary(orig_result)
                 )
 
-    # Calculate field preservation rates
+    # Calculate the match and field preservation rates
     for scanner_name in validation_results["match_statistics"]:
         stats = validation_results["match_statistics"][scanner_name]
         if stats["total_results"] > 0:
+            stats["match_rate"] = stats["matched_results"] / stats["total_results"]
+        if stats["fields_compared"] > 0:
             stats["field_preservation_rate"] = (
-                stats["matched_results"] / stats["total_results"]
-            )
+                stats["fields_compared"] - stats["fields_missing"]
+            ) / stats["fields_compared"]
 
     return validation_results
 
@@ -246,10 +264,35 @@ def _has_location(location_info: Dict) -> bool:
     return any(value is not None for value in location_info.values())
 
 
+def _rule_identity(result: Dict) -> Optional[str]:
+    """The rule a result names: ``ruleId``, else ``rule.id`` (SARIF 3.27.5 lets a
+    result name its rule through the ``rule`` reference alone)."""
+    rule_id = result.get("ruleId")
+    if rule_id:
+        return rule_id
+    rule = result.get("rule")
+    if isinstance(rule, dict):
+        return rule.get("id") or None
+    return None
+
+
+def _result_scanner(result: Dict) -> Optional[str]:
+    """The scanner an aggregated result records (``properties.scanner_name``,
+    which aggregation attaches to every result), normalized, or None."""
+    properties = result.get("properties")
+    if not isinstance(properties, dict):
+        return None
+    name = properties.get("scanner_name")
+    if not isinstance(name, str) or not name:
+        return None
+    return SCANNER_NAME_MAP.get(name, name)
+
+
 def find_matching_result(
     original_result: Dict,
     aggregated_results: List[Dict],
     exclude_ids: Optional[Set[int]] = None,
+    scanner_name: Optional[str] = None,
 ) -> Optional[Dict]:
     """
     Find a matching result in the aggregated report using rule ID and location.
@@ -257,13 +300,21 @@ def find_matching_result(
     Two results of one rule match when both carry a location and the locations
     match, or when neither carries one and their message texts, or failing those
     their ``analysisTarget`` URIs, are equal. A result with a location never
-    matches one whose location differs, whatever else they share.
+    matches one whose location differs, whatever else they share. A rule is
+    named by ``ruleId`` or by ``rule.id``; two results that name no rule at all
+    are the same finding only when their locations match and their messages,
+    when both carry one, are equal, since a location alone is not a rule. With
+    *scanner_name*, an aggregated result that records another scanner
+    (``properties.scanner_name``) is not a match: one scanner's finding was
+    paired with another scanner's result of the same rule id at the same place.
 
     Args:
         original_result: Result from original scanner report
         aggregated_results: List of results from aggregated report
         exclude_ids: ``id()`` of aggregated results already matched to another
             original, which are not offered again
+        scanner_name: The normalized name of the scanner that reported
+            *original_result*, when known
 
     Returns:
         Matching result or None
@@ -273,7 +324,10 @@ def find_matching_result(
     )
 
     # Extract matching criteria
-    rule_id = original_result.get("ruleId")
+    rule_id = _rule_identity(original_result)
+    wanted_scanner = (
+        SCANNER_NAME_MAP.get(scanner_name, scanner_name) if scanner_name else None
+    )
 
     # Extract location info
     location_info = extract_location_info(original_result)
@@ -284,8 +338,12 @@ def find_matching_result(
         if exclude_ids and id(agg_result) in exclude_ids:
             continue
         # Match by rule ID first
-        if agg_result.get("ruleId") != rule_id:
+        if _rule_identity(agg_result) != rule_id:
             continue
+        if wanted_scanner is not None:
+            recorded = _result_scanner(agg_result)
+            if recorded is not None and recorded.lower() != wanted_scanner.lower():
+                continue
         agg_location = extract_location_info(agg_result)
         agg_located = _has_location(agg_location)
 
@@ -296,6 +354,8 @@ def find_matching_result(
                 and agg_located
                 and locations_match(location_info, agg_location)
             ):
+                if rule_id is None and not _messages_agree(original_result, agg_result):
+                    continue
                 return agg_result
             continue
 
@@ -314,6 +374,13 @@ def find_matching_result(
             return agg_result
 
     return None
+
+
+def _messages_agree(original_result: Dict, agg_result: Dict) -> bool:
+    """Whether two results' message texts are equal, when both carry a message."""
+    if not (original_result.get("message") and agg_result.get("message")):
+        return True
+    return get_message_text(original_result) == get_message_text(agg_result)
 
 
 # ---------------------------------------------------------------------------
@@ -362,10 +429,13 @@ def extract_location_info(result: Dict) -> Dict:
     """
     location = {"file_path": None, "start_line": None, "end_line": None}
 
-    # Extract from locations array
-    if result.get("locations") and len(result["locations"]) > 0:
-        loc = result["locations"][0]
-        if loc.get("physicalLocation"):
+    # Extract from locations array. A first location, or a physicalLocation,
+    # that is JSON null or not an object carries no location; it raised
+    # AttributeError out of the whole aggregation check.
+    locations = result.get("locations")
+    if isinstance(locations, list) and locations:
+        loc = locations[0]
+        if isinstance(loc, dict) and isinstance(loc.get("physicalLocation"), dict):
             phys_loc = loc["physicalLocation"]
 
             # Handle different SARIF structures
