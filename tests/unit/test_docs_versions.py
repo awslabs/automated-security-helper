@@ -829,6 +829,49 @@ def test_a_recognized_pin_is_not_reported():
     assert manager.release_pins(text) == {"1.2.3"}
 
 
+REAL_TARGETS = _manager().target_files
+
+
+def _real_template(target: str) -> str:
+    path = REPO_ROOT / (target + ".template")
+    assert path.is_file(), f"{target} is a target file with no template: {path}"
+    return path.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target", REAL_TARGETS)
+def test_no_real_page_holds_a_pin_the_check_would_reject(target):
+    """The check fails the docs build on a pin that no pattern accepts, and every
+    other test feeds it a hand-written string. Render each real template the way the
+    site is built, for a release and for main, and require that nothing is rejected:
+    a third-party tag or an install form the patterns do not know would otherwise
+    fail the first build after the check landed, with no allowance to name it."""
+    manager = _manager()
+    template = _real_template(target)
+    release = manager.render(template, "3.4.0")
+    main = manager.render_for_branch(template, "main", "3.4.0")
+    assert dv.unrecognized_pin_problems(manager, release, f"3.4.0/{target}") == []
+    assert dv.unrecognized_pin_problems(manager, main, f"main/{target}") == []
+    assert manager.release_pins(release) <= {"3.4.0"}
+
+
+@pytest.mark.unit
+def test_the_real_templates_hold_pins_and_the_check_can_fail_on_them():
+    """The control for the test above: it read pins (a zero over no pins would pass
+    anything), and the same check does reject a planted pin in the same text."""
+    manager = _manager()
+    rendered = {
+        target: manager.render(_real_template(target), "3.4.0")
+        for target in REAL_TARGETS
+    }
+    pinned = [target for target, text in rendered.items() if manager.release_pins(text)]
+    assert len(pinned) > len(REAL_TARGETS) // 2, pinned
+    for target in pinned:
+        planted = rendered[target] + f"\n- rev: v9.9.9\n  repo: {REPO_URL}\n"
+        problems = dv.unrecognized_pin_problems(manager, planted, target)
+        assert len(problems) == 1, (target, problems)
+
+
 @pytest.mark.unit
 def test_the_readers_still_see_a_pin_inside_one_code_span():
     """The control: this repository's clone in one span, in a block and inline."""
