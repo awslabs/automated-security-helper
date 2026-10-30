@@ -244,7 +244,11 @@ def test_the_installer_exports_an_absolute_bin_path(tmp_path, monkeypatch):
         ["--bin-path", "rel/bin", "--tool", "no-such-tool"],
     )
     assert os.environ["ASH_BIN_PATH"] == str(tmp_path / "rel" / "bin")
-    assert (tmp_path / "rel" / "bin").is_dir()
+    # The unknown tool is refused before the bin directory is made: the command
+    # creates it just before the installs run, after every refusal of its own
+    # (tests/unit/cli/test_dependencies_refuses_before_creating.py), so the
+    # export is this run's only effect.
+    assert not (tmp_path / "rel").exists()
 
 
 # ---------------------------------------------------------------------------
