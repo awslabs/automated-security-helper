@@ -1127,10 +1127,18 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         assert sharding.WARN_PREFIX not in done.stdout, done.stdout
         assert "::error title=tier run executed no test::" in done.stdout, done.stdout
 
-    def test_any_other_value_leaves_the_floor_off(self, tmp_path):
+    def test_any_other_value_is_a_usage_error(self, tmp_path):
+        """A mistyped value ends the run as a malformed ASH_TEST_SHARD does."""
         self._plant(tmp_path, absent_tool=1)
         done = self._run(tmp_path, floor="WARN", gate_open=True)
-        assert done.returncode == 0, done.stdout + done.stderr
+        assert done.returncode == int(pytest.ExitCode.USAGE_ERROR), (
+            done.stdout + done.stderr
+        )
+        assert int(pytest.ExitCode.USAGE_ERROR) == 4
+        assert (
+            "ASH_TEST_TIER_FLOOR: 'WARN' is not accepted; use 1 or warn, or leave it empty"
+            in done.stdout + done.stderr
+        ), done.stdout + done.stderr
         assert "executed no test" not in done.stdout, done.stdout
 
 
@@ -1850,12 +1858,28 @@ class TestATierRunThatExecutedNoTestFails:
         assert config.stash[sharding._FLOOR_KEY] is True
 
     @pytest.mark.parametrize(
-        "value", ["true", "0", "yes", "", "WARN", "warning", " 1", "1 ", "warn "]
+        "value", ["true", "0", "yes", "WARN", "Warn", "warning", " 1", "1 ", "warn "]
     )
     def test_only_the_values_1_and_warn_opt_a_run_in(self, monkeypatch, value):
-        """Any other value is ignored, as before."""
+        """Any other non-empty value is a usage error, never a silently off floor."""
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
         monkeypatch.setenv(sharding.FLOOR_ENV_VAR, value)
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        with pytest.raises(pytest.UsageError) as raised:
+            sharding.configure(config)
+        message = str(raised.value)
+        assert sharding.FLOOR_ENV_VAR in message, message
+        assert repr(value) in message, message
+        assert "1" in message and sharding.FLOOR_WARN_VALUE in message, message
+        assert "\n" not in message, "a one-line message"
+        assert manager.get_plugin("ash-tier-run-outcome") is None
+        assert sharding.FLOOR_ENV_VAR not in os.environ
+
+    def test_an_empty_value_leaves_the_floor_off(self, monkeypatch):
+        """Only an empty value is the same as no value."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "")
         manager = pytest.PytestPluginManager()
         config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
         sharding.configure(config)

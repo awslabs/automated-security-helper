@@ -117,7 +117,9 @@ time is not.
 ``ASH_TEST_TIER_FLOOR=warn`` opts in like ``1`` and reports instead of failing: the
 same line is printed with a warning prefix and the exit status is left alone. The e2e
 legs run in warn mode until a hosted run shows every one of them executing a real test
-with its scanners installed. Any other value is ignored.
+with its scanners installed. An empty value leaves the floor off; any other value is a
+usage error, as a malformed ``ASH_TEST_SHARD`` is, so that a mistyped ``WARN`` does not
+turn the floor off without a word.
 
 The failure line counts the leg assertions apart from the skips, so its numbers add up
 (``2 collected, 1 skipped, 1 leg assertion not counted, 0 executed``); the clause is
@@ -248,7 +250,8 @@ def configure(config: pytest.Config) -> None:
     through ``workerinput`` by :func:`pytest_configure_node`. Calling it twice is
     harmless, so a run that registers the module both ways reads the variable once.
 
-    Raises ``pytest.UsageError`` for a value that is not ``<index>of<count>``.
+    Raises ``pytest.UsageError`` for a shard value that is not ``<index>of<count>``, and
+    for a floor value that is not empty, ``1`` or ``warn``.
     """
     if _SHARD_KEY in config.stash:
         return
@@ -261,6 +264,11 @@ def configure(config: pytest.Config) -> None:
     else:
         text = os.environ.pop(ENV_VAR, "")
         floor_value = os.environ.pop(FLOOR_ENV_VAR, "")
+        if floor_value not in ("", "1", FLOOR_WARN_VALUE):
+            raise pytest.UsageError(
+                f"{FLOOR_ENV_VAR}: {floor_value!r} is not accepted; "
+                f"use 1 or {FLOOR_WARN_VALUE}, or leave it empty"
+            )
         floor = floor_value in ("1", FLOOR_WARN_VALUE)
         warn = floor_value == FLOOR_WARN_VALUE
     try:
