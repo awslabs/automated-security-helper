@@ -440,15 +440,19 @@ def _member_glob_stays_inside(glob: str) -> bool:
 
     pnpm resolves the globs against the workspace root with forward or
     backward slashes, so a pattern is read on both separators: it stays inside
-    when it is relative on both path flavors, holds no ``..`` component and is
-    not empty. A leading ``!`` marks a pattern pnpm excludes and is read past.
+    when it is relative on both path flavors (no leading slash or backslash,
+    no drive: a root-relative ``\\packages\\*`` names the current drive's root,
+    not the workspace, and ``PureWindowsPath.is_absolute`` alone admits it),
+    holds no ``..`` component and is not empty. A leading ``!`` marks a pattern
+    pnpm excludes and is read past.
     """
     body = glob.removeprefix("!")
     if not body:
         return False
-    if PurePosixPath(body).is_absolute() or PureWindowsPath(body).is_absolute():
+    windows = PureWindowsPath(body)
+    if PurePosixPath(body).is_absolute() or windows.is_absolute():
         return False
-    if PureWindowsPath(body).drive:
+    if windows.drive or windows.root:
         return False
     return ".." not in re.split(r"[\\/]+", body)
 
