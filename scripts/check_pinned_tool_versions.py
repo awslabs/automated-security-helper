@@ -60,11 +60,12 @@ Dockerfile configures. Each pin is reported as
 An ``apt-get install`` of a package with no ``=version`` is refused (exit 2) rather
 than skipped, and so is one package pinned to two versions in different stages. The
 install is found in a ``RUN`` of any case, whether written in shell form, as an exec
-form array or as a here-document, and whether spelled ``apt-get`` or ``apt``. An
-option that takes its value as a separate word (``-t suite``, ``-o Name=value``) and a
-redirection are not packages. A Dockerfile that configures NodeSource without a
-``NODE_MAJOR`` this script can read is refused too, because the nodejs pin would be
-looked up in Debian's own nodejs.
+form array or as a here-document, and whether spelled ``apt-get`` or ``apt``. The body
+of a here-document that a command writes to a file (``cat > setup.sh <<'EOF'``) is
+that file's content and is not read. An option that takes its value as a separate
+word (``-t suite``, ``-o Name=value``) and a redirection are not packages. A
+Dockerfile that configures NodeSource without a ``NODE_MAJOR`` this script can read is
+refused too, because the nodejs pin would be looked up in Debian's own nodejs.
 
 What was rejected
 -----------------
@@ -1303,6 +1304,16 @@ _HEREDOC_MARKER = re.compile(
 # parentheses. Its shift operator is not a here-document, so it is cut out before the
 # markers are looked for.
 _ARITHMETIC = re.compile(r"\$?\(\((?:[^()]|\([^()]*\))*\)\)")
+# Where one shell command ends on a line: ``;``, ``|``, ``&&`` and a lone ``&``, not the
+# ``&`` of ``2>&1`` or ``&>file``.
+_COMMAND_END = re.compile(r"[;|]|&&|(?<![<>&])&(?![>&])")
+# A redirection of output to a file: "> x", ">> x", "2> x", "&> x". Not a copy of a
+# descriptor (``2>&1``), and not /dev/null, which keeps nothing.
+_FILE_REDIRECT = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?!/dev/null(?![\w/.-]))[^\s<>|;&]")
+# A redirection or a here-document marker among the words of a command.
+_REDIRECT_WORD = re.compile(r"(?:&|\d*)>>?\s*\S*|<<-?\s*[\"']?\w+[\"']?")
+# Shells, which run the body of a here-document they are given.
+_SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ash", "ksh"})
 # A shell redirection among the arguments of the install: "> /dev/null", "2>".
 _REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
 # The options of apt-get that take their value as the next word. A short option takes
@@ -1335,6 +1346,31 @@ class AptResult:
     detail: str = ""
 
 
+def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
+    """The here-documents opened on one line, as (name, body is a file's content).
+
+    A body is a file's content, and not commands, when the command it is given to
+    writes its output to a file (``cat > setup.sh <<'EOF'``, ``cat <<EOF >> conf``) and
+    is not a shell. A body given to a shell (``bash <<EOF > log``), or to a command
+    that does not write a file, is read as shell.
+    """
+    cleaned = _ARITHMETIC.sub(" ", line)
+    ends = [match.span() for match in _COMMAND_END.finditer(cleaned)]
+    markers: list[tuple[str, bool]] = []
+    for match in _HEREDOC_MARKER.finditer(cleaned):
+        start = max([end for _, end in ends if end <= match.start()], default=0)
+        stop = min(
+            [begin for begin, _ in ends if begin >= match.end()], default=len(cleaned)
+        )
+        command = cleaned[start:stop]
+        words = _REDIRECT_WORD.sub(" ", command).split()
+        is_file = bool(_FILE_REDIRECT.search(command)) and not any(
+            word.rsplit("/", 1)[-1] in _SHELLS for word in words
+        )
+        markers.append((match.group(2), is_file))
+    return markers
+
+
 def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
     """Each RUN instruction as its (line number, text) lines, comments dropped.
 
@@ -1342,21 +1378,26 @@ def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
     instruction a blank line and a comment line are skipped, as Docker skips them.
     The body of a here-document belongs to the instruction, each of its lines ended
     with ``;`` as the shell ends a command at a newline, except a line that ends with
-    a backslash, which continues on the next. An instruction still open at the end of
-    the file is kept.
+    a backslash, which continues on the next. The body of a here-document written to
+    a file (``cat > setup.sh <<'EOF'``) is that file's content: it is not part of the
+    instruction. An instruction still open at the end of the file is kept.
     """
     blocks: list[list[tuple[int, str]]] = []
     current: list[tuple[int, str]] | None = None
-    markers: list[str] = []  # here-document names found on the instruction's lines
-    terminators: list[str] = []  # here-document names whose body is being read
+    # here-document (name, body is a file's content) found on the instruction's lines
+    markers: list[tuple[str, bool]] = []
+    # here-documents whose body is being read, in the order the shell reads them
+    terminators: list[tuple[str, bool]] = []
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if current is not None and terminators:
-            if line == terminators[0]:
+            if line == terminators[0][0]:
                 terminators.pop(0)
                 if not terminators:
                     blocks.append(current)
                     current = None
+            elif terminators[0][1]:
+                continue  # the content of a file the command writes, not commands
             elif line and not line.startswith("#"):
                 # A command ends at a newline, unless the line ends with a backslash:
                 # then the next line continues it, as in the body of a here-document.
@@ -1375,10 +1416,7 @@ def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
         continued = line.endswith("\\")
         body = line[:-1] if continued else line
         current.append((number, body))
-        markers += [
-            match.group(2)
-            for match in _HEREDOC_MARKER.finditer(_ARITHMETIC.sub(" ", body))
-        ]
+        markers += _heredoc_markers(body)
         if continued:
             continue
         if markers:
