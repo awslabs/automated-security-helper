@@ -15,6 +15,7 @@ as functions.
 from __future__ import annotations
 
 import importlib.util
+import random
 import sys
 import types
 from pathlib import Path
@@ -27,19 +28,29 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "generate_test_docx.py"
 
 
-@pytest.fixture
-def docx_script(monkeypatch):
-    """The script loaded with a stand-in ``docx`` module, by path."""
+def _load_docx_script(monkeypatch, module_name: str):
+    """Load the script with a stand-in ``docx`` module, by path."""
     stand_in = types.ModuleType("docx")
     stand_in.Document = object
     monkeypatch.setitem(sys.modules, "docx", stand_in)
-    spec = importlib.util.spec_from_file_location(
-        "_ash_script_generate_test_docx_isolated", SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location(module_name, SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture
+def docx_script(monkeypatch):
+    return _load_docx_script(monkeypatch, "_ash_script_generate_test_docx_isolated")
+
+
+@pytest.fixture
+def seeded(docx_script, monkeypatch):
+    """A private PRNG for the script, so a test's seed never leaks into the
+    process-global ``random`` state the rest of the session shares."""
+    monkeypatch.setattr(docx_script, "random", random.Random(7))
+    return docx_script
 
 
 def _luhn_valid(number: str) -> bool:
@@ -67,10 +78,17 @@ class TestOutputPath:
         )
 
     def test_the_path_does_not_depend_on_the_working_directory(
-        self, docx_script, monkeypatch, tmp_path
+        self, monkeypatch, tmp_path
     ):
+        """OUTPUT_PATH is a module constant, so the directory has to change
+        BEFORE the module runs; changing it afterwards tested nothing, and
+        pytest's own cwd is the repository root, where a cwd-relative path
+        and a repository-anchored one are the same path."""
         monkeypatch.chdir(tmp_path)
-        assert docx_script.OUTPUT_PATH.parent.parent.parent.parent.parent == REPO_ROOT
+        script = _load_docx_script(monkeypatch, "_ash_script_generate_test_docx_cwd")
+        assert script.OUTPUT_PATH.is_absolute()
+        assert script.OUTPUT_PATH.is_relative_to(REPO_ROOT)
+        assert not script.OUTPUT_PATH.is_relative_to(tmp_path)
 
 
 class _FakeCoreProperties:
@@ -161,9 +179,9 @@ class TestReproducibility:
 
 
 class TestFixtureContent:
-    def test_ssn_area_numbers_are_ones_a_validator_accepts(self, docx_script):
+    def test_ssn_area_numbers_are_ones_a_validator_accepts(self, seeded):
         """At the base every area number was 900-999, the never-issued range."""
-        docx_script.random.seed(7)
+        docx_script = seeded
         for _ in range(300):
             area, group, serial = docx_script.fake_ssn().split("-")
             assert 100 <= int(area) <= 899, area
@@ -204,9 +222,9 @@ class TestCardNumbers:
         ],
     )
     def test_every_generated_number_passes_luhn(
-        self, docx_script, generator, prefix, length
+        self, seeded, generator, prefix, length
     ):
-        docx_script.random.seed(7)
+        docx_script = seeded
         for _ in range(50):
             number = getattr(docx_script, generator)()
             digits = "".join(c for c in number if c.isdigit())
