@@ -188,7 +188,7 @@ def test_a_presence_guard_that_cannot_be_taken_clears_the_memory_and_warns(
     registry = sessions.get_default_registry()
     registry.session_for("unreadable")
 
-    def refused(_root):
+    def refused(_root, **_kwargs):
         raise PermissionError(errno.EACCES, "Permission denied")
 
     try:
@@ -237,7 +237,7 @@ def test_forgetting_a_session_drops_its_delivered_source_record(
     registry.session_for("unreadable")
     assert source_delivery.delivered_session_count() == 1
 
-    def refused(_root):
+    def refused(_root, **_kwargs):
         raise PermissionError("the presence registry cannot be opened")
 
     # Permanent: the sweep below hits the same refusal.
@@ -287,11 +287,15 @@ def registry_calls(monkeypatch) -> List[str]:
 def _refuse_the_presence_guard(
     monkeypatch, error: Optional[OSError] = None
 ) -> List[Path]:
-    """Make every ``_scan_presence_guard`` call raise; the list records each attempt."""
+    """Make every ``_scan_presence_guard`` call raise; the list records each attempt.
+
+    The double takes the guard's keyword arguments too (the sweep asks for the
+    lock with a bounded ``wait``), so a call of either shape reaches the raise.
+    """
     attempts: List[Path] = []
     raised = error or PermissionError(errno.EACCES, "Permission denied")
 
-    def refused(guard_root):
+    def refused(guard_root, **_kwargs):
         attempts.append(guard_root)
         raise raised
 
@@ -564,7 +568,7 @@ def test_a_guard_that_cannot_be_taken_does_not_strand_the_default_workspace(
 ) -> None:
     default = mark_session_workspace(root / profile_registry.DEFAULT_SESSION_ID)
 
-    def refused(_root):
+    def refused(_root, **_kwargs):
         raise PermissionError("the presence registry cannot be opened")
 
     monkeypatch.setattr(sessions, "_scan_presence_guard", refused)
