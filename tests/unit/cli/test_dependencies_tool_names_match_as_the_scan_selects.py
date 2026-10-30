@@ -107,6 +107,28 @@ def test_the_selection_key_is_the_scans():
     assert dependencies_module._selection_key("cfn-nag") == "cfn-nag"
 
 
+def test_two_spellings_of_one_alias_warn_once(monkeypatch):
+    """Aliases match by key, so `ArchiveConverter` and `archiveconverter` are one
+    alias; the repeat check read the typed spelling and warned for each."""
+    warnings = io.StringIO()
+    monkeypatch.setattr(
+        dependencies_module,
+        "err_console",
+        Console(file=warnings, width=200, no_color=True),
+    )
+
+    resolution = dependencies_module._resolve_tool_aliases(
+        ["ArchiveConverter", "archiveconverter", " ArchiveConverter "]
+    )
+
+    assert resolution == {
+        "ArchiveConverter": "archive",
+        "archiveconverter": "archive",
+        " ArchiveConverter ": "archive",
+    }
+    assert warnings.getvalue().count("Deprecated:") == 1, warnings.getvalue()
+
+
 class TestCanonicalToolName:
     """Two plugins whose names differ only in case: the exact spelling wins."""
 

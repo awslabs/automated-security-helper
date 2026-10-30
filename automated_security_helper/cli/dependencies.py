@@ -253,18 +253,24 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
     refused by the caller exactly as before.
     """
     resolved: dict[str, str] = {}
+    # Aliases match by selection key, so two spellings of one alias are one alias:
+    # warned once, by key, not once per spelling.
+    warned: set[str] = set()
     for tool in tools:
         if tool in resolved:
             continue
-        replacement = _DEPRECATED_ALIASES_BY_KEY.get(_selection_key(tool))
+        key = _selection_key(tool)
+        replacement = _DEPRECATED_ALIASES_BY_KEY.get(key)
         if replacement is None:
             resolved[tool] = tool.strip()
             continue
-        err_console.print(
-            f"[bold yellow]Deprecated:[/bold yellow] --tool {escape(tool)} is "
-            f"deprecated; use --tool {escape(replacement)} instead.",
-            highlight=False,
-        )
+        if key not in warned:
+            warned.add(key)
+            err_console.print(
+                f"[bold yellow]Deprecated:[/bold yellow] --tool {escape(tool)} is "
+                f"deprecated; use --tool {escape(replacement)} instead.",
+                highlight=False,
+            )
         resolved[tool] = replacement
     return resolved
 
