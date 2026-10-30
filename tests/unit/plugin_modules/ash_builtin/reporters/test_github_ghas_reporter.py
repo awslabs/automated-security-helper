@@ -408,26 +408,28 @@ class TestEmptyAndErrorPaths:
 class TestCollectRules:
     def test_none_component_is_ignored(self, reporter):
         rules_map = {}
-        reporter._collect_rules(None, rules_map)
+        reporter._collect_rules([None], rules_map)
         assert rules_map == {}
 
     def test_component_without_rules_is_ignored(self, reporter):
         rules_map = {}
-        reporter._collect_rules(ToolComponent(name="empty"), rules_map)
+        reporter._collect_rules([ToolComponent(name="empty")], rules_map)
         assert rules_map == {}
 
-    def test_first_definition_of_a_rule_id_wins(self, reporter):
+    def test_the_scanner_named_first_keeps_a_rule_id_in_any_order(self, reporter):
+        # Listed extension first: the bare id still goes to "driver", which
+        # sorts first by name. Without a `qualified` map the other declaration
+        # is not entered at all.
         rules_map = {}
         reporter._collect_rules(
-            ToolComponent(
-                name="driver", rules=[_rule("DUP", short_desc="from driver")]
-            ),
-            rules_map,
-        )
-        reporter._collect_rules(
-            ToolComponent(
-                name="ext", rules=[_rule("DUP", short_desc="from extension")]
-            ),
+            [
+                ToolComponent(
+                    name="ext", rules=[_rule("DUP", short_desc="from extension")]
+                ),
+                ToolComponent(
+                    name="driver", rules=[_rule("DUP", short_desc="from driver")]
+                ),
+            ],
             rules_map,
         )
 
@@ -437,7 +439,7 @@ class TestCollectRules:
     def test_hyphenated_security_severity_is_preserved_as_string(self, reporter):
         rules_map = {}
         reporter._collect_rules(
-            ToolComponent(name="d", rules=[_rule("R", security_severity=9.5)]),
+            [ToolComponent(name="d", rules=[_rule("R", security_severity=9.5)])],
             rules_map,
         )
         assert rules_map["R"]["security_severity"] == "9.5"
@@ -446,7 +448,7 @@ class TestCollectRules:
         """ASH-internal code writes the underscored spelling; both must work."""
         rules_map = {}
         reporter._collect_rules(
-            ToolComponent(name="d", rules=[_rule("R", underscored="7.5")]),
+            [ToolComponent(name="d", rules=[_rule("R", underscored="7.5")])],
             rules_map,
         )
         assert rules_map["R"]["security_severity"] == "7.5"
@@ -454,9 +456,12 @@ class TestCollectRules:
     def test_hyphenated_spelling_takes_precedence_over_underscored(self, reporter):
         rules_map = {}
         reporter._collect_rules(
-            ToolComponent(
-                name="d", rules=[_rule("R", security_severity="9.0", underscored="1.0")]
-            ),
+            [
+                ToolComponent(
+                    name="d",
+                    rules=[_rule("R", security_severity="9.0", underscored="1.0")],
+                )
+            ],
             rules_map,
         )
         assert rules_map["R"]["security_severity"] == "9.0"
@@ -464,19 +469,21 @@ class TestCollectRules:
     def test_rule_metadata_is_captured(self, reporter):
         rules_map = {}
         reporter._collect_rules(
-            ToolComponent(
-                name="d",
-                rules=[
-                    _rule(
-                        "R",
-                        level=Level.warning,
-                        short_desc="a short description",
-                        help_text="some help",
-                        help_uri="https://example.test/rules/R",
-                        tags=["security", "cwe-79"],
-                    )
-                ],
-            ),
+            [
+                ToolComponent(
+                    name="d",
+                    rules=[
+                        _rule(
+                            "R",
+                            level=Level.warning,
+                            short_desc="a short description",
+                            help_text="some help",
+                            help_uri="https://example.test/rules/R",
+                            tags=["security", "cwe-79"],
+                        )
+                    ],
+                )
+            ],
             rules_map,
         )
 
@@ -502,7 +509,7 @@ class TestCollectRules:
         rules_map = {}
 
         reporter._collect_rules(
-            ToolComponent(name="ASH", rules=[rule]),
+            [ToolComponent(name="ASH", rules=[rule])],
             rules_map,
         )
 
@@ -510,7 +517,9 @@ class TestCollectRules:
 
     def test_rule_without_properties_has_no_severity_or_tags(self, reporter):
         rules_map = {}
-        reporter._collect_rules(ToolComponent(name="d", rules=[_rule("R")]), rules_map)
+        reporter._collect_rules(
+            [ToolComponent(name="d", rules=[_rule("R")])], rules_map
+        )
         assert rules_map["R"]["security_severity"] is None
         assert rules_map["R"]["tags"] == []
         assert rules_map["R"]["default_level"] is None

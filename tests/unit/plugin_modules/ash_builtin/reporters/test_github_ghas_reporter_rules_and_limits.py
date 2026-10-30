@@ -120,6 +120,59 @@ class TestRuleIdCollisions:
             "trivy/CVE-2024-1",
         ]
 
+    @pytest.mark.parametrize("extension_name", ["Trivy", "TRIVY"])
+    def test_an_extension_name_spelled_differently_from_its_scanner_still_collides(
+        self, reporter, extension_name
+    ):
+        run = _run(
+            [_result("CVE-2024-1", "grype"), _result("CVE-2024-1", "trivy")],
+            [
+                ToolComponent(name="grype", rules=[_rule("CVE-2024-1", "grype text")]),
+                ToolComponent(
+                    name=extension_name, rules=[_rule("CVE-2024-1", "trivy text")]
+                ),
+            ],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        qualified_id = f"{extension_name}/CVE-2024-1"
+        rules = {rule["id"]: rule for rule in doc["tool"]["driver"]["rules"]}
+        assert set(rules) == {"CVE-2024-1", qualified_id}
+        assert rules["CVE-2024-1"]["shortDescription"]["text"] == "grype text"
+        assert rules[qualified_id]["shortDescription"]["text"] == "trivy text"
+        assert [r["ruleId"] for r in doc["results"]] == ["CVE-2024-1", qualified_id]
+
+    def test_the_ids_do_not_depend_on_the_order_of_the_extensions(self, reporter):
+        def emitted(extension_order):
+            run = _run(
+                [_result("CVE-2024-1", name) for name in ("grype", "trivy")],
+                [
+                    ToolComponent(
+                        name=name, rules=[_rule("CVE-2024-1", f"{name} text")]
+                    )
+                    for name in extension_order
+                ],
+            )
+            doc = json.loads(reporter.report(_model(run)))["runs"][0]
+            texts = {
+                rule["id"]: rule["shortDescription"]["text"]
+                for rule in doc["tool"]["driver"]["rules"]
+            }
+            # Each scanner's result, with the text of the rule it names.
+            return texts, {
+                result["message"]["text"]: texts[result["ruleId"]]
+                for result in doc["results"]
+            }
+
+        forward = emitted(("grype", "trivy"))
+        reversed_order = emitted(("trivy", "grype"))
+
+        assert forward == reversed_order
+        texts, by_result = forward
+        assert texts["CVE-2024-1"] == "grype text"
+        assert by_result == {"grype says": "grype text", "trivy says": "trivy text"}
+
     def test_one_rule_declared_alike_by_two_scanners_stays_one_rule(self, reporter):
         run = _run(
             [_result("R1", "a"), _result("R1", "b")],

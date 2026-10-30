@@ -48,7 +48,7 @@ aggregator does too.
 import json
 import re
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, TYPE_CHECKING
 from urllib.parse import unquote
 
 from pydantic import Field
@@ -197,6 +197,18 @@ def _result_scanner(result: Any) -> Optional[str]:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _scanner_identity(name: Any) -> str:
+    """*name* as the identity every spelling of one scanner shares.
+
+    A scanner is named in two places that nothing keeps in step: the tool
+    component that declares its rules (``Trivy``) and the ``scanner_name``
+    stamped on its results (``trivy``). Both are stripped and case-folded
+    before they are compared, so a rule collision recorded under one spelling
+    is found again under the other.
+    """
+    return str(name or "").strip().casefold()
 
 
 def _result_kind(result: Any) -> str:
@@ -394,15 +406,17 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             #    different descriptions, help and scores. Flattened first-wins,
             #    the second scanner's alerts carried the first scanner's text
             #    and score, and the two scanners' results pooled into one
-            #    severity. Such a second rule is declared under
+            #    severity. Such a colliding rule is declared under
             #    "<scanner>/<rule id>" and that scanner's results name it; the
-            #    first keeps the bare id, so existing alerts keep theirs.
+            #    scanner whose name sorts first keeps the bare id, whatever
+            #    order the components are listed in.
             rules_map: Dict[str, Dict[str, Any]] = {}
             qualified: Dict[Tuple[str, str], str] = {}
+            components: List[Any] = []
             for run in runs:
-                self._collect_rules(run.tool.driver, rules_map, qualified)
-                for ext in run.tool.extensions or []:
-                    self._collect_rules(ext, rules_map, qualified)
+                components.append(run.tool.driver)
+                components.extend(run.tool.extensions or [])
+            self._collect_rules(components, rules_map, qualified)
 
             # 2. The most severe of each rule's results, as the gate grades them
             #    (issue_severity, else the level), for rules whose scanner gave
@@ -693,50 +707,65 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         scanner = _result_scanner(result)
         if scanner is None:
             return rule_id
-        return qualified.get((scanner, rule_id), rule_id)
+        return qualified.get((_scanner_identity(scanner), rule_id), rule_id)
 
     def _collect_rules(
         self,
-        tool_component,
+        components: Iterable[Any],
         rules_map: Dict[str, Dict[str, Any]],
         qualified: Optional[Dict[Tuple[str, str], str]] = None,
     ) -> None:
-        """Collect rules from a ToolComponent into the rules map.
+        """Collect the rules of *components* (ToolComponents) into the rules map.
 
-        A rule whose id another component already declared with the same
-        description is the same rule and is skipped. One declared differently
-        is a collision: it is entered under ``<component name>/<id>`` and the
-        pair (component name, id) is recorded in *qualified*, so the results of
-        that scanner name the qualified id (:meth:`_emitted_rule_id`) and keep
-        their own description, help and score.
+        The declarations of one rule id are decided together, so the ids that
+        come out do not depend on the order the components are listed in. A rule
+        another component declares with the same description is the same rule.
+        One declared differently is a collision: the scanner whose name sorts
+        first (compared by :func:`_scanner_identity`, unnamed components last)
+        keeps the bare id, and each other scanner's rule is entered under
+        ``<component name>/<id>``. The pair (scanner identity, id) is recorded
+        in *qualified* under the identity the results' ``scanner_name`` is
+        compared by, so the results of that scanner name the qualified id
+        (:meth:`_emitted_rule_id`) and keep their own description, help and
+        score. A component repeating an id keeps its first declaration.
         """
-        if not tool_component or not tool_component.rules:
-            return
+        declared: Dict[str, Dict[str, Tuple[str, Dict[str, Any]]]] = {}
+        for component in components:
+            if not component or not component.rules:
+                continue
+            component_name = str(getattr(component, "name", None) or "")
+            identity = _scanner_identity(component_name)
+            for rule in component.rules:
+                by_scanner = declared.setdefault(rule.id, {})
+                if identity not in by_scanner:
+                    by_scanner[identity] = (
+                        component_name,
+                        self._rule_entry(rule, component_name),
+                    )
 
-        component_name = str(getattr(tool_component, "name", None) or "")
-        for rule in tool_component.rules:
-            entry = self._rule_entry(rule, component_name)
-            emitted_id = rule.id
-            existing = rules_map.get(rule.id)
-            if existing is not None:
-                if existing.get("component") == component_name or all(
-                    existing.get(key) == entry.get(key)
+        for rule_id, by_scanner in declared.items():
+            owner = min(by_scanner, key=lambda name: (not name, name))
+            owner_name, owner_entry = by_scanner[owner]
+            rules_map[rule_id] = owner_entry
+            for identity, (component_name, entry) in by_scanner.items():
+                if identity == owner or not identity or qualified is None:
+                    continue
+                if all(
+                    owner_entry.get(key) == entry.get(key)
                     for key in _RULE_DESCRIPTION_KEYS
                 ):
                     continue
-                if not component_name or qualified is None:
-                    continue
-                emitted_id = f"{component_name}/{rule.id}"
+                emitted_id = f"{component_name}/{rule_id}"
                 if emitted_id in rules_map:
                     continue
                 entry["id"] = emitted_id
-                qualified[(component_name, rule.id)] = emitted_id
+                qualified[(identity, rule_id)] = emitted_id
+                rules_map[emitted_id] = entry
                 ASH_LOGGER.debug(
-                    f"GHAS report: rule {rule.id} is declared differently by "
-                    f"{existing.get('component') or 'another scanner'} and "
+                    f"GHAS report: rule {rule_id} is declared differently by "
+                    f"{owner_name or 'another scanner'} and "
                     f"{component_name}; {component_name}'s is emitted as {emitted_id}"
                 )
-            rules_map[emitted_id] = entry
 
     @staticmethod
     def _rule_entry(rule: Any, component_name: str) -> Dict[str, Any]:
