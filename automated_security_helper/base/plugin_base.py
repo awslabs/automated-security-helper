@@ -1818,16 +1818,24 @@ class PluginBase(UVToolMixin, BaseModel):
         if text:
             post_run["stderr"] = text
 
-    def _timeout_limit_token(self, limit: float | None) -> str:
+    def _timeout_limit_token(
+        self, limit: float | None, values: Optional[Sequence[str]] = None
+    ) -> str:
         """The scan_timeout limit as a timeout message prints it:
         ``error_text.timeout_limit_token`` over this plugin's environment
         values. One token for every timeout message, the executor's included,
         so the sites cannot drift.
 
-        The values hook is read once, guarded: a hook that raised or gave no
-        usable answer leaves nothing to tell whether an environment value
-        typed the limit, so the token names the option and prints no number,
-        the form it takes when one did."""
+        ``values`` is the caller's own guarded read of the values hook, for a
+        message that also redacts with them: the message then reads the hook
+        once, and the token and the redaction cannot disagree. Without it the
+        hook is read here, once, guarded: a hook that raised or gave no usable
+        answer leaves nothing to tell whether an environment value typed the
+        limit, so the token names the option and prints no number, the form it
+        takes when one did. A caller that redacts with the hook's values
+        itself and does not pass them reads the hook a second time, unguarded."""
+        if values is not None:
+            return timeout_limit_token(limit, values)
         read = guarded_values_read(self)
         if read.values is None:
             return _LIMIT_TOKEN_WITHOUT_A_NUMBER
