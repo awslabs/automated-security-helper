@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
 import pytest
 
 from automated_security_helper.cli.mcp.scan_target import (
@@ -112,7 +114,11 @@ class TestOutputPartsAreOneComponentEach:
 
         assert refusal is not None
         assert "path separator" in str(refusal)
-        assert refusal.context["output_component"].endswith(part)
+        # The context renders the component joined under ``.ash`` as a path of
+        # the platform, so on Windows ``a/b`` reads back as ``a\b``.
+        assert refusal.context["output_component"].endswith(
+            part.replace("/", os.sep).replace("\\", os.sep)
+        )
 
     def test_plain_parts_are_still_admitted(self, tmp_path):
         """Control: the usual output tree is a contained path."""

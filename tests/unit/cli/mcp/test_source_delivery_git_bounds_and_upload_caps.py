@@ -28,6 +28,7 @@ import base64
 import hashlib
 import io
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 from typing import List
@@ -328,6 +329,11 @@ class TestUploadsAreBoundedPerSession:
 
 
 class TestZipEntriesNamedWithBackslashesAreRefused:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="zipfile's reader rewrites a backslash to / on Windows, so no "
+        "backslash entry ever reaches the delivery there",
+    )
     def test_a_backslash_entry_is_refused(self, tmp_path):
         """Red at the base: extracted on POSIX as the flat file ``src\\\\main.py``."""
         payload = _zip_bytes({"src\\main.py": b"print(1)\n"})
