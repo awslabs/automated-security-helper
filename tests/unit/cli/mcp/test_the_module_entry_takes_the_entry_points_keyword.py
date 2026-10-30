@@ -57,18 +57,39 @@ def test_the_callable_runs_the_mcp_command_with_this_processs_arguments(
 
 
 def test_the_entry_point_exits_with_the_code_the_command_returned(root_app) -> None:
-    """Run as the entry point runs a module app, the callable's answer becomes
-    the process's exit code, as a command's ``typer.Exit`` does."""
+    """Run as ``__main__`` runs it, through the public ``run_module_app``, the
+    callable's answer becomes the process's exit code, as a command's
+    ``typer.Exit`` does: the failure path around the runner passes a
+    ``SystemExit`` through unchanged."""
     with pytest.raises(SystemExit) as stopped:
-        entrypoint._run_module_app(mcp_server._run_as_the_mcp_command)
+        entrypoint.run_module_app(mcp_server._run_as_the_mcp_command)
 
     assert stopped.value.code == 7
     assert len(root_app) == 1
 
 
+def test_the_public_entry_hands_the_callable_to_the_module_runner_unchanged(
+    monkeypatch,
+) -> None:
+    """What ties the two: ``run_module_app`` runs the callable it is given
+    through ``_run_module_app``, the same object, once, so the keyword contract
+    the tests below pin on the runner is the contract ``python -m`` meets."""
+    handed = []
+    monkeypatch.setattr(entrypoint, "_run_module_app", handed.append)
+
+    def marker(**kwargs):
+        return 0
+
+    entrypoint.run_module_app(marker)
+
+    assert handed == [marker]
+
+
 def test_a_callable_that_takes_no_keyword_is_what_the_entry_point_refuses() -> None:
-    """The shape the module used to hand over: the entry point's call reaches it
+    """The shape the module used to hand over: the runner's call reaches it
     with a keyword it does not take, so the TypeError is raised before any
-    startup check runs. Pinned so the contract is named, not just avoided."""
+    startup check runs. Pinned on the runner itself, so the contract is named,
+    not just avoided; under ``run_module_app`` the failure path would report
+    it and exit 1, which is the process-level symptom, not the contract."""
     with pytest.raises(TypeError, match="standalone_mode"):
         entrypoint._run_module_app(lambda: 0)
