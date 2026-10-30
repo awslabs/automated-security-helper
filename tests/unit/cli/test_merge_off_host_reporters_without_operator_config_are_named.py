@@ -38,14 +38,21 @@ pytestmark = pytest.mark.unit
 NO_PRODUCER = "No report will be written for requested format"
 
 
-class _OffHost:
+# Named as the reporter classes are, because plugin_config_key falls back to the
+# class's own name lowered when it declares no config class. A `__name__ = ...`
+# in a class body does not rename a class: type's descriptor answers first, so
+# an earlier `_OffHost` with `__name__ = "FakeOffHost"` read as `_offhost` and
+# every assertion on `fakeoffhost` and `s3` below went red at the venue.
+class FakeOffHost:
     sends_off_host: ClassVar[bool] = True
-    __name__ = "FakeOffHost"
 
 
-class _S3:
+class S3:
     sends_off_host: ClassVar[bool] = True
-    __name__ = "S3"
+
+
+_OffHost = FakeOffHost
+_S3 = S3
 
 
 def test_an_empty_list_stays_empty_and_says_nothing(caplog):
