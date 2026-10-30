@@ -148,3 +148,40 @@ def test_the_plain_gzip_decision_reads_a_zero_block_as_a_file(content, holds):
 
     assert archive_converter._gzip_holds_a_tar(handle) is holds
     assert handle.tell() == 0
+
+
+def _header_with_negative_size(member_type: bytes) -> bytes:
+    """A one-member tar whose header is of ``member_type`` with a size field of
+    base-256 -1, followed by end blocks."""
+    info = tarfile.TarInfo("entry")
+    info.type = member_type
+    raw = bytearray(_header(info))
+    raw[124:136] = b"\xff" * 12
+    checksum = sum(raw[:148]) + 8 * 32 + sum(raw[156:512])
+    raw[148:156] = b"%06o\0 " % checksum
+    return bytes(raw) + b"\0" * (2 * tarfile.BLOCKSIZE)
+
+
+@pytest.mark.parametrize(
+    "member_type",
+    [
+        pytest.param(tarfile.DIRTYPE, id="directory"),
+        pytest.param(tarfile.SYMTYPE, id="symlink"),
+        pytest.param(tarfile.REGTYPE, id="regular"),
+    ],
+)
+def test_a_negative_size_is_refused_exactly_where_tarfile_refuses_it(member_type):
+    """tarfile reads a size for a regular file and an extended header and never
+    for a directory or a link, so a directory header with a negative size opens;
+    the probe follows tarfile type by type (the expected value is what tarfile
+    itself does with the same bytes)."""
+    data = _header_with_negative_size(member_type)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data)):
+            tarfile_opens = True
+    except tarfile.TarError:
+        tarfile_opens = False
+
+    kind = archive_converter.archive_kind("lib/b.tar", io.BytesIO(data))
+
+    assert (kind == "tar") is tarfile_opens

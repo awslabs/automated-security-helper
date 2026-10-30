@@ -933,13 +933,44 @@ def _is_tar_header(block: bytes, *, empty_is_tar: bool) -> bool:
     try:
         info = tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
         block_of = getattr(info, "_block", None)
-        if block_of is not None:
+        if block_of is not None and _tarfile_sizes(info):
             block_of(info.size)
     except tarfile.EOFHeaderError:
         return empty_is_tar
     except tarfile.HeaderError:
         return False
     return True
+
+
+#: The header types tarfile reads a body for by the size field, through
+#: ``TarInfo._block``: an extended header (pax, a GNU long name or link, a GNU
+#: sparse member) is read whole; a regular file's data, or an unknown type's, is
+#: seeked past. tarfile sizes nothing else (a directory, a link, a device, a fifo),
+#: so a negative size on one of those opens.
+_SIZED_HEADER_TYPES = frozenset(
+    {
+        tarfile.XHDTYPE,
+        tarfile.XGLTYPE,
+        tarfile.SOLARIS_XHDTYPE,
+        tarfile.GNUTYPE_LONGNAME,
+        tarfile.GNUTYPE_LONGLINK,
+        tarfile.GNUTYPE_SPARSE,
+    }
+)
+
+
+def _tarfile_sizes(info: tarfile.TarInfo) -> bool:
+    """Whether tarfile applies ``_block`` to this header's size when it reads the
+    member: for a regular file or an unknown type (``_proc_builtin``) and for an
+    extended header (``_proc_pax``, ``_proc_gnulong``, ``_proc_sparse``), and not
+    for a directory, link, device or fifo, whose size field it never reads. The
+    probe refuses a negative size exactly where tarfile would.
+    """
+    return (
+        info.isreg()
+        or info.type not in tarfile.SUPPORTED_TYPES
+        or info.type in _SIZED_HEADER_TYPES
+    )
 
 
 def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
