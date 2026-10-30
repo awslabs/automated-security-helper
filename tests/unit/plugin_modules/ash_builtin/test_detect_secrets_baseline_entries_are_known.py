@@ -13,22 +13,25 @@ under the scan's spelling of the path. An entry without a line number (a
 ``--slim`` baseline's) became a SARIF region starting at line 0, which the model
 refuses, and the whole scan failed.
 
-A baseline's entries are a suppression surface, and nothing a baseline lists
-leaves the report. The worker is never seeded with the baseline, so the scan's
-own findings are the one copy of each candidate, at the scan's line. A known
-candidate stays in the report marked suppressed, with the baseline named as the
-reason and whose file it is (the operator's ``baseline_file``, or a file the
-scanned repository controls), so the count stays visible and a repository
-cannot hide a secret still in its files by listing the hash in a file it
-commits. An entry the baseline audits as a real secret (``is_secret: true``)
-that is still in the file is reported as an ordinary finding, whoever's
-baseline lists it: the record of a confirmed secret does not clear it. An
-earlier shape removed every known candidate of an operator-named baseline,
-audited real or not.
+A baseline's entries are a suppression surface, so whose file it is decides
+what "known" does. The worker is never seeded with the baseline, so the scan's
+own findings are the one copy of each candidate, at the scan's line. A baseline
+the operator names (``baseline_file`` in the operator's own settings) may DROP
+its known candidates from the report, as ``detect-secrets scan --baseline``
+would. A baseline the scanned repository controls, its own in-tree
+``.secrets.baseline``, may only MARK: its known candidates stay in the report
+suppressed with the baseline named as the reason, so the count stays visible
+and a repository cannot hide a secret still in its files by listing the hash in
+a file it commits. Under either baseline an entry audited as a real secret
+(``is_secret: true``) that is still in the file is reported as an ordinary
+finding: the record of a confirmed secret does not clear it. The worker is told
+the same answer as ``baseline_trusted`` in its request, so its own drop of
+accepted entries, for a request that carries a baseline, follows the rule.
 
 The scan is driven in-process: ``_scan_in_worker`` is replaced by a stand-in
 that returns what the worker returns, the baseline's entries (when it is
-handed one) plus the scan's.
+handed one) plus the scan's; one test runs the real ``_scan_in_worker`` against
+a process runner stand-in to read the request it writes.
 """
 
 from __future__ import annotations
@@ -241,14 +244,12 @@ def test_the_worker_is_never_seeded_with_the_baseline(
     assert seen["baseline"] is None
 
 
-def test_the_operators_baseline_entries_stay_in_the_report_as_suppressed(
+def test_the_operators_baseline_entries_leave_the_report_and_a_new_secret_stays(
     tmp_path, monkeypatch
 ):
-    """The operator's baseline: a listed candidate still in its file stays in
-    the report, at the scan's line, marked suppressed with the operator's
-    baseline as the reason, so it is counted; the entry whose secret left the
-    file is not reported; a new secret is an ordinary finding. Before, the
-    listed candidate left the report."""
+    """The operator's baseline: a listed candidate still in its file leaves the
+    report, the entry whose secret left the file is not reported (the worker
+    was not seeded with it), and a new secret is reported as before."""
     scanner, source = _scanner_with_baseline(
         tmp_path, monkeypatch, KNOWN_ENTRIES, operator_named=True
     )
@@ -260,13 +261,38 @@ def test_the_operators_baseline_entries_stay_in_the_report_as_suppressed(
 
     report = scanner.scan(target=source, target_type="source")
 
-    assert _findings(report) == [("other.py", 1), ("settings.py", 1)]
-    suppressed = _suppressed(report)
-    assert suppressed["other.py"] == []
-    (reason,) = suppressed["settings.py"]
-    assert "operator.baseline" in reason
-    assert "operator's configuration names" in reason
-    assert "repository controls" not in reason
+    assert _findings(report) == [("other.py", 1)]
+    assert _suppressed(report)["other.py"] == []
+
+
+@pytest.mark.parametrize("operator_named", [True, False], ids=["operator", "repo"])
+def test_the_worker_is_told_whose_baseline_the_scan_runs_under(
+    tmp_path, monkeypatch, operator_named
+):
+    """The request the real ``_scan_in_worker`` writes carries
+    ``baseline_trusted``: true for the operator's baseline, false for the
+    repository's, and no baseline either way. The worker drops an entry the
+    baseline accepted only when the flag is true, so a request with the flag
+    absent or false can only mark."""
+    from automated_security_helper.utils import subprocess_utils
+
+    scanner, source = _scanner_with_baseline(
+        tmp_path, monkeypatch, KNOWN_ENTRIES, operator_named=operator_named
+    )
+    requests: list[dict] = []
+
+    def record(*, command, **_kwargs):
+        requests.append(json.loads(Path(command[-2]).read_text(encoding="utf-8")))
+        Path(command[-1]).write_text("[]", encoding="utf-8")
+        return {"returncode": 0, "timed_out": False, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", record)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert len(requests) == 1, requests
+    assert requests[0]["baseline"] is None
+    assert requests[0]["baseline_trusted"] is operator_named
 
 
 @pytest.mark.parametrize("operator_named", [True, False], ids=["operator", "repo"])
@@ -305,10 +331,10 @@ def test_an_entry_audited_as_a_real_secret_is_reported_unsuppressed(
 def test_a_baseline_entry_without_a_line_number_fails_nothing(
     tmp_path, monkeypatch, operator_named
 ):
-    """A ``--slim`` baseline records no line numbers. Its entry is known, so
-    the finding is kept at the scan's own line, suppressed, whichever baseline
-    it came from. Before, the entry became a region at line 0 and failed the
-    scan."""
+    """A ``--slim`` baseline records no line numbers. Its entry is known: the
+    operator's removes the finding, the repository's keeps it at the scan's own
+    line, suppressed. Before, the entry became a region at line 0 and failed the
+    scan, whichever baseline it came from."""
     scanner, source = _scanner_with_baseline(
         tmp_path,
         monkeypatch,
@@ -323,8 +349,11 @@ def test_a_baseline_entry_without_a_line_number_fails_nothing(
 
     report = scanner.scan(target=source, target_type="source")
 
-    assert _findings(report) == [("settings.py", 1)]
-    assert len(_suppressed(report)["settings.py"]) == 1
+    if operator_named:
+        assert _findings(report) == []
+    else:
+        assert _findings(report) == [("settings.py", 1)]
+        assert len(_suppressed(report)["settings.py"]) == 1
 
 
 def test_without_a_baseline_every_secret_is_reported(tmp_path, monkeypatch):
