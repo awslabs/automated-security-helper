@@ -20,6 +20,7 @@ directory first, so a scan run from inside the tree recorded a different path.
 
 from __future__ import annotations
 
+import errno
 import io
 import zipfile
 from pathlib import Path
@@ -152,14 +153,97 @@ def test_a_failure_of_the_run_is_a_tool_error_that_no_suppression_accepts(
         pytest.param(zipfile.BadZipFile("bad"), "input", id="bad-zip"),
         pytest.param(archive_converter._UnreadableArchive("cut"), "input", id="cut"),
         pytest.param(EOFError(), "input", id="eof"),
-        pytest.param(PermissionError(13, "denied"), "tool", id="permission"),
-        pytest.param(OSError(28, "No space left on device"), "tool", id="enospc"),
+        pytest.param(
+            NotImplementedError("That compression method is not supported"),
+            "input",
+            id="zip-compression-method",
+        ),
+        pytest.param(
+            NotADirectoryError(errno.ENOTDIR, "Not a directory"),
+            "input",
+            id="member-under-a-file",
+        ),
+        pytest.param(
+            OSError(errno.ENAMETOOLONG, "File name too long"),
+            "input",
+            id="member-name-too-long",
+        ),
+        pytest.param(
+            OSError(errno.EILSEQ, "Illegal byte sequence"), "input", id="member-name"
+        ),
+        pytest.param(
+            OSError(errno.EINVAL, "Invalid data stream"), "input", id="bz2-stream"
+        ),
+        pytest.param(PermissionError(errno.EACCES, "denied"), "tool", id="permission"),
+        pytest.param(OSError(errno.EPERM, "not permitted"), "tool", id="eperm"),
+        pytest.param(
+            OSError(errno.ENOSPC, "No space left on device"), "tool", id="enospc"
+        ),
+        pytest.param(OSError(errno.EDQUOT, "Disk quota exceeded"), "tool", id="quota"),
+        pytest.param(OSError(errno.EROFS, "Read-only file system"), "tool", id="rofs"),
         pytest.param(MemoryError(), "tool", id="memory"),
         pytest.param(AttributeError("defect"), "tool", id="defect"),
+        pytest.param(RuntimeError("defect"), "tool", id="runtime-defect"),
     ],
 )
 def test_the_kind_of_a_failure_follows_the_error(error, kind):
     assert archive_converter._failure_kind(error) == kind
+
+
+def _zip_with(members) -> bytes:
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_STORED) as archive:
+        for info, data in members:
+            archive.writestr(info, data)
+    return zipped.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "words"),
+    [
+        pytest.param(
+            "under.zip",
+            _zip_with(
+                [
+                    (zipfile.ZipInfo("x.js"), b"x\n"),
+                    (zipfile.ZipInfo("x.js/y.js"), b"y\n"),
+                ]
+            ),
+            ("NotADirectoryError",),
+            id="member-under-a-file",
+        ),
+    ],
+)
+def test_what_the_archive_itself_makes_unextractable_is_an_input_error(
+    name, data, words, test_plugin_context, monkeypatch
+):
+    """A member under a path an earlier member made a file: the archive's doing,
+    recorded as an input error a reviewed suppression may accept, with the reason
+    naming it; not a tool failure. (An encrypted member and a compression method
+    zipfile does not read are refused one by one before extraction, with the rest
+    of the archive extracted; test_archive_converter_edge_inputs covers them.)"""
+    from automated_security_helper.models.asharp_model import waives_gate
+
+    source = Path(test_plugin_context.source_dir)
+    archive = source / name
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_bytes(data)
+    test_plugin_context.config.global_settings.suppressions = [
+        AshSuppression(
+            rule_id="ash-unconverted-input", path=name, reason="a reviewed fixture"
+        )
+    ]
+    converter = _converter(test_plugin_context, monkeypatch, archive)
+
+    results = converter.convert()
+
+    assert results == []
+    (failed,) = converter.failed_inputs
+    assert failed.kind == "input"
+    for word in words:
+        assert word in failed.reason, failed.reason
+    assert failed.accepted is True
+    assert waives_gate(failed)
 
 
 def test_the_record_names_the_archive_by_its_path_in_the_tree_wherever_ash_runs(

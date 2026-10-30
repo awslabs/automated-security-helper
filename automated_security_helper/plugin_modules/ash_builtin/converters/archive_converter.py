@@ -5,6 +5,7 @@
 
 import bz2
 import contextlib
+import errno
 import gzip
 import hashlib
 import importlib
@@ -1304,10 +1305,10 @@ def _failure_reason(error: Exception, target: Optional[Path]) -> str:
 
 
 #: The errors that say the ARCHIVE cannot be read: a damaged or truncated zip, tar
-#: or compressed stream, or one whose names are not text. An error of any other
-#: type during extraction (no space or no permission in the work directory, a link
-#: the filesystem guard refused, a resource limit, a defect) is the run's, not the
-#: archive's.
+#: or compressed stream, a compression method zipfile does not implement, or
+#: names that are not text. An error of any other type during extraction (no
+#: space or no permission in the work directory, a link the filesystem guard
+#: refused, a resource limit, a defect) is the run's, not the archive's.
 _ARCHIVE_UNREADABLE_ERRORS: Tuple[type, ...] = (
     _UnreadableArchive,
     zipfile.BadZipFile,
@@ -1317,7 +1318,22 @@ _ARCHIVE_UNREADABLE_ERRORS: Tuple[type, ...] = (
     zlib.error,
     lzma.LZMAError,
     UnicodeDecodeError,
+    NotImplementedError,
 )
+
+#: The OSError numbers that say the RUN could not write: the work directory is
+#: full, over quota, read-only, or not this user's to write. Every other OSError
+#: raised while an archive is extracted comes from the archive: a member name a
+#: filesystem refuses (too long, not valid in its encoding), a member that names a
+#: file where an earlier member made a directory or the reverse, a decompressor's
+#: "Invalid data stream" (BZ2File raises OSError for a damaged bz2 stream).
+_RUN_ERRNOS = frozenset(
+    {errno.ENOSPC, errno.EDQUOT, errno.EACCES, errno.EPERM, errno.EROFS}
+)
+
+#: Decompressor error classes read by name: the zstd module is optional and its
+#: error class is imported only where it is used (_zstd_file_class).
+_DECOMPRESSOR_ERROR_NAMES = frozenset({"ZstdError"})
 
 
 def _failure_kind(error: Exception) -> Literal["input", "tool"]:
@@ -1330,9 +1346,17 @@ def _failure_kind(error: Exception) -> Literal["input", "tool"]:
     says this run could not do its work (the work directory full or unwritable,
     a guard refusing a path, memory exhausted, a defect): accepting that would
     hide a loss of coverage no review of the archive explains, and the record
-    would say the archive was at fault.
+    would say the archive was at fault. An OSError is read by its number: the
+    run's when it names the work directory's state (_RUN_ERRNOS), the archive's
+    otherwise.
     """
-    return "input" if isinstance(error, _ARCHIVE_UNREADABLE_ERRORS) else "tool"
+    if isinstance(error, _ARCHIVE_UNREADABLE_ERRORS):
+        return "input"
+    if type(error).__name__ in _DECOMPRESSOR_ERROR_NAMES:
+        return "input"
+    if isinstance(error, OSError):
+        return "tool" if error.errno in _RUN_ERRNOS else "input"
+    return "tool"
 
 
 #: The most bytes of UTF-8 an archive's folded path may take in the name of the
@@ -2315,7 +2339,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     TreeInputRefused(archive_display, exceeded.reason),
                     limit=exceeded.option,
                 )
-            except IsADirectoryError as e:
+            except (IsADirectoryError, NotADirectoryError) as e:
+                # IsADirectoryError: a member named like a directory an earlier
+                # member made; NotADirectoryError: a member under a path an
+                # earlier member made a file (``x.js`` before ``x.js/y.js``).
+                # Both are the archive's layout.
                 if Path(archive_file).is_dir():
                     # The scan-set entry is a directory: nothing to extract.
                     ASH_LOGGER.debug(
