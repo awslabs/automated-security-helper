@@ -234,7 +234,10 @@ def test_the_sweep_never_removes_the_scanned_source_or_the_output_directory(
     source = temp_root / "ash-snyk-code-project"
     output = temp_root / "ash-snyk-code-out"
     _write(source, "app.js")
-    output.mkdir()
+    # Every directory the scan touches exists before the backdate, so nothing the
+    # scan creates refreshes a mtime the sweep reads. The default scan timeout
+    # (1800 s, base/options.py) is the sweep's age bound; 7200 s is past it.
+    (output / "converted").mkdir(parents=True)
     then = time.time() - 7200
     os.utime(source, (then, then))
     os.utime(output, (then, then))
@@ -244,13 +247,50 @@ def test_the_sweep_never_removes_the_scanned_source_or_the_output_directory(
         work_dir=output / "converted",
         config=get_default_config(),
     )
-    (output / "converted").mkdir()
 
     _scan(context)
 
     assert (source / "app.js").exists(), "the sweep removed the scanned source"
     assert output.is_dir(), "the sweep removed the output directory"
     assert tested["runs"] == 1
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the liveness check uses flock, which is POSIX"
+)
+def test_the_sweep_keeps_only_the_directories_it_is_told_to_keep(tmp_path):
+    """``keep`` is what protects the scan's directories, not their age or name.
+
+    Three aged directories named like copies: with the scan's two in ``keep`` only
+    the third is removed; the control without ``keep`` removes the two as well,
+    which is what the scan-level test above cannot show (the output directory's
+    mtime is refreshed by whatever the scan creates under it).
+    """
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    source = temp_root / "ash-snyk-code-project"
+    output = temp_root / "ash-snyk-code-out"
+    abandoned = temp_root / "ash-snyk-code-abandoned"
+    _write(source, "app.js")
+    output.mkdir()
+    abandoned.mkdir()
+    then = time.time() - 7200
+    for directory in (source, output, abandoned):
+        os.utime(directory, (then, then))
+
+    snyk_code_scanner._sweep_abandoned_copies(
+        temp_root, older_than=60, keep=(source, output)
+    )
+
+    assert (source / "app.js").exists(), "the sweep removed a kept directory"
+    assert output.is_dir(), "the sweep removed a kept directory"
+    assert not abandoned.exists(), "the sweep left the abandoned copy"
+
+    # The control: the same two directories, no longer kept, are removed too.
+    snyk_code_scanner._sweep_abandoned_copies(temp_root, older_than=60)
+
+    assert not source.exists(), "without keep the source would have stayed anyway"
+    assert not output.exists(), "without keep the output would have stayed anyway"
 
 
 # --- nothing to send ---------------------------------------------------------------

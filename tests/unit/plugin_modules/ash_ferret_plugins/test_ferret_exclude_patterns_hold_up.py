@@ -85,7 +85,12 @@ def test_an_ignored_file_whose_name_is_not_utf8_gets_a_pattern(mock_plugin_conte
     root = mock_plugin_context.source_dir
     (root / "kept.txt").write_text("kept\n", encoding="utf-8")
     undecodable = root / os.fsdecode(b"ignored-\xff.txt")
-    undecodable.write_bytes(b"ignored\n")
+    try:
+        undecodable.write_bytes(b"ignored\n")
+    except OSError as error:
+        # APFS and HFS+ refuse a name that is not valid UTF-8 (EILSEQ), so the
+        # shape under test cannot exist there.
+        pytest.skip(f"the filesystem refuses a file name that is not UTF-8: {error}")
 
     patterns, left_out = _ignore_exclude_patterns(
         root,
@@ -103,8 +108,9 @@ def test_a_link_to_a_directory_leaving_the_tree_is_excluded_with_its_contents(
     mock_plugin_context, tmp_path
 ):
     outside = tmp_path / "elsewhere"
-    outside.mkdir()
+    (outside / "sub").mkdir(parents=True)
     (outside / "creds").write_text("outside\n", encoding="utf-8")
+    (outside / "sub" / "creds").write_text("outside, nested\n", encoding="utf-8")
     root = mock_plugin_context.source_dir
     (root / "real.txt").write_text("in the tree\n", encoding="utf-8")
     (root / "shared").symlink_to(outside, target_is_directory=True)
@@ -112,6 +118,11 @@ def test_a_link_to_a_directory_leaving_the_tree_is_excluded_with_its_contents(
 
     argv = _scan(scanner, root)
 
+    # The pair is the plugin's stated shape (ferret_scanner.py,
+    # _link_exclude_patterns): the link itself, and the link with the separator and
+    # ``*``, because whether ferret-scan descends a directory link was not
+    # measured. A file nested below the link gets no pattern of its own, so this
+    # pins the argv, not how deep ferret-scan's matcher reads the second pattern.
     assert argv is not None
     link = os.fspath(root / "shared")
     assert _excludes(argv) == [link, link + os.sep + "*"]

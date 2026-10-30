@@ -19,6 +19,7 @@ name is the value that reaches the command line here.
 import json
 import logging
 import shlex
+import tempfile
 from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
@@ -85,6 +86,7 @@ def _scan(
     directory_name=None,
     directory_is_environment_value=True,
     values_hook=None,
+    output_under_directory=False,
 ):
     """Scan with a fake snyk.
 
@@ -92,7 +94,10 @@ def _scan(
     name, which is an argument of the command. ``project_name`` reads the name
     from the environment, so the name is in the redaction set, unless
     ``directory_is_environment_value`` is false. ``values_hook`` replaces the
-    scanner's ``_values_to_redact`` for the scan.
+    scanner's ``_values_to_redact`` for the scan. With ``output_under_directory``
+    the output directory sits under the named directory too, so the name reaches
+    the command that runs (its ``--sarif-file-output`` argument), not only the
+    recorded one.
     """
     monkeypatch.setenv("ASH_TEST_SNYK_DIRECTORY", directory_name or "unused")
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -116,7 +121,10 @@ def _scan(
     source = tmp_path / (directory_name or ".") / "src"
     source.mkdir(parents=True)
     (source / "app.js").write_text("const token = 'placeholder';\n", encoding="utf-8")
-    output = tmp_path / "out"
+    output_parent = (
+        tmp_path / (directory_name or ".") if output_under_directory else tmp_path
+    )
+    output = output_parent / "out"
     output.mkdir()
     scanner = SnykCodeScanner(
         context=PluginContext(
@@ -165,22 +173,54 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
         tmp_path, monkeypatch, directory_name=MARKED_DIRECTORY
     )
 
-    # snyk ran on a copy of the scan set; the records name the scanned directory.
+    # The fake snyk was the binary that ran, and it ran on a copy of the scan set:
+    # the directory argument is a temporary directory, not the scanned one. The
+    # records name the scanned directory.
     assert argv[0] == str(snyk_on_path) or argv[0] == "snyk", argv
+    source = tmp_path / MARKED_DIRECTORY / "src"
+    copy = Path(next(a for a in argv[3:] if not a.startswith("--")))
+    assert copy.resolve() != source.resolve(), copy
+    assert copy.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()), copy
     assert running, "the scan did not reach the Running command log call"
     invocation = report.runs[0].invocations[0]
     assert MARKED_DIRECTORY not in invocation.commandLine, invocation.commandLine
     assert "<value>" in invocation.commandLine, invocation.commandLine
     assert not any(MARKED_DIRECTORY in a for a in invocation.arguments)
     # The verbose log record names the command that ran: the copy snyk was given,
-    # whose temporary name carries no value, so nothing in it is redacted and the
-    # directory name is absent from it. The SARIF's own location fields still name
-    # the scanned directory: redaction covers the command records, not where the
+    # whose temporary name carries no value, so this record holds nothing to
+    # redact (the redaction of that record is measured below, with a value that
+    # does reach the command). The SARIF's own location fields still name the
+    # scanned directory: redaction covers the command records, not where the
     # findings are.
-    copy = next(a for a in argv[3:] if not a.startswith("--"))
-    assert MARKED_DIRECTORY not in copy, copy
-    assert any(copy in message for message in running), running
+    assert MARKED_DIRECTORY not in str(copy), copy
+    assert any(str(copy) in message for message in running), running
     assert all(MARKED_DIRECTORY not in message for message in running), running
+
+
+def test_an_environment_value_in_the_output_path_is_hidden_in_the_log_record(
+    tmp_path, monkeypatch, snyk_on_path
+):
+    """The log record is redacted too, measured with a value the command carries.
+
+    The scanned directory is swapped for a copy before the command runs, so the
+    directory name never reaches the verbose "Running command" record; the output
+    path does. With the output directory under the environment-named directory,
+    the record carries the value's marker and not the value.
+    """
+    report, running, argv = _scan(
+        tmp_path,
+        monkeypatch,
+        directory_name=MARKED_DIRECTORY,
+        output_under_directory=True,
+    )
+
+    # The control: the value reaches the command that ran.
+    assert any(MARKED_DIRECTORY in a for a in argv), argv
+    assert running, "the scan did not reach the Running command log call"
+    assert all(MARKED_DIRECTORY not in message for message in running), running
+    assert any("<value>" in message for message in running), running
+    invocation = report.runs[0].invocations[0]
+    assert MARKED_DIRECTORY not in invocation.commandLine, invocation.commandLine
 
 
 def test_a_directory_name_written_out_is_recorded_whole(
