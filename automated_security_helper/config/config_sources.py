@@ -2209,18 +2209,27 @@ def text_reads_the_environment(path: Path, text: str) -> bool:
     scalar the loader resolves as one (a key included), or a TOML string
     value starting with a reference (``_resolve_toml_env``). JSON reads
     nothing. A text that does not parse reads nothing; its load says why. A
-    text nested past the interpreter's recursion limit is one of those: the
-    parser's RecursionError is answered False here, and the load's own parse
-    words it as an unparsed config (``parse_config_text``), where it used to
-    escape this check raw."""
+    text nested past the interpreter's recursion limit is NOT answered that
+    way: this check's parse and the load's parse run at different depths of
+    the stack, so a text at the edge of the limit could pass here and then
+    parse, with its references read. A check that cannot judge the text
+    refuses it as an unparsed config (ASHConfigUnparsedError, in the words
+    ``parse_config_text`` uses for the same file), where the RecursionError
+    used to escape this check raw."""
     path = Path(path)
     if is_json_file(path):
         return False
     if is_toml_file(path):
+        unparsed: Optional[str] = None
         try:
             document = _toml_document(path, text)
-        except (ASHConfigSourceError, RecursionError):
+        except ASHConfigSourceError:
             return False
+        except RecursionError as exc:
+            unparsed = unparsed_config_reason(path, exc)
+        if unparsed is not None:
+            # Outside the handler (unparsed_config_reason).
+            raise ASHConfigUnparsedError(unparsed)
         pending: List[Any] = [document]
         while pending:
             value = pending.pop()
@@ -2231,25 +2240,36 @@ def text_reads_the_environment(path: Path, text: str) -> bool:
             elif isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
                 return True
         return False
-    return _yaml_reads_the_environment(_NamedText(text, str(path)))
+    return _yaml_reads_the_environment(_NamedText(text, str(path)), path)
 
 
-def _yaml_reads_the_environment(stream: Any) -> bool:
+def _yaml_reads_the_environment(stream: Any, path: Optional[Path] = None) -> bool:
     """Whether the YAML in ``stream`` holds a scalar the loader reads from the
     environment: one tagged ``!ENV``, or a plain scalar the loader tags so
     (``load_yaml_config`` registers ENV_REFERENCE_PATTERN as an implicit
-    resolver). False for a stream that does not parse."""
+    resolver). False for a stream that does not parse. A stream nested past
+    the interpreter's recursion limit is refused as an unparsed config when
+    ``path`` names the file (``text_reads_the_environment``, a check that may
+    not answer "reads nothing" for a text it could not judge), and answers
+    False without one (``uses_env_references``, a lint convenience whose load
+    words the depth itself)."""
 
     class _Loader(yaml.SafeLoader):
         pass
 
     _Loader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
+    unparsed: Optional[str] = None
     try:
         root = yaml.compose(stream, Loader=_Loader)
-    except (UnicodeDecodeError, yaml.YAMLError, RecursionError):
-        # A document nested past the recursion limit does not parse either;
-        # the caller's own load says so (text_reads_the_environment).
+    except (UnicodeDecodeError, yaml.YAMLError):
         return False
+    except RecursionError as exc:
+        if path is None:
+            return False
+        unparsed = unparsed_config_reason(path, exc)
+    if unparsed is not None:
+        # Outside the handler (unparsed_config_reason).
+        raise ASHConfigUnparsedError(unparsed)
     pending = [root] if root is not None else []
     # An alias is the node it names, so a node can be reached twice, and a
     # recursive alias reaches itself.
