@@ -480,7 +480,12 @@ class TestHostCachesAreNotWrittenInPlace:
         plan.run_cleanup()
         assert not private.parent.exists()
 
-    def test_bwrap_keeps_its_throwaway_overlay(self, layout, cache):
+    def test_bwrap_keeps_its_throwaway_overlay(self, layout, cache, monkeypatch):
+        # The plan probes the cache's filesystem with the real bwrap once per
+        # filesystem (_overlay_over); on a host without bwrap that probe reads as a
+        # refusal and the cache is mounted read-only, which is not what this test
+        # measures. The probe is answered here, so the test reads the plan's shape.
+        monkeypatch.setattr(backends_module, "_probe_run", lambda argv, env=None: None)
         plan = self._plan("bwrap", layout, overlay=True)
         real = _as_argv(cache)
         i = plan.argv.index("--overlay-src")
