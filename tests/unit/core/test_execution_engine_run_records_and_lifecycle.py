@@ -24,7 +24,8 @@ What each test pins, and what it read at the base before the fix:
 * the aggregated suppression pass sees every finding before --changed-files-only
   narrows them (the narrowing ran first, so a matching suppression read unused);
 * the report phase renders a model whose summary carries the scan's timing (the
-  stamp sat in the finally, after the reporters ran).
+  stamp sat in the finally, after the reporters ran), and a report-only run over
+  results that already carry a scan's timing keeps it through both stamps.
 """
 
 from __future__ import annotations
@@ -420,3 +421,36 @@ def test_the_report_phase_renders_a_model_that_carries_the_scan_timing(tmp_path)
     assert seen["duration"] >= 0.0
     # The finally still stamps the final values over them.
     assert engine._results.metadata.summary_stats.end >= seen["end"]
+
+
+def test_a_report_over_existing_results_keeps_their_timing(tmp_path):
+    """Control for the restamp: a report-only run over results that already
+    carry a scan's start, end and duration leaves all three as they were, at
+    the report phase and in the finally. (The stamp over fresh results in a
+    report-only run is pinned by test_execution_engine_lifecycle.py's
+    TestExecutePhasesDuration, which reads red when the final stamp skips
+    the pre-report one.)"""
+    from datetime import datetime, timedelta, timezone
+
+    engine = _engine(tmp_path)
+    stats = engine._results.metadata.summary_stats
+    stats.start = datetime(2025, 6, 1, 8, 0, 0, tzinfo=timezone.utc)
+    stats.end = stats.start + timedelta(seconds=90)
+    stats.duration = 90.0
+    seen = {}
+
+    class _CapturingReportPhase(_StubPhase):
+        def execute(self, **kwargs):
+            summary = kwargs["aggregated_results"].metadata.summary_stats
+            seen["start"], seen["end"] = summary.start, summary.end
+            return kwargs["aggregated_results"]
+
+    result = _run(engine, ["report"], _manager(), report_phase=_CapturingReportPhase)
+
+    assert seen == {"start": stats.start, "end": stats.end}
+    final = result.metadata.summary_stats
+    assert (final.start, final.end, final.duration) == (
+        datetime(2025, 6, 1, 8, 0, 0, tzinfo=timezone.utc),
+        datetime(2025, 6, 1, 8, 1, 30, tzinfo=timezone.utc),
+        90.0,
+    )

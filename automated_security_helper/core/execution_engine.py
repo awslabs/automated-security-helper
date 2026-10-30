@@ -825,14 +825,22 @@ class ScanExecutionEngine:
         model as well as when the run ends: the reporters read the model as it
         is, and stamped only at the end, every report written during a scan
         recorded start None, end None and duration 0.0 while the results file
-        written afterwards carried the real values.
+        written afterwards carried the real values. A stamp this run made is
+        this run's to stamp over: the pre-report stamp sets ``start``, so
+        without that the final stamp of a report-only run over fresh results
+        read ``start`` as set and left the pre-report end in place.
         """
         scan_duration = (scan_end_time - scan_start_time).total_seconds()
         stats = self._results.metadata.summary_stats
-        if "scan" in ordered_phases or stats.start is None:
+        if (
+            "scan" in ordered_phases
+            or stats.start is None
+            or getattr(self, "_run_stamped_timing", False)
+        ):
             stats.start = scan_start_time
             stats.end = scan_end_time
             stats.duration = scan_duration
+            self._run_stamped_timing = True
         return scan_duration
 
     def execute_phases(
@@ -879,6 +887,10 @@ class ScanExecutionEngine:
         # tests pin with a two-value clock.
         scan_start_time = datetime.now(timezone.utc)
         scan_start_mark = time.monotonic()
+        # Whether this run has stamped its timing yet (see _stamp_scan_timing):
+        # a report over existing results keeps the stored timing, a stamp this
+        # run made is stamped over by the final one.
+        self._run_stamped_timing = False
         # Initialize duration variables so the finally block can reference
         # them even when the try block raises before computing them.
         hours = minutes = seconds = 0
