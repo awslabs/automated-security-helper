@@ -360,7 +360,9 @@ class ScanResultsContainer(BaseModel):
         :meth:`set_exception` does; *errors* go through :meth:`add_error`,
         which writes the home directory in each entry as ``~``. The exception's
         own text is added to the errors only when none of *errors* already says
-        it, so a failure given as both is listed once.
+        it, so a failure given as both is listed once. An error says it when it
+        is the text or ends in ``: `` and the text; one that only contains the
+        text does not.
 
         The duration is None, as for the excluded and missing containers: no
         timed run is recorded here, and 0 would claim a run of no time.
@@ -376,7 +378,14 @@ class ScanResultsContainer(BaseModel):
         if exception is not None:
             # _record_exception also sets status to FAILED
             text = home_as_tilde(container._record_exception(exception, values))
-            if not any(text in recorded for recorded in container.errors):
+            # Said already when an error is the text, or ends in it after a
+            # ``label: `` as the callers write it. Not when the text is only
+            # somewhere inside one: ``timed out`` is in every "... timed out
+            # after 300s", and is not that error.
+            if not any(
+                recorded == text or recorded.endswith(f": {text}")
+                for recorded in container.errors
+            ):
                 container.add_error(text)
         return container
 
