@@ -98,11 +98,27 @@ class TestSessionSandboxRefusesTheIdsEveryOtherBuilderRefuses:
         with pytest.raises(ValueError):
             session_sandbox(session_id)
 
-    @pytest.mark.parametrize("session_id", ["a/b", "..", "a\\b", ""])
+    @pytest.mark.parametrize("session_id", ["a/b", "..", "a\\b"])
     def test_the_separator_rule_still_holds(self, session_id):
         """Control: what the old rule refused is still refused."""
         with pytest.raises(ValueError):
             session_sandbox(session_id)
+
+    def test_an_empty_id_is_the_local_callers_sandbox(self):
+        """An empty id names no session and is not validated as one.
+
+        ``session_sandbox`` validates an id only when it is non-empty (its
+        docstring: it raises "if session_id is non-empty but could not name a
+        single directory"), so the empty string is the caller that named none:
+        no sandbox root, the local caller's denylist fallback. Asserted as such;
+        an earlier row of the table above expected a raise the product does not
+        make, and read red on every platform that ran it.
+        """
+        sandbox_of_nobody = session_sandbox("")
+
+        assert sandbox_of_nobody.session_id is None
+        assert sandbox_of_nobody.root is None
+        assert sandbox_of_nobody.fall_back_to_denylist is True
 
     def test_a_plain_id_still_gets_its_sandbox(self):
         assert session_sandbox("session-a").root is not None
@@ -329,7 +345,11 @@ class TestWindowsRefusesBeforeResolving:
         real_lstat = os.lstat
 
         def unsearchable(path, *args, **kwargs):
-            if os.fspath(path) == os.path.normpath(str(second)):
+            # Matched by the entry's name, not its spelling: on Windows the walk
+            # reaches ``second`` through the extended-form target ``os.readlink``
+            # gives for ``first`` (``\\\\?\\C:\\...\\second``), which an equality
+            # test against ``str(second)`` never meets.
+            if os.path.basename(os.fspath(path).rstrip("\\/")) == second.name:
                 raise PermissionError(13, "permission denied")
             return real_lstat(path, *args, **kwargs)
 
@@ -438,11 +458,21 @@ class TestWindowsRefusesBeforeResolving:
         )
 
     def test_a_plain_local_directory_is_judged_as_before(self, tmp_path):
-        """Control: the Windows check refuses only what resolving would open."""
+        """Control: the Windows check refuses only what resolving would open.
+
+        Judged for the caller that named no session: that caller is local, and
+        with no grant its denylist fallback admits a directory under tmp_path, so
+        the only refusal this test could meet is the pre-resolve one, and there
+        is none. For a session id the gates read a remote caller whose scan roots
+        are its own sandbox alone, and a tmp_path directory is refused as outside
+        the permitted roots whatever the platform, which is what an earlier shape
+        of this test asked for and read red on.
+        """
         target = tmp_path / "checkout"
         target.mkdir()
 
-        assert validate_scan_target_in_sandbox(target, session_id=OWN) is None
+        assert sandbox._refusal_before_resolving("Scan target", target) is None
+        assert validate_scan_target_in_sandbox(target, session_id=None) is None
 
 
 def test_off_windows_nothing_is_refused_before_resolving(tmp_path):
