@@ -95,7 +95,9 @@ def test_the_windows_safe_filter_puts_the_arguments_in_ascii(monkeypatch):
     assert record.args == ("->x",)
     record.args = {"k": "caf" + chr(0xE9)}
     assert safe.filter(record)
-    assert record.args == {"k": "caf"}
+    # Written as its escape, not dropped: the file sinks write the record as it
+    # was logged, and the console gets every character as text or as an escape.
+    assert record.args == {"k": "caf\\xe9"}
     record.msg = "%(k)s"
     record.getMessage().encode("ascii")
 

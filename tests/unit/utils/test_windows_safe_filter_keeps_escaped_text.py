@@ -7,16 +7,15 @@ Why this exists
 ---------------
 On a Windows console that cannot write Unicode, and on a Windows CI runner,
 ``WindowsSafeFilter`` rewrites each record's message to ASCII: it replaces some
-characters (an arrow "↓" becomes "v") and drops the rest. A record that asks for
-Rich markup (``extra=MARKUP``) has had each value escaped with ``escape_markup``
-before that, and the rewrite can undo the escape: a dropped character between a
-value's own backslash and the escape's would leave two backslashes before "[/x]",
-which Rich reads as a tag and refuses with MarkupError, so the line would be lost;
-"[↓x]", which is no tag, would become "[vx]", which is one, and its text be
-dropped. A record
-whose rewrite would change the text it shows is written as that text's ASCII
-form, without markup; one whose rewrite changes nothing but characters keeps its
-styles.
+characters (an arrow "↓" becomes "v") and writes the rest as escapes (an "é"
+becomes the four characters of ``\\xe9``; nothing is dropped). A record that asks
+for Rich markup (``extra=MARKUP``) has had each value escaped with
+``escape_markup`` before that, and the rewrite can undo the escape: the escape
+text put between a value's own backslash and the tag changes what stands before
+"[/x]", and "[↓x]", which is no tag, would become "[vx]", which is one, and its
+text be dropped. A record whose rewrite would change the text it shows is
+written as that text's ASCII form, without markup; one whose rewrite changes
+nothing but characters keeps its styles.
 
 The filter is active on Windows only, so these cells turn it on.
 """
@@ -56,10 +55,10 @@ def _shown(record: logging.LogRecord) -> Text:
 @pytest.mark.parametrize(
     "value, shown",
     [
-        pytest.param("C:\\\u00e9[/x]", "C:\\[/x]", id="dropped-after-a-backslash"),
+        pytest.param("C:\\\u00e9[/x]", "C:\\\\xe9[/x]", id="escaped-after-a-backslash"),
         pytest.param(
             "C:\\\u00e9[bold]x[/bold]",
-            "C:\\[bold]x[/bold]",
+            "C:\\\\xe9[bold]x[/bold]",
             id="style-after-a-backslash",
         ),
         pytest.param("[\u2193x]", "[vx]", id="replaced-into-a-tag"),
