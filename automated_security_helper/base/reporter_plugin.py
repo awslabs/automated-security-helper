@@ -616,17 +616,18 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     @field_validator("config", mode="wrap")
     @classmethod
     def _config_is_validated_by_the_declared_model(
-        cls, value: Any, handler: ValidatorFunctionWrapHandler
+        cls, value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
     ) -> Any:
         """A reporter that declares a config model is configured by that model.
 
         A section it refuses, such as an AWS reporter's ``max_delay`` over its
         60-second cap, is a ValidationError: ``ReportPhase`` and the workspace
         report step log it, with the option and the limit, and go on without this
-        reporter. See ``plugin_config.config_validated_by_declared_model``.
+        reporter. The declared model validates under the validation context the
+        field was given. See ``plugin_config.config_validated_by_declared_model``.
         """
         return config_validated_by_declared_model(
-            cls, ReporterPluginConfigBase, value, handler
+            cls, ReporterPluginConfigBase, value, handler, info
         )
 
     @model_validator(mode="after")

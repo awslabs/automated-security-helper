@@ -49,7 +49,13 @@ from automated_security_helper.utils.subprocess_utils import (
     path_independent_dirs,
 )
 
-from pydantic import Field, PrivateAttr, ValidatorFunctionWrapHandler, field_validator
+from pydantic import (
+    Field,
+    PrivateAttr,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+)
 from typing import (
     Annotated,
     Any,
@@ -498,17 +504,18 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     @field_validator("config", mode="wrap")
     @classmethod
     def _config_is_validated_by_the_declared_model(
-        cls, value: Any, handler: ValidatorFunctionWrapHandler
+        cls, value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
     ) -> Any:
         """A scanner that declares a config model is configured by that model.
 
         A section it refuses, such as an opengrep ``sha256`` that is not a
         digest, is a ValidationError, which ``ScanPhase`` records as that
         scanner's ERROR, naming the option, before it goes on with the others.
-        See ``plugin_config.config_validated_by_declared_model``.
+        The declared model validates under the validation context the field was
+        given. See ``plugin_config.config_validated_by_declared_model``.
         """
         return config_validated_by_declared_model(
-            cls, ScannerPluginConfigBase, value, handler
+            cls, ScannerPluginConfigBase, value, handler, info
         )
 
     def model_post_init(self, context):
