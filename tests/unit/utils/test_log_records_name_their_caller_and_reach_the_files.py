@@ -64,6 +64,27 @@ def test_a_verbose_or_trace_record_names_the_caller(ash_logger, method):
     assert record.lineno == line
 
 
+@pytest.mark.parametrize("method", ["verbose", "trace"])
+def test_the_module_level_form_names_the_caller_too(method):
+    """``logging.trace()`` and ``logging.verbose()`` log through the root logger;
+    the record names the line that called them, not logToRoot's."""
+    root = logging.getLogger()
+    keep = _Keep()
+    level = root.level
+    root.setLevel(1)
+    root.addHandler(keep)
+    try:
+        getattr(logging, method)("from the test")
+        line = inspect.currentframe().f_lineno - 1  # type: ignore[union-attr]
+    finally:
+        root.removeHandler(keep)
+        root.setLevel(level)
+
+    (record,) = keep.records
+    assert record.filename == Path(__file__).name, record.filename
+    assert record.lineno == line, record.lineno
+
+
 def test_a_handler_removed_under_the_walk_does_not_skip_the_next(ash_logger):
     logger, keep = ash_logger
     logger.removeHandler(keep)
@@ -83,6 +104,11 @@ def test_a_handler_removed_under_the_walk_does_not_skip_the_next(ash_logger):
 def test_the_windows_safe_filter_puts_the_arguments_in_ascii(monkeypatch):
     monkeypatch.setattr(
         "automated_security_helper.utils.log._detect_encoding_issues", lambda: True
+    )
+    # A console known to write only ASCII: this host's own streams would write
+    # more, and the filter then keeps what they write.
+    monkeypatch.setattr(
+        "automated_security_helper.utils.log._console_writes", lambda: None
     )
     safe = WindowsSafeFilter()
     arrow = chr(0x2192)
@@ -114,9 +140,15 @@ def test_the_windows_safe_filter_puts_the_arguments_in_ascii(monkeypatch):
 
 @pytest.mark.skipif(not hasattr(time, "tzset"), reason="needs tzset")
 def test_jsonl_timestamps_are_utc_under_their_z(monkeypatch):
-    monkeypatch.setenv("TZ", "Etc/GMT-5")
+    original = os.environ.get("TZ")
+    # A POSIX zone string, so no zone database is needed on the runner: a zone
+    # named "XYZ" five hours east of UTC.
+    monkeypatch.setenv("TZ", "XYZ-5")
     time.tzset()
     try:
+        # The control: the process clock is five hours ahead of UTC here, so a
+        # formatter that used local time would write 03:13:20 on the 15th.
+        assert time.localtime(1_700_000_000.0).tm_hour == 3
         formatter = JsonFormatter({"timestamp": "asctime", "message": "message"})
         record = logging.LogRecord("ash", logging.INFO, "f", 1, "m", (), None)
         record.created = 1_700_000_000.0  # 2023-11-14T22:13:20Z
@@ -124,7 +156,12 @@ def test_jsonl_timestamps_are_utc_under_their_z(monkeypatch):
 
         written = formatter.format(record)
     finally:
-        monkeypatch.delenv("TZ", raising=False)
+        # Restored here, and the zone re-read, rather than left to the
+        # monkeypatch: its undo restores the variable and cannot call tzset.
+        if original is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original
         time.tzset()
 
     assert '"timestamp": "2023-11-14T22:13:20.000Z"' in written, written

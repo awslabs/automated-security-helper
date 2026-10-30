@@ -53,6 +53,14 @@ from automated_security_helper.utils.terminal_text import (
 #: named the caller's caller there.
 _WRAPPER_FRAME = 1 if sys.version_info >= (3, 11) else 0
 
+#: The same for the module-level form (``logging.trace()``, logToRoot), which goes
+#: through ``logging.log`` and the root logger's ``log`` before ``_log``. One on
+#: Python 3.11 and later; two before it, where findCaller steps out by the
+#: stacklevel first and only then skips logging's own frames, so one step ends on
+#: the wrapper (measured on 3.9 and 3.14 with a stand-in wrapper: 0 and 1 name the
+#: wrapper on 3.9, 1 names the caller on 3.14, 2 names the caller on 3.9).
+_ROOT_WRAPPER_FRAME = 1 if sys.version_info >= (3, 11) else 2
+
 
 def addLoggingLevel(levelName, levelNum, methodName=None):
     """
@@ -119,7 +127,9 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
         # did this')`). Pointing this at a named logger would make
         # `logging.trace()` write somewhere its stdlib counterparts do not, which
         # is the opposite of the recipe's contract. Per-logger use goes through
-        # `logForLevel`, set on the logger class just above.
+        # `logForLevel`, set on the logger class just above. The record names the
+        # caller of `logging.trace()`, not this wrapper (see _ROOT_WRAPPER_FRAME).
+        kwargs["stacklevel"] = kwargs.get("stacklevel", 1) + _ROOT_WRAPPER_FRAME
         logging.log(levelNum, message, *args, **kwargs)  # noqa: LOG015
 
     logging.addLevelName(levelNum, levelName)
