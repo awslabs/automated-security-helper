@@ -32,7 +32,6 @@ from tests.utils.host_ids import with_fixed_ids
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
-IMAGE = "automated-security-helper:non-root"
 
 pytestmark = [
     pytest.mark.integration,
@@ -251,7 +250,6 @@ def test_the_oci_layout_directory_reaches_the_build_as_one_argument(runner, tmp_
     layout.mkdir()
     # nerdctl and finch take the layout as a build context; the runtime is read from
     # the runner's name.
-    _, log_dir = runner
     nerdctl = _executable(tmp_path / "bin" / "nerdctl", RECORDING_RUNNER)
 
     result, calls = _run(
