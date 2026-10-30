@@ -9,10 +9,9 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 """
 
 import logging
-import os
 import platform
 from pathlib import Path
-from typing import Annotated, List, Literal, ClassVar, Optional
+from typing import Annotated, List, Literal, ClassVar, Optional, Tuple
 
 from pydantic import Field
 
@@ -196,11 +195,14 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         shows upgrade banners, so it is off for every run, online as well.
         """
         env = {_VERSION_CHECK_ENV: _VERSION_CHECK_OFF}
-        if self._scanner_offline() and "SEMGREP_RULES_CACHE_DIR" in os.environ:
-            # Absolute, as the --config the base passes: semgrep runs in the
-            # source directory, where a relative cache path names another place.
-            cache_dir = os.path.abspath(os.environ["SEMGREP_RULES_CACHE_DIR"])
-            env["SEMGREP_RULES"] = f"{cache_dir}/*"
+        # The cache the command's --config names (the base records it, absolute,
+        # when the offline resolution read it; None when local rules or path trust
+        # left the cache unread, and online). The variable used to be re-read from
+        # the environment here, so a scan whose --config carried no cache still
+        # exported one, and a relative value was made absolute against the scan-time
+        # working directory while the --config had been resolved at construction.
+        if self._scanner_offline() and self._cache_dir_in_use:
+            env["SEMGREP_RULES"] = f"{self._cache_dir_in_use}/*"
         return env
 
     def _direct_or_uv_command_found(self, *, direct_only: bool = False) -> bool:
@@ -288,12 +290,30 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             shown_uv_output,
         )
 
+        from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+
         extras = self._get_tool_package_extras()
         constraint = self._get_tool_version_constraint()
         package = self.uv_tool_package_name or self.command
         requirement = build_requirement(package, extras, constraint)
-        # Read once for the verify and every line below; see _select_tool_execution.
-        values = self._values_to_redact()
+        # The values hook is read ONCE, guarded, for the verify and every line
+        # below, as _select_tool_execution reads it: a bare read let a raising
+        # hook crash the dependency check, a generator answer was drained by the
+        # verify so the lines after it logged the requirement and the answer's
+        # detail unredacted, and a None went into the verify as is. With no usable
+        # values the copy is not verified (its probe's excerpt could not be
+        # redacted); it is the only route left, so it runs, and the line says why
+        # without any text the hook would have redacted.
+        read = guarded_values_read(self)
+        if read.values is None:
+            self._plugin_log(
+                f"The {self.command} on PATH was not verified: the plugin's values "
+                f"hook {read.failure()}, so its check could not be redacted. It is "
+                "the only copy ASH can run here, so it runs unverified.",
+                level=logging.WARNING,
+            )
+            return True
+        values: Tuple[str, ...] = read.values
         answer = verify_pre_installed_tool(
             executable,
             package,
@@ -320,18 +340,35 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 ),
                 level=logging.INFO,
             )
-            if answer.version:
-                self.tool_version = answer.version
+            # With a default, as the mixin reads it: a verifier stand-in that
+            # carries only a status and a detail is an answer without a version.
+            verified_version = getattr(answer, "version", None)
+            if verified_version:
+                self.tool_version = verified_version
             return True
         if answer.status == "unsatisfied":
-            reason = _shown(
-                f"{self.command} at {executable} cannot be used: {answer.detail}. "
+            # The log gets the full story, the copy's path and the answer's
+            # detail, which quotes the tool's own words. The REASON that reaches
+            # the results (dependency_unavailable_reason) gets the answer's
+            # summary, the path-free, excerpt-free line the verifier provides for
+            # exactly that use; the detail stands in only for an answer without
+            # one. This is the mixin's rule for the same two lines.
+            remedy = (
                 "It is the only copy ASH can run here, so semgrep is missing. "
                 f"Install a copy that satisfies {requirement!r}, or install uv so "
                 "ASH can run one."
             )
-            self.dependency_unavailable_reason = reason
-            self._plugin_log(reason, level=logging.ERROR)
+            self._plugin_log(
+                _shown(
+                    f"{self.command} at {executable} cannot be used: {answer.detail}. "
+                    f"{remedy}"
+                ),
+                level=logging.ERROR,
+            )
+            summary = getattr(answer, "summary", "") or answer.detail
+            self.dependency_unavailable_reason = _shown(
+                f"{self.command} cannot be used: {summary}. {remedy}"
+            )
             return False
         self._plugin_log(
             _shown(
@@ -411,6 +448,13 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         if not self._validate_uv_tool_availability():
             # UV missing — defer to consolidated resolver: if the tool is on
             # PATH directly (or uv answers its probe after all) we can still run it.
+            # Two oracles, and the resolver's wins: the runner's availability
+            # check answers False for a probe that failed as well as for a uv that
+            # is absent, while the resolver's uv form means its own
+            # `uv tool run semgrep --version` just succeeded. The runner asks its
+            # question again when the scan runs (UVToolRunner.run_tool), so a
+            # failed availability probe that is still inside its retry window
+            # refuses the scan there, with the window's reason, rather than here.
             if self._direct_or_uv_command_found():
                 return True
             self._plugin_log(

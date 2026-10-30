@@ -854,7 +854,13 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         names every file the converter wrote, which is every file the target holds,
         so the tools found files and excluded them all, and the scanned-nothing
         refusal below (_post_process_sarif) made a repository of notebooks a
-        scanner error. An operator's own exclude patterns stay as written.
+        scanner error. The pattern is dropped by its value, whoever wrote it: the
+        documented default lists it, so a configuration ``ash config init`` wrote,
+        or one copied from the reference, carries it as an operator value, and a
+        drop keyed on provenance would scan nothing on every such configuration.
+        Every other exclude pattern the operator wrote stays as written, on this
+        target too; one that happens to match every converted file is the
+        operator's choice, and the scanned-nothing refusal names it.
         """
         if self._scan_target_type != "converted":
             return list(self.args.extra_args)

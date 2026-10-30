@@ -22,6 +22,8 @@ check refuses before it reaches the binary route these tests are about.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
@@ -67,9 +69,14 @@ def _scanner(test_plugin_context, monkeypatch) -> SemgrepScanner:
     return scanner
 
 
-def _verdict(status: str, detail: str, version: str | None = None):
+def _verdict(status: str, detail: str, version: str | None = None, summary: str = ""):
     return PreInstalledToolVerdict(
-        status, BINARY, "semgrep>=1.125.0,<2.0.0", detail, version=version
+        status,
+        BINARY,
+        "semgrep>=1.125.0,<2.0.0",
+        detail,
+        version=version,
+        summary=summary,
     )
 
 
@@ -82,7 +89,7 @@ def _answer(monkeypatch, answer, seen: list):
 
 
 def test_a_binary_that_does_not_satisfy_the_constraint_is_refused(
-    test_plugin_context, monkeypatch
+    test_plugin_context, monkeypatch, caplog
 ):
     """Verified unsatisfied: the dependency check says no and records why.
 
@@ -91,18 +98,44 @@ def test_a_binary_that_does_not_satisfy_the_constraint_is_refused(
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     seen: list = []
+    detail = "semgrep 1.100.0 at /home/someone/.local/bin/semgrep does not satisfy"
     _answer(
         monkeypatch,
-        _verdict("unsatisfied", "semgrep 1.100.0 does not satisfy >=1.125.0,<2.0.0"),
+        _verdict(
+            "unsatisfied",
+            detail,
+            summary="the installed semgrep is older than required",
+        ),
         seen,
     )
 
-    assert scanner._validate_tool_dependencies() is False
+    with caplog.at_level(logging.ERROR):
+        assert scanner._validate_tool_dependencies() is False
     assert seen and seen[0][0] == BINARY, seen
     assert seen[0][2] == scanner._get_tool_version_constraint()
+    # The REASON reaches the results: the verifier's path-free summary, never the
+    # copy's path or the full detail, which quotes the tool's own output.
     reason = scanner.dependency_unavailable_reason or ""
-    assert BINARY in reason and "cannot be used" in reason, reason
-    assert "1.100.0" in reason, reason
+    assert "cannot be used" in reason, reason
+    assert "older than required" in reason, reason
+    assert BINARY not in reason, reason
+    assert "1.100.0" not in reason and "/home/someone" not in reason, reason
+    # The LOG keeps the full story: the path and the detail.
+    logged = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any(BINARY in line and "1.100.0" in line for line in logged), logged
+
+
+def test_an_answer_without_a_summary_falls_back_to_its_detail_in_the_reason(
+    test_plugin_context, monkeypatch
+):
+    """A verifier stand-in that carries no summary: the detail stands in, as the
+    mixin's own MISSING line does, so the reason still says why."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    _answer(monkeypatch, _verdict("unsatisfied", "semgrep 1.100.0 is too old"), [])
+
+    assert scanner._validate_tool_dependencies() is False
+    reason = scanner.dependency_unavailable_reason or ""
+    assert "1.100.0" in reason and BINARY not in reason, reason
 
 
 def test_a_binary_that_satisfies_the_constraint_runs_directly(
@@ -122,15 +155,89 @@ def test_a_binary_that_satisfies_the_constraint_runs_directly(
     assert scanner.tool_version == "1.130.0"
 
 
-def test_a_binary_that_cannot_be_verified_still_runs(test_plugin_context, monkeypatch):
+def test_a_binary_that_cannot_be_verified_still_runs(
+    test_plugin_context, monkeypatch, caplog
+):
     """Unverifiable (no uv to resolve the requirement with, say): the only route
-    left is taken, with a warning rather than a refusal."""
+    left is taken, with a warning rather than a refusal. The verifier was asked
+    (``seen``), and the warning names the copy and says it is unverified."""
     scanner = _scanner(test_plugin_context, monkeypatch)
-    _answer(monkeypatch, _verdict("unverifiable", "no uv to resolve against"), [])
+    seen: list = []
+    _answer(monkeypatch, _verdict("unverifiable", "no uv to resolve against"), seen)
 
-    assert scanner._validate_tool_dependencies() is True
+    with caplog.at_level(logging.WARNING):
+        assert scanner._validate_tool_dependencies() is True
     assert scanner.use_uv_tool is False
     assert scanner.dependency_unavailable_reason is None
+    assert seen and seen[0][0] == BINARY, seen
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(BINARY in line and "unverified" in line for line in warnings), warnings
+
+
+def test_a_values_hook_that_raises_leaves_the_binary_unverified_not_the_check_crashed(
+    test_plugin_context, monkeypatch, caplog
+):
+    """The values hook is overridable, and a raising one used to escape the
+    dependency check. Now the copy is not verified (its probe's excerpt could not
+    be redacted), the check still answers, the warning names the hook's failure
+    and carries no text the hook would have redacted, and the verifier is never
+    asked.
+
+    Fails at the base: the exception escaped ``_validate_tool_dependencies``.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    seen: list = []
+    _answer(monkeypatch, _verdict("satisfied", "semgrep 1.130.0"), seen)
+
+    def broken(self):
+        raise RuntimeError("the hook is broken")
+
+    monkeypatch.setattr(SemgrepScanner, "_values_to_redact", broken)
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner._validate_tool_dependencies() is True
+    assert seen == [], "the verify ran with values that could not be read"
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(
+        "RuntimeError" in line and "not verified" in line for line in warnings
+    ), warnings
+
+
+def test_a_values_hook_answering_a_generator_is_read_once_and_redacts_every_line(
+    test_plugin_context, monkeypatch, caplog
+):
+    """A generator answer used to be drained by the verify, so the lines after it
+    were redacted against nothing and logged the requirement and the verifier's
+    detail in clear. The guarded read turns it into a tuple once; the verifier
+    gets that tuple and the reason is redacted with it.
+
+    Fails at the base: the reason carried the secret value.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    secret = "hunter2-token-value"
+    seen_values: list = []
+
+    def verify(executable, package, extras=None, version_constraint=None, **kwargs):
+        seen_values.append(tuple(kwargs.get("values") or ()))
+        return _verdict(
+            "unsatisfied",
+            f"semgrep at {BINARY} rejected {secret}",
+            summary=f"rejected {secret}",
+        )
+
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
+    monkeypatch.setattr(
+        SemgrepScanner, "_values_to_redact", lambda self: (v for v in [secret])
+    )
+
+    with caplog.at_level(logging.ERROR):
+        assert scanner._validate_tool_dependencies() is False
+    assert seen_values == [(secret,)], seen_values
+    reason = scanner.dependency_unavailable_reason or ""
+    assert secret not in reason, reason
+    assert "rejected" in reason, reason
+    logged = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert logged and all(secret not in line for line in logged), logged
 
 
 def test_the_last_resort_after_a_failed_install_is_verified_too(
@@ -139,11 +246,17 @@ def test_the_last_resort_after_a_failed_install_is_verified_too(
     """After uv's install of semgrep failed, the binary on PATH is the last resort,
     and an unsatisfying one is refused there as well. The last resort looks the
     binary up on PATH directly (``find_executable``), so that lookup is stood in
-    for here; the resolver stub ``_scanner`` sets is not consulted on this route.
+    for here; the resolver stub answers ANOTHER path, so the verified path tells
+    which lookup the route used.
 
     Fails at the base: the last-resort binary was taken unverified.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
+    monkeypatch.setattr(
+        semgrep_scanner,
+        "get_uv_tool_command",
+        lambda name, **kwargs: ["/elsewhere/bin/semgrep"],
+    )
     monkeypatch.setattr(semgrep_scanner, "find_executable", lambda name: BINARY)
     monkeypatch.setattr(
         SemgrepScanner, "_validate_uv_tool_availability", lambda self: True
@@ -157,9 +270,11 @@ def test_the_last_resort_after_a_failed_install_is_verified_too(
         SemgrepScanner, "_install_uv_tool", lambda self, timeout=300: False
     )
     scanner.use_uv_tool = True
-    _answer(monkeypatch, _verdict("unsatisfied", "semgrep 0.9.0 is too old"), [])
+    seen: list = []
+    _answer(monkeypatch, _verdict("unsatisfied", "semgrep 0.9.0 is too old"), seen)
 
     assert scanner._validate_tool_dependencies() is False
+    assert seen and seen[0][0] == BINARY, seen
     assert "0.9.0" in (scanner.dependency_unavailable_reason or "")
 
 
