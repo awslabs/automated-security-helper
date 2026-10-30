@@ -602,6 +602,31 @@ class _JobCondition:
         return None
 
 
+class _StepCondition(_JobCondition):
+    """A step's ``if`` before the run: ``inputs.<name>`` are the call's values as for a
+    job, ``always()`` is true and ``cancelled()`` false, and ``success()`` and
+    ``failure()`` are unknown, because at step level they read the steps before this
+    one, which the plan does not run."""
+
+    def _path(self, token: str, needs: list[str]) -> Any:
+        if token in ("success()", "failure()"):
+            return None
+        return super()._path(token, needs)
+
+    def step_runs(self, step: Mapping[str, Any]) -> bool | None:
+        """True when the step's ``if`` reads true (or it has none), False when it reads
+        false, None when it cannot be read before the run."""
+        condition = step.get("if")
+        if condition is None:
+            return True
+        if isinstance(condition, bool):
+            return condition
+        try:
+            return _truth(self.evaluate(str(condition), []))
+        except ValueError:
+            return None
+
+
 def _tokens(text: str) -> list[str]:
     tokens = []
     position = 0
@@ -859,16 +884,40 @@ def wrapped_job_steps(workflows: Iterable[Mapping[str, Any]]) -> list[tuple[str,
     return pairs
 
 
-def conditional_steps(workflows: Iterable[Mapping[str, Any]]) -> set[tuple[str, str]]:
-    """(job id, step name) of each named step with an ``if``, which may not run."""
+def conditional_steps(
+    workflow: Mapping[str, Any],
+    called: Mapping[str, Mapping[str, Any]] | None = None,
+) -> set[tuple[str, str]]:
+    """(job id, step name) of each named step whose ``if`` reads false or cannot be
+    read before the run (_StepCondition), in the workflow's own jobs and in those of
+    each reusable workflow it calls, with the call's inputs (call_inputs) known.
+
+    A step whose ``if`` reads true (``always()``, ``!cancelled()``, a known input that
+    is on) is not in the set: it ran in every run of its job, and a log with no run of
+    it is a problem, as for a step with no ``if``.
+    """
     pairs: set[tuple[str, str]] = set()
-    for workflow in workflows:
-        for job_id, job in (workflow.get("jobs") or {}).items():
-            if not isinstance(job, Mapping):
-                continue
-            for step in _steps(job):
-                if step.get("if") is not None and step.get("name"):
-                    pairs.add((str(job_id), str(step["name"])))
+
+    def collect(job_id: str, job: Mapping[str, Any], inputs: Mapping[str, Any]) -> None:
+        condition = _StepCondition({}, inputs=inputs)
+        for step in _steps(job):
+            if step.get("name") and condition.step_runs(step) is not True:
+                pairs.add((job_id, str(step["name"])))
+
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        if not isinstance(job, Mapping):
+            continue
+        uses = str(job.get("uses") or "")
+        if not uses:
+            collect(str(job_id), job, {})
+            continue
+        target = (called or {}).get(PurePosixPath(uses.split("@", 1)[0]).name)
+        if target is None:
+            continue
+        inputs = call_inputs(job, target)
+        for called_id, called_job in (target.get("jobs") or {}).items():
+            if isinstance(called_job, Mapping):
+                collect(str(called_id), called_job, inputs)
     return pairs
 
 

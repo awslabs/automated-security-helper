@@ -1515,9 +1515,10 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
     except ValueError as error:
         problems.append(str(error))
         wrapped = []
-    # A wrapped step behind an ``if`` is checked in the runs it had, and may have none.
+    # A wrapped step whose ``if`` reads false or unknown before the run is checked in
+    # the runs it had, and may have none; one whose ``if`` reads true must have run.
     problems += verdict.resume_token_problems(
-        log, wrapped, optional=reports.conditional_steps(workflows)
+        log, wrapped, optional=reports.conditional_steps(workflow, called)
     )
     return problems
 

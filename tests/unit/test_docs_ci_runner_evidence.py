@@ -512,7 +512,7 @@ def test_a_wrapped_step_with_an_if_is_checked_only_in_the_runs_it_had():
             }
         }
     }
-    assert conditional([workflow]) == {("ash", "Base")}
+    assert conditional(workflow) == {("ash", "Base")}
     log = "\n".join(
         [
             json.dumps({"jobID": "ash", "msg": "⭐ Run Main Preflight"}),
@@ -525,9 +525,86 @@ def test_a_wrapped_step_with_an_if_is_checked_only_in_the_runs_it_had():
         ]
     )
     wrapped = [("ash", "Base"), ("ash", "Preflight")]
-    assert check(log, wrapped, optional=conditional([workflow])) == []
+    assert check(log, wrapped, optional=conditional(workflow)) == []
     problems = check(log, wrapped)
     assert problems and all("Base" in p for p in problems), problems
+
+
+@pytest.mark.parametrize(
+    ("condition", "optional"),
+    [
+        ("always()", False),
+        ("${{ !cancelled() }}", False),
+        (True, False),
+        ("inputs.changed == 'true' || always()", False),
+        (False, True),
+        ("success()", True),
+        ("failure()", True),
+        ("steps.scan.outcome == 'failure'", True),
+        ("github.event_name == 'push'", True),
+        ("inputs.changed", True),
+        ("cancelled()", True),
+    ],
+)
+@pytest.mark.unit
+def test_a_step_is_optional_only_when_its_if_reads_false_or_unknown(
+    condition, optional
+):
+    """A wrapped step with ``if: always()`` ran in every run of its job, so a log
+    with no run of it is a problem; one behind ``success()``, ``failure()``, another
+    step's outcome or an input the block does not give may have had no run."""
+    conditional = _api("reports", "conditional_steps")
+    workflow = {
+        "jobs": {
+            "ash": {
+                "steps": [
+                    {"name": "Base", "if": condition, "run": "with_commands_stopped x"},
+                    {"name": "Plain", "run": "with_commands_stopped uvx ash"},
+                ]
+            }
+        }
+    }
+    assert conditional(workflow) == ({("ash", "Base")} if optional else set())
+
+
+@pytest.mark.unit
+def test_a_called_steps_if_reads_the_calls_inputs():
+    """A step of a reusable workflow behind ``if: inputs.<name>`` is optional only
+    when the call gives that input off, leaves it at an off default, or gives it as
+    an expression; a call that gives it on makes the step run."""
+    conditional = _api("reports", "conditional_steps")
+    scan = {
+        "on": {
+            "workflow_call": {
+                "inputs": {"quiet": {"default": False, "type": "boolean"}}
+            }
+        },
+        "jobs": {
+            "ash": {
+                "steps": [
+                    {"name": "Quiet", "if": "inputs.quiet", "run": "echo"},
+                    {"name": "Loud", "if": "${{ !inputs.quiet }}", "run": "echo"},
+                ]
+            }
+        },
+    }
+
+    def caller(given):
+        job = {"uses": "./.github/workflows/quiet.yml"}
+        if given is not None:
+            job["with"] = {"quiet": given}
+        return {"jobs": {"scan": job}}
+
+    called = {"quiet.yml": scan}
+    assert conditional(caller(True), called) == {("ash", "Loud")}
+    assert conditional(caller(False), called) == {("ash", "Quiet")}
+    assert conditional(caller(None), called) == {("ash", "Quiet")}, "the default is off"
+    expression = "${{ github.event_name == 'push' }}"
+    assert conditional(caller(expression), called) == {
+        ("ash", "Quiet"),
+        ("ash", "Loud"),
+    }, "an input given as an expression is unknown, so both steps may have no run"
+    assert conditional(caller(True), {}) == set(), "an unread call adds no steps"
 
 
 @pytest.mark.unit
