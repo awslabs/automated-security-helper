@@ -1760,8 +1760,26 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # exclude_dirs, which bandit applies before --exclude: a config that
         # legitimately leaves every Python file out was read as "scanned no file".
         include_globs, exclude_dirs = _config_file_filters(final_args)
-        entries += exclude_dirs
         root = Path(target).as_posix()
+        for entry in exclude_dirs:
+            if entry in root:
+                # bandit alone reads an exclude_dirs entry as a substring of every
+                # walked path, so an entry that is part of the target's own path
+                # ("tests" under a tree at .../tests-infra/repo) skipped the
+                # whole tree. Read as an exclusion here, that made the target
+                # SKIPPED with no word; it is said, and left out, so the files it
+                # hid count as unexcluded and the result is graded as it was: an
+                # error, since bandit's result says nothing about them. The ini
+                # exclude entries warn the same way (_ini_excludes).
+                ASH_LOGGER.warning(
+                    f"The bandit config file's exclude_dirs entry {entry!r} is part "
+                    f"of the scanned target's own path {root}: bandit reads an "
+                    "entry as a substring of every walked path and skipped the "
+                    "whole tree, so its result says nothing about the files there.",
+                    extra=NO_MARKUP,
+                )
+                continue
+            entries.append(entry)
         all_files, _ = walked_files(target)
         python = [
             f"{root}/{relative}"

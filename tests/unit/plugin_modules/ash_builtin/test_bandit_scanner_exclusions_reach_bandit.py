@@ -515,6 +515,31 @@ def test_an_operator_config_whose_exclude_dirs_cover_the_tree_is_skipped(tmp_pat
     assert scanner.targets_attempted == 0
 
 
+def test_an_exclude_dirs_entry_inside_the_targets_own_path_keeps_the_error(
+    tmp_path, caplog
+):
+    """bandit reads a config file's exclude_dirs entry as a substring of every
+    walked path, so ``tests`` under a target at ``.../tests-infra`` skipped the
+    whole tree. Read as an exclusion of the files, that graded the target
+    SKIPPED with no word; the entry is named and the grade stays an error."""
+    source = _tree(tmp_path, ["a.py"], name="tests-infra")
+    config = tmp_path / "bandit.yaml"
+    config.write_text("exclude_dirs:\n  - tests\n", encoding="utf-8")
+    scanner = _scanner(source, tmp_path)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ScannerError, match="scanned no file"):
+            scanner._record_scanned_files(
+                _report(source, [], []), ["bandit", "--configfile", str(config)], source
+            )
+
+    assert any(
+        "exclude_dirs entry 'tests'" in record.message
+        and "scanned target's own path" in record.message
+        for record in caplog.records
+    ), [record.message for record in caplog.records]
+
+
 def test_an_operator_config_whose_include_names_no_file_is_skipped(tmp_path):
     source = _tree(tmp_path, ["a.py"])
     config = tmp_path / "bandit.toml"
