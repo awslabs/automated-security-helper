@@ -250,6 +250,12 @@ class CommandSafeStream:
                 self._checked_buffer._emit_held()
             self._mid_write = True
             try:
+                # A write deferred after the last drain's final empty check,
+                # before _mid_write was cleared, is still in _pending with no
+                # write under way to drain it. It lands first: it was made
+                # before this text, and left to the drain below it would have
+                # landed after it.
+                self._drain_pending()
                 written = self._write_text(text)
             except BaseException:
                 self._end_write(failed=True)
@@ -275,7 +281,12 @@ class CommandSafeStream:
         target = self.target
         if self._passes_as_is():
             written = target.write(text)
-            self._at_line_start = text.endswith(("\n", "\r"))
+            # The line state follows the checked model (_safe), not
+            # text.endswith(...): whitespace or a color code after a line
+            # break still starts the line, so a later checked write of this
+            # wrap (the target lookup can answer another stream) reads the
+            # state the check would have left.
+            self._at_line_start = self._safe(text, self._at_line_start)[1]
             return written
         safe, at_line_start = self._safe(text, self._at_line_start)
         target.write(safe)
@@ -289,17 +300,24 @@ class CommandSafeStream:
         and drained by this same loop. An item whose write raises does not
         strand the items after it: the drain goes on, and the first such
         error is raised once the list is empty. Stranded items would land
-        after some later write's text, or never."""
-        error: Exception | None = None
+        after some later write's text, or never. A KeyboardInterrupt raised
+        while an item lands is held the same way: the items after it still
+        land, and it is raised once the list is empty."""
+        error: BaseException | None = None
         while self._pending:
             item = self._pending.pop(0)
             try:
                 if isinstance(item, str):
+                    if self._checked_buffer is not None:
+                        # Bytes a buffer write left held land first, where
+                        # they were written, as write() has them land before
+                        # its own text.
+                        self._checked_buffer._emit_tail()
                     self._write_text(item)
                 elif self._checked_buffer is not None:
                     # Bytes defer only through the wrap's own buffer view.
                     self._checked_buffer._write_bytes(item, deferred=True)
-            except Exception as exc:
+            except BaseException as exc:
                 if error is None:
                     error = exc
         if error is not None:
@@ -364,6 +382,12 @@ class CommandSafeStream:
                 # A flush right before an exit (os._exit after a stop) is the
                 # last chance for bytes a buffer write left held.
                 self._checked_buffer._emit_held()
+            elif self._pending and not self._mid_write:
+                # A write stranded in _pending after the last drain (see
+                # write()) lands on the flush too, so a flush right before an
+                # exit does not drop it.
+                self._mid_write = True
+                self._end_write(failed=False)
             flush = getattr(self.target, "flush", None)
             if flush is not None:
                 flush()
@@ -380,7 +404,14 @@ class CommandSafeStream:
         # ``rich_proxied_file`` to find the real file under Live's redirect, and
         # would then write past the check. This stream does that lookup itself,
         # in ``target``.
-        if name.startswith("rich_"):
+        #
+        # Nor a private name: ``target`` reads ``self._target``, so on an
+        # instance that has no ``__dict__`` yet (copy.copy builds one and
+        # looks its attributes up before it fills them in) the lookup of
+        # ``_target`` came back here, read ``target`` again, and recursed
+        # until RecursionError. A private attribute is this wrap's own, never
+        # forwarded.
+        if name.startswith(("rich_", "_")):
             raise AttributeError(name)
         return getattr(self.target, name)
 
@@ -429,6 +460,9 @@ class CommandSafeBuffer(io.BufferedIOBase):
                 return len(given)
             owner._mid_write = True
             try:
+                # As in CommandSafeStream.write: a write stranded in _pending
+                # after the last drain lands first.
+                owner._drain_pending()
                 written = self._write_bytes(given)
             except BaseException:
                 owner._end_write(failed=True)
@@ -450,8 +484,18 @@ class CommandSafeBuffer(io.BufferedIOBase):
             flush_text()
         target = self._target_buffer()
         if owner._passes_as_is():
+            # The bytes an earlier checked write left held (an incomplete
+            # character's start) land first, where they were written, as their
+            # own bytes; left in the decoder they landed after these bytes, or
+            # never. The line state follows the checked model (_safe) over the
+            # decoded text, as the text side's pass-as-is path does.
+            tail = self._decoder.decode(b"", True)
+            self._decoder.reset()
+            if tail:
+                target.write(_encoded(tail))
             written = target.write(given)
-            owner._at_line_start = given.endswith((b"\n", b"\r"))
+            text = tail + codecs.decode(given, "utf-8", "surrogateescape")
+            owner._at_line_start = owner._safe(text, owner._at_line_start)[1]
             return written
         if deferred:
             # A deferred byte write, drained after the write it interrupted:
@@ -486,16 +530,24 @@ class CommandSafeBuffer(io.BufferedIOBase):
             return
         owner._mid_write = True
         try:
-            tail = self._decoder.decode(b"", True)
-            self._decoder.reset()
-            if tail:
-                safe, at_line_start = owner._safe(tail, owner._at_line_start)
-                self._target_buffer().write(_encoded(safe))
-                owner._at_line_start = at_line_start
+            self._emit_tail()
         except BaseException:
             owner._end_write(failed=True)
             raise
         owner._end_write(failed=False)
+
+    def _emit_tail(self) -> None:
+        """Write the held tail, checked from the line state, with _mid_write
+        already set and under the owner's lock: the body of :meth:`_emit_held`,
+        also run by the owner's drain before a deferred text item lands, so
+        the tail of the byte write that deferred it lands ahead of it."""
+        owner = self._owner
+        tail = self._decoder.decode(b"", True)
+        self._decoder.reset()
+        if tail:
+            safe, at_line_start = owner._safe(tail, owner._at_line_start)
+            self._target_buffer().write(_encoded(safe))
+            owner._at_line_start = at_line_start
 
     def flush(self) -> None:
         # Quiet on a target that is closed or detached, not on a closed view:
@@ -538,6 +590,9 @@ class CommandSafeBuffer(io.BufferedIOBase):
         return self._owner.isatty()
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith("rich_"):
+        # ``raw`` is the real buffer's unchecked writer: forwarded, it gave a
+        # caller of the checked view a byte path past the check. A private
+        # name is this view's own (see CommandSafeStream.__getattr__).
+        if name.startswith(("rich_", "_")) or name == "raw":
             raise AttributeError(name)
         return getattr(self._target_buffer(), name)
