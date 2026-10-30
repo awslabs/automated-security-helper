@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, Literal, List, Optional
@@ -302,9 +303,18 @@ class ScanResultsContainer(BaseModel):
         # results, and a stack trace names files by their full paths. The
         # environment values are redacted first; a value under the home
         # directory no longer matches once it is written as ~. The trace is the
-        # one of the exception given, not of whatever the caller is handling.
+        # one of the exception given, not of whatever the caller is handling,
+        # unless the one given was never raised: it has no traceback, and its
+        # trace would be one line. That is an exception built to wrap the one
+        # being handled (``ScannerError(f"...: {e}")``), so the handled one's
+        # trace is the only trace there is.
+        trace_of = exception
+        if exception.__traceback__ is None:
+            handled = sys.exc_info()[1]
+            if handled is not None and handled is not exception:
+                trace_of = handled
         self.exception = home_as_tilde(text)
-        self.stack_trace = home_as_tilde(traceback_text(exception, values=values))
+        self.stack_trace = home_as_tilde(traceback_text(trace_of, values=values))
         self.status = ScannerStatus.FAILED
         return text
 
