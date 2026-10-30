@@ -1089,6 +1089,28 @@ def test_a_stale_git_dir_naming_another_repositorys_tree_is_not_honored(
 
 
 @pytest.mark.integration
+def test_an_empty_git_work_tree_is_read_as_unset(isolated_tmp, monkeypatch):
+    """A hook that exports ``GIT_WORK_TREE=`` (empty) means "not set"; git refuses
+    the empty string as a path ("The empty string is not a valid path", exit 128)
+    on the root lookup and the diff alike. Passed through beside a GIT_DIR whose
+    repository names its tree with ``core.worktree``, the empty value turned a
+    layout git honors with GIT_DIR alone into no root and every finding reported.
+    An empty location variable is left out of the copy git is started with."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    _git("config", "core.worktree", tree.as_posix(), cwd=source)
+    monkeypatch.setenv("GIT_DIR", (source / ".git").as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", "")
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
 def test_a_relative_core_worktree_is_read_against_the_git_directory(
     isolated_tmp, monkeypatch
 ):

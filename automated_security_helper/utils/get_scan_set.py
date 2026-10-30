@@ -2271,15 +2271,25 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     outside that tree it would make the root and the diff describe a tree the
     scan is not reading. A GIT_WORK_TREE that names no directory is not honored
     either: git would answer with that name unchecked, and the lookup would join
-    the diff's paths onto a path that does not exist.
+    the diff's paths onto a path that does not exist. A location variable
+    exported with an empty value is read as unset (and left out of the copy):
+    git itself refuses the empty string as a path.
     """
     environ = child_environ()
     # os.path.abspath reads a relative value against this process's directory, the
     # exporter's, and keeps an absolute one as it is; git started in *cwd* then
-    # reads the same directory the exporter meant.
+    # reads the same directory the exporter meant. A variable exported EMPTY is
+    # dropped from the copy: git refuses "" as a path ("The empty string is not a
+    # valid path" for GIT_WORK_TREE, "not a git repository: ''" for GIT_DIR), so
+    # passed through it would turn a layout git honors with GIT_DIR alone into a
+    # failed lookup, and unset is what such an export means.
     for name in _GIT_LOCATION_ENV:
         value = environ.get(name)
-        if value and not os.path.isabs(value):
+        if value is None:
+            continue
+        if not value:
+            del environ[name]
+        elif not os.path.isabs(value):
             environ[name] = os.path.abspath(value)
     work_tree = environ.get("GIT_WORK_TREE")
     git_dir = environ.get("GIT_DIR")
