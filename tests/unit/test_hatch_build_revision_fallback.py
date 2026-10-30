@@ -1,0 +1,153 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""hatch_build reuses an earlier commit record only where it can belong to the tree.
+
+Why this file exists
+--------------------
+When git cannot name the commit, ``_get_commit_sha`` falls back to the record an
+earlier build left in assets/ASH_INSTALLED_REVISION. That fallback exists for a
+wheel built from an sdist: the unpacked sdist has no .git, and the record it holds
+is the commit the sdist was built from.
+
+It ran in every tree, though. In a checkout where git refuses to answer (a
+repository-ownership refusal is the usual cause), the record is whatever an earlier
+build of that checkout left, at whatever commit it was on then, and the new build
+recorded that commit as its own. And it accepted any text that was not one of three
+placeholders: "HEAD" or a branch name from an older build, or any other string,
+went into the package as the revision a container build installs.
+
+What is asserted
+----------------
+Git is replaced by a stub that fails the way a refused repository does, so nothing
+here starts a process. A tree with a .git (a directory, or the file a worktree has)
+and a record of a commit id records "unknown-commit"; the same record in a tree with
+no .git is kept, which is the sdist case. Only a 40-digit lowercase commit id is
+reused; the placeholders, a branch name, "HEAD", and ids of any other length or case
+read as no record.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+HOOK = REPO_ROOT / "hatch_build.py"
+
+
+def _commit_id() -> str:
+    """A commit-shaped id, built at run time."""
+    return hashlib.sha1(b"a commit", usedforsecurity=False).hexdigest()
+
+
+def _hook_in(monkeypatch, tree: Path):
+    """hatch_build.py, loaded from a copy in ``tree`` so its paths point there."""
+    tree.mkdir()
+    shutil.copyfile(HOOK, tree / "hatch_build.py")
+    spec = importlib.util.spec_from_file_location(
+        "hatch_build_revision_fallback", tree / "hatch_build.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _git_refuses(monkeypatch, hook) -> None:
+    """git is found on PATH and fails, as it does on a repository it will not read."""
+    monkeypatch.setattr(hook.shutil, "which", lambda name: "/usr/bin/git")
+
+    def run(*args, **kwargs):
+        raise hook.subprocess.CalledProcessError(
+            128, args[0], stderr=b"fatal: detected dubious ownership in repository"
+        )
+
+    monkeypatch.setattr(hook.subprocess, "run", run)
+
+
+def _record(hook, text: str) -> None:
+    hook.ASH_INSTALLED_REVISION_PATH.parent.mkdir(parents=True, exist_ok=True)
+    hook.ASH_INSTALLED_REVISION_PATH.write_text(text, encoding="utf-8")
+
+
+def _get(hook) -> str:
+    return hook.CustomBuildHook._get_commit_sha(None)
+
+
+@pytest.mark.parametrize("kind", ["directory", "worktree-file"])
+def test_a_checkout_does_not_reuse_an_earlier_record_when_git_refuses(
+    monkeypatch, tmp_path, kind
+):
+    """Red at the base: the fallback returned the earlier record unconditionally."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _git_refuses(monkeypatch, hook)
+    _record(hook, _commit_id())
+    git_entry = hook.ASH_REPO_ROOT / ".git"
+    if kind == "directory":
+        git_entry.mkdir()
+    else:
+        git_entry.write_text("gitdir: ../elsewhere\n", encoding="utf-8")
+
+    assert _get(hook) == "unknown-commit"
+
+
+def test_a_tree_without_a_git_entry_keeps_the_record_an_sdist_left(
+    monkeypatch, tmp_path
+):
+    """The control for the test above: the same record, no .git, is kept."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _git_refuses(monkeypatch, hook)
+    sha = _commit_id()
+    _record(hook, sha)
+    assert not (hook.ASH_REPO_ROOT / ".git").exists()
+
+    assert _get(hook) == sha
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        pytest.param("main", id="branch-name"),
+        pytest.param("HEAD", id="head"),
+        pytest.param("ERROR: Failed to get commit SHA\nfatal", id="error-text"),
+        pytest.param("unknown-commit", id="placeholder"),
+        pytest.param("", id="empty"),
+        pytest.param("UPPER", id="upper-case"),
+        pytest.param("LONG", id="longer-id"),
+        pytest.param("TWO", id="two-ids"),
+    ],
+)
+def test_only_a_commit_id_is_reused(monkeypatch, tmp_path, recorded):
+    """Red at the base for branch-name, head, upper-case, longer-id and two-ids:
+    the fallback reused any text that was not a placeholder or an ERROR line."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _git_refuses(monkeypatch, hook)
+    sha = _commit_id()
+    recorded = {
+        "UPPER": sha.upper(),
+        "LONG": sha + "0",
+        "TWO": sha + "\n" + sha,
+    }.get(recorded, recorded)
+    _record(hook, recorded)
+
+    assert _get(hook) == "unknown-commit"
+
+
+def test_a_lowercase_commit_id_is_reused(monkeypatch, tmp_path):
+    """The control for the test above: a 40-digit lowercase id passes the check."""
+    hook = _hook_in(monkeypatch, tmp_path / "tree")
+    _git_refuses(monkeypatch, hook)
+    sha = _commit_id()
+    assert len(sha) == 40
+    _record(hook, f"{sha}\n")
+
+    assert _get(hook) == sha

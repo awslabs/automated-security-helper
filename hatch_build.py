@@ -170,6 +170,13 @@ GENAI_GUIDE_SOURCE: Path = ASH_REPO_ROOT.joinpath(
 )
 GENAI_GUIDE_PACKAGE_PATH = "automated_security_helper/assets/genai-steering-guide.md"
 
+# A commit id as the root Dockerfile's clone step takes it: 40 lowercase hex digits
+# and nothing else (its length test is `-eq 40`). ASH's repository is a SHA-1 one. A
+# 64-digit id from a SHA-256 repository is left out on purpose: that step would pass
+# it to `git clone --branch` and fail the image build, where "unknown-commit" falls
+# back to the release tag.
+_COMMIT_ID = re.compile(r"[0-9a-f]{40}")
+
 
 class CustomBuildHook(BuildHookInterface):
     """Build hook to stage build assets before packaging."""
@@ -204,11 +211,15 @@ class CustomBuildHook(BuildHookInterface):
         if GENAI_GUIDE_SOURCE.is_file():
             packaged.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(GENAI_GUIDE_SOURCE, packaged)
-            print(f"Staged the GenAI guide at {GENAI_GUIDE_PACKAGE_PATH}")
+            _say(f"Staged the GenAI guide at {GENAI_GUIDE_PACKAGE_PATH}")
         elif packaged.is_file():
-            print(f"Using the GenAI guide already at {GENAI_GUIDE_PACKAGE_PATH}")
+            _say(f"Using the GenAI guide already at {GENAI_GUIDE_PACKAGE_PATH}")
         else:
-            print(
+            # The one message here that holds the checkout's absolute path. Called
+            # outside _stage_assets' handler, so a plain print of a path the console
+            # cannot encode raised UnicodeEncodeError and failed the whole build
+            # instead of printing this warning.
+            _say(
                 f"Warning: {GENAI_GUIDE_SOURCE} not found; this build carries no "
                 "GenAI guide, and `ash get-genai-guide` from it needs --from-github"
             )
@@ -230,8 +241,8 @@ class CustomBuildHook(BuildHookInterface):
                 # characters outside every ANSI code page, and read_text() with no
                 # encoding takes the console's, so on a Japanese, Chinese or
                 # Korean Windows the read raised UnicodeDecodeError, no
-                # assets/Dockerfile was generated, and the handler below recorded
-                # "build-error" as the commit.
+                # assets/Dockerfile was generated, and "build-error" was recorded
+                # as the commit.
                 content = dockerfile_path.read_text(encoding="utf-8")
                 # Stage the package files the Dockerfile COPYs from outside assets/;
                 # staged_dockerfile_text points every COPY source at the staged
@@ -250,8 +261,11 @@ class CustomBuildHook(BuildHookInterface):
                         )
                     shutil.copyfile(source, ASH_ASSETS_PATH.joinpath(staged_name))
                     _say(f"Staged {source_rel} into assets/{staged_name}")
+                # newline="\n": a text-mode write on Windows turns every "\n" into
+                # "\r\n", so the same sources staged a different Dockerfile there
+                # than on Linux. The image build reads it on Linux either way.
                 dockerfile_copy_path.write_text(
-                    staged_dockerfile_text(content), encoding="utf-8"
+                    staged_dockerfile_text(content), encoding="utf-8", newline="\n"
                 )
                 _say("Successfully generated assets/Dockerfile from root Dockerfile")
             else:
@@ -263,13 +277,6 @@ class CustomBuildHook(BuildHookInterface):
                         "No Dockerfile available - this may be expected for wheel-only builds"
                     )
 
-            # Handle Git commit SHA
-            commit_sha = self._get_commit_sha()
-            ASH_INSTALLED_REVISION_PATH.write_text(commit_sha)
-            _say(
-                f"Successfully wrote git details '{commit_sha}' to {ASH_INSTALLED_REVISION_PATH}"
-            )
-
         except StagedSourceMissingError:
             # The staging loop's own assertion: a Dockerfile source that does not
             # exist. Re-raised so the build fails here, as the comment above says
@@ -278,8 +285,26 @@ class CustomBuildHook(BuildHookInterface):
             # recorded "build-error" as the commit: exactly the silently-dropped
             # stage the assertion exists to refuse. Caught by its own class, not
             # as FileNotFoundError: that name also covers a git that cannot be
-            # run, which belongs to the handler below.
+            # run, which _record_commit handles.
             raise
+        except Exception as e:
+            _say(f"Unexpected error in build hook: {e}")
+            _say("Continuing build despite asset staging error")
+
+        # After the staging, outside its handler: an error while staging the
+        # Dockerfile used to be caught by the same handler that records
+        # "build-error", which overwrote the commit record before the commit was
+        # looked up, discarding a commit the tree could still name.
+        self._record_commit()
+
+    def _record_commit(self):
+        """Write the commit the tree is built from to ASH_INSTALLED_REVISION."""
+        try:
+            commit_sha = self._get_commit_sha()
+            ASH_INSTALLED_REVISION_PATH.write_text(commit_sha)
+            _say(
+                f"Successfully wrote git details '{commit_sha}' to {ASH_INSTALLED_REVISION_PATH}"
+            )
         except Exception as e:
             _say(f"Unexpected error in build hook: {e}")
             # Ensure we have some revision file even if there's an error
@@ -315,6 +340,11 @@ class CustomBuildHook(BuildHookInterface):
         records "unknown-commit". That is accepted: the alternative would read whichever repository the caller's
         environment named, which inside a `git commit` hook is the one being
         committed to, not this tree's.
+
+        When git cannot name the commit, a tree with no .git of its own (an
+        unpacked sdist) keeps the commit id an earlier build recorded; a checkout
+        records "unknown-commit" instead, since its earlier record may be of
+        another commit.
         """
         git_path = shutil.which("git")
         if not git_path:
@@ -353,15 +383,19 @@ class CustomBuildHook(BuildHookInterface):
             if hasattr(e, "stderr") and e.stderr:
                 _say(f"stderr: {e.stderr.decode('utf-8', 'replace').strip()}")
 
-        # Fallback: Check if we already have a revision file (from sdist build)
-        if ASH_INSTALLED_REVISION_PATH.exists():
+        # Fallback: the record an sdist build left, for a wheel built from that sdist.
+        # Only a tree with no .git of its own can be that wheel's source: in a
+        # checkout git failing (a repository-ownership refusal, say) says nothing
+        # about which commit the tree is, and the record there is whatever an
+        # earlier build of the checkout, at some other commit, left behind.
+        if os.path.lexists(ASH_REPO_ROOT.joinpath(".git")):
+            _say("This tree is a git checkout, so an earlier commit record is not used")
+        elif ASH_INSTALLED_REVISION_PATH.exists():
             existing_sha = ASH_INSTALLED_REVISION_PATH.read_text().strip()
-            if (
-                existing_sha
-                and not existing_sha.startswith("ERROR")
-                and existing_sha
-                not in ["unknown-commit", "no-git-available", "build-error"]
-            ):
+            # A commit id only. The three placeholders, "HEAD" and a branch name
+            # from an older build, and the "ERROR: ..." text a failed staging
+            # script wrote all name no commit, and would be installed as a ref.
+            if _COMMIT_ID.fullmatch(existing_sha):
                 _say(f"Using existing commit SHA from previous build: {existing_sha}")
                 return existing_sha
 
