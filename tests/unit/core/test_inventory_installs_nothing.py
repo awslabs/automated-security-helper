@@ -70,6 +70,21 @@ def sandbox(tmp_path, monkeypatch) -> InstallSandbox:
     yield from sandbox_env(tmp_path, monkeypatch)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _the_sandbox_reaches_nothing_real():
+    """The stand-ins' environment never leaked out of a test.
+
+    Checked in this module-scoped fixture's teardown, so it runs after every test
+    of the module on whatever worker or shard collected it and in whatever order
+    the tests ran; a function placed last in the file would guard only the tests
+    that happened to run before it in its own tier.
+    """
+    yield
+    assert "ASH_TEST_STAND_IN_LOG" not in environ_names(), (
+        "a sandbox user left ASH_TEST_STAND_IN_LOG in the environment"
+    )
+
+
 def _by_name(entries: List[Dict]) -> Dict[str, Dict]:
     return {entry["name"]: entry for entry in entries}
 
@@ -375,12 +390,3 @@ def test_an_installed_tool_is_satisfied_and_installs_nothing(sandbox, monkeypatc
     assert entry["dependencies_satisfied"] is True, (entry, sandbox.calls())
     assert entry["installs_on_first_scan"] is False, entry
     assert sandbox.installs() == [], sandbox.calls()
-
-
-# integration, though it starts nothing: it guards the thirteen integration tests
-# above by running after them in the same tier, so the integration leg is where the
-# check means something (in the unit leg it would follow one sandbox user).
-@pytest.mark.integration
-def test_the_sandbox_reaches_nothing_real():
-    """The stand-ins' environment never leaked out of a test."""
-    assert "ASH_TEST_STAND_IN_LOG" not in environ_names()
