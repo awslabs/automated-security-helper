@@ -456,11 +456,13 @@ def off_host_reporter_refused(reporter_class: type, plugin_config: object) -> bo
     )
 
 
-#: Config keys of the off-host reporters already named by
+#: ``(config key, cause)`` pairs of the off-host reporters already named by
 #: :func:`warn_off_host_section_without_enabled` in this process. A run reads a
 #: reporter's section more than once (each workspace project's report phase reads
-#: the same one), and one section should produce one warning.
-_UNENABLED_SECTIONS_WARNED: Set[str] = set()
+#: the same one), and one section should produce one warning. The cause is part of
+#: the key: a section with no ``enabled`` and a section with a non-bool one are
+#: different problems with different fixes.
+_UNENABLED_SECTIONS_WARNED: Set[Tuple[str, str]] = set()
 _UNENABLED_SECTIONS_LOCK = threading.Lock()
 
 
@@ -508,7 +510,13 @@ def warn_off_host_section_without_enabled(
         value = plugin_config["enabled"]
         if isinstance(value, bool):
             return
-        kind = "null" if value is None else f"a {type(value).__name__}"
+        if value is None:
+            kind = "null"
+        else:
+            type_name = type(value).__name__
+            article = "an" if type_name[:1] in "aeiou" else "a"
+            kind = f"{article} {type_name}"
+        cause = "not-a-bool"
         message = (
             f"Reporter '{key}' sends findings off the host and is not run: its "
             f"config section sets enabled to {kind}, and only the boolean true "
@@ -519,6 +527,7 @@ def warn_off_host_section_without_enabled(
     else:
         if not any(_sets_something(value) for value in plugin_config.values()):
             return
+        cause = "no-enabled"
         message = (
             f"Reporter '{key}' sends findings off the host and is disabled by "
             "default. Its config section sets options but not 'enabled': it does "
@@ -526,10 +535,13 @@ def warn_off_host_section_without_enabled(
             f"To run it, set reporters.{key}.enabled: true in the operator's "
             f"config, or pass --config-overrides reporters.{key}.enabled=true."
         )
+    # Once per (reporter, cause): a config that first leaves 'enabled' out and
+    # later sets it to a non-bool is a different problem with a different fix, and
+    # the second message must not be swallowed by the first.
     with _UNENABLED_SECTIONS_LOCK:
-        if key in _UNENABLED_SECTIONS_WARNED:
+        if (key, cause) in _UNENABLED_SECTIONS_WARNED:
             return
-        _UNENABLED_SECTIONS_WARNED.add(key)
+        _UNENABLED_SECTIONS_WARNED.add((key, cause))
     ASH_LOGGER.warning(message, extra=NO_MARKUP)
 
 

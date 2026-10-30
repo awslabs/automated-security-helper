@@ -61,7 +61,7 @@ def warnings():
 
 @pytest.mark.parametrize(
     ("value", "kind"),
-    [("true", "a str"), (1, "a int"), ("yes-planted-value", "a str"), (None, "null")],
+    [("true", "a str"), (1, "an int"), ("yes-planted-value", "a str"), (None, "null")],
     ids=["str", "int", "yes", "null"],
 )
 def test_a_non_boolean_enabled_is_named_once(warnings, value, kind):
@@ -74,6 +74,20 @@ def test_a_non_boolean_enabled_is_named_once(warnings, value, kind):
     assert f"sets enabled to {kind}" in named[0], named[0]
     # The type is named, never the value.
     assert "yes-planted-value" not in named[0], named[0]
+
+
+def test_a_missing_enabled_does_not_hide_a_later_non_boolean_one(warnings):
+    """One warning per (reporter, cause): the second problem is not swallowed."""
+    warn_off_host_section_without_enabled(
+        _OffHostReporter, {"bucket": "planted-bucket-name"}
+    )
+    warn_off_host_section_without_enabled(_OffHostReporter, {"enabled": "true"})
+
+    named = [line for line in warnings if "offhost-planted" in line]
+    assert len(named) == 2, warnings
+    assert "sets options but not 'enabled'" in named[0], named[0]
+    assert "sets enabled to a str" in named[1], named[1]
+    assert "planted-bucket-name" not in " ".join(named), named
 
 
 def test_a_boolean_enabled_is_not_named(warnings):
