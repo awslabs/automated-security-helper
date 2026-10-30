@@ -240,8 +240,20 @@ class IgnorePathWithReason(RedactedSection):
 
     @field_validator("expiration", mode="before")
     @classmethod
-    def _expiration_is_text(cls, v: Any) -> Any:
-        """An unquoted date, refused with what to write (``refuse_an_expiration_that_is_not_text``)."""
+    def _expiration_is_text(cls, v: Any, info: ValidationInfo) -> Any:
+        """An unquoted date, refused with what to write (``refuse_an_expiration_that_is_not_text``).
+
+        Under the TOLERATE_STORED_CONFIG context a stored value that is not text
+        is kept as its text, which ``validate_expiration_date`` then records as an
+        unreadable date like a malformed string, instead of refusing the whole
+        results file.
+        """
+        if (
+            v is not None
+            and not isinstance(v, str)
+            and tolerated_notes(info) is not None
+        ):
+            return str(v)
         return refuse_an_expiration_that_is_not_text(v)
 
     @field_validator("expiration")
@@ -747,7 +759,9 @@ class AshSuppression(IgnorePathWithReason):
             if notes is not None and _is_environment_reference(v):
                 notes.append(UNREADABLE_SYMBOL_NOTE)
                 return v
-        if not isinstance(v, str) or not is_valid_symbol(v):
+        # SYMBOL_PATTERN ends in ``$``, which also matches before a trailing
+        # newline (a YAML block scalar ends in one), so that is refused here.
+        if not isinstance(v, str) or v.endswith("\n") or not is_valid_symbol(v):
             raise ValueError(SYMBOL_RULE)
         return v
 
