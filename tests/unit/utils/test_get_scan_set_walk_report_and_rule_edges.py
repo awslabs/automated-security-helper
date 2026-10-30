@@ -68,11 +68,15 @@ class TestAJunctionBeforePython312:
 
     @staticmethod
     def _junction():
+        # ``stat.IO_REPARSE_TAG_MOUNT_POINT`` is defined by Windows builds of the
+        # ``stat`` module only (the ``FILE_ATTRIBUTE_*`` names are on every
+        # platform), so the stand-in names the tag's value itself and this class
+        # runs on Linux and macOS too.
         return SimpleNamespace(
             st_mode=stat.S_IFDIR | 0o755,
             st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT
             | stat.FILE_ATTRIBUTE_DIRECTORY,
-            st_reparse_tag=stat.IO_REPARSE_TAG_MOUNT_POINT,
+            st_reparse_tag=getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003),
         )
 
     def test_a_path_that_is_one_is_a_link_to_a_directory(self, tmp_path, monkeypatch):
