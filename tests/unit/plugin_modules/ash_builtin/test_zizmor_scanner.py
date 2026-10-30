@@ -1075,9 +1075,12 @@ def test_exit_3_with_every_input_rejected_is_zero_findings(repo):
 
 
 def test_exit_3_with_only_non_actions_attempts_nothing(tmp_path):
+    # The file is the one zizmor's rejection line quotes (other/action.yml), so
+    # the probe reads it and finds another tool's file, not a path it cannot
+    # open (which counts as a failed target).
     source = tmp_path / "src"
-    (source / "x").mkdir(parents=True)
-    (source / "x" / "action.yml").write_text("tool: other\n")
+    (source / "other").mkdir(parents=True)
+    (source / "other" / "action.yml").write_text("tool: other\n")
     scanner = _scanner(source)
     _fake_run(scanner, stdout=None, returncode=3, stderr=NOT_AN_ACTION + NO_INPUTS)
     report = scanner.scan(source, "source", [])
@@ -1394,7 +1397,7 @@ def test_without_a_binary_on_path_the_deferred_probe_runs_for_the_uv_route(
         lambda self, *args: probed.append(args) or "1.30.1",
     )
     scanner = _scanner(repo)
-    object.__setattr__(scanner, "_resolve_through_uv", lambda: True)
+    object.__setattr__(scanner, "_resolve_through_uv", lambda *_: True)
 
     assert scanner.validate_plugin_dependencies() is True
 
@@ -1880,12 +1883,14 @@ def test_an_action_the_safe_loader_refuses_is_a_failed_target(repo, monkeypatch)
 
 def test_a_rejected_file_that_cannot_be_read_is_a_failed_target(repo, monkeypatch):
     """A rejected input the probe cannot read at all (here, the quoted path
-    names no file) is not known to be another tool's file: fail closed."""
+    names no file) is not known to be another tool's file: fail closed, one
+    failed target. The attempted count stays the inputs zizmor was given; a
+    quoted path that was never an input adds nothing to it."""
     scanner, _ = _scan_with_output(
         repo, CAPTURED_SARIF.read_text(), stderr=_REJECTED_BROKEN_ACTION
     )
 
-    assert scanner.targets_attempted == len(EXPECTED_INPUTS) + 1
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
     assert scanner.targets_failed == 1
 
 
@@ -2085,8 +2090,10 @@ def _later_batch_sarif() -> str:
 def test_a_joined_report_carries_every_batchs_rules_and_invocations(repo, monkeypatch):
     """A rule that fires only in a later batch keeps its descriptor (help URI,
     description) in the joined report, each rule id appears once, the
-    invocations of every run are kept in order, and a result's ruleIndex
-    points at its rule in the merged list, not into the batch's own array."""
+    invocations of every run are kept in order (one per batch: the base class
+    records each run's own argv as that run's invocation, replacing whatever
+    the tool wrote), and a result's ruleIndex points at its rule in the merged
+    list, not into the batch's own array."""
     monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
     scanner = _scanner(repo)
     calls = _fake_runs(scanner, [CAPTURED_SARIF.read_text(), _later_batch_sarif()])
@@ -2105,9 +2112,9 @@ def test_a_joined_report_carries_every_batchs_rules_and_invocations(repo, monkey
     for result in indexed:
         assert run.tool.driver.rules[result.ruleIndex].id == result.ruleId
     assert len(run.invocations) == len(calls)
-    assert [invocation.commandLine for invocation in run.invocations[1:]] == [
-        "later"
-    ] * (len(calls) - 1)
+    assert [
+        invocation.commandLine.rsplit(" -- ", 1)[-1] for invocation in run.invocations
+    ] == EXPECTED_INPUTS
     assert len(run.results) == len(EXPECTED_INPUTS) * len(EXPECTED_FINDINGS)
 
 
