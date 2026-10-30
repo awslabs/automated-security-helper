@@ -88,6 +88,23 @@ def logged():
         ASH_LOGGER.setLevel(level)
 
 
+def _config_dumps(lines):
+    """The pre-scan's two config dumps among the logged lines.
+
+    The plugin log writes each message after a tab, and wraps it in an empty
+    ``[none][/none]`` pair that keeps the console from reading the text as markup.
+    The pair is not part of what a dump says, so it is taken out before the dump's
+    own opening words are compared.
+    """
+
+    def body(line):
+        return line.split("\t", 1)[-1].replace("[none][/none]", "")
+
+    return [
+        line for line in lines if body(line).startswith(("self.config: ", "config: "))
+    ]
+
+
 def test_timeout_record_carries_no_environment_value(tmp_path, logged):
     """The limit is a short number, so it has to be its own quoted token."""
     scanner = _scanner(_context(tmp_path, ["67"]))
@@ -2281,9 +2298,7 @@ def test_pre_scan_dumps_show_a_value_from_the_environment_as_written(
 
     assert scanner._pre_scan(target=target, target_type="source", config=scanner.config)
 
-    dumps = [
-        line for line in logged if "\tself.config: " in line or "\tconfig: " in line
-    ]
+    dumps = _config_dumps(logged)
     assert len(dumps) == 2, logged
     for line in dumps:
         assert "${ASH_SPELLED_LIMIT}" in line, line
@@ -2317,9 +2332,7 @@ def test_a_hook_answering_no_set_skips_the_dumps_instead_of_printing_clear(
             target=target, target_type="source", config=scanner.config
         )
 
-    dumps = [
-        line for line in logged if "\tself.config: " in line or "\tconfig: " in line
-    ]
+    dumps = _config_dumps(logged)
     assert dumps == [], dumps
 
 
@@ -2437,9 +2450,7 @@ def test_pre_scan_dumps_show_a_large_whole_value_as_written(
 
     assert scanner._pre_scan(target=target, target_type="source", config=scanner.config)
 
-    dumps = [
-        line for line in logged if "\tself.config: " in line or "\tconfig: " in line
-    ]
+    dumps = _config_dumps(logged)
     assert len(dumps) == 2, logged
     for line in dumps:
         assert "${ASH_SPELLED_LIMIT}" in line, line
