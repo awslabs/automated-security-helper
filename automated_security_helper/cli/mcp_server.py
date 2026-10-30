@@ -597,11 +597,13 @@ async def _tell_client(
         # client), and a log line that repeats it shows it a second time, so a
         # name holding an escape reads as the text of one. The tool's own result
         # carries what the client needed; the log is the courtesy that was lost.
-        # Sized as text: a caller may hand something other than a str (None, a
-        # count), and the failure path must not raise over it.
+        # Nothing of the message reaches the log, not even its size: the
+        # shown-twice check reads any value derived from it in a log call as
+        # the text shown again, and the failure path must not raise over a
+        # message that is not a str either.
         logger.warning(
-            f"Failed to send {level} message to client ({len(str(message))} "
-            "characters); the tool's result carries what it said"
+            f"Failed to send {level} message to client; "
+            "the tool's result carries what it said"
         )
         logger.debug(f"The {level} send that failed, with why:", exc_info=True)
 

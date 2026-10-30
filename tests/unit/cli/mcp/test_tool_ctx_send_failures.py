@@ -568,15 +568,14 @@ def test_a_failed_send_does_not_repeat_the_message_in_the_log(caplog) -> None:
     assert warnings, logged
     assert all(message not in text for text in logged), logged
     assert all("a name holding an escape" not in text for text in logged), logged
-    assert f"({len(message)} characters)" in warnings[0], warnings[0]
     assert "Failed to send warning message to client" in warnings[0], warnings[0]
 
 
 def test_a_failed_send_of_a_non_str_message_still_warns(caplog) -> None:
     """The guard is given whatever a caller hands it, and the old text-bearing
-    warning accepted any type. Sizing the message in the failure path must not
-    raise over a message that is not a str (None here): the send is still
-    named by its level and the text's length, as for any other message."""
+    warning accepted any type. The failure path must not raise over a message
+    that is not a str (None here): the send is still named by its level, as for
+    any other message, and nothing of the message reaches the log."""
     ctx = _ctx()
 
     with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
@@ -584,9 +583,8 @@ def test_a_failed_send_of_a_non_str_message_still_warns(caplog) -> None:
 
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert warnings, [r.getMessage() for r in caplog.records]
-    assert "Failed to send info message to client (4 characters)" in warnings[0], (
-        warnings[0]
-    )
+    assert "Failed to send info message to client" in warnings[0], warnings[0]
+    assert "None" not in warnings[0], warnings[0]
 
 
 def test_control_a_working_log_send_is_awaited_once_with_the_error() -> None:
