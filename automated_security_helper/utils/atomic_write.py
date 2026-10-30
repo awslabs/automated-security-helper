@@ -48,8 +48,8 @@ def write_text_atomically(
     within one filesystem, then renamed over ``path``. Created exclusively rather
     than with ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain
     write of a new file would: ``mkstemp`` creates 0600, which would stop a host
-    user reading results a container wrote. An existing file's own mode is not
-    kept: the staging file is a new file, and takes a new file's mode.
+    user reading results a container wrote. A regular file already at ``path``
+    keeps its permission bits: the staging file is given them before the rename.
 
     ``newline`` is open()'s: by default a ``\\n`` in ``content`` is written as the
     platform's line ending, as a plain text write writes it, so content that
@@ -61,8 +61,9 @@ def write_text_atomically(
     caller names the directory it writes in, the directory is opened without
     following a link at any component, and the staging file is created and renamed
     relative to that descriptor: a link on the way to ``path``, or at ``path``
-    itself, raises ``OutputLinkRefused``, and a file at ``path`` that another name
-    refers to raises ``OutputHardLinkRefused``. ``root`` is for a writer that knows
+    itself, raises ``OutputLinkRefused``. A file at ``path`` that another name
+    refers to is not refused: the rename replaces the entry at ``path`` and the
+    other name keeps the file as it was. ``root`` is for a writer that knows
     its output directory but may run where nothing registered it (the scan-set
     lists); it guards this write only and registers nothing.
     """
@@ -90,9 +91,10 @@ def open_atomically(
     The write is ``fs_guard.open_for_atomic_write``, so it is guarded exactly as
     :func:`write_text_atomically` is: below a registered output directory, or below
     ``root``, a link at ``path`` or on the way to it is refused with
-    ``OutputLinkRefused``, a file at ``path`` that another name refers to with
-    ``OutputHardLinkRefused``, and the rename is made relative to the directory's
-    descriptor. Staging the write through ``open_for_write`` and renaming by name,
+    ``OutputLinkRefused``, a file at ``path`` that another name refers to is
+    replaced as an entry with the other name's file left as it was, and the rename
+    is made relative to the directory's descriptor. Staging the write through
+    ``open_for_write`` and renaming by name,
     as this once did, guarded the staging file's own name only, so a link at
     ``path`` was replaced by the rename and never refused.
     """

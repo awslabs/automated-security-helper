@@ -163,9 +163,12 @@
   `ERROR`; under a sandbox, a link already below a results directory when its
   scanner starts is refused the same way, where the sweep after the spawn used to
   remove it. A file at one of those paths that another name also refers to (a hard
-  link, which an archive can carry) is refused too (`OutputHardLinkRefused`), before
-  it is truncated: the file was opened with `O_TRUNC`, so a hard link to a file
-  elsewhere on the filesystem was emptied and overwritten. On Windows, where these
+  link, which an archive can carry) is refused too by the writers that open the
+  file in place (`OutputHardLinkRefused`), before it is truncated: the file was
+  opened with `O_TRUNC`, so a hard link to a file elsewhere on the filesystem was
+  emptied and overwritten. The atomic writers (`write_text_atomically` and the
+  streaming `open_atomically`) replace the entry at the name instead and leave the
+  other name's file as it was, so they refuse no hard link. On Windows, where these
   writes were plain `open()` calls, each component is now checked by name first
   (symlinks and reparse points such as junctions), so a link already in place is
   refused; one created between that check and the open is not.

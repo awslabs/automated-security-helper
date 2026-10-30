@@ -16,7 +16,9 @@ that:
   name also refers to (a hard link) is refused with :class:`OutputHardLinkRefused`
   before it is truncated. :func:`open_for_atomic_write` is the same guard for a
   file a reader may open while it is written: it writes a staging file and renames
-  it over the name, and ``atomic_write.write_text_atomically`` calls it.
+  it over the name, and ``atomic_write.write_text_atomically`` calls it. The rename
+  replaces the entry at the name and leaves the file another name refers to as it
+  was, so that writer refuses no hard link: nothing at the name needs the refusal.
 * :func:`sweep_writable` runs after every sandboxed spawn and removes every entry
   under the writable directories that is not a regular file or a directory.
 
