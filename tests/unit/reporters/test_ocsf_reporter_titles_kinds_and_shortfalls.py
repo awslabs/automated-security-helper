@@ -529,7 +529,12 @@ class TestShortfalls:
         self, reporter, monkeypatch
     ):
         """When the array itself cannot be written, no finding reached the
-        file, so none is processed; the response said one of two was."""
+        file, so none is processed; the response said one of two was.
+
+        The array's own dump is what fails here. A shortfall record that cannot
+        be built no longer fails the array (it is built under its own guard and
+        left out), so that route is covered elsewhere and is not the way in.
+        """
         original = OcsfReporter._create_vulnerability_finding
 
         def flaky(self, result, metadata, current_time_ms, shared_id=None, **kw):
@@ -537,11 +542,19 @@ class TestShortfalls:
                 raise RuntimeError("cannot build")
             return original(self, result, metadata, current_time_ms, shared_id, **kw)
 
-        def no_shortfall(self, *args, **kwargs):
-            raise RuntimeError("cannot build the shortfall record")
+        real_dumps = json.dumps
+        dumps_calls = {"n": 0}
+
+        def dumps_failing_the_array(*args, **kwargs):
+            # The first dump is the findings array; the error response that
+            # follows it is written as usual.
+            dumps_calls["n"] += 1
+            if dumps_calls["n"] == 1:
+                raise TypeError("the array cannot be written")
+            return real_dumps(*args, **kwargs)
 
         monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
-        monkeypatch.setattr(OcsfReporter, "_create_shortfall_finding", no_shortfall)
+        monkeypatch.setattr(ocsf_module.json, "dumps", dumps_failing_the_array)
         payload = json.loads(
             reporter.report(
                 _model(
