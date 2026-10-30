@@ -127,8 +127,23 @@ def _install(tmp_path, bundle, archive, calls, download=None, **kwargs):
         return install_rules_bundle(bundle.name, root=tmp_path / "rules", **kwargs)
 
 
+# The install serializes on this file in the rules root and leaves it there:
+# a lock file removed after its release would let a waiter that had already
+# opened it run beside the next taker. It is the one entry an install, finished
+# or refused, may leave behind, so the listings below leave it out.
+INSTALL_LOCK = ".ash-rules-install.lock"
+
+
+def _contents(rules: Path) -> list:
+    return sorted(p.name for p in rules.iterdir() if p.name != INSTALL_LOCK)
+
+
 def _leftovers(rules: Path) -> list:
-    return [p.name for p in rules.iterdir() if p.name.startswith(".ash-rules")]
+    return [
+        p.name
+        for p in rules.iterdir()
+        if p.name.startswith(".ash-rules") and p.name != INSTALL_LOCK
+    ]
 
 
 def _tree(directory: Path) -> dict:
@@ -283,7 +298,7 @@ class TestInstall:
         wrong = replace(bundle, sha256="0" * 64)
         with pytest.raises(ToolDownloadIntegrityError):
             _install(tmp_path, wrong, archive, [])
-        assert list((tmp_path / "rules").iterdir()) == []
+        assert _contents(tmp_path / "rules") == []
 
     def test_a_second_install_does_not_download(self, tmp_path, bundle_zip):
         archive, bundle = bundle_zip
@@ -329,7 +344,7 @@ class TestTheInstallerChecksItsOwnExtraction:
         bundle = _pinned(archive)
         with pytest.raises(ToolDownloadIntegrityError, match="pinned contents"):
             _install(tmp_path, bundle, archive, [])
-        assert list((tmp_path / "rules").iterdir()) == []
+        assert _contents(tmp_path / "rules") == []
 
     def test_a_changed_rule_file_leaves_the_installed_bundle_alone(
         self, tmp_path, bundle_zip
@@ -379,7 +394,7 @@ class TestOffline:
         message = str(refused.value)
         assert "are not installed" in message and "does not exist" in message
         assert "network access" in message and "ASH container image" in message
-        assert list((tmp_path / "rules").iterdir()) == []
+        assert _contents(tmp_path / "rules") == []
 
     def test_a_pinned_bundle_needs_no_network(self, tmp_path, bundle_zip):
         archive, bundle = bundle_zip
