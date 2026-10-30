@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import bz2
 import contextlib
+import gzip
 import io
 import struct
 import tarfile
@@ -346,6 +347,28 @@ def test_a_tar_gz_followed_by_other_bytes_is_extracted(
     assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
 
 
+def test_the_trailing_count_survives_a_seek_back_to_the_start():
+    """The listing reads the gzip stream to its end, where the count is taken;
+    extraction then seeks back to each member's data, which starts the stream
+    over. The count used to be reset with the rest of the stream's state, so the
+    converter, reading it after extraction, found None for every .tar.gz with a
+    member and recorded nothing. The file's tail does not change with the
+    position, so the count is kept."""
+    stream = archive_converter._GzipMembersStream(
+        io.BytesIO(gzip.compress(b"x" * 100) + b"TRAILER\n")
+    )
+
+    assert stream.trailing is None
+    assert stream.read() == b"x" * 100
+    assert stream.trailing == 8
+
+    stream.seek(0)
+
+    assert stream.trailing == 8
+    assert stream.read(10) == b"x" * 10
+    assert stream.trailing == 8
+
+
 def test_a_tar_gz_with_nothing_after_its_data_is_extracted_whole(
     test_plugin_context, monkeypatch
 ):
@@ -370,8 +393,6 @@ def test_a_plain_gzip_followed_by_other_bytes_is_decompressed(
     """A .gz of one file took the GzipFile path, which failed the whole file on the
     bytes after its data (BadGzipFile) where the .tar.gz path read past them: the
     one stream serves both now, and the bytes are recorded the same way."""
-    import gzip
-
     raw = gzip.compress(b'{"x": 1}\n') + b"TRAILER\n"
 
     converter, results = _convert_one(

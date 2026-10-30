@@ -684,13 +684,17 @@ class _GzipMembersStream(io.RawIOBase):
     time. Seekable as GzipFile is: forward by reading, backward by starting over.
     The bytes that ended the stream are counted (``trailing``: None until the end
     is reached, 0 for a clean end): nothing reads them, so the caller records
-    them and the archive is not recorded as extracted whole.
+    them and the archive is not recorded as extracted whole. The count is kept
+    across a seek back (the file's tail does not change with the position), so
+    it reads the same after extraction, which seeks back to each member's data
+    once the listing has read the stream to its end.
     """
 
     def __init__(self, raw: BinaryIO) -> None:
         super().__init__()
         self._raw = raw
         self._start = raw.tell()
+        self.trailing: Optional[int] = None
         self._rewind()
 
     def _rewind(self) -> None:
@@ -699,7 +703,6 @@ class _GzipMembersStream(io.RawIOBase):
         self._pending = b""
         self._pos = 0
         self._ended = False
-        self.trailing: Optional[int] = None
 
     def readable(self) -> bool:
         return True
