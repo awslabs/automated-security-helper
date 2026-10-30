@@ -138,6 +138,16 @@ class SymbolGrammar:
     function_values: frozenset[str] = frozenset()
     span_wrappers: frozenset[str] = frozenset()
     """Parent node types whose span counts as the definition's own."""
+    leading_siblings: frozenset[str] = frozenset()
+    """Node types that, placed right before a definition among its siblings,
+    count as the definition's own lines.
+
+    tree-sitter-typescript parses a class member's decorator as a sibling of the
+    member inside ``class_body``, not as the member's child (Python's decorator is
+    a ``decorated_definition`` parent, Java's annotation a ``modifiers`` child, and
+    plain JavaScript's a field of the method), so a span that started at the
+    member left its decorator line out.
+    """
 
 
 _PYTHON = SymbolGrammar(
@@ -199,6 +209,7 @@ _TYPESCRIPT = SymbolGrammar(
     },
     function_values=_JS_FUNCTION_VALUES,
     span_wrappers=frozenset({"export_statement"}),
+    leading_siblings=frozenset({"decorator"}),
 )
 
 _TSX = SymbolGrammar(
@@ -210,6 +221,7 @@ _TSX = SymbolGrammar(
     assigned_definitions=_TYPESCRIPT.assigned_definitions,
     function_values=_TYPESCRIPT.function_values,
     span_wrappers=_TYPESCRIPT.span_wrappers,
+    leading_siblings=_TYPESCRIPT.leading_siblings,
 )
 
 _JAVA = SymbolGrammar(
@@ -408,6 +420,13 @@ def index_symbols(
                 start.parent is not None and start.parent.type in grammar.span_wrappers
             ):
                 start = start.parent
+            # A decorator the grammar places beside the definition, not inside it
+            # (leading_siblings), begins the definition's own lines.
+            while (
+                start.prev_named_sibling is not None
+                and start.prev_named_sibling.type in grammar.leading_siblings
+            ):
+                start = start.prev_named_sibling
             spans.setdefault(".".join(scope), []).append(_line_span(start, node))
         for child in reversed(node.children):
             if child.is_named:
