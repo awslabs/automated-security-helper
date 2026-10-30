@@ -602,10 +602,23 @@ def _policy_home() -> Path:
     root is returned. The root names no home: ``_homes`` leaves it out, the
     backends mount no private home over it and deny no reads under it, and the
     scanner's HOME is the root, as a process with that environment reads it.
-    """
-    from automated_security_helper.core.constants import usable_home
 
-    home = usable_home()
+    The read goes through ``Path.home()`` so a test that fakes the home by
+    patching it is honored, with ``usable_home``'s screening applied around it:
+    an empty HOME is treated as unset before the read (``Path.home()`` would read
+    it as the root), a value that is not anchored (a relative HOME) is passed
+    over, and the RuntimeError an unset HOME with no passwd entry raises is read
+    as no home. Each of those falls to the passwd entry's home when that is
+    absolute, and to the filesystem root with none.
+    """
+    home: Optional[Path] = None
+    if os.name == "nt" or os.environ.get("HOME") != "":
+        try:
+            home = Path.home()
+        except (RuntimeError, KeyError):
+            home = None
+    if home is not None and not home.is_absolute():
+        home = None
     if home is None:
         passwd = _passwd_home()
         if passwd is not None and passwd.is_absolute():
