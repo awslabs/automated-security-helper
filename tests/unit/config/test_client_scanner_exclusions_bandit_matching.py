@@ -18,16 +18,24 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import sys
 
 import pytest
 
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_scanner_exclusions import (
     ClientScannerExclusion,
     bandit_would_skip,
 )
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
-    bandit_excluded_path_globs,
+    BanditScanner,
+    BanditScannerConfig,
+    BanditScannerConfigOptions,
 )
+
+PluginContext.model_rebuild()
 
 pytestmark = pytest.mark.unit
 
@@ -83,6 +91,35 @@ def test_the_matcher_hides_what_bandit_skipped(pattern, relative, hidden):
     assert _hides(pattern, relative) is hidden
 
 
+#: Stands for the name of the directory the scan root sits in, read at run time.
+ABOVE_THE_ROOT = "<the directory above the root>"
+
+
+def _exclude_entries_of_a_scan(source, output, options) -> list[str]:
+    """The ``--exclude`` entries of the command the scanner assembles for ``source``."""
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(),
+    )
+    scanner = BanditScanner(
+        context=context, config=BanditScannerConfig(options=options)
+    )
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+    (token,) = [arg for arg in argv if str(arg).startswith("--exclude=")]
+    return token[len("--exclude=") :].split(",")
+
+
+def _bandit_leaves_out(path: str, entries: list[str]) -> bool:
+    """The exclusion half of bandit 1.9.4's ``_is_file_included``: an entry
+    matches the walked path with ``fnmatch`` or is a plain substring of it."""
+    return any(fnmatch.fnmatch(path, entry) or entry in path for entry in entries)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="bandit exclude entries are POSIX paths here"
+)
 @pytest.mark.parametrize(
     ("pattern", "relative"),
     [
@@ -90,20 +127,40 @@ def test_the_matcher_hides_what_bandit_skipped(pattern, relative, hidden):
         ("vendor", "src/x/vendor/a.py"),
         ("app.py", "deep/app.py"),
         ("*.pyc", "a/b/c.pyc"),
-        ("home", "src/app.py"),
+        (ABOVE_THE_ROOT, "src/app.py"),
         ("", "app.py"),
     ],
 )
-def test_the_matcher_and_the_argument_agree(pattern, relative):
-    """One builder: what the matcher hides is what the globs bandit got match."""
-    absolute = f"{ROOT}/{relative}"
-    globs = bandit_excluded_path_globs(ROOT, pattern)
-    bandit_skips = any(
-        fnmatch.fnmatchcase(absolute, entry) or entry in absolute for entry in globs
+def test_the_matcher_and_the_argument_agree(pattern, relative, tmp_path):
+    """What the matcher hides is what the scan's own ``--exclude`` makes bandit skip.
+
+    The entries come from the command a scanner assembles for a real tree with
+    the pattern in ``excluded_paths``, not from the glob builder called directly,
+    which would only repeat the matcher's implementation. A scan with no entry
+    of its own is read first, so a file the known ignores would leave out anyway
+    cannot pass for an agreement."""
+    source = tmp_path / "proj"
+    (source / relative).parent.mkdir(parents=True, exist_ok=True)
+    (source / relative).write_text("x = 1\n", encoding="utf-8")
+    output = tmp_path / "ash-output"
+    output.mkdir()
+    if pattern == ABOVE_THE_ROOT:
+        pattern = source.parent.name
+    absolute = f"{source.as_posix()}/{relative}"
+
+    without = _exclude_entries_of_a_scan(source, output, BanditScannerConfigOptions())
+    entries = _exclude_entries_of_a_scan(
+        source,
+        output,
+        BanditScannerConfigOptions(
+            excluded_paths=[IgnorePathWithReason(path=pattern, reason="client")]
+        ),
     )
+
+    assert not _bandit_leaves_out(absolute, without), without
     assert bandit_would_skip(pattern, relative=relative, absolute=absolute) is (
-        bandit_skips
-    )
+        _bandit_leaves_out(absolute, entries)
+    ), entries
 
 
 def test_a_finding_whose_root_cannot_be_read_is_not_hidden():
