@@ -315,7 +315,9 @@ def test_the_operator_scanner_view_holds_anchored_tool_paths(tmp_path):
         AshConfig(), [operator], [], reads, frozenset()
     )
     assert view is not None
-    section = view.get_plugin_config("scanners", "bandit")
+    # The view answers for the singular plugin type the ownership check asks
+    # with (operator_wrote_value); any other type is None by design.
+    section = view.get_plugin_config("scanner", "bandit")
     value = section["options"]["config_file"]
     assert value != "rel.yaml", value
     assert Path(value).resolve() == (operator.parent / "rel.yaml").resolve()
