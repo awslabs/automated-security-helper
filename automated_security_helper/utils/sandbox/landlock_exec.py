@@ -423,7 +423,8 @@ def _parse_policy(text: str) -> Dict[str, Any]:
     that is not JSON raised out of main with the interpreter's traceback and exit
     1, and a wrong value inside one failed in the child with exit 126 and no
     message. Every path list holds strings; ``network`` is a boolean; ``cwd`` and
-    ``read_data`` are optional. Every path is absolute: the wrapper changes into
+    ``read_data`` are optional, and one of them sent as JSON null is the key left
+    out. Every path is absolute: the wrapper changes into
     ``cwd`` before the rules are applied and the command is run, so a relative
     path would resolve against it and not against the spawn's directory, and
     ``add_path_rule`` skips a path that does not exist, so the grant would go in
@@ -439,10 +440,13 @@ def _parse_policy(text: str) -> Dict[str, Any]:
     for key in _REQUIRED_POLICY_KEYS:
         if key not in policy:
             fail(f"--policy lacks the key {key!r}")
-    for key, value in policy.items():
+    for key, value in list(policy.items()):
         wanted = _POLICY_KEYS.get(key)
         if wanted is None:
             fail(f"--policy holds the unknown key {key!r}")
+        if value is None and key not in _REQUIRED_POLICY_KEYS:
+            del policy[key]
+            continue
         if not isinstance(value, wanted) or (wanted is bool) != isinstance(value, bool):
             fail(f"--policy key {key!r} must be a {wanted.__name__}")
         if wanted is list and not all(isinstance(item, str) for item in value):

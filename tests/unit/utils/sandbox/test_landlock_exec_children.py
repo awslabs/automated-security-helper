@@ -794,6 +794,21 @@ def test_a_policy_with_a_relative_path_is_refused(capsys):
     assert landlock_exec._parse_policy(json.dumps({**base, "cwd": ""}))["cwd"] == ""
 
 
+def test_an_optional_key_sent_as_null_is_the_key_left_out():
+    """A producer that writes `"cwd": null` or `"read_data": null` for "none"
+    is not refused: the key is dropped, and the required keys keep their types."""
+    base = {"read_only": ["/usr"], "writable": ["/var/out"], "network": False}
+
+    policy = landlock_exec._parse_policy(
+        json.dumps({**base, "cwd": None, "read_data": None})
+    )
+
+    assert "cwd" not in policy and "read_data" not in policy
+    assert policy["read_only"] == ["/usr"]
+    with pytest.raises(SystemExit):
+        landlock_exec._parse_policy(json.dumps({**base, "network": None}))
+
+
 def test_the_socket_filter_route_restores_the_dispositions_before_its_exec(
     monkeypatch,
 ):
