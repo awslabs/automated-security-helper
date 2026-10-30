@@ -114,7 +114,9 @@ def guarded_values_read(plugin: Any) -> GuardedValues:
     (``utils.redacted_model.environment_strings``, the normalizer every sink
     reads values through). An iterable is drained here, outside the
     normalizer's own TypeError arm, so one that raises mid-iteration takes the
-    guarded path too.
+    guarded path too. A ``None`` ENTRY inside an iterable is an unset value
+    (an override adding a token it has not got), not a broken hook: it is
+    skipped, since dropping it hides nothing, and the other entries stand.
 
     Why bytes, mappings and non-string entries are unusable rather than
     normalized: the normalizer drops every entry that is not a string or a
@@ -138,7 +140,10 @@ def guarded_values_read(plugin: Any) -> GuardedValues:
         if isinstance(answered, (bytes, bytearray, memoryview, Mapping)):
             return GuardedValues(None, None)
         if isinstance(answered, Iterable):
-            entries = tuple(answered)
+            # A None entry is an unset value, not a broken hook (docstring):
+            # refusing the whole answer for it refused every run of a plugin
+            # whose override adds a token it has not got.
+            entries = tuple(entry for entry in answered if entry is not None)
             if any(not isinstance(entry, (str, os.PathLike)) for entry in entries):
                 return GuardedValues(None, None)
             return GuardedValues(environment_strings(entries), None)

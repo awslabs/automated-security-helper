@@ -150,6 +150,14 @@ class TestTheGuardedReadRefusesWhatIsNotAValueSet:
         plugin = FakePlugin(values=["a", "b"])
         assert guarded_values_read(plugin).values == ("a", "b")
 
+    def test_a_none_entry_is_an_unset_value_not_a_broken_hook(self):
+        """An override such as ``(*super()._values_to_redact(), self._token)``
+        with the token unset answers a None ENTRY. Dropping it hides nothing, so
+        the other values stand and no run is refused for it; a whole answer of
+        None and entries of other types stay unusable (the cases above)."""
+        plugin = FakePlugin(values=["a", None, "b"])
+        assert guarded_values_read(plugin).values == ("a", "b")
+
 
 class TestEveryGateNamesTheProbesFailure:
     FAILURE = "the probe timed out after 10 seconds"
