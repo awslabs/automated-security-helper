@@ -132,7 +132,25 @@ def test_the_null_device_handed_the_descriptor_itself_stays_open(
     # No dup2, no close; the descriptor the null device took is made inheritable,
     # as os.open hands out a non-inheritable one (PEP 446).
     assert recorded_os == [("inheritable", 2, True)], recorded_os
+
+
+def test_a_descriptor_closed_at_startup_is_recorded_though_the_hold_fails(
+    monkeypatch, no_reservations
+):
+    """With no null device to open (a bare container, a sandbox policy) the
+    number stays free, so the raw floor must still never write to it."""
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(entrypoint, "_reattach", lambda fd: None)
+    monkeypatch.setattr(entrypoint, "_descriptor_is_closed", lambda fd: fd == 2)
+    monkeypatch.setattr(entrypoint, "_reserve_descriptor", lambda fd: False)
+    written: list[int] = []
+    monkeypatch.setattr(os, "write", lambda fd, payload: written.append(fd))
+
+    entrypoint.ensure_std_streams()
+
     assert no_reservations == {2}
+    assert entrypoint._write_raw("report") is True
+    assert written == [1], written
 
 
 def test_the_raw_floor_skips_a_held_descriptor(monkeypatch, no_reservations):

@@ -96,13 +96,15 @@ _BANNER = "ash: fatal error"
 _PRINTERS = frozenset({"typer.main", "rich.traceback"})
 
 
-#: The standard descriptors that were closed when the process started and that
-#: :func:`ensure_std_streams` holds with ``os.devnull``. A closed descriptor
-#: number is free, so the next ``open()`` anywhere in ASH would be handed 1 or 2,
-#: and from then on everything that writes to the descriptor by number -- the
-#: raw floor below, a child's inherited stderr -- would write into that file.
-#: Holding the number keeps it out of reach, and :func:`_write_raw` never writes
-#: to a held one: there was nothing there to read it.
+#: The standard descriptors that were closed when the process started. A closed
+#: descriptor number is free, so the next ``open()`` anywhere in ASH would be
+#: handed 1 or 2, and from then on everything that writes to the descriptor by
+#: number -- the raw floor below, a child's inherited stderr -- would write into
+#: that file. :func:`ensure_std_streams` records each one here and holds it with
+#: ``os.devnull`` where the null device can be opened (:func:`_reserve_descriptor`).
+#: The record does not depend on the hold: :func:`_write_raw` never writes to a
+#: recorded descriptor, whether it is held or, with no null device, still free
+#: and by then possibly a file ASH opened. There was nothing there to read it.
 _RESERVED_DESCRIPTORS: set[int] = set()
 
 
@@ -143,7 +145,6 @@ def _reserve_descriptor(fd: int) -> bool:
         os.set_inheritable(fd, True)
     except OSError:
         return False
-    _RESERVED_DESCRIPTORS.add(fd)
     return True
 
 
@@ -187,6 +188,9 @@ def ensure_std_streams() -> tuple[str, ...]:
         stream = _reattach(fd)
         if stream is None:
             if _descriptor_is_closed(fd):
+                # Recorded first: the raw floor skips a descriptor that was
+                # closed at startup whether or not the hold below succeeds.
+                _RESERVED_DESCRIPTORS.add(fd)
                 _reserve_descriptor(fd)
             continue
         setattr(sys, name, stream)
