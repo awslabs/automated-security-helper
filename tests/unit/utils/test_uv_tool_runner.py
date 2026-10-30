@@ -3871,6 +3871,24 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
                 " and passed to the trivy binary; never a uv install input"
             ),
         ),
+        ("scanners/_trivy_scanner_base.py", 'os.environ.get("TRIVY_IGNOREFILE")'): (
+            1,
+            (
+                "read inside _environment_values itself, so the value joins the"
+                " run's redaction set by that call; it is the operator's trivy"
+                " ignore file path, passed to the trivy binary; never a uv"
+                " install input"
+            ),
+        ),
+        ("scanners/_trivy_scanner_base.py", 'os.environ.get("TRIVY_SECRET_CONFIG")'): (
+            1,
+            (
+                "read inside _environment_values itself, so the value joins the"
+                " run's redaction set by that call; it is the operator's trivy"
+                " secret config path, passed to the trivy binary; never a uv"
+                " install input"
+            ),
+        ),
         ("scanners/gitleaks_scanner.py", "os.environ.get(<dynamic>)"): (
             1,
             (
