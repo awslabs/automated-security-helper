@@ -68,7 +68,11 @@ class YamlReporter(ReporterPluginBase[YAMLReporterConfig]):
 
         Written by utils/report_yaml.py, so a value from the scanned tree that holds
         "::" or "##" first or after whitespace (a refused input's name) is written
-        double-quoted on one line, and no line of the file is a CI workflow command.
+        double-quoted on one line, and a value holding a ``##name[`` form anywhere
+        (``##[group]``, ``##vso[``, ``##teamcity[``, the forms a runner reads
+        mid-line too) is written double-quoted with the first "#" of each form as
+        the escape ``\\x23``, so no line of the file is a CI workflow command and
+        no line holds one of those forms as written.
         """
 
         return report_yaml(model.model_dump(by_alias=True, mode="json"), indent=2)
