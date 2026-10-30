@@ -56,9 +56,11 @@ def _project(key: str, **fields) -> WorkspaceProjectResult:
     )
 
 
-def _refusal(path: str, **fields) -> ProjectConverterRefusal:
+def _refusal(
+    path: str, reason: str = "nested archive", **fields
+) -> ProjectConverterRefusal:
     return ProjectConverterRefusal(
-        converter="archive", path=path, reason="nested archive", **fields
+        converter="archive", path=path, reason=reason, **fields
     )
 
 

@@ -74,12 +74,20 @@ class TestResolveWorkspacePassesTheSession:
 
     def test_with_no_session_the_rules_session_is_used(self, tmp_path, recorded):
         """The per-project resolution reads the rules' session; so does the check."""
+        from automated_security_helper.config.ash_config import (
+            AshConfig,
+            RuntimeOverridesConfig,
+        )
         from automated_security_helper.config.client_config_policy import (
             ClientConfigRules,
         )
 
         workspace = _workspace(tmp_path / "work", ["api"])
-        rules = ClientConfigRules(session_id="session-9")
+        # The rules carry a policy and a base config (both required); only the
+        # session matters here.
+        rules = ClientConfigRules(
+            policy=RuntimeOverridesConfig(), base=AshConfig(), session_id="session-9"
+        )
 
         resolve_workspace(
             workspace,

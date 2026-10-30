@@ -187,7 +187,10 @@ class TestEachProjectIsJudgedByItsOwnGates:
     def test_the_kept_count_is_the_actionable_count(self):
         filtered = filter_actionable_only(_workspace_document())
 
-        assert len(_rule_ids(filtered)) == 5
+        # STRICT-HIGH, LAX-SEMGREP-LOW, WATCH-OWN and LEGACY-POLICY: the four the
+        # projects' own gates keep (the first venue read of this test found its
+        # earlier count, 4 before LEGACY-POLICY existed, one too high).
+        assert len(_rule_ids(filtered)) == 4
         assert (
             filtered["summary_stats"]["total"]
             == filtered["summary_stats"]["actionable"]
