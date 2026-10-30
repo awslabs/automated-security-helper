@@ -291,12 +291,14 @@ def test_an_interrupt_waits_only_briefly_for_a_child_the_kill_did_not_stop():
 
     With a timeout the plain runner stops the child's own process group, so the
     kill it sends is the group signal rather than Popen.kill; without one, as
-    here, it kills the child alone, as subprocess.run does. Both are made no-ops
-    here and both count as a try."""
+    here, it kills the child alone, as subprocess.run does. The kill is made a
+    no-op so the child keeps running, as the case under test requires, and the
+    group signal is recorded apart from it: a stop that reached for the group
+    in this no-timeout case would show as a group signal, not as a kill."""
     interrupt = KeyboardInterrupt()
     real_kill = subprocess.Popen.kill
     real_communicate = subprocess.Popen.communicate
-    seen = SimpleNamespace(processes=[], kills=0)
+    seen = SimpleNamespace(processes=[], kills=0, group_signals=0)
 
     def communicate(self, *args, **kwargs):
         seen.processes.append(self)
@@ -309,10 +311,10 @@ def test_an_interrupt_waits_only_briefly_for_a_child_the_kill_did_not_stop():
 
     def signal_group(pgid, signum):
         # Signal 0 is the existence probe, which keeps answering that the group
-        # lives on; a real signal is the stop attempt the test counts, swallowed
-        # so the child keeps running as the case under test requires.
+        # lives on; a real signal is a group stop, counted on its own and
+        # swallowed so the child keeps running as the case under test requires.
         if signum != 0:
-            seen.kills += 1
+            seen.group_signals += 1
         return True
 
     started = time.monotonic()
@@ -328,6 +330,7 @@ def test_an_interrupt_waits_only_briefly_for_a_child_the_kill_did_not_stop():
 
         assert info.value is interrupt, info.value
         assert seen.kills >= 1, "the runner never tried to stop the child"
+        assert seen.group_signals == 0, "without a timeout the child is killed alone"
         assert elapsed < 10, f"the interrupt took {elapsed:.1f}s"
     finally:
         for process in seen.processes:
