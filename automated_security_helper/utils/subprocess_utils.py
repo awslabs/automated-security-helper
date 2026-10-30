@@ -2998,10 +2998,14 @@ def _wait_out_grace(
     when it is set after, because the wait blocks on that event rather than
     sleeping, so a SIGTERM that reaches the server in the middle of a stop a cancel
     began is seen at once.
+
+    The group is read through _group_survives: when this process is PID 1, the
+    exited children of a stopped tool fall to it as zombies nobody else reaps,
+    and a group made only of those kept the wait going for the whole grace.
     """
     deadline = time.monotonic() + grace
     shortened = prompt is None
-    while process.poll() is None or (pgid is not None and _signal_group(pgid, 0)):
+    while process.poll() is None or (pgid is not None and _group_survives(pgid)):
         now = time.monotonic()
         if not shortened and prompt is not None and prompt.is_set():
             shortened = True
@@ -3203,7 +3207,11 @@ def _stop_tree(
         # returned; signalling the group then would have hit whoever took the
         # id next. Nothing of ours is left to stop.
         return
-    if not _group_exists(pgid):
+    # Every group read here goes through _group_survives: as PID 1 this process
+    # holds the exited members of the group as zombies nobody else reaps, and a
+    # group left with nothing but those is a tool that is gone, not one to
+    # signal, wait out or record as a survivor.
+    if not _group_survives(pgid):
         if process.poll() is None:
             _stop(process, grace, prompt)
         return
@@ -3230,7 +3238,7 @@ def _stop_tree(
                 # reaped before the wait returns.
                 _signal_group(pgid, signal.SIGKILL)
                 raise
-            if process.poll() is not None and not _group_exists(pgid):
+            if process.poll() is not None and not _group_survives(pgid):
                 # The wait reaps the leader and can end with the group
                 # observed empty; the kernel has then released the id, and
                 # a new process group can hold it, so the final SIGKILL
@@ -3247,7 +3255,7 @@ def _stop_tree(
         # back is not racing a process that is still writing. A zombie whose new
         # parent has not reaped it yet still counts, hence the bound.
         settled = time.monotonic() + _KILLED_GROUP_SETTLE_SECONDS
-        while time.monotonic() < settled and _signal_group(pgid, 0):
+        while time.monotonic() < settled and _group_survives(pgid):
             time.sleep(0.02)
     _wait_after_kill(process)
     # The kernel reports a group kill as a success when it signalled ANY member,
