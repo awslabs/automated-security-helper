@@ -1638,6 +1638,44 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 emitted[(vuln_id, uri, version)] = result
                 results.append(result)
 
+    def _every_copy_excluded(
+        self,
+        pkg_name: str,
+        vuln_info: Dict[str, Any],
+        via_items: List[Any],
+        lock_rel: str | None,
+        lock_index: NpmLockIndex | None,
+    ) -> bool:
+        """Whether every installed copy of an npm entry falls outside every
+        range of its advisories, by the lockfile's versions.
+
+        True only when the entry lists copies and advisories with ranges and
+        each pairing answers False; an uncertain pairing (no version, an
+        unreadable range) or an advisory without a range keeps the entry on
+        the ordinary path. A True is logged: npm listed the advisories for
+        these copies and this reading of the lockfile says none is affected,
+        so the two disagree and the results are kept rather than dropped.
+        """
+        nodes = vuln_info.get("nodes") or []
+        advisories = [
+            via for via in via_items if isinstance(via, dict) and via.get("range")
+        ]
+        if not nodes or not advisories:
+            return False
+        for node_path in nodes:
+            _, identity = self._node_place(pkg_name, node_path, lock_rel, lock_index)
+            version = identity.get(PACKAGE_VERSION_KEY)
+            for via in advisories:
+                if _version_in_range(version, via.get("range")) is not False:
+                    return False
+        ASH_LOGGER.debug(
+            f"npm-audit: every installed copy of {pkg_name} falls outside every "
+            f"range of its {len(advisories)} advisory(ies) by the lockfile's "
+            "versions, while npm reported them; the results are kept",
+            extra=NO_MARKUP,
+        )
+        return True
+
     @staticmethod
     def _widen_result(
         kept: Result, more_range: Any, pkg_name: str, title: str, url: Any
@@ -1868,6 +1906,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     via_items = [via_items]
 
                 has_dict_via = False
+                # The per-copy range exclusion below is switched off for an
+                # entry whose EVERY copy falls outside EVERY range of its
+                # advisories: such an entry would yield no result while npm
+                # counted its advisories in the report's metadata, so npm's
+                # reading of the lockfile and this one disagree (a stale
+                # lockfile, a wrong index lookup), which is uncertainty, and
+                # an uncertain answer keeps the result. Logged once per entry.
+                exclude_by_range = not self._every_copy_excluded(
+                    pkg_name, vuln_info, via_items, lock_rel, lock_index
+                )
                 for via in via_items:
                     # Skip if it's just a string reference to another package
                     if isinstance(via, str):
@@ -1957,7 +2005,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # into several ranges was reported once per range on
                         # every copy. An uncertain answer keeps the result.
                         if (
-                            via.get("range")
+                            exclude_by_range
+                            and via.get("range")
                             and _version_in_range(
                                 identity.get(PACKAGE_VERSION_KEY), via_range
                             )

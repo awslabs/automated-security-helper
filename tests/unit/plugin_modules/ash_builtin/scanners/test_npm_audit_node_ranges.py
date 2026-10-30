@@ -15,6 +15,8 @@ prerelease) the result is kept, once per advisory and copy.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -24,6 +26,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfig,
     _version_in_range,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.package_identity import identity_properties
 
 pytestmark = pytest.mark.unit
@@ -118,6 +121,40 @@ def test_a_fixed_copy_carries_no_advisory_meant_for_another(scanner, monkeypatch
     )
 
     assert _rows(report) == [(old, "<0.2.4")]
+
+
+class _Messages(logging.Handler):
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.texts: list[str] = []
+
+    def emit(self, record):
+        self.texts.append(record.getMessage())
+
+
+def test_an_entry_whose_every_copy_is_excluded_keeps_its_results(scanner, monkeypatch):
+    """Both copies at versions outside both ranges: npm listed the advisory for
+    them and counted it in the metadata, so this reading of the lockfile and
+    npm's disagree (a stale lockfile, a wrong index lookup). The exclusion is
+    then not applied, the entry keeps one result per copy naming both ranges,
+    and the disagreement is logged once; dropping every copy silently left a
+    counted advisory with no result. (ASH's logger does not propagate, so a
+    handler of our own reads it, not caplog.)"""
+    old, fixed = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {old: "1.2.8", fixed: "1.3.0"})
+    messages = _Messages()
+    ASH_LOGGER.addHandler(messages)
+    monkeypatch.setattr(ASH_LOGGER, "level", logging.DEBUG)
+    try:
+        report = scanner._convert_npm_audit_to_sarif(
+            _report([old, fixed]), scanner.context.source_dir
+        )
+    finally:
+        ASH_LOGGER.removeHandler(messages)
+
+    both = "<0.2.4 || >=1.0.0 <1.2.6"
+    assert _rows(report) == sorted([(old, both), (fixed, both)])
+    assert sum("every installed copy of minimist" in m for m in messages.texts) == 1
 
 
 def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):
