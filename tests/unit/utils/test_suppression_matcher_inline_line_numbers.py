@@ -35,7 +35,6 @@ import pytest
 
 from automated_security_helper.utils.suppression_matcher import (
     InlineSuppression,
-    _quoted_spans,
     find_inline_suppressions,
 )
 
@@ -180,6 +179,10 @@ _REFERENCE_QUOTED_STRING = re.compile(
 def test_the_quoted_spans_are_the_reference_expressions(line):
     """The one-pass scan and the expression it replaced agree, escape rules and
     the quote-that-never-closes rule included."""
+    # Imported here, not at the top: a module without the scan then fails this
+    # test alone and still collects the others.
+    from automated_security_helper.utils.suppression_matcher import _quoted_spans
+
     expected = [found.span() for found in _REFERENCE_QUOTED_STRING.finditer(line)]
 
     assert _quoted_spans(line) == expected
