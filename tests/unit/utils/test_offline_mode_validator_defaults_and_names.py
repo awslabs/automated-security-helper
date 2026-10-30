@@ -21,6 +21,7 @@ Each test pins one change in ``utils/offline_mode_validator.py``:
 from __future__ import annotations
 
 import os
+import stat
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -156,7 +157,10 @@ class TestTheDatabaseAge:
 
         def _stat(self, *args, **kwargs):
             if self.name == "vulnerability.db":
-                return SimpleNamespace(st_mtime=1e18)
+                # A regular file by mode, so the validator's is_file() read of
+                # this stat answers as it does for the real file; only the time
+                # is out of the platform's range.
+                return SimpleNamespace(st_mtime=1e18, st_mode=stat.S_IFREG | 0o644)
             return real_stat(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "stat", _stat)
