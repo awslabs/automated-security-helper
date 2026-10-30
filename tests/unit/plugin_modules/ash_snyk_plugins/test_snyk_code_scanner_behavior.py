@@ -1338,6 +1338,28 @@ def test_when_every_file_is_ignored_nothing_is_sent(
     subprocess_double.assert_not_called()
 
 
+@pytest.mark.unit
+def test_when_every_file_is_ignored_the_row_is_skipped(
+    scanner,
+    snyk_on_path,
+    tree_with_vendor,
+    subprocess_double,
+    plugin_context,
+    monkeypatch,
+    refusals_set_aside,
+):
+    """Nothing is evaluated and nothing is sent, as for a scan set with no file:
+    the row grades SKIPPED (targets_attempted 0), not PASSED for a tool that never
+    ran. Pinned here so the all-ignored case cannot drift from the no-file one."""
+    row = _executor_row(
+        scanner, plugin_context, monkeypatch, ignore_paths=_ignore("**")
+    )
+
+    assert row.status == ScannerStatus.SKIPPED, row
+    assert scanner.targets_attempted == 0
+    subprocess_double.assert_not_called()
+
+
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
@@ -1500,6 +1522,7 @@ def test_a_tree_holding_only_a_link_leaving_it_sends_nothing(
         row = _executor_row(scanner, plugin_context, monkeypatch)
 
     assert row.status == ScannerStatus.SKIPPED, row
+    assert scanner.targets_attempted == 0
     subprocess_double.assert_not_called()
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert "Not scanning 'app.js': link leaves the scanned tree" in warnings, warnings

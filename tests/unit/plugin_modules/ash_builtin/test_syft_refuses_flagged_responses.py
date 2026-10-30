@@ -28,6 +28,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
     SyftScannerConfig,
     SyftScannerConfigOptions,
 )
+from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 
 pytestmark = pytest.mark.unit
 
@@ -77,8 +78,10 @@ def _scan_with(scanner: SyftScanner, response: dict, *, write_results: bool = Fa
 
 
 def test_a_timed_out_run_is_reported_as_a_timeout(scanner):
+    """A results file is present, as a killed tool can leave a partial one: the
+    flag is read before the file, so the file is not what grades the run."""
     with pytest.raises(ScannerError) as excinfo:
-        _scan_with(scanner, {"returncode": -9, "timed_out": True})
+        _scan_with(scanner, {"returncode": -9, "timed_out": True}, write_results=True)
 
     message = str(excinfo.value)
     assert "timed out" in message, message
@@ -88,9 +91,13 @@ def test_a_timed_out_run_is_reported_as_a_timeout(scanner):
 
 def test_a_tool_that_could_not_start_is_reported_as_such(scanner):
     with pytest.raises(ScannerError) as excinfo:
-        _scan_with(scanner, {"returncode": 127, "spawn_failed": True})
+        _scan_with(
+            scanner, {"returncode": 127, "spawn_failed": True}, write_results=True
+        )
 
-    assert "could not start" in str(excinfo.value), str(excinfo.value)
+    message = str(excinfo.value)
+    assert "could not start" in message, message
+    assert "No such file" not in message, message
 
 
 def test_a_run_whose_output_could_not_be_recorded_is_not_graded_on_its_file(scanner):
@@ -117,6 +124,9 @@ def test_a_run_a_foreign_signal_ended_did_not_finish(scanner):
 
 
 def test_control_an_unflagged_run_is_graded_on_its_file(scanner):
+    """The file the fake wrote is parsed and returned as the SBOM model: None, a
+    bool or a swallowed error would all have passed a looser check."""
     report = _scan_with(scanner, {"returncode": 0}, write_results=True)
 
-    assert report is not False and report is not True
+    assert isinstance(report, CycloneDXReport), type(report)
+    assert report.bomFormat == "CycloneDX", report
