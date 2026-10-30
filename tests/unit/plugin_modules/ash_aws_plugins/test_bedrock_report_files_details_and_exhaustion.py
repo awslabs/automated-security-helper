@@ -9,7 +9,9 @@ output file never existed for a clean scan; a secret finding's code snippet was
 written into the details with include_code_snippets on; a suppressed finding
 sat in the finding table with nothing to tell it from an analyzed one; and
 after the fallback walk exhausted, every later section walked the whole chain
-again.
+again. The memory of an exhaustion stops where the control plane left a
+candidate unchecked: a throttled listing is asked again by the next section,
+as the walk tests already pin.
 
 No test here calls AWS: the sessions and clients are doubles.
 """
@@ -68,16 +70,23 @@ class RuntimeDouble:
 
 
 class ControlPlaneDouble:
-    """Lists no model; counts its listing calls."""
+    """Lists no model; counts its listing calls. With ``throttled`` every
+    listing call fails with a ThrottlingException."""
 
-    def __init__(self):
+    def __init__(self, throttled=False):
         self.listings = 0
+        self.throttled = throttled
 
     def list_inference_profiles(self, **kwargs):
         return {"inferenceProfileSummaries": []}
 
     def list_foundation_models(self, **kwargs):
         self.listings += 1
+        if self.throttled:
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "ThrottlingException", "Message": "slow down"}},
+                "ListFoundationModels",
+            )
         return {"modelSummaries": []}
 
 
@@ -241,3 +250,27 @@ def test_a_later_section_does_not_walk_an_exhausted_chain_again(monkeypatch, tmp
     assert len(runtime.calls) == calls_after_first + 1, (
         "the second section called the configured model once and no candidate"
     )
+
+
+def test_a_walk_the_control_plane_left_unchecked_is_asked_again(monkeypatch, tmp_path):
+    """The boundary of the memory above: when the listing was throttled the
+    walk checked nothing, so its exhaustion is not kept and the next section
+    asks the control plane again (the throttle may have passed)."""
+    refusal = botocore.exceptions.ClientError(
+        {"Error": {"Code": "ValidationException", "Message": "too long"}}, "Converse"
+    )
+    runtime = RuntimeDouble(failure=refusal)
+    control_plane = ControlPlaneDouble(throttled=True)
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", _session_double(runtime, control_plane)
+    )
+    reporter = make_reporter(plugin_context_in(tmp_path), max_retries=0)
+    client = reporter._make_model_client(runtime)
+
+    first = reporter._outcome_with_fallback(client, "prompt one", "system")
+    second = reporter._outcome_with_fallback(client, "prompt two", "system")
+
+    assert first.ok is False and "not checked" in first.text, first.text
+    assert second.ok is False and "not checked" in second.text, second.text
+    assert reporter._walk_exhausted is None
+    assert control_plane.listings == 2, "each section asked the control plane once"

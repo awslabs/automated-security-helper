@@ -2011,43 +2011,31 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             if kept.ok or not kept.model_specific:
                 return kept
             self._run_model = None
-            return self._remembered_exhaustion(
-                self._walk_outcome(
-                    self._control_plane(),
-                    opts.model_id,
-                    call,
-                    primary_error=self._configured_error,
-                    resume_after=run_model,
-                    resume_error=kept.text,
-                )
+            return self._walk_outcome(
+                self._control_plane(),
+                opts.model_id,
+                call,
+                primary_error=self._configured_error,
+                resume_after=run_model,
+                resume_error=kept.text,
             )
         outcome = client.call(prompt, system_prompt)
         if outcome.ok or not opts.enable_fallback_models or not outcome.model_specific:
             return outcome
         self._configured_error = outcome.text
         if self._walk_exhausted is not None:
-            # An earlier section walked the whole chain and nothing answered.
-            # The configured model was still called, once, and failed again;
-            # the chain is not walked again for every section after that.
+            # An earlier section walked the whole chain, every candidate was
+            # checked, and nothing answered (``_walk_outcome`` keeps that
+            # exhaustion). The configured model was still called, once, and
+            # failed again; the chain is not walked again for every section
+            # after that.
             return self._walk_exhausted
-        return self._remembered_exhaustion(
-            self._walk_outcome(
-                self._control_plane(),
-                opts.model_id,
-                call,
-                primary_error=outcome.text,
-            )
+        return self._walk_outcome(
+            self._control_plane(),
+            opts.model_id,
+            call,
+            primary_error=outcome.text,
         )
-
-    def _remembered_exhaustion(self, outcome: CallOutcome) -> CallOutcome:
-        """*outcome*, kept as the run's exhaustion when the walk found nothing:
-        a failure no model answered that the walk did not return early (a
-        failure another model could have answered, ``model_specific``) with no
-        run model set. A later section's configured call that fails again gets
-        it back without a second walk over the same chain."""
-        if not outcome.ok and outcome.model_specific and self._run_model is None:
-            self._walk_exhausted = outcome
-        return outcome
 
     def _walk_fallbacks(
         self,
@@ -2197,7 +2185,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     # after calling the rest of the chain for nothing.
                     return outcome
             model = get_fallback_model(model)
-        return CallOutcome(
+        exhausted = CallOutcome(
             text_without_values(
                 _exhaustion_text(
                     primary,
@@ -2215,6 +2203,14 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             ok=False,
             model_specific=True,
         )
+        if keep_as_run_model and not not_checked and not listing_refused:
+            # The report run's walk checked every candidate and nothing
+            # answered: a later section's configured call that fails again gets
+            # this back without a second walk over the same chain. A walk the
+            # control plane left candidates unchecked in (a throttled or
+            # refused listing) is not remembered: the next section asks again.
+            self._walk_exhausted = exhausted
+        return exhausted
 
     # ------------------------------------------------------------------
     # Markdown file writer
