@@ -462,7 +462,7 @@ def test_an_operator_config_outside_the_tree_loads_its_plugin_file(
 def test_a_repositorys_config_does_not_choose_opengreps_patterns(
     tmp_path: Path,
 ) -> None:
-    """Patterns mode runs the patterns in place of every rule config."""
+    """Only the operator chooses ``patterns``; a repository's value is dropped."""
     repo = _repo(tmp_path, {"opengrep": {"options": {"patterns": ["X_9q"]}}})
     assert _option(resolve_config(source_dir=repo), "opengrep", "patterns") == []
     chosen = resolve_config(
