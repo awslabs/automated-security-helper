@@ -146,6 +146,21 @@ def _completed_result_status(status: Any) -> bool:
     return isinstance(status, str) and status.lower() in _COMPLETED_RESULT_STATUSES
 
 
+def _code_with_texts_redacted(code: Any, values: Iterable[str]) -> Any:
+    """*code* with every text inside a tuple or list redacted, containers kept.
+
+    ``repr`` escapes a newline or a quote inside a text, so a value that holds
+    one is no longer in the quoted container as the configuration read it.
+    Redacting each text before the container is quoted keeps it findable. Any
+    other object is returned as it is, and the caller redacts its ``repr``.
+    """
+    if isinstance(code, str):
+        return text_without_values(code, values)
+    if type(code) in (tuple, list):
+        return type(code)(_code_with_texts_redacted(item, values) for item in code)
+    return code
+
+
 def _failure_text(error: BaseException, values: Iterable[str]) -> str:
     """``error_text``, with a SystemExit named as the plugin's own exit.
 
@@ -173,7 +188,9 @@ def _failure_text(error: BaseException, values: Iterable[str]) -> str:
     if isinstance(error.code, str):
         code_text = repr(text_without_values(error.code, values))
     else:
-        code_text = text_without_values(repr(error.code), values)
+        code_text = text_without_values(
+            repr(_code_with_texts_redacted(error.code, values)), values
+        )
     named = f"the scanner called sys.exit({code_text})"
     if not described or described == text_without_values(str(error.code), values):
         return named

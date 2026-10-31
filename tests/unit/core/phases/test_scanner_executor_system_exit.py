@@ -241,6 +241,24 @@ def test_an_exit_message_with_an_escaped_character_is_redacted_before_it_is_quot
     assert "the scanner called sys.exit(3)" in plain, plain
 
 
+def test_an_exit_tuple_holding_a_value_with_an_escaped_character_is_redacted():
+    """A code that is a tuple is quoted by ``repr`` too, which writes a newline in
+    each text of it as two characters. Redacting the quoted tuple left a value
+    that holds a newline in clear, so each text is redacted before the tuple is
+    quoted. Red at the base: both lines of the value are in the text."""
+    value = "env-canary-line-one\nenv-canary-line-two"
+
+    described = scanner_executor._failure_text(
+        SystemExit((f"token {value} refused", 2)), [value]
+    )
+
+    assert "the scanner called sys.exit(" in described, described
+    assert "env-canary-line-one" not in described, described
+    assert "env-canary-line-two" not in described, described
+    # The control: the code's other members are quoted as written.
+    assert ", 2)" in described, described
+
+
 def test_the_scanner_handler_redacts_an_environment_value_from_the_exit(
     plugin_context, monkeypatch, caplog
 ):
