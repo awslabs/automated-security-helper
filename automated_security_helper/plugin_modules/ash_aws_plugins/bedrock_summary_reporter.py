@@ -97,6 +97,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     get_fallback_model,
     report_missing_setting,
     reporter_client_config,
+    stripped_or_none,
     validate_bedrock_model,
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
@@ -688,8 +689,12 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
         Field(
-            default_factory=lambda: os.environ.get(
-                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+            # A blank AWS_REGION is unset, so it neither hides
+            # AWS_DEFAULT_REGION nor reaches the pattern as an empty name.
+            default_factory=lambda: (
+                stripped_or_none(os.environ.get("AWS_REGION"))
+                or stripped_or_none(os.environ.get("AWS_DEFAULT_REGION"))
+                or "us-east-1"
             ),
             # Every region name AWS publishes: the two-letter areas plus mx and
             # the eusc, us-isof and eu-isoe partitions, with an optional
@@ -703,7 +708,7 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     aws_profile: Annotated[
         str | None,
         Field(
-            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
+            default_factory=lambda: stripped_or_none(os.environ.get("AWS_PROFILE")),
             description="AWS profile to use for Bedrock. If not specified, the default profile will be used.",
         ),
     ]
