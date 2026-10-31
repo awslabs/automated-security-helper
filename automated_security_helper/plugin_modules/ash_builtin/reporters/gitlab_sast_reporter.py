@@ -43,6 +43,27 @@ _SOLUTION_MAX_LENGTH = 7000
 #: occurrence and described it as type Keyword).
 _SECRET_RULE_PREFIX = "SECRET-"
 
+
+def _rule_descriptors(sarif: Any) -> Dict[str, Any]:
+    """Each rule id to the first descriptor declaring it, over every run's driver
+    and extensions: what a message given by ``id`` is resolved against.
+
+    A SARIF message may name a string of its rule (``messageStrings``) instead
+    of carrying text, so the description of such a result lives on the rule.
+    """
+    rules: Dict[str, Any] = {}
+    for run in getattr(sarif, "runs", None) or []:
+        tool = getattr(run, "tool", None)
+        components = [getattr(tool, "driver", None)]
+        components.extend(getattr(tool, "extensions", None) or [])
+        for component in components:
+            for rule in getattr(component, "rules", None) or []:
+                rule_id = getattr(rule, "id", None)
+                if isinstance(rule_id, str) and rule_id and rule_id not in rules:
+                    rules[rule_id] = rule
+    return rules
+
+
 # The GitLab security-report schema version this reporter's output conforms to, and
 # the single place that states it.
 #
@@ -134,7 +155,8 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         try:
             # Read field by field below, so a name set on a result after it was
             # validated is read from a copy in the record form.
-            all_results = recorded(model.sarif).get_all_results() if model.sarif else []
+            recorded_sarif = recorded(model.sarif) if model.sarif else None
+            all_results = recorded_sarif.get_all_results() if recorded_sarif else []
         except Exception as e:
             ASH_LOGGER.error(f"Failed to read SARIF results: {error_text(e)}")
             return self._failure_report(
@@ -145,6 +167,8 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         skipped_results = 0
         if all_results:
             shared_ids = shared_finding_ids(model, all_results)
+            # Read once: the rules a message given by id is resolved against.
+            rules = _rule_descriptors(recorded_sarif)
             legacy_ids_seen: Dict[str, int] = {}
             ASH_LOGGER.trace("Creating rule dict")
             for index, result in enumerate(all_results):
@@ -157,7 +181,9 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 # alternative is enumerating the ways one result can be
                 # malformed, and missing one of them loses the run again.
                 try:
-                    vuln = self._vulnerability_for(result, model, shared_ids[index])
+                    vuln = self._vulnerability_for(
+                        result, model, shared_ids[index], rules
+                    )
                 except Exception as e:  # noqa: BLE001 -- see above
                     skipped_results += 1
                     ASH_LOGGER.error(
@@ -205,7 +231,11 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 entry["value"] = distinct
 
     def _vulnerability_for(
-        self, result, model: "AshAggregatedResults", shared_id: str | None = None
+        self,
+        result,
+        model: "AshAggregatedResults",
+        shared_id: str | None = None,
+        rules: Dict[str, Any] | None = None,
     ) -> Dict[str, Any] | None:
         """One SARIF result as a GitLab vulnerability, or None to omit it.
 
@@ -213,7 +243,11 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         ``exclude_suppressed`` -- and is the only omission that is not counted as
         a skip, because the operator asked for it. *shared_id* is the finding's
         id in every other report (``sarif_utils.shared_finding_ids``); without one the
-        legacy rule-file-line id is used.
+        legacy rule-file-line id is used. *rules* maps rule ids to their
+        descriptors (:func:`_rule_descriptors`): a message given by ``id`` is
+        described by the string its rule names, else by the rule's short
+        description, else by the id itself, which is also what a call without
+        *rules* gets.
         """
         # `ruleId` is optional in SARIF 2.1.0 and defaults to None, and a result
         # may name its rule as `rule.id` instead (3.27.5, 3.27.7), so bind the
@@ -233,7 +267,9 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # Same reasoning for the message: `text` is optional beside `markdown`
         # and an `id`, and `message` itself is reached through a RootModel
         # wrapper. Whitespace alone is no description.
-        message_text = result_message_text(result, default="")
+        message_text = result_message_text(
+            result, rule=(rules or {}).get(rule_id), default=""
+        )
 
         # Check if finding is suppressed: by a suppression in effect. One
         # rejected or under review has not taken effect (SARIF 3.35.4) and the

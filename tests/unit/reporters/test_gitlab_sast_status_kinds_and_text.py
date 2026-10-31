@@ -38,12 +38,18 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Level,
     Location,
     Message,
+    MultiformatMessageString,
     PhysicalLocation,
     PropertyBag,
     Region,
+    ReportingDescriptor,
     Result,
+    Run,
+    SarifReport,
     State,
     Suppression,
+    Tool,
+    ToolComponent,
 )
 
 pytestmark = pytest.mark.unit
@@ -133,6 +139,54 @@ class TestMessageAndSecretText:
 
         assert vuln["description"] == "default"
         assert vuln["raw_source_code_extract"] == "default"
+
+    @staticmethod
+    def _vulnerability_with_rule(reporter, rule: ReportingDescriptor) -> dict:
+        """The one vulnerability of a run whose driver declares *rule* and whose
+        only result names the message string ``default`` by id."""
+        result = Result(ruleId="R1", level=Level.warning)
+        result.message = Message.model_validate({"id": "default"})
+        model = AshAggregatedResults()
+        model.sarif = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="t", rules=[rule])),
+                    results=[result],
+                )
+            ],
+        )
+        (vuln,) = _report(reporter, model)["vulnerabilities"]
+        return vuln
+
+    def test_a_message_given_by_id_is_resolved_against_the_rule(self, reporter):
+        """The description was the key of the message string, not the string
+        the rule names by it."""
+        vuln = self._vulnerability_with_rule(
+            reporter,
+            ReportingDescriptor(
+                id="R1",
+                messageStrings={
+                    "default": MultiformatMessageString(text="Hardcoded password")
+                },
+            ),
+        )
+
+        assert vuln["description"] == "Hardcoded password"
+        assert vuln["raw_source_code_extract"] == "Hardcoded password"
+
+    def test_an_id_the_rule_does_not_name_falls_back_to_its_short_description(
+        self, reporter
+    ):
+        vuln = self._vulnerability_with_rule(
+            reporter,
+            ReportingDescriptor(
+                id="R1",
+                shortDescription=MultiformatMessageString(text="Password in source"),
+            ),
+        )
+
+        assert vuln["description"] == "Password in source"
 
     def test_the_secret_prefix_is_read_once(self, reporter):
         result = Result(
