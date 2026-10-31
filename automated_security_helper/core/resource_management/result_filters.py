@@ -15,6 +15,12 @@ from automated_security_helper.utils.severity_ladder import (
     result_severity,
 )
 
+#: The result property the workspace aggregator sets when it writes a rebased
+#: location's ``uri`` percent-encoded: the path that ``uri`` names, as plain
+#: text. Spelled as ``flat_vulnerability.ARTIFACT_PATH_PROPERTY`` spells it (a
+#: test compares them), because that module is not imported here.
+ARTIFACT_PATH_PROPERTY = "workspace_artifact_path"
+
 #: The per-severity buckets a summary carries, in the order the summary lists
 #: them. ``suppressed`` is a bucket of its own, as it is in SummaryStats.
 _SEVERITY_KEYS = ("critical", "high", "medium", "low", "info", "suppressed")
@@ -1244,6 +1250,19 @@ def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
                     )
                     artifact_loc = phys_loc.get("artifactLocation", {})
                     file_path = artifact_loc.get("uri")
+                    # The workspace aggregator writes a rebased uri percent-
+                    # encoded and records the path it names; the encoded text
+                    # names no file. The flattened finding reads it the same way.
+                    recorded_path = props.get(ARTIFACT_PATH_PROPERTY)
+                    if (
+                        isinstance(recorded_path, str)
+                        and recorded_path.strip()
+                        and not (
+                            isinstance(file_path, str)
+                            and file_path.startswith("file://")
+                        )
+                    ):
+                        file_path = recorded_path
                     region = phys_loc.get("region", {})
                     line_start = region.get("startLine")
                     line_end = region.get("endLine")
