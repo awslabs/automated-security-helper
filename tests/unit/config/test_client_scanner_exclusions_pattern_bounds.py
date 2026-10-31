@@ -45,6 +45,8 @@ import multiprocessing
 import operator
 import os
 import re
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -108,7 +110,13 @@ def _hides(entry: ClientScannerExclusion, relative: str, absolute: str) -> bool:
 
 
 def _reported(connection: Any, function: Callable[..., Any], args: tuple) -> None:
-    """In the guard's child: run the call and send back one line saying what it did."""
+    """In the guard's child: run the call and send back one line saying what it did.
+
+    On POSIX the child leads a session of its own, so the guard can kill the
+    whole group: the evaluation worker the call starts is a grandchild, and a
+    kill of the child alone left it running at full CPU after pytest exited."""
+    if os.name == "posix":
+        os.setsid()
     try:
         function(*args)
         connection.send("returned")
@@ -149,8 +157,54 @@ def _outcome_of(
     finally:
         receiving.close()
         if child.is_alive():
-            child.kill()
+            if os.name == "posix":
+                # The child is its group's leader (``_reported``); the group
+                # holds the grandchildren it started.
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                child.kill()
         child.join()
+
+
+def _start_a_grandchild_and_hang(pid_file: str) -> None:
+    """A call that starts a process of its own, as the evaluation worker is
+    one, and then never returns."""
+    grandchild = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"]
+    )
+    Path(pid_file).write_text(str(grandchild.pid), encoding="utf-8")
+    time.sleep(120)
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods() or os.name != "posix",
+    reason="the guard runs the call in a forked child on POSIX only",
+)
+def test_the_guard_kills_the_process_a_runaway_call_started(tmp_path):
+    """At the limit the guard killed only its direct child, which orphaned a
+    runaway evaluation worker (a grandchild) at full CPU after pytest exited.
+    The group is killed now: the process the call started is gone."""
+    pid_file = tmp_path / "grandchild.pid"
+
+    outcome = _outcome_of(_start_a_grandchild_and_hang, str(pid_file), limit=3.0)
+
+    assert outcome.startswith("no answer within")
+    grandchild = int(pid_file.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 10.0
+    alive = True
+    while alive and time.monotonic() < deadline:
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            alive = False
+        else:
+            time.sleep(0.05)
+    if alive:
+        os.kill(grandchild, signal.SIGKILL)
+    assert not alive, "the grandchild outlived the guard"
 
 
 # ---------------------------------------------------------------------------
