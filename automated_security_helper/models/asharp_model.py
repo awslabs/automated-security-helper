@@ -1782,9 +1782,13 @@ class AshAggregatedResults(RecordModel):
             self.scanner_results[key] = target_info
 
         # ScannerSeverityCount declares `suppressed: int = 0`, so the attribute
-        # always exists and moves with the count above.
+        # always exists and moves with the count above. The row's own count is
+        # declared `int | None` and a results file can carry null for it, which
+        # reads as zero here.
         if count is None:
-            target_info.suppressed_finding_count += 1
+            target_info.suppressed_finding_count = (
+                target_info.suppressed_finding_count or 0
+            ) + 1
             target_info.severity_counts.suppressed += 1
         else:
             target_info.suppressed_finding_count = count
