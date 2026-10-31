@@ -1078,6 +1078,55 @@ def test_a_ca_directory_that_holds_a_home_is_not_granted(
     ), [record.getMessage() for record in caplog.records]
 
 
+@POSIX
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+def test_a_ca_path_that_cannot_be_examined_is_passed_on_and_fails_no_plan(
+    layout, monkeypatch, kind
+):
+    """A bundle below a directory this user cannot search opens nothing and breaks nothing.
+
+    Python 3.10 to 3.12 raise PermissionError from Path.is_file and Path.is_dir for
+    such a path. The grant is a convenience, so the plan must not fail over it: the
+    setting is passed through as it was before the grant existed. Here both methods
+    refuse the two paths as the older pathlib does, and os.stat refuses them as the
+    kernel does, so the answer left is the one os.path gives.
+    """
+    bundle = layout.home / "private" / "corp.pem"
+    bundle.parent.mkdir()
+    bundle.write_text("")
+    certs = layout.home / "private-certs"
+    certs.mkdir()
+    refused = {_real(bundle), _real(certs)}
+    env = {"SSL_CERT_FILE": str(bundle), "SSL_CERT_DIR": str(certs)}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+    for method in ("is_file", "is_dir"):
+        original = getattr(Path, method)
+
+        def refusing(self, *args, _original=original, **kwargs):
+            if self in refused:
+                raise PermissionError(13, "Permission denied", str(self))
+            return _original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, method, refusing)
+    real_stat = os.stat
+
+    def stat(path, *args, **kwargs):
+        if not isinstance(path, int) and Path(os.fsdecode(path)) in refused:
+            raise PermissionError(13, "Permission denied", os.fsdecode(path))
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+
+    plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+    try:
+        assert plan.env["SSL_CERT_FILE"] == str(bundle)
+        assert plan.env["SSL_CERT_DIR"] == str(certs)
+        granted = _read_grants(kind, plan)
+        assert not {_real(bundle).as_posix(), _real(certs).as_posix()} & granted
+    finally:
+        plan.run_cleanup()
+
+
 def test_the_default_environment_list_is_the_proxy_family_and_the_ca_set(layout):
     """With no list written, exactly these are passed, and nothing else the caller has."""
     expected = _PROXY_NAMES | _CA_NAMES

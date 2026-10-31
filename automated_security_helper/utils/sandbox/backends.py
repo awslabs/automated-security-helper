@@ -441,8 +441,12 @@ def _operator_ca_reads(
             if not entry or not os.path.isabs(entry):
                 continue
             real = _real(Path(entry))
+            # os.path answers False for a path it cannot stat. Path.is_dir and
+            # Path.is_file raise PermissionError on Python 3.10 to 3.12 for a path
+            # below a directory this user cannot search, which would fail every
+            # spawn over a setting that only grants a convenience.
             if is_directory:
-                if not real.is_dir():
+                if not os.path.isdir(real):
                     continue
                 if _exposes_a_home(real, homes):
                     ASH_LOGGER.warning(
@@ -451,7 +455,7 @@ def _operator_ca_reads(
                         "directory. Point it at the directory of certificates."
                     )
                     continue
-            elif not real.is_file():
+            elif not os.path.isfile(real):
                 continue
             # Visible already, unless a home carved out of the path that shows it
             # (a HOME under /opt) is where it sits.
@@ -1783,7 +1787,7 @@ class SandboxExecBackend(SandboxBackend):
         # The operator's other CA-bundle settings: a file by its literal path, a
         # directory by its subpath, read-only like the trust roots above.
         for real in sorted({_real(p) for p in ca_reads}):
-            kind = "subpath" if real.is_dir() else "literal"
+            kind = "subpath" if os.path.isdir(real) else "literal"
             lines.append(f"(allow file-read* ({kind} {_sbpl_string(real)}))")
         # Last of the file rules, so no path the policy grants can reopen them: the
         # system and login keychains, whatever the keychain daemon would allow.
@@ -1857,7 +1861,7 @@ class SandboxExecBackend(SandboxBackend):
             operators = child_env["SSL_CERT_FILE"] == startup_environ().get(
                 "SSL_CERT_FILE"
             )
-            if operators and named.is_absolute() and named.is_file():
+            if operators and named.is_absolute() and os.path.isfile(named):
                 trust_roots = named
         elif policy.system_trust_roots:
             pem = _system_trust_roots()
