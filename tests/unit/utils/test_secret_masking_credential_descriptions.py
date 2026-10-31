@@ -4,10 +4,12 @@
 
 A rule or a message that describes a credential in code counts for a finding of
 any scanner type. A code scanner's message can hold the value its rule matched
-without quoting it, so a rule or message of a dependency scanner or a code
-scanner that reads like such a description is classed as a secret rule or
-finding, which masks the value and the file from the finding's line to the end:
-masking is the side that fails closed.
+without quoting it, so a rule or message of a code scanner that reads like such
+a description is classed as a secret rule or finding, which masks the value and
+the file from the finding's line to the end: masking is the side that fails
+closed. A dependency scanner is the exception for its findings, which describe
+the dependency and not the scanned code: its rule is still listed among the
+secret rules, but its finding enters by neither that rule nor its own text.
 The pattern that reads such a description joined its two words with ``.*`` and
 backtracked over the whole text for every credential word in it; and the pattern
 that read the string literals of a matched line restarted at every quote of a
@@ -76,7 +78,9 @@ def _run(scanner, rule_id, description, *results):
 
 
 class TestWhichRulesDescribeACredential:
-    def test_a_dependency_scanners_rule_that_describes_one_is_a_secret_rule(self):
+    def test_a_dependency_scanners_rule_that_describes_one_is_still_listed(self):
+        """The rule is listed; a finding of a dependency scanner does not enter
+        by it (``is_secret_finding`` gets the described-only rule ids)."""
         report = _report(
             _run(
                 "grype",
