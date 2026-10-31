@@ -45,13 +45,16 @@ from automated_security_helper.utils.redacted_model import (
 )
 from automated_security_helper.utils.scanner_names import SCANNER_TAG_NAMES
 from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_THRESHOLDS,
     resolve_scanner_threshold,
     severity_fails_threshold,
 )
 
 #: The levels a target report can record it was graded against
 #: (``ScanResultsContainer.scanner_severity_threshold``, written by the executor).
-_RECORDED_LEVELS = frozenset({"ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"})
+#: The ladder's own levels, the same set the executor writes
+#: (``scanner_executor._GRADED_LEVELS``): defined once, in the ladder.
+_RECORDED_LEVELS = frozenset(SEVERITY_THRESHOLDS)
 
 
 class ScannerStatisticsCalculator:

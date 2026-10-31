@@ -74,6 +74,7 @@ from automated_security_helper.utils.sarif_utils import (
 )
 from automated_security_helper.utils.tool_config_dir import tool_config_scope
 from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_THRESHOLDS,
     resolve_missing_levels,
     resolve_scanner_threshold,
 )
@@ -196,7 +197,10 @@ _SEVERITY_COUNT_FIELDS = ("suppressed", "critical", "high", "medium", "low", "in
 #: (``ScanResultsContainer.scanner_severity_threshold``). An unrecognised
 #: threshold (an external section's number, say) grades CRITICAL only and is not
 #: a level the report can carry, so the row keeps the value it was built with.
-_GRADED_LEVELS = frozenset({"ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"})
+#: The ladder's own levels (``severity_ladder.SEVERITY_THRESHOLDS``), which the
+#: statistics calculator's ``_RECORDED_LEVELS`` is built from as well: the level
+#: written here is the level read back there.
+_GRADED_LEVELS = frozenset(SEVERITY_THRESHOLDS)
 
 
 #: Severity words a tool writes for a level ASH ranks under another name, where

@@ -342,3 +342,21 @@ class TestTheRecordedRun:
         assert (
             ScannerStatisticsCalculator._dict_result_counts(model, "bandit").high == 2
         )
+
+
+class TestTheRecordedLevelsAreDefinedOnce:
+    def test_the_level_the_executor_writes_is_the_level_the_calculator_reads(self):
+        """The executor writes ``scanner_severity_threshold`` only for a value in its
+        set and the calculator accepts only a value in its own. Two copies of the
+        ladder could drift, and the read-back would quietly fall back to the
+        record's own read; both are the severity ladder's levels."""
+        from automated_security_helper.core import scanner_statistics_calculator
+        from automated_security_helper.core.phases import scanner_executor
+        from automated_security_helper.utils.severity_ladder import (
+            SEVERITY_THRESHOLDS,
+        )
+
+        ladder = frozenset(SEVERITY_THRESHOLDS)
+
+        assert scanner_executor._GRADED_LEVELS == ladder
+        assert scanner_statistics_calculator._RECORDED_LEVELS == ladder
