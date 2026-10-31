@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, List, Literal
 
-from pydantic.json_schema import GenerateJsonSchema
+from pydantic.json_schema import GenerateJsonSchema, JsonRef
 
 #: An environment reference as a configuration file writes it: ``${VAR}``,
 #: ``${VAR:default}``, ``!ENV ${VAR}``. Written for every JSON Schema regex
@@ -369,6 +369,29 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
             return {"anyOf": [json_schema, dict(ENV_REFERENCE_JSON_SCHEMA)]}
         return json_schema
 
+    def _resolves_to_enum(self, json_schema: Any) -> bool:
+        """Whether the JSON schema already generated for a value is an Enum's.
+
+        An Enum used as a field's type is a shared definition, so at the field
+        its core schema is a reference to that definition, not the ``enum``
+        schema itself, and ``_is_enum_core`` cannot see through it. The
+        definitions are generated before the fields that use them, so the
+        reference is followed in the generated JSON instead."""
+        for _ in range(8):
+            if not isinstance(json_schema, dict):
+                return False
+            ref = json_schema.get("$ref")
+            if ref is None:
+                return "enum" in json_schema
+            try:
+                resolved = self.get_schema_from_definitions(JsonRef(ref))
+            except KeyError:
+                return False
+            if resolved is None:
+                return False
+            json_schema = resolved
+        return False
+
     def int_schema(self, schema: Any) -> Any:
         return self._beside_reference(super().int_schema(schema))
 
@@ -382,15 +405,31 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
         self._under_default[-1] = True
         try:
             json_schema = super().default_schema(schema)
-            if _is_enum_core(schema.get("schema")):
-                json_schema = self._beside_reference(json_schema)
+            # The value's own schema, without the default pydantic put beside
+            # it; the reference is admitted beside the value, and the default
+            # stays at the field.
+            value_schema = {
+                key: value for key, value in json_schema.items() if key != "default"
+            }
+            if _is_enum_core(schema.get("schema")) or self._resolves_to_enum(
+                value_schema
+            ):
+                with_reference = self._beside_reference(value_schema)
+                if "default" in json_schema:
+                    with_reference = {
+                        **with_reference,
+                        "default": json_schema["default"],
+                    }
+                json_schema = with_reference
         finally:
             self._under_default[-1] = was
         return json_schema
 
     def list_schema(self, schema: Any) -> Any:
         json_schema = super().list_schema(schema)
-        if _is_enum_core(schema.get("items_schema")):
+        if _is_enum_core(schema.get("items_schema")) or self._resolves_to_enum(
+            json_schema.get("items")
+        ):
             json_schema["items"] = self._beside_reference(json_schema["items"])
         return json_schema
 
