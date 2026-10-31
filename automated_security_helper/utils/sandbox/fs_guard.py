@@ -1418,6 +1418,23 @@ def _staging_name(
     return f".{stem}{suffix}"
 
 
+class _AsGiven:
+    """The type of ``_AS_GIVEN``, the default ``newline`` of open_for_atomic_write."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<as given>"
+
+
+#: ``newline`` was not passed to open_for_atomic_write. Text then reaches the file
+#: as given (open()'s ``newline=""``), where an explicit ``None`` is open()'s own
+#: default and translates each ``\n`` to the platform's line ending. A separate
+#: value, not ``""``, because a binary handle refuses an explicit ``newline=""``
+#: as open() does but takes no ``newline`` at all.
+_AS_GIVEN: Any = _AsGiven()
+
+
 @contextmanager
 def open_for_atomic_write(
     path: Union[str, Path],
@@ -1425,18 +1442,28 @@ def open_for_atomic_write(
     errors: Optional[str] = "strict",
     *,
     binary: bool = False,
-    newline: Optional[str] = None,
+    newline: Optional[str] = _AS_GIVEN,
     root: Optional[Union[str, Path]] = None,
 ) -> Iterator[IO[Any]]:
     """Write ``path`` through a staging file that replaces it when the block ends.
 
     ``with open_for_atomic_write(path) as handle:`` yields a handle, text unless
     ``binary``, on a new file created exclusively in ``path``'s directory, with the
-    permissions a plain open gives (0o666 less the umask). ``encoding``, ``errors``
-    and ``newline`` are open()'s, for text, as they are for open_for_write; the
-    staging handle is the one they shape, so the bytes renamed over ``path`` are
-    the bytes open() would have written there. ``newline`` with ``binary`` raises
-    ValueError, as open() raises it. When the block ends
+    permissions a plain open gives (0o666 less the umask). ``encoding`` and
+    ``errors`` are open()'s, for text, as they are for open_for_write; the staging
+    handle is the one they shape, so the bytes renamed over ``path`` are the bytes
+    open() would have written there.
+
+    ``newline`` is open()'s too, but its default is ``""``, not open()'s ``None``
+    (which open_for_write keeps): what is written reaches the file as given, with
+    no line ending translated, on every platform. The callers of this writer hand
+    it content that already carries the line endings it wants (a JSON document, a
+    config file read with its own CRLF kept), and the translation open() does by
+    default would turn each ``\\n`` into ``\\r\\n`` on Windows, so a ``\\r\\n``
+    already in the content came out as ``\\r\\r\\n``. A caller that wants the
+    platform's line ending passes ``newline=None``. ``newline`` with ``binary``
+    raises ValueError, as open() raises it, except ``None``, which open() takes
+    too. When the block ends
     without an exception the file is renamed over ``path``, so a reader of ``path``
     opens the old complete file or the new complete one and never a partial write.
     When the block raises, the staging file is removed and ``path`` is left as it
@@ -1473,7 +1500,7 @@ def open_for_atomic_write(
     the rename, and the rename is retried for a bounded time while a reader holds
     the file open (atomic_write._replace).
     """
-    if binary and newline is not None:
+    if binary and newline is not None and newline is not _AS_GIVEN:
         # open() refuses this too; a silently dropped argument would hide a caller
         # that expects the bytes translated.
         raise ValueError("binary mode doesn't take a newline argument")
@@ -1482,7 +1509,13 @@ def open_for_atomic_write(
 
     open_mode = "wb" if binary else "w"
     text: Dict[str, Any] = (
-        {} if binary else {"encoding": encoding, "errors": errors, "newline": newline}
+        {}
+        if binary
+        else {
+            "encoding": encoding,
+            "errors": errors,
+            "newline": "" if newline is _AS_GIVEN else newline,
+        }
     )
     path = Path(os.path.abspath(path))
     guard = _guard_root(path, root)

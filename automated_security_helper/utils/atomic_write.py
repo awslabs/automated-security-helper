@@ -94,6 +94,10 @@ def open_atomically(
     over it when the block completes; if the block raises, the staging file is
     removed and ``path`` is left as it was.
 
+    Like :func:`write_text_atomically`, it writes what the block hands it as given:
+    open_for_atomic_write's default ``newline`` is ``""``, so no line ending is
+    translated and a document streamed here has the same bytes on every platform.
+
     The write is ``fs_guard.open_for_atomic_write``, so it is guarded exactly as
     :func:`write_text_atomically` is: below a registered output directory, or below
     ``root``, a link at ``path`` or on the way to it is refused with
