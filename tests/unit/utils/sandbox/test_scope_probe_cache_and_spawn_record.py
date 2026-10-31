@@ -671,17 +671,19 @@ def test_a_bytes_argument_is_decoded_so_a_hidden_value_in_it_is_hidden(
 
     with scope.sandbox_scope(sandbox_scope):
         scope._plan_spawn(
-            sandbox_scope, ["tool", b"--token=" + value.encode(), b"a b"], {}, None
+            sandbox_scope, ["tool", b"--token=" + value.encode(), b"a c"], {}, None
         )
 
     record = _record(debug_record)
     # Red at the base: b'--token=s\xc3\xa9cret-env-read-value' in the record.
     assert "cret-env-read-value" not in record
     assert "\\xc3" not in record
+    # The blank-holding argument ends in a letter other than ``b`` so its closing
+    # quote cannot read as the ``b'`` that opens a bytes literal.
     assert "b'" not in record
     assert record.startswith("Scanner sandbox (fake, network=no) for scanner: tool ")
     assert "--token=" in record
-    assert record.endswith(" 'a b'")
+    assert record.endswith(" 'a c'")
 
 
 def test_a_path_like_and_bytes_argument_are_text_in_the_record_line():
