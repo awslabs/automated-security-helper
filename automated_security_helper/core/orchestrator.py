@@ -20,7 +20,14 @@ from typing import (
     cast,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 
 from automated_security_helper.base.plugin_context import PluginContext
 
@@ -850,10 +857,21 @@ class ASHScanOrchestrator(BaseModel):
                     raise ASHValidationError(
                         f"Failed to load existing results: {error_text(e, values)}"
                     ) from e
-                asharp_model = AshAggregatedResults.model_validate_json(
-                    existing_text,
-                    context=context,
-                )
+                try:
+                    asharp_model = AshAggregatedResults.model_validate_json(
+                        existing_text,
+                        context=context,
+                    )
+                except ValidationError as e:
+                    # A truncated or malformed file: the same refusal as a file
+                    # that cannot be read, described without its input and
+                    # redacted of the values the config read from the
+                    # environment, not a bare pydantic ValidationError that no
+                    # entry point reads as a results file that did not load.
+                    values = config_environment_values(config)
+                    raise ASHValidationError(
+                        f"Failed to load existing results: {error_text(e, values)}"
+                    ) from e
             self._adopt_this_runs_values(asharp_model, config)
             exec_engine_params = {"asharp_model": asharp_model}
 
