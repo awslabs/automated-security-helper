@@ -63,7 +63,10 @@ def _record_worker(scanner, monkeypatch) -> dict:
 
 
 MALFORMED = {
-    "not utf-8": b"\xff\xfe{}",
+    # Valid JSON apart from one byte that is not UTF-8. A UTF-16 byte order mark
+    # (``\xff\xfe`` before ``{}``) is a different failure: a reader that
+    # detects the encoding from the bytes would decode it.
+    "not utf-8": b'{"results": {}, "x": "\xff"}',
     "a json array": json.dumps([]).encode(),
     "no results": json.dumps({"version": "1.5.0", "plugins_used": []}).encode(),
     "results not a mapping": json.dumps({"version": "1.5.0", "results": []}).encode(),
@@ -92,6 +95,15 @@ MALFORMED = {
     ).encode(),
     "a results item with a hashed secret of the wrong type": json.dumps(
         {"version": "1.5.0", "results": {"a.py": [{"type": "x", "hashed_secret": 5}]}}
+    ).encode(),
+    "a results item without a type but with a hashed secret": json.dumps(
+        {"version": "1.5.0", "results": {"a.py": [{"hashed_secret": "abc"}]}}
+    ).encode(),
+    "a results item with a type of the wrong type": json.dumps(
+        {
+            "version": "1.5.0",
+            "results": {"a.py": [{"type": 5, "hashed_secret": "abc"}]},
+        }
     ).encode(),
 }
 
