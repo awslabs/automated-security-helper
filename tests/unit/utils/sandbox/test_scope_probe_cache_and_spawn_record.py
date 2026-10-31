@@ -40,6 +40,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from automated_security_helper.config.config_validator import REDACTED
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.sandbox import backends, scope
 from automated_security_helper.utils.sandbox.backends import SandboxBackend, SpawnPlan
@@ -498,7 +499,9 @@ class _Logger:
         return True
 
     def debug(self, message, *args, **kwargs):
-        self.debug_lines.append(message)
+        # As the logging module formats a record: an argument a call passes is
+        # part of the text, so a dropped argument or a %s-formatted leak shows.
+        self.debug_lines.append(message % args if args else message)
 
     def info(self, *args, **kwargs):
         pass
@@ -589,6 +592,9 @@ def test_an_env_read_value_holding_a_quote_is_hidden_in_both_spellings(
     assert value not in record
     assert shlex.quote(value)[1:-1] not in record
     assert "the-value-read-from-the-environment" not in record
+    # The argument is still in the record, with the value written as the mask.
+    assert record.startswith("Scanner sandbox (fake, network=no) for scanner: tool ")
+    assert "--token=" in record and REDACTED in record
 
 
 def test_a_bytes_argument_is_decoded_so_a_hidden_value_in_it_is_hidden(

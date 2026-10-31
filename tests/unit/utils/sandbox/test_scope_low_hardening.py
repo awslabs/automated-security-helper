@@ -83,7 +83,12 @@ class _Logger:
         return True
 
     def _record(self, level):
-        return lambda message, *args, **kwargs: self.lines.append((level, message))
+        def record(message, *args, **kwargs):
+            # As the logging module formats a record: an argument a call passes
+            # is part of the text, so a %s-formatted leak is seen by the checks.
+            self.lines.append((level, message % args if args else message))
+
+        return record
 
     def __getattr__(self, name):
         if name in ("debug", "info", "warning", "error"):
@@ -439,6 +444,11 @@ def test_the_record_names_no_argv_when_the_values_are_unread(
     assert "the-secret" not in record
     assert "could not be read" in record
     assert record.startswith("Scanner sandbox (recorder, network=no) for scanner")
+    # The whole sentence, so a record that dropped its reason does not pass.
+    assert record.endswith(
+        "the planned command line is not shown because the plugin's redaction "
+        "values could not be read"
+    )
 
 
 def test_the_record_of_a_class_scope_says_it_carries_no_values(
