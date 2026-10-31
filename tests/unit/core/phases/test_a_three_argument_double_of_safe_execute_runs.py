@@ -87,11 +87,14 @@ def _targets(plugin_context):
     return [{"path": Path(plugin_context.source_dir), "type": "source"}]
 
 
-def _executor(plugin_context, scanner, parallel: bool) -> ScannerExecutor:
+def _executor(plugin_context, scanners, parallel: bool) -> ScannerExecutor:
+    """Two tasks at least for the parallel case: ``run_parallel`` hands a queue of
+    one scanner to ``run_sequential``, so a single task never reaches the pool."""
+    targets = _targets(plugin_context)
     return ScannerExecutor(
         plugin_context=plugin_context,
         progress_display=MagicMock(),
-        scanner_tasks=[("one", scanner, _targets(plugin_context))],
+        scanner_tasks=[(name, scanner, targets) for name, scanner in scanners],
         max_workers=2 if parallel else 1,
     )
 
@@ -101,7 +104,8 @@ def test_a_three_argument_double_is_called_and_its_scanner_completes(
     plugin_context, parallel
 ):
     scanner = NeverRunScanner(config=_Config(), context=plugin_context)
-    executor = _executor(plugin_context, scanner, parallel)
+    second = NeverRunScanner(config=_Config(), context=plugin_context)
+    executor = _executor(plugin_context, [("one", scanner), ("two", second)], parallel)
     calls: list[tuple] = []
 
     def three_argument_double(name, plugin, targets):
@@ -123,5 +127,12 @@ def test_a_three_argument_double_is_called_and_its_scanner_completes(
     )
 
     assert results is not None
-    assert [name for name, _, _ in calls] == ["one"], calls
-    assert executor.completed_scanners == [scanner]
+    # Both doubles ran. In a parallel run the order is the pool's, so the names
+    # are compared sorted; with the single task this case used to queue, the
+    # pool's submit was never reached.
+    assert sorted(name for name, _, _ in calls) == ["one", "two"], calls
+    # completed_scanners holds the plugin instances, not the task names, and the
+    # order in a parallel run is the order the futures were read.
+    assert len(executor.completed_scanners) == 2
+    assert any(done is scanner for done in executor.completed_scanners)
+    assert any(done is second for done in executor.completed_scanners)
