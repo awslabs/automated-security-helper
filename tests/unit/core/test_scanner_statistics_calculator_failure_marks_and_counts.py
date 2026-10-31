@@ -283,6 +283,10 @@ class TestTheSarifCompareTakesTheDictCountsBackOut:
         model.sarif = _sarif("bandit", ["error", "warning"])
 
         assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True
+        # The compare alone cannot tell a double count from none (it subtracts by
+        # the same rule that adds), so pin the row's total as well.
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+        assert stats["bandit"]["total"] == 2
 
     def test_a_sarif_result_no_row_accounts_for_is_still_a_mismatch(self):
         """Control: the compare still fails on a real disagreement. A result that
