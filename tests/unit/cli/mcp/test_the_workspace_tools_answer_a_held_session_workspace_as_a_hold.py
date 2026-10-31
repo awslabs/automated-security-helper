@@ -4,7 +4,7 @@
 """The workspace tools answer a session workspace another request holds as a hold.
 
 When a session's bound profile has to be written to its workspace again and the
-sweep is removing that workspace, the write is refused with
+sweep is removing that workspace, the session's write hold is refused with
 ``SessionWorkspaceBusyError``, a ``RuntimeError``. ``resolve_workspace`` and
 ``scan_workspace`` answered it as a config refusal, exit 3, so a client read its
 own config as wrong, while every other tool answers the hold under the error's own
@@ -28,14 +28,28 @@ from tests.unit.cli.mcp.test_the_workspace_tools_answer_an_unwritable_workspace_
 pytestmark = pytest.mark.unit
 
 
-def _a_held_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The profile stays registered; the workspace is held for the sweep's removal."""
-    from automated_security_helper.cli.mcp import profile_registry
+class _HeldWorkspace:
+    """A write hold that is refused on entry, as it is while the sweep removes."""
 
-    def held(sid, config, patched):
+    def __enter__(self) -> None:
         raise SessionWorkspaceBusyError("the session's workspace is being removed")
 
-    monkeypatch.setattr(profile_registry, "materialize_session_binding", held)
+    def __exit__(self, *exc_info: object) -> bool:
+        return False
+
+
+def _a_held_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The profile stays registered; the session's write hold is refused.
+
+    The hold is raised where the product raises it, on entry to
+    ``writing_session_state``, which the bound profile's rewrite takes before
+    its try block and imports when it runs.
+    """
+    from automated_security_helper.cli.mcp import sessions
+
+    monkeypatch.setattr(
+        sessions, "writing_session_state", lambda session_id: _HeldWorkspace()
+    )
 
 
 @pytest.mark.parametrize("tool", ["mcp_resolve_workspace", "mcp_scan_workspace"])
