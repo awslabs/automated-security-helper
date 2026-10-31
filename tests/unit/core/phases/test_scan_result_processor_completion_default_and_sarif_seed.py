@@ -87,12 +87,35 @@ class TestTheCompletionDefaultCountsTheRowsThatRan:
             ("no-tool", ScannerStatus.MISSING),
             ("crashed", ScannerStatus.ERROR),
         ):
-            model.scanner_results[name] = ScannerTargetStatusInfo(status=status)
+            # The switched-off scanner is excluded, as every recorder of one
+            # writes it; a SKIPPED row that is not excluded ran and found nothing
+            # (the test below).
+            model.scanner_results[name] = ScannerTargetStatusInfo(
+                status=status, excluded=status == ScannerStatus.SKIPPED
+            )
 
         processor.validate_completion(model)
 
         validation_manager.validate_execution_completion.assert_called_once_with(
             ["ran-clean", "ran-found"]
+        )
+
+    def test_a_scanner_that_ran_and_attempted_nothing_is_completed(self, tmp_path):
+        """Red at the base: SKIPPED rows were never completed, so a saved results
+        file warned about a scanner a live scan counts completed."""
+        processor, validation_manager = _processor(tmp_path)
+        model = AshAggregatedResults()
+        model.scanner_results["found-nothing"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.SKIPPED, excluded=False
+        )
+        model.scanner_results["switched-off"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.SKIPPED, excluded=True
+        )
+
+        processor.validate_completion(model)
+
+        validation_manager.validate_execution_completion.assert_called_once_with(
+            ["found-nothing"]
         )
 
     def test_names_given_by_the_caller_are_passed_as_they_are(self, tmp_path):

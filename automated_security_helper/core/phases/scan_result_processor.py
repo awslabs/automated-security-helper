@@ -56,8 +56,10 @@ def _declared_tool_version(sarif_report: Any) -> str | None:
 
 
 #: The recorded statuses that say a scanner ran to completion: it evaluated its
-#: targets and reached a grade. ERROR did not complete; SKIPPED (excluded, or
-#: nothing to evaluate) and MISSING (its dependencies were not there) never ran.
+#: targets and reached a grade. ERROR did not complete; MISSING (its dependencies
+#: were not there) never ran. SKIPPED is read with the row's ``excluded`` flag
+#: (``_completed_scanner_names``): an excluded row never ran, and one that ran and
+#: attempted nothing did.
 _COMPLETED_STATUSES = frozenset(
     {ScannerStatus.PASSED.value, ScannerStatus.FAILED.value}
 )
@@ -77,7 +79,15 @@ def _completed_scanner_names(aggregated_results: AshAggregatedResults) -> list[s
     names = []
     for name, row in rows.items():
         status = getattr(row, "status", None)
-        if getattr(status, "value", status) in _COMPLETED_STATUSES:
+        status = getattr(status, "value", status)
+        # A scanner that ran and attempted nothing is SKIPPED but not excluded:
+        # a live scan counts it completed, so a saved results file has to as
+        # well, or the check warns about it on every reload. An excluded row
+        # (left out by the operator, the config or a shard) never ran.
+        ran_and_found_nothing = status == ScannerStatus.SKIPPED.value and not getattr(
+            row, "excluded", True
+        )
+        if status in _COMPLETED_STATUSES or ran_and_found_nothing:
             names.append(name)
     return names
 
