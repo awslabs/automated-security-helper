@@ -161,13 +161,17 @@ def pytest_collection_modifyitems(config, items):
     a test for the property it checks rather than for the shape of the flow, and
     it stays reachable with one flag.
     """
-    integration_root = Path(__file__).resolve().parent.parent
+    # This directory, not tests/integration: pytest loads this conftest only when it
+    # collects tests/integration/cli, so a wider root would mark a test in a sibling
+    # directory slow in a run that includes the CLI tests and not in a run of the
+    # sibling alone.
+    cli_root = Path(__file__).resolve().parent
 
     for item in items:
-        # Scoped to the integration tree, which is what every heuristic below is
-        # about. Compared against a resolved path rather than by substring: a
-        # substring test is how the unscoped version reached the whole repo.
-        if not Path(item.fspath).resolve().is_relative_to(integration_root):
+        # Scoped to this directory, which is what every heuristic below is about.
+        # Compared against a resolved path rather than by substring: a substring
+        # test is how the unscoped version reached the whole repo.
+        if not Path(item.fspath).resolve().is_relative_to(cli_root):
             continue
 
         # No tier marker is added here. The tier (integration or e2e) is declared
