@@ -301,7 +301,7 @@ class TestAHopsTargetIsJudgedThroughItsParents:
         """One budget for the whole judgment: a self-looping link spends it to
         the last read and no further, and the parent walks of each hop draw on
         the same budget rather than their own."""
-        loop = tmp_path / "loop"
+        loop = tmp_path.resolve() / "loop"
         loop.symlink_to(loop)
         reads = []
         real_readlink = os.readlink
