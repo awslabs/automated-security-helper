@@ -2672,6 +2672,14 @@ def _mask_additional_reports(additional: Dict[str, Any], index: _SecretIndex) ->
         # (_ENTRY_IDENTIFIERS), as the local pass below keeps them: one pass over
         # the mapping as a plain tree rewrote an entry's file_path and rule_id
         # before the entry pass read them, and the entry lost its place.
+        #
+        # This walk does not apply two tests that a pass over the mapping as a
+        # tree would apply at the scanner-name level: _is_skipped_key (a scanner
+        # named like a skipped key would have had its entries left alone) and
+        # _keep_the_key_pattern (it acts only for the GUID key names). No scanner
+        # is named like either, so both would be no-ops here; if one were, this
+        # walk masks that scanner's entries where the tree walk skipped them,
+        # which is the safe side.
         for scanner_name in list(additional):
             entries = additional[scanner_name]
             parent = scanner_name if isinstance(scanner_name, str) else None
