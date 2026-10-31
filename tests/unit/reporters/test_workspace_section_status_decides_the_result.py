@@ -229,3 +229,34 @@ def test_a_completed_project_with_a_skip_reason_and_findings_over_the_gate_reads
     )
     assert _result(model, "svc") == "FAILED"
     assert 'class="failed"' in html_workspace_section(model)
+
+
+def test_a_completed_project_failed_for_its_findings_shows_the_counts():
+    """The row that reads FAILED for a breach shows the findings it failed for.
+
+    RED at the base of this change: ``never_scanned`` was true for any record
+    holding a skip reason, so the row read FAILED beside ``findings`` and
+    ``actionable`` of ``"n/a"`` -- a label that says there are findings and two
+    columns that say the project was never counted. The control is the same
+    record without the breach, which stays uncounted because its row reads
+    SKIPPED.
+    """
+    from automated_security_helper.models.workspace import SkippedProjectReason
+
+    over = _project(
+        "svc",
+        skip_reason=SkippedProjectReason.NO_CHANGES,
+        finding_count=2,
+        actionable_finding_count=2,
+        exceeds_threshold=True,
+    )
+    (row,) = workspace_project_rows(_model(over))
+    assert row["result"] == "FAILED"
+    assert row["findings"] == 2, row
+    assert row["actionable"] == 2, row
+
+    clean = _project("svc", skip_reason=SkippedProjectReason.NO_CHANGES)
+    (row,) = workspace_project_rows(_model(clean))
+    assert row["result"] == "SKIPPED (no-changes)"
+    assert row["findings"] == "n/a", row
+    assert row["actionable"] == "n/a", row

@@ -223,6 +223,11 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
         # a successful optimisation and an error skip is a project that was not
         # looked at, and they must not read the same.
         reason = getattr(project.skip_reason, "value", project.skip_reason)
+        # Whether the skip reason, rather than the project's findings, names a
+        # COMPLETED record's row. One answer for the Result arm and for the
+        # count columns below: a row that reads FAILED for a threshold breach
+        # must also show the counts that breach was read from, not "n/a".
+        read_as_skip = project.skip_reason is not None and not project.exceeds_threshold
         if project.status == ProjectRunStatus.FAILED:
             # The recorded status decides, ahead of every text field: a FAILED
             # project whose error is null or empty was still attempted and
@@ -237,7 +242,7 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # ahead of the error text, so a skipped project that also carries an
             # error text reads SKIPPED, as workspace_exit_code reads it.
             result = f"SKIPPED ({reason})" if reason else "SKIPPED"
-        elif project.skip_reason is not None and not project.exceeds_threshold:
+        elif read_as_skip:
             # Fallbacks for a record whose status does not say: the text fields.
             # A COMPLETED record that carries a skip reason is read by its
             # findings first: workspace_exit_code counts such a project as
@@ -344,7 +349,7 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
         # finding of none, and a row of zeros reads as a clean scan.
         never_scanned = (
             project.status in (ProjectRunStatus.FAILED, ProjectRunStatus.SKIPPED)
-            or project.skip_reason is not None
+            or read_as_skip
             or bool(project.error)
         )
         # How the Result column is styled: red for a project that failed or was
