@@ -108,8 +108,10 @@ if TYPE_CHECKING:
 #: on the run's log scope so a long-lived process (the MCP server) logs a
 #: refusal again for a later scan run that refuses the same option and path;
 #: within one run the many per-path checks stay deduplicated. None is the scope
-#: outside every run.
-_WARNED: Set[Tuple[Optional[str], str, str]] = set()
+#: outside every run. The derived-root clause of refused_derived_product adds
+#: its entries as (option key, path), without the scope, so the declared shape
+#: is a tuple of optional strings.
+_WARNED: Set[Tuple[Optional[str], ...]] = set()
 _WARNED_LOCK = threading.Lock()
 
 #: The scan run the derived roots recorded and judged here belong to, set by
