@@ -831,15 +831,20 @@ def test_a_program_the_backend_cannot_find_is_a_failed_spawn_not_a_refusal(
     assert sandbox_scope.last_refusal is None
 
 
-def test_a_refusal_is_counted_as_a_refusal_only(tmp_path, monkeypatch):
-    """The control: a SandboxUnavailable from the plan is a refusal, and the
-    failure counter does not move."""
+class _RefusingBackend:
+    """A backend whose plan refuses, as bwrap's does for a policy it cannot honor."""
 
-    def refusing(sandbox_scope, argv, env, cwd):
+    name = "refusing"
+
+    def plan(self, argv, env, policy):
         raise SandboxUnavailable("the policy has no writable root for this tool")
 
-    monkeypatch.setattr(scope, "_plan_spawn", refusing)
-    sandbox_scope = _scope(tmp_path)
+
+def test_a_refusal_is_counted_as_a_refusal_only(tmp_path, debug_record):
+    """The control: a SandboxUnavailable from the plan is a refusal, and the
+    failure counter does not move. It goes through the real ``_plan_spawn``, as
+    the failed-plan case above does, so both counters are read off one path."""
+    sandbox_scope = _scope(tmp_path, backend=_RefusingBackend())
 
     with scope.sandbox_scope(sandbox_scope):
         with pytest.raises(SandboxUnavailable):
