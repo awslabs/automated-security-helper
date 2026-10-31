@@ -407,32 +407,37 @@ def test_the_one_rule_two_lockfiles_share_carries_the_score_either_one_brings(
     ]
 
 
-def test_two_lockfiles_with_two_scores_keep_the_first_lockfile_s_score(scanner):
-    """Both records carry a score and they differ (5.0, then 7.5). The kept
-    rule is the first lockfile's and keeps its own score; the later score is
-    lent only to a rule that has none. Both results rely on the rule, so both
-    read the first score's band, MEDIUM: the choice is pinned here, where it
-    was not, so a change of it is a seen change."""
-    first = _report(
+@pytest.mark.parametrize("higher_first", [False, True])
+def test_two_lockfiles_with_two_scores_keep_the_higher_whichever_comes_first(
+    scanner, higher_first
+):
+    """Both records carry a score and they differ (5.0 and 7.5). The merged
+    rule keeps the higher, whichever lockfile is walked first: both results
+    rely on the rule, so both read the 7.5 band, HIGH. Keeping the first
+    lockfile's score let the walk order lower an advisory's grade (5.0 first
+    read MEDIUM for both, 7.5 first read HIGH for both), and a gate then saw a
+    grade below what one lockfile's own report scored it."""
+    low = _report(
         pkg=(
             "high",
             [_via("pkg", "high", score=5.0, vector="CVSS:3.1/AV:N")],
             ["node_modules/pkg"],
         )
     )
-    second = _report(
+    high = _report(
         pkg=(
             "high",
             [_via("pkg", "high", score=7.5, vector="CVSS:3.1/AV:N")],
             ["node_modules/pkg"],
         )
     )
+    first, second = (high, low) if higher_first else (low, high)
 
     report = _two_lockfiles(scanner, first, second)
 
     (rule,) = report.runs[0].tool.driver.rules
-    assert rule.properties.model_extra["security_severity"] == 5.0
-    assert [result_severity(r) for r in report.runs[0].results] == ["MEDIUM", "MEDIUM"]
+    assert rule.properties.model_extra["security_severity"] == 7.5
+    assert [result_severity(r) for r in report.runs[0].results] == ["HIGH", "HIGH"]
 
 
 def test_a_root_with_no_nodes_still_gives_the_transitive_result_a_ref(scanner):

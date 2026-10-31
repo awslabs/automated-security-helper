@@ -1972,7 +1972,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     known[rule.id] = rule
                     continue
                 score = self._rule_security_severity(rule)
-                if score is not None and self._rule_security_severity(kept) is None:
+                if self._is_higher_score(score, self._rule_security_severity(kept)):
                     if kept.properties is None:
                         kept.properties = PropertyBag()
                     setattr(kept.properties, "security_severity", score)  # noqa: B010
@@ -1996,6 +1996,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if rule.properties is None:
             return None
         return (rule.properties.model_extra or {}).get("security_severity")
+
+    @staticmethod
+    def _is_higher_score(score: Any, kept: Any) -> bool:
+        """Whether ``score`` should replace the ``kept`` rule score.
+
+        Always when the kept rule has none, otherwise only for a higher score.
+        The rules of one advisory merge across lockfiles into one, and results
+        that declare no grade of their own read the merged rule's score, so the
+        highest of the lockfiles' scores is kept: keeping the first lockfile's
+        let the order the lockfiles were walked in lower an advisory's grade
+        (5.0 over 7.5 read MEDIUM for both). A score that is not a number never
+        replaces one.
+        """
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            return False
+        if kept is None:
+            return True
+        if isinstance(kept, bool) or not isinstance(kept, (int, float)):
+            return True
+        return score > kept
 
     def _convert_npm_audit_to_sarif(
         self,
