@@ -52,7 +52,18 @@ def _a_complete_result() -> AshAggregatedResults:
     return model
 
 
-def _close_a_scan_whose_tool_could_not_stop(tmp_path: Path, *, remote: bool):
+class _AnIncompletenessWithAnOddRow(ras.ScanIncompleteness):
+    """The payload of a tool that outlived the scan, with a row that is no mapping."""
+
+    def to_payload(self):
+        payload = super().to_payload()
+        payload["could_not_stop"] = [*payload["could_not_stop"], REASON]
+        return payload
+
+
+def _close_a_scan_whose_tool_could_not_stop(
+    tmp_path: Path, *, remote: bool, odd_row: bool = False
+):
     source = tmp_path / "proj"
     source.mkdir()
     output = source / ".ash" / "ash_output"
@@ -61,10 +72,13 @@ def _close_a_scan_whose_tool_could_not_stop(tmp_path: Path, *, remote: bool):
     scan_id = registry.register_scan(
         directory_path=str(source), output_directory=str(output)
     )
+    incompleteness_type = (
+        _AnIncompletenessWithAnOddRow if odd_row else ras.ScanIncompleteness
+    )
 
     def a_scan_whose_tool_could_not_stop(**_options):
         raise ras.ScanIncompleteExit(
-            ras.ScanIncompleteness(could_not_stop=(("bandit", REASON),)),
+            incompleteness_type(could_not_stop=(("bandit", REASON),)),
             _a_complete_result(),
         )
 
@@ -104,3 +118,18 @@ def test_a_local_callers_stored_coverage_keeps_the_pid(tmp_path):
     assert entry.coverage["could_not_stop"] == [
         {"scanner": "bandit", "reason": REASON}
     ], entry.coverage
+
+
+def test_a_row_that_cannot_be_redacted_does_not_leave_the_entry_running(tmp_path):
+    """Red at the base: the redaction ran outside the close's guard, so a row that
+    is no mapping raised out of the settle step and the entry stayed running.
+    The close now stores the rows without their reasons, the gap still counted,
+    and no process id reaches the entry."""
+    entry = _close_a_scan_whose_tool_could_not_stop(tmp_path, remote=True, odd_row=True)
+
+    assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
+    assert entry.coverage["could_not_stop"] == [
+        {"scanner": "bandit"},
+        {"scanner": "unknown"},
+    ], entry.coverage
+    assert "4242" not in str(entry.coverage), entry.coverage

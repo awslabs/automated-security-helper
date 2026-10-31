@@ -2905,6 +2905,11 @@ async def _run_scan(
     settled_close: Optional[
         Tuple[MCScanStatus, Optional[Dict[str, Any]], Optional[str]]
     ] = None
+    # Whether the caller is a remote one, decided before any closure below can
+    # run. The close helpers read it, and the refusal arms that run before the
+    # config work close an entry through them, so it cannot be assigned further
+    # down: a free variable read before its assignment raises.
+    remote_client = caller_is_remote(session_id)
 
     def _work_out_the_close(
         ended: Optional[BaseException], results: Any
@@ -2983,10 +2988,49 @@ async def _run_scan(
                 f"{error_text(close_error, environment_values)}"
             )
             status, coverage, threshold = fallback
-        return status, _coverage_as_the_caller_may_see_it(coverage), threshold
+        # Inside the never-raises contract, as the work above is: a row that
+        # cannot be redacted must not turn the close into an exception, which
+        # would leave the entry running. It is stored without its reasons
+        # instead, since a reason is what names the process id.
+        try:
+            shown = _coverage_as_the_caller_may_see_it(coverage, remote_client)
+        except Exception as redact_error:  # noqa: BLE001
+            _logger.warning(
+                f"Scan {scan_id}: could not redact the coverage's reasons for "
+                "this caller, so they are not stored: "
+                f"{error_text(redact_error, environment_values)}"
+            )
+            shown = _coverage_without_reasons(coverage)
+        return status, shown, threshold
+
+    def _coverage_without_reasons(
+        coverage: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """``coverage`` with every could_not_stop row cut down to its scanner.
+
+        Never raises, whatever the rows are: a row that is not a mapping names
+        no scanner and is stored as ``unknown``, so the gap is still counted.
+        """
+        if not isinstance(coverage, dict):
+            return None
+        rows = coverage.get("could_not_stop")
+        if not isinstance(rows, (list, tuple)):
+            return coverage
+        return {
+            **coverage,
+            "could_not_stop": [
+                {
+                    "scanner": str(row.get("scanner", "unknown"))
+                    if isinstance(row, dict)
+                    else "unknown"
+                }
+                for row in rows
+            ],
+        }
 
     def _coverage_as_the_caller_may_see_it(
         coverage: Optional[Dict[str, Any]],
+        remote_client: bool,
     ) -> Optional[Dict[str, Any]]:
         """The coverage to store, its could_not_stop reasons shown as this caller may see them.
 
@@ -3227,10 +3271,9 @@ async def _run_scan(
     except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
         _refuse_before_running(exc)
         return
-    # For a remote caller, every config file the operator did not set aside
-    # resolves no !ENV, the target's own .ash.yaml included; see "Environment
-    # variables" in config/config_sources.py.
-    remote_client = caller_is_remote(session_id)
+    # For a remote caller (remote_client, above), every config file the operator
+    # did not set aside resolves no !ENV, the target's own .ash.yaml included;
+    # see "Environment variables" in config/config_sources.py.
     # Every file of the chain a client delivered, the named upload or the
     # target's own .ash.yaml, is checked against this session's policy.
     try:
