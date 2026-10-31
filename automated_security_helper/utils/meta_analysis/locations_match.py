@@ -299,16 +299,20 @@ def _is_resolvable(text: str) -> bool:
 @functools.lru_cache(maxsize=4096)
 def _below_resolved_root(path: str, root: str) -> Optional[str]:
     """*path* (normalized, absolute) as the path relative to *root* (normalized)
-    when it spells the root another way, else None.
+    when it spells a file below the root another way, else None.
 
-    The text of the path is not below the root's text, but an ancestor of it can
-    still be the root reached another way: through a link (``/tmp/x`` for
-    ``/private/tmp/x``), or with the case or short names of a Windows path. The
-    shallowest ancestor that resolves to the root is the boundary and the tail
-    below it is kept as written, as aggregation does when it makes a URI
-    relative to the source directory (``sarif_utils._relative_to_resolved_root``).
-    A path of another system's spelling, or one no ancestor of which exists as
-    the root, is None.
+    The text of the path is not below the root's text, but it can still be a
+    file of the root reached another way. An ancestor of it can be the root
+    reached through a link (``/tmp/x`` for ``/private/tmp/x``), or with the case
+    or short names of a Windows path: the shallowest ancestor that resolves to
+    the root is the boundary and the tail below it is kept as written. When no
+    ancestor is the root, the path itself can still lead into it, as a link to a
+    directory of the root or to a file in it does: the whole path is resolved and
+    the part below the root is the result. Aggregation does the same when it
+    makes a URI relative to the source directory
+    (``sarif_utils._relative_to_resolved_root``), and nothing is placed here that
+    it would not place. A path of another system's spelling, or one that does
+    not lead into the root either way, is None.
 
     Cached on the pair: a report names the same few paths against every
     candidate result, and each ancestor costs a file system walk. A link
@@ -327,15 +331,23 @@ def _below_resolved_root(path: str, root: str) -> Optional[str]:
                 ancestor += "/"
             if os.path.normcase(os.path.realpath(ancestor)) == wanted:
                 return "/".join(parts[depth:])
+        resolved = os.path.realpath(path)
     except (OSError, ValueError):
         return None
-    return None
+    folded = os.path.normcase(resolved)
+    boundary = wanted if wanted.endswith(os.sep) else wanted + os.sep
+    if not folded.startswith(boundary):
+        return None
+    # Case folding keeps the length of a path; keep the spelling on disk.
+    spelled = resolved if len(resolved) == len(folded) else folded
+    return spelled[len(boundary) :].replace(os.sep, "/") or None
 
 
 def _placed_by_root(path: str, root: str) -> str:
     """*path* (normalized) as a path relative to the scan root when the root can
     place it, else unchanged: below the root as spelled, or below it through an
-    ancestor that resolves to it. A relative path is already relative to it."""
+    ancestor that resolves to it, or by a link that leads into it. A relative
+    path is already relative to it."""
     placed = _below_root(path, root)
     if not _is_absolute(placed):
         return placed
@@ -358,7 +370,8 @@ def file_paths_match(file1: str, file2: str, scan_root: Optional[str] = None) ->
     run on, the tail rule is not used: a relative path is a path relative to the
     root, and an absolute path is made relative to it when it is below it, as
     spelled or through an ancestor that resolves to the root (a report that
-    spells a linked directory another way). The files of the scan are then
+    spells a linked directory another way), or by a link that leads into it (to
+    a directory of the root, or to a file in it). The files of the scan are then
     compared whole. An absolute path the root cannot place is not a file of the
     scan, so it matches only an identical path and never a relative one: the
     aggregate writes a relative path only for a file below the source directory,
