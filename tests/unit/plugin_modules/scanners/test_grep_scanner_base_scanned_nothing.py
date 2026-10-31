@@ -119,9 +119,10 @@ def test_files_the_tools_default_ignore_list_left_out_grade_skipped(
     An absolute path is read below the target, so ``<target>/tests/x.py`` is on
     the list the way ``tests/x.py`` is.
 
-    Fails at the base with ScannerError ("its --exclude patterns left out all N
-    files it found"): every ``cli_exclude_flags_match`` entry outside the global
-    ignore names counted as the operator's.
+    A pin: the code already grades these SKIPPED. On the code before ASH read the
+    re-passed default list as its own exclusions this fails with ScannerError ("its --exclude patterns left out all N files it found"):
+    every ``cli_exclude_flags_match`` entry outside the global ignore names counted
+    as the operator's.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     target = (tmp_path / "src").as_posix()

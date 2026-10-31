@@ -309,8 +309,9 @@ def test_semgreps_own_offline_mode_reaches_the_real_resolvers_probe(
     available to the runner and no test would see it; this row calls the real
     signature.
 
-    Fails at the base: the resolver was asked without ``offline``, so the probe of
-    a scanner with ``options.offline: true`` ran online under ASH online.
+    A pin on the check's call: the code already passes the keyword. On the code
+    before the check passed ``offline``, the resolver was asked without it, so the
+    probe of a scanner with ``options.offline: true`` ran online under ASH online.
     """
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.delenv("UV_OFFLINE", raising=False)
