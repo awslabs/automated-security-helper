@@ -340,8 +340,10 @@ def test_without_the_flag_the_metadata_records_no_lift(tmp_path):
     reporter reads it through bool(), so either reads as "not ignored"."""
     merged = _merged(tmp_path, ignore_suppressions=False)
 
-    assert getattr(merged.metadata, "suppressions_ignored", None) in (None, False)
-    assert not getattr(merged.metadata, "suppressions_ignored", None)
+    # None, not merely falsy: a merge that wrote False would record "ignored:
+    # no", which the docstring rules out. The default stands in for both the
+    # absent attribute and the declared field.
+    assert getattr(merged.metadata, "suppressions_ignored", None) is None
 
 
 def test_the_unused_reporter_reads_the_merged_file_as_not_evaluated(tmp_path):

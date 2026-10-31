@@ -161,6 +161,11 @@ class TestARefusedReportLeavesNoMergedFile:
         )
         assert "wasremoved" in console, result.output
 
+
+class TestAReusedOutputDirectoryLosesTheEarlierResultsFile:
+    """No symlink is made here, so unlike the class above this one carries no
+    platform skip."""
+
     def test_an_earlier_runs_results_file_is_removed_before_the_reports_run(
         self, tmp_path, monkeypatch
     ):
@@ -174,17 +179,27 @@ class TestARefusedReportLeavesNoMergedFile:
         output_dir.mkdir(parents=True)
         earlier = output_dir / RESULTS_FILE_NAME
         earlier.write_text("{}", encoding="utf-8")
+        found_when_the_phase_started = []
 
         def failing_execute(self, *args, **kwargs):
+            found_when_the_phase_started.append(earlier.exists())
             raise RuntimeError("a reporter failed")
 
         monkeypatch.setattr(merge_module.ReportPhase, "execute", failing_execute)
 
         result = _MergeCli()._invoke(_args(shard_paths, output_dir))
 
-        assert result.exit_code != 0, result.output
+        # The phase was entered once, and the earlier run's file was already
+        # gone by then: a removal made after the phases, or none, reads True.
+        assert found_when_the_phase_started == [False], result.output
+        # What ended the command is the phase's error, not the ordinary exit 2
+        # of a merge with findings and not a refusal made before the phase.
+        assert result.exit_code == 1, result.output
+        assert isinstance(result.exception, RuntimeError) or (
+            "a reporter failed" in result.output
+        ), result.output
+        # And the failed run wrote no results file in its place.
         assert not earlier.exists(), result.output
-        assert not (output_dir / RESULTS_FILE_NAME).exists(), result.output
 
 
 class TestTheRelocatedOutputDirIsCheckedAgain:

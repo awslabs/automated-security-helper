@@ -211,12 +211,13 @@ class TestTheMergedReportSharesNothingWithTheShards:
                 rule.id = "renamed"
                 edits += 1
         for name, report in merged.additional_reports.items():
-            # The values are models or mappings by shape; edit each as it is,
-            # so a value of the other shape is not left untouched in silence.
-            if isinstance(report, dict):
-                report.clear()
-            else:
-                merged.additional_reports[name] = None
+            # Each value is edited where it sits. Replacing the key would leave
+            # the value a shard may still share untouched, and could never show
+            # a shared one. The fixture's values are mappings; a value of
+            # another shape fails here, in the open, instead of being counted
+            # as an edit it did not make.
+            assert isinstance(report, dict), (name, type(report))
+            report.clear()
             edits += 1
         for row in merged.scanner_results.values():
             row.status = ScannerStatus.ERROR
