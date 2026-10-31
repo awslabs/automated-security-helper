@@ -295,6 +295,11 @@ from automated_security_helper.core.exceptions import (
     ASHConfigUnsetVariableError,
 )
 from automated_security_helper.utils.error_text import os_error_without_named_file
+from automated_security_helper.utils.link_chain import (
+    LINK_HOPS,
+    first_unsafe_link,
+    names_a_windows_share,
+)
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -1543,6 +1548,15 @@ def _not_permitted(found: Path) -> ASHConfigInputNotPermittedError:
     )
 
 
+def _search_dir_not_permitted(search_dir: Path) -> ASHConfigInputNotPermittedError:
+    # Names the directory as given, never what it leads to.
+    return ASHConfigInputNotPermittedError(
+        f"{search_dir.as_posix()}, the directory to look for a config source in, "
+        "leads through a network share, a device path or a link ASH cannot "
+        "read, so ASH does not look inside it."
+    )
+
+
 def _on_windows() -> bool:
     return os.name == "nt"
 
@@ -1619,80 +1633,40 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
 
 #: Links followed before a chain is given up on as unjudgeable: the bound
 #: ``os.path.realpath`` applies to a chain of links before it stops following.
-_LINK_HOPS = 40
+#: The reading itself is ``utils/link_chain`` (the one copy, shared with the MCP
+#: sandbox gates); the bound is a module attribute so a test can shorten it, and
+#: it is passed to the walk at call time.
+_LINK_HOPS = LINK_HOPS
 
 
-#: A drive letter and its separator. Behind the extended or device prefix a bare
-#: ``C:`` with no separator names the volume's device object (``\\.\C:`` opens a
-#: raw volume), not a directory on it, so the separator is required.
-_DRIVE_LETTER_ROOT = re.compile(r"[A-Za-z]:\\")
+def _refused_before_resolving(path: Path) -> bool:
+    """Whether resolving `path` on Windows could connect to a host, or cannot be ruled out.
 
+    Resolving a path there opens what it names, so this reads the path from text
+    and from ``os.lstat`` / ``os.readlink`` alone (``utils/link_chain``), which
+    open a link's own entry and never what it names. True when:
 
-def _may_reach_the_network(target: str) -> bool:
-    """Whether the text of a link `target` can name something other than a local path.
+    - the spelling names a share or a device (a UNC path, or a device-prefixed
+      path whose device is not a drive letter, or a drive path with a ``..``
+      step behind a device prefix);
+    - a link on the way, ANY component from the anchor down and not only the
+      last, or a link that link leads to, names a share or a device, or its
+      target cannot be read, or its chain is longer than ``_LINK_HOPS``;
+    - a component that is there cannot be examined, so whether it is a link
+      cannot be told.
 
-    True for a UNC path, ``\\\\server\\share`` or ``//server/share``, and for a
-    path in the extended or device form (``\\\\?\\...``, ``\\\\.\\...`` or the
-    native ``\\??\\...``) unless its next part is a drive letter and a
-    separator (a bare ``\\\\.\\C:`` is the volume's device). The form is
-    what ``os.readlink`` returns for a junction, so ``\\\\?\\C:\\repo`` is a
-    local volume; ``\\\\?\\UNC\\server\\share``, ``\\\\?\\GLOBALROOT\\Device\\Mup\\...``,
-    ``\\\\?\\GLOBALROOT\\??\\UNC\\...`` and ``\\\\.\\pipe\\...`` can reach a host or
-    a device, and so does any device name not listed here. Only the drive-letter
-    form is admitted: a spelling the list does not know is refused. Both
-    separators are read as one, as Windows reads them.
+    A link that leads only to local names is followed and the components under it
+    are judged where it leads, as resolving would read them; a component that is
+    not there ends the walk with nothing judged, and the permit judges the path
+    as it does on every other platform. A relative link target is walked name by
+    name from the directory the link is in: ``os.lstat`` of the whole collapsed
+    spelling would follow a link among its parents, and open the share at the
+    check meant to prevent it.
     """
-    text = target.replace("/", "\\")
-    if text[:4] in ("\\\\?\\", "\\\\.\\", "\\??\\"):
-        return _DRIVE_LETTER_ROOT.match(text[4:]) is None
-    return text.startswith("\\\\")
-
-
-def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
-    """Whether the link at `path`, or a link it leads to, may reach the network.
-
-    Read with ``os.readlink`` one hop at a time: reading a link's target opens
-    the link's own entry, never what it names, so a chain is judged without a
-    connection to anything it leads to. A relative target is taken from the
-    link's directory, as resolving would take it. The walk ends at the first
-    name that is not a link, or that is not there: a local name is then all
-    that resolving would open, and the answer is False.
-
-    True when a hop's target spells a share or a device (see
-    ``_may_reach_the_network``). None when the chain cannot be judged: a link
-    whose target cannot be read, a hop that cannot be examined, or a chain
-    longer than ``_LINK_HOPS``. The caller refuses then, as it refused every
-    link before, since what resolving would open cannot be told. A link in a
-    parent directory of `path` is not read, as it was not before.
-    """
-    current = os.fspath(path)
-    for _ in range(_LINK_HOPS):
-        try:
-            target = os.readlink(current)
-        except (OSError, ValueError):
-            # ValueError: a reparse point that is neither a symbolic link nor a
-            # junction (a WSL link, say) is read as a link by the lstat test but
-            # has no target os.readlink can return.
-            return None
-        if _may_reach_the_network(target):
-            return True
-        if not os.path.isabs(target):
-            target = os.path.join(os.path.dirname(current), target)
-        target = os.path.normpath(target)
-        try:
-            is_link = _is_a_symlink_or_reparse_point(os.lstat(target))
-        except (FileNotFoundError, NotADirectoryError):
-            # Not there: a local name, which is all that resolving would open.
-            return False
-        except OSError:
-            # Cannot be examined (a directory above it cannot be searched): it
-            # may be a link whose own target was never read and names a share, so
-            # the chain is unjudged and the caller refuses.
-            return None
-        if not is_link:
-            return False
-        current = target
-    return None
+    text = os.fspath(path)
+    if names_a_windows_share(text):
+        return True
+    return first_unsafe_link(text, hops=_LINK_HOPS) is not None
 
 
 def _resolved_if_permitted(path: Path, permit: PermitBase) -> Optional[Path]:
@@ -1702,14 +1676,16 @@ def _resolved_if_permitted(path: Path, permit: PermitBase) -> Optional[Path]:
     descriptor opened after this judgment (``_identity_held_after_the_judgment``),
     never from the name.
     """
-    if _on_windows() and _is_a_link(path):
-        # Resolving a link on Windows can open a connection to the host a UNC
-        # target names, so a link that leads to a share, or whose target cannot
-        # be read, is refused unresolved, as an extends base whose spelling
-        # leaves the root is (_resolve_base_path). A link that leads to a local
-        # name is resolved below and judged as the file it names.
-        if _link_chain_names_a_windows_share(path) is not False:
-            return None
+    if _on_windows() and _refused_before_resolving(path):
+        # Resolving a path on Windows can open a connection to the host a UNC
+        # spelling or a link target names, so a path that leads to a share, or
+        # one a link on the way makes unreadable, is refused unresolved, as an
+        # extends base whose spelling leaves the root is (_resolve_base_path).
+        # Every component is read, not the last alone: a link in a parent
+        # directory is followed by the lstat of the whole spelling. A link that
+        # leads only to local names is resolved below and judged as the file it
+        # names.
+        return None
     # realpath reads links and opens nothing, and does not raise on a loop.
     resolved = Path(os.path.realpath(path))
     return resolved if permit(resolved) else None
@@ -1761,6 +1737,11 @@ def _existing_candidates(
     anything looks inside it: whether a name exists there would otherwise answer
     whether a file exists in a directory the caller may not read.
     """
+    if permit is not None and _on_windows() and _refused_before_resolving(search_dir):
+        # Every lookup below is an lstat of a spelling that passes through
+        # `search_dir`, which follows a link among its components; so the
+        # directory is judged first, whether or not any config name is there.
+        raise _search_dir_not_permitted(search_dir)
     dot_ash = search_dir / ".ash"
     if permit is not None and _name_exists(dot_ash) and not _permitted(dot_ash, permit):
         raise _not_permitted(dot_ash)
