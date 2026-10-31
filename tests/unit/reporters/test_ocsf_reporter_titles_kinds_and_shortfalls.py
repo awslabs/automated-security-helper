@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters import (
     ocsf_reporter as ocsf_module,
@@ -51,6 +52,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporte
     DEGRADED_FINDING_LABEL,
     TITLE_MAX_LENGTH,
     OcsfReporter,
+    _shortfall_uid,
 )
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     Metadata,
@@ -510,9 +512,16 @@ class TestShortfalls:
         assert "1 record(s) were built by the fallback" in shortfall["status_detail"]
 
     @staticmethod
-    def _shortfall_uid_for(
-        reporter, monkeypatch, project_name: str, description: str = ""
-    ) -> str:
+    def _broken_and_fine_results() -> tuple:
+        return (
+            Result(ruleId="BROKEN", level=Level.error, message=Message(text="x")),
+            Result(ruleId="FINE", level=Level.error, message=Message(text="y")),
+        )
+
+    @staticmethod
+    def _shortfall_uid_of(reporter, monkeypatch, model) -> str:
+        """The uid of the shortfall record *model*'s report carries, with the
+        ``BROKEN`` result made unconvertible."""
         original = OcsfReporter._create_vulnerability_finding
 
         def flaky(self, result, metadata, current_time_ms, shared_id=None, **kw):
@@ -521,17 +530,52 @@ class TestShortfalls:
             return original(self, result, metadata, current_time_ms, shared_id, **kw)
 
         monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
-        model = _model(
-            Result(ruleId="BROKEN", level=Level.error, message=Message(text="x")),
-            Result(ruleId="FINE", level=Level.error, message=Message(text="y")),
-        )
-        model.metadata.project_name = project_name
-        if description:
-            model.description = description
         payload = json.loads(reporter.report(model))
         shortfall = payload[-1]
         assert CONVERSION_SHORTFALL_LABEL in shortfall["metadata"]["labels"]
         return shortfall["finding_info"]["uid"]
+
+    @classmethod
+    def _shortfall_uid_for(
+        cls, reporter, monkeypatch, project_name: str, description: str = ""
+    ) -> str:
+        model = _model(*cls._broken_and_fine_results())
+        model.metadata.project_name = project_name
+        if description:
+            model.description = description
+        return cls._shortfall_uid_of(reporter, monkeypatch, model)
+
+    @classmethod
+    def _engine_model(cls, tmp_path, config_yaml: str):
+        """The results model a scan starts from, built the way a scan builds
+        it: the engine reads the project's name from the configuration and
+        records it in the report metadata. Nothing here sets the metadata."""
+        source = tmp_path / "src"
+        source.mkdir(parents=True)
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text(config_yaml, encoding="utf-8")
+        orchestrator = ASHScanOrchestrator.create(
+            source_dir=source, output_dir=tmp_path / "out", config_path=config_path
+        )
+        model = orchestrator.execution_engine._asharp_model
+        model.sarif = _model(*cls._broken_and_fine_results()).sarif
+        return model
+
+    def test_a_project_named_only_in_the_configuration_has_its_own_record(
+        self, reporter, monkeypatch, tmp_path
+    ):
+        """The configuration's project name reaches the shortfall record's uid
+        through the path a scan uses, not through a model whose metadata the
+        test sets: two scans configured with different names get different
+        uids, and one configured name gets the same uid on every run."""
+        uids = {}
+        for key, name in (("a1", "alpha"), ("a2", "alpha"), ("b", "beta")):
+            model = self._engine_model(tmp_path / key, f"project_name: {name}\n")
+            uids[key] = self._shortfall_uid_of(reporter, monkeypatch, model)
+
+        assert uids["a1"] == uids["a2"] == _shortfall_uid("alpha")
+        assert uids["b"] == _shortfall_uid("beta")
+        assert uids["a1"] != uids["b"]
 
     def test_the_shortfall_uid_is_one_per_project(self, reporter, monkeypatch):
         """A fixed uid for every scan merged unrelated scans' records in a SIEM
