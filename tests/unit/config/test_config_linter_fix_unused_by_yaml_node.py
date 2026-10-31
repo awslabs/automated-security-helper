@@ -142,12 +142,12 @@ def test_a_flow_sequence_is_refused_with_a_reason_and_left_as_it_is(tmp_path):
             {"path": "src/b.py", "rule_id": "B102", "reason": "two"},
         ],
     )
-    before = config_path.read_text(encoding="utf-8")
+    before = config_path.read_bytes()
 
     with pytest.raises(UnusedSuppressionsNotEditable, match="flow sequence"):
         ConfigLinter.fix_unused_suppressions(config_path)
 
-    assert config_path.read_text(encoding="utf-8") == before
+    assert config_path.read_bytes() == before
 
 
 def test_every_entry_commented_out_leaves_an_empty_list_in_a_crlf_file(tmp_path):
@@ -322,12 +322,12 @@ def test_a_repeated_suppressions_key_is_refused_with_a_reason(tmp_path):
         "      reason: one\n",
         [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
     )
-    before = config_path.read_text(encoding="utf-8")
+    before = config_path.read_bytes()
 
     with pytest.raises(UnusedSuppressionsNotEditable, match="more than once"):
         ConfigLinter.fix_unused_suppressions(config_path)
 
-    assert config_path.read_text(encoding="utf-8") == before
+    assert config_path.read_bytes() == before
 
 
 def test_a_list_with_nothing_unused_in_it_is_not_refused_for_its_shape(tmp_path):
