@@ -334,12 +334,21 @@ def _probe_answers(monkeypatch, found):
 def test_a_recorded_reason_makes_the_check_answer_false_without_a_path_probe(
     root, monkeypatch
 ):
-    """A construction-time reason is not outvoted by the binary being on PATH."""
+    """A construction-time reason is not outvoted by the binary being on PATH, and
+    the check does not look for the binary at all: the probes are recorded."""
     scanner = _grype(_context(root))
     scanner.dependency_unavailable_reason = "grype is in offline mode with no database"
-    _probe_answers(monkeypatch, "/usr/bin/grype")
+    probed: list[str] = []
+
+    def probe(command):
+        probed.append(command)
+        return "/usr/bin/grype"
+
+    monkeypatch.setattr(scanner_plugin, "find_executable", probe)
+    monkeypatch.setattr(grype_scanner, "find_executable", probe, raising=False)
 
     assert scanner.validate_plugin_dependencies() is False
+    assert probed == []
     assert (
         scanner.dependency_unavailable_reason
         == "grype is in offline mode with no database"
