@@ -1565,8 +1565,9 @@ class ScanRegistry:
         second scan of it, and reopening the first then put two RUNNING scans on
         one output tree. The reopen is refused (False, logged) while another
         entry occupies the directory or the output tree, or a later scan has
-        taken the tree (``_later_scans_holding``); the runner's claim fails and
-        it reports the scan as not started.
+        taken the tree (``_later_scans_holding``), or while the entry's own
+        output tree is being removed (``output_removal``); the runner's claim
+        fails and it reports the scan as not started.
         """
         if status == MCScanStatus.INCOMPLETE:
             # finish_scan is the only way in, because it carries the coverage gap.
@@ -1588,6 +1589,17 @@ class ScanRegistry:
                     self._logger.info(
                         f"Scan {scan_id} stays {entry.status.value}: a scan that "
                         "has ended is not reopened as running"
+                    )
+                    return False
+                if entry.output_removal is not None:
+                    # remove_output_of_scan is deleting this entry's tree off
+                    # the lock. Reopened now, the scan would write into a tree
+                    # being deleted, and the removal's ending would mark the
+                    # running scan's output removed (output_removed).
+                    self._logger.info(
+                        f"Scan {scan_id} stays {entry.status.value}: its output "
+                        "directory is being removed, so it is not reopened as "
+                        "running"
                     )
                     return False
                 if self._another_scan_occupies(entry) or self._later_scans_holding(

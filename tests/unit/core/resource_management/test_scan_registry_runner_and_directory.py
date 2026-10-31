@@ -1733,6 +1733,31 @@ class TestAFileClosedEntryIsNotReopenedOverAnotherScan:
 
         assert registry.get_scan(first).output_removed is False
 
+    def test_the_reopen_is_refused_while_the_entrys_own_tree_is_being_removed(
+        self, tmp_path
+    ):
+        """The remover runs off the registry lock. A runner that reopened the
+        entry in that window wrote into a tree being deleted, and the removal's
+        ending then marked the running scan's output removed, so the enclosing
+        scan's removal later deleted the rerun's files."""
+        registry = ScanRegistry()
+        _root_scan, first = self._file_closed_inside_a_root_scan(registry, tmp_path)
+        reopened = []
+
+        def remover():
+            reopened.append(registry.update_scan_status(first, MCScanStatus.RUNNING))
+            return True
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(first), remover
+        )
+
+        assert (reason, removed) == (None, True)
+        assert reopened == [False]
+        entry = registry.get_scan(first)
+        assert entry.status is not MCScanStatus.RUNNING
+        assert entry.output_removed is True
+
     def test_a_scan_whose_output_was_removed_and_not_reopened_holds_nothing(
         self, tmp_path
     ):
