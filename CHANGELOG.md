@@ -8206,13 +8206,15 @@
   uploaded as a complete, successful scan. The status now follows the same
   incompleteness facts the exit code reads, and each fact adds one `warn`
   message naming the scanner, converter, rule or database and what is absent
-  from the report because of it. Two findings of one
-  rule at one line that the flattening could not pair used to share one `id` and
-  one ASH finding-id identifier; they now carry distinct ones: the first keeps
-  the id it always had, the second is numbered. GitLab merges vulnerabilities
-  that share a location and any identifier other than CWE or WASC, so two such
-  findings that both carry the scanner's rule identifier still read as one
-  there; the distinct ids keep apart those that carry no rule identifier.
+  from the report because of it.
+
+- **Two GitLab SAST findings of one rule at one line that the flattening could
+  not pair carry distinct ids.** They used to share one `id` and one ASH
+  finding-id identifier; they now carry distinct ones: the first keeps the id it
+  always had, the second is numbered. GitLab merges vulnerabilities that share a
+  location and any identifier other than CWE or WASC, so two such findings that
+  both carry the scanner's rule identifier still read as one there; the distinct
+  ids keep apart those that carry no rule identifier.
 
 - **The GitLab SAST and OCSF reports read a result's rule and message as the
   SARIF schema allows.** A result that names its rule as `rule.id` instead of
