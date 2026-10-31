@@ -5808,16 +5808,22 @@ def run_command_stream_output(
                     wait_for_the_watchers_stop()
             finally:
                 try:
-                    if process.poll() is None:
+                    # Asked before the poll below, which reaps a leader that
+                    # has exited: the answer is then False for a group whose
+                    # members still run, and they were left running
+                    # (_run_cancellable asks first for the same reason).
+                    leads_group = _leads_its_own_group(process)
+                    if process.poll() is None or leads_group:
                         # The whole group when the child leads one (the plan's
                         # start_new_session, or a tool that called setsid): a
                         # kill of the pid alone left the members the tool
                         # started running, and holding the output directory
-                        # the cleanup below sweeps. SIGKILL at once, as before,
-                        # with the reap bounded as the tree stop bounds it; a
-                        # child in ASH's own group is killed alone and waited
-                        # for, as before.
-                        if _leads_its_own_group(process):
+                        # the cleanup below sweeps, and so did a leader that
+                        # had exited with members still running. SIGKILL at
+                        # once, as before, with the reap bounded as _stop_tree
+                        # bounds it; a child in ASH's own group is killed
+                        # alone and waited for, as before.
+                        if leads_group:
                             _stop_tree(process, 0.0, None)
                         else:
                             process.kill()

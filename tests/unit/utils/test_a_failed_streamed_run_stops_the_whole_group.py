@@ -151,6 +151,55 @@ def test_a_group_signal_the_kernel_refuses_is_logged_and_the_run_is_unrecorded(
     assert "close" in child.calls
 
 
+class _LeaderExitedUnreaped(_ReadFailsPopen):
+    """A group leader that has exited and is not reaped yet, as a tool's leader is
+    when it ends while members it started run on: until something polls it,
+    its returncode is unset, and the poll reaps it as Popen.poll does."""
+
+    def poll(self):
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode
+
+
+def test_a_leader_that_exited_with_members_still_running_has_its_group_ended(
+    monkeypatch, streamed_run
+):
+    """The read for a group of its own is made before the poll that reaps the
+    leader: a reaped child answers False, and the members it started were left
+    running (and holding the directory the plan's cleanup sweeps)."""
+    monkeypatch.setattr(spu.subprocess, "Popen", _LeaderExitedUnreaped)
+    # What the real probe answers: True for a leader not reaped, False once it is.
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda p: p.returncode is None)
+    # The members run until the group is signalled, whatever the leader did.
+    monkeypatch.setattr(
+        spu, "_group_survives", lambda pgid: (pgid, signal.SIGKILL) not in streamed_run
+    )
+
+    code = spu.run_command_stream_output(["ash-u26-no-such-tool"])
+
+    (child,) = _ReadFailsPopen.instances
+    assert code == spu.UNRECORDED_RUN_RETURNCODE
+    assert streamed_run == [(_PID, signal.SIGKILL)], streamed_run
+    assert "close" in child.calls
+
+
+def test_the_control_a_leader_in_ashs_own_group_that_exited_is_left_alone(
+    monkeypatch, streamed_run
+):
+    """The same exited leader, but in ASH's own group: nothing of its own to end,
+    no group signalled and no kill, as before."""
+    monkeypatch.setattr(spu.subprocess, "Popen", _LeaderExitedUnreaped)
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda process: False)
+
+    code = spu.run_command_stream_output(["ash-u26-no-such-tool"])
+
+    (child,) = _ReadFailsPopen.instances
+    assert code == spu.UNRECORDED_RUN_RETURNCODE
+    assert streamed_run == []
+    assert "kill" not in child.calls
+
+
 def test_the_control_a_child_in_ashs_own_group_is_killed_alone(
     monkeypatch, streamed_run
 ):
