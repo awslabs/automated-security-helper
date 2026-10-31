@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 import pytest
@@ -191,6 +191,34 @@ def test_the_config_warnings_name_the_config_as_configured_not_as_resolved(
         assert str(real) not in message, message
         assert "zz-grype" not in message, message
         assert "zz-home" not in message and "zz-elsewhere" not in message, message
+
+
+def test_the_path_spellings_include_the_native_windows_spelling(monkeypatch):
+    """Path() writes a forward-slash value with backslashes on Windows, and a
+    warning that names the config through Path() prints that spelling. It has to
+    be one of the redaction needles, whatever platform the test runs on."""
+    monkeypatch.setattr(grype_scanner, "Path", PureWindowsPath)
+
+    spellings = grype_scanner._with_path_spellings(
+        ["~/zz-grype-config.yaml", "cfg/./zz-grype.yaml"]
+    )
+
+    assert "~/zz-grype-config.yaml" in spellings
+    assert "~\\zz-grype-config.yaml" in spellings
+    assert "cfg/zz-grype.yaml" in spellings
+    assert "cfg\\zz-grype.yaml" in spellings
+
+
+def test_a_config_named_with_windows_separators_is_redacted(monkeypatch):
+    from automated_security_helper.utils.error_text import text_without_values
+
+    configured = "~/zz-grype-config.yaml"
+    monkeypatch.setattr(grype_scanner, "Path", PureWindowsPath)
+    needles = grype_scanner._with_path_spellings([configured])
+    named = f"The grype config at {PureWindowsPath(configured)} sets only-fixed."
+
+    assert "zz-grype" in named
+    assert "zz-grype" not in text_without_values(named, needles)
 
 
 def _symlinked_source_context(root: Path) -> tuple[PluginContext, Path]:

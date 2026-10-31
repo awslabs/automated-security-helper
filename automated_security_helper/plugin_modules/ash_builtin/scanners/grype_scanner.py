@@ -249,10 +249,17 @@ def _with_path_spellings(values: Iterable[str]) -> list[str]:
 
     The scanner names its config through Path(), which collapses "." segments
     and doubled or trailing slashes, and redaction finds only a spelling it is
-    given.
+    given. On Windows Path() also respells forward slashes with backslashes, so
+    the native spelling is a needle too; elsewhere it equals the POSIX one and
+    is dropped as a repeat.
     """
     values = list(value_tuple(values))
-    spelled = [Path(value).as_posix() for value in values if value and "/" in value]
+    spelled = [
+        spelling
+        for value in values
+        if value and "/" in value
+        for spelling in (Path(value).as_posix(), str(Path(value)))
+    ]
     return list(dict.fromkeys([*values, *spelled]))
 
 
