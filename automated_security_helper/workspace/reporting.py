@@ -485,10 +485,18 @@ class _ConstructionFailure:
     reporter raising in ``__init__`` turned a run with ``--output-format sarif``
     into exit 1 after every project was scanned, where ``ash --source-dir`` on
     the same project passed.
+
+    ``behaviour`` is what the reporter's class declares, so the manifest entry
+    states it where there is no instance to read it from, and so a ``PER_PROJECT``
+    reporter, for which the step owes no workspace-level file, is not failed for
+    one it could not build here. ``file_name`` is the file its report phase writes
+    in each project, from the extension its declared config model defaults to.
     """
 
     error: str
     skipped: Optional[str]
+    behaviour: Optional[ReporterWorkspaceBehaviour] = None
+    file_name: str = "ash.txt"
 
 
 def _construction_skip_reason(
@@ -537,6 +545,20 @@ def _construction_skip_reason(
     return None if str(name or key) in requested else SKIP_NOT_REQUESTED
 
 
+def _declared_file_name(reporter_class: type) -> str:
+    """The file ``ReportPhase`` would write a reporter of this class to, from its class.
+
+    ``ash.<extension>`` with the extension its declared config model defaults to,
+    and ``ash.txt`` where it declares none, as :func:`_report_filename` names the
+    file of a built reporter. An extension a constructor sets some other way is
+    not known without an instance.
+    """
+    declared = declared_config_model(reporter_class, ReporterPluginConfigBase)
+    field = (getattr(declared, "model_fields", None) or {}).get("extension")
+    extension = getattr(field, "default", None)
+    return f"ash.{extension}" if isinstance(extension, str) and extension else "ash.txt"
+
+
 def _build_instance(
     reporter_class: type,
     context,
@@ -577,6 +599,8 @@ def _build_instance(
                 skipped=_construction_skip_reason(
                     reporter_class, key, config, output_formats
                 ),
+                behaviour=_declared_behaviour(reporter_class, key),
+                file_name=_declared_file_name(reporter_class),
             )
         return None
 
@@ -1081,7 +1105,9 @@ def emit_workspace_reports(
         # recorded with that reason, as a built one would be, and fails nothing
         # (_ConstructionFailure).
         manifest_reporters[key] = {
-            "behaviour": None,
+            "behaviour": (
+                failure.behaviour.value if failure.behaviour is not None else None
+            ),
             "considered": False,
             "covers_projects": False,
             "workspace_artifact": None,
@@ -1094,6 +1120,23 @@ def emit_workspace_reports(
             ASH_LOGGER.debug(
                 f"Reporter {key} could not be constructed and would not have run "
                 f"at workspace level ({failure.skipped}); recorded, not a failure."
+            )
+            continue
+        if failure.behaviour is ReporterWorkspaceBehaviour.PER_PROJECT:
+            # A per-project reporter writes in each project's own reports/, so
+            # this step owed no file for it, and a failure to build it in the
+            # workspace context is not one of the step's. Its projects' files
+            # are listed as a built per-project reporter's are.
+            per_project.append(key)
+            entries, missing = _per_project_artifacts(
+                plan, output_dir, failure.file_name, completed()
+            )
+            manifest_reporters[key]["per_project_artifacts"] = entries
+            manifest_reporters[key]["missing_per_project_artifacts"] = missing
+            ASH_LOGGER.warning(
+                f"Reporter {key} is per-project and could not be constructed for "
+                f"the workspace report step; its own projects' report phases "
+                f"write its files, so the run does not fail for it."
             )
             continue
         failures[key] = failure.error

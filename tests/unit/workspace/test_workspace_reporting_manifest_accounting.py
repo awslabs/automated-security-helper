@@ -245,6 +245,28 @@ class FakeOffHostUnbuildableReporter(ReporterPluginBase[_OffHostUnbuildableConfi
         raise AssertionError("never constructed")
 
 
+class _UnbuildablePerProjectConfig(ReporterPluginConfigBase):
+    name: str = "fake-unbuildable-per-project"
+    extension: str = "cdx.json"
+    enabled: bool = True
+
+
+class FakeUnbuildablePerProjectReporter(
+    ReporterPluginBase[_UnbuildablePerProjectConfig]
+):
+    """Per-project, enabled, and raising in the workspace step's constructor: the
+    step owes no workspace file for it, because each project's own report phase
+    writes its files."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+
+    def model_post_init(self, context):
+        raise RuntimeError("cannot be built in the workspace context")
+
+    def report(self, model) -> str:  # pragma: no cover - never constructed
+        raise AssertionError("never constructed")
+
+
 class _NotPythonOnlyConfig(ReporterPluginConfigBase):
     name: str = "fake-python-only-raises"
     extension: str = "pyonly.txt"
@@ -509,8 +531,34 @@ class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
 
         entry = _manifest(output_dir)["reporters"]["fake-unconstructible"]
         assert "skipped" not in entry
+        assert entry["behaviour"] == ReporterWorkspaceBehaviour.MERGED.value
         assert "fake-unconstructible" in outcome.failed_reporters
         assert outcome.failed is True
+
+    def test_a_per_project_reporter_that_cannot_be_built_does_not_fail_the_run(
+        self, workspace
+    ):
+        """The step writes nothing at workspace level for a per-project reporter,
+        so a constructor that raises here fails nothing it owed. The entry names
+        the declared behaviour (it was null) and lists the projects' files."""
+        _, output_dir, _ = workspace
+        outcome = _emit(
+            workspace, FakeUnbuildablePerProjectReporter, FakeMergedReporter
+        )
+
+        entry = _manifest(output_dir)["reporters"]["fake-unbuildable-per-project"]
+        assert entry["behaviour"] == ReporterWorkspaceBehaviour.PER_PROJECT.value
+        assert "could not be constructed" in entry["error"]
+        assert "skipped" not in entry
+        assert entry["per_project_artifacts"] == [
+            {"project": "api", "path": "projects/api/reports/ash.cdx.json"},
+            {"project": "web", "path": "projects/web/reports/ash.cdx.json"},
+        ]
+        assert entry["missing_per_project_artifacts"] == []
+        assert "fake-unbuildable-per-project" not in outcome.failed_reporters
+        assert outcome.per_project_reporters == ("fake-unbuildable-per-project",)
+        assert outcome.failed is False
+        assert "fake-merged" in outcome.workspace_artifacts
 
     def test_a_name_that_cannot_be_read_is_recorded_under_the_class_name(
         self, workspace, monkeypatch
