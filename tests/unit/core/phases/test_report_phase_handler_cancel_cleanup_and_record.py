@@ -40,7 +40,10 @@ from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
-from automated_security_helper.utils.inner_run_outcome import report_file_written_as
+from automated_security_helper.utils.inner_run_outcome import (
+    REPORTS_WRITTEN_CHECKPOINT,
+    report_file_written_as,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -171,3 +174,44 @@ class TestASecondRunKeepsTheFirstRunsRecord:
         assert report_file_written_as(results, "csv") == "ash.csv"
         # Red at the base: the second run's record replaced the first's.
         assert report_file_written_as(results, "sarif") == "ash.sarif"
+
+
+def _record_another_run_left(**metadata) -> dict:
+    return {
+        "type": REPORTS_WRITTEN_CHECKPOINT,
+        "severity": "info",
+        "message": "The report files this run wrote.",
+        "metadata": {"files": ["ash.sarif"], "formats": {"ash.sarif": "sarif"}}
+        | metadata,
+    }
+
+
+class TestARecordAnotherRunLeftIsNotCarriedIntoThisRunsRecord:
+    @pytest.mark.parametrize(
+        "metadata",
+        [{}, {"run_token": "a-token-from-another-process"}],
+        ids=["no token", "another process's token"],
+    )
+    def test_its_sarif_does_not_become_this_runs_sarif(self, tmp_path, metadata):
+        context = _context(tmp_path)
+        results = AshAggregatedResults()
+        # What a loader that did not strip the run records would hand the phase:
+        # an earlier run's record, naming a SARIF file this run does not write.
+        results.validation_checkpoints = [_record_another_run_left(**metadata)]
+        progress = LiveProgressDisplay(show_progress=False)
+
+        phase = _registry_phase(context, progress, results)
+        results = _execute(phase, context, results, ["csv"])
+
+        assert report_file_written_as(results, "csv") == "ash.csv"
+        # Red at the base: the phase read the other run's record token-blind and
+        # passed its files back in as its own, so the earlier ash.sarif was
+        # recorded again under this process's token.
+        assert report_file_written_as(results, "sarif") is None
+        (record,) = [
+            checkpoint
+            for checkpoint in results.validation_checkpoints
+            if checkpoint["type"] == REPORTS_WRITTEN_CHECKPOINT
+        ]
+        assert "ash.csv" in record["metadata"]["files"]
+        assert "ash.sarif" not in record["metadata"]["files"]

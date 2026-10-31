@@ -41,10 +41,7 @@ from automated_security_helper.utils.error_text import (
     error_text,
     traceback_text,
 )
-from automated_security_helper.utils.inner_run_outcome import (
-    REPORTS_WRITTEN_CHECKPOINT,
-    record_reports_written,
-)
+from automated_security_helper.utils.inner_run_outcome import record_reports_written
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
 from automated_security_helper.utils.redacted_model import without_env_scalars
 from automated_security_helper.utils.report_path_links import (
@@ -152,32 +149,6 @@ def _entries_under(directory: Path) -> Optional[set]:
         ASH_LOGGER.debug(f"Could not finish listing {directory}: {e}")
         return None
     return entries
-
-
-def _reports_already_recorded(results: Any) -> List[Tuple[str, Optional[str]]]:
-    """The ``(file name, format)`` pairs an earlier ReportPhase of this run recorded.
-
-    Read from the results' ``reports_written`` record as ``record_reports_written``
-    wrote it; empty when there is none. A results model loaded from a file has
-    had the record stripped (``without_run_records``), so a record present here
-    was written in this process, by a ReportPhase that ran before this one on the
-    same results, and its files are this run's.
-    """
-    for checkpoint in getattr(results, "validation_checkpoints", None) or []:
-        if not (
-            isinstance(checkpoint, dict)
-            and checkpoint.get("type") == REPORTS_WRITTEN_CHECKPOINT
-        ):
-            continue
-        metadata = checkpoint.get("metadata")
-        formats = metadata.get("formats") if isinstance(metadata, dict) else None
-        if not isinstance(formats, dict):
-            return []
-        return [
-            (str(name), format_name if isinstance(format_name, str) else None)
-            for name, format_name in formats.items()
-        ]
-    return []
 
 
 def _excluded_reporter_reason(
@@ -1153,16 +1124,15 @@ class ReportPhase(EnginePhase):
         # the ash.sarif there is an earlier run's, and another reporter's extension
         # can name that file (utils/inner_run_outcome.py).
         #
-        # Added to what an earlier ReportPhase of this same run recorded, not
-        # written over it. `ash merge` runs two: the local reporters, then the
-        # off-host ones, on one results model, and the second's record replaced
-        # the first's, so the SARIF the first wrote was no longer recorded and the
-        # exit code fell back to the in-memory metrics. Results loaded from a file
-        # carry no such record (without_run_records strips it), so whatever is on
-        # the model was written in this process.
-        record_reports_written(
-            aggregated_results,
-            [*_reports_already_recorded(aggregated_results), *written_files],
-        )
+        # record_reports_written adds to a record an earlier ReportPhase of this
+        # same process left on the model, and replaces any other. `ash merge`
+        # runs two phases on one results model: the local reporters, then the
+        # off-host ones, and the second's record used to replace the first's, so
+        # the SARIF the first wrote was no longer recorded and the exit code fell
+        # back to the in-memory metrics. A record that carries another process's
+        # token, or none, is not this run's and is not carried over: its files
+        # are not passed back in here, so a loader that did not strip the run
+        # records cannot make an earlier run's report this run's.
+        record_reports_written(aggregated_results, written_files)
 
         return aggregated_results
