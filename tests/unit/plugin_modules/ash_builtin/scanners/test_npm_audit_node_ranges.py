@@ -165,6 +165,12 @@ def _debug_messages(monkeypatch):
     return messages, restore
 
 
+def _named_copies(message: str) -> list:
+    """The copies a disagreement log names: the list in its parentheses."""
+    named = message.split("while npm listed them (", 1)[1].split(")", 1)[0]
+    return named.split(", ")
+
+
 def test_an_entry_whose_every_copy_is_excluded_keeps_its_results(scanner, monkeypatch):
     """Both copies at versions outside both ranges: npm listed the advisory for
     them and counted it in the metadata, so this reading of the lockfile and
@@ -187,7 +193,9 @@ def test_an_entry_whose_every_copy_is_excluded_keeps_its_results(scanner, monkey
     logged = [m for m in messages.texts if "fall outside every range" in m]
     assert len(logged) == 1, messages.texts
     assert "2 of 2 listed copy(ies) of minimist" in logged[0], logged[0]
-    assert old in logged[0] and fixed in logged[0], logged[0]
+    # The hoisted path is also the tail of the nested one, so a substring check
+    # passes a log that names only the nested copy; compare the named list.
+    assert _named_copies(logged[0]) == sorted([old, fixed]), logged[0]
 
 
 def test_a_listed_copy_no_range_covers_is_kept_as_a_disagreement(scanner, monkeypatch):
@@ -212,7 +220,7 @@ def test_a_listed_copy_no_range_covers_is_kept_as_a_disagreement(scanner, monkey
     logged = [m for m in messages.texts if "fall outside every range" in m]
     assert len(logged) == 1, messages.texts
     assert "1 of 2 listed copy(ies) of minimist" in logged[0], logged[0]
-    assert odd in logged[0] and old not in logged[0], logged[0]
+    assert _named_copies(logged[0]) == [odd], logged[0]
 
 
 def _mixed_report(nodes, own_range="<2.0.0", dependency="mkdirp"):
