@@ -20,7 +20,7 @@ from automated_security_helper.utils import get_scan_set
 from automated_security_helper.utils.get_scan_set import (
     get_ash_ignorespec_with_attribution,
 )
-from automated_security_helper.utils.log import TextFileFormatter
+from automated_security_helper.utils.log import TextFileFormatter, console_text
 
 pytestmark = pytest.mark.unit
 
@@ -32,7 +32,9 @@ def _refuse(self, pattern, base_path=None):
 def test_a_refused_ignore_rule_is_shown_once_in_the_skip_warning(tmp_path):
     """The parser is made to refuse every rule, so the warning's text is what is
     measured, not which patterns igittigitt refuses. The message is formatted
-    the way ash.log formats it (TextFileFormatter), which is the sink's show."""
+    the way ash.log formats it (TextFileFormatter) and the way the console
+    handler renders it (console_text, which ConsoleHandler.render_message
+    calls): both sinks show the raw rule once."""
     rule = "build" + chr(0x1B) + "[31m"
     warning = MagicMock()
     with (
@@ -46,7 +48,10 @@ def test_a_refused_ignore_rule_is_shown_once_in_the_skip_warning(tmp_path):
     record = logging.LogRecord("ash", logging.WARNING, __file__, 1, message, None, None)
     written = TextFileFormatter("%(message)s").format(record)
 
-    assert "Skipped ignore rule" in written, written
-    assert "build\\x1b[31m" in written, written
-    assert "\\\\x1b" not in written, written
-    assert chr(0x1B) not in written, written
+    shown = console_text(record, record.getMessage())
+
+    for text in (written, shown):
+        assert "Skipped ignore rule" in text, text
+        assert "build\\x1b[31m" in text, text
+        assert "\\\\x1b" not in text, text
+        assert chr(0x1B) not in text, text
