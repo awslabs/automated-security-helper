@@ -475,6 +475,69 @@ def test_a_delivered_relative_ignore_file_equal_to_the_operators_is_anchored(tmp
     assert config._client_scanner_exclusions == []
 
 
+def _strip_chain(config, operators: list[dict], delivered: dict, tmp_path: Path):
+    """``strip_client_scanner_exclusions`` over a chain of operator documents,
+    each in a directory of its own (``op0``, ``op1``, ...), then the delivered
+    one."""
+    documents = {
+        tmp_path / f"op{index}" / "ash.yaml": document
+        for index, document in enumerate(operators)
+    }
+    documents[tmp_path / "c.yaml"] = delivered
+    return strip_client_scanner_exclusions(
+        config,
+        documents,
+        AshConfig(),
+        source_dir=tmp_path,
+        scanned_root=tmp_path,
+        is_delivered=lambda path: Path(path) == tmp_path / "c.yaml",
+    )
+
+
+def _bandit_excluded(*entries: dict) -> dict:
+    return {"scanners": {"bandit": {"options": {"excluded_paths": list(entries)}}}}
+
+
+def test_the_last_operator_file_to_write_an_entry_governs_it(tmp_path):
+    """The chain is last-writer-wins, and the first entry seen for a pattern
+    was kept: an earlier file listed ``vendor`` unexpired, a later one let it
+    expire, and a client's copy was respelled as the earlier file's entry and
+    kept, reviving what the operator had retired."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="vendor", reason="client says"),
+    ]
+    earlier = _bandit_excluded(
+        {"path": "vendor", "reason": "op1", "expiration": "2099-01-01"}
+    )
+    later = _bandit_excluded(
+        {"path": "vendor", "reason": "op2", "expiration": "2020-01-01"}
+    )
+
+    _strip_chain(config, [earlier, later], {}, tmp_path)
+
+    assert config.scanners.bandit.options.excluded_paths == []
+    assert config._client_scanner_exclusions == []
+
+
+def test_the_last_operator_file_to_set_an_ignore_file_anchors_it_at_its_directory(
+    tmp_path,
+):
+    """Two operator files in different directories both set the ignore file; a
+    delivered copy of the shared relative text is the LATER file's, anchored
+    at that file's own directory: anchored at the first, the option named a
+    file the operator's last word never wrote."""
+    config = AshConfig()
+    options = config.scanners.trivy.options
+    options.ignore_file = ".trivyignore"
+    trivy = {"scanners": {"trivy": {"options": {"ignore_file": ".trivyignore"}}}}
+
+    _strip_chain(config, [trivy, trivy], trivy, tmp_path)
+
+    assert options.ignore_file == str(tmp_path / "op1" / ".trivyignore")
+    assert config._client_scanner_exclusions == []
+
+
 def test_an_entry_an_operator_file_adds_by_a_patch_operation_is_the_operators(
     tmp_path,
 ):

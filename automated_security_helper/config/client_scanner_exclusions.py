@@ -1638,16 +1638,27 @@ def _operator_entries(
 ) -> Dict[str, Any]:
     """The entries the operator supplied for ``spec``, by pattern: defaults, the trusted config, operator files.
 
-    The first entry seen for a pattern is kept, in that order. For a trivy
-    ignore file the keys also hold each value resolved from its document's
-    directory, so a relative operator value compares with the anchored absolute
-    path the merged config holds.
+    The defaults and the trusted config come first and keep a pattern they
+    hold. Among the files of the chain the last entry seen for a pattern wins,
+    as the chain itself is last-writer-wins: the first was kept before, so a
+    pattern a later file let expire or changed was still the earlier file's
+    unexpired entry here, and a client's copy of it was respelled as that entry
+    and kept. For a trivy ignore file the keys also hold each value resolved
+    from its document's directory, so a relative operator value compares with
+    the anchored absolute path the merged config holds.
     """
     from automated_security_helper.config.operator_paths import anchored_path
 
     found: Dict[str, Any] = {pattern: pattern for pattern in spec.default}
+    written_by_a_file: Set[str] = set()
 
-    def take(value: Any, directory: Optional[Path]) -> None:
+    def put(key: str, entry: Any, from_a_file: bool) -> None:
+        if key not in found or (from_a_file and key in written_by_a_file):
+            found[key] = entry
+            if from_a_file:
+                written_by_a_file.add(key)
+
+    def take(value: Any, directory: Optional[Path], from_a_file: bool = False) -> None:
         if spec.kind == "trivy-ignore-file":
             text = _path_text(value)
             if text:
@@ -1660,30 +1671,30 @@ def _operator_entries(
                     if directory is None
                     else anchored_path(text, directory, expands_variables=False)
                 )
-                found.setdefault(text, held)
-                found.setdefault(Path(text).as_posix(), held)
+                put(text, held, from_a_file)
+                put(Path(text).as_posix(), held, from_a_file)
                 anchored = Path(text) if directory is None else directory / text
                 try:
-                    found.setdefault(anchored.resolve().as_posix(), held)
+                    put(anchored.resolve().as_posix(), held, from_a_file)
                 except (OSError, RuntimeError, ValueError):
                     pass
             return
         if isinstance(value, str):
-            found.setdefault(value, value)
+            put(value, value, from_a_file)
             return
         if not isinstance(value, list):
             return
         for entry in value:
             pattern, _ = _pattern_of(entry)
             if pattern is not None:
-                found.setdefault(pattern, entry)
+                put(pattern, entry, from_a_file)
 
     read = base.get_plugin_config("scanner", spec.scanner) if base is not None else None
     if isinstance(read, dict):
         take(_get(read.get("options") or {}, spec.option), None)
     for path, document in operator_documents:
         for value in _document_values(document, spec, read_key):
-            take(value, Path(path).parent)
+            take(value, Path(path).parent, from_a_file=True)
     return found
 
 
