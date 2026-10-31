@@ -19,6 +19,8 @@ kill is a recorder, and the module's count and registry are this test's own.
 """
 
 import os
+import signal
+import subprocess  # nosec B404 - the module under test wraps subprocess
 from typing import List
 
 import pytest
@@ -69,6 +71,7 @@ def registry(monkeypatch):
     monkeypatch.setattr(spu, "_STOPPING", False)
     monkeypatch.setattr(spu, "_SPAWNS_STARTING", 0)
     monkeypatch.setattr(spu, "_RUNNING_GROUPS", {})
+    monkeypatch.setattr(spu, "_SERVER_KILLED", set())
     mirrored: List[int] = []
     monkeypatch.setattr(spu, "record_tool_group", mirrored.append)
     monkeypatch.setattr(spu, "_reap", lambda args, process: None)
@@ -183,3 +186,62 @@ def test_a_child_in_ashs_own_group_takes_no_part(monkeypatch, registry):
     assert completed.returncode == 0
     assert spu._SPAWNS_STARTING == 0
     assert registry["mirrored"] == []
+
+
+class _ChildTheServerEnds(_Child):
+    """A child that dies of SIGKILL while the runner waits on it, as one does when
+    the server's last step signals it: that step sets its flag, and (when it
+    signalled this child) records the pid it signalled."""
+
+    def __init__(self, *, signalled_by_the_server: bool = True) -> None:
+        super().__init__()
+        self.signalled_by_the_server = signalled_by_the_server
+
+    def communicate(self, *args, **kwargs):
+        self.calls.append("communicate")
+        spu._STOPPING = True
+        if self.signalled_by_the_server:
+            spu._SERVER_KILLED.add(self.pid)
+        self.returncode = -signal.SIGKILL
+        return None, None
+
+    def wait(self, timeout=None):
+        self.calls.append("wait")
+        return self.returncode
+
+
+@pytest.mark.parametrize("check", [False, True], ids=["unchecked", "check"])
+def test_a_child_the_servers_last_step_killed_ends_the_run_as_a_cancel(
+    check, monkeypatch, registry
+):
+    """The server began stopping while the tool ran and signalled the recorded
+    child: the run ends as the cancel the cancellable runner raises, not as a
+    completed run whose code is a SIGKILL ASH did not send, and not, with
+    ``check``, as a CalledProcessError for a tool that did not fail."""
+    child = _ChildTheServerEnds()
+    _popen(monkeypatch, child)
+
+    with pytest.raises(
+        ScanCancelled, match="the server is stopping, so tool was stopped"
+    ):
+        spu._run_plain(["tool"], timeout=5, check=check)
+
+    assert registry["stops"] == [], "a child the server ended was ended again"
+    assert spu._SPAWNS_STARTING == 0
+
+
+def test_a_sigkill_death_of_a_child_in_ashs_own_group_is_returned_as_it_is(
+    monkeypatch, registry
+):
+    """The control: with no timeout the child shares ASH's group, is never
+    recorded, and the server's last step cannot signal it. A SIGKILL death
+    in the same seconds is the tool's own ending (the operator's kill, the
+    kernel's), returned as a code, whether or not the server is stopping."""
+    child = _ChildTheServerEnds(signalled_by_the_server=False)
+    _popen(monkeypatch, child)
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda process: False)
+
+    completed = spu._run_plain(["tool"])
+
+    assert completed.returncode == -signal.SIGKILL
+    assert isinstance(completed, subprocess.CompletedProcess)

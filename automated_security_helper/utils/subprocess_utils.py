@@ -2939,6 +2939,20 @@ def _run_plain(
             # communicate() waited for the child, so this returns its code at
             # once.
             retcode = process.wait()
+            if own_group and _stopped_by_the_server(retcode, process):
+                # The wait ended because the server's last step
+                # (kill_running_groups) signalled this recorded child: ASH's own
+                # doing, so the run ends as the cancel a child killed by
+                # _record_spawn is promised, as _run_cancellable ends it.
+                # Returned, the code would read as the tool's own ending (a
+                # SIGKILL ASH did not send), or with ``check`` as a
+                # CalledProcessError. Only a child this runner recorded is the
+                # server's to kill; one in ASH's own group is never signalled
+                # by it.
+                raise ScanCancelled(
+                    "the server is stopping, so "
+                    f"{_shown_tool(argv, _SPAWN_VALUES.get())} was stopped"
+                )
             if check and retcode:
                 raise subprocess.CalledProcessError(
                     retcode, process.args, output=stdout, stderr=stderr
