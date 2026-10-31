@@ -90,6 +90,12 @@ FORMAT_NO_REPORTER = "no-reporter"
 #: that names the real problem.
 FORMAT_REPORTER_FAILED = "reporter-failed-to-build"
 
+#: The reporter exists and is enabled, but it could not name the files it writes,
+#: so the phase left it out before any reporter ran. Its own cause: the line the
+#: phase logged for it names the reporter and says why, and sending the operator
+#: to credentials and a network (the dependency reason) was the wrong place.
+FORMAT_REPORTER_FILES_UNNAMED = "reporter-files-unnamed"
+
 #: What to tell the operator for each cause, and where to send them. Keyed by
 #: reason so that adding a reason without a message is a ``KeyError`` at the point
 #: of logging rather than a diagnosis that silently prints nothing -- the failure
@@ -106,6 +112,11 @@ _FORMAT_REASON_MESSAGES = {
     FORMAT_REPORTER_FAILED: (
         "its reporter could not be created. The 'Error creating reporter' line "
         "above names the reporter and says why."
+    ),
+    FORMAT_REPORTER_FILES_UNNAMED: (
+        "its reporter could not name the files it writes, so it was not run. The "
+        "'is not run: it could not name the files it writes' line above names the "
+        "reporter and says why."
     ),
     FORMAT_REPORTER_DEPENDENCIES: (
         "its reporter's dependencies are not satisfied. It is enabled, but its "
@@ -210,6 +221,7 @@ def unsatisfied_output_formats(
     python_based_plugins_only: bool = False,
     off_host_refused: Collection[int] = (),
     failed_to_build: Collection[str] = (),
+    files_unnamed: Collection[int] = (),
 ) -> Dict[str, str]:
     """Requested formats that will produce no report, and why.
 
@@ -245,6 +257,8 @@ def unsatisfied_output_formats(
             sends findings off the host and its section does not enable it.
         failed_to_build: The names of the reporters that could not be created, so
             a requested format of one is told apart from a format no reporter has.
+        files_unnamed: ``id()`` of each enabled instance the phase left out because
+            it could not name the files it writes.
 
     Returns:
         Format name -> the reason it will produce nothing, one of the
@@ -273,7 +287,9 @@ def unsatisfied_output_formats(
         if fmt in selected_names:
             continue
         instance = known_by_name.get(fmt)
-        if instance is not None:
+        if instance is not None and id(instance) in files_unnamed:
+            unsatisfied[fmt] = FORMAT_REPORTER_FILES_UNNAMED
+        elif instance is not None:
             unsatisfied[fmt] = _excluded_reporter_reason(
                 instance, python_based_plugins_only, id(instance) in off_host_refused
             )
@@ -704,7 +720,14 @@ class ReportPhase(EnginePhase):
         # collision checks, before any reporter runs. One whose declaration raises
         # is left out here, with its own error, so it cannot abort the phase and
         # take every other report with it.
-        enabled_reporters = self._reporters_that_name_their_files(enabled_reporters)
+        named_reporters = self._reporters_that_name_their_files(enabled_reporters)
+        kept_ids = {id(plugin_instance) for plugin_instance in named_reporters}
+        files_unnamed = {
+            id(plugin_instance)
+            for plugin_instance in enabled_reporters
+            if id(plugin_instance) not in kept_ids
+        }
+        enabled_reporters = named_reporters
         enabled_reporter_names = [
             _display_name(plugin_instance) for plugin_instance in enabled_reporters
         ]
@@ -725,6 +748,7 @@ class ReportPhase(EnginePhase):
                 python_based_plugins_only=python_based_plugins_only,
                 off_host_refused=off_host_refused,
                 failed_to_build=failed_to_build,
+                files_unnamed=files_unnamed,
             )
         )
 
