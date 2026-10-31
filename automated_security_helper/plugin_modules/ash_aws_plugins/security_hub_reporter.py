@@ -39,9 +39,11 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
     RETRYABLE_EXCEPTIONS,
+    blank_is_unset,
     check_retry_delays,
     report_missing_setting,
     retry_with_backoff,
+    stripped_or_none,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.finding_identity import (
@@ -195,15 +197,14 @@ class SecurityHubImportError(RuntimeError):
 class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     # Read from the environment when the options are built, not when this module
     # is imported, so a config built later sees the run's environment.
-    # An empty value is unset: AWS_REGION="" does not hide AWS_DEFAULT_REGION,
-    # and an empty AWS_PROFILE is no profile.
+    # An empty or blank value is unset: AWS_REGION="" or " " does not hide
+    # AWS_DEFAULT_REGION, and an empty AWS_PROFILE is no profile.
     aws_region: Annotated[
         str | None,
         Field(
             default_factory=lambda: (
-                os.environ.get("AWS_REGION")
-                or os.environ.get("AWS_DEFAULT_REGION")
-                or None
+                stripped_or_none(os.environ.get("AWS_REGION"))
+                or stripped_or_none(os.environ.get("AWS_DEFAULT_REGION"))
             ),
             description="AWS Region for Security Hub integration",
         ),
@@ -211,7 +212,7 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     aws_profile: Annotated[
         str | None,
         Field(
-            default_factory=lambda: os.environ.get("AWS_PROFILE") or None,
+            default_factory=lambda: stripped_or_none(os.environ.get("AWS_PROFILE")),
             description="AWS Profile to use for authentication",
         ),
     ]
@@ -251,6 +252,11 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
             description="Maximum delay in seconds between retry attempts",
         ),
     ] = 60.0
+    # findings_scope and aws_profile take text only. An all-digit value YAML or
+    # --config-overrides hands over as an int is refused rather than converted:
+    # the text the operator wrote is not recoverable from the int (YAML reads
+    # `0755` as octal 493), so a converted value could name a scope or profile
+    # they never wrote. Quote it in the config to keep it text.
     findings_scope: Annotated[
         str | None,
         Field(
@@ -296,24 +302,8 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     @field_validator("aws_region", "aws_profile", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: Any) -> Any:
-        """An empty or blank value is no value, whichever way it arrives.
-
-        The default factories read the environment that way; a config file
-        (``aws_profile: "${AWS_PROFILE}"`` with the variable empty) or
-        ``--config-overrides`` reaches the field here instead. Mapped to None, a
-        blank profile is no profile (botocore reads "" as a profile named "" and
-        raises ProfileNotFound) and a blank region is named as the missing
-        setting rather than sent to AWS.
-        """
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
-
-    # findings_scope and aws_profile take text only. An all-digit value YAML or
-    # --config-overrides hands over as an int is refused rather than converted:
-    # the text the operator wrote is not recoverable from the int (YAML reads
-    # `0755` as octal 493), so a converted value could name a scope or profile
-    # they never wrote. Quote it in the config to keep it text.
+        """A blank region or profile is no value (``blank_is_unset``)."""
+        return blank_is_unset(value)
 
     @model_validator(mode="after")
     def _retry_delays_are_bounded(self):
@@ -480,11 +470,12 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
     # Sends findings to AWS with the host's credentials.
     sends_off_host = True
-    # The two scope options are the operator's as much as the Region: which
-    # findings a scan owns, updates and archives. Declared here now that the
-    # options model defines them, so the declaration ``ash merge`` and
-    # ``ash report`` read (``declared_destination_options``) names them as the
-    # trust table does.
+    # The Region and profile, the account, the archive switch and the findings
+    # scope are the operator's: where the findings are sent, and which of them a
+    # scan owns, updates and archives. The retry options set how long it keeps
+    # calling Security Hub with the operator's credentials. Declared here so
+    # the declaration ``ash merge`` and ``ash report`` read
+    # (``declared_destination_options``) names them as the trust table does.
     destination_options = (
         "aws_region",
         "aws_profile",

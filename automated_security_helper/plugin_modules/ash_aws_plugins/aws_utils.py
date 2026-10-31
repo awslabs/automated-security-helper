@@ -83,6 +83,58 @@ def report_missing_setting(
     )
 
 
+def stripped_or_none(value: Optional[str]) -> Optional[str]:
+    """A value read from the environment without the whitespace around it, or None
+    when nothing is left.
+
+    For an AWS reporter option's default factory, which reads each variable it
+    names with ``os.environ.get`` itself (the reference documentation is built
+    from those reads). Pydantic runs no validator on a default, so a variable
+    set to a space would otherwise be the default: it hides the variable behind
+    it in the chain (``AWS_DEFAULT_REGION``), passes the missing-setting check
+    and reaches botocore as a region.
+    """
+    return (value or "").strip() or None
+
+
+def blank_is_unset(value: Any) -> Any:
+    """An empty or blank string is no value, whichever way it arrives; any other
+    value as given.
+
+    For an AWS reporter's option validator (``mode="before"``): the default
+    factories read the environment that way (``stripped_or_none``), and a config
+    file (``aws_profile: "${AWS_PROFILE}"`` with the variable empty) or
+    ``--config-overrides`` reaches the field through the validator instead.
+    Mapped to None, a blank profile is no profile (botocore reads "" as a
+    profile named "" and raises ProfileNotFound), and a blank region or name is
+    named as the missing setting rather than refused by the region pattern or
+    sent to AWS.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def settings_missing(
+    reporter_key: str,
+    options: Any,
+    required: Sequence[Tuple[str, Sequence[str]]],
+) -> bool:
+    """Name each of the ``required`` options of ``options`` that is unset or
+    empty, with ``report_missing_setting``; True when one is.
+
+    ``required`` is ``(option, environment variables its default is read from)``
+    pairs. ``not`` rather than ``is None``: an empty name stays out of the AWS
+    call should one ever get through ``blank_is_unset``.
+    """
+    missing = False
+    for option, environment in required:
+        if not getattr(options, option):
+            report_missing_setting(reporter_key, option, environment)
+            missing = True
+    return missing
+
+
 #: The most retries an AWS reporter's options allow, and the longest delay in
 #: seconds between two attempts, so no config makes a reporter keep calling an
 #: API that refuses it for longer than that.

@@ -16,10 +16,12 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     AWS_REGION_PATTERN,
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
+    blank_is_unset,
     check_retry_delays,
-    report_missing_setting,
     reporter_client_config,
     retry_with_backoff,
+    settings_missing,
+    stripped_or_none,
 )
 
 
@@ -46,13 +48,12 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
         Field(
-            # An empty value is unset: AWS_REGION="" does not hide
-            # AWS_DEFAULT_REGION, and an empty region is named as the missing
-            # setting rather than refused by the pattern or sent to AWS.
+            # An empty or blank value is unset: AWS_REGION="" or " " does not
+            # hide AWS_DEFAULT_REGION, and an empty region is named as the
+            # missing setting rather than refused by the pattern or sent to AWS.
             default_factory=lambda: (
-                os.environ.get("AWS_REGION")
-                or os.environ.get("AWS_DEFAULT_REGION")
-                or None
+                stripped_or_none(os.environ.get("AWS_REGION"))
+                or stripped_or_none(os.environ.get("AWS_DEFAULT_REGION"))
             ),
             # The three AWS reporters share one pattern (aws_utils), so a
             # region one of them accepts is never a configuration error for
@@ -64,10 +65,10 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     log_group_name: Annotated[
         str | None,
         Field(
-            # An empty value is unset, so it is named as missing instead of
-            # reaching CreateLogStream as an empty group name.
-            default_factory=lambda: (
-                os.environ.get("ASH_CLOUDWATCH_LOG_GROUP_NAME") or None
+            # An empty or blank value is unset, so it is named as missing
+            # instead of reaching CreateLogStream as an empty group name.
+            default_factory=lambda: stripped_or_none(
+                os.environ.get("ASH_CLOUDWATCH_LOG_GROUP_NAME")
             ),
             description="CloudWatch Logs group name to publish results to",
         ),
@@ -108,17 +109,8 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     @field_validator("aws_region", "log_group_name", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: Any) -> Any:
-        """An empty or blank value is no value, whichever way it arrives.
-
-        The default factories read the environment that way; a config file
-        (``aws_region: "${AWS_REGION}"`` with the variable empty) or
-        ``--config-overrides`` reaches the field here instead. Mapped to None, a
-        blank region or group name is named as the missing setting rather than
-        refused by the region pattern or sent to AWS as an empty name.
-        """
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+        """A blank region or group name is no value (``blank_is_unset``)."""
+        return blank_is_unset(value)
 
     @model_validator(mode="after")
     def _retry_delays_are_bounded(self):
@@ -244,18 +236,14 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         the environment or a config file alike; ``not`` rather than ``is None``
         keeps an empty name out of CreateLogStream should one ever get through.
         """
-        missing = False
-        if not self.config.options.aws_region:
-            report_missing_setting(
-                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
-            )
-            missing = True
-        if not self.config.options.log_group_name:
-            report_missing_setting(
-                self.config.name, "log_group_name", ("ASH_CLOUDWATCH_LOG_GROUP_NAME",)
-            )
-            missing = True
-        return missing
+        return settings_missing(
+            self.config.name,
+            self.config.options,
+            (
+                ("aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")),
+                ("log_group_name", ("ASH_CLOUDWATCH_LOG_GROUP_NAME",)),
+            ),
+        )
 
     def report(self, model: "AshAggregatedResults") -> str | None:
         """Publishes AshAggregatedResults as a CloudWatchLogs event.

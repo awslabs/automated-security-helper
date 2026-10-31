@@ -26,10 +26,12 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     AWS_REGION_PATTERN,
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
+    blank_is_unset,
     check_retry_delays,
-    report_missing_setting,
     reporter_client_config,
     retry_with_backoff,
+    settings_missing,
+    stripped_or_none,
 )
 
 if TYPE_CHECKING:
@@ -40,13 +42,12 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         Optional[str],
         Field(
-            # An empty value is unset: AWS_REGION="" does not hide
-            # AWS_DEFAULT_REGION, and an empty region is named as the missing
-            # setting rather than refused by the pattern or sent to AWS.
+            # An empty or blank value is unset: AWS_REGION="" or " " does not
+            # hide AWS_DEFAULT_REGION, and an empty region is named as the
+            # missing setting rather than refused by the pattern or sent to AWS.
             default_factory=lambda: (
-                os.environ.get("AWS_REGION")
-                or os.environ.get("AWS_DEFAULT_REGION")
-                or None
+                stripped_or_none(os.environ.get("AWS_REGION"))
+                or stripped_or_none(os.environ.get("AWS_DEFAULT_REGION"))
             ),
             # The three AWS reporters share one pattern (aws_utils), so a region
             # one accepts is never a configuration error for another.
@@ -57,17 +58,20 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     aws_profile: Annotated[
         Optional[str],
         Field(
-            # An empty AWS_PROFILE is no profile, not a profile named "".
-            default_factory=lambda: os.environ.get("AWS_PROFILE") or None,
+            # An empty or blank AWS_PROFILE is no profile, not a profile named
+            # "" or " ".
+            default_factory=lambda: stripped_or_none(os.environ.get("AWS_PROFILE")),
             description="AWS profile to use for authentication",
         ),
     ]
     bucket_name: Annotated[
         Optional[str],
         Field(
-            # An empty value is unset, so it is named as missing instead of
-            # reaching PutObject as an empty bucket name.
-            default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME") or None,
+            # An empty or blank value is unset, so it is named as missing
+            # instead of reaching PutObject as an empty bucket name.
+            default_factory=lambda: stripped_or_none(
+                os.environ.get("ASH_S3_BUCKET_NAME")
+            ),
             description="Name of the S3 bucket to store reports",
         ),
     ]
@@ -113,18 +117,8 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     @field_validator("aws_region", "aws_profile", "bucket_name", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: Any) -> Any:
-        """An empty or blank value is no value, whichever way it arrives.
-
-        The default factories read the environment that way; a config file
-        (``aws_profile: "${AWS_PROFILE}"`` with the variable empty) or
-        ``--config-overrides`` reaches the field here instead. Mapped to None, a
-        blank profile is no profile (botocore reads "" as a profile named "" and
-        raises ProfileNotFound), and a blank region or bucket is named as the
-        missing setting rather than refused by the region pattern or sent to AWS.
-        """
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+        """A blank region, profile or bucket is no value (``blank_is_unset``)."""
+        return blank_is_unset(value)
 
     @model_validator(mode="after")
     def _retry_delays_are_bounded(self):
@@ -289,18 +283,14 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         the environment or a config file alike; ``not`` rather than ``is None``
         keeps an empty name out of PutObject should one ever get through.
         """
-        missing = False
-        if not self.config.options.aws_region:
-            report_missing_setting(
-                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
-            )
-            missing = True
-        if not self.config.options.bucket_name:
-            report_missing_setting(
-                self.config.name, "bucket_name", ("ASH_S3_BUCKET_NAME",)
-            )
-            missing = True
-        return missing
+        return settings_missing(
+            self.config.name,
+            self.config.options,
+            (
+                ("aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")),
+                ("bucket_name", ("ASH_S3_BUCKET_NAME",)),
+            ),
+        )
 
     def report(self, model: "AshAggregatedResults") -> str | None:
         """Upload the results to S3 and return a JSON receipt, or None on failure.
