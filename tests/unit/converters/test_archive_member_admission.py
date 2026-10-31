@@ -1079,3 +1079,4 @@ def test_a_member_written_where_earlier_members_are_extracted_below_is_refused_a
     (refused,) = converter.refused_inputs
     assert (refused.path, refused.member) == (f"a.{kind}", "d.js")
     assert "below its path" in refused.reason, refused.reason
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
