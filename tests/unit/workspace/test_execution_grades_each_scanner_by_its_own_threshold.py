@@ -291,11 +291,11 @@ def _threshold_values_named(node, value, path=""):
 
 def test_the_walk_that_looks_for_a_published_threshold_finds_one():
     """Control, green on both sides: the walk reports a value it is asked for."""
-    document = {"a": [{"scanner_thresholds": {"x": 1}, "severity_threshold": "CRITICAL"}]}
+    document = {
+        "a": [{"scanner_thresholds": {"x": 1}, "severity_threshold": "CRITICAL"}]
+    }
 
-    assert _threshold_values_named(document, "CRITICAL") == [
-        "/a[0]/severity_threshold"
-    ]
+    assert _threshold_values_named(document, "CRITICAL") == ["/a[0]/severity_threshold"]
     assert _threshold_values_named(document, "HIGH") == []
 
 

@@ -55,9 +55,7 @@ def test_the_verdicts_name_no_process_id_unless_asked():
 
 
 def test_the_coverage_names_no_process_id_unless_asked():
-    outcome = _outcome(
-        "api", unstoppable_tools={"bandit": could_not_stop_default(PID)}
-    )
+    outcome = _outcome("api", unstoppable_tools={"bandit": could_not_stop_default(PID)})
 
     coverage = _module()._project_coverage(outcome)
 
@@ -74,9 +72,7 @@ def test_a_local_caller_that_asks_for_the_pid_still_reads_it():
     verdicts = _module()._project_verdicts(
         payload, {"api": "scan-1"}, name_process_ids=True
     )
-    coverage = _module()._project_coverage(
-        payload.projects[0], name_process_ids=True
-    )
+    coverage = _module()._project_coverage(payload.projects[0], name_process_ids=True)
 
     assert verdicts[0]["unstoppable_tools"] == {"bandit": reason}
     assert coverage["could_not_stop"][0]["reason"] == reason
