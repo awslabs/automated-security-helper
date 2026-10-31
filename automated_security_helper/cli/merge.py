@@ -3241,8 +3241,9 @@ def merge_command(
                 "scanner had a file to scan. Under "
                 "--no-fail-on-incomplete-scanners, a shard whose scanners never ran "
                 "contributes no findings and the merged report reads as a "
-                "complete, clean scan. Defaults to unset, which prefers the scan "
-                "configuration's value and then on; pass "
+                "complete, clean scan. On by default: when the option is not "
+                "given, the scan configuration's value is used, and when that "
+                "sets none either, the check is on. Pass "
                 "--no-fail-on-incomplete-scanners to merge a partial union anyway."
             ),
         ),

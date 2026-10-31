@@ -864,8 +864,9 @@ def _ensure_output_gitignore(config_path: Path) -> None:
 # The config-file option every `ash config` subcommand that reads a config takes,
 # with the same name, short flag and environment variable as `ash scan --config`.
 _READ_CONFIG_HELP = (
-    "The path to the configuration file. By default, the config a scan of the "
-    f"current directory would use: {ASH_CONFIG_SOURCES_DESCRIPTION}."
+    "The path to the configuration file. By default, the config a scan of "
+    "--source-dir would use (the current directory when --source-dir is not "
+    f"given): {ASH_CONFIG_SOURCES_DESCRIPTION}."
 )
 _POSITIONAL_CONFIG_HELP = (
     "The configuration file, as a positional argument. Same as --config, which "
@@ -2452,7 +2453,12 @@ def wizard(
         typer.Option(
             "--config",
             "-c",
-            help=f"Path to read/write the configuration file. By default, the config a scan of the current directory would use, or a new {ASH_DEFAULT_CONFIG_FILE_NAME} when there is none.",
+            help=(
+                "Path to read/write the configuration file. By default, the config "
+                "a scan of --source-dir would use (the current directory when "
+                "--source-dir is not given), or a new "
+                f"{ASH_DEFAULT_CONFIG_FILE_NAME} in that directory when there is none."
+            ),
             envvar="ASH_CONFIG",
         ),
     ] = None,
