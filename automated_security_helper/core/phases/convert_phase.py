@@ -137,21 +137,6 @@ def _failure_text(error: BaseException, values: Any) -> str:
     return f"{type(error).__name__}: {error_text(error, values)}"
 
 
-def _answers_python_only(plugin_instance: Any) -> bool:
-    """Whether a converter says it is Python-only, read with a guard.
-
-    ``is_python_only`` is plugin-supplied, so the exception set is open; a check
-    that raises is read as "not Python-only", which is what
-    ``filter_enabled_plugins`` does with the same call, so the pre-filter
-    dependency skip and the filter agree on which converters a Python-only run
-    leaves out.
-    """
-    try:
-        return bool(plugin_instance.is_python_only())
-    except Exception:
-        return False
-
-
 def _records(holder: Any, name: str, model: Any) -> List[Any]:
     """``holder``'s ``name`` records, each dict read as the record it becomes.
 
@@ -577,6 +562,7 @@ class ConvertPhase(EnginePhase):
         row_keys: Dict[int, str] | None = None,
         dependency_answers: Dict[int, bool] | None = None,
         filter_failures: Dict[int, str] | None = None,
+        python_only_answers: Dict[int, bool] | None = None,
     ) -> None:
         """Write a ``converter_results`` row for each converter the filter dropped.
 
@@ -603,10 +589,17 @@ class ConvertPhase(EnginePhase):
         answered, so its row is a failure that says which check raised, and it
         says nothing about the converter's tool unless a dependency answer was
         recorded for it.
+
+        ``python_only_answers`` is the one Python-only answer each converter the
+        config left on gave on a Python-only run, by ``id``. An instance it does
+        not name, and that ``filter_failures`` does not name either, is asked
+        here (a caller that builds the rows itself); a converter the config
+        turned off is not asked, since it is excluded whatever it would answer.
         """
         row_keys = row_keys or {}
         dependency_answers = dependency_answers or {}
         filter_failures = filter_failures or {}
+        python_only_answers = python_only_answers or {}
         # Identity, not membership. A converter instance is a pydantic model, whose
         # __eq__ compares field values, so `instance in filtered_instances` would
         # report a dropped converter as surviving whenever another instance of the
@@ -621,17 +614,21 @@ class ConvertPhase(EnginePhase):
             row_key = row_keys.get(id(plugin_instance), display_name)
             enabled = section_enabled(getattr(plugin_instance, "config", None))
             declined_by_python_only = False
-            if python_based_plugins_only:
-                try:
-                    declined_by_python_only = not plugin_instance.is_python_only()
-                except Exception:
-                    # is_python_only is plugin-supplied, so the exception set is
-                    # open. An unanswerable question is not an exclusion, and the
-                    # pre-filter loop skipped this converter's dependency check on
-                    # the same answer (_answers_python_only). The text of what it
-                    # raised is not read here: the filter recorded it, redacted,
-                    # in ``filter_failures``, which is read below.
-                    declined_by_python_only = False
+            if python_based_plugins_only and enabled:
+                if id(plugin_instance) in python_only_answers:
+                    declined_by_python_only = not python_only_answers[
+                        id(plugin_instance)
+                    ]
+                elif id(plugin_instance) not in filter_failures:
+                    try:
+                        declined_by_python_only = not plugin_instance.is_python_only()
+                    except Exception:
+                        # is_python_only is plugin-supplied, so the exception set
+                        # is open. An unanswerable question is not an exclusion.
+                        # The text of what it raised is not read here: a caller
+                        # that asked recorded it, redacted, in ``filter_failures``,
+                        # which is read below.
+                        declined_by_python_only = False
             raised = filter_failures.get(id(plugin_instance))
             # The pre-filter loop asks the dependency question of an enabled
             # converter that the Python-only filter keeps, and of no other. A
@@ -845,11 +842,49 @@ class ConvertPhase(EnginePhase):
         # asking about their dependencies, and a dependency check can resolve
         # and install a tool (the jupyter converter's resolves nbconvert through
         # uv), which a run that left the converter out asked it not to do.
+        #
+        # The Python-only question is made once too, for the same reason: asked
+        # by the loop below, by the filter and by the row builder, a plugin that
+        # answered differently each time was skipped by the first, admitted by
+        # the second and described by the third as a converter whose check never
+        # ran. The one answer is kept by converter in ``python_only_answers``;
+        # the one failure goes into ``filter_failures``, where the row builder
+        # reads what a check that raised said, and the filter below is told not
+        # to ask. A converter the config turned off is not asked.
+        # What an instance's own check raised, by ``id`` (already redacted): the
+        # Python-only question asked here, and the enabled check the filter below
+        # makes. Read by the row builder to name the check in a dropped row.
+        filter_failures: Dict[int, str] = {}
+        python_only_answers: Dict[int, bool] = {}
+        if python_based_plugins_only:
+            for plugin_instance in all_converter_instances:
+                if not section_enabled(getattr(plugin_instance, "config", None)):
+                    continue
+                try:
+                    python_only_answers[id(plugin_instance)] = bool(
+                        plugin_instance.is_python_only()
+                    )
+                except Exception as e:  # noqa: BLE001 -- plugin code
+                    # An unanswerable question is not an exclusion: the converter
+                    # is dropped and its row says its check raised. Said at
+                    # warning, as the filter says a check that raises.
+                    described = _failure_text(
+                        e, _redaction_values_or(plugin_instance, run_config, run_values)
+                    )
+                    filter_failures[id(plugin_instance)] = described
+                    ASH_LOGGER.warning(
+                        f"Excluding {type(plugin_instance).__name__} from the "
+                        f"{self.phase_name} phase: its enabled/dependency check "
+                        f"raised {described}"
+                    )
+
         dependency_answers: Dict[int, bool] = {}
         for plugin_instance in all_converter_instances:
             if not section_enabled(getattr(plugin_instance, "config", None)):
                 continue
-            if python_based_plugins_only and not _answers_python_only(plugin_instance):
+            if python_based_plugins_only and not python_only_answers.get(
+                id(plugin_instance), False
+            ):
                 continue
             try:
                 with plugin_probe_scope(plugin_instance, self.plugin_context):
@@ -887,17 +922,22 @@ class ConvertPhase(EnginePhase):
         # error opening it aborted the whole phase. A converter survives only
         # with the one dependency answer above True.
         filtered_instances = []
-        # What the filter recorded for an instance whose own check raised, so its
-        # row can name the check instead of guessing a cause.
-        filter_failures: Dict[int, str] = {}
         for plugin_instance in all_converter_instances:
+            # python_only is False here: the Python-only question was asked once
+            # above, and its answer is applied below. The filter records what its
+            # own enabled check raised in ``filter_failures``, so a row can name
+            # the check instead of guessing a cause.
             admitted = self.filter_enabled_plugins(
                 plugin_instances=[plugin_instance],
                 plugin_context=self.plugin_context,
-                python_only=python_based_plugins_only,
+                python_only=False,
                 check_dependencies=False,
                 failures=filter_failures,
             )
+            if python_based_plugins_only and not python_only_answers.get(
+                id(plugin_instance), False
+            ):
+                continue
             if admitted and dependency_answers.get(id(plugin_instance)) is True:
                 filtered_instances.extend(admitted)
 
@@ -917,6 +957,7 @@ class ConvertPhase(EnginePhase):
             row_keys=row_keys,
             dependency_answers=dependency_answers,
             filter_failures=filter_failures,
+            python_only_answers=python_only_answers,
         )
 
         enabled_converters = [inst.__class__ for inst in filtered_instances]
