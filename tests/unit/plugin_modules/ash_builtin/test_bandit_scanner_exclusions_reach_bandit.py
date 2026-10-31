@@ -459,6 +459,58 @@ def test_an_absolute_ini_entry_is_read_below_the_target_with_a_warning(
     assert told[0].markup is False
 
 
+def test_a_star_slash_ini_entry_reaches_the_top_level_directory(tmp_path):
+    """``exclude = */tests/*`` is the usual bandit idiom: bandit matches it
+    against the absolute path, where the leading ``*/`` is the target's own
+    directories and more, so it covers ``<target>/tests/x.py`` too. Read as an
+    ``excluded_paths`` entry, the ``*/`` asked for a component between the
+    target and ``tests``, and the top-level ``tests/`` was still scanned."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = */tests/*\n", encoding="utf-8")
+    source = _tree(
+        tmp_path,
+        ["app.py", "tests/test_app.py", "pkg/tests/test_pkg.py", "pkg/testsx/y.py"],
+    )
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    entries = _entries(argv)
+    root = source.as_posix()
+    assert _covers(entries, f"{root}/tests/test_app.py"), entries
+    assert _covers(entries, f"{root}/pkg/tests/test_pkg.py"), entries
+    assert not _covers(entries, f"{root}/app.py"), entries
+    assert not _covers(entries, f"{root}/pkg/testsx/y.py"), entries
+
+
+def test_an_ini_entry_ending_in_a_glob_warns_that_it_crosses_directories(
+    tmp_path, caplog
+):
+    """``exclude = test_*.py`` becomes ``<target>/test_*.py``, where ``*`` takes
+    a ``/``: files in ``test_helpers/`` are skipped too, and bandit alone, which
+    matches the whole absolute path, skips none of these. Nothing re-applies
+    the entry after the scan, so the operator is told once."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = test_*.py,tests/*\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "test_helpers/app.py", "tests/a.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+        scanner._execute_scan(source, "source", [])
+
+    messages = [r.getMessage() for r in caplog.records]
+    told = [m for m in messages if "also take a '/'" in m]
+    assert len(told) == 1, messages
+    assert repr("test_*.py") in told[0]
+    assert "test_helpers" in told[0]
+    assert _covers(_entries(argv), f"{source.as_posix()}/test_helpers/app.py")
+
+
 def test_an_ini_warning_is_given_once_per_build_not_once_per_target(tmp_path, caplog):
     """``_ini_excludes`` runs for every scanned target (the source and the
     converted one); its warnings describe the operator's file, so a second

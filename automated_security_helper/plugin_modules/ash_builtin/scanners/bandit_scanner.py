@@ -646,6 +646,21 @@ def bandit_excluded_path_globs(anchor: str, path: str) -> List[str]:
     return entries
 
 
+def _any_depth_star_slash(entry: str) -> str:
+    """A ``.bandit`` ``exclude`` entry with a leading ``*/`` read as ``**/``.
+
+    bandit matches an ini entry with ``fnmatch`` against the absolute path it
+    walks, where ``*/tests/*`` covers ``<target>/tests/x.py`` and any deeper
+    ``tests`` directory (the ``*`` takes the target's own directory names and
+    more). Built as an ``excluded_paths`` entry, the ``*/`` asked for a
+    component between the target and ``tests``, so a top-level ``tests/`` was
+    still scanned. ``**/`` is the builder's any-depth form.
+    """
+    if entry.startswith("*/"):
+        return "**/" + entry[2:]
+    return entry
+
+
 def _spelled_absolute(path: str) -> bool:
     """Whether an ``excluded_paths`` entry is written as an absolute path.
 
@@ -1427,7 +1442,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         character), which bandit alone read as a substring of every walked path
         (``exclude = test`` skipped ``tests/``, ``test_x.py`` and ``testing/``
         too), is anchored as the exact name and the operator is told what it no
-        longer covers. Each warning is about the operator's file, so it is given
+        longer covers. A leading ``*/`` is read as ``**/``, the any-depth form
+        (``_any_depth_star_slash``: ``*/tests/*`` covers the top-level
+        ``tests/`` as it does under bandit alone), and an entry whose last
+        component holds ``*`` or ``?`` gets a warning that it also skips files
+        in directories its glob fits, which bandit alone does not. Each
+        warning is about the operator's file, so it is given
         once per build, not once per scanned target, and the entry is written as
         its repr with the console markup off (``NO_MARKUP``: ``tests/[a-z]*`` is
         not a Rich tag). Only the operator's configured ``.bandit`` is read
@@ -1465,7 +1485,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 # command line, and bandit would not start.
                 unpassable += 1
                 continue
-            globs = bandit_excluded_path_globs(anchor, entry)
+            globs = bandit_excluded_path_globs(anchor, _any_depth_star_slash(entry))
             if not globs:
                 cause = (
                     "holds a line break"
@@ -1507,6 +1527,19 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     f"{entry}_x.py). ASH passes it as the exact name {entry!r} at "
                     f"any depth below the target; write a glob ({entry}*) to keep "
                     "the wider reading.",
+                )
+            last = spelled.rstrip("/").rsplit("/", 1)[-1]
+            if last not in ("*", "**") and ("*" in last or "?" in last):
+                self._warn_about_ini_once(
+                    entry,
+                    "crosses",
+                    f"The .bandit exclude entry {entry!r} ends in a glob, and in "
+                    "bandit's fnmatch matching '*' and '?' also take a '/', so "
+                    "under the target it skips a file in any directory whose "
+                    "name the glob fits too (test_*.py skips test_helpers/app.py). "
+                    "bandit alone matches an entry against the whole absolute "
+                    "path and would skip none of these; name the directory to "
+                    "skip it on purpose.",
                 )
             if entry in anchor:
                 self._warn_about_ini_once(
