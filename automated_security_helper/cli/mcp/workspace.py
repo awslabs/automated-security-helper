@@ -2932,12 +2932,15 @@ async def _scan_workspace(
             # no previous results aside. execute_workspace keeps its own
             # prewarm and pre-check for callers that reach it another way; the
             # duplicate prewarm is idempotent. On the worker pool, like the
-            # scan itself, because the prewarm imports plugin modules.
+            # scan itself, because the prewarm imports plugin modules, and
+            # holding the claim until the thread returns (_off_the_loop): a call
+            # cancelled here leaves the thread importing, and the call's exit
+            # must not release the claim under it.
             def _selection_preflight() -> None:
                 prewarm_plugin_registry(plan, settings)
                 refuse_unresolvable_scanner_selection(plan, settings)
 
-            await asyncio.to_thread(_selection_preflight)
+            await _off_the_loop(claim, _selection_preflight)
             registered = _register_projects(
                 plan,
                 project_outputs,

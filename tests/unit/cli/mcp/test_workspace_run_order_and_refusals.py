@@ -1116,6 +1116,56 @@ class TestAThreadThatReadsTheTreeHoldsTheClaim:
 
         assert counted.returned == 1
 
+    @pytest.mark.asyncio
+    async def test_a_call_cancelled_during_the_selection_check_keeps_the_claim(
+        self, tmp_path, monkeypatch, _fresh_registry
+    ):
+        """Red at the base: the selection check ran on a thread of its own, and
+        the call's exit released the claim under it.
+
+        The check prewarms the plugin registry, which imports plugin modules;
+        cancelling the call leaves that thread running. The claim is released
+        when the thread returns, as it is for the two reads before it.
+        """
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+        monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_prewarm(plan, settings):
+            entered.set()
+            release.wait(timeout=10)
+            raise RuntimeError("stand-in prewarm ended")
+
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+        plan = _plan(tmp_path)
+        scan = workspace_module._in_a_run_log_scope_of_its_own(
+            workspace_module._scan_workspace
+        )
+
+        with patch.object(
+            workspace_module, "prewarm_plugin_registry", side_effect=blocking_prewarm
+        ):
+            task = asyncio.ensure_future(
+                scan(
+                    workspace_file=plan.workspace_file,
+                    output_dir=str(tmp_path / "out"),
+                    claim=claim,
+                )
+            )
+            assert await asyncio.to_thread(entered.wait, 10)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            claim.call_returns()
+            assert counted.returned == 0
+            release.set()
+            assert await asyncio.to_thread(counted.released.wait, 10)
+
+        assert counted.returned == 1
+
 
 class TestTheSettleRunsUnderTheSessionsPresence:
     def test_settle_runs_before_the_presence_is_given_up(self, tmp_path):
