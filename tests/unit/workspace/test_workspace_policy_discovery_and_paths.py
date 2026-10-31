@@ -24,7 +24,10 @@ import pytest
 from automated_security_helper.config.ash_workspace_config import (
     WorkspacePolicyConfig,
 )
-from automated_security_helper.core.exceptions import WorkspaceDefinitionError
+from automated_security_helper.core.exceptions import (
+    ASHConfigInputNotPermittedError,
+    WorkspaceDefinitionError,
+)
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.workspace.policy import (
     discover_workspace_policy_file,
@@ -102,6 +105,62 @@ class TestAPolicyEntryThatIsNotAFileIsRefused:
         """The one non-refusal the module docstring allows."""
         assert discover_workspace_policy_file(tmp_path) is None
         assert resolve_workspace_policy(tmp_path) == (None, None)
+
+
+class TestALinkToALoopOutsideTheGateIsRefusedLikeAnyOutsideTarget:
+    """CPython 3.10 to 3.12 raise ``RuntimeError`` from ``Path.resolve`` for a
+    symlink loop. The gate's refusal of a file outside the permitted directories
+    has to be the one answer for every kind of outside target, so a loop outside
+    must not be told apart (``cannot be resolved``) by the order of the calls."""
+
+    @pytest.fixture
+    def root_and_gate(self, tmp_path, monkeypatch):
+        root = Path(os.path.realpath(tmp_path)) / "ws"
+        (root / ".ash").mkdir(parents=True)
+        elsewhere = Path(os.path.realpath(tmp_path)) / "elsewhere"
+        elsewhere.mkdir()
+        _symlink_or_skip(elsewhere / "a", elsewhere / "b")
+        _symlink_or_skip(elsewhere / "b", elsewhere / "a")
+        _symlink_or_skip(root / ".ash" / POLICY_NAME, elsewhere / "a")
+
+        real_resolve = Path.resolve
+
+        def resolve_as_an_older_interpreter(self, strict=False):
+            if self.name == POLICY_NAME:
+                raise RuntimeError(f"Symlink loop from '{self}'")
+            return real_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", resolve_as_an_older_interpreter)
+
+        def permit(path) -> bool:
+            # By the spelling, as the MCP gate judges the name a file is reached
+            # by: the link is inside the root, the loop it leads to is not.
+            return Path(os.path.abspath(path)).is_relative_to(root)
+
+        return root, permit
+
+    def test_discovery_refuses_it_as_outside_not_as_unresolvable(self, root_and_gate):
+        root, permit = root_and_gate
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            discover_workspace_policy_file(root, permit=permit)
+
+        assert isinstance(excinfo.value.__cause__, ASHConfigInputNotPermittedError)
+        assert "outside the directories" in str(excinfo.value)
+        assert "cannot be resolved" not in str(excinfo.value)
+
+    def test_a_named_policy_is_refused_as_outside_not_as_unresolvable(
+        self, root_and_gate
+    ):
+        root, permit = root_and_gate
+
+        with pytest.raises(ASHConfigInputNotPermittedError) as excinfo:
+            resolve_workspace_policy(
+                root, explicit=root / ".ash" / POLICY_NAME, permit_base=permit
+            )
+
+        assert "outside the directories" in str(excinfo.value)
+        assert "cannot be resolved" not in str(excinfo.value)
 
 
 class TestAPolicyPathIsReadAsNamed:

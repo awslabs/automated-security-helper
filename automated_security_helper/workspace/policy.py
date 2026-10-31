@@ -514,6 +514,22 @@ def _resolved(named: Path) -> Path:
         ) from exc
 
 
+def _reached_by(named: Path) -> Path:
+    """The file *named* reaches, for a caller's gate, without raising on a loop.
+
+    ``Path.resolve`` raises ``RuntimeError`` for a symlink loop on CPython 3.10
+    to 3.12, so a link inside the permitted directories to a loop outside them
+    was refused as "cannot be resolved", a refusal of its own kind, before the
+    gate could say the target is outside: the probe the gate's ordering exists
+    to close, and one refusal for every kind of outside target is the rule.
+    ``os.path.realpath`` stops where it cannot continue and returns the path so far,
+    which the gate judges; a loop that stays inside the permitted directories is
+    then refused where the file is examined (``_load_policy``,
+    ``_refuse_unless_a_file``), as it is on 3.13 and later.
+    """
+    return Path(os.path.realpath(named))
+
+
 def _policy_problems(error: ValidationError) -> str:
     """Each problem of a policy file, with the value the file wrote.
 
@@ -677,7 +693,7 @@ def discover_workspace_policy_file(
                 # what sits at a target outside the permitted directories,
                 # the probe resolve_workspace_policy closes for an explicit
                 # path. One refusal for every kind of outside target.
-                if not permit(_resolved(candidate)):
+                if not permit(_reached_by(candidate)):
                     raise _policy_not_permitted(candidate, directory)
             _refuse_unless_a_file(candidate)
             candidates.append(candidate)
@@ -844,7 +860,10 @@ def resolve_workspace_policy(
         policy_path = discovered
 
     named = _as_named(policy_path)
-    target = _resolved(named)
+    # With a gate in force the path is followed without Path.resolve, which
+    # raises for a symlink loop on 3.10 to 3.12 before the gate has judged where
+    # the loop is (_reached_by).
+    target = _reached_by(named) if permit_base is not None else _resolved(named)
     # The gate on the file the path reaches comes before any existence test: a
     # link inside the permitted directories to a file outside them was told
     # "does not exist" when that file was absent and refused by this gate when
