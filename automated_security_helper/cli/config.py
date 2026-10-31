@@ -376,14 +376,17 @@ def _write_target(config_path: Path) -> Path:
     the plain write these commands made wrote through the link, so the file it
     points to is the one replaced, and the link is kept.
 
-    A path that is not a link is written where it was given. ``realpath`` of a
-    relative path joins it to ``os.getcwd()``, and the plain write never read
-    the working directory's name: it resolved the path through the open, as the
-    staged write beside it does. A process whose ``os.getcwd`` does not answer
-    with the directory the files are in (one that reports a display name for it,
-    or whose working directory was renamed) then wrote beside a directory that
-    is not there. A relative link is resolved with ``realpath``, which does read
-    ``os.getcwd()``; that is the one case here that does.
+    A path that is not a link is written where it was given: this function does
+    not resolve it. ``realpath`` of a relative path joins it to ``os.getcwd()``,
+    which the plain ``write_text`` these commands once made never read: it
+    resolved the path through the open. The writes that follow do read it for a
+    relative path: the staged write (``fs_guard.open_for_atomic_write``) and the
+    in-place fallback (``fs_guard.open_for_write``) both take
+    ``os.path.abspath`` of the target. A process whose ``os.getcwd`` does not
+    answer with the directory the files are in (one that reports a display name
+    for it, or whose working directory was renamed) can then write beside a
+    directory that is not there, on either arm. A relative link is resolved here
+    with ``realpath``, which reads ``os.getcwd()`` too.
     """
     target = Path(config_path)
     if target.is_symlink():
@@ -507,11 +510,12 @@ def _staged_write_falls_back(error: OSError) -> bool:
 def _write_in_place(target: Path, data: str | bytes) -> None:
     """Write ``data`` over the file at ``target`` where it is, through the write guard.
 
-    ``fs_guard.open_for_write`` opens the file as ``Path.write_text`` does and
-    truncates it only after it has checked it. Below a guarded root it refuses a
-    link at any component (OutputLinkRefused) and a file another name refers to
-    (OutputHardLinkRefused) before anything is changed; anywhere else it is the
-    plain open. The in-place write used to be a bare ``write_text``, so a file
+    Below a guarded root ``fs_guard.open_for_write`` checks the file first and
+    truncates it only after the check: it refuses a link at any component
+    (OutputLinkRefused) and a file another name refers to (OutputHardLinkRefused)
+    before anything is changed. Outside every guarded root it is the plain
+    ``open(path, "w")``, which truncates on open, as ``Path.write_text`` does.
+    The in-place write used to be a bare ``write_text``, so a file
     taken to this path because the staged write was skipped (an owner this
     process is not, a file it may not write) was written where the guard would
     have refused it.
