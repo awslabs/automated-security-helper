@@ -135,6 +135,7 @@ def _on_the_baseline(report) -> list[tuple[str, int | None]]:
     return sorted(found)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "echo_type",
     [HEX_HIGH_ENTROPY_TYPE, "Secret Keyword", "Base64 High Entropy String"],
@@ -246,6 +247,7 @@ def _recording_worker(scanner, monkeypatch) -> dict:
     return seen
 
 
+@pytest.mark.unit
 def test_the_filter_that_skips_files_by_name_is_not_taken_from_the_repositorys_baseline(
     tmp_path, monkeypatch
 ):
@@ -269,6 +271,7 @@ def test_the_filter_that_skips_files_by_name_is_not_taken_from_the_repositorys_b
     assert IS_BASELINE_FILE_FILTER not in seen["filters"]
 
 
+@pytest.mark.unit
 def test_the_operators_own_name_filter_still_reaches_the_worker(tmp_path, monkeypatch):
     """The same filter written in the operator's own settings is the operator's
     to use, and a baseline entry for the same path yields to it."""
@@ -296,6 +299,7 @@ def test_the_operators_own_name_filter_still_reaches_the_worker(tmp_path, monkey
     assert seen["filters"].count(IS_BASELINE_FILE_FILTER) == 1
 
 
+@pytest.mark.unit
 def test_the_operators_own_baseline_keeps_its_name_filter(tmp_path, monkeypatch):
     """A baseline the operator names outside the tree is the operator's file,
     so what it carries is the operator's choice: the filter reaches the worker."""
@@ -322,6 +326,7 @@ def test_the_operators_own_baseline_keeps_its_name_filter(tmp_path, monkeypatch)
     assert IS_BASELINE_FILE_FILTER in seen["filters"]
 
 
+@pytest.mark.unit
 def test_a_pattern_in_the_repositorys_baseline_does_not_drop_the_baseline_from_the_scan(
     tmp_path, monkeypatch
 ):
@@ -351,6 +356,7 @@ def test_a_pattern_in_the_repositorys_baseline_does_not_drop_the_baseline_from_t
     assert seen["names"] == [BASELINE_NAME, "kept.py"]
 
 
+@pytest.mark.unit
 def test_a_pattern_the_operator_wrote_still_drops_the_baseline_from_the_scan(
     tmp_path, monkeypatch
 ):
