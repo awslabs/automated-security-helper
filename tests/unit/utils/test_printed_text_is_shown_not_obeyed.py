@@ -1171,6 +1171,10 @@ _HANDLERS_THAT_DO_NOT_REPORT = {
     ("utils/cdk_nag_worker.py", "_RecordCollector"): (
         "its emit only appends to a list, and never calls handleError"
     ),
+    ("utils/download_utils.py", "_HttpsOnlyRedirects"): (
+        "a urllib.request redirect handler, not a log handler: it has no "
+        "handleError and writes no record"
+    ),
 }
 
 
@@ -1346,3 +1350,23 @@ def test_the_handler_guard_passes_a_handler_with_the_mix_in():
     source = "class H(ShownHandlerErrors, logging.Handler):\n    pass\n"
 
     assert _handler_offenders(source, "fixture.py") == []
+
+
+_REDIRECT_HANDLER = (
+    "import urllib.request\n"
+    "class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):\n"
+    "    pass\n"
+)
+
+
+@pytest.mark.unit
+def test_the_handler_guard_passes_the_download_redirect_handler_by_name():
+    assert _handler_offenders(_REDIRECT_HANDLER, "utils/download_utils.py") == []
+
+
+@pytest.mark.unit
+def test_the_handler_guard_still_finds_a_redirect_handler_anywhere_else():
+    """The exemption is for one class in one module, not for the base."""
+    offenders = _handler_offenders(_REDIRECT_HANDLER, "utils/other_module.py")
+
+    assert any(o.startswith("utils/other_module.py:2 ") for o in offenders), offenders
