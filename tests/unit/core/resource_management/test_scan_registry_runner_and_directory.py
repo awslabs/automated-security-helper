@@ -618,12 +618,16 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
             )
         )
         registering.start()
-        registering.join(timeout=0.3)
-        assert registering.is_alive()
-
-        release.set()
-        removing.join(timeout=10)
-        registering.join(timeout=10)
+        try:
+            registering.join(timeout=0.3)
+            assert registering.is_alive()
+        finally:
+            # Released whether or not the assertion held: the remover and the
+            # registering thread are not daemons, and a failed assertion left
+            # them waiting out their timeouts.
+            release.set()
+            removing.join(timeout=10)
+            registering.join(timeout=10)
         assert registry.get_scan(outcome["scan_id"]) is not None
         assert registry.get_scan_count() == 3
 
