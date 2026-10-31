@@ -744,6 +744,35 @@ def is_not_a_finding(
     return result_kind(result) in non_finding_kinds
 
 
+#: A SARIF 2.1.0 message placeholder (3.11.5): ``{N}``, or the escapes ``{{`` and
+#: ``}}`` for a literal brace.
+_MESSAGE_PLACEHOLDER = re.compile(r"\{\{|\}\}|\{(\d{1,9})\}")
+
+
+def _fill_message_arguments(text: str, arguments: Any) -> str:
+    """*text* with its ``{N}`` placeholders replaced by the message's
+    ``arguments`` (SARIF 3.11.5), ``{{`` and ``}}`` read as one brace each.
+
+    A message with no arguments is returned as written, escapes included: it has
+    nothing to fill, and a scanner's own text may hold braces. A placeholder
+    whose index is past the last argument is left as written, never raised on."""
+    if not isinstance(arguments, (list, tuple)) or not arguments:
+        return text
+
+    def fill(match: "re.Match[str]") -> str:
+        token = match.group(0)
+        if token == "{{":
+            return "{"
+        if token == "}}":
+            return "}"
+        index = int(match.group(1))
+        if index < len(arguments) and arguments[index] is not None:
+            return str(arguments[index])
+        return token
+
+    return _MESSAGE_PLACEHOLDER.sub(fill, text)
+
+
 def result_message_text(
     result: Any, rule: Any = None, default: str | None = None
 ) -> str | None:
@@ -758,13 +787,19 @@ def result_message_text(
     spaces described a finding as spaces. SARIF lets a message be given by id
     alone (``Message2``); read as ``text`` alone, such a result was described as
     "No description" in one report and left blank in another.
+
+    The message's ``arguments`` fill the ``{N}`` placeholders of the text, the
+    markdown or the rule's message string it resolves to (SARIF 3.11.5): a
+    message string ``Found {0}`` and the argument ``x`` read ``Found x``. They
+    were never read, so the placeholder reached the report as written.
     """
     message = getattr(result, "message", None)
     body = getattr(message, "root", message)
+    arguments = getattr(body, "arguments", None)
     for field in ("text", "markdown"):
         value = getattr(body, field, None)
         if isinstance(value, str) and value.strip():
-            return value
+            return _fill_message_arguments(value, arguments)
     message_id = getattr(body, "id", None)
     if not (isinstance(message_id, str) and message_id.strip()):
         return default
@@ -775,6 +810,8 @@ def result_message_text(
         for field in ("text", "markdown"):
             value = getattr(source, field, None)
             if isinstance(value, str) and value.strip():
+                if source is named:
+                    return _fill_message_arguments(value, arguments)
                 return value
     return message_id
 

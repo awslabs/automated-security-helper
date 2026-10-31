@@ -149,6 +149,66 @@ class TestResultMessageText:
         assert result_message_text(id_only) == "m"
         assert result_message_text(id_only, ReportingDescriptor(id="R1")) == "m"
 
+    def test_arguments_fill_the_placeholders_of_the_rules_message_string(self):
+        """SARIF 3.11.5: the result's ``arguments`` replace ``{N}`` in the rule's
+        message string. The placeholder reached the report as written."""
+        rule = ReportingDescriptor(
+            id="R1",
+            messageStrings={"default": MultiformatMessageString(text="Found {0}")},
+        )
+        with_argument = _result(
+            message=Message(root=Message2(id="default", arguments=["x"]))
+        )
+        assert result_message_text(with_argument, rule) == "Found x"
+
+    def test_arguments_fill_the_placeholders_of_the_text_and_the_markdown(self):
+        text = _result(
+            message=Message(root=Message1(text="{0} met {1}", arguments=["a", "b"]))
+        )
+        assert result_message_text(text) == "a met b"
+        markdown = _result(
+            message=Message(
+                root=Message2(id="m", markdown="**{1}** then {0}", arguments=["a", "b"])
+            )
+        )
+        assert result_message_text(markdown) == "**b** then a"
+
+    def test_a_doubled_brace_is_one_literal_brace(self):
+        escaped = _result(
+            message=Message(
+                root=Message1(text="{{0}} is {0}, {{done}}", arguments=["x"])
+            )
+        )
+        assert result_message_text(escaped) == "{0} is x, {done}"
+
+    def test_a_placeholder_past_the_last_argument_is_left_as_written(self):
+        short = _result(
+            message=Message(root=Message1(text="Found {3} and {0}", arguments=["x"]))
+        )
+        assert result_message_text(short) == "Found {3} and x"
+        # A number with more digits than a list could hold, and a word, are not
+        # placeholders this function fills.
+        odd = _result(
+            message=Message(
+                root=Message1(text="{12345678901234567890} {name}", arguments=["x"])
+            )
+        )
+        assert result_message_text(odd) == "{12345678901234567890} {name}"
+
+    def test_a_message_with_no_arguments_is_returned_as_written(self):
+        """The control: braces in a scanner's own text are not touched when the
+        message has nothing to fill them with, escapes included."""
+        braces = _result(message=Message(root=Message1(text="use {0} and {{x}}")))
+        assert result_message_text(braces) == "use {0} and {{x}}"
+        empty = _result(message=Message(root=Message1(text="use {0}", arguments=[])))
+        assert result_message_text(empty) == "use {0}"
+        # And a rule's short description, the fallback, is never a format string.
+        rule = ReportingDescriptor(
+            id="R1", shortDescription=MultiformatMessageString(text="short {0}")
+        )
+        id_only = _result(message=Message(root=Message2(id="m", arguments=["x"])))
+        assert result_message_text(id_only, rule) == "short {0}"
+
     def test_no_message_gives_the_default(self):
         """A SARIF result always carries a message; a stand-in built on an error
         path may not, and the reading degrades instead of raising."""
