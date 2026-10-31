@@ -805,6 +805,17 @@ class TestSmallThings:
         # Red at the base: twice.
         assert listed == [str(nested / "converted.py")]
 
+    def test_a_missing_work_directory_is_not_warned_about(self, ctx, logger):
+        ctx.work_dir = ctx.source_dir.parent / "no-such-work-directory"
+        phase = _phase(ctx)
+
+        _run(phase)
+
+        # Red at the base: "Could not list <dir>, so nothing under it is scanned"
+        # on every run that converted nothing.
+        assert not any("Could not list" in line for line in _lines(logger, "warning"))
+        assert phase._include_work_dir is False
+
     def test_a_result_processor_is_not_built_per_call(self, ctx):
         phase = _phase(ctx)
         phase._result_processor = MagicMock()

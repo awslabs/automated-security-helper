@@ -320,7 +320,14 @@ def _holds_a_regular_file(directory: Any) -> bool:
     dot (``rglob("*.*")``), so an archive whose extracted members carry no
     extension (``Dockerfile``, ``id_rsa``, a script without a suffix) was
     converted and then never scanned. A file is a file whatever it is called.
+
+    A directory that does not exist holds no file and is not walked: the walk
+    reports a missing top directory as one it could not list, and the work
+    directory is absent on every run that converted nothing, so that warning
+    was logged on each of them.
     """
+    if not os.path.isdir(str(directory)):
+        return False
     return next(iter(_regular_files_under(directory)), None) is not None
 
 
