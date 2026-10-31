@@ -215,6 +215,52 @@ def test_a_values_hook_that_raises_refuses_the_copy_on_path(
     assert not any(BINARY in line for line in warnings), warnings
 
 
+def test_a_values_hook_refusal_is_logged_with_its_own_reason_not_as_a_missing_uv(
+    test_plugin_context, monkeypatch, caplog
+):
+    """The copy on PATH was refused because the plugin's values hook failed, so the
+    ERROR line says that, and does not blame a uv that is not the cause of the
+    refusal.
+
+    Fails on the code before this row: after the refusal the check logged ``UV tool
+    validation failed - UV is not available but required`` at ERROR and never the
+    hook's reason, which only reached the results.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    _answer(monkeypatch, _verdict("satisfied", "semgrep 1.130.0"), [])
+
+    def broken(self):
+        raise RuntimeError("the hook is broken")
+
+    monkeypatch.setattr(SemgrepScanner, "_values_to_redact", broken)
+
+    with caplog.at_level(logging.ERROR):
+        assert scanner._validate_tool_dependencies() is False
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors, "the refusal logged nothing at ERROR"
+    assert not any("UV is not available" in line for line in errors), errors
+    assert any("values hook" in line and "RuntimeError" in line for line in errors), (
+        errors
+    )
+    assert not any(BINARY in line for line in errors), errors
+
+
+def test_no_route_to_semgrep_is_still_logged_as_a_missing_uv(
+    test_plugin_context, monkeypatch, caplog
+):
+    """The control: with uv missing and no semgrep on PATH either, the check
+    recorded no reason of its own, and the ERROR line keeps naming uv."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    monkeypatch.setattr(
+        semgrep_scanner, "get_uv_tool_command", lambda name, **kwargs: None
+    )
+
+    with caplog.at_level(logging.ERROR):
+        assert scanner._validate_tool_dependencies() is False
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any("UV is not available" in line for line in errors), errors
+
+
 def test_a_values_hook_answering_a_generator_is_read_once_and_redacts_every_line(
     test_plugin_context, monkeypatch, caplog
 ):

@@ -468,12 +468,20 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             # question again when the scan runs (UVToolRunner.run_tool), so a
             # failed availability probe that is still inside its retry window
             # refuses the scan there, with the window's reason, rather than here.
+            recorded_before = self.dependency_unavailable_reason
             if self._direct_or_uv_command_found():
                 return True
-            self._plugin_log(
-                "UV tool validation failed - UV is not available but required",
-                level=logging.ERROR,
-            )
+            recorded = self.dependency_unavailable_reason
+            if recorded and recorded != recorded_before:
+                # The semgrep on PATH was found and refused, and the check said
+                # why (its values hook failed, or the copy does not satisfy the
+                # requirement): that reason is the cause, not the missing uv.
+                self._plugin_log(recorded, level=logging.ERROR)
+            else:
+                self._plugin_log(
+                    "UV tool validation failed - UV is not available but required",
+                    level=logging.ERROR,
+                )
             return False
 
         if self.use_uv_tool:
