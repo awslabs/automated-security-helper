@@ -96,16 +96,18 @@ def _reference_text(value) -> str:
     The configuration records a project name read from the environment as the
     reference it was written as, not the value. Escaping it would show
     ``$\\{NAME\\}`` (or ``NAME`` with its underscores escaped), which is not what
-    the file says. A reference holds nothing Markdown reads (a name's underscores
-    sit inside a word), so it is written as it is; every other character is
-    escaped as in ``_text``, and braces stay escaped on every other line.
+    the file says. A reference is put in a code span, as a mention and a URL
+    are: written bare, ``${_X_}`` read as emphasis and ``${ORG}/${REPO}`` as
+    math, since the dollar signs delimit a formula on GitHub. Every other
+    character is escaped as in ``_text``, and braces stay escaped on every other
+    line.
     """
     text = str(value or "")
     parts = []
     end = 0
     for match in _ENV_REFERENCE.finditer(text):
         parts.append(_text(text[end : match.start()]))
-        parts.append(match.group())
+        parts.append(markdown_code_span(match.group()))
         end = match.end()
     parts.append(_text(text[end:]))
     return "".join(parts)

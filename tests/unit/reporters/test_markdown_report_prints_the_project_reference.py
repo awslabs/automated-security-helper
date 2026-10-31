@@ -8,8 +8,9 @@ reference it was written as, ``${NAME}``, and every report is meant to show that
 reference rather than the value. The Markdown report escapes ``{``, ``}`` and
 ``_`` along with the other Markdown syntax characters, so the project line read
 ``$\\{MY\\_NAME\\}``, which is not what the file says. Only a ``${NAME}`` reference
-in the project line is written as it is; every other character in the line, and
-every other line, is still escaped.
+in the project line is written as it is, in a code span, because bare it read as
+emphasis (``${_X_}``) or as math (``${ORG}/${REPO}``); every other character in
+the line, and every other line, is still escaped.
 """
 
 import pytest
@@ -57,16 +58,22 @@ def _report(test_plugin_context, model, **options) -> str:
 
 class TestTheReferenceHelper:
     def test_a_written_reference_keeps_its_braces(self):
-        assert _reference_text(REFERENCE) == REFERENCE
+        assert _reference_text(REFERENCE) == f"`{REFERENCE}`"
+
+    def test_a_reference_is_not_read_as_emphasis_or_math(self):
+        """Bare, ``${_X_}`` read as emphasis, and ``${ORG}/${REPO}`` as a
+        formula between its two dollar signs."""
+        assert _reference_text("${_X_}") == "`${_X_}`"
+        assert _reference_text("${ORG}/${REPO}") == "`${ORG}`/`${REPO}`"
 
     def test_every_other_character_is_still_escaped(self):
-        assert _reference_text("a_b *c* ${X}") == "a\\_b \\*c\\* ${X}"
+        assert _reference_text("a_b *c* ${X}") == "a\\_b \\*c\\* `${X}`"
         assert _reference_text("<x> & [y]") == "&lt;x&gt; &amp; \\[y\\]"
 
     def test_a_mention_and_a_url_are_still_put_in_a_code_span(self):
-        assert _reference_text("@octocat ${X}") == "`@octocat` ${X}"
+        assert _reference_text("@octocat ${X}") == "`@octocat` `${X}`"
         assert _reference_text("https://example.com/a ${X}") == (
-            "`https://example.com/a` ${X}"
+            "`https://example.com/a` `${X}`"
         )
 
     def test_braces_stay_escaped_for_every_other_line(self):
@@ -81,7 +88,7 @@ class TestTheReportPrintsTheReference:
     ):
         document = _report(test_plugin_context, _model(REFERENCE))
 
-        assert REFERENCE in document
+        assert f"`{REFERENCE}`" in document
         assert ESCAPED not in document
 
     def test_the_report_without_a_summary_never_prints_the_escaped_form(
@@ -98,4 +105,4 @@ class TestTheReportPrintsTheReference:
     ):
         document = _report(test_plugin_context, _model("a_b ${ZZ_NAME}"))
 
-        assert "a\\_b ${ZZ_NAME}" in document
+        assert "a\\_b `${ZZ_NAME}`" in document
