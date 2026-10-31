@@ -1344,11 +1344,14 @@ def _matches_an_exclude_pattern(path: str, target: Path, patterns: List[str]) ->
     name the reported ``path``: a glob matched against the file's name and against
     each directory of the path below the project root (a trailing ``/`` names a
     directory), or against the whole reported path. Read permissively: a pattern
-    this says cannot match certainly did not leave the file out."""
+    this says cannot match certainly did not leave the file out. A leading ``/``
+    anchors a pattern at the project root in the tools' gitignore-style reading,
+    and a trailing one names a directory; both are dropped here, so ``/src/``
+    names the ``src`` component the way ``src/`` does."""
     parts = (*_parts_of_target_below_root(target), *_parts_below(path, target))
     candidates = (*parts, Path(path).as_posix())
     for pattern in patterns:
-        glob = pattern.rstrip("/") or pattern
+        glob = pattern.strip("/") or pattern
         if any(fnmatch.fnmatchcase(candidate, glob) for candidate in candidates):
             return True
     return False

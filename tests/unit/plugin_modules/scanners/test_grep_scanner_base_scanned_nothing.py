@@ -618,9 +618,15 @@ def test_an_operator_pattern_that_cannot_name_the_file_does_not_take_the_blame(
     command-line pattern. No pattern of the operator's can name that file, so the
     exclusion is one ASH does not recognize, and the refusal says so and names the
     file instead of blaming the operator's patterns. A pattern that names a
-    directory of the path (``src/``) or the whole path is the operator's.
+    directory of the path (``src/``) or the whole path is the operator's, and so
+    is one anchored at the project root with a leading slash (``/src/``,
+    ``/src``, ``/src/app.py``), which the tools honor as written.
 
     Fails at the base: every configured pattern took the blame, whatever it named.
+    The anchored rows fail at the previous tip: the glob kept its leading slash
+    (``rstrip("/")`` only), so ``/src`` matched neither the ``src`` component nor
+    the path ``src/app.py``, and the refusal said "does not recognize as its own"
+    for a pattern the operator wrote.
     """
     scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.md"])
     with pytest.raises(ScannerError) as refused:
@@ -628,7 +634,15 @@ def test_an_operator_pattern_that_cannot_name_the_file_does_not_take_the_blame(
     assert "does not recognize as its own" in str(refused.value), str(refused.value)
     assert "src/app.py" in str(refused.value), str(refused.value)
 
-    for exclude in (["src/"], ["src"], ["src/app.py"], ["*.py"]):
+    for exclude in (
+        ["src/"],
+        ["src"],
+        ["src/app.py"],
+        ["*.py"],
+        ["/src/"],
+        ["/src"],
+        ["/src/app.py"],
+    ):
         named = _scanner(test_plugin_context, monkeypatch, exclude=exclude)
         with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
             _grade(named, tmp_path, _excluded("src/app.py"))
