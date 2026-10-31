@@ -630,6 +630,30 @@ def test_an_ini_entry_with_a_glob_in_a_middle_component_warns_it_crosses(
     assert repr("src/tests") not in told[0]
 
 
+def test_a_double_star_between_directories_draws_no_crossing_warning(
+    tmp_path, caplog
+):
+    """``src/**/tests`` asks for the crossing the warning describes, so telling
+    its author that the glob "also takes a '/'" was noise. A bare ``*`` in the
+    same place (``src/*/lib``) reads as one directory level and still draws the
+    warning, once, naming only that entry."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = src/**/tests,src/*/lib\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "src/a/tests/x.py", "src/a/lib/y.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        scanner._execute_scan(source, "source", [])
+
+    messages = [r.getMessage() for r in caplog.records]
+    told = [m for m in messages if "also take a '/'" in m]
+    assert len(told) == 1, messages
+    assert repr("src/*/lib") in told[0]
+    assert repr("src/**/tests") not in told[0]
+
+
 def test_a_star_slash_entry_and_a_plain_path_draw_no_crossing_warning(
     tmp_path, caplog
 ):

@@ -1556,11 +1556,15 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             # Every component holding a '*' or '?' crosses a '/' in bandit's
             # fnmatch, a middle one too (src/*/tests skips src/a/b/tests/x.py).
             # A bare '*' or '**' as the first or the last component is the usual
-            # idiom (*/tests/*) and draws no warning.
+            # idiom (*/tests/*) and draws no warning, nor does a bare '**' in
+            # a middle one (src/**/tests): crossing directories is what its
+            # author asked for. A bare '*' in the middle (src/*/tests) reads as
+            # one directory level and still draws it.
             parts = spelled.rstrip("/").split("/")
             if any(
                 ("*" in part or "?" in part)
-                and not (part in ("*", "**") and index in (0, len(parts) - 1))
+                and part != "**"
+                and not (part == "*" and index in (0, len(parts) - 1))
                 for index, part in enumerate(parts)
             ):
                 self._warn_about_ini_once(
