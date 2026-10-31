@@ -1007,6 +1007,15 @@ class TestLinkedDirectories:
         ):
             package_manager_inputs("yarn", package, roots=[repo])
 
+        # The boundary: five linked directories are entered, so a cap of four
+        # refuses and a cap of five does not. A count that raised only past
+        # ``cap + 1`` would pass the cap-three case above and fail this one.
+        monkeypatch.setattr(child_module, "_MAX_LINKED_DIRECTORY_WALKS", 4)
+        with pytest.raises(
+            child_module.TooManyLinkedDirectories, match="more than 4 linked"
+        ):
+            package_manager_inputs("yarn", package, roots=[repo])
+
         monkeypatch.setattr(child_module, "_MAX_LINKED_DIRECTORY_WALKS", 5)
         listed = package_manager_inputs("yarn", package, roots=[repo])
         assert "entry/next/next/next/next/package.json" in _rel(listed, package)
