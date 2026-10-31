@@ -411,14 +411,20 @@ class TestBedrockReportPipeline:
 
         assert call_order == ["sys-A", "sys-B", "sys-C"]
 
-    def test_skips_section_on_client_failure(self):
-        """When client returns error string for a section, pipeline omits that section's content."""
+    @pytest.mark.parametrize("model_specific", [True, False])
+    def test_a_failed_section_keeps_its_error_text_and_the_run_goes_on(
+        self, model_specific
+    ):
+        """A section whose call fails is in the results with the failure's own
+        text, whatever ``model_specific`` says (the pipeline walks no
+        fallbacks, so the flag changes nothing here), and the sections after it
+        are still asked."""
         client = MagicMock()
 
         def fail_b(prompt, system_prompt):
             if "sys-B" in system_prompt:
                 return CallOutcome(
-                    "*Error: model failed*", ok=False, model_specific=True
+                    "*Error: model failed*", ok=False, model_specific=model_specific
                 )
             return CallOutcome("ok content", ok=True)
 
@@ -441,11 +447,17 @@ class TestBedrockReportPipeline:
         prompts = {"a": "pa", "b": "pb", "c": "pc"}
         results = pipeline.run(prompts)
 
-        # Section B failed — its content should be the error string but pipeline continues
-        assert results["a"] == "ok content"
-        assert results["c"] == "ok content"
-        # All three sections were attempted
-        assert client.call.call_count == 3
+        assert results == {
+            "a": "ok content",
+            "b": "*Error: model failed*",
+            "c": "ok content",
+        }
+        # All three sections were attempted, each once, in order.
+        assert [c.args[1] for c in client.call.call_args_list] == [
+            "sys-A",
+            "sys-B",
+            "sys-C",
+        ]
 
     def test_caching_returns_same_result_on_second_call(self):
         """With caching enabled, second call for same key skips client."""
