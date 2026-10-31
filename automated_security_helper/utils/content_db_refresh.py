@@ -113,6 +113,7 @@ failed rather than run against a database that could not be brought up to date.
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import hashlib
 import ntpath
@@ -120,12 +121,13 @@ import os
 import posixpath
 import re
 import shutil
+import stat
 import subprocess  # nosec B404 - TimeoutExpired only; spawns go through spawn_run
 import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
 
 import yaml
 
@@ -497,6 +499,11 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     lock named for this account, which this account made itself. Two accounts that
     both end up there do not serialize against each other, which the unusable
     file could not do for them either.
+
+    The same goes for a name that is not a regular file: a link, a FIFO, a socket
+    or a device another account left at the lock's name. ``exclusive_lock`` does
+    not follow a link and refuses anything but a regular file, whatever its mode,
+    so such a name is no lock; the caller takes the next one down.
     """
     cache = Path(cache_dir)
     probe = cache
@@ -517,14 +524,47 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
 
 
 def _lock_is_openable(lock: Path) -> bool:
-    """Whether ``exclusive_lock`` can open ``lock``: it is missing, or readable.
+    """Whether ``exclusive_lock`` can open ``lock``: it is missing, or it is a
+    regular file this account can read.
 
     Its read-write open needs read and write permission and its read-only fallback
-    needs read permission, so a file this account can read is always openable and
-    one it cannot read never is (a write-only file fails both opens). A dangling
-    link counts as unreadable: the open does not follow links.
+    needs read permission, so a regular file this account can read is always
+    openable and one it cannot read never is (a write-only file fails both opens).
+    The name is looked at without following a link, because the open does not
+    follow one: a link (dangling or to a readable file) and a FIFO, socket or
+    device are refused whatever their mode, so none of them is openable.
     """
-    return os.access(lock, os.R_OK) or not os.path.lexists(lock)
+    try:
+        mode = os.lstat(lock).st_mode
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISREG(mode) and os.access(lock, os.R_OK)
+
+
+@contextlib.contextmanager
+def _refresh_lock(tool: str, lock: Path) -> Iterator[None]:
+    """Hold ``exclusive_lock`` on ``lock`` for the block, and word its refusals.
+
+    What ``exclusive_lock`` raises while taking the lock (a lock file or directory
+    this account cannot open, a name that is not a regular file, a holder that has
+    kept it past the bound) becomes the ``ScannerError`` the scanners turn into a
+    failed scanner, instead of an ``OSError`` or ``TimeoutError`` that ends the
+    scan. Only the taking is worded here: whatever the block raises passes
+    through as it is.
+    """
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(exclusive_lock(lock))
+        except OSError as exc:  # TimeoutError is one
+            raise ScannerError(
+                f"the {tool} database update could not take its lock "
+                f"{lock.as_posix()} ({exc}). Make that file and its directory "
+                "usable by this account, or wait for the update that holds it, "
+                "and run ASH again."
+            ) from exc
+        yield
 
 
 def prepare_content_db(
@@ -577,9 +617,12 @@ def prepare_content_db(
     update in and is said once; see "The operator's opt-out" above.
 
     Raises:
-        ScannerError: The tool is missing, failed, or timed out, or ``config_file``
-            is inside the scanned tree. The scanners turn this error into a failed
-            scanner; any other exception type would end the scan instead.
+        ScannerError: The tool is missing, failed, or timed out, ``config_file``
+            is inside the scanned tree, or the refresh lock could not be taken (a
+            lock file that is not a regular file, a directory this account cannot
+            use, another process holding it past the bound). The scanners turn this
+            error into a failed scanner; any other exception type would end the
+            scan instead.
         ValueError: ``tool`` is not one this module refreshes (a programming error).
     """
     if tool not in TOOLS:
@@ -650,7 +693,8 @@ def prepare_content_db(
             raise ScannerError(
                 f"{tool} is not installed, so its database cannot be updated"
             )
-        with exclusive_lock(update_lock_path(tool, cache)), outside_scanner_sandbox():
+        lock = update_lock_path(tool, cache)
+        with _refresh_lock(tool, lock), outside_scanner_sandbox():
             workdir = Path(tempfile.mkdtemp(prefix=f"ash-{tool}-refresh-"))
             try:
                 # Placed by the same rule as checkov's scans, inside this block so

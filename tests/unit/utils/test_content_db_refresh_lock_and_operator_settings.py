@@ -259,6 +259,133 @@ def test_a_scan_does_not_end_on_a_lock_file_both_opens_refuse(
     assert [what for _argv, _env, what in captured] == ["grype database"]
 
 
+def _plant_fifo(path, mode):
+    os.mkfifo(path)
+    path.chmod(mode)
+
+
+def _plant_link_to_readable_file(path, _mode):
+    target = path.parent / "readable-target"
+    target.write_text("")
+    path.symlink_to(target)
+
+
+def _plant_dangling_link(path, _mode):
+    path.symlink_to(path.parent / "no-such-target")
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="FIFOs and the no-follow open are POSIX behavior"
+)
+@pytest.mark.parametrize(
+    "plant, mode",
+    [
+        pytest.param(_plant_fifo, 0o444, id="fifo-readable-not-writable"),
+        pytest.param(_plant_fifo, 0o600, id="fifo-own-read-write"),
+        pytest.param(_plant_link_to_readable_file, 0o644, id="link-to-readable-file"),
+        pytest.param(_plant_dangling_link, 0o644, id="dangling-link"),
+    ],
+)
+def test_a_name_that_is_not_a_regular_file_is_not_taken_as_the_cache_lock(
+    plant, mode, tmp_path, captured
+):
+    """``exclusive_lock`` opens with no-follow and refuses what is not a regular
+    file (``file_lock._open_lock_file``), with an ``OSError`` rather than the
+    ``PermissionError`` that sends it to its read-only open. A link, or a FIFO
+    another account left at the name in a shared cache, can be readable, so a lock
+    path that asked only whether the name was readable chose it and the refresh
+    ended on the refusal. The caller takes the shared temporary lock instead and
+    the refresh runs.
+
+    Red before the fix for the two FIFOs and the link to a readable file: each
+    passes ``os.access``. The dangling link already read as unreadable and is
+    pinned so it stays so."""
+    cache = tmp_path / "shared-cache"
+    cache.mkdir()
+    lock, shared, _own = _lock_names(cache)
+    plant(lock, mode)
+    assert refresh.update_lock_path("grype", cache) == shared
+    _prepare("grype", cache, tmp_path)
+    assert [what for _argv, _env, what in captured] == ["grype database"]
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="FIFOs and the no-follow open are POSIX behavior"
+)
+def test_a_shared_temp_lock_that_is_not_a_regular_file_sends_the_caller_to_its_own(
+    tmp_path, captured
+):
+    """The shared temporary name has no account in it and sits in a directory every
+    local user can write, so a FIFO left there is as likely as one in a cache. Both
+    names being refused, the caller takes the temporary lock named for its own
+    account, which it made itself."""
+    cache = tmp_path / "shared-cache"
+    cache.mkdir()
+    lock, shared, own = _lock_names(cache)
+    os.mkfifo(lock)
+    os.mkfifo(shared)
+    assert refresh.update_lock_path("grype", cache) == own
+    _prepare("grype", cache, tmp_path)
+    assert [what for _argv, _env, what in captured] == ["grype database"]
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        pytest.param(
+            OSError(errno.EINVAL, "The lock file is not a regular file."),
+            id="not-a-regular-file",
+        ),
+        pytest.param(
+            PermissionError(errno.EACCES, "Permission denied"), id="both-opens-refused"
+        ),
+        pytest.param(
+            NotADirectoryError(errno.ENOTDIR, "Not a directory"), id="lock-directory"
+        ),
+        pytest.param(TimeoutError("Another process has held the lock."), id="held"),
+    ],
+)
+def test_a_lock_that_cannot_be_taken_is_a_scanner_error_not_an_os_error(
+    refusal, tmp_path, monkeypatch, captured
+):
+    """Whatever ``exclusive_lock`` refuses with while taking the lock leaves
+    ``prepare_content_db`` as the ``ScannerError`` its Raises section promises and
+    the scanners turn into a failed scanner. An ``OSError`` or ``TimeoutError``
+    ended the scan on a traceback. Every name is refused here, so no fallback lock
+    can save the refresh; nothing runs and the error names the lock and the way
+    out."""
+
+    def _open(path):
+        raise refusal
+
+    monkeypatch.setattr(file_lock, "_open_lock_file", _open)
+    cache = tmp_path / "shared-cache"
+    cache.mkdir()
+    with pytest.raises(ScannerError, match="could not take its lock") as raised:
+        _prepare("grype", cache, tmp_path)
+    assert (cache / ".ash-grype-update.lock").as_posix() in str(raised.value)
+    assert raised.value.__cause__ is refusal
+    assert captured == []
+
+
+def test_an_error_inside_the_lock_is_not_reworded_as_a_lock_refusal(
+    tmp_path, monkeypatch
+):
+    """Only the taking of the lock is worded: what the refresh itself raises while
+    it holds the lock passes through as it is, an ``OSError`` included."""
+    boom = OSError(errno.EIO, "disk error while updating")
+
+    def _run(argv, env, cwd, what, values=()):
+        raise boom
+
+    monkeypatch.setattr(refresh, "_run", _run)
+    cache = tmp_path / "shared-cache"
+    cache.mkdir()
+    with pytest.raises(OSError) as raised:
+        _prepare("grype", cache, tmp_path)
+    assert raised.value is boom
+
+
 def test_the_grype_refresh_runs_with_the_operators_config(tmp_path, captured):
     cache = tmp_path / "grype-db"
     config = tmp_path / "grype.yaml"
