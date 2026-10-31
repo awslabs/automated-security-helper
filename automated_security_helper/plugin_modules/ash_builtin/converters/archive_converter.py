@@ -3,6 +3,7 @@
 
 """Module containing the ArchiveConverter implementation."""
 
+import bisect
 import bz2
 import contextlib
 import errno
@@ -1786,11 +1787,28 @@ def _named_member(
     return None
 
 
+def _a_member_runs_through(key: str, sorted_keys: List[str]) -> bool:
+    """Whether some member's key (``sorted_keys``, every member's _written_key,
+    sorted) runs through ``key`` as a directory: starts with it and a separator.
+
+    The keys that start with ``key`` + the separator are contiguous in sorted
+    order, from the first key at or past it, so one bisect and one comparison
+    answer, and no string is built for any directory a member's path passes
+    through: a name of thousands of components built a string per prefix, each as
+    long as the prefix, for every member that had one. The separator is the one the
+    keys are joined with (os.path.normcase of ``/``: a backslash where the host
+    folds names as Windows does).
+    """
+    start = key + os.path.normcase("/")
+    index = bisect.bisect_left(sorted_keys, start)
+    return index < len(sorted_keys) and sorted_keys[index].startswith(start)
+
+
 def _renamed_member_name(
     member_name: str,
     kind: Optional[Literal["zip", "tar"]],
     taken: Set[str],
-    taken_directories: Set[str],
+    sorted_taken: List[str],
     written: Dict[str, str],
     directories: Set[str],
     counters: Dict[str, int],
@@ -1803,8 +1821,8 @@ def _renamed_member_name(
     counter; the first such placement whose file and directory no member of the
     archive is named by (``taken``, every member's _written_key, read before any
     is renamed), whose file is not a directory any member's path runs through
-    (``taken_directories``, every member's _written_prefix_keys, read with
-    ``taken``; and ``directories``, the admitted members' own), and whose file
+    (``sorted_taken``, ``taken`` sorted, read by _a_member_runs_through; and
+    ``directories``, the admitted members' own), and whose file
     and directory no earlier member is written to (``written``). A placement only
     ``written`` was checked against could be a later member's own, which then
     lost its name to the rename; a placement checked against no directory set
@@ -1841,7 +1859,7 @@ def _renamed_member_name(
         if (
             renamed_key not in taken
             and renamed_key not in written
-            and renamed_key not in taken_directories
+            and not _a_member_runs_through(renamed_key, sorted_taken)
             and renamed_key not in directories
             and directory_key not in taken
             and directory_key not in written
@@ -2445,17 +2463,20 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # at extraction (NotADirectoryError, IsADirectoryError).
         directories: Set[str] = set()
         # Every member's key before any is renamed, so a renamed member never
-        # takes the name of a member that comes later in the archive; and every
-        # directory any member's path runs through, so a renamed member is never
-        # written as a file where a later member's directory stands (the
+        # takes the name of a member that comes later in the archive. The same
+        # keys, sorted at the first rename, say whether a member's path runs
+        # through a directory (_a_member_runs_through), so a renamed member is
+        # never written as a file where a later member's directory stands (the
         # earlier members' directories are ``directories``, read at the rename).
+        # No directory string is built for a member: a name of thousands of
+        # components cost a string per prefix, each as long as the prefix, even
+        # for a member later refused or left out.
         taken: Set[str] = set()
-        taken_directories: Set[str] = set()
         for member in members:
             named = _named_member(member)
             if named is not None:
                 taken.add(_written_key(*named, fold=fold))
-                taken_directories.update(_written_prefix_keys(*named, fold=fold))
+        sorted_taken: Optional[List[str]] = None
         # Per written key, where the next rename of it starts counting.
         rename_counters: Dict[str, int] = {}
         renamed_count = 0
@@ -2565,11 +2586,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     # earlier one, under its own file name, and the scan reads
                     # both, whichever of the two a consumer's unpacker keeps.
                     # The notice names the archive when inspect_members knows it.
+                    if sorted_taken is None:
+                        sorted_taken = sorted(taken)
                     renamed = _renamed_member_name(
                         member_name,
                         kind,
                         taken,
-                        taken_directories,
+                        sorted_taken,
                         written,
                         directories,
                         rename_counters,

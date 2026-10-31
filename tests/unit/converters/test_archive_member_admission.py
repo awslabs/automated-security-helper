@@ -460,6 +460,71 @@ def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
     assert len(aggregate) == 1 and f"{expected} more members" in aggregate[0], aggregate
 
 
+def test_a_member_left_out_costs_no_directory_strings(test_plugin_context, monkeypatch):
+    """Every prefix of every member's path used to be built up front, so a name of
+    thousands of components built a string per prefix, each as long as the prefix
+    (a 64 KiB ``a/a/.../a`` is about a gigabyte of characters), even for a member
+    no scanner reads and that is left out unlooked at. A member left out reaches
+    no prefix key now: the run's only calls are for members past that point."""
+    calls = {"n": 0}
+    real = archive_converter._written_prefix_keys
+
+    def counting(member_name, kind, fold=True):
+        calls["n"] += 1
+        return real(member_name, kind, fold)
+
+    monkeypatch.setattr(archive_converter, "_written_prefix_keys", counting)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo("a/" * 50 + f"logo{i}.png") for i in range(20)]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert admitted == []
+    assert converter.refused_inputs == []
+    assert calls["n"] == 0
+
+
+def test_a_member_runs_through_a_directory_only_where_a_key_starts_with_it_and_a_separator():
+    """The directory test the rename reads: over the sorted keys of every member,
+    one bisect. ``m~2/m.js`` is a directory because a member is written below it;
+    ``m.js`` and ``m`` are not, nor ``m~3/m.js``; and a key that merely starts
+    with the same characters (``ab`` beside ``abc/x``) is not a directory."""
+    keys = sorted(["m.js", "m~2/m.js/x.py", "abc/x", "other"])
+    runs_through = archive_converter._a_member_runs_through
+
+    assert runs_through("m~2/m.js", keys) is True
+    assert runs_through("m~2", keys) is True
+    assert runs_through("abc", keys) is True
+    assert runs_through("m.js", keys) is False
+    assert runs_through("m", keys) is False
+    assert runs_through("m~3/m.js", keys) is False
+    assert runs_through("ab", keys) is False
+    assert runs_through("m.js", []) is False
+
+
+def test_a_renamed_member_never_takes_a_name_a_later_members_directory_stands_on(
+    test_plugin_context,
+):
+    """The control for the directory test, end to end: the second ``m.js`` would be
+    placed at ``m~2/m.js``, where the later member ``m~2/m.js/x.py`` needs a
+    directory, so it is placed at ``m~3/m.js`` and the later member is kept."""
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [
+        zipfile.ZipInfo("m.js"),
+        zipfile.ZipInfo("m.js"),
+        zipfile.ZipInfo("m~2/m.js/x.py"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert [m.filename for m in admitted] == ["m.js", "m~3/m.js", "m~2/m.js/x.py"]
+    assert converter.refused_inputs == []
+
+
 def _tmp_folds_case(directory: Path) -> bool:
     """The test's own read of the filesystem under ``directory``: whether a file
     written in lower case is found by its upper-case spelling."""
