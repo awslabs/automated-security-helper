@@ -35,8 +35,8 @@ The entries only work where git reads safe.directory from the command scope, whi
 believed to be git 2.38 and later. Every test here replaces git with a stub, so none
 shows a real git accepting an entry (that needs an integration run on a host with a
 second user and a git of each age); what these tests can pin is that the version
-bound is recorded where a reader of the code will find it, in the docstrings of
-``_safe_directory_config`` and ``_get_commit_sha``.
+bound and the three variable names are module constants the code reads, and that a
+failing git with entries passed names the bound from the constant.
 """
 
 from __future__ import annotations
@@ -203,15 +203,46 @@ def test_the_config_file_variables_are_still_removed(
     assert ("GIT_CONFIG_VALUE_0" in seen) is with_entry
 
 
-def test_the_minimum_git_version_is_recorded_where_the_code_is_read(hook):
-    """Red before: neither docstring named a git version, so a reader had no way
-    to tell why the forwarded entries do nothing on an older git."""
-    for documented in (
-        hook._safe_directory_config,
-        hook.CustomBuildHook._get_commit_sha,
-    ):
-        text = " ".join(documented.__doc__.split())
-        assert "git 2.38" in text, documented.__name__
-    config_text = " ".join(hook._safe_directory_config.__doc__.split())
-    for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"):
-        assert name in config_text, name
+def test_the_minimum_git_version_is_a_constant_the_code_reads(
+    monkeypatch, capsys, hook
+):
+    """Red at the base: there was no constant, so the version bound lived only in
+    docstring wording and nothing the code ran read it. When git fails with
+    safe.directory entries passed, the build now names the bound it reads from
+    the constant, so changing the constant changes the line and a reworded
+    docstring changes nothing."""
+    assert hook._SAFE_DIRECTORY_MIN_GIT == "2.38"
+    assert (
+        hook._GIT_CONFIG_COUNT,
+        hook._GIT_CONFIG_KEY,
+        hook._GIT_CONFIG_VALUE,
+    ) == ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/srv/ash-first")
+    monkeypatch.setattr(hook.shutil, "which", lambda name: "/usr/bin/git")
+
+    def refuse(*args, **kwargs):
+        raise hook.subprocess.CalledProcessError(128, args[0], stderr=b"dubious")
+
+    monkeypatch.setattr(hook.subprocess, "run", refuse)
+    monkeypatch.setattr(hook, "_SAFE_DIRECTORY_MIN_GIT", "9.99")
+
+    assert hook._commit_from_git("/usr/bin/git") is None
+
+    assert "older than 9.99" in capsys.readouterr().out
+
+
+def test_no_version_line_without_a_forwarded_entry(monkeypatch, capsys, hook):
+    """The control: a git failure with no safe.directory entry passed says nothing
+    about the version bound."""
+    monkeypatch.setattr(hook.shutil, "which", lambda name: "/usr/bin/git")
+
+    def refuse(*args, **kwargs):
+        raise hook.subprocess.CalledProcessError(128, args[0], stderr=b"dubious")
+
+    monkeypatch.setattr(hook.subprocess, "run", refuse)
+
+    assert hook._commit_from_git("/usr/bin/git") is None
+
+    assert "older than" not in capsys.readouterr().out

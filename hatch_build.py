@@ -181,6 +181,19 @@ _COMMIT_ID = re.compile(r"[0-9a-f]{40}")
 # trusted to bound a loop.
 _MAX_GIT_CONFIG_ENTRIES = 1000
 
+# The variables that carry numbered config entries: the count, and the prefix of the
+# key and value of entry <n>. These are the only GIT_CONFIG_* names passed to git.
+_GIT_CONFIG_COUNT = "GIT_CONFIG_COUNT"
+_GIT_CONFIG_KEY = "GIT_CONFIG_KEY_"
+_GIT_CONFIG_VALUE = "GIT_CONFIG_VALUE_"
+
+# The oldest git believed to read safe.directory from the command scope, which is
+# where the entries above are put. git 2.38 introduced protected configuration, the
+# only scope set that git-config(1) says safe.directory is respected in. Not
+# measured here, and nothing tests for the version: git gives the same refusal on
+# an older release, so the build says this number when git fails with entries passed.
+_SAFE_DIRECTORY_MIN_GIT = "2.38"
+
 
 def _safe_directory_config(environ) -> dict:
     """The safe.directory entries of GIT_CONFIG_COUNT/KEY_<n>/VALUE_<n>, renumbered.
@@ -213,21 +226,21 @@ def _safe_directory_config(environ) -> dict:
     gives the same refusal either way.
     """
     try:
-        count = int(environ.get("GIT_CONFIG_COUNT", ""))
+        count = int(environ.get(_GIT_CONFIG_COUNT, ""))
     except ValueError:
         return {}
     values = []
     for index in range(min(count, _MAX_GIT_CONFIG_ENTRIES)):
-        key = environ.get(f"GIT_CONFIG_KEY_{index}")
-        value = environ.get(f"GIT_CONFIG_VALUE_{index}")
+        key = environ.get(f"{_GIT_CONFIG_KEY}{index}")
+        value = environ.get(f"{_GIT_CONFIG_VALUE}{index}")
         if key is not None and value is not None and key.lower() == "safe.directory":
             values.append(value)
     if not values:
         return {}
-    kept = {"GIT_CONFIG_COUNT": str(len(values))}
+    kept = {_GIT_CONFIG_COUNT: str(len(values))}
     for index, value in enumerate(values):
-        kept[f"GIT_CONFIG_KEY_{index}"] = "safe.directory"
-        kept[f"GIT_CONFIG_VALUE_{index}"] = value
+        kept[f"{_GIT_CONFIG_KEY}{index}"] = "safe.directory"
+        kept[f"{_GIT_CONFIG_VALUE}{index}"] = value
     return kept
 
 
@@ -256,7 +269,8 @@ def _commit_from_git(git_path: str) -> str | None:
     # git that reads safe.directory from the command scope (believed to be git
     # 2.38 and later; see _safe_directory_config). GIT_CONFIG_GLOBAL,
     # GIT_CONFIG_SYSTEM and GIT_CONFIG_NOSYSTEM stay dropped by the filter above.
-    git_env.update(_safe_directory_config(os.environ))
+    forwarded = _safe_directory_config(os.environ)
+    git_env.update(forwarded)
     try:
         git_result_full = subprocess.run(  # nosec B603 - This code is run during package build
             [git_path, "rev-parse", "--show-prefix", "HEAD"],
@@ -274,6 +288,11 @@ def _commit_from_git(git_path: str) -> str | None:
         _say(f"Git command failed in current directory: {e}")
         if hasattr(e, "stderr") and e.stderr:
             _say(f"stderr: {e.stderr.decode('utf-8', 'replace').strip()}")
+        if forwarded:
+            _say(
+                "safe.directory entries were passed to git; a git older than "
+                f"{_SAFE_DIRECTORY_MIN_GIT} is believed to ignore them"
+            )
     return None
 
 
