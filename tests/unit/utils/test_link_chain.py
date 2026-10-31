@@ -780,13 +780,27 @@ class TestADriveSpellingKeepsItsStepBack:
 
     @pytest.mark.parametrize("target", ["C:", "C:foo", "C:foo\\bar", "c:../x"])
     def test_a_drive_and_no_root_is_a_target_that_cannot_be_judged(
-        self, tmp_path, target
+        self, tmp_path, monkeypatch, target
     ):
         """Red at the base: the walk read ``C:foo`` as a name in the link's own
         directory, found nothing there, and passed it. It is taken from the
-        current directory of that drive, which the link does not tell."""
+        current directory of that drive, which the link does not tell.
+
+        The stored target is handed to the walk through ``os.readlink``. A link
+        made with ``symlink_to`` on Windows did not hold these spellings as
+        given (the walk found nothing to refuse), so the test names the text
+        that a link keeping the spelling would return, on every platform.
+        """
         link = tmp_path / "link"
-        link.symlink_to(target)
+        link.symlink_to("ash-test-nothing-here")
+        real_readlink = os.readlink
+
+        def stored_target(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "link":
+                return target
+            return real_readlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "readlink", stored_target)
 
         found = link_chain.first_unsafe_link(str(link))
 
