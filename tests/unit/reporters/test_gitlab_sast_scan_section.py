@@ -524,24 +524,28 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
             i["value"] for i in vuln["identifiers"] if i["type"] == "ash-finding-id"
         } == {flat.id}
 
-    def test_a_flattening_with_more_rows_than_results_vouches_for_none(
+    def test_an_extra_flattened_row_takes_no_other_findings_id(
         self, reporter, monkeypatch
     ):
         """The length check used to run after the list was cut to size, so a
         flattening with an extra row passed it and every id after the extra row
-        named another finding. A length that differs means no position is known
-        to line up, and every finding keeps its legacy id."""
+        named another finding. Then a differing length made every finding keep
+        its legacy id, which changed every id between two pipelines of the same
+        tree for one stray row. Now an extra row is walked past: a row that
+        describes no result is paired with none, and the rows that describe
+        their results keep their ids."""
         model = _model(_result("B105", "one"), _result("B106", "two"))
         flat = list(model.to_flat_vulnerabilities())
-        extra = flat[0].model_copy(update={"id": "an-extra-row"})
+        extra = flat[0].model_copy(update={"id": "an-extra-row", "rule_id": "B999"})
         monkeypatch.setattr(
-            AshAggregatedResults, "to_flat_vulnerabilities", lambda self: flat + [extra]
+            AshAggregatedResults,
+            "to_flat_vulnerabilities",
+            lambda self: [flat[0], extra, flat[1]],
         )
 
         ids = [v["id"] for v in json.loads(reporter.report(model))["vulnerabilities"]]
 
-        assert len(ids) == 2
-        assert set(ids).isdisjoint({item.id for item in flat} | {"an-extra-row"})
+        assert ids == [flat[0].id, flat[1].id]
 
     @pytest.mark.parametrize(
         "drift",

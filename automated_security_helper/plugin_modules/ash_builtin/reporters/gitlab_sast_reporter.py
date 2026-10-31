@@ -220,18 +220,21 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         at one line shared an "unique" id and an ASH finding-id identifier, and
         the id differed from the one in every other report of the same scan.
 
-        None at every position when the flattening fails or has a different
-        length, and at a position whose flattened row does not describe its
-        result (another rule or another file), so a model this cannot read, and
-        a result the flattening drifted from, keep the legacy id rather than
-        taking another finding's; see :func:`shared_ids_by_position`.
+        None at every position when the flattening fails or cannot be paired,
+        and at a position whose flattened row does not describe its result
+        (another rule, file or line), so a model this cannot read, and a result
+        the flattening drifted from, keep the legacy id rather than taking
+        another finding's; see :func:`shared_ids_by_position`. The pairing runs
+        inside the guard too: it reads each result's locations, and a result
+        whose locations misbehave is a legacy id at that position, never an
+        exception out of ``report()`` with no artefact written.
         """
         try:
             flat = list(model.to_flat_vulnerabilities())
+            return shared_ids_by_position(flat, all_results)
         except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
             ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
             return [None] * len(all_results)
-        return shared_ids_by_position(flat, all_results)
 
     def _vulnerability_for(
         self, result, model: "AshAggregatedResults", shared_id: str | None = None

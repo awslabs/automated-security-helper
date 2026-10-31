@@ -44,7 +44,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 pytestmark = pytest.mark.unit
 
 
-def _result(rule_id: str, text: str, uri: str = "app/main.py") -> Result:
+def _result(rule_id: str, text: str, uri: str = "app/main.py", line: int = 7) -> Result:
     return Result(
         ruleId=rule_id,
         level=Level.error,
@@ -54,15 +54,30 @@ def _result(rule_id: str, text: str, uri: str = "app/main.py") -> Result:
             Location(
                 physicalLocation=PhysicalLocation(
                     artifactLocation=ArtifactLocation(uri=uri),
-                    region=Region(startLine=7),
+                    region=Region(startLine=line),
                 )
             )
         ],
     )
 
 
-def _flat(identifier: str, rule_id: str, file_path: str) -> SimpleNamespace:
-    return SimpleNamespace(id=identifier, rule_id=rule_id, file_path=file_path)
+def _flat(
+    identifier: str,
+    rule_id: str,
+    file_path: str,
+    line_start: int | None = 7,
+    source_report: str | None = None,
+) -> SimpleNamespace:
+    """A flattened row as the pairing reads it: id, rule, file, first line, and
+    where it came from (None = a SARIF row; a key = a row of that additional
+    report)."""
+    return SimpleNamespace(
+        id=identifier,
+        rule_id=rule_id,
+        file_path=file_path,
+        line_start=line_start,
+        source_report=source_report,
+    )
 
 
 class TestSharedIdsByPosition:
@@ -72,12 +87,61 @@ class TestSharedIdsByPosition:
 
         assert shared_ids_by_position(flat, results) == ["id-1", "id-2"]
 
-    def test_lists_of_different_length_vouch_for_no_position(self):
+    def test_a_missing_row_costs_its_own_position_alone(self):
+        """One stray row used to switch every id of the report to its legacy
+        key, which changed every id between two pipelines of the same tree."""
+        results = [_result("R1", "a"), _result("R2", "b"), _result("R3", "c")]
+        flat = [_flat("id-1", "R1", "app/main.py"), _flat("id-3", "R3", "app/main.py")]
+
+        assert shared_ids_by_position(flat, results) == ["id-1", None, "id-3"]
+
+    def test_an_extra_row_costs_no_position(self):
+        results = [_result("R1", "a"), _result("R2", "b")]
+        flat = [
+            _flat("id-1", "R1", "app/main.py"),
+            _flat("stray", "R9", "elsewhere/other.py"),
+            _flat("id-2", "R2", "app/main.py"),
+        ]
+
+        assert shared_ids_by_position(flat, results) == ["id-1", "id-2"]
+
+    def test_repeated_rows_pair_once_each_in_order(self):
         results = [_result("R1", "a"), _result("R2", "b")]
         flat = [_flat("id-1", "R1", "app/main.py")]
 
+        assert shared_ids_by_position(flat, results) == ["id-1", None]
+        assert shared_ids_by_position(flat + flat + flat, results) == ["id-1", None]
+
+    def test_rows_of_an_additional_report_are_not_paired_with_sarif_results(self):
+        """``to_flat_vulnerabilities`` appends a scanner's list-form additional
+        report after the SARIF rows. Read as one list those rows made the
+        lengths differ and every id of the report fell back; they describe no
+        SARIF result and are left out of the pairing."""
+        results = [_result("R1", "a"), _result("R2", "b")]
+        flat = [
+            _flat("id-1", "R1", "app/main.py"),
+            _flat("id-2", "R2", "app/main.py"),
+            _flat("npm-1", "R1", "app/main.py", source_report="npm-audit"),
+            _flat("npm-2", "R2", "app/main.py", source_report="npm-audit"),
+        ]
+
+        assert shared_ids_by_position(flat, results) == ["id-1", "id-2"]
+
+    def test_two_hits_of_one_rule_in_one_file_do_not_swap_ids(self):
+        """Rule and file are the same for two hits of one rule in one file; the
+        line is what tells them apart, and a flattening that ordered them the
+        other way round swapped their ids with no sign."""
+        results = [_result("R1", "a"), _result("R1", "b", line=20)]
+        flat = [
+            _flat("id-at-20", "R1", "app/main.py", line_start=20),
+            _flat("id-at-7", "R1", "app/main.py", line_start=7),
+        ]
+
         assert shared_ids_by_position(flat, results) == [None, None]
-        assert shared_ids_by_position(flat + flat + flat, results) == [None, None]
+        assert shared_ids_by_position(list(reversed(flat)), results) == [
+            "id-at-7",
+            "id-at-20",
+        ]
 
     @pytest.mark.parametrize(
         "row",
@@ -109,8 +173,17 @@ class TestSharedIdsByPosition:
     def test_a_result_with_no_location_pairs_with_a_row_with_no_file(self):
         result = Result(ruleId="R1", level=Level.error, message=Message(text="a"))
 
-        assert flat_describes_result(_flat("id", "R1", None), result)
-        assert not flat_describes_result(_flat("id", "R1", "app/main.py"), result)
+        assert flat_describes_result(_flat("id", "R1", None, line_start=None), result)
+        assert not flat_describes_result(
+            _flat("id", "R1", "app/main.py", line_start=None), result
+        )
+
+    def test_a_row_at_another_line_describes_another_hit(self):
+        result = _result("R1", "a")
+
+        assert flat_describes_result(_flat("id", "R1", "app/main.py", 7), result)
+        assert not flat_describes_result(_flat("id", "R1", "app/main.py", 8), result)
+        assert not flat_describes_result(_flat("id", "R1", "app/main.py", None), result)
 
 
 class TestBothReportersGiveTheFlattenedId:
@@ -141,4 +214,33 @@ class TestBothReportersGiveTheFlattenedId:
         ] == [{flat_id} for flat_id in flat_ids]
         assert [r["finding_info"]["uid"] for r in ocsf] == [
             str(uuid.uuid5(_FINDING_UID_NAMESPACE, flat_id)) for flat_id in flat_ids
+        ]
+
+    def test_an_additional_report_leaves_every_shared_id_in_place(
+        self, test_plugin_context, model
+    ):
+        """A scanner's list-form additional report adds flattened rows after the
+        SARIF rows. Read as one list, those rows made every OCSF uid and GitLab
+        id of the run fall back to the legacy key, and flip back in a run whose
+        report was empty: the SIEM saw every finding as new each time."""
+        model.additional_reports["npm-audit"] = [
+            {
+                "id": "GHSA-1",
+                "title": "lodash",
+                "severity": "HIGH",
+                "file_path": "package.json",
+            }
+        ]
+        flat = model.to_flat_vulnerabilities()
+        assert [row.source_report for row in flat] == [None, None, None, "npm-audit"]
+        sarif_ids = [row.id for row in flat if row.source_report is None]
+
+        gitlab = json.loads(
+            GitLabSASTReporter(context=test_plugin_context).report(model)
+        )
+        ocsf = json.loads(OcsfReporter(context=test_plugin_context).report(model))
+
+        assert [v["id"] for v in gitlab["vulnerabilities"]] == sarif_ids
+        assert [r["finding_info"]["uid"] for r in ocsf] == [
+            str(uuid.uuid5(_FINDING_UID_NAMESPACE, flat_id)) for flat_id in sarif_ids
         ]

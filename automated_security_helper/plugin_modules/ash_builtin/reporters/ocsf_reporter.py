@@ -309,14 +309,20 @@ def _shared_finding_ids(
     SAST report and the flat JSON report carry, and distinct for two identical
     results in one run. None where the flattening cannot vouch for a position
     (:func:`shared_ids_by_position`), so that result's uid comes from
-    ``_identity_key`` instead of another finding's id.
+    ``_identity_key`` instead of another finding's id. Only the flattening's
+    SARIF rows are paired: a scanner's list-form additional report adds rows
+    after them, and read as one list those rows made the lengths differ, so
+    every uid of the report fell back whenever such a report was present and
+    flipped back when it was not. The pairing runs inside the guard too, so a
+    result whose locations misbehave is a fallback uid at that position, never
+    an exception out of ``report()``.
     """
     try:
         flat = list(model.to_flat_vulnerabilities())
+        return shared_ids_by_position(flat, all_results)
     except Exception as e:  # noqa: BLE001 -- a fallback, see _identity_key
         ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
         return [None] * len(all_results)
-    return shared_ids_by_position(flat, all_results)
 
 
 def _rule_id(result: Any) -> Optional[str]:
