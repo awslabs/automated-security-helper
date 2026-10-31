@@ -39,6 +39,7 @@ from automated_security_helper.models.workspace import (
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporter,
+    UnusedSuppressionsReporterConfig,
     UnusedSuppressionsReporterConfigOptions,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -113,6 +114,35 @@ def test_the_workspace_report_lists_only_projects_that_wrote_one(tmp_path):
             "path": "projects/api/reports/ash.unused-suppressions.json",
         }
     ]
+
+
+def test_the_workspace_markdown_lists_the_per_project_reports(tmp_path):
+    """Red at the base: the markdown named ``per_project_reports`` in its scope
+    line and listed none, so the reader of the markdown copy could not see which
+    file holds each project's own answer. The list is the JSON's: the projects
+    that wrote a report, at the path under the format's own extension."""
+    model = AshAggregatedResults()
+    model.used_suppressions = set()
+    model.workspace = WorkspaceResults(
+        workspace_file=(tmp_path / "fixture.code-workspace").as_posix(),
+        workspace_root=tmp_path.as_posix(),
+        exit_code=1,
+        projects=[
+            _project("api", ProjectRunStatus.COMPLETED),
+            _project("web", ProjectRunStatus.FAILED, error="the scan did not finish"),
+        ],
+        wall_clock_seconds=1.0,
+    )
+    reporter = UnusedSuppressionsReporter(
+        context=_context(tmp_path),
+        config=UnusedSuppressionsReporterConfig(options={"output_format": "markdown"}),
+    )
+
+    markdown = reporter.report(model)
+
+    assert "## Per-project reports" in markdown, markdown
+    assert "- api: `projects/api/reports/ash.unused-suppressions.md`" in markdown
+    assert "web" not in markdown.split("## Per-project reports")[1], markdown
 
 
 class TestOutputFormat:

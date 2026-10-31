@@ -678,6 +678,19 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             )
             lines.append("")
 
+        # A workspace-level report points at each project's own report (the scope
+        # line above names them): the list is in the JSON as per_project_reports,
+        # and the markdown shows it too, so its scope line does not point at a
+        # list the reader of this file cannot see.
+        if report_data.get("per_project_reports"):
+            lines.append("## Per-project reports")
+            lines.append("")
+            for entry in report_data["per_project_reports"]:
+                lines.append(
+                    f"- {_one_line(entry['project'])}: {_code_span(entry['path'])}"
+                )
+            lines.append("")
+
         # Footer
         lines.append("---")
         lines.append("")
