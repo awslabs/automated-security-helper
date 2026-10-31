@@ -42,7 +42,8 @@ from tests.unit import test_ash_output_dirs_are_not_scanned as named
 from tests.unit import test_output_dir_patterns_are_escaped as patterns
 from tests.unit.workspace.test_execution import _git
 
-capture = named.capture
+# ``capture`` is the ``caplog`` fixture tests/unit/conftest.py defines for every
+# unit test; it is no longer re-exported through test_ash_output_dirs_are_not_scanned.
 
 #: The scanners built here start no tool, and a tree built without ``git init`` is
 #: outside git wherever tmp_path is (tests/unit/conftest.py).
