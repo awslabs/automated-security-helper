@@ -44,7 +44,8 @@ import, starting from terminal_text's escapers:
   calling a function of the package that does, up to _REACH_DEPTH calls down. One
   ``raise ValueError(<shown>)`` therefore makes no ``except ValueError`` elsewhere
   a handler of shown text. A name read only as ``type(x)`` or ``x.__class__`` is a
-  class, not the value: it makes nothing shown.
+  class, and one read only as ``len(x)`` is a size, not the value: it makes nothing
+  shown, and a function that logs only that of a parameter does not show it.
 
 Refused: a doubling sink given shown text. Allowed: the one-pass form (a log
 call's whole message one shown_not_obeyed or shown_on_one_line call), the values
@@ -387,7 +388,8 @@ def _bound_names(target: ast.AST) -> Iterable[str]:
 def _derived_from(function: ast.AST, seeds: Set[str]) -> Set[str]:
     """*seeds* and every local bound from an expression that reads one of them,
     or holding one: a container stored into counts (``_bound_names``), its
-    index does not."""
+    index does not, and neither does the class or the size of a value
+    (``_walk_values``)."""
     derived = set(seeds)
     bindings = []
     for node in ast.walk(function):
@@ -401,7 +403,7 @@ def _derived_from(function: ast.AST, seeds: Set[str]) -> Set[str]:
         changed = False
         for targets, value in bindings:
             if any(
-                isinstance(n, ast.Name) and n.id in derived for n in ast.walk(value)
+                isinstance(n, ast.Name) and n.id in derived for n in _walk_values(value)
             ):
                 for target in targets:
                     for name in _bound_names(target):
@@ -424,18 +426,30 @@ def _is_a_class_read(node: ast.AST) -> bool:
     )
 
 
-def _walk_values(node: ast.AST) -> Iterable[ast.AST]:
-    """``ast.walk`` that does not look inside the class of a value.
+def _is_a_size_read(node: ast.AST) -> bool:
+    """``len(x)`` with one argument: the size of a value, a number."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "len"
+        and len(node.args) == 1
+        and not node.keywords
+    )
 
-    ``type(error).__name__`` and ``error.__class__.__name__`` name a class: none of
-    the text *error* holds is in them, so a shown *error* does not make the
-    expression shown text.
+
+def _walk_values(node: ast.AST) -> Iterable[ast.AST]:
+    """``ast.walk`` that does not look inside the class or the size of a value.
+
+    ``type(error).__name__`` and ``error.__class__.__name__`` name a class, and
+    ``len(message)`` is a number: none of the text *error* or *message* holds is in
+    them, so a shown *error* does not make the expression shown text, and a log
+    line that holds only the size of its *message* does not show it.
     """
     pending = [node]
     while pending:
         inner = pending.pop()
         yield inner
-        if not _is_a_class_read(inner):
+        if not (_is_a_class_read(inner) or _is_a_size_read(inner)):
             pending.extend(ast.iter_child_nodes(inner))
 
 
@@ -537,7 +551,7 @@ class _Analysis:
                             if parameter not in reaching and any(
                                 isinstance(inner, ast.Name) and inner.id in passed_on
                                 for argument in arguments
-                                for inner in ast.walk(argument)
+                                for inner in _walk_values(argument)
                             ):
                                 self.doubling.setdefault(key, set()).add(parameter)
                                 changed = True
@@ -1172,6 +1186,8 @@ _CLASS_READ_CASES = {
     "dunder-class-name": ("{exc.__class__.__name__}", False),
     "class-name-and-the-text": ("{type(exc).__name__}: {exc}", True),
     "class-name-and-str-of-it": ("{type(exc).__name__}: {str(exc)}", True),
+    "size-of-the-text": ("{len(str(exc))} characters", False),
+    "size-and-the-text": ("{len(str(exc))} characters: {exc}", True),
     "the-text": ("{exc}", True),
 }
 
@@ -1180,13 +1196,72 @@ _CLASS_READ_CASES = {
     "logged, offends", _CLASS_READ_CASES.values(), ids=list(_CLASS_READ_CASES)
 )
 def test_the_class_of_a_value_is_not_the_value(logged, offends):
-    """A name read only as ``type(x)`` or ``x.__class__`` makes nothing shown, and
-    does not hide a read of the value beside it."""
+    """A name read only as ``type(x)``, ``x.__class__`` or ``len(x)`` makes nothing
+    shown, and does not hide a read of the value beside it."""
     source = _HELPERS + (
         "def site(name):\n"
         "    try:\n        raise ValueError(f'no: {_shown(name)}')\n"
         "    except ValueError as exc:\n"
         f"        ASH_LOGGER.debug(f'cannot read ({logged})')\n"
+    )
+
+    sites = _sites({"automated_security_helper/x.py": source})
+
+    assert sites == ([("automated_security_helper/x.py", "site")] if offends else []), (
+        sites
+    )
+
+
+#: What the failed-send branch of a helper that takes a message logs about it, and
+#: whether that shows twice the shown text a caller hands the helper.
+_SIZE_READ_CASES = {
+    "the-size-only": (
+        "ASH_LOGGER.warning(f'Failed to send {level} message ({len(message)} chars)')",
+        False,
+    ),
+    "the-class-only": (
+        "ASH_LOGGER.warning(f'Failed to send {level} {type(message).__name__}')",
+        False,
+    ),
+    "the-size-in-a-local": (
+        "size = len(message)\n"
+        "        ASH_LOGGER.warning(f'Failed to send {level} message ({size} chars)')",
+        False,
+    ),
+    "the-size-and-the-text": (
+        "ASH_LOGGER.warning(f'Failed to send ({len(message)} chars): {message}')",
+        True,
+    ),
+    "the-text-in-a-local": (
+        "text = str(message)\n"
+        "        ASH_LOGGER.warning(f'Failed to send {level} message: {text}')",
+        True,
+    ),
+    "the-text-beside-its-size-in-a-local": (
+        "text = f'{len(message)}: {message}'\n        ASH_LOGGER.warning(text)",
+        True,
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "logged, offends", _SIZE_READ_CASES.values(), ids=list(_SIZE_READ_CASES)
+)
+def test_the_size_of_a_message_is_not_the_message(logged, offends):
+    """The cured shape of mcp_server's `_tell_client`: a helper that logs, when a
+    send fails, only the length (or the class) of its message shows nothing twice of
+    the shown text a caller hands it, since a number is no text. The text beside its
+    length, or in a local bound from it, still does; a local bound from the length
+    alone holds a number."""
+    source = _HELPERS + (
+        "async def tell(ctx, level, message):\n"
+        "    try:\n        await ctx.send(message)\n"
+        "    except Exception:\n"
+        f"        {logged}\n"
+        "async def site(ctx, name):\n"
+        "    await tell(ctx, 'error', raw_controls_shown(f'Refusing: {name}'))\n"
+        "async def raw_site(ctx, name):\n"
+        "    await tell(ctx, 'error', f'Refusing: {name}')\n"
     )
 
     sites = _sites({"automated_security_helper/x.py": source})
