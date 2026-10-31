@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,11 @@ from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
 from automated_security_helper.config.resolve_config import _own_grants_after_patch
 from automated_security_helper.config.sandbox_grants import confine_sandbox_grants
 from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
-from automated_security_helper.utils.sandbox.policy import DEFAULT_ENVIRONMENT
+from automated_security_helper.utils.sandbox.policy import (
+    CA_BUNDLE_ENV_NAMES,
+    DEFAULT_ENVIRONMENT,
+    PROXY_ENV_NAMES,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -173,3 +178,26 @@ def test_control_a_delivered_list_of_entries_the_server_has_is_not_refused(tmp_p
     assert (
         _refusals({"sandbox": {"environment": ["HTTP_PROXY"]}}, rules, tmp_path) == []
     )
+
+
+def test_the_scanner_reference_names_the_configurable_variables_apart():
+    """The names every scanner gets exclude the ones ``sandbox.environment`` decides;
+    those are named as its default, so the page stays true when a list omits them."""
+    scripts = Path(__file__).resolve().parents[3] / "scripts"
+    sys.path.insert(0, str(scripts))
+    try:
+        import generate_scanner_reference
+    finally:
+        sys.path.remove(str(scripts))
+
+    text = "\n".join(generate_scanner_reference._baseline_environment())
+
+    always = text.split("Every sandboxed scanner gets these names: ")[1].split(
+        "; and names starting with"
+    )[0]
+    assert "`PATH`" in always
+    configurable = (*CA_BUNDLE_ENV_NAMES, *sorted(PROXY_ENV_NAMES))
+    for name in configurable:
+        assert f"`{name}`" not in always, name
+        assert f"`{name}`" in text, name
+    assert "are the default of `sandbox.environment`" in text

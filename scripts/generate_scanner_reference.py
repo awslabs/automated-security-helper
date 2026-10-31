@@ -122,7 +122,10 @@ def _baseline_environment() -> list[str]:
     """The environment every sandboxed scanner gets, from utils/sandbox/policy.py."""
     from automated_security_helper.utils.sandbox import policy
 
-    names = sorted(policy.BASE_ENV_NAMES)
+    # The certificate names are in BASE_ENV_NAMES but follow `sandbox.environment`,
+    # so they are not among the names every scanner gets.
+    certificates = list(policy.CA_BUNDLE_ENV_NAMES)
+    names = sorted(policy.BASE_ENV_NAMES - set(certificates))
     prefixes = list(policy.BASE_ENV_PREFIXES)
     markers = list(policy.CREDENTIAL_MARKERS)
     proxies = sorted(policy.PROXY_ENV_NAMES)
@@ -135,13 +138,17 @@ def _baseline_environment() -> list[str]:
         + ", ".join(code(n) for n in names)
         + "; and names starting with "
         + ", ".join(code(p) for p in prefixes)
-        + ". A scanner's own prefixes and names, listed with each scanner below, are "
-        "added to that. A name containing "
+        + ". The proxy variables "
+        + ", ".join(code(n) for n in proxies)
+        + " and the certificate variables "
+        + ", ".join(code(n) for n in certificates)
+        + " are the default of `sandbox.environment`, a docker-compose style list "
+        "that replaces them when it is set. A proxy variable is passed only to a "
+        "scanner that has a network. A scanner's own prefixes and names, listed with "
+        "each scanner below, are added to all of that. A name containing "
         + ", ".join(code(m) for m in markers)
         + " is dropped even under an allowed prefix, unless the scanner names it "
-        "exactly. The proxy variables "
-        + ", ".join(code(n) for n in proxies)
-        + " are passed only to a scanner that has a network. The lists are in "
+        "exactly. The lists are in "
         "`automated_security_helper/utils/sandbox/policy.py`.",
         "",
         (
