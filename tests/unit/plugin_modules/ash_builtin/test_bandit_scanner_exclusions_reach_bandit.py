@@ -616,10 +616,22 @@ def test_additional_formats_leave_one_sarif_format_in_argv(tmp_path, caplog):
 
     argv, _, _ = scanner._execute_scan(source, "source", [])
 
-    assert argv.count("--format") == 1
-    assert argv[argv.index("--format") + 1] == "sarif"
-    assert "html" not in argv
-    assert "json" not in argv
+    # No extra argument carries a format in any spelling: the formats would
+    # reach the command as ``--format=json`` (one token, as ``--exclude=...``
+    # is) or ``-f json`` as readily as ``--format json``, and bandit's last
+    # value wins.
+    assert not any(
+        arg.key.startswith(("--format", "-f")) for arg in scanner.args.extra_args
+    ), [arg.key for arg in scanner.args.extra_args]
+    tokens = [str(arg) for arg in argv]
+    assert tokens.count("--format") == 1
+    assert tokens[tokens.index("--format") + 1] == "sarif"
+    assert not any(
+        token.startswith("--format=") or token == "-f" for token in tokens
+    ), tokens
+    assert not any(name in token for token in tokens for name in ("json", "html")), (
+        tokens
+    )
     assert any(
         "additional_formats" in record.message and "not produced" in record.message
         for record in caplog.records
