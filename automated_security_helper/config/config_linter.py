@@ -696,6 +696,14 @@ class ConfigLinter:
         if report_data.get("not_evaluated"):
             return raw_content, [], report_timestamp
 
+        # A report that lists scanners which did not run cannot say which of its
+        # entries belong to them: a suppression carries no scanner name, and the
+        # findings it would have matched were never reported. Every entry it
+        # lists is then in doubt, and commenting out a suppression that is in
+        # force makes the next full scan fail, so none is commented out.
+        if cls._scanners_not_run_of(report_data):
+            return raw_content, [], report_timestamp
+
         unused_suppressions = report_data.get("unused_suppressions", [])
         if not isinstance(unused_suppressions, list) or not unused_suppressions:
             return raw_content, [], report_timestamp
@@ -809,6 +817,22 @@ class ConfigLinter:
             return False
         resolved_id = cls._make_suppression_id(entry)
         return resolved_id in unused_ids and resolved_id not in written_ids
+
+    @staticmethod
+    def _scanners_not_run_of(report_data: Dict[str, Any]) -> List[str]:
+        """The scanners the unused suppressions report says did not run
+        (``scanners_not_run``); empty when it names none.
+
+        Any non-empty value counts, whatever its shape: a report this reads is a
+        file, and a value it cannot take for a list is still a statement that
+        the scan was partial.
+        """
+        listed = report_data.get("scanners_not_run")
+        if not listed:
+            return []
+        if isinstance(listed, (list, tuple)):
+            return [str(name) for name in listed]
+        return [str(listed)]
 
     @staticmethod
     def _rule_shown(entry: Dict[str, Any]) -> Any:
@@ -2157,6 +2181,26 @@ class ConfigLinter:
                     )
                 )
 
+        # A scan that did not run some scanner cannot say which of the entries it
+        # lists belong to that scanner, so none of them is offered to
+        # --fix-unused (the fixer reads the same key and comments nothing out).
+        not_run = cls._scanners_not_run_of(report_data)
+        if not_run:
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.INFO,
+                    category=LintCategory.SUPPRESSION_UNUSED,
+                    message=redact_values(
+                        "The unused suppressions report lists scanners that did "
+                        f"not run ({', '.join(not_run)}). It does not record "
+                        "which suppressions belong to them, so none is offered "
+                        "to --fix-unused; run a scan with those scanners enabled "
+                        "first.",
+                        result.environment_values,
+                    ),
+                )
+            )
+
         unused_suppressions = report_data.get("unused_suppressions", [])
         # The report holds the suppressions as the scan read them. Each one is
         # matched by its id to the suppressions the config's chain resolves to,
@@ -2185,7 +2229,7 @@ class ConfigLinter:
                 # free text, with what the chain read from the environment
                 # redacted.
                 message = redact_values(message, result.environment_values)
-            fixable = unused_id in own_ids
+            fixable = unused_id in own_ids and not not_run
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.INFO,
