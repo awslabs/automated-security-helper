@@ -807,6 +807,57 @@ class TestExpiryWarningsCoverScannerOptionLists:
         assert f"{subject} 'soon' expires on 2026-07-01" in expiring, warnings
         assert "'later'" not in expiring and "'old'" not in expiring
 
+    @pytest.mark.parametrize(
+        "scanner,field,subject",
+        [
+            ("bandit", "excluded_paths", "Bandit excluded path"),
+            ("checkov", "skip_path", "Checkov skip path"),
+            ("syft", "exclude", "Syft exclude entry"),
+        ],
+    )
+    def test_an_expired_entry_is_still_named_under_ignore_suppressions(
+        self, tmp_path, scanner, field, subject
+    ):
+        """Red at the base: the handler returned before it looked at any list.
+        The flag lifts suppressions and global ignore paths; a scanner's option
+        list is handed to the tool as its own argument either way, so an
+        expired entry there still changes what the tool scans. The global
+        ignore path that expired too is not named, as before."""
+        config = AshConfig(
+            project_name="test-project",
+            global_settings={
+                "ignore_paths": [
+                    {"path": "vendor/**", "reason": "r", "expiration": "2026-06-01"}
+                ]
+            },
+            scanners={
+                scanner: {
+                    "options": {
+                        field: [
+                            {"path": "old", "reason": "r", "expiration": "2026-06-01"}
+                        ]
+                    }
+                }
+            },
+        )
+        context = _context(tmp_path, config)
+        context.ignore_suppressions = True
+
+        warnings = self._warnings_for(context)
+
+        (expired,) = [w for w in warnings if "have expired" in w]
+        assert f"{subject} 'old' expired on 2026-06-01" in expired, expired
+        assert "vendor" not in expired, expired
+
+    @staticmethod
+    def _warnings_for(context) -> list[str]:
+        with patch(
+            "automated_security_helper.plugin_modules.ash_builtin.event_handlers."
+            "suppression_expiration_checker.ASH_LOGGER"
+        ) as logger:
+            assert handle_suppression_expiration_check(plugin_context=context)
+        return [str(c.args[0]) for c in logger.warning.call_args_list]
+
 
 @pytest.mark.usefixtures("fixed_clock")
 class TestScannerOptionLists:

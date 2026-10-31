@@ -28,13 +28,14 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
     This ensures the check is performed only once per execution rather than
     multiple times during SARIF processing.
 
-    Nothing is checked under ``--ignore-suppressions``: the flag lifts every
-    suppression and every ignore path for the run (``models.core.
-    ignore_paths_that_skip_scanning`` returns none under it, and the SARIF step
-    applies none), so an ignore path's expiry changes nothing about the scan,
-    and a warning about it would describe a scan that is not running. The
-    checker used to warn about expiring and expired ignore paths under the flag
-    all the same, on the reading that the flag turned off suppressions only.
+    Under ``--ignore-suppressions`` the suppressions and the global ignore paths
+    are not checked: the flag lifts every suppression and every ignore path for
+    the run (``models.core.ignore_paths_that_skip_scanning`` returns none under
+    it, and the SARIF step applies none), so their expiry changes nothing about
+    the scan, and a warning about it would describe a scan that is not running.
+    The scanner option lists that take the same entries (bandit ``excluded_paths``,
+    checkov ``skip_path``, syft ``exclude``) are still checked: they are handed
+    to the tool as its own arguments, which the flag does not lift.
 
     Args:
         **kwargs: Event data including:
@@ -70,10 +71,22 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
         recorded.update(recorded_ignore_paths(plugin_context.config, entries, keys))
 
     if ignoring_suppressions:
+        # The flag lifts the suppressions and the global ignore paths. A scanner's
+        # own option list (bandit ``excluded_paths``, checkov ``skip_path``, syft
+        # ``exclude``) reaches the tool as its argument whether or not the flag is
+        # set, so an expired entry there still changes what the tool scans, and
+        # an expiring one is still worth the notice.
+        scanner_lists = [
+            entry
+            for entry, (keys, _) in zip(ignore_path_lists, IGNORE_PATH_LISTS)
+            if keys[0] == "scanners"
+        ]
         ASH_LOGGER.debug(
-            "Suppressions and ignore paths are being ignored, so none of them is "
-            "checked for expiration"
+            "Suppressions and global ignore paths are being ignored, so none of "
+            "them is checked for expiration"
         )
+        _warn_about_expired_entries(scanner_lists, [], recorded)
+        _warn_about_expiring_ignore_paths(scanner_lists, recorded)
         return True
 
     _warn_about_expired_entries(ignore_path_lists, suppressions, recorded)
