@@ -214,6 +214,8 @@ class TestCleanupErrorsAreBoundedAndExpire:
 
         manager.get_cleanup_errors()[0]["error"] = "edited"
         manager.get_cleanup_errors(limit=1)[0]["subscription_id"] = "edited"
+        health = await manager.get_health_status()
+        health["details"]["recent_cleanup_errors"][0]["error"] = "edited"
 
         assert manager.get_cleanup_errors() == [stored]
 

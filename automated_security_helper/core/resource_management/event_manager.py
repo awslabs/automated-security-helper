@@ -786,9 +786,9 @@ class EventSubscriptionManager:
                     ).isoformat()
                     if self._subscriptions
                     else None,
-                    "recent_cleanup_errors": self._cleanup_errors[-5:]
-                    if self._cleanup_errors
-                    else [],
+                    "recent_cleanup_errors": [
+                        dict(entry) for entry in self._cleanup_errors[-5:]
+                    ],
                 },
             }
 
