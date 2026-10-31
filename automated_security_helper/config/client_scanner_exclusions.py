@@ -418,7 +418,8 @@ def evaluated_within(
     same bound. The call runs in a child process, which is killed at the
     deadline; its result, or the exception it raised, comes back as if the call
     had run inline. With ``timeout`` None (the scanner left unbounded) it runs
-    inline, in this process.
+    in the child too, with no deadline: inline, the matcher would hold this
+    process's interpreter lock for the whole search and freeze every thread.
 
     A thread cannot bound it. Python's matcher holds the interpreter lock for
     the whole of a search and returns to no one until it is done, so a thread
@@ -520,12 +521,14 @@ class EvaluationBudget:
     ) -> T:
         """``function(*args)`` within what is left of ``timeout``, or a ScannerError.
 
-        ``timeout`` None runs inline, unbounded. ``key`` names the entry for
+        ``timeout`` None runs in the worker with no deadline (never inline: a
+        client's expression would hold this process's interpreter lock for the
+        whole search), and charges no balance. ``key`` names the entry for
         the memory (the pattern as the option holds it); ``source`` names it
         for the error.
         """
         if timeout is None:
-            return function(*args)
+            return self._worker.evaluate(None, None, source, function, args)
         if key in self._timed_out:
             raise ScannerError(
                 f"A regular expression from {source} already ran past {timeout} "
@@ -596,8 +599,8 @@ class _EvaluationWorker:
 
     def evaluate(
         self,
-        wait: float,
-        timeout: float,
+        wait: Optional[float],
+        timeout: Optional[float],
         source: str,
         function: Callable[..., T],
         args: Tuple[Any, ...],
@@ -605,7 +608,8 @@ class _EvaluationWorker:
         """``function(*args)`` in the worker, killed when ``wait`` seconds pass.
 
         ``wait`` is what is left of ``timeout``, the scanner's ``scan_timeout``,
-        which the error names.
+        which the error names. Both None waits for the answer with no deadline,
+        for a scanner left unbounded: the search still runs in the child.
         """
         self.last_search_seconds = 0.0
         connection = self._started()
@@ -790,8 +794,10 @@ def checkov_skips(
     With a ``budget`` (the suppression pass's, ``EvaluationBudget``) the search
     gets what is left of the pass's one scan_timeout and an entry that ran out is
     not searched again; without one the search is bounded on its own
-    (``evaluated_within``). None, a literal pattern, or one that did not
-    compile is searched inline.
+    (``evaluated_within``). A ``timeout`` of None (the scanner left unbounded)
+    searches in the child with no deadline: the pattern is the client's, and
+    inline it would hold this process's interpreter lock for the whole search.
+    A literal pattern, or one that did not compile, is searched inline.
     """
     candidates = [absolute]
     parts = [part for part in _slashed(relative).split("/") if part]
@@ -800,7 +806,7 @@ def checkov_skips(
         candidates.append(f"{base}/{'/'.join(parts[:end])}")
     compiled = _checkov_pattern(pattern)
 
-    if compiled is None or timeout is None or _REGEX_SYNTAX.search(pattern) is None:
+    if compiled is None or _REGEX_SYNTAX.search(pattern) is None:
         return _checkov_search(pattern, candidates)
     source = (
         "scanners.checkov.options.skip_path, an entry of a config an MCP client "

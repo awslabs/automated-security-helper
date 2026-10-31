@@ -168,7 +168,9 @@ def test_evaluated_within_returns_the_result_or_re_raises():
 
 def test_evaluated_within_runs_the_bounded_call_in_another_process():
     assert evaluated_within(FAST_TIMEOUT, "x", os.getpid) != os.getpid()
-    assert evaluated_within(None, "x", os.getpid) == os.getpid()
+    # With no bound the call still leaves this process: only the wait has no
+    # deadline (the matcher would otherwise hold this process's lock).
+    assert evaluated_within(None, "x", os.getpid) != os.getpid()
 
 
 def test_evaluated_within_fails_at_the_deadline_naming_the_source():
@@ -442,12 +444,51 @@ def test_a_budget_keeps_one_balance_per_scan_timeout():
     assert budget.remaining(3.0) == 3.0
 
 
-def test_a_budget_with_no_bound_runs_inline():
+def test_a_budget_with_no_bound_runs_in_the_worker_without_a_deadline():
     budget = EvaluationBudget()
 
-    assert budget.evaluate(None, "s", "k", os.getpid) == os.getpid()
+    pid = budget.evaluate(None, "s", "k", os.getpid)
+
+    assert pid != os.getpid()
+    assert budget.worker_pid == pid
     assert budget.timed_out == ()
-    assert budget.worker_pid is None
+    assert budget.remaining(1.0) == 1.0
+    budget.close()
+
+
+def test_a_client_pattern_under_a_null_scan_timeout_never_runs_in_this_process():
+    """``scan_timeout: null`` is not a client-denied field, so a delivered
+    config could pair it with a backtracking ``skip_path`` and have the
+    expression searched inline: the matcher holds the interpreter lock for the
+    whole search, which freezes every thread of the server. With no bound the
+    search goes to the worker as before, and only the wait has no deadline."""
+    budget = _RecordingBudget()
+    entry = ClientScannerExclusion(
+        scanner="checkov",
+        option="skip_path",
+        kind="checkov",
+        pattern="vend.r",
+        reason="r",
+        scan_timeout=None,
+    )
+
+    assert (
+        checkov_skips(
+            "vend.r", "/scan/vendor/x.tf", "vendor/x.tf", timeout=None, budget=budget
+        )
+        is True
+    )
+    assert (
+        entry.hides(
+            relative="vendor/x.tf",
+            absolute="/scan/vendor/x.tf",
+            rule_id=None,
+            budget=budget,
+        )
+        is True
+    )
+
+    assert budget.keys == ["skip_path:vend.r", "skip_path:vend.r"]
 
 
 # ---------------------------------------------------------------------------
