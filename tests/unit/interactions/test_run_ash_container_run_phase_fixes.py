@@ -100,6 +100,10 @@ class _Runtime:
         self.pid = os.getpid()
         self.polls = 0
         self.on_poll = on_poll
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
 
     def poll(self):
         self.polls += 1
@@ -134,6 +138,57 @@ def test_an_exit_raised_while_the_runtime_runs_stops_it_first(monkeypatch):
 
     assert exited.value.code == 143
     assert stops == [{"child_got_the_interrupt": False}]
+
+
+@pytest.mark.parametrize(
+    "first",
+    [
+        pytest.param(lambda: SystemExit(143), id="a-sigterm-then-a-sigterm"),
+        pytest.param(KeyboardInterrupt, id="a-sigint-then-a-sigterm"),
+    ],
+)
+def test_a_second_exit_inside_the_stop_still_kills_the_runtime(monkeypatch, first):
+    """A CI cancel sends SIGTERM again (or SIGINT, then SIGTERM) while ASH waits
+    out the runtime's grace. The second signal reaches the wait as a SystemExit,
+    which the wait does not handle, so the exit unwound with the runtime still
+    running after ASH had gone."""
+
+    def first_signal():
+        raise first()
+
+    runtime = _Runtime(on_poll=first_signal)
+    monkeypatch.setattr(
+        subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
+    )
+
+    def stop_cut_short(process, **kwargs):
+        raise SystemExit(143)
+
+    monkeypatch.setattr(rac, "_stop_after_interrupt", stop_cut_short)
+
+    with pytest.raises(SystemExit) as exited:
+        rac.run_cmd_direct(["runtime", "run", "scan"])
+
+    assert exited.value.code == 143
+    assert runtime.killed is True
+
+
+def test_a_stop_that_ends_normally_does_not_kill_the_runtime(monkeypatch):
+    """Control: a runtime that stopped in its grace is left as it is."""
+
+    def relayed_exit():
+        raise SystemExit(143)
+
+    runtime = _Runtime(on_poll=relayed_exit)
+    monkeypatch.setattr(
+        subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
+    )
+    monkeypatch.setattr(rac, "_stop_after_interrupt", lambda process, **kw: True)
+
+    with pytest.raises(SystemExit):
+        rac.run_cmd_direct(["runtime", "run", "scan"])
+
+    assert runtime.killed is False
 
 
 def test_the_reader_drains_the_pipe_after_a_failed_console_write(monkeypatch):

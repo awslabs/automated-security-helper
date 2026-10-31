@@ -555,6 +555,27 @@ def validate_path(path: str | Path) -> Path:
 _stop_after_interrupt = subprocess_utils.stop_after_interrupt
 
 
+def _stop_the_runtime(process, **kwargs) -> bool:
+    """:func:`_stop_after_interrupt`, with a kill if it is itself cut short.
+
+    The helper handles a second Ctrl-C while it waits out the grace (a
+    KeyboardInterrupt) and kills the runtime then. A second SIGTERM, the order a
+    CI job's cancel sends after a first one, reaches this process as a SystemExit
+    raised by the run step (``_termination_raises``), which the helper does not
+    handle: it unwound out of the wait with the runtime still running after ASH
+    had exited. Anything that ends the helper early is followed by a kill before
+    it goes on.
+    """
+    try:
+        return _stop_after_interrupt(process, **kwargs)
+    except BaseException:
+        try:
+            process.kill()
+        except OSError:
+            pass  # it has already exited, or the kernel refuses the signal
+        raise
+
+
 def _shown_command_text(cmd_list: Sequence[object]) -> str:
     """A command's argv as it may be printed.
 
@@ -861,9 +882,7 @@ def run_cmd_direct(
                     # The signal was delivered to this process alone, so the
                     # runtime has not been interrupted yet, whatever the
                     # terminal probe would say.
-                    stopped = _stop_after_interrupt(
-                        process, child_got_the_interrupt=False
-                    )
+                    stopped = _stop_the_runtime(process, child_got_the_interrupt=False)
                     for reader in readers:
                         # A thread that was never started cannot be joined.
                         if reader.ident is not None:
@@ -890,7 +909,7 @@ def run_cmd_direct(
                     )
                 time.sleep(0.1)
         except KeyboardInterrupt:
-            _stop_after_interrupt(process)
+            _stop_the_runtime(process)
             for reader in readers:
                 # A thread that was never started cannot be joined.
                 if reader.ident is not None:
@@ -904,7 +923,7 @@ def run_cmd_direct(
             # the signal was delivered to this process alone, so the runtime has
             # received nothing. Without this arm the exit unwound past the wait
             # with the runtime left running.
-            stopped = _stop_after_interrupt(process, child_got_the_interrupt=False)
+            stopped = _stop_the_runtime(process, child_got_the_interrupt=False)
             if not stopped:
                 # The kill was refused, so the runtime may outlive the exit
                 # after all: recorded on the scan's event, when there is one,
