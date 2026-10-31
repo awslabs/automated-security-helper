@@ -28,7 +28,26 @@ pytestmark = pytest.mark.unit
 
 
 def test_a_component_holding_a_nul_is_not_a_link_and_does_not_raise(tmp_path):
-    assert link_locations(tmp_path / "a\x00b" / "c") == []
+    # Built from the path with its own links resolved, as every test here is: a
+    # temporary directory that passes through a link (macOS's /var) would have
+    # the walk report that link, and "no links" would fail for that reason.
+    tree = Path(os.path.realpath(tmp_path))
+
+    assert link_locations(tree / "a\x00b" / "c") == []
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_a_component_holding_a_nul_is_stepped_through_to_a_later_link(tmp_path):
+    """Not raising is the least of it: the walk goes on past the name it could not
+    look up, so a ``..`` after it is applied and the link later in the path is
+    found, as for the Win32 errors below."""
+    tree = _layout(tmp_path)
+
+    found = link_locations(tree / "a\x00b" / ".." / "dir" / "link" / "file")
+
+    assert found == [tree / "dir" / "link"]
 
 
 def _layout(tmp_path):
