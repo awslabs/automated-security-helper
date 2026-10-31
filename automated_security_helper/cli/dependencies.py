@@ -310,7 +310,7 @@ def _bin_path_under_home(bin_path: str, home: Path, pure: type = PurePath) -> Pa
 
 
 def _canonical_tool_names(
-    tool_resolution: dict[str, str], known: Iterable[str]
+    tool_resolution: dict[str, str], known: Iterable[str], strict: bool = True
 ) -> dict[str, str]:
     """Each requested name mapped to the plugin name it selects among ``known``
     (:func:`_canonical_tool_name`: as typed first, then by the scan's selection
@@ -321,27 +321,35 @@ def _canonical_tool_names(
     A name that selects two plugins by key and neither exactly is refused here,
     exit 2, naming both and the spelling that would select one: the scan refuses
     such a pair too (:func:`_canonical_tool_name`), and installing for the first
-    the registry happened to list would be a silent choice."""
+    the registry happened to list would be a silent choice.
+
+    With ``strict`` false, ``known`` is only part of the plugins' names (a plugin
+    whose name is known only by building it is not in it), so a name that is
+    ambiguous among them is kept as resolved and not refused: the complete list
+    decides, in a later call made from the same resolved names."""
     names = list(known)
-    try:
-        return {
-            typed: _canonical_tool_name(resolved_name, names)
-            for typed, resolved_name in tool_resolution.items()
-        }
-    except AmbiguousToolName as e:
-        console.print(
-            Panel(
-                f"[bold red]Ambiguous tool: {escape(e.name)}[/bold red]\n"
-                f"[cyan]Names more than one plugin:[/cyan] "
-                f"{escape(', '.join(e.matches))}\n"
-                "Their names differ only in case or blanks, which the scan refuses "
-                "too (two scanners cannot share one name). Select one by its exact "
-                "spelling.",
-                title="Nothing installed",
-                expand=False,
+    canonical: dict[str, str] = {}
+    for typed, resolved_name in tool_resolution.items():
+        try:
+            canonical[typed] = _canonical_tool_name(resolved_name, names)
+        except AmbiguousToolName as e:
+            if not strict:
+                canonical[typed] = resolved_name
+                continue
+            console.print(
+                Panel(
+                    f"[bold red]Ambiguous tool: {escape(e.name)}[/bold red]\n"
+                    f"[cyan]Names more than one plugin:[/cyan] "
+                    f"{escape(', '.join(e.matches))}\n"
+                    "Their names differ only in case or blanks, which the scan "
+                    "refuses too (two scanners cannot share one name). Select one "
+                    "by its exact spelling.",
+                    title="Nothing installed",
+                    expand=False,
+                )
             )
-        )
-        raise typer.Exit(EXIT_BAD_SELECTION)
+            raise typer.Exit(EXIT_BAD_SELECTION)
+    return canonical
 
 
 def _requested_classes(candidates: Iterable[tuple], requested_names: List[str]) -> set:
@@ -1260,9 +1268,20 @@ def install_dependencies(
     # installs and is judged exactly as `--tool archive` is (see below); then each
     # name takes the spelling of the plugin it matches without regard to case, as
     # the scan matches names (_canonical_tool_names).
+    #
+    # The alias-resolved names are kept (`aliased`): this first pass sees only the
+    # names plugins declare, so with a plugin whose name is known only by building
+    # it, it is a provisional reading for the option check below, and the check
+    # of the --tool names is made again, from `aliased`, once those plugins are
+    # built. Started from this pass's output, that check took a spelling that
+    # exactly names a built-only plugin for the declared twin it had been
+    # rewritten to, chose silently between two plugins, and refused a spelling
+    # that exactly names a built-only plugin.
+    aliased = _resolve_tool_aliases(tools)
     tool_resolution = _canonical_tool_names(
-        _resolve_tool_aliases(tools),
+        aliased,
         [candidate[3] for candidate in candidates if candidate[3]],
+        strict=all(candidate[3] for candidate in candidates),
     )
     requested_names = list(dict.fromkeys(tool_resolution.values()))
 
@@ -1384,7 +1403,7 @@ def install_dependencies(
         # differs from another's only in case is still selected by its exact
         # spelling, and a name that selects two plugins by key is refused. An
         # unknown name is still reported as the caller typed it.
-        tool_resolution = _canonical_tool_names(tool_resolution, available)
+        tool_resolution = _canonical_tool_names(aliased, available)
         requested_names = list(dict.fromkeys(tool_resolution.values()))
         unknown = [
             typed

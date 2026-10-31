@@ -14,6 +14,7 @@ has is still refused in the spelling the caller typed.
 """
 
 import io
+from types import SimpleNamespace
 
 import pytest
 import typer
@@ -228,6 +229,109 @@ class TestAmbiguousNamesAreRefused:
 
         assert resolution == {"semgrep": "semgrep", "Bandit": "bandit"}
         assert panels.getvalue() == ""
+
+
+class _TwinConfig:
+    """Stands in for a plugin's config class: only its ``name`` default is read."""
+
+    model_fields = {"name": SimpleNamespace(default="Twinplug")}
+
+
+class _DeclaredTwin:
+    """A plugin whose name is read without building it (declared_plugin_name)."""
+
+    model_fields = {"config": SimpleNamespace(annotation=_TwinConfig)}
+
+    def __init__(self, **_kwargs):
+        self.config = SimpleNamespace(name="Twinplug")
+        self.command = "twinplug-declared"
+
+    def get_installation_commands(self, platform_name, arch):
+        return []
+
+
+class _BuiltOnlyTwin:
+    """A plugin that declares no name, so its name is known only by building it:
+    the same word as the declared twin's, in another case."""
+
+    def __init__(self, **_kwargs):
+        self.config = SimpleNamespace(name="twinplug")
+        self.command = "twinplug-built"
+
+    def get_installation_commands(self, platform_name, arch):
+        return []
+
+
+class TestADeclaredTwinBesideABuiltOnlyOne:
+    """The command canonicalizes ``--tool`` names twice: once from the names
+    plugins declare, before any is built, and once from every name, after the
+    plugins that declare none are built. The second pass started from the first
+    one's output, so ``--tool twinplug`` was rewritten to ``Twinplug`` by the
+    first and kept by the second, ``--tool TWINPLUG`` was resolved silently, and
+    the helpers' own tests (above) never saw the two passes together."""
+
+    @pytest.fixture(autouse=True)
+    def _registry(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(SETTING, raising=False)
+        monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+        self.bin_args = ["--bin-path", str(tmp_path / "bin")]
+        self.panels = io.StringIO()
+        monkeypatch.setattr(
+            dependencies_module,
+            "console",
+            Console(file=self.panels, width=200, no_color=True),
+        )
+        monkeypatch.setattr(dependencies_module, "load_plugins", lambda *_a, **_k: {})
+        monkeypatch.setattr(
+            dependencies_module,
+            "ash_plugin_manager",
+            SimpleNamespace(
+                plugin_modules=lambda kind: (
+                    [_DeclaredTwin, _BuiltOnlyTwin] if kind == "scanner" else []
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            dependencies_module, "run_command", lambda cmd, shell=False: 0
+        )
+        self.selected = []
+
+        def recording(outcomes, requested_tools):
+            self.selected.append(([o.name for o in outcomes], list(requested_tools)))
+            return 0
+
+        monkeypatch.setattr(dependencies_module, "_report_and_exit", recording)
+
+    def _invoke(self, typed):
+        return runner.invoke(
+            dependencies_app,
+            ["--plugin-type", "scanner", "--tool", typed, *self.bin_args],
+        )
+
+    def test_the_declared_twin_is_selected_by_its_own_spelling(self):
+        """The control: the exact spelling of the declared twin."""
+        result = self._invoke("Twinplug")
+
+        assert result.exit_code == EXIT_OK, (result.output, self.panels.getvalue())
+        assert self.selected == [(["Twinplug"], ["Twinplug"])], self.selected
+
+    def test_the_exact_spelling_of_the_built_only_twin_selects_it(self):
+        result = self._invoke("twinplug")
+
+        assert result.exit_code == EXIT_OK, (result.output, self.panels.getvalue())
+        assert self.selected == [(["twinplug"], ["twinplug"])], self.selected
+
+    def test_a_third_spelling_is_refused_as_ambiguous_not_resolved(self):
+        result = self._invoke("TWINPLUG")
+
+        assert result.exit_code == EXIT_BAD_SELECTION, (
+            result.output,
+            self.panels.getvalue(),
+        )
+        assert "Ambiguous tool: TWINPLUG" in self.panels.getvalue()
+        assert "Twinplug, twinplug" in self.panels.getvalue()
+        assert self.selected == []
 
 
 class TestRequestedClassesFollowTheResolvedNames:
