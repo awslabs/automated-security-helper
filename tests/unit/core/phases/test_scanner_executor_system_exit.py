@@ -185,7 +185,7 @@ def test_an_exit_message_quoting_an_environment_value_is_redacted(
     assert "the scanner called sys.exit(" in reasons, row.errors
     assert ENV_CANARY not in reasons, row.errors
     assert ENV_CANARY not in str(row.raw_results), row.raw_results
-    # The same text is what the handler logs at ERROR (:1563).
+    # The same text is what the per-target handler logs at ERROR (its ``err_str``).
     assert "Failed to execute shape-tool scanner" in caplog.text
     assert ENV_CANARY not in caplog.text
     # The control: the plain code reads as before beside the planted value.

@@ -887,8 +887,8 @@ class ScannerExecutor:
     def _drop_from_remaining(scanner_name: str, remaining_scanners: List[str]) -> None:
         """Take *scanner_name* off *remaining_scanners*; its turn is over.
 
-        Called for a recorded turn before SCAN_COMPLETE is announced, and for a
-        failed turn alone: the failure is in its container, not an event.
+        Called by ``_announce_scan_complete`` before it sends SCAN_COMPLETE, which
+        every finished turn sends, a failed one with ``succeeded`` False.
         """
         if scanner_name in remaining_scanners:
             remaining_scanners.remove(scanner_name)

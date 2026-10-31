@@ -614,14 +614,21 @@ class ScannerStatisticsCalculator:
         """True when *scanner_name*'s target reports record the one level they were
         graded against (``_recorded_graded_level``).
 
-        The executor writes that level on every report it files, so a results
-        file this ASH wrote answers True for any scanner with a report. An older
-        file answers False: its reports carry no level, and a read-back grades
-        its finding counts against whatever threshold the configuration record
-        resolves to now, which can be a stricter level than the scan used (a
-        LOW scan through an environment-read threshold reads as MEDIUM, so its
-        LOW findings count as nothing actionable). A reading that would
-        override the recorded status on those counts must not run then.
+        The executor writes that level on a report only when it graded the report
+        and the threshold it graded against is one of the levels the report can
+        carry. A report of a scanner that did not run to a grade (an error, a
+        missing tool, a skip) carries none, and neither does one graded against a
+        value off that ladder, which grades CRITICAL only and is passed through as
+        written. So a results file this ASH wrote answers True for a scanner whose
+        reports were graded against a named level, and False for one whose reports
+        carry none; it also answers False when two targets were graded against
+        different levels. An older file answers False too: its reports carry no
+        level, and a read-back grades its finding counts against whatever
+        threshold the configuration record resolves to now, which can be a
+        stricter level than the scan used (a LOW scan through an
+        environment-read threshold reads as MEDIUM, so its LOW findings count as
+        nothing actionable). A reading that would override the recorded status
+        on those counts must not run then.
         """
         return (
             ScannerStatisticsCalculator._recorded_graded_level(
