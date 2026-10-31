@@ -369,14 +369,10 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (_INSTALLER, "stage_third_party", "shutil.copyfile"): (1, _INSTALLS),
     (_INSTALLER, "stage_third_party", "write_text"): (1, _INSTALLS),
     (_INSTALLER, "verify_third_party", "write_text"): (1, _INSTALLS),
-    # Every config write of init, update, the wizard and the lint fixers goes
-    # through these two helpers: fs_guard.open_for_atomic_write (a staging file
-    # beside the config, renamed over it), with the in-place write kept only as
-    # the fallback for a place the staged write cannot use (a file the user may
-    # write in a directory they may not, a bind-mounted file, a rename across
-    # file systems, a file held open on Windows).
-    (f"{_ASH}/cli/config.py", "_write_config_text", "write_text"): (1, _CONFIG),
-    (f"{_ASH}/cli/config.py", "_write_config_bytes", "write_bytes"): (1, _CONFIG),
+    # The config writes of init, update, the wizard and the lint fixers
+    # (_write_config_text, _write_config_bytes) are not listed: they write through
+    # fs_guard.open_for_atomic_write, with fs_guard.open_for_write as the fallback
+    # for a place the staged write cannot use, so neither makes a bare write.
     (f"{_ASH}/cli/config.py", "_ensure_output_gitignore", "write_text"): (
         1,
         _PROJECT_ASH_DIR,
