@@ -720,6 +720,20 @@ class ReporterPluginBase(PluginBase, Generic[T]):
                         "required field, so it is built with no config",
                         extra=NO_MARKUP,
                     )
+                except Exception as error:
+                    # Pydantic wraps only ValueError and AssertionError from a
+                    # validator. A default factory or validator that reads the
+                    # environment or a file can raise another kind (OSError,
+                    # TypeError, KeyError), and building a reporter with no
+                    # section must not fail on it any more than on a required
+                    # field. Only the exception's type is logged: its text can
+                    # carry a value the operator's environment supplied.
+                    ASH_LOGGER.debug(
+                        f"{self.__class__.__name__}'s config model could not state "
+                        f"its defaults ({type(error).__name__}), so it is built "
+                        "with no config",
+                        extra=NO_MARKUP,
+                    )
         return self
 
     def configure(

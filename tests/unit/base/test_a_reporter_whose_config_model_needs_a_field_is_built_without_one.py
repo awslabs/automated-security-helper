@@ -18,6 +18,7 @@ from typing import Literal
 from unittest.mock import patch
 
 import pytest
+from pydantic import Field
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
@@ -89,6 +90,42 @@ def test_a_section_that_gives_the_field_is_still_held_to_the_model(plugin_contex
 
     assert isinstance(reporter.config, _NeedsAFieldConfig)
     assert reporter.config.endpoint == "https://example.invalid"
+
+
+def _reads_a_file_that_is_not_there() -> str:
+    raise FileNotFoundError("/nonexistent/ASH-CANARY-1f3a/defaults.txt")
+
+
+class _DefaultReadsAFileConfig(ReporterPluginConfigBase):
+    name: Literal["default-reads-a-file"] = "default-reads-a-file"
+    extension: str = "reads.txt"
+    template: str = Field(default_factory=_reads_a_file_that_is_not_there)
+
+
+class _DefaultReadsAFile(ReporterPluginBase[_DefaultReadsAFileConfig]):
+    def report(self, model) -> str:
+        return ""
+
+
+def test_a_default_factory_that_raises_an_oserror_does_not_fail_construction(
+    plugin_context,
+):
+    """Pydantic wraps only ValueError and AssertionError from a validator, so a
+    default factory reading a file or the environment raised straight out of the
+    reporter's constructor. Building a reporter with no section does not fail on
+    it any more than on a required field."""
+    reporter = _DefaultReadsAFile(context=plugin_context)
+
+    assert reporter.config is None
+
+
+def test_the_kind_is_said_at_debug_level_and_never_its_text(plugin_context):
+    with patch("automated_security_helper.base.reporter_plugin.ASH_LOGGER") as log:
+        _DefaultReadsAFile(context=plugin_context)
+
+    said = " ".join(str(call.args[0]) for call in log.debug.call_args_list)
+    assert "FileNotFoundError" in said, said
+    assert "ASH-CANARY-1f3a" not in said, said
 
 
 def test_a_model_with_only_defaults_still_gets_them(plugin_context):
