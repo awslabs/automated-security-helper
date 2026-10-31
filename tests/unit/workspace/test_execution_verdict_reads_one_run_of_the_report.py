@@ -25,6 +25,7 @@ The contract these cases pin:
 
 from __future__ import annotations
 
+import json
 import logging
 
 import pytest
@@ -71,25 +72,38 @@ def _report(*runs: list) -> dict:
     }
 
 
-def _scan(tmp_path, written: dict):
+def _scan(tmp_path, written: dict, model: dict | None = None):
     _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
     FakeOrchestrator.behaviour["api"] = {
-        # The model carries four findings; the file is what the verdict counts.
-        "sarif": _sarif(level="error", count=4),
+        # The model carries four findings unless a case gives it its own; the
+        # written report is what the project's count reads.
+        "sarif": model if model is not None else _sarif(level="error", count=4),
         "written_sarif": written,
     }
     return _run(tmp_path, plan)
+
+
+def _carried_rule_ids(outcome) -> list:
+    """The rule ids of the results the unified file carries, in order."""
+    parsed = json.loads(outcome.results_path.read_text(encoding="utf-8"))
+    return [
+        result["ruleId"] for run in parsed["sarif"]["runs"] for result in run["results"]
+    ]
 
 
 def test_a_second_run_in_the_report_is_not_counted(tmp_path, caplog):
     """Red at the base: both runs' results were folded in, 3 counted for 2."""
     caplog.set_level(logging.WARNING, logger="ash")
 
-    outcome = _scan(tmp_path, _report([_result(1), _result(2)], [_result(3)]))
+    # The model carries the same two runs the report does, so the count can be
+    # checked against the run the unified file keeps: the first, with its two.
+    two_runs = _report([_result(1), _result(2)], [_result(3)])
+    outcome = _scan(tmp_path, two_runs, model=two_runs)
 
     entry = outcome.payload.projects[0]
     assert entry.status is ProjectRunStatus.COMPLETED, entry.error
     assert entry.finding_count == 2
+    assert _carried_rule_ids(outcome) == ["rule-1", "rule-2"]
     assert any(
         "carries 2 runs" in record.getMessage()
         and "counts only the first" in record.getMessage()
@@ -107,6 +121,8 @@ def test_a_report_with_no_run_falls_back_to_the_models_results(tmp_path, caplog)
     entry = outcome.payload.projects[0]
     assert entry.status is ProjectRunStatus.COMPLETED, entry.error
     assert entry.finding_count == 4
+    # The fallback counted the model's four, and the file carries those four.
+    assert len(_carried_rule_ids(outcome)) == 4
     assert any("carries no run" in record.getMessage() for record in caplog.records), [
         record.getMessage() for record in caplog.records
     ]
@@ -121,4 +137,8 @@ def test_a_one_run_report_counts_what_it_carries(tmp_path, caplog):
     entry = outcome.payload.projects[0]
     assert entry.status is ProjectRunStatus.COMPLETED, entry.error
     assert entry.finding_count == 3
-    assert not any("SARIF report" in record.getMessage() for record in caplog.records)
+    # None of the phrases the cases above look for, which is what the warnings say.
+    for phrase in ("carries 2 runs", "counts only the first", "carries no run"):
+        assert not any(phrase in record.getMessage() for record in caplog.records), (
+            phrase
+        )
