@@ -361,6 +361,34 @@ def test_a_link_the_sweep_cannot_remove_is_refused_not_passed_over(tmp_path, cap
     assert os.path.lexists(locked / "out.sarif"), "the link is left as found"
 
 
+@pytest.mark.parametrize("walk", ["descriptors", "by-name"])
+def test_a_failed_removal_names_the_entry_by_its_path_below_the_root(
+    tmp_path, caplog, monkeypatch, walk
+):
+    """Two entries called ``cache`` in different directories, one of which cannot
+    be removed: the warning says which, as the walks' own refusals name a
+    directory (``a/cache``), not the bare name both share."""
+    root = tmp_path / "results"
+    for directory in ("a", "b"):
+        (root / directory).mkdir(parents=True)
+        (root / directory / "cache").symlink_to(tmp_path)
+    (root / "a").chmod(0o555)
+    if walk == "by-name":
+        monkeypatch.delattr(os, "fwalk")
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.sweep_writable([root])
+    finally:
+        (root / "a").chmod(0o755)
+
+    (line,) = _warnings(caplog, "Could not remove")
+    assert line.startswith("Could not remove a/cache under "), line
+    assert "a/cache" in str(refused.value), str(refused.value)
+    assert os.path.lexists(root / "a" / "cache"), "the unremovable link is left"
+    assert not os.path.lexists(root / "b" / "cache"), "its namesake is removed"
+
+
 def test_a_directory_removed_during_the_walk_is_not_a_refusal(tmp_path, monkeypatch):
     """A subdirectory that vanished between its listing and its open reads as
     ENOENT; nothing is below it, so the sweep continues without a word."""

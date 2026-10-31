@@ -589,12 +589,16 @@ def _sweep_tree(
         )
         collected.append(OSError(_errno_of(error), shown))
 
-    def remove(name: str, dir_fd: Optional[int], path: Union[str, Path]) -> int:
+    def remove(
+        name: str, dir_fd: Optional[int], path: Union[str, Path], relative: str
+    ) -> int:
         # A removal that fails is a refusal like a directory that cannot be
         # listed: the link stays where a reader that opens paths by name would
         # follow it (a scanner can plant one and take the directory's write bit
         # away), so it is logged, kept with the other refusals, and the sweep
-        # goes on to the next entry so nothing else is shielded by it.
+        # goes on to the next entry so nothing else is shielded by it. The entry
+        # is named by its path below the root (``relative``), as the walks name a
+        # directory they refuse: a bare name does not tell a/cache from b/cache.
         try:
             if dir_fd is None:
                 os.unlink(path)
@@ -602,7 +606,7 @@ def _sweep_tree(
                 os.unlink(name, dir_fd=dir_fd)
         except OSError as e:
             shown = _sweep_warning(
-                f"Could not remove {name} under {root}: {e}",
+                f"Could not remove {relative} under {root}: {e}",
                 "Could not remove an entry a scanner left in its results "
                 "directory; it is not named because the plugin's redaction "
                 "values could not be read",
@@ -624,7 +628,7 @@ def _sweep_tree(
             for relative, dir_fd, statuses, dirnames in walk:
                 for name, status in statuses.items():
                     if _is_special(status.st_mode):
-                        removed += remove(name, dir_fd, name)
+                        removed += remove(name, dir_fd, name, _below(relative, name))
                 if skipped:
                     # The walk descends into what is left in this list once it
                     # resumes; a named directory's entries are the backend's to
@@ -642,7 +646,7 @@ def _sweep_tree(
 def _sweep_by_name(
     root: Path,
     refuse: "Callable[[str, str, OSError], None]",
-    remove: "Callable[[str, Optional[int], Union[str, Path]], int]",
+    remove: "Callable[[str, Optional[int], Union[str, Path], str], int]",
     skipped: FrozenSet[str] = frozenset(),
 ) -> int:
     """``_sweep_tree`` over os.walk, for a platform without directory descriptors.
@@ -681,7 +685,7 @@ def _sweep_by_name(
                 continue
             if not _is_special(mode):
                 continue
-            removed += remove(name, None, path)
+            removed += remove(name, None, path, _below(relative, name))
             if name in dirnames:
                 dirnames.remove(name)
         if skipped:
