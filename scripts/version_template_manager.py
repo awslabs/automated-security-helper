@@ -81,10 +81,11 @@ _FORM_PREFIX = {name: prefix for name, prefix, _branch in INSTALL_REF_FORMS}
 
 # What unrecognized_pins looks for where the install form has more spellings than the
 # anchored patterns read: a YAML value may follow `rev:` after any run of blanks, and a
-# clone takes its tag as `--branch v1`, `--branch=v1` or `-b v1`. The safety net has to
-# be looser than the anchors, or a pin in a spelling nobody anchored is never seen.
+# clone takes its tag as `--branch v1`, `--branch=v1` or `-b v1`, with one blank or a
+# run of them after the flag. The safety net has to be looser than the anchors, or a
+# pin in a spelling nobody anchored is never seen.
 _LOOSE_PREFIX = {
-    "--branch": r"(?:--branch[ =]|(?<![\w-])-b )",
+    "--branch": r"(?:--branch(?:[ \t]+|=)|(?<![\w-])-b[ \t]+)",
     "rev:": r"(?<![\w-])rev:[ \t]+",
 }
 

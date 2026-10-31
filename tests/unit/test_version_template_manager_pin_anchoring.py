@@ -396,6 +396,11 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
             ("rev:", f"- {{repo: {ASH_URL}, rev:\tv3.3.0}}\n"),
             ("--branch", 'git clone --branch=v3.3.0 "$ASH_REPO_URL"\n'),
             ("--branch", 'git clone -b v3.3.0 "$ASH_REPO_URL"\n'),
+            # A run of blanks after the flag, as after `rev:` above: red at the base,
+            # where the net took exactly one blank and these were never listed.
+            ("--branch", 'git clone --branch  v3.3.0 "$ASH_REPO_URL"\n'),
+            ("--branch", 'git clone --branch\tv3.3.0 "$ASH_REPO_URL"\n'),
+            ("--branch", 'git clone -b  v3.3.0 "$ASH_REPO_URL"\n'),
         ],
         ids=[
             "rev-before-repo",
@@ -405,6 +410,9 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
             "rev-tab",
             "branch-equals",
             "short-flag",
+            "branch-two-spaces",
+            "branch-tab",
+            "short-flag-two-spaces",
         ],
     )
     def test_a_pin_in_a_shape_no_anchor_knows_is_listed_not_dropped(self, form, text):
@@ -429,6 +437,8 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
         assert manager.release_pins(block) == {"3.3.0"}
         assert manager.unrecognized_pins(block) == []
         assert manager.unrecognized_pins("prev: v3.3.0\nweb-b v3.3.0\n") == []
+        # The wider gap after a flag does not widen the net past the flag's own name.
+        assert manager.unrecognized_pins("web-b  v3.3.0\nxbranch  v3.3.0\n") == []
 
     @pytest.mark.parametrize(
         "text", list(OTHER_PROJECTS_PINS.values()), ids=list(OTHER_PROJECTS_PINS)
