@@ -2,10 +2,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Six workspace-scan gaps, each pinned by the order or the input that passed it.
+"""Workspace-scan gaps, each pinned by the order or the input that passed it.
 
 * The output directory's ``.gitignore`` was written before the directory was
-  created, so a first workspace scan never wrote it.
+  created, so a first workspace scan never wrote it. A link at that name is
+  refused before any folder is made.
 * Two workspace scans whose output directories resolve to one place were both
   admitted, and one run's cleanup and results overwrote the other's.
 * The scan's timeout clock started before the wait for the session's lock, so a
@@ -15,6 +16,10 @@
 * An ``ASH_CONFIG`` that cannot be read raised out of both workspace tools
   instead of answering a config refusal.
 * The plan's resolution and the committed-output check ran on the event loop.
+* The scan's claim on its session's tree passes between the call, the worker
+  and the threads that read the tree before the worker exists, and is given
+  back once, by the last of them; a call cancelled meanwhile, or leaving as a
+  thread starts, does not unprotect a settle or a read that is still running.
 """
 
 from __future__ import annotations
