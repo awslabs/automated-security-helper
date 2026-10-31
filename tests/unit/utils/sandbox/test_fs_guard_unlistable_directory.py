@@ -483,7 +483,54 @@ def test_refusals_past_the_warning_limit_are_counted_and_said_once(
         record.getMessage() for record in caplog.records
     ]
     text = str(refused.value)
-    assert "and 4 more" in text and "first 2" in text, text
+    # The refusal the text carries is one of the two logged, so of the four
+    # others one was: the count the text gives matches the log, and the line
+    # the sweep adds says the other three.
+    assert "and 4 more, 1 of them logged as warnings" in text, text
+
+
+def test_a_root_refused_past_the_warning_limit_is_counted_not_logged(
+    tmp_path, caplog, monkeypatch
+):
+    """The warning limit holds for the refusal of a whole root too, which the
+    sweep makes outside the tree walk: with two refusals logged already, a third
+    counts toward the total and is not logged, so the figure the sweep gives for
+    the refusals it did not log is the number it did not (it was one too many
+    when the root's refusal was logged as well as counted)."""
+    monkeypatch.setattr(fs_guard, "_SWEEP_WARNING_LIMIT", 2)
+    first = tmp_path / "results"
+    for index in range(3):
+        (first / f"dir-{index}").mkdir(parents=True)
+    unreadable = tmp_path / "unreadable-root"
+    unreadable.mkdir()
+    real_open = os.open
+    real_lstat = os.lstat
+
+    def refuse_every_subdirectory(path, flags, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None and flags & os.O_DIRECTORY:
+            raise PermissionError(errno.EACCES, "Permission denied", os.fspath(path))
+        return real_open(path, flags, *args, **kwargs)
+
+    def refuse_the_root(path, *args, **kwargs):
+        if os.fspath(path) == os.fspath(unreadable) and not kwargs.get("dir_fd"):
+            raise PermissionError(errno.EACCES, "Permission denied", os.fspath(path))
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", refuse_every_subdirectory)
+    monkeypatch.setattr(os, "lstat", refuse_the_root)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        with pytest.raises(PermissionError) as refused:
+            fs_guard.sweep_writable([first, unreadable])
+
+    logged = _warnings(caplog, "Could not list") + _warnings(
+        caplog, "Could not check or remove the root"
+    )
+    assert len(logged) == 2, logged
+    assert len(_warnings(caplog, "Scanner sandbox: 2 more refusal(s)")) == 1, [
+        record.getMessage() for record in caplog.records
+    ]
+    assert "and 3 more, 1 of them logged as warnings" in str(refused.value)
 
 
 @needs_unprivileged

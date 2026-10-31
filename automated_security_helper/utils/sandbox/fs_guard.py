@@ -749,8 +749,10 @@ def _sweep_refused(refusals: List[OSError]) -> OSError:
     elif len(refusals) <= _SWEEP_WARNING_LIMIT:
         more = f"; and {len(refusals) - 1} more, each logged as a warning"
     else:
+        # The first refusal, the one this text carries, is one of the logged
+        # ones, so of the others one fewer than the limit was.
         more = (
-            f"; and {len(refusals) - 1} more, the first {_SWEEP_WARNING_LIMIT} "
+            f"; and {len(refusals) - 1} more, {_SWEEP_WARNING_LIMIT - 1} of them "
             "logged as warnings"
         )
     return OSError(first.errno, f"{first.strerror}{more}")
@@ -956,6 +958,12 @@ def sweep_writable(
             # over would leave whatever is there for a reader that opens paths by
             # name to follow, so it is refused as an unlistable directory is; the
             # other roots are still swept.
+            if len(refusals) >= _SWEEP_WARNING_LIMIT:
+                # Counted, not logged, as the tree walks count theirs: the
+                # figure _say_unlogged_refusals gives is the refusals past the
+                # limit, so each of them must be one that was not logged.
+                refusals.append(OSError(_errno_of(e), ""))
+                continue
             shown = _sweep_warning(
                 f"Could not check or remove the root {root}: {e}",
                 "Could not check or remove a scanner's results directory root; it "
