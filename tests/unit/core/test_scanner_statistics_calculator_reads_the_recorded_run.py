@@ -186,6 +186,10 @@ class TestNamesAndSuppressions:
                 "bandit", suppressions=[Suppression(kind="external", state="accepted")]
             ),
             _result("bandit", suppressions=[Suppression(kind="external")]),
+            _result(
+                "bandit",
+                suppressions=[Suppression(kind="external", state="underReview")],
+            ),
         )
 
         suppressed, critical, high, medium, low, info = (
@@ -194,8 +198,10 @@ class TestNamesAndSuppressions:
             )
         )
 
+        # Accepted and state-less suppressions hide a result; rejected and under
+        # review do not, so two of the four results are counted.
         assert suppressed == 2, (suppressed, critical)
-        assert critical == 1
+        assert critical == 2
 
 
 class TestTheRecordedRun:
