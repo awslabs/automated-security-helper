@@ -771,6 +771,21 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
                 {"medium": 1, "low": 1},
                 id="buckets-that-are-all-unusable-without-a-count-read-the-findings",
             ),
+            pytest.param(
+                {"findings": [{"severity": "HIGH"}, {"severity": "SUPPRESSED"}]},
+                1,
+                {"high": 1, "suppressed": 1},
+                id="the-findings-array-count-leaves-out-its-suppressed-entries",
+            ),
+            pytest.param(
+                {
+                    "finding_count": 3,
+                    "findings": [{"severity": "HIGH"}, {"severity": "SUPPRESSED"}],
+                },
+                3,
+                {"high": 1, "suppressed": 1, "unknown": 2},
+                id="a-count-beside-findings-grades-the-rest-without-the-suppressed-ones",
+            ),
         ],
     )
     def test_malformed_counts_are_read_defensively(

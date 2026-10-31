@@ -724,7 +724,12 @@ def _progress_counts_of_document(
                 value for bucket, value in counts.items() if bucket != "suppressed"
             )
         else:
-            count = len(findings)
+            # The non-suppressed findings, as ScannerProgress.update_findings
+            # counts the same array on the aggregated path: a finding whose
+            # severity is "suppressed" is in that bucket beside the count.
+            count = sum(
+                value for bucket, value in counts.items() if bucket != "suppressed"
+            )
     elif recorded_counts is not None:
         count = max(recorded_count - counts["suppressed"], 0)
         ungraded = count - (sum(counts.values()) - counts["suppressed"])
@@ -732,7 +737,11 @@ def _progress_counts_of_document(
             counts[UNKNOWN_SEVERITY] += ungraded
     else:
         count = recorded_count
-        ungraded = recorded_count - sum(counts.values())
+        # What the findings array does not account for, without its suppressed
+        # entries: the aggregated path takes the rest from the same
+        # non-suppressed count, so the one row reads the same unknown remainder
+        # on both views.
+        ungraded = recorded_count - (sum(counts.values()) - counts["suppressed"])
         if ungraded > 0:
             counts[UNKNOWN_SEVERITY] += ungraded
     return findings, count, counts
