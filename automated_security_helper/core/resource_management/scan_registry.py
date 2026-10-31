@@ -1034,7 +1034,13 @@ class ScanRegistry:
                 if not entry.occupies_its_directory():
                     continue
                 same_directory = entry.canonical_directory == requested
-                same_output = entry.canonical_output_directory == requested_output
+                # One tree, not one directory: a workspace's projects write
+                # under its output root, and a scan aimed at the root (or into
+                # it, or above it) shares files with them though no entry names
+                # the same directory.
+                same_output = _shares_an_output_tree(
+                    entry.canonical_output_directory, requested_output
+                )
                 if not same_directory and not same_output:
                     continue
                 owned = entry.session_id == _owner(session_id)
