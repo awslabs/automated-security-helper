@@ -45,6 +45,30 @@ GOOD_REPORT = json.dumps(
 )
 
 
+def test_the_same_report_comments_out_an_entry_it_lists(tmp_path):
+    """The control for the refusals below: with a config and a report that read
+    fine, the entry the report lists is commented out. Without it, "nothing was
+    fixed" would also be the answer when the report is never found."""
+    config_path, report = _write(
+        tmp_path,
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: one\n",
+    )
+    report.write_text(GOOD_REPORT, encoding="utf-8")
+
+    fixed_content, fixed_issues, timestamp = ConfigLinter.fix_unused_suppressions(
+        config_path
+    )
+
+    assert [i.path for i in fixed_issues] == ["global_settings.suppressions[0]"]
+    assert timestamp is not None
+    assert "# - path: src/a.py" in fixed_content
+
+
 def test_a_config_that_does_not_parse_is_returned_unchanged(tmp_path):
     """Red at the base: the YAML parser's error escaped."""
     config_path, report = _write(tmp_path, "project_name: [unclosed\n")
