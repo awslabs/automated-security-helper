@@ -659,7 +659,11 @@ class ConvertPhase(EnginePhase):
                 # The filter recorded the exception its own check raised, so the
                 # drop has a cause that can be named. Recorded as a failure: a
                 # converter that could not say whether a Python-only run wants it
-                # may have held files the scanners then never saw.
+                # may have held files the scanners then never saw. The wording
+                # names two checks, where the warning the pre-filter loop logs
+                # for the same entry names only is_python_only(): the dict also
+                # holds what the filter's own enabled check raised, and the row
+                # cannot tell the two apart, so it names both.
                 failure = (
                     "dropped by the filter: its enabled or is_python_only() check "
                     f"raised {raised}"
