@@ -755,6 +755,19 @@ def test_a_skipped_file_with_a_percent_in_its_name_is_told_from_its_decoded_twin
     assert scanner.targets_attempted == 1
 
 
+def test_a_percent_twin_of_a_skipped_file_is_still_counted(tmp_path):
+    """The roles swapped: ``xA.py`` is the skipped file and ``x%41.py`` the
+    parsed one. Decoding the metrics keys too read the parsed file's key as
+    ``xA.py``, the skipped file's name, so neither counted and a target with a
+    parsed file was graded as one bandit scanned nothing in."""
+    source = _tree(tmp_path, ["xA.py", "x%41.py"])
+    scanner = _scanner(source, tmp_path)
+
+    scanner._record_scanned_files(_report(source, ["x%41.py"], ["xA.py"]), [], source)
+
+    assert scanner.targets_attempted == 1
+
+
 def test_a_parsed_file_is_still_counted(tmp_path):
     source = _tree(tmp_path, ["a.py"])
     scanner = _scanner(source, tmp_path)
