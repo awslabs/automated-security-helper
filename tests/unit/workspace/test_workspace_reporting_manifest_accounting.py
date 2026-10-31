@@ -15,7 +15,6 @@ at a report's name after the pre-write check (earlier reports written, no
 manifest), and a cancel during the step (every reporter ran).
 """
 
-import json
 from pathlib import Path
 
 import pytest
@@ -30,24 +29,27 @@ from automated_security_helper.core.cancellation import (
     ScanCancelled,
     cancel_scope,
 )
-from automated_security_helper.models.workspace import (
-    ProjectRunStatus,
-    WorkspaceProjectResult,
-)
 from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.utils.error_text import carry_environment_values
 from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.workspace import reporting
 from automated_security_helper.workspace.aggregation import WorkspaceAggregator
-from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.reporting import (
     MANIFEST_FILENAME,
     REPORTS_DIR_NAME,
     SKIP_DISABLED,
     SKIP_NOT_PYTHON_ONLY,
     SKIP_NOT_REQUESTED,
-    emit_workspace_reports,
     refuse_linked_workspace_report_paths,
+)
+from tests.unit.workspace.test_workspace_reporting import (
+    FakeDefaultOffPerProjectReporter,
+    FakeMergedReporter,
+    _emit,
+    _manifest,
+    _outcome,
+    _plan,
+    _run,
 )
 
 pytestmark = pytest.mark.unit
@@ -55,59 +57,11 @@ pytestmark = pytest.mark.unit
 CANARY = "env-canary-value-q7k2"
 
 
-def _plan(root: Path, *keys: str) -> WorkspacePlan:
-    return WorkspacePlan(
-        workspace_file=(root / "fixture.code-workspace").as_posix(),
-        workspace_root=root.as_posix(),
-        projects=[
-            ProjectPlan(
-                key=key,
-                relative_path=key,
-                path=(root / key).as_posix(),
-                label=key,
-                display_label=key,
-                severity_threshold="MEDIUM",
-            )
-            for key in keys
-        ],
-    )
-
-
-def _run(project_key: str, *, rule: str, uri: str) -> dict:
-    return {
-        "tool": {"driver": {"name": "ASH", "rules": [{"id": rule}]}},
-        "results": [
-            {
-                "ruleId": rule,
-                "level": "error",
-                "message": {"text": f"finding in {project_key}"},
-                "locations": [
-                    {"physicalLocation": {"artifactLocation": {"uri": uri}}},
-                ],
-                "properties": {"scanner_name": "bandit"},
-            }
-        ],
-        "invocations": [],
-    }
-
-
-def _outcome(project: ProjectPlan) -> WorkspaceProjectResult:
-    return WorkspaceProjectResult(
-        project=project.key,
-        relative_path=project.relative_path,
-        display_label=project.display_label,
-        status=ProjectRunStatus.COMPLETED,
-        severity_threshold="MEDIUM",
-        finding_count=1,
-        actionable_finding_count=1,
-        exceeds_threshold=True,
-        output_path=f"projects/{project.key}",
-        scanners={"bandit": "FAILED"},
-    )
-
-
 @pytest.fixture
 def workspace(tmp_path):
+    # Not the sibling module's fixture: that one also writes a ``ash.ghas.sarif``
+    # into each project's reports, and several cases here depend on only
+    # ``ash.cdx.json`` being there.
     root = tmp_path / "ws"
     output_dir = tmp_path / "out"
     plan = _plan(root, "api", "web")
@@ -126,48 +80,9 @@ def workspace(tmp_path):
     return plan, output_dir, results_path
 
 
-def _emit(workspace, *reporter_classes, **kwargs):
-    plan, output_dir, results_path = workspace
-    return emit_workspace_reports(
-        plan=plan,
-        output_dir=output_dir,
-        results_path=results_path,
-        reporter_classes=list(reporter_classes),
-        **kwargs,
-    )
-
-
-def _manifest(output_dir: Path) -> dict:
-    return json.loads(
-        (output_dir / REPORTS_DIR_NAME / MANIFEST_FILENAME).read_text(encoding="utf-8")
-    )
-
-
 # --------------------------------------------------------------------------- #
 # Test doubles
 # --------------------------------------------------------------------------- #
-
-
-class _MergedConfig(ReporterPluginConfigBase):
-    name: str = "fake-merged"
-    extension: str = "merged.txt"
-    enabled: bool = True
-
-
-class FakeMergedReporter(ReporterPluginBase[_MergedConfig]):
-    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
-
-    def model_post_init(self, context):
-        if self.config is None:
-            self.config = _MergedConfig()
-        return super().model_post_init(context)
-
-    def report(self, model) -> str:
-        return "\n".join(
-            result.ruleId
-            for run in (model.sarif.runs or [])
-            for result in (run.results or [])
-        )
 
 
 class _UnconstructibleConfig(ReporterPluginConfigBase):
@@ -290,24 +205,6 @@ class FakePythonOnlyRaisesReporter(ReporterPluginBase[_NotPythonOnlyConfig]):
         return "unreachable"
 
 
-class _DefaultOffPerProjectConfig(ReporterPluginConfigBase):
-    name: str = "fake-default-off-per-project"
-    extension: str = "cdx.json"
-    enabled: bool = False
-
-
-class FakeDefaultOffPerProjectReporter(ReporterPluginBase[_DefaultOffPerProjectConfig]):
-    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
-
-    def model_post_init(self, context):
-        if self.config is None:
-            self.config = _DefaultOffPerProjectConfig()
-        return super().model_post_init(context)
-
-    def report(self, model) -> str:  # pragma: no cover - never invoked
-        raise AssertionError("a PER_PROJECT reporter was invoked at workspace level")
-
-
 class _DefaultOffMergedConfig(ReporterPluginConfigBase):
     name: str = "fake-default-off-merged"
     extension: str = "cdx.json"
@@ -328,18 +225,22 @@ class FakeDefaultOffMergedReporter(ReporterPluginBase[_DefaultOffMergedConfig]):
         raise AssertionError("a disabled reporter must not be invoked")
 
 
-class _RaisingConfig(ReporterPluginConfigBase):
-    name: str = "fake-raising"
-    extension: str = "raising.txt"
+class _CanaryRaisingConfig(ReporterPluginConfigBase):
+    name: str = "fake-canary-raising"
+    extension: str = "canary-raising.txt"
     enabled: bool = True
 
 
-class FakeRaisingReporter(ReporterPluginBase[_RaisingConfig]):
+class FakeCanaryRaisingReporter(ReporterPluginBase[_CanaryRaisingConfig]):
+    """Raises an error that carries an environment value, to pin its redaction.
+
+    Not the sibling module's ``FakeRaisingReporter``, which raises a plain error."""
+
     workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         if self.config is None:
-            self.config = _RaisingConfig()
+            self.config = _CanaryRaisingConfig()
         return super().model_post_init(context)
 
     def report(self, model) -> str:
@@ -701,7 +602,7 @@ class TestAnUnbuildableReporterIsRefusedBeforeAnythingIsScanned:
 class _RaisingDependencyCheck:
     """A reporter whose own dependency check raises an error carrying a secret."""
 
-    config = _RaisingConfig()
+    config = _CanaryRaisingConfig()
 
     def validate_plugin_dependencies(self) -> bool:
         error = RuntimeError(f"token {CANARY} leaked")
@@ -727,9 +628,9 @@ class TestADependencyCheckThatRaisesIsLoggedWithoutItsSecrets:
 class TestFailuresAreRecordedNotRaised:
     def test_a_merged_reporter_that_raised_covers_no_project(self, workspace):
         _, output_dir, _ = workspace
-        _emit(workspace, FakeRaisingReporter)
+        _emit(workspace, FakeCanaryRaisingReporter)
 
-        entry = _manifest(output_dir)["reporters"]["fake-raising"]
+        entry = _manifest(output_dir)["reporters"]["fake-canary-raising"]
         assert "error" in entry
         assert entry["covers_projects"] is False
 
@@ -742,11 +643,11 @@ class TestFailuresAreRecordedNotRaised:
 
         caplog.set_level(logging.DEBUG, logger=ASH_LOGGER.name)
         _, output_dir, _ = workspace
-        outcome = _emit(workspace, FakeRaisingReporter)
+        outcome = _emit(workspace, FakeCanaryRaisingReporter)
 
-        entry = _manifest(output_dir)["reporters"]["fake-raising"]
+        entry = _manifest(output_dir)["reporters"]["fake-canary-raising"]
         assert CANARY not in entry["error"]
-        assert CANARY not in outcome.failed_reporters["fake-raising"]
+        assert CANARY not in outcome.failed_reporters["fake-canary-raising"]
         assert "RuntimeError" in entry["error"]
         # The log is a sink too: the error line and the debug traceback are both
         # written, and neither may carry the value. The first assertion is the
