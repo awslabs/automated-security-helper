@@ -29,6 +29,11 @@ from automated_security_helper.utils import file_lock
 
 pytestmark = pytest.mark.unit
 
+# The bits of an open's flags that say how it reads and writes. ``os.O_ACCMODE`` is
+# not defined on Windows, where the three access modes are 0, 1 and 2 and so
+# occupy the two low bits all the same.
+_ACCESS_MODE = getattr(os, "O_ACCMODE", os.O_RDONLY | os.O_WRONLY | os.O_RDWR)
+
 
 def _recording_open(monkeypatch, opened):
     real_open = os.open
@@ -56,7 +61,7 @@ def test_a_lock_file_this_account_can_write_is_opened_for_writing_once(
 
     (flags,) = _opens_of(opened, lock_file)
     assert flags & os.O_CREAT
-    assert flags & os.O_ACCMODE == os.O_RDWR
+    assert flags & _ACCESS_MODE == os.O_RDWR
     assert lock_file.is_file()
 
 
@@ -69,7 +74,7 @@ def test_the_lock_is_taken_on_a_descriptor_open_for_writing(tmp_path, monkeypatc
 
     def network_mount_flock(fd, operation):
         if operation & file_lock.fcntl.LOCK_EX:
-            mode = file_lock.fcntl.fcntl(fd, file_lock.fcntl.F_GETFL) & os.O_ACCMODE
+            mode = file_lock.fcntl.fcntl(fd, file_lock.fcntl.F_GETFL) & _ACCESS_MODE
             if mode == os.O_RDONLY:
                 raise OSError(errno.EBADF, "Bad file descriptor")
         return real_flock(fd, operation)
@@ -103,8 +108,8 @@ def test_a_lock_file_this_account_cannot_write_is_opened_read_only_and_locked(
 
     assert entered
     writing, reading = _opens_of(opened, lock_file)
-    assert writing & os.O_ACCMODE == os.O_RDWR
-    assert reading & os.O_ACCMODE == os.O_RDONLY
+    assert writing & _ACCESS_MODE == os.O_RDWR
+    assert reading & _ACCESS_MODE == os.O_RDONLY
 
 
 def _refuse_every_create(monkeypatch, lock_file, opened):
@@ -150,8 +155,8 @@ def test_the_read_only_fallback_does_not_ask_to_create_the_lock_file(
     assert entered
     writing, reading = opened
     assert writing & os.O_CREAT
-    assert writing & os.O_ACCMODE == os.O_RDWR
-    assert reading & os.O_ACCMODE == os.O_RDONLY
+    assert writing & _ACCESS_MODE == os.O_RDWR
+    assert reading & _ACCESS_MODE == os.O_RDONLY
     assert not reading & os.O_CREAT
 
 
@@ -171,7 +176,7 @@ def test_control_a_refused_create_of_a_missing_lock_file_raises_that_refusal(
 
     assert raised.value.errno == errno.EACCES
     assert not lock_file.exists()
-    assert [flags & os.O_ACCMODE for flags in opened] == [os.O_RDWR, os.O_RDONLY]
+    assert [flags & _ACCESS_MODE for flags in opened] == [os.O_RDWR, os.O_RDONLY]
 
 
 def test_control_a_refusal_other_than_permission_propagates(tmp_path, monkeypatch):
