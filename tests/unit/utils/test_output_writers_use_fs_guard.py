@@ -149,17 +149,27 @@ def _bindings(owner: ast.AST) -> Bindings:
     return found
 
 
+def _is_os(node: ast.AST) -> bool:
+    return isinstance(node, ast.Name) and node.id == "os"
+
+
 def _flag_names(node: ast.AST, frames: List[Bindings], seen=frozenset()):
     """The ``O_*`` names an os.open flags expression is built from.
 
-    None when any part of it cannot be followed to such a name: a parameter, a call
-    result, an attribute of something else, a number other than 0. Names are followed
-    through the enclosing functions and the module, and a name with several
-    bindings stands for all of them."""
+    Only ``os.O_X`` and ``getattr(os, "O_X", default)`` name a flag outright. None
+    when any part of it cannot be followed to such a name: a parameter, a call
+    result, an attribute of anything but ``os``, a bare ``O_`` name that nothing
+    binds, a number other than 0. Names are followed through the enclosing
+    functions and the module, and a name with several bindings stands for all of
+    them; an ``O_`` name is followed to what binds it, as any other is."""
     if isinstance(node, ast.Constant):
         return set() if node.value == 0 else None
     if isinstance(node, ast.Attribute):
-        return {node.attr} if node.attr.startswith("O_") else None
+        return (
+            {node.attr}
+            if _is_os(node.value) and node.attr.startswith("O_")
+            else None
+        )
     if isinstance(node, ast.Name):
         if node.id in seen:
             return set()
@@ -174,7 +184,7 @@ def _flag_names(node: ast.AST, frames: List[Bindings], seen=frozenset()):
                         return None
                     names |= part
                 return names
-        return {node.id} if node.id.startswith("O_") else None
+        return None
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
         left = _flag_names(node.left, frames, seen)
         right = _flag_names(node.right, frames, seen)
@@ -188,6 +198,7 @@ def _flag_names(node: ast.AST, frames: List[Bindings], seen=frozenset()):
         and isinstance(node.func, ast.Name)
         and node.func.id == "getattr"
         and len(node.args) in (2, 3)
+        and _is_os(node.args[0])
         and isinstance(node.args[1], ast.Constant)
         and isinstance(node.args[1].value, str)
         and node.args[1].value.startswith("O_")
