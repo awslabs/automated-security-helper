@@ -539,6 +539,51 @@ def test_a_strongly_encrypted_zip_member_is_refused_alone(
     assert "flag bit 6" in refused.reason
 
 
+def test_a_member_whose_extraction_path_passes_the_host_limit_is_refused_alone(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """On a host with a path length limit (Windows' MAX_PATH) the extractor's
+    open of a longer path fails with ENOENT, which the failure grading reads as
+    the run's fault, so one over-long member name failed the whole archive as a
+    tool error. The member is refused alone by name, before extraction, and the
+    control is admitted. The limit is set on the module: no real long path, so the
+    test reads the same on every host."""
+    converter = _converter(test_plugin_context)
+    monkeypatch.setattr(
+        archive_converter, "_PATH_LENGTH_LIMIT", len(str(tmp_path)) + 1 + 10
+    )
+    short = zipfile.ZipInfo("ok.js")
+    long = zipfile.ZipInfo("a_much_longer_name.js")
+
+    kept = converter.inspect_members(
+        [short, long], target_path=tmp_path, archive="a.zip"
+    )
+
+    assert kept == [short]
+    (refused,) = converter.refused_inputs
+    assert refused.member == "a_much_longer_name.js"
+    assert "path length limit" in refused.reason
+    assert "a_much_longer_name" not in refused.reason
+
+
+def test_a_host_without_a_path_length_limit_admits_a_long_member_name(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """The control: with no limit set (the POSIX default) the same members are
+    both admitted and nothing is refused."""
+    converter = _converter(test_plugin_context)
+    monkeypatch.setattr(archive_converter, "_PATH_LENGTH_LIMIT", None)
+    short = zipfile.ZipInfo("ok.js")
+    long = zipfile.ZipInfo("a_much_longer_name.js")
+
+    kept = converter.inspect_members(
+        [short, long], target_path=tmp_path, archive="a.zip"
+    )
+
+    assert kept == [short, long]
+    assert converter.refused_inputs == []
+
+
 def test_a_later_name_bound_for_a_taken_path_is_refused_when_members_are_names(
     test_plugin_context, tmp_path
 ):

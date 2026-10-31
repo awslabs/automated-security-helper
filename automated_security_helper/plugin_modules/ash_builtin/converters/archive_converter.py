@@ -1264,6 +1264,10 @@ _MEMBER_NUL = "its path holds a NUL character, which no file name can"
 _MEMBER_PARENT = "its path contains a '..' component"
 _MEMBER_ENCRYPTED = "it is encrypted, and an encrypted member is not extracted"
 _MEMBER_ESCAPES = "it would be extracted outside the destination directory"
+_MEMBER_PATH_TOO_LONG = (
+    "its extraction path is longer than this host's path length limit, so the "
+    "extractor could not write it"
+)
 _MEMBER_LINK = "it is a symbolic or hard link"
 _MEMBER_NOT_REGULAR = "it is not a regular file"
 _MEMBER_SPARSE_BEYOND_SIZE = (
@@ -1764,6 +1768,39 @@ def _on_windows() -> bool:
     """Whether the extractor writes names as Windows takes them (see
     _member_written_path); a function, so a test can read the other host's shape."""
     return os.name == "nt"
+
+
+#: The longest path, in characters, the extractor can write on this host, or None
+#: where the extractor meets no fixed limit. On Windows it is MAX_PATH (260,
+#: counting the terminating NUL, so 259 characters of path): zipfile and tarfile
+#: open each member through the ordinary Win32 calls, which keep that limit (no
+#: ``\\?\`` prefix), and the open of a longer path fails with ENOENT, a number
+#: _failure_kind reads as the run's fault (a missing directory is the run's). So
+#: an archive whose member name was too long for the host failed as a whole, as a
+#: TOOL error no suppression could accept. inspect_members refuses such a member
+#: by name instead (_written_path_over_limit), before anything is written, and
+#: the rest of the archive is extracted. Read at call time, so a test can set it.
+_PATH_LENGTH_LIMIT: Optional[int] = 260 if os.name == "nt" else None
+
+
+def _written_path_over_limit(
+    member_name: str, kind: Optional[Literal["zip", "tar"]], target_path: Path
+) -> Optional[str]:
+    """What is over the limit, as the detail of the refusal's log line, when the
+    path the member is written to (``target_path``, a separator, its written path
+    below it; _member_written_path) is at or past _PATH_LENGTH_LIMIT; None when it
+    is under the limit or the host has none. The length counts characters, as the
+    limit does; a member later placed in a numbered directory beside an earlier
+    one (_renamed_member_name) is a few characters longer than read here."""
+    limit = _PATH_LENGTH_LIMIT
+    if limit is None:
+        return None
+    length = (
+        len(os.fspath(target_path)) + 1 + len(_member_written_path(member_name, kind))
+    )
+    if length < limit:
+        return None
+    return f"{length} characters with the extraction directory, limit {limit}"
 
 
 #: The zip general-purpose flag that marks a member as encrypted.
@@ -2299,6 +2336,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             if problem is None and target_path is not None:
                 if self._is_path_traversal(member_name, target_path):
                     problem = _MEMBER_ESCAPES
+            if problem is None and target_path is not None:
+                over = _written_path_over_limit(member_name, kind, target_path)
+                if over is not None:
+                    problem = _MEMBER_PATH_TOO_LONG
+                    detail = over
             if problem is None and is_link:
                 problem = _MEMBER_LINK
             if problem is None and not is_regular:
