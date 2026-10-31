@@ -7196,9 +7196,10 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
     grep family's ``cache_dir_env_var``) declares the database only when the offline
     scan read that cache: with none it declines and reads nothing, and a scan of
     the operator's own rules or of bare patterns reads no cache either. So the
-    offline build of such a scanner is given a cache the way the offline image
-    ships one, a directory outside the scanned tree holding one rules file, and
-    the question is asked of that build.
+    build of such a scanner is given a cache the way the offline image ships one,
+    a directory outside the scanned tree holding one rules file, in both modes, and
+    the question is asked of that build: the online reading and the offline one
+    differ in ``ASH_OFFLINE`` alone.
     """
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.ash_config import AshConfig
