@@ -62,6 +62,37 @@ def test_as_init_the_zombie_orphans_of_the_group_are_reaped_by_pid():
 
 
 @skip_on_windows
+def test_a_zombie_another_thread_reaped_first_leaves_the_others_to_be_reaped():
+    """Something else (a SIGCHLD handler, another thread's wait) reaps orphan 777
+    between the scan of /proc and this call, so the waitpid for it raises
+    ChildProcessError. The race is handled: the next orphan is still reaped, and
+    the answer is the group read's own."""
+    zombies = {777, 778}
+
+    def exists(pgid):
+        return bool(zombies)
+
+    def reap(pid, options):
+        zombies.discard(pid)
+        if pid == 777:
+            raise ChildProcessError(10, "No child processes")
+        return (pid, 9)
+
+    with (
+        patch.object(subprocess_utils, "_this_process_is_init", return_value=True),
+        patch.object(
+            subprocess_utils, "_zombie_orphans_of_group", return_value=[777, 778]
+        ),
+        patch.object(subprocess_utils, "_group_exists", side_effect=exists),
+        patch.object(subprocess_utils.os, "waitpid", side_effect=reap) as waitpid,
+    ):
+        assert subprocess_utils._group_survives(_NO_SUCH_PID) is False
+    waitpid.assert_any_call(777, os.WNOHANG)
+    waitpid.assert_any_call(778, os.WNOHANG)
+    assert zombies == set(), "the orphan after the raced one was not reaped"
+
+
+@skip_on_windows
 def test_not_as_init_nothing_is_reaped_and_the_group_read_stands():
     with (
         patch.object(subprocess_utils, "_this_process_is_init", return_value=False),
