@@ -1400,9 +1400,11 @@
   writes its own status lines and the image build's output to stderr so that
   `./ash report ... > file` holds the report alone. `./ash get-genai-guide -o
   guide.md` and `./ash config -o DIR` now reach those subcommands' own `-o`
-  (`--output`, `--output-dir`) instead of naming the container runtime; `-o` with
-  no subcommand, after `scan` (whose `-o` is the CLI's own alias of
-  `--oci-runner`) and after `build-image` is still the wrapper's runner, so
+  (`--output`, `--output-dir`) instead of naming the container runtime; those two
+  are the only subcommands that define an `-o` of their own, so everywhere else
+  (`-o` with no subcommand, after `scan`, whose `-o` is the CLI's own alias of
+  `--oci-runner`, after `build-image`, `report`, `merge`, `mcp`, `inspect`,
+  `dependencies` and `plugin`) `-o` is still the wrapper's runner, and
   `./ash scan -o podman` picks podman as it always did.
 - `./ash` exits 5, the usage-error code, for a value option given no value, where
   it exited 3; `Invoke-ASH` exits 5 for a parameter given an empty or blank value,

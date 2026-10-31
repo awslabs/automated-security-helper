@@ -204,15 +204,21 @@ def _keeps_stdin(options: List[str]) -> bool:
     )
 
 
-#: The `python` beside the interpreter running the suite, which is the one that can
-#: import the CLI and its dependencies; `shutil.which("python")` alone found any
-#: python, and a venv's pytest run without activating it, or a system python with no
-#: CLI installed, failed the tests below with an import error instead of skipping.
-_PYTHON_BESIDE_THE_SUITE = Path(sys.executable).parent / "python"
-_NEEDS_THE_SUITES_PYTHON = pytest.mark.skipif(
-    not _PYTHON_BESIDE_THE_SUITE.is_file(),
-    reason="the wrapper runs `python`; none sits beside the interpreter running the suite",
-)
+@pytest.fixture
+def suite_python(tmp_path: Path) -> Path:
+    """A directory holding one `python`: the interpreter running the suite, which is
+    the one that can import the CLI and its dependencies. Put first on PATH so the
+    wrapper's `python` is exactly that interpreter and nothing else is shadowed:
+    `shutil.which("python")` alone found any python (a venv's pytest run without
+    activating it, or a system python with no CLI installed, failed the tests below
+    with an import error instead of skipping), and putting sys.executable's own
+    directory first put the whole of it, /usr/bin for a system interpreter, ahead of
+    the fixed-id bin, so the real `id` and every other host tool hid the test's
+    fakes, and the `python` found there need not have been sys.executable."""
+    bin_dir = tmp_path / "suite-python"
+    bin_dir.mkdir()
+    (bin_dir / "python").symlink_to(sys.executable)
+    return bin_dir
 
 
 def _dirs(tmp_path: Path):
@@ -352,8 +358,9 @@ def test_dash_v_is_the_scans_verbose_not_the_wrappers_version(runner, tmp_path):
     assert _inner(run) == ["ash", "scan", *SANDBOX_OFF, "-v"], run
 
 
-@_NEEDS_THE_SUITES_PYTHON
-def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(runner, tmp_path):
+def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(
+    runner, suite_python, tmp_path
+):
     """`./ash -v`, with no subcommand before it, prints the version on the host and
     exits, as it always did: a habit or a health check must never fall through to a
     build and a verbose scan of the working directory."""
@@ -361,7 +368,7 @@ def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(runner, tmp_
     result, calls = _run(
         runner,
         ["--no-build", "--source-dir", str(source), "--output-dir", str(out), "-v"],
-        path_prefix=_PYTHON_BESIDE_THE_SUITE.parent,
+        path_prefix=suite_python,
     )
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
@@ -369,8 +376,9 @@ def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(runner, tmp_
     assert calls == [], "the version is printed on the host; no image is built or run"
 
 
-@_NEEDS_THE_SUITES_PYTHON
-def test_the_long_version_option_is_still_the_wrappers_own(runner, tmp_path):
+def test_the_long_version_option_is_still_the_wrappers_own(
+    runner, suite_python, tmp_path
+):
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,
@@ -382,7 +390,7 @@ def test_the_long_version_option_is_still_the_wrappers_own(runner, tmp_path):
             str(out),
             "--version",
         ],
-        path_prefix=_PYTHON_BESIDE_THE_SUITE.parent,
+        path_prefix=suite_python,
     )
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
@@ -392,9 +400,8 @@ def test_the_long_version_option_is_still_the_wrappers_own(runner, tmp_path):
     assert calls == [], "the version is printed on the host; no image is built or run"
 
 
-@_NEEDS_THE_SUITES_PYTHON
 def test_help_runs_the_wrappers_own_cli_not_a_package_in_the_working_directory(
-    runner, tmp_path
+    runner, suite_python, tmp_path
 ):
     """`python -m` puts the working directory first on sys.path. Run from a checkout
     that holds a package under the CLI's name, --help imported that package at the
@@ -410,7 +417,7 @@ def test_help_runs_the_wrappers_own_cli_not_a_package_in_the_working_directory(
         runner,
         ["--help"],
         cwd=tmp_path / "checkout",
-        path_prefix=_PYTHON_BESIDE_THE_SUITE.parent,
+        path_prefix=suite_python,
     )
     shown = result.stdout + result.stderr
     assert "PLANTED-PACKAGE-RAN" not in shown, shown
