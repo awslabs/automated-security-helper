@@ -911,6 +911,10 @@ def _push_down(
     pushed: list[IgnorePathWithReason] = []
     package_applied: list[int] = []
     package_dropped: list[int] = []
+    # The one spelling every refusal below shows, the one the policy records
+    # (_prefix_text): a backslash-written prefix reads as ``apps/api`` here as
+    # it does in the pattern converter's own message, on POSIX too.
+    shown_prefix = _prefix_text(project_prefix)
     for position, entry in enumerate(entries, start=1):
         try:
             rewritten = to_project_pattern(entry.path, project_prefix, kind=kind)
@@ -918,13 +922,13 @@ def _push_down(
             if not quote_values:
                 raise _refuse(
                     f"workspace policy {kind} entry {position} cannot be applied to "
-                    f"project '{Path(project_prefix).as_posix()}': it has no sound "
+                    f"project '{shown_prefix}': it has no sound "
                     f"rewrite for that project. The pattern is not shown because "
                     f"an MCP client supplied the file."
                 ) from None
             raise _refuse(
                 f"workspace policy pattern '{entry.path}' cannot be applied to "
-                f"project '{Path(project_prefix).as_posix()}': {exc}"
+                f"project '{shown_prefix}': {exc}"
             ) from exc
         if rewritten is None:
             continue
@@ -948,13 +952,13 @@ def _push_down(
                     raise _refuse(
                         f"workspace policy {kind} entry {position} has a "
                         f"package_path that cannot be applied to project "
-                        f"'{Path(project_prefix).as_posix()}': it has no sound "
+                        f"'{shown_prefix}': it has no sound "
                         f"rewrite for that project. The value is not shown because "
                         f"an MCP client supplied the file."
                     ) from None
                 raise _refuse(
                     f"workspace policy package_path '{package_path}' cannot be "
-                    f"applied to project '{Path(project_prefix).as_posix()}': {exc}"
+                    f"applied to project '{shown_prefix}': {exc}"
                 ) from exc
             if rewritten_package is None:
                 # The path reaches this project and the package copy named does

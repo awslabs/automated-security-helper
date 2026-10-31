@@ -253,6 +253,38 @@ class TestPushDown:
                 project_scanners=[],
             )
 
+    @pytest.mark.parametrize("quote_values", [True, False], ids=["quoted", "unquoted"])
+    @pytest.mark.parametrize("field", ["path", "package_path"])
+    def test_a_refusal_shows_the_project_prefix_as_the_policy_records_it(
+        self, field, quote_values
+    ):
+        """A prefix written with a backslash is one project, ``apps/api``. On
+        POSIX ``Path(...).as_posix()`` keeps the backslash, so a refusal that
+        showed the prefix that way spelled the project one way while the rest of
+        the policy (and the pattern converter's own message) spelled it another.
+        ``apps/*/x.py`` has a wildcard inside the project path, so it has no
+        sound rewrite and is refused, for the entry's path and for its
+        package_path alike."""
+        if field == "path":
+            entry = AshSuppression(path="apps/*/x.py", reason="mine")
+        else:
+            entry = AshSuppression(
+                path="**/*.js", reason="mine", package_path="apps/*/x.py"
+            )
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            policy_for_project(
+                _policy(suppressions=[entry]),
+                project_prefix="apps\\api",
+                project_threshold=None,
+                project_scanners=[],
+                quote_values=quote_values,
+            )
+
+        message = str(excinfo.value)
+        assert "cannot be applied to project 'apps/api'" in message
+        assert "apps\\api" not in message
+
 
 class TestTheCeilingDisclosure:
     @staticmethod
