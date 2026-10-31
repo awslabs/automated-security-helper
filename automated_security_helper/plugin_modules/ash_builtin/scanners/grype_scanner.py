@@ -430,7 +430,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             return None
 
     def _warn_if_config_moves_the_database(
-        self, config_path: Path, values: Iterable[str] = ()
+        self,
+        config_path: Path,
+        values: Iterable[str] = (),
+        shown: Optional[Path] = None,
     ) -> None:
         """Say so when the grype config sets ``db.cache-dir``, which ASH overrides.
 
@@ -439,14 +442,16 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         one; that variable beats the config file. Never raises, like
         ``_output_restricting_keys``. The path is redacted with *values*, the
         config's environment values, as the sibling restricting-keys warning is: a
-        configured option can come from the environment.
+        configured option can come from the environment. The file is read at
+        *config_path*; the warning names it as *shown*, the configured spelling
+        (default: *config_path*), because redaction finds only that spelling.
         """
         document = self._read_config(config_path)
         db = _lowercase_keys(_lowercase_keys(document).get("db"))
         if db.get("cache-dir"):
             self._plugin_log(
                 text_without_values(
-                    f"The grype config at {config_path} sets db.cache-dir, which ASH "
+                    f"The grype config at {shown or config_path} sets db.cache-dir, which ASH "
                     "does not use: grype reads its database from the directory ASH "
                     "refreshes and checks the age of. Set GRYPE_DB_CACHE_DIR to move "
                     "it.",
@@ -583,10 +588,13 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 restricting_keys = self._output_restricting_keys(candidate)
                 if restricting_keys:
                     # Redacted: the config path is configured, and a configured
-                    # option can come from the environment.
+                    # option can come from the environment. Named as configured,
+                    # not as resolved: redaction finds only the configured
+                    # spelling, and the resolved path of "~/..." or a symlink is
+                    # another string.
                     self._plugin_log(
                         text_without_values(
-                            f"The grype config at {candidate} sets "
+                            f"The grype config at {Path(conf_path)} sets "
                             f"{', '.join(restricting_keys)}, which restricts which "
                             "matches reach the report. Vulnerabilities grype detected "
                             "may be absent from these results, and the scan can pass "
@@ -595,7 +603,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                         ),
                         level=logging.WARNING,
                     )
-                self._warn_if_config_moves_the_database(candidate, environment_values)
+                self._warn_if_config_moves_the_database(
+                    candidate, environment_values, shown=Path(conf_path)
+                )
                 resolved_config = candidate
                 configured_config = Path(conf_path)
                 # A database mirror or CA the operator's config names applies to

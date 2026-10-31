@@ -144,6 +144,55 @@ def test_the_cache_dir_warning_is_redacted_and_reads_the_key_case_insensitively(
     assert "zz-grype-config" not in warning
 
 
+@pytest.mark.parametrize("form", ["tilde", "symlink"])
+def test_the_config_warnings_name_the_config_as_configured_not_as_resolved(
+    root, monkeypatch, form
+):
+    """Redaction finds the spelling the operator configured, so a warning that
+    named the resolved path (``~`` expanded, a link followed) printed it whole. The
+    value is passed to the scanner as the environment's, as ``config_file:
+    ${GRYPE_CFG}`` does."""
+    if form == "symlink" and sys.platform == "win32":
+        pytest.skip("symlinks")
+    body = "only-fixed: true\ndb:\n  cache-dir: /elsewhere/db\n"
+    if form == "tilde":
+        home = root / "zz-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        real = home / "zz-grype-config.yaml"
+        configured = "~/zz-grype-config.yaml"
+    else:
+        folder = root / "zz-elsewhere"
+        folder.mkdir()
+        real = folder / "zz-grype-real.yaml"
+        link = folder / "zz-grype-link.yaml"
+        configured = str(link)
+    real.write_text(body, encoding="utf-8")
+    if form == "symlink":
+        link.symlink_to(real)
+    messages: list[str] = []
+
+    with (
+        patch.object(GrypeScanner, "_environment_values", return_value=[configured]),
+        patch.object(
+            GrypeScanner,
+            "_plugin_log",
+            autospec=True,
+            side_effect=lambda self, message, **kwargs: messages.append(str(message)),
+        ),
+    ):
+        _grype(_context(root), config_file=configured)
+
+    restricting = [m for m in messages if "restricts which matches" in m]
+    moving = [m for m in messages if "db.cache-dir" in m]
+    assert len(restricting) == 1 and len(moving) == 1, messages
+    for message in (*restricting, *moving):
+        assert str(real) not in message, message
+        assert "zz-grype" not in message, message
+        assert "zz-home" not in message and "zz-elsewhere" not in message, message
+
+
 # --- the configured path ------------------------------------------------------------
 
 
