@@ -15,42 +15,27 @@ import json
 import botocore.exceptions
 import pytest
 
-from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
     BedrockSummaryReporter,
     BedrockSummaryReporterConfig,
 )
-from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactLocation,
-    Level,
-    Location,
-    Message,
-    PhysicalLocation,
-    PropertyBag,
-    Region,
-    ReportingDescriptorReference,
-    Result,
-    Run,
-    SarifReport,
-    Tool,
-    ToolComponent,
-)
-from automated_security_helper.utils.sarif_utils import attach_scanner_details
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     FALLBACK_ONE,
     FALLBACK_TWO,
     MODULE,
     PRIMARY_MODEL,
+    ControlPlaneSessions,
+    SessionOf,
+    client_error,
+    default_session_client,
+    finding,
     make_reporter,
+    sarif_model,
 )
 
 pytestmark = pytest.mark.unit
-
-# make_reporter, MODULE and the model placeholders are this directory's shared
-# doubles (bedrock_reporter_doubles.py); the other modules here import them from
-# this module as well as from there.
-__all__ = ["FALLBACK_ONE", "FALLBACK_TWO", "MODULE", "PRIMARY_MODEL", "make_reporter"]
 
 
 class RuntimeDouble:
@@ -71,59 +56,6 @@ class RuntimeDouble:
                 "message": {"role": "assistant", "content": [{"text": self.text}]}
             }
         }
-
-
-@pytest.fixture
-def context(test_plugin_context):
-    return test_plugin_context
-
-
-def sarif_model(results):
-    model = AshAggregatedResults()
-    model.sarif = SarifReport(
-        version="2.1.0",
-        runs=[Run(tool=Tool(driver=ToolComponent(name="ASH")), results=results)],
-    )
-    model.scanner_results = {}
-    return model
-
-
-def finding(rule_id="R1", level=Level.error, uri="src/app.py", scanner="bandit"):
-    """One result as the engine hands it on for ``scanner``.
-
-    The properties are what ``attach_scanner_details`` writes, plus the tags
-    detect-secrets puts on its own results. No scanner sets ``scanner_type``.
-    """
-    tags = None
-    if scanner == "detect-secrets":
-        tags = [
-            "detect-secrets",
-            "secret",
-            "security",
-            "tool_name::detect-secrets",
-            f"tool_type::{ScannerToolType.SECRETS}",
-        ]
-    result = Result(
-        ruleId=rule_id,
-        rule=ReportingDescriptorReference(id=rule_id),
-        level=level,
-        message=Message(text=f"{rule_id} was reported"),
-        locations=[
-            Location(
-                physicalLocation=PhysicalLocation(
-                    artifactLocation=ArtifactLocation(uri=uri),
-                    region=Region(startLine=4, endLine=6),
-                )
-            )
-        ],
-        properties=PropertyBag(tags=tags) if tags else None,
-    )
-    report = SarifReport(
-        version="2.1.0",
-        runs=[Run(tool=Tool(driver=ToolComponent(name=scanner)), results=[result])],
-    )
-    attach_scanner_details(report, scanner_name=scanner, scanner_version="1.0.0")
-    return report.runs[0].results[0]
 
 
 class TestValidatePluginDependencies:
@@ -193,7 +125,7 @@ class TestReportEntryPoint:
             "options": {"aws_region": "us-east-1", "model_id": PRIMARY_MODEL},
         }
         monkeypatch.setattr(
-            f"{MODULE}.boto3.Session", lambda **kw: _SessionOf(RuntimeDouble())
+            f"{MODULE}.boto3.Session", lambda **kw: SessionOf(RuntimeDouble())
         )
 
         result = reporter.report(sarif_model([]))
@@ -213,7 +145,7 @@ class TestReportEntryPoint:
 
         def _session(**kwargs):
             captured.update(kwargs)
-            return _SessionOf(RuntimeDouble())
+            return SessionOf(RuntimeDouble())
 
         monkeypatch.setattr(f"{MODULE}.boto3.Session", _session)
         monkeypatch.setattr(
@@ -234,49 +166,12 @@ class TestReportEntryPoint:
     ):
         reporter = make_reporter(context)
         runtime = RuntimeDouble()
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", lambda **kw: _SessionOf(runtime))
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", lambda **kw: SessionOf(runtime))
 
         report = reporter.report(sarif_model([]))
         assert "No scanners completed" in report
         assert "No findings matched the analysis filters" in report
         assert runtime.calls == [], "the model must not be invoked for zero findings"
-
-
-class _SessionOf:
-    """A boto3.Session stand-in returning one prepared client."""
-
-    def __init__(self, client):
-        self._client = client
-
-    def client(self, service, **kwargs):
-        return self._client
-
-
-class _ControlPlaneSessions:
-    """A boto3.Session stand-in that records what each session was built with
-    and each control-plane ("bedrock") client built from one. Any other
-    service gets ``runtime``."""
-
-    def __init__(self, runtime=None):
-        self.runtime = runtime
-        self.sessions: list = []
-        self.control_clients: list = []
-
-    def __call__(self, **kwargs):
-        self.sessions.append(kwargs)
-        return _RecordedSession(self)
-
-
-class _RecordedSession:
-    def __init__(self, owner):
-        self._owner = owner
-
-    def client(self, service, **kwargs):
-        if service == "bedrock":
-            control = object()
-            self._owner.control_clients.append(control)
-            return control
-        return self._owner.runtime
 
 
 class TestExtractFindings:
@@ -751,8 +646,8 @@ class TestFallbackModels:
         self, context, monkeypatch
     ):
         reporter = make_reporter(context, enable_fallback_models=True)
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
             lambda client, model, values=(), *, label=None: (False, "not enabled"),
@@ -798,8 +693,8 @@ class TestFallbackModels:
         self, context, monkeypatch
     ):
         reporter = make_reporter(context, enable_fallback_models=False)
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
             lambda client, model, values=(), *, label=None: (False, "not enabled"),
@@ -1008,8 +903,8 @@ class TestRealPathFallback:
             f"{MODULE}.validate_bedrock_model",
             lambda client, model, values=(): (True, None),
         )
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
         runtime = _RoutingRuntime(PRIMARY_MODEL)
 
         out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1028,8 +923,8 @@ class TestRealPathFallback:
             f"{MODULE}.validate_bedrock_model",
             lambda client, model, values=(): (True, None),
         )
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
         runtime = _RoutingRuntime(PRIMARY_MODEL)
 
         out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1130,8 +1025,8 @@ class TestRealPathFallback:
             f"{MODULE}.validate_bedrock_model",
             lambda client, model, values=(): (True, None),
         )
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
         runtime = _RoutingRuntime(PRIMARY_MODEL)
 
         run(reporter, runtime)
@@ -1161,18 +1056,6 @@ class _FailingPrimary:
         }
 
 
-def _client_error(code, message="it failed"):
-    return botocore.exceptions.ClientError(
-        {"Error": {"Code": code, "Message": message}}, "Converse"
-    )
-
-
-def _default_session_client(*args, **kwargs):
-    raise AssertionError(
-        "a client from boto3's default session ignores the configured aws_profile"
-    )
-
-
 class TestTheFallbackWalkContract:
     """What the report path's walk does, beyond reaching the fallback."""
 
@@ -1197,9 +1080,9 @@ class TestTheFallbackWalkContract:
         validated = self._chain(
             monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE}
         )
-        sessions = _ControlPlaneSessions()
+        sessions = ControlPlaneSessions()
         monkeypatch.setattr(f"{MODULE}.boto3.Session", sessions)
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
         runtime = _RoutingRuntime(PRIMARY_MODEL)
 
         out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1226,7 +1109,7 @@ class TestTheFallbackWalkContract:
             context, batch_processing=True, max_findings_to_analyze=1
         )
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, set())
-        sessions = _ControlPlaneSessions()
+        sessions = ControlPlaneSessions()
         monkeypatch.setattr(f"{MODULE}.boto3.Session", sessions)
         default_clients = []
         monkeypatch.setattr(
@@ -1250,8 +1133,8 @@ class TestTheFallbackWalkContract:
             context, batch_processing=True, max_findings_to_analyze=1
         )
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
         runtime = _RoutingRuntime(PRIMARY_MODEL)
 
         reporter._process_findings_by_batch(
@@ -1274,8 +1157,8 @@ class TestTheFallbackWalkContract:
         reporter = make_reporter(context, enable_caching=False)
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
         runtime = _RoutingRuntime(PRIMARY_MODEL)
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions(runtime))
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions(runtime))
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
         model = sarif_model([finding()])
 
         reporter.report(model)
@@ -1289,16 +1172,16 @@ class TestTheFallbackWalkContract:
     @pytest.mark.parametrize(
         "error, calls",
         [
-            pytest.param(_client_error("ExpiredTokenException"), 1, id="expired-token"),
-            pytest.param(_client_error("UnrecognizedClientException"), 1, id="bad-key"),
+            pytest.param(client_error("ExpiredTokenException"), 1, id="expired-token"),
+            pytest.param(client_error("UnrecognizedClientException"), 1, id="bad-key"),
             # A service fault is a failure a later try can pass, so the model
             # client's retries repeat the call on the same model: the first call
             # and the two retries the reporter below is set to make.
-            pytest.param(_client_error("InternalServerException"), 3, id="internal"),
+            pytest.param(client_error("InternalServerException"), 3, id="internal"),
             # Built without an HTTP status, so the code alone decides and the
             # call is asked once. The same answer sent with 503 is retried.
             pytest.param(
-                _client_error("ServiceUnavailableException"),
+                client_error("ServiceUnavailableException"),
                 1,
                 id="service-unavailable",
             ),
@@ -1329,8 +1212,8 @@ class TestTheFallbackWalkContract:
         validated = self._chain(
             monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE}
         )
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
         runtime = _FailingPrimary(error)
 
         out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1369,8 +1252,8 @@ class TestTheFallbackWalkContract:
         model."""
         reporter = make_reporter(context, max_retries=2, base_delay=0.0, max_delay=0.0)
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
         runtime = _FailingPrimary(error)
 
         out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1401,9 +1284,9 @@ class TestTheFallbackWalkContract:
         # retry itself is test_an_error_no_model_can_fix_is_not_walked's.
         reporter = make_reporter(context, max_retries=0)
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
-        runtime = _FailingPrimary(_client_error(code, "Input is too long."))
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
+        runtime = _FailingPrimary(client_error(code, "Input is too long."))
 
         out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1416,8 +1299,8 @@ class TestTheFallbackWalkContract:
         answer = "*Error handling in src/app.py swallows every exception.*"
         reporter = make_reporter(context)
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
         runtime = RuntimeDouble(text=answer)
 
         out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1431,9 +1314,9 @@ class TestTheFallbackWalkContract:
         answer = "*Error handling in src/app.py swallows every exception.*"
         reporter = make_reporter(context)
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
-        runtime = _FailingPrimary(_client_error("ThrottlingException"), answer)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
+        runtime = _FailingPrimary(client_error("ThrottlingException"), answer)
 
         out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1451,8 +1334,8 @@ class TestTheFallbackWalkContract:
             {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO},
             {FALLBACK_TWO},
         )
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
 
         class _Runtime:
             models: list = []
@@ -1464,7 +1347,7 @@ class TestTheFallbackWalkContract:
                     if kwargs["modelId"] == PRIMARY_MODEL
                     else "ThrottlingException"
                 )
-                raise _client_error(code)
+                raise client_error(code)
 
         out = reporter._run_simple_report(_Runtime(), sarif_model([]), [], [])
 
@@ -1500,8 +1383,8 @@ class TestTheFallbackWalkContract:
             {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO},
             {FALLBACK_ONE, FALLBACK_TWO},
         )
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
 
         class _Runtime:
             def __init__(self):
@@ -1511,11 +1394,11 @@ class TestTheFallbackWalkContract:
                 model = kwargs["modelId"]
                 self.models.append(model)
                 if model == PRIMARY_MODEL:
-                    raise _client_error("AccessDeniedException", "primary denied")
+                    raise client_error("AccessDeniedException", "primary denied")
                 if model == FALLBACK_ONE and self.models.count(FALLBACK_ONE) > 1:
-                    raise _client_error("ThrottlingException", "first fallback slowed")
+                    raise client_error("ThrottlingException", "first fallback slowed")
                 if model == FALLBACK_TWO and not second_fallback_answers:
-                    raise _client_error("ThrottlingException", "second fallback slowed")
+                    raise client_error("ThrottlingException", "second fallback slowed")
                 return {
                     "output": {
                         "message": {"role": "assistant", "content": [{"text": "ok"}]}
@@ -1574,8 +1457,8 @@ class TestTheFallbackWalkContract:
         only: a report path call after it starts from the configured model."""
         reporter = make_reporter(context, enable_caching=False)
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
-        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
 
         # The configured model is unavailable, so the shim walks to the fallback.
         shimmed = reporter._call_bedrock(RuntimeDouble("shim answer"), "m", "s")
@@ -1596,9 +1479,9 @@ class TestTheFallbackWalkContract:
         report run's cached client is not set by it."""
         reporter = make_reporter(context, aws_profile="first-profile")
         self._chain(monkeypatch, {}, {PRIMARY_MODEL})
-        sessions = _ControlPlaneSessions()
+        sessions = ControlPlaneSessions()
         monkeypatch.setattr(f"{MODULE}.boto3.Session", sessions)
-        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
 
         reporter._call_bedrock(RuntimeDouble(), "m", "s")
         reporter.config.options.aws_profile = "second-profile"

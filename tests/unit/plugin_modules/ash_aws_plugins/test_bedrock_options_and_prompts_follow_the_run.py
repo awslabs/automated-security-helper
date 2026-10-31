@@ -36,11 +36,9 @@ from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     MODULE,
     PRIMARY_MODEL,
     REGION,
+    finding,
     make_reporter,
     plugin_context_in,
-)
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
-    finding,
     sarif_model,
 )
 

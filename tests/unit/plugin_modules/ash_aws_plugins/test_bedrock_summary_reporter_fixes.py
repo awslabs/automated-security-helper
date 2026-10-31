@@ -18,7 +18,6 @@ plan, and the control plane is a MagicMock.
 """
 
 import json
-from unittest.mock import MagicMock
 
 import botocore.exceptions
 import pytest
@@ -47,94 +46,22 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     FALLBACK_ONE,
     FALLBACK_TWO,
     MODULE,
     PRIMARY_MODEL,
-    context,  # noqa: F401  (fixture)
+    Runtime,
+    Session,
+    control_plane,
     finding,
     make_reporter,
+    run_report,
     sarif_model,
+    sts_client,
 )
 
 pytestmark = pytest.mark.unit
-
-
-# ---------------------------------------------------------------------------
-# Doubles
-# ---------------------------------------------------------------------------
-
-
-class Runtime:
-    """A bedrock-runtime client: converse() answers ``plan`` in order (a text or
-    an exception) and records every request."""
-
-    def __init__(self, *plan):
-        self.plan = list(plan)
-        self.calls = []
-
-    def converse(self, **kwargs):
-        self.calls.append(kwargs)
-        step = self.plan.pop(0) if self.plan else "answer"
-        if isinstance(step, BaseException):
-            raise step
-        return {
-            "output": {"message": {"role": "assistant", "content": [{"text": step}]}}
-        }
-
-    def prompts(self):
-        return [call["messages"][0]["content"][0]["text"] for call in self.calls]
-
-
-class Session:
-    """A boto3.Session stand-in handing out the clients it was given."""
-
-    def __init__(self, **clients):
-        self.clients = clients
-
-    def __call__(self, **kwargs):
-        return self
-
-    def client(self, service, **kwargs):
-        return self.clients[service]
-
-
-def _model_summary(model_id):
-    return {
-        "modelId": model_id,
-        "modelName": "placeholder",
-        "modelArn": f"arn:aws:bedrock:::{model_id}",
-        "providerName": "placeholder",
-        "modelLifecycle": {"status": "ACTIVE"},
-        "inputModalities": ["TEXT"],
-        "outputModalities": ["TEXT"],
-        "inferenceTypesSupported": ["ON_DEMAND"],
-    }
-
-
-def _control_plane(*listed):
-    control = MagicMock()
-    control.list_inference_profiles.return_value = {"inferenceProfileSummaries": []}
-    control.list_foundation_models.return_value = {
-        "modelSummaries": [_model_summary(model) for model in listed]
-    }
-    return control
-
-
-def _sts():
-    sts = MagicMock()
-    sts.get_caller_identity.return_value = {"Account": "123456789012"}
-    return sts
-
-
-def _run(reporter, monkeypatch, runtime, *results):
-    """report() with the runtime as the run's bedrock-runtime client."""
-    monkeypatch.setattr(
-        f"{MODULE}.boto3.Session",
-        Session(**{"bedrock-runtime": runtime, "bedrock": _control_plane()}),
-    )
-    return reporter.report(sarif_model(list(results)))
 
 
 def _tagged_finding(rule_id, scanner, tool_type):
@@ -190,7 +117,7 @@ def test_the_walk_ends_on_a_failure_no_other_model_answers(context, monkeypatch)
         )
 
     out = reporter._walk_fallbacks(
-        _control_plane(), PRIMARY_MODEL, call_model, primary_error="*Error: first*"
+        control_plane(), PRIMARY_MODEL, call_model, primary_error="*Error: first*"
     )
 
     assert called == [FALLBACK_ONE], called
@@ -222,7 +149,7 @@ def test_the_walk_goes_on_past_a_failure_only_that_model_gave(context, monkeypat
         )
 
     out = reporter._walk_fallbacks(
-        _control_plane(), PRIMARY_MODEL, call_model, primary_error="*Error: first*"
+        control_plane(), PRIMARY_MODEL, call_model, primary_error="*Error: first*"
     )
 
     assert called == [FALLBACK_ONE, FALLBACK_TWO], called
@@ -294,8 +221,10 @@ def test_html_in_a_code_span_without_a_pipe_stays_as_the_model_wrote_it():
 def test_the_dependency_check_accepts_a_later_fallback(context, monkeypatch):  # noqa: F811
     """Only the second fallback is listed: the run would reach it, so the check
     does too instead of disabling the reporter."""
-    control = _control_plane(FALLBACK_TWO)
-    monkeypatch.setattr(f"{MODULE}.boto3.Session", Session(sts=_sts(), bedrock=control))
+    control = control_plane(FALLBACK_TWO)
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", Session(sts=sts_client(), bedrock=control)
+    )
     monkeypatch.setattr(
         f"{MODULE}.get_fallback_model",
         {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO}.get,
@@ -319,8 +248,10 @@ def test_the_dependency_check_refuses_when_no_model_of_the_chain_is_listed(
 ):
     """The control: with nothing of the chain listed, the walk finds no model
     and the reporter is disabled; the check is not an unconditional True."""
-    control = _control_plane()
-    monkeypatch.setattr(f"{MODULE}.boto3.Session", Session(sts=_sts(), bedrock=control))
+    control = control_plane()
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", Session(sts=sts_client(), bedrock=control)
+    )
     monkeypatch.setattr(
         f"{MODULE}.get_fallback_model",
         {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO}.get,
@@ -345,7 +276,7 @@ def test_the_simple_reports_total_is_the_whole_list(context, monkeypatch):  # no
     )
     runtime = Runtime("summary")
 
-    _run(reporter, monkeypatch, runtime, *[finding(f"R{i}") for i in range(5)])
+    run_report(reporter, monkeypatch, runtime, *[finding(f"R{i}") for i in range(5)])
 
     (prompt,) = runtime.prompts()
     assert "Total actionable findings: 5" in prompt, prompt
@@ -413,7 +344,7 @@ def test_the_evidence_section_keeps_every_instances_raw_json(context, monkeypatc
         include_sections=["executive_summary"],
     )
 
-    report = _run(
+    report = run_report(
         reporter,
         monkeypatch,
         Runtime(),
@@ -500,7 +431,7 @@ def test_a_secrets_only_scan_sends_no_placeholder_prompt(context, monkeypatch): 
     )
     runtime = Runtime()
 
-    report = _run(
+    report = run_report(
         reporter, monkeypatch, runtime, finding("S1", scanner="detect-secrets")
     )
 

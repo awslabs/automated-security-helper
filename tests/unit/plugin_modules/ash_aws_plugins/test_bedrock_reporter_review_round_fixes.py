@@ -40,21 +40,18 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_re
 from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
     S3ReporterConfigOptions,
 )
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_fixes import (
-    Runtime,
-    Session,
-    _control_plane,
-    _run,
-    _sts,
-)
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     FALLBACK_ONE,
     FALLBACK_TWO,
     MODULE,
     PRIMARY_MODEL,
-    context,  # noqa: F401  (fixture)
+    Runtime,
+    Session,
+    control_plane,
     finding,
     make_reporter,
+    run_report,
+    sts_client,
 )
 
 pytestmark = pytest.mark.unit
@@ -261,7 +258,7 @@ def test_a_secrets_only_scan_sends_no_recommendations_placeholder(context, monke
     )
     runtime = Runtime()
 
-    report = _run(
+    report = run_report(
         reporter, monkeypatch, runtime, finding("S1", scanner="detect-secrets")
     )
 
@@ -286,7 +283,7 @@ def test_a_secrets_only_scan_with_only_the_recommendations_section_sends_nothing
     )
     runtime = Runtime()
 
-    report = _run(
+    report = run_report(
         reporter, monkeypatch, runtime, finding("S1", scanner="detect-secrets")
     )
 
@@ -391,7 +388,7 @@ def test_the_sentence_is_not_written_when_the_secrets_section_is_excluded(
         include_sections=["risk_assessment"],
     )
 
-    report = _run(
+    report = run_report(
         reporter, monkeypatch, Runtime(), finding("S1", scanner="detect-secrets")
     )
 
@@ -411,7 +408,7 @@ def test_the_sentence_is_written_when_the_secrets_section_is_included(
         include_sections=["risk_assessment", "secret_findings"],
     )
 
-    report = _run(
+    report = run_report(
         reporter, monkeypatch, Runtime(), finding("S1", scanner="detect-secrets")
     )
 
@@ -448,8 +445,10 @@ def test_the_dependency_check_asks_the_control_plane_once_for_the_whole_chain(
     """The configured model and two fallbacks are checked against ONE pair of
     listings; before, the configured model's check listed once and the walk a
     second time."""
-    control = _control_plane(FALLBACK_TWO)
-    monkeypatch.setattr(f"{MODULE}.boto3.Session", Session(sts=_sts(), bedrock=control))
+    control = control_plane(FALLBACK_TWO)
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", Session(sts=sts_client(), bedrock=control)
+    )
     monkeypatch.setattr(
         f"{MODULE}.get_fallback_model",
         {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO}.get,
@@ -485,12 +484,14 @@ def test_a_failed_profile_listing_is_warned_once_across_the_chain(
     primary = f"us.{PRIMARY_MODEL}"
     fallback_one = f"us.{FALLBACK_ONE}"
     fallback_two = f"us.{FALLBACK_TWO}"
-    control = _control_plane(fallback_two)
+    control = control_plane(fallback_two)
     control.list_inference_profiles.side_effect = botocore.exceptions.ClientError(
         {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}},
         "ListInferenceProfiles",
     )
-    monkeypatch.setattr(f"{MODULE}.boto3.Session", Session(sts=_sts(), bedrock=control))
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", Session(sts=sts_client(), bedrock=control)
+    )
     monkeypatch.setattr(
         f"{MODULE}.get_fallback_model",
         {primary: fallback_one, fallback_one: fallback_two}.get,

@@ -33,14 +33,13 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
     BedrockModelClient,
 )
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     FALLBACK_ONE,
     FALLBACK_TWO,
     MODULE,
     PRIMARY_MODEL,
-    _client_error,
-    _default_session_client,
-    context,  # noqa: F401  (fixture)
+    client_error,
+    default_session_client,
     make_reporter,
     sarif_model,
 )
@@ -197,7 +196,7 @@ def _walk_setup(context, monkeypatch, control_plane, links):  # noqa: F811
     reporter = make_reporter(context, enable_caching=False)
     monkeypatch.setattr(f"{MODULE}.get_fallback_model", links.get)
     monkeypatch.setattr(f"{MODULE}.boto3.Session", Sessions(control_plane))
-    monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+    monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
     return reporter
 
 
@@ -651,7 +650,7 @@ def test_a_model_whose_check_got_no_answer_is_named_as_not_checked(
         ControlPlane([FALLBACK_ONE], throttled=True),
         {PRIMARY_MODEL: FALLBACK_ONE},
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -670,7 +669,7 @@ def test_a_model_the_listing_does_not_name_is_named_as_unavailable(
         ControlPlane([PRIMARY_MODEL]),
         {PRIMARY_MODEL: FALLBACK_ONE},
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -704,7 +703,7 @@ def test_a_walk_names_a_refused_listing_by_its_code_not_as_unavailable(
     names the code, which sends the operator to access and not to availability."""
     control = ControlPlane([FALLBACK_ONE], listing_error=code)
     reporter = _walk_setup(context, monkeypatch, control, {PRIMARY_MODEL: FALLBACK_ONE})
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -739,8 +738,8 @@ def test_a_walk_with_only_the_profile_listing_refused_still_calls_on_demand_mode
     )
     runtime = Runtime(
         {
-            PRIMARY_MODEL: _client_error("ResourceNotFoundException"),
-            FALLBACK_TWO: _client_error("ValidationException"),
+            PRIMARY_MODEL: client_error("ResourceNotFoundException"),
+            FALLBACK_TWO: client_error("ValidationException"),
         }
     )
 
@@ -770,7 +769,7 @@ def test_a_walk_names_every_candidate_a_refused_listing_left_unchecked(
     code once and all four models after it."""
     control = ControlPlane(CHAIN, listing_error="AccessDeniedException")
     reporter = _walk_setup(context, monkeypatch, control, _chain_links())
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -799,7 +798,7 @@ def test_a_walk_names_a_listing_that_failed_without_a_code(
     reporter = _walk_setup(
         context, monkeypatch, Broken([FALLBACK_ONE]), {PRIMARY_MODEL: FALLBACK_ONE}
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -918,7 +917,7 @@ def test_a_walk_names_a_botocore_failure_by_its_class(
         Failing([FALLBACK_ONE], error),
         {PRIMARY_MODEL: FALLBACK_ONE},
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -982,7 +981,7 @@ def test_the_shim_names_a_primary_the_listing_does_not_name_as_unavailable(
     The one listing answers the primary's check and the fallback's."""
     control = ControlPlane([FALLBACK_ONE])
     reporter = _walk_setup(context, monkeypatch, control, {PRIMARY_MODEL: FALLBACK_ONE})
-    runtime = Runtime({FALLBACK_ONE: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({FALLBACK_ONE: client_error("ResourceNotFoundException")})
 
     out = reporter._call_bedrock(runtime, "findings", "system")
 
@@ -1014,7 +1013,7 @@ def test_a_refused_listing_does_not_send_a_cyclic_chain_around_again(
         return links.get(model)
 
     monkeypatch.setattr(f"{MODULE}.get_fallback_model", _next_in_chain)
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1060,7 +1059,7 @@ def test_a_model_the_listing_names_is_called(context, monkeypatch):  # noqa: F81
         ControlPlane([FALLBACK_ONE]),
         {PRIMARY_MODEL: FALLBACK_ONE},
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1267,7 +1266,7 @@ def test_a_kept_failure_is_the_clients_error_with_its_response():
     assert control.listings == 1
 
 
-def test_a_kept_failure_without_a_service_answer_still_reads_as_a_client_error():
+def test_a_kept_failure_without_a_service_answer_still_reads_as_aclient_error():
     """A listing that failed without a service answer (a refused connection) has
     no response of its own. The kept failure is still a ``ClientError``, keeps
     the original, and is classified from it: a connection failure is transient
@@ -1654,7 +1653,7 @@ def test_a_throttled_control_plane_is_asked_once_per_walk_not_once_per_model(
     the chain again."""
     control = ControlPlane(CHAIN, throttled=True)
     reporter = _walk_setup(context, monkeypatch, control, _chain_links())
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
     expected = _exhausted_text(not_checked=", ".join(CHAIN))
 
     first = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1676,7 +1675,7 @@ def test_a_listing_throttled_once_leaves_the_fallback_unchecked_not_gone(
     as not checked, one listing call was made, and the primary was called once."""
     control = ControlPlane([FALLBACK_ONE], throttle_first=1)
     reporter = _walk_setup(context, monkeypatch, control, {PRIMARY_MODEL: FALLBACK_ONE})
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1694,7 +1693,7 @@ def test_the_listing_is_read_once_for_every_model_a_walk_checks(
     unavailable."""
     control = ControlPlane([PRIMARY_MODEL])
     reporter = _walk_setup(context, monkeypatch, control, _chain_links())
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1718,7 +1717,7 @@ def test_a_candidate_the_one_listing_names_is_called(
         }
     }
     runtime = Runtime(
-        {PRIMARY_MODEL: _client_error("ResourceNotFoundException"), CHAIN[2]: third}
+        {PRIMARY_MODEL: client_error("ResourceNotFoundException"), CHAIN[2]: third}
     )
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1782,7 +1781,7 @@ def _recording_reporter(
         f"{MODULE}.get_fallback_model", {PRIMARY_MODEL: FALLBACK_ONE}.get
     )
     monkeypatch.setattr(f"{MODULE}.boto3.Session", sessions)
-    monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+    monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
     return reporter, sessions
 
 
@@ -1831,7 +1830,7 @@ def test_the_walks_control_plane_client_is_built_with_the_retry_config(
         {"max_retries": max_retries},
         bedrock=ControlPlane([FALLBACK_ONE]),
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1891,7 +1890,7 @@ def test_a_reporter_built_with_default_options_makes_three_control_plane_attempt
     reporter, sessions = _recording_reporter(
         context, monkeypatch, None, bedrock=ControlPlane([FALLBACK_ONE])
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     reporter._run_simple_report(runtime, sarif_model([]), [], [])
 

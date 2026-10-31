@@ -42,11 +42,9 @@ from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     MODULE,
     PRIMARY_MODEL,
+    finding,
     make_reporter,
     plugin_context_in,
-)
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
-    finding,
     sarif_model,
 )
 

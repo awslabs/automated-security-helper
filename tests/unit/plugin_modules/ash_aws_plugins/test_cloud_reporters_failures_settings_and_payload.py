@@ -41,7 +41,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
     S3ReporterConfig,
     S3ReporterConfigOptions,
 )
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     finding,
     sarif_model,
 )
