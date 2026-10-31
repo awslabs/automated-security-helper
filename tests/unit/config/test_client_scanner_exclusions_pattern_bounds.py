@@ -165,7 +165,10 @@ def _outcome_of(
                 try:
                     os.killpg(child.pid, signal.SIGKILL)
                 except ProcessLookupError:
-                    pass
+                    # No group yet: the limit ran out before the child reached
+                    # ``os.setsid()``, so it leads none and is still alive, and
+                    # the ``join`` below would wait on it for good.
+                    child.kill()
             else:
                 child.kill()
         child.join()
@@ -672,8 +675,8 @@ def test_a_worker_that_never_reports_ready_fails_its_start(monkeypatch):
     assert worker.pid is None
 
 
-def test_a_budget_with_no_bound_runs_in_the_worker():
-    budget = EvaluationBudget()
+def test_a_budget_with_no_bound_runs_in_the_worker(pass_budget):
+    budget = pass_budget
 
     pid = budget.evaluate(None, "s", "k", os.getpid)
 
@@ -681,7 +684,6 @@ def test_a_budget_with_no_bound_runs_in_the_worker():
     assert budget.worker_pid == pid
     assert budget.timed_out == ()
     assert budget.remaining(1.0) == 1.0
-    budget.close()
 
 
 def test_a_null_scan_timeout_gives_a_client_pattern_a_finite_wait():
@@ -738,8 +740,24 @@ def test_a_client_pattern_under_a_null_scan_timeout_never_runs_in_this_process()
     config could pair it with a backtracking ``skip_path`` and have the
     expression searched inline: the matcher holds the interpreter lock for the
     whole search, which freezes every thread of the server. With no bound the
-    search goes to the worker as before, and only the wait has no deadline."""
-    budget = _RecordingBudget()
+    search goes to the worker, under the ceiling
+    (``test_a_null_scan_timeout_gives_a_client_pattern_a_finite_wait``).
+
+    The budget here is a real one that notes the timeout each call hands it, so
+    the test sees what ``checkov_skips`` and ``hides`` pass (None, the null
+    read as the entry carries it) and, from the worker's pid, that the search
+    left this process. A budget that answers inline would show only that the
+    search reached it."""
+
+    class _NotingBudget(EvaluationBudget):
+        def __init__(self) -> None:
+            super().__init__()
+            self.timeouts: list = []
+
+        def evaluate(self, timeout, source, key, function, *args):
+            self.timeouts.append(timeout)
+            return super().evaluate(timeout, source, key, function, *args)
+
     entry = ClientScannerExclusion(
         scanner="checkov",
         option="skip_path",
@@ -748,24 +766,33 @@ def test_a_client_pattern_under_a_null_scan_timeout_never_runs_in_this_process()
         reason="r",
         scan_timeout=None,
     )
-
-    assert (
-        checkov_skips(
-            "vend.r", "/scan/vendor/x.tf", "vendor/x.tf", timeout=None, budget=budget
+    budget = _NotingBudget()
+    try:
+        assert (
+            checkov_skips(
+                "vend.r",
+                "/scan/vendor/x.tf",
+                "vendor/x.tf",
+                timeout=None,
+                budget=budget,
+            )
+            is True
         )
-        is True
-    )
-    assert (
-        entry.hides(
-            relative="vendor/x.tf",
-            absolute="/scan/vendor/x.tf",
-            rule_id=None,
-            budget=budget,
+        assert (
+            entry.hides(
+                relative="vendor/x.tf",
+                absolute="/scan/vendor/x.tf",
+                rule_id=None,
+                budget=budget,
+            )
+            is True
         )
-        is True
-    )
 
-    assert budget.keys == ["skip_path:vend.r", "skip_path:vend.r"]
+        assert budget.timeouts == [None, None]
+        assert budget.worker_pid is not None
+        assert budget.worker_pid != os.getpid()
+    finally:
+        budget.close()
 
 
 # ---------------------------------------------------------------------------

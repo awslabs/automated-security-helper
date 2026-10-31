@@ -348,8 +348,22 @@ def test_bandits_own_default_excludes_are_passed(tmp_path):
 def test_the_default_excludes_match_the_installed_bandits_own_list():
     """The tuple is a hand-kept copy of ``bandit.core.constants.EXCLUDE``; read
     from the installed bandit, a change to its list shows here and not as a
-    scan quietly covering more or less than bandit's own default did."""
-    constants = pytest.importorskip("bandit.core.constants")
+    scan quietly covering more or less than bandit's own default did.
+
+    This reads the bandit the test interpreter imports and skips where bandit
+    is provided as a separate tool, which is how the scanner runs it (the unit
+    tool guard also keeps a test from starting that tool). The comparison
+    against the tool's own environment is
+    tests/integration/scanners/test_bandit_default_excludes_match_the_tool.py;
+    a run's record says which of the two ran, since a skip is not a pass."""
+    constants = pytest.importorskip(
+        "bandit.core.constants",
+        reason=(
+            "bandit is not importable by the test interpreter (a separate tool "
+            "provides it); the drift check against the tool's environment is "
+            "the integration test test_bandit_default_excludes_match_the_tool"
+        ),
+    )
 
     assert set(BANDIT_DEFAULT_EXCLUDES) == set(constants.EXCLUDE)
 
