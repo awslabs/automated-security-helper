@@ -322,14 +322,19 @@ def test_a_baseline_the_operator_names_inside_the_scanned_tree_only_marks(
         assert _findings(report) == [("other.py", 1)]
 
 
+@pytest.mark.parametrize("spelling", ["in_tree", "linked_name"])
 def test_a_repository_baseline_is_scanned_and_only_its_hash_echoes_are_dropped(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, spelling
 ):
     """The tree's own baseline is handed to the worker like any file. The
     entropy detectors read each ``hashed_secret`` it lists, and those findings
     (the hex type, on a value the baseline lists) are dropped; a hex string it
     does not list and a key under an extra top-level key are reported. Left out
-    of the scan set, a repository could hide a key under a key of its own."""
+    of the scan set, a repository could hide a key under a key of its own.
+
+    The ``linked_name`` spelling has the operator name a path outside the tree
+    that is a link to the tree's baseline: the file read is the repository's
+    under either name, so it is scanned, and its echoes are dropped, the same."""
     from detect_secrets.core.potential_secret import PotentialSecret
 
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
@@ -357,7 +362,18 @@ def test_a_repository_baseline_is_scanned_and_only_its_hash_echoes_are_dropped(
     )
     document["notes"] = NEW_SECRET
     (source / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
-    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    config = DetectSecretsScannerConfig()
+    if spelling == "linked_name":
+        link = tmp_path / "ci" / "proj.baseline"
+        link.parent.mkdir()
+        try:
+            link.symlink_to(source / ".secrets.baseline")
+        except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+            pytest.skip(f"symlinks unavailable on this platform: {exc}")
+        config = DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(link))
+        )
+    scanner = DetectSecretsScanner(context=context, config=config)
     assert scanner._baseline_in_use()
     assert scanner._baseline_entries_trusted() is False
 
