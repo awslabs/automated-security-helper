@@ -44,8 +44,10 @@ release version; PEP 440 defines it as arbitrary string equality, so
 it is satisfied by the one version spelled exactly ``X``: ``===1.0`` and
 ``===1.0.0`` name two strings, so no version satisfies both, where ``==1.0``
 and ``==1.0.0`` are one padded version. The release tuple is compared without
-padding for it, so a leading zero (``===01.0``) is the one spelling difference
-this reading does not see.
+padding for it. A leading zero in a component (``===01.0``, ``===1.00``) is the
+one spelling difference a tuple does not hold: ``===1.0`` and ``===1.00`` would
+parse alike though no string is both, so such a text is UNDECIDABLE, and only a
+text that is its tuple's canonical spelling is modelled.
 
 UNDECIDABLE is refused by the caller, not assumed compatible. The asymmetry is
 the same one that runs through workspace mode: refusing a workspace that would
@@ -219,7 +221,11 @@ def _parse_specifier(specifier: str) -> Optional[List[_Constraint]]:
         # Arbitrary equality. Modelled only because the version text happened to
         # be an orderable release version; see the module docstring. Not EQUAL:
         # that pads, and "===1.0" with "===1.0.0" then read COMPATIBLE though
-        # no string is both.
+        # no string is both. A text with a leading zero in a component parses to
+        # the tuple of its canonical spelling ("1.00" to (1, 0)), so "===1.0"
+        # and "===1.00" would read COMPATIBLE the same way: not modelled.
+        if ".".join(str(part) for part in version) != version_text:
+            return None
         return [_Constraint(_Op.ARBITRARY_EQUAL, version)]
     if operator == "~=":
         return _expand_compatible_release(version)

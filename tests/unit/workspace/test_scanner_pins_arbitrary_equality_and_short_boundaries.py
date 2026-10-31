@@ -43,6 +43,29 @@ class TestArbitraryEqualityIsStringEquality:
         assert compare_pin_set(["===1.0", "==1.0.0", ">=1"]) is PinVerdict.COMPATIBLE
 
 
+class TestAnArbitraryEqualityTextWithALeadingZeroIsUndecidable:
+    """``===1.00`` parses to the tuple ``(1, 0)`` as ``===1.0`` does, though the
+    two name different strings, so the pair read COMPATIBLE: the wrong direction."""
+
+    @pytest.mark.parametrize("text", ["===01.0", "===1.00", "===1.0.00"])
+    def test_a_text_that_is_not_its_tuples_spelling_is_not_modelled(self, text):
+        assert compare_pins(text, ">=1") is PinVerdict.UNDECIDABLE
+        assert compare_pins(">=1", text) is PinVerdict.UNDECIDABLE
+
+    def test_two_spellings_that_parse_alike_are_not_compatible(self):
+        assert compare_pins("===1.0", "===1.00") is PinVerdict.UNDECIDABLE
+        assert compare_pins("===1.00", "===01.0") is PinVerdict.UNDECIDABLE
+        assert compare_pin_set(["===1.0", "===1.00"]) is PinVerdict.UNDECIDABLE
+
+    def test_the_same_text_twice_is_still_compatible(self):
+        """Textually identical pins are folded before they are parsed."""
+        assert compare_pins("===1.00", "===1.00") is PinVerdict.COMPATIBLE
+
+    def test_a_canonical_text_is_still_compared(self):
+        assert compare_pins("===10.0", ">=1,<20") is PinVerdict.COMPATIBLE
+        assert compare_pins("===10.0", ">=1,<2") is PinVerdict.INCOMPATIBLE
+
+
 class TestTheWitnessSearchReachesEveryOpenInterval:
     @pytest.mark.parametrize(
         ("first", "second"),
