@@ -145,6 +145,64 @@ def test_a_trusted_reference_past_the_trusted_list_refuses_the_carry(root: Path)
     assert _snapshot(config) == before
 
 
+def test_a_refused_carry_leaves_the_list_as_it_was_in_the_merge_confinement(
+    root: Path,
+):
+    """The merge swaps the config's list for the trusted one and carries the
+    trusted references with it. A trusted reference past the end of the trusted
+    list refuses the carry; the refusal used to come after the swap, so the
+    config kept the trusted list with none of its references. It now comes
+    before any assignment: the list and every reference list stay as they were.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        PluginModuleReferenceError,
+        confine_plugin_modules,
+    )
+    from automated_security_helper.config.untrusted_source import SHARD_RECORDED
+
+    trusted = _resolved_config(
+        _entries_file(root / "trusted.yaml", [INSTALLED, "${ASH_RECV_ONE}"])
+    )
+    trusted.ash_plugin_modules = [INSTALLED]
+
+    config = _resolved_config(_entries_file(root / "client.yaml", [SEC_TWO]))
+    list_before = list(config.ash_plugin_modules)
+    before = _snapshot(config)
+
+    with pytest.raises(PluginModuleReferenceError):
+        confine_plugin_modules(
+            config,
+            trusted,
+            [],
+            root,
+            [],
+            checkout_membership=False,
+            untrusted=True,
+            mixed_membership=False,
+            given_root_membership=False,
+            undecided_membership=False,
+            source=SHARD_RECORDED,
+        )
+
+    assert list(config.ash_plugin_modules) == list_before
+    assert _snapshot(config) == before
+
+
+def test_the_carry_plan_refuses_a_past_the_end_reference_without_a_config(root: Path):
+    from automated_security_helper.config.plugin_module_trust import (
+        PluginModuleReferenceError,
+        _carried_module_references,
+    )
+
+    trusted = _resolved_config(
+        _entries_file(root / "trusted.yaml", [INSTALLED, "${ASH_RECV_ONE}"])
+    )
+    trusted.ash_plugin_modules = [INSTALLED]
+
+    with pytest.raises(PluginModuleReferenceError):
+        _carried_module_references(trusted, [SEC_TWO, INSTALLED, SEC_ONE])
+
+
 def test_distinct_trusted_entries_are_each_carried(root: Path):
     """The contrast: two trusted entries reading two variables carry one
     reference each, at the index the merged list gives each NAME: the merged

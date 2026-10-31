@@ -929,13 +929,18 @@ def confine_plugin_modules(
         # swapped, as in the drop path below.
         outside_names = [name for name in kept if not _is_allowed_module_path(name)]
         loaded = list(dict.fromkeys(outside_names + trusted_list))
+        # The trusted references are planned before anything is assigned: a
+        # trusted reference past the end of the trusted list refuses the carry,
+        # and a refusal after the swap left the config with the new list and
+        # none of the references that belong to it.
+        carried_references = _carried_module_references(trusted_config, loaded)
         if loaded != split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
             reindex_plugin_module_references(config, original_entries, loaded)
             config.ash_plugin_modules = loaded
         # The entries are now the operator's, so the record and the import
         # log name each as the operator's file wrote it: its references
-        # come with them (_carry_trusted_module_references).
-        _carry_trusted_module_references(config, trusted_config, loaded)
+        # come with them (_carried_module_references).
+        _apply_carried_module_references(config, carried_references)
     if not refused and not carried:
         return
     if not named_modules_only:
@@ -947,10 +952,17 @@ def confine_plugin_modules(
         # the list is swapped: it checks every reference first and changes nothing
         # when it refuses, so a refusal leaves the list and the references as they
         # were instead of the new list beside the old indices.
+        # The trusted references are planned first, for the reason the merge
+        # branch above gives: a refusal must come before the swap.
+        carried_references = (
+            _carried_module_references(trusted_config, kept, only=carried)
+            if carried
+            else None
+        )
         reindex_plugin_module_references(config, original_entries, kept)
         config.ash_plugin_modules = kept
-        if carried:
-            _carry_trusted_module_references(config, trusted_config, kept, only=carried)
+        if carried_references is not None:
+            _apply_carried_module_references(config, carried_references)
     if not refused:
         return
     # The names and paths are the repository's: the whole message is shown, once
@@ -1054,14 +1066,16 @@ def confine_plugin_modules(
     )
 
 
-def _carry_trusted_module_references(
-    config: "AshConfig",
+def _carried_module_references(
     trusted_config: "AshConfig",
     loaded: Sequence[str],
     *,
     only: Optional[Collection[str]] = None,
-) -> None:
-    """Carry the trusted base's ``ash_plugin_modules`` references onto ``config``.
+) -> Dict[str, Any]:
+    """The trusted base's ``ash_plugin_modules`` references, moved to ``loaded``'s indices.
+
+    Reads the trusted config alone and changes nothing, so it can run before the
+    caller assigns anything: a refusal raises here, ahead of every assignment.
 
     With ``named_modules_only`` the list becomes the trusted base's, and the
     merge imports and records those entries: one the operator's file read from
@@ -1133,6 +1147,13 @@ def _carry_trusted_module_references(
         lambda old, index: loaded[index] if respelled[old] else None,
         described_entries=len(entries),
     )
+    return carried
+
+
+def _apply_carried_module_references(
+    config: "AshConfig", carried: Dict[str, Any]
+) -> None:
+    """Append the references :func:`_carried_module_references` planned to ``config``."""
     for attribute, moved in carried.items():
         if not moved:
             continue
@@ -1141,6 +1162,25 @@ def _carry_trusted_module_references(
             setattr(config, attribute, [*held, *moved])
         else:
             setattr(config, attribute, (*tuple(held), *moved))
+
+
+def _carry_trusted_module_references(
+    config: "AshConfig",
+    trusted_config: "AshConfig",
+    loaded: Sequence[str],
+    *,
+    only: Optional[Collection[str]] = None,
+) -> None:
+    """Carry the trusted base's ``ash_plugin_modules`` references onto ``config``.
+
+    The plan (:func:`_carried_module_references`) is built whole before any list
+    on ``config`` is assigned, so a refusal leaves ``config`` as it was. A caller
+    that also swaps the list builds the plan first itself, so a refusal leaves
+    the list as it was too.
+    """
+    _apply_carried_module_references(
+        config, _carried_module_references(trusted_config, loaded, only=only)
+    )
 
 
 _MODULE_REFERENCE_LISTS = (
