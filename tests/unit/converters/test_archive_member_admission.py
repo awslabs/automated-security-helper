@@ -280,7 +280,15 @@ def test_two_members_written_to_one_path_are_both_extracted(
     the archive with tar or unzip gets, and it used to be refused unscanned. It
     keeps its file name, in a numbered directory beside the first: written as
     ``package-lock~2.json`` or ``Dockerfile~2``, it was a file the scanners that
-    find a lockfile or a Dockerfile by name never read."""
+    find a lockfile or a Dockerfile by name never read.
+
+    The output filesystem's answer to "does case fold" is set to yes here: the
+    ``case-fold`` id is a pair of spellings that are one file only where it does,
+    and the answer is otherwise this host's own (no on Linux), so the id read red
+    there. The other ids name one path however it is spelled and do not depend on it."""
+    monkeypatch.setattr(
+        archive_converter, "_filesystem_folds_case", lambda target_path: True
+    )
     maker = _zip if kind == "zip" else _tar
     archive = maker(
         Path(test_plugin_context.source_dir) / f"a.{kind}",
@@ -647,7 +655,10 @@ def test_a_member_under_a_directory_spelled_like_a_file_is_extracted_where_case_
     used to fold case whatever the filesystem, so the second read as a member
     under the first's file and was refused for a collision the host never has;
     ``Foo.js`` and ``foo.js`` were likewise renamed as one path. The filesystem's
-    answer is set here, so the test reads the same on every host."""
+    answer is set here, so the test reads the same on every host. A third member
+    ``foo.js`` is a file where the directory ``foo.js`` stands, which no filesystem
+    writes, so it is refused alone, by its own reason, and is not what the fold
+    decides."""
     monkeypatch.setattr(
         archive_converter, "_filesystem_folds_case", lambda target_path: False
     )
@@ -662,7 +673,29 @@ def test_a_member_under_a_directory_spelled_like_a_file_is_extracted_where_case_
 
     admitted = converter.inspect_members(members, target_path=tmp_path, archive="a.zip")
 
-    assert [m.filename for m in admitted] == ["Foo.js", "foo.js/bar.js", "foo.js"]
+    assert [m.filename for m in admitted] == ["Foo.js", "foo.js/bar.js"]
+    (refused,) = converter.refused_inputs
+    assert refused.member == "foo.js"
+    assert refused.reason == archive_converter._MEMBER_OVER_A_DIRECTORY
+
+
+def test_two_members_differing_only_in_case_are_both_written_where_case_counts(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """``Foo.js`` and ``foo.js`` are two files on a case-sensitive filesystem: both
+    are admitted under the names they were read with, none renamed or refused. The
+    filesystem's answer is set here, so the test reads the same on every host."""
+    monkeypatch.setattr(
+        archive_converter, "_filesystem_folds_case", lambda target_path: False
+    )
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo("Foo.js"), zipfile.ZipInfo("foo.js")]
+
+    admitted = converter.inspect_members(members, target_path=tmp_path, archive="a.zip")
+
+    assert [m.filename for m in admitted] == ["Foo.js", "foo.js"]
     assert converter.refused_inputs == []
 
 
