@@ -2266,6 +2266,23 @@ def _apply_unused_fixes(
 
     report_path, report_timestamp, age_seconds = report_info
 
+    # A report that lists scanners which did not run is not edited from (the
+    # fixer comments nothing out of it), so no question about its age is asked
+    # and the run does not end in a green "nothing to comment out" under lint's
+    # own notes: the reason is the line printed.
+    not_run = ConfigLinter.unused_report_scanners_not_run(report_path)
+    if not_run:
+        secho(
+            shown_on_one_line(
+                "⚠️  Nothing is commented out: the unused suppressions report "
+                f"lists scanners that did not run ({', '.join(not_run)}), and it "
+                "does not record which suppressions belong to them. Run a scan in "
+                "which those scanners run, then run --fix-unused again."
+            ),
+            fg=typer.colors.YELLOW,
+        )
+        return False
+
     # Warn if report is too old
     if age_seconds > ConfigLinter.MAX_REPORT_AGE_SECONDS:
         age_hours = age_seconds / 3600
@@ -2338,9 +2355,10 @@ def _apply_unused_fixes(
         # entries is not what the operator said yes to: nothing is written.
         if _entries_of(fixed_issues) != approved:
             secho(
-                "\n❌ The config changed while the prompt was open, and the "
-                "unused suppressions to comment out are no longer the ones "
-                f"shown. {config_path} is unchanged; run the command again.",
+                "\n❌ The config or the unused suppressions report changed while "
+                "the prompt was open, and the unused suppressions to comment out "
+                f"are no longer the ones shown. {config_path} is unchanged; run "
+                "the command again.",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)

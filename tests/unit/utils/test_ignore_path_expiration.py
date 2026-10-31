@@ -903,6 +903,18 @@ class TestExpiryWarningsCoverScannerOptionLists:
         assert f"{subject} 'soon' expires on 2026-07-01" in named, warnings
         assert "vendor" not in named, warnings
 
+    def test_the_lists_the_flag_lifts_are_recorded_not_guessed(self):
+        """Red at the base: there was no such record, and the handler took a
+        list for a scanner's own because its first key was ``scanners``. The
+        record names the global ignore paths and nothing else, every name in it
+        is a list the expiry check reads, and the rest are the scanner lists."""
+        lifted = models_core.IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS
+        listed = [keys for keys, _subject in models_core.IGNORE_PATH_LISTS]
+
+        assert lifted == {("global_settings", "ignore_paths")}
+        assert lifted <= set(listed)
+        assert {keys[0] for keys in listed if keys not in lifted} == {"scanners"}
+
     @staticmethod
     def _warnings_for(context) -> list[str]:
         with patch(

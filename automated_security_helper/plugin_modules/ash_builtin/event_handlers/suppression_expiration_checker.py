@@ -7,6 +7,7 @@ from typing import Any
 
 from automated_security_helper.models.core import (
     IGNORE_PATH_LISTS,
+    IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS,
     expiration_has_passed,
     value_at,
 )
@@ -29,10 +30,12 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
     multiple times during SARIF processing.
 
     Under ``--ignore-suppressions`` the suppressions and the global ignore paths
-    are not checked: the flag lifts every suppression and every ignore path for
-    the run (``models.core.ignore_paths_that_skip_scanning`` returns none under
+    are not checked: the flag lifts every suppression and every global ignore path
+    for the run (``models.core.ignore_paths_that_skip_scanning`` returns none under
     it, and the SARIF step applies none), so their expiry changes nothing about
     the scan, and a warning about it would describe a scan that is not running.
+    Which lists the flag lifts is recorded beside ``IGNORE_PATH_LISTS``
+    (``IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS``).
     The scanner option lists that take the same entries (bandit ``excluded_paths``,
     checkov ``skip_path``, syft ``exclude``) are still checked: they are handed
     to the tool as its own arguments, which the flag does not lift.
@@ -79,7 +82,7 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
         scanner_lists = [
             entry
             for entry, (keys, _) in zip(ignore_path_lists, IGNORE_PATH_LISTS)
-            if keys[0] == "scanners"
+            if keys not in IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS
         ]
         ASH_LOGGER.debug(
             "Suppressions and global ignore paths are being ignored, so none of "

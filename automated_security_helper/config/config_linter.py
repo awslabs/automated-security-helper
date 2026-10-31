@@ -878,6 +878,21 @@ class ConfigLinter:
             return [str(name) for name in listed]
         return [str(listed)]
 
+    @classmethod
+    def unused_report_scanners_not_run(cls, report_path: Path) -> List[str]:
+        """The scanners the report at ``report_path`` says did not run; empty when
+        it names none or cannot be read.
+
+        Public for ``--fix-unused``, which says why it comments nothing out
+        before it asks about a report's age: the fixer comments nothing out of a
+        report that lists such a scanner (``fix_unused_suppressions``), and the
+        command reported that as nothing to do.
+        """
+        try:
+            return cls._scanners_not_run_of(cls._read_unused_report(report_path))
+        except (ValueError, OSError):
+            return []
+
     @staticmethod
     def _rule_shown(entry: Dict[str, Any]) -> Any:
         """``entry``'s ``rule_id`` as a message names it: ``*`` for an entry that

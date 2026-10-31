@@ -10,6 +10,7 @@ from typing import (
     Any,
     ClassVar,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Annotated,
@@ -168,6 +169,16 @@ IGNORE_PATH_LISTS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("scanners", "bandit", "options", "excluded_paths"), "Bandit excluded path"),
     (("scanners", "checkov", "options", "skip_path"), "Checkov skip path"),
     (("scanners", "syft", "options", "exclude"), "Syft exclude entry"),
+)
+
+
+#: The lists of ``IGNORE_PATH_LISTS`` that ``--ignore-suppressions`` lifts, by
+#: their keys: the global ignore paths. A scanner's own option list (bandit
+#: ``excluded_paths``, checkov ``skip_path``, syft ``exclude``) reaches the tool as
+#: its argument whether or not the flag is set, so the flag leaves it alone. The
+#: scan-start expiry check read this from the first key being ``scanners``.
+IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS: FrozenSet[Tuple[str, ...]] = (
+    frozenset({("global_settings", "ignore_paths")})
 )
 
 
