@@ -71,14 +71,22 @@ def fresh_cache():
 def _probe_answers(monkeypatch, answers):
     """Replace the probe: each call takes the next answer, the last one repeating.
 
+    ``answers`` is one list for any backend, or a dict of lists by backend name
+    (the auto order probes several), each name keeping its own place in its list.
     An exception answer is raised; any other is returned as the backend. Returns
     the list of backend names probed, in order.
     """
     probes: list = []
+    asked: dict = {}
 
     def probe(name):
         probes.append(name)
-        answer = answers[min(len(probes) - 1, len(answers) - 1)]
+        if isinstance(answers, dict):
+            options, index = answers[name], asked.get(name, 0)
+            asked[name] = index + 1
+        else:
+            options, index = answers, len(probes) - 1
+        answer = options[min(index, len(options) - 1)]
         if isinstance(answer, Exception):
             raise answer
         return answer
@@ -256,19 +264,10 @@ def test_under_auto_a_scan_keeps_the_fallback_past_the_window(
         scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
     )
     firejail = _backend("firejail")
-    answers = {"bwrap": [scope.TransientProbeFailure(TIMED_OUT), _backend("bwrap")]}
-    probes: list = []
-
-    def probe(name):
-        probes.append(name)
-        if name == "firejail":
-            return firejail
-        answer = answers[name].pop(0) if len(answers[name]) > 1 else answers[name][0]
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-    monkeypatch.setattr(scope, "_probe_backend", probe)
+    probes = _probe_answers(
+        monkeypatch,
+        {"bwrap": [scope.TransientProbeFailure(TIMED_OUT)], "firejail": [firejail]},
+    )
 
     with subprocess_utils.scanning_tree(tmp_path):
         assert scope.resolve_backend("auto") is firejail
@@ -447,17 +446,13 @@ def test_under_auto_a_bwrap_that_times_out_again_is_probed_with_its_peers(
     monkeypatch.setattr(
         scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
     )
-    answers = {
-        "bwrap": scope.TransientProbeFailure(TIMED_OUT),
-        "firejail": SandboxUnavailable("firejail is not installed"),
-    }
-    probes: list = []
-
-    def probe(name):
-        probes.append(name)
-        raise answers[name]
-
-    monkeypatch.setattr(scope, "_probe_backend", probe)
+    probes = _probe_answers(
+        monkeypatch,
+        {
+            "bwrap": [scope.TransientProbeFailure(TIMED_OUT)],
+            "firejail": [SandboxUnavailable("firejail is not installed")],
+        },
+    )
 
     for _ in range(2):
         with pytest.raises(scope.SandboxBackendUnavailable):
@@ -493,20 +488,13 @@ def test_under_auto_one_timed_out_member_is_probed_again(
         scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
     )
     backend = _backend()
-    answers = {
-        "bwrap": [scope.TransientProbeFailure(TIMED_OUT), backend],
-        "firejail": [SandboxUnavailable("firejail is not installed")],
-    }
-    probes: list = []
-
-    def probe(name):
-        probes.append(name)
-        answer = answers[name].pop(0) if len(answers[name]) > 1 else answers[name][0]
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-    monkeypatch.setattr(scope, "_probe_backend", probe)
+    probes = _probe_answers(
+        monkeypatch,
+        {
+            "bwrap": [scope.TransientProbeFailure(TIMED_OUT), backend],
+            "firejail": [SandboxUnavailable("firejail is not installed")],
+        },
+    )
 
     with pytest.raises(scope.SandboxBackendUnavailable) as first:
         scope.resolve_backend("auto")
@@ -532,20 +520,13 @@ def test_under_auto_a_fallback_past_a_transient_skip_expires(
     )
     bwrap = _backend("bwrap")
     firejail = _backend("firejail")
-    answers = {
-        "bwrap": [scope.TransientProbeFailure(TIMED_OUT), bwrap],
-        "firejail": [firejail],
-    }
-    probes: list = []
-
-    def probe(name):
-        probes.append(name)
-        answer = answers[name].pop(0) if len(answers[name]) > 1 else answers[name][0]
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-    monkeypatch.setattr(scope, "_probe_backend", probe)
+    probes = _probe_answers(
+        monkeypatch,
+        {
+            "bwrap": [scope.TransientProbeFailure(TIMED_OUT), bwrap],
+            "firejail": [firejail],
+        },
+    )
 
     assert scope.resolve_backend("auto") is firejail
     assert scope.resolve_backend("auto") is firejail
@@ -603,16 +584,21 @@ def _scope(tmp_path, backend=None, **fields) -> scope.SandboxScope:
 
 
 @pytest.fixture
-def debug_record(monkeypatch):
-    """A DEBUG-delivering logger in the scope module, and a policy that grants nothing."""
-    logger = _Logger()
-    monkeypatch.setattr(scope, "ASH_LOGGER", logger)
-    monkeypatch.setattr(scope, "delivers", lambda *args: True)
+def no_grant_policy(monkeypatch):
+    """A policy that grants nothing, so no spawn registers a writable root."""
     monkeypatch.setattr(
         scope,
         "build_scanner_policy",
         lambda *args, **kwargs: SimpleNamespace(network=False, writable=[]),
     )
+
+
+@pytest.fixture
+def debug_record(monkeypatch, no_grant_policy):
+    """A DEBUG-delivering logger in the scope module (the policy is the one above)."""
+    logger = _Logger()
+    monkeypatch.setattr(scope, "ASH_LOGGER", logger)
+    monkeypatch.setattr(scope, "delivers", lambda *args: True)
     return logger
 
 
@@ -873,7 +859,7 @@ class _ProgramlessBackend:
 
 
 def test_a_program_the_backend_cannot_find_is_a_failed_spawn_not_a_refusal(
-    tmp_path, debug_record
+    tmp_path, no_grant_policy
 ):
     """Under Landlock a missing program fails at planning time; under bwrap the
     same program fails at Popen and the scope never sees it. Counting the first as
@@ -902,7 +888,7 @@ class _RefusingBackend:
         raise SandboxUnavailable("the policy has no writable root for this tool")
 
 
-def test_a_refusal_is_counted_as_a_refusal_only(tmp_path, debug_record):
+def test_a_refusal_is_counted_as_a_refusal_only(tmp_path, no_grant_policy):
     """The control: a SandboxUnavailable from the plan is a refusal, and the
     failure counter does not move. It goes through the real ``_plan_spawn``, as
     the failed-plan case above does, so both counters are read off one path."""
