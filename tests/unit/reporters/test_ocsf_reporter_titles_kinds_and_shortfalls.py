@@ -466,9 +466,10 @@ class TestShortfalls:
     ):
         """The project name is the only identity the report model carries, and
         its default is the same for every repository. Two scans that keep it get
-        the same uid whatever else differs; a repository that needs its own
-        record sets ``project_name``. This pins the limit the module comment
-        states, so a change to it is made on purpose."""
+        the same uid even when their reports' descriptions differ (the only
+        other field the test varies); a repository that needs its own record
+        sets ``project_name``. This pins the limit the module comment states,
+        so a change to it is made on purpose."""
         first = self._shortfall_uid_for(
             reporter, monkeypatch, "ash-scan", description="first repository"
         )
