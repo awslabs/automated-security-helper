@@ -336,14 +336,20 @@ class TestNonFindingKinds:
     @pytest.mark.parametrize(
         "kind", [Kind.pass_, Kind.notApplicable, Kind.informational]
     )
-    def test_a_result_that_states_no_problem_is_not_emitted(self, reporter, kind):
+    @pytest.mark.parametrize("level", [Level.none, Level.error])
+    def test_a_result_that_states_no_problem_is_not_emitted(
+        self, reporter, kind, level
+    ):
+        """The kind decides, not the level: a ``pass`` result at level ``error``
+        is left out as well, which a fixture at level ``none`` alone cannot
+        tell from a filter on the level."""
         payload = json.loads(
             reporter.report(
                 _model(
                     Result(
                         ruleId="CDK-1",
                         kind=kind,
-                        level=Level.none,
+                        level=level,
                         message=Message(text="x"),
                     ),
                     Result(ruleId="B102", level=Level.error, message=Message(text="y")),
