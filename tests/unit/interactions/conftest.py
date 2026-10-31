@@ -25,6 +25,7 @@ An individual test or fixture that sets the IDs itself, or patches
 
 import io
 import os
+import tempfile
 
 import pytest
 
@@ -68,6 +69,24 @@ class _RuntimeStandIn:
         if self.polls == 2 and self.on_poll is not None:
             self.on_poll()
         return self.returncode
+
+
+@pytest.fixture
+def tempfile_reads_this_tests_tmpdir(monkeypatch):
+    """Keep the sweep of stranded private directories inside the test's own TMPDIR.
+
+    The sweep searches TEMP, TMP and tempfile's own answer beside TMPDIR. A test
+    that stays inside ``tmp_path`` sets TMPDIR (and empties the fixed parents), so
+    the other two variables are unset and tempfile's cached answer is dropped for
+    the test: a cached real temp directory would be searched too, and a stale
+    private directory of this user there could be deleted by a test. A test that
+    points TMPDIR at a directory that is not there must also give tempfile an
+    answer of its own, since a TMPDIR it cannot use makes tempfile fall back to
+    the host's /tmp.
+    """
+    monkeypatch.delenv("TEMP", raising=False)
+    monkeypatch.delenv("TMP", raising=False)
+    monkeypatch.setattr(tempfile, "tempdir", None)
 
 
 @pytest.fixture

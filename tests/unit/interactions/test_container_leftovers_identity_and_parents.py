@@ -32,26 +32,12 @@ pytestmark = [
     pytest.mark.skipif(
         sys.platform == "win32", reason="records and directory descriptors are POSIX"
     ),
+    pytest.mark.usefixtures("tempfile_reads_this_tests_tmpdir"),
 ]
 
 # Above the kernel's pid space (pid_max is at most 2**22): a stand-in for a
 # creator that is gone, which no live process can hold.
 _GONE_PID = 2**30 + 91
-
-
-@pytest.fixture(autouse=True)
-def _tempfile_reads_this_tests_tmpdir(monkeypatch):
-    """The sweep searches TEMP, TMP and tempfile's own answer beside TMPDIR.
-
-    A test here stays inside ``tmp_path`` by setting TMPDIR and emptying the
-    listed parents, so the other two variables are unset and tempfile's cached
-    answer is dropped for the test: a cached real temp directory would be searched
-    too, and a stale private directory of this user there could be deleted by a
-    test.
-    """
-    monkeypatch.delenv("TEMP", raising=False)
-    monkeypatch.delenv("TMP", raising=False)
-    monkeypatch.setattr(tempfile, "tempdir", None)
 
 
 _DAEMON_SELECTORS = (
@@ -418,9 +404,16 @@ def test_a_stranded_directory_under_a_symlinked_tmpdir_is_swept(monkeypatch, tmp
 def test_a_record_under_a_parent_that_cannot_be_listed_is_kept(monkeypatch, tmp_path):
     """A parent that cannot be opened (TMPDIR naming a directory that is not
     there) says nothing about whether a record's directory is gone, so the
-    record is kept; dropping it as "gone" left a directory with no record."""
+    record is kept; dropping it as "gone" left a directory with no record.
+
+    tempfile cannot use the missing TMPDIR and would fall back to the host's
+    /tmp, which the sweep would then list; its answer is a directory of this
+    test's own instead."""
     missing = tmp_path / "not-mounted-yet"
+    tempfile_answer = tmp_path / "tempfile-answer"
+    tempfile_answer.mkdir()
     monkeypatch.setenv("TMPDIR", str(missing))
+    monkeypatch.setattr(tempfile, "tempdir", str(tempfile_answer))
     monkeypatch.setattr(container_leftovers, "_ENV_DIR_PARENTS", ())
     monkeypatch.setenv(container_leftovers.STATE_DIR_ENV, str(tmp_path / "state"))
     if container_leftovers.host_key() is None:

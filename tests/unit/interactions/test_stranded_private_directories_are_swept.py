@@ -22,7 +22,6 @@ import logging
 import os
 import subprocess  # nosec B404 - cells spawn the running interpreter, fixed argv
 import sys
-import tempfile
 from pathlib import Path
 from typing import List
 from unittest.mock import MagicMock
@@ -32,23 +31,12 @@ import pytest
 from automated_security_helper.interactions import container_leftovers
 from automated_security_helper.utils.log import ASH_LOGGER
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="records and directory descriptors are POSIX"
-)
-
-
-@pytest.fixture(autouse=True)
-def _tempfile_reads_this_tests_tmpdir(monkeypatch):
-    """The sweep searches TEMP, TMP and tempfile's own answer beside TMPDIR.
-
-    A test here stays inside ``tmp_path`` by setting TMPDIR and the listed
-    parents, so the other two variables are unset and tempfile's cached answer is
-    dropped for the test: a cached real temp directory would be searched too, and
-    a stale private directory of this user there could be deleted by a test.
-    """
-    monkeypatch.delenv("TEMP", raising=False)
-    monkeypatch.delenv("TMP", raising=False)
-    monkeypatch.setattr(tempfile, "tempdir", None)
+pytestmark = [
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="records and directory descriptors are POSIX"
+    ),
+    pytest.mark.usefixtures("tempfile_reads_this_tests_tmpdir"),
+]
 
 
 _CANARY = "operator-value-canary-7731"
