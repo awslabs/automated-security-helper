@@ -86,8 +86,12 @@ def _scan(
     directory_is_environment_value=True,
     values_hook=None,
     output_under_directory=False,
+    threshold_from_environment=None,
 ):
     """Scan with a fake snyk.
+
+    With ``threshold_from_environment``, ``severity_threshold`` is written
+    ``!ENV ${ASH_TEST_SNYK_THRESHOLD}`` and that variable holds the value.
 
     With ``directory_name``, the scanned directory sits in a directory of that
     name, which is an argument of the command. ``project_name`` reads the name
@@ -102,6 +106,11 @@ def _scan(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     config_file = tmp_path / "operator" / ".ash.yaml"
     config_file.parent.mkdir()
+    if threshold_from_environment is not None:
+        monkeypatch.setenv("ASH_TEST_SNYK_THRESHOLD", threshold_from_environment)
+        threshold = "!ENV ${ASH_TEST_SNYK_THRESHOLD}"
+    else:
+        threshold = "MEDIUM"
     project_name = (
         "!ENV ${ASH_TEST_SNYK_DIRECTORY}"
         if directory_name and directory_is_environment_value
@@ -113,7 +122,7 @@ def _scan(
         "  snyk-code:\n"
         "    enabled: true\n"
         "    options:\n"
-        "      severity_threshold: MEDIUM\n",
+        f"      severity_threshold: {threshold}\n",
         encoding="utf-8",
     )
     _, config = resolve_config_module.load_config_file_for_run(config_file)
@@ -229,6 +238,28 @@ def test_an_environment_value_in_the_output_path_is_hidden_in_the_log_record(
     assert any("<value>" in message for message in running), running
     invocation = report.runs[0].invocations[0]
     assert MARKED_DIRECTORY not in invocation.commandLine, invocation.commandLine
+
+
+def test_a_threshold_read_from_the_environment_is_nowhere_in_the_scan(
+    tmp_path, monkeypatch, snyk_on_path
+):
+    """``severity_threshold`` written ``!ENV`` is applied by ASH after the scan.
+
+    It is not a snyk argument, so the command, the verbose records and the report
+    are the places the value could still appear (ASH's own logs and the scanner
+    details are new ones since the threshold moved out of the command). The scan
+    has no results, so a severity word cannot match by being a finding's.
+    """
+    report, running, argv = _scan(
+        tmp_path, monkeypatch, threshold_from_environment="CRITICAL"
+    )
+
+    assert argv, "the fake snyk was not run"
+    assert running, "the scan did not reach the Running command log call"
+    assert not any("critical" in a.lower() for a in argv), argv
+    assert not any("severity-threshold" in a for a in argv), argv
+    assert not any("critical" in message.lower() for message in running), running
+    assert "critical" not in report.model_dump_json().lower()
 
 
 def test_a_directory_name_written_out_is_recorded_whole(
