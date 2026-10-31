@@ -364,7 +364,20 @@ _TOOL_ASH_PATTERN = re.compile(
 _TOOL_TABLE_HEADER = re.compile(
     rf"^[ \t]*\[[ \t]*{_TOOL_KEY}[ \t]*\][ \t]*(?:#.*)?[ \t\r]*$", re.MULTILINE
 )
-_ANY_TABLE_HEADER = re.compile(r"^[ \t]*\[", re.MULTILINE)
+# A table header: a dotted key path between one pair of brackets or two, never
+# one of each (`[a]]` and `[[a]` are no header), with a comment after it at most.
+# Any line starting with `[` used to count, so a row of a multi-line array value
+# (`  ["a", "b"],`, `[3]`) ended the table early, the `ash` key under it was
+# missed, and an unparsable pyproject written that way was skipped as holding no
+# ASH settings. A row such as `[3]` or `[true]` has a header's exact shape, so a
+# line is tested as a header only outside a multi-line value (`_table_end`).
+_TOML_KEY = r"""(?:[A-Za-z0-9_-]+|"(?:[^"\\\n]|\\.)*"|'[^'\n]*')"""
+_KEY_PATH = rf"{_TOML_KEY}(?:[ \t]*\.[ \t]*{_TOML_KEY})*"
+_ANY_TABLE_HEADER = re.compile(
+    rf"^[ \t]*(?:\[[ \t]*{_KEY_PATH}[ \t]*\]|\[\[[ \t]*{_KEY_PATH}[ \t]*\]\])"
+    r"[ \t]*(?:#.*)?[ \t\r]*$",
+    re.MULTILINE,
+)
 _ASH_KEY_LINE = re.compile(rf"^[ \t]*{_ASH_KEY}[ \t]*[.=]", re.MULTILINE)
 
 
@@ -384,12 +397,85 @@ def _tool_ash_declared(text: str) -> Optional[int]:
     if match is not None:
         return match.start()
     for header in _TOOL_TABLE_HEADER.finditer(text):
-        following = _ANY_TABLE_HEADER.search(text, header.end())
-        table_end = following.start() if following is not None else len(text)
+        table_end = _table_end(text, header.end())
         key = _ASH_KEY_LINE.search(text, header.end(), table_end)
         if key is not None:
             return key.start()
     return None
+
+
+def _table_end(text: str, start: int) -> int:
+    """The offset of the first table header at or after ``start`` that is not
+    inside a multi-line value, or the end of ``text``.
+
+    ``start`` is the end of a header's line. The lines after it are read in
+    order, tracking the brackets a value leaves open (an array written over
+    several lines) and a multi-line string, and a line is tested as a header
+    only outside both. The text did not parse, so this is a reading by lines and
+    not a parser: a bracket inside a quoted string or after a ``#`` is not
+    counted, and a value left unclosed hides every header after it, which keeps
+    scanning the table the key might be in rather than ending it early.
+    """
+    depth = 0
+    multiline: Optional[str] = None
+    position = start
+    while position < len(text):
+        newline = text.find("\n", position)
+        line_end = len(text) if newline < 0 else newline
+        line = text[position:line_end]
+        if depth == 0 and multiline is None and _ANY_TABLE_HEADER.match(line):
+            return position
+        depth, multiline = _brackets_left_open(line, depth, multiline)
+        position = line_end + 1
+    return len(text)
+
+
+def _brackets_left_open(
+    line: str, depth: int, multiline: Optional[str]
+) -> Tuple[int, Optional[str]]:
+    """The array depth and the open multi-line string delimiter after ``line``,
+    given those before it. Quoted strings and comments hold no brackets."""
+    index = 0
+    while index < len(line):
+        if multiline is not None:
+            closing = line.find(multiline, index)
+            if closing < 0:
+                return depth, multiline
+            index = closing + len(multiline)
+            multiline = None
+            continue
+        char = line[index]
+        if char == "#":
+            break
+        if char in "\"'":
+            if line.startswith(char * 3, index):
+                multiline = char * 3
+                index += 3
+            else:
+                index = _end_of_string(line, index)
+            continue
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+        index += 1
+    return depth, multiline
+
+
+def _end_of_string(line: str, start: int) -> int:
+    """The index just past the single-line string that opens at ``start``, or the
+    end of ``line`` when it does not close there. A basic string reads a
+    backslash as escaping the next character; a literal one does not."""
+    quote = line[start]
+    index = start + 1
+    while index < len(line):
+        if quote == '"' and line[index] == "\\":
+            index += 2
+        elif line[index] == quote:
+            return index + 1
+        else:
+            index += 1
+    return len(line)
 
 
 def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
