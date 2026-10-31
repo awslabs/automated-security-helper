@@ -565,6 +565,20 @@ class TestShortfalls:
 
         assert first == second
 
+    def test_the_fixed_string_is_a_seed_and_the_label_selects_the_record(
+        self, reporter, metadata
+    ):
+        """The record's uid is derived, so the module no longer exports the
+        fixed string under a name that reads as the uid; a SIEM rule selects the
+        record by its label, which stays."""
+        record = reporter._create_shortfall_finding(
+            1, 0, metadata, _now_ms(), scan_identity="alpha"
+        )
+
+        assert record.finding_info.uid != "ash-ocsf-conversion-shortfall"
+        assert not hasattr(ocsf_module, "CONVERSION_SHORTFALL_UID")
+        assert CONVERSION_SHORTFALL_LABEL in record.metadata.labels
+
     def test_a_shortfall_with_both_counts_names_both(self, reporter, metadata):
         record = reporter._create_shortfall_finding(2, 1, metadata, _now_ms())
 

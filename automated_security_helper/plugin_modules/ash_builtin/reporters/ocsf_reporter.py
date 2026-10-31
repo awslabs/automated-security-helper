@@ -82,17 +82,19 @@ _FALLBACK_VULNERABILITY_DESC = "Error processing vulnerability details"
 #: file alone learns it is incomplete.
 CONVERSION_SHORTFALL_LABEL = "ash_row_type:conversion_shortfall"
 
-#: The fixed part of the shortfall record's identity. Its ``finding_info.uid``
-#: is derived (:func:`_finding_uid`) from this and the scanned project's
-#: configured name, so a SIEM deduplicates the record across runs of one named
-#: project and keeps differently named projects' records apart. The uid was
-#: this string itself for every scan, so a SIEM that deduplicates on the uid
-#: merged unrelated scans' shortfall records into one, which a later clean run
-#: of any of them could never close. The name is the only identity the report
-#: model carries: scans that keep the default project name share one record,
-#: so set ``project_name`` in each repository's configuration to keep their
-#: records apart.
-CONVERSION_SHORTFALL_UID = "ash-ocsf-conversion-shortfall"
+#: The fixed part of the shortfall record's identity, a seed and not the uid
+#: itself. Its ``finding_info.uid`` is derived (:func:`_finding_uid`) from this
+#: and the scanned project's configured name, so a SIEM deduplicates the record
+#: across runs of one named project and keeps differently named projects'
+#: records apart. The uid was this string itself for every scan, so a SIEM that
+#: deduplicates on the uid merged unrelated scans' shortfall records into one,
+#: which a later clean run of any of them could never close. A rule that
+#: matches ``finding_info.uid`` against this string finds nothing; select the
+#: record by its label, :data:`CONVERSION_SHORTFALL_LABEL`, which is stable.
+#: The name is the only identity the report model carries: scans that keep the
+#: default project name share one record, so set ``project_name`` in each
+#: repository's configuration to keep their records apart.
+_SHORTFALL_UID_SEED = "ash-ocsf-conversion-shortfall"
 
 #: Splits a location uri on either separator: a Windows scanner can write a
 #: drive-letter or UNC uri with backslashes, and splitting on "/" alone made
@@ -318,7 +320,7 @@ def _scan_identity(model: Any) -> str:
 
 def _shortfall_uid(scan_identity: str) -> str:
     """The shortfall record's uid for the project *scan_identity* names."""
-    return _finding_uid(f"{scan_identity}|{CONVERSION_SHORTFALL_UID}")
+    return _finding_uid(f"{scan_identity}|{_SHORTFALL_UID_SEED}")
 
 
 def _identity_key(result: Any, rule_id: str, message_text: Optional[str] = None) -> str:

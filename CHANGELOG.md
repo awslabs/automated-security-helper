@@ -8122,9 +8122,13 @@
   every other report. A finding the OCSF builder could not convert used to be
   dropped with a log line, and the array looked complete. The array now carries
   one extra record when that happens: `status_id` 99 with `status` `Incomplete`,
-  severity Informational, an empty `vulnerabilities` array, the fixed
-  `finding_info.uid` `ash-ocsf-conversion-shortfall` and the label
-  `ash_row_type:conversion_shortfall`; its `status_detail` says how many findings
+  severity Informational, an empty `vulnerabilities` array, a `finding_info.uid`
+  derived from the scanned project's configured name (the same across runs of
+  one named project, different for differently named projects; scans that keep
+  the default name share one) and the label `ash_row_type:conversion_shortfall`,
+  which is the stable way to select the record: the uid is not the fixed string
+  `ash-ocsf-conversion-shortfall`, and a SIEM rule that matches that string
+  finds nothing. Its `status_detail` says how many findings
   are absent and how many were built by the fallback path, and those fallback
   records carry the label `ash_row_type:degraded_finding`. A reader that takes
   `vulnerabilities[0]` from every record skips the shortfall record by its label.
