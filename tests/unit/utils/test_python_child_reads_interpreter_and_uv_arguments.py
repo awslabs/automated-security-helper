@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""python_child reads interpreter options and uv's arguments as the tools do.
+"""python_child reads interpreter options as the interpreter does.
 
 Properties of ``utils/python_child.py`` that nothing else pins:
 
@@ -10,14 +10,13 @@ Properties of ``utils/python_child.py`` that nothing else pins:
   option that takes the next argument (``--check-hash-based-pycs always``);
 - ``python_module_arguments`` reads the module and its arguments out of the same
   spellings, and nothing out of ``-c``, a script, ``-`` or ``--``;
-- ``python_code_argv`` builds a source that compiles when it opens with a
-  compound statement or a ``from __future__`` import, and the dropping
-  statement runs before anything of the caller's source, a one-line source
-  with a leading future import included;
-- ``uv_child_overrides`` takes a path-like program, reads the subcommand past
-  the value of a global option it does not know, counts a ``UV_SYSTEM_PYTHON``
-  uv reads as false as no choice, and decides from the environment the child
-  gets when the caller passes it.
+- ``python_code_argv`` builds a program that compiles around a source that opens
+  with a docstring, a compound statement or a ``from __future__`` import (one
+  line or several), and the dropping statement is the first thing the program
+  runs: no statement of the caller's source is at its top level.
+
+The tests of ``uv_child_overrides`` are in
+``test_uv_overrides_read_uvs_own_arguments.py``.
 """
 
 from __future__ import annotations
@@ -32,18 +31,9 @@ from automated_security_helper.utils.python_child import (
     python_code_argv,
     python_module_arguments,
     runs_module_or_code,
-    uv_child_overrides,
 )
 
 pytestmark = pytest.mark.unit
-
-BOTH = {"UV_NO_PROJECT": "1", "UV_PYTHON": sys.executable}
-
-
-@pytest.fixture(autouse=True)
-def _no_operator_choice(monkeypatch):
-    monkeypatch.delenv("UV_PYTHON", raising=False)
-    monkeypatch.delenv("UV_SYSTEM_PYTHON", raising=False)
 
 
 @pytest.mark.parametrize(
@@ -96,7 +86,6 @@ def test_a_path_in_argv_is_a_script_and_never_an_error():
     AttributeError out of the spawn, so the command never ran."""
     assert runs_module_or_code([sys.executable, Path("worker.py"), "-m"]) is False
     assert runs_module_or_code([sys.executable, b"-m", b"uv"]) is True
-    assert uv_child_overrides([sys.executable, Path("worker.py"), "x"]) == {}
     assert python_module_arguments([Path("worker.py")]) is None
     assert python_module_arguments([3]) is None  # subprocess refuses it too
 
@@ -151,6 +140,8 @@ def test_python_module_arguments_reads_the_module_as_the_interpreter_does(
         "# a comment first\n\nfrom __future__ import annotations\ndef f():\n    pass\n",
         "import os; print(os.getcwd())",
         "from __future__ import annotations; import os; print(os.getcwd())",
+        '"""A module docstring."""\nfrom __future__ import annotations\nx: int = 1\n',
+        "from __future__ import (\n    annotations,\n    division,\n)\nx = 1\n",
     ],
     ids=[
         "if",
@@ -159,15 +150,25 @@ def test_python_module_arguments_reads_the_module_as_the_interpreter_does(
         "comment then future",
         "one line",
         "future on the one line",
+        "docstring then future",
+        "parenthesized future import",
     ],
 )
 def test_python_code_argv_builds_a_source_that_compiles(source):
     argv = python_code_argv(source)
     assert argv[-2] == "-c"
     compile(argv[-1], "<python_code_argv>", "exec")
+    # The caller's own source compiles as the unit it is run as: a future
+    # import is legal there whatever precedes it (a docstring, a comment) and
+    # however many lines it takes.
+    compile(source, "<ash>", "exec")
     # The dropping statement is the first statement, always, and the caller's
-    # source follows it whole, as its own compiled unit.
+    # source follows it whole, as its own compiled unit: the program's top level
+    # is the drop's two statements and the one call that runs the source, so no
+    # statement of the caller's source can run ahead of the drop.
     assert "sys.path[:1] = []" in argv[-1]
+    statements = ast.parse(argv[-1]).body
+    assert [type(node) for node in statements] == [ast.Import, ast.Assign, ast.Expr]
     assert source.strip().splitlines()[-1] in argv[-1]
 
 
@@ -200,42 +201,3 @@ def test_the_drop_runs_before_a_one_line_source_with_a_leading_future_import():
     assert isinstance(compiled, ast.Call) and compiled.func.id == "compile"
     assert compiled.args[0].value == source
     compile(source, "<ash>", "exec")
-
-
-def test_uv_overrides_take_a_path_like_program():
-    assert uv_child_overrides([Path("/opt/bin/uv"), "pip", "list"]) == BOTH
-
-
-def test_the_value_of_an_unknown_global_option_is_not_the_subcommand():
-    # "value" is not a uv subcommand; the subcommand is the next positional
-    # that names one, and uv tool commands get nothing.
-    assert uv_child_overrides(["uv", "--new-option", "value", "tool", "run", "x"]) == {}
-    assert uv_child_overrides(["uv", "--new-option", "value", "pip", "list"]) == BOTH
-
-
-@pytest.mark.parametrize(
-    "value", ["0", "false", "f", "F", "no", "n", "N", "off", "OFF", "False", ""]
-)
-def test_a_false_uv_system_python_is_no_choice_of_interpreter(monkeypatch, value):
-    """Every spelling uv's boolish parser reads as false, ``n`` and ``f``
-    included: counted as a choice, they left UV_PYTHON out while uv read them as
-    false and ran the tree's ``.venv``."""
-    monkeypatch.setenv("UV_SYSTEM_PYTHON", value)
-    assert uv_child_overrides(["uv", "pip", "list"]) == BOTH
-
-
-@pytest.mark.parametrize("value", ["1", "true", "t", "yes", "y", "on", "TRUE", " 1 "])
-def test_a_true_uv_system_python_is_a_choice_of_interpreter(monkeypatch, value):
-    monkeypatch.setenv("UV_SYSTEM_PYTHON", value)
-    assert uv_child_overrides(["uv", "pip", "list"]) == {"UV_NO_PROJECT": "1"}
-
-
-def test_the_choice_is_read_from_the_environment_the_child_gets(monkeypatch):
-    # The child's own environment names an interpreter: the merge of the
-    # overrides over it must not replace it.
-    assert uv_child_overrides(["uv", "pip", "list"], env={"UV_PYTHON": "/x/py"}) == {
-        "UV_NO_PROJECT": "1"
-    }
-    # And this process's environment does not count when the child's is given.
-    monkeypatch.setenv("UV_PYTHON", "/elsewhere/py")
-    assert uv_child_overrides(["uv", "pip", "list"], env={}) == BOTH

@@ -18,9 +18,16 @@ pinned:
 - for ``uv run`` the scan for ``--project``, ``--python``, ``-p`` and ``--system``
   stops where the program uv runs begins (the first positional argument, or
   ``--``). That program's own ``-p`` or ``--system`` says nothing about uv's
-  interpreter, yet suppressed UV_PYTHON or UV_NO_PROJECT.
+  interpreter, yet suppressed UV_PYTHON or UV_NO_PROJECT;
+- the subcommand is the first positional that names a listed one, whatever
+  unlisted option or word comes before it;
+- a path-like program or argument is read as text, and bytes too;
+- the operator's choice of interpreter is read from the environment the child
+  gets: ``UV_PYTHON`` for every subcommand, and a ``UV_SYSTEM_PYTHON`` uv reads as
+  true only for the ``uv pip`` family, the one that has ``--system``.
 
-Nothing here starts uv: the function reads argv and the environment only.
+Nothing here starts uv: the function reads argv and the environment only. These
+are the only tests of ``uv_child_overrides``.
 """
 
 from __future__ import annotations
@@ -93,6 +100,57 @@ def test_a_subcommand_the_list_lacks_still_gets_the_overrides(no_operator_choice
     assert uv_child_overrides(["uv", "virtualenv", ".venv"]) == BOTH
     assert uv_child_overrides(["uv", "--new-option", "value", "newcmd", "x"]) == BOTH
     assert uv_child_overrides(["uv", "--new-option", "value", "tool", "run", "x"]) == {}
+
+
+def test_the_subcommand_is_the_first_positional_that_names_one(no_operator_choice):
+    """One rule, pinned by its deciding cases. The value of a global option this
+    module does not list is not the subcommand: the next positional that names a
+    listed one is. A boolean flag it does not list takes no value, so the word
+    after it is already the subcommand. And an unlisted word before ``tool``
+    gives way to ``tool``, so the command gets nothing."""
+    assert uv_child_overrides(["uv", "--new-option", "value", "pip", "list"]) == BOTH
+    assert uv_child_overrides(["uv", "--new-flag", "pip", "list"]) == BOTH
+    assert uv_child_overrides(["uv", "newcmd", "tool", "run", "x"]) == {}
+
+
+def test_a_path_like_program_is_uv(no_operator_choice):
+    assert uv_child_overrides([Path("/opt/bin/uv"), "pip", "list"]) == BOTH
+    # A path-like argument of a program that is not uv is no error either.
+    assert uv_child_overrides([sys.executable, Path("worker.py"), "x"]) == {}
+
+
+@pytest.mark.parametrize(
+    "value", ["0", "false", "f", "F", "no", "n", "N", "off", "OFF", "False", ""]
+)
+def test_a_false_uv_system_python_is_no_choice_of_interpreter(
+    no_operator_choice, monkeypatch, value
+):
+    """Every spelling uv's boolish parser reads as false, ``n`` and ``f``
+    included: counted as a choice, they left UV_PYTHON out while uv read them as
+    false and ran the tree's ``.venv``."""
+    monkeypatch.setenv("UV_SYSTEM_PYTHON", value)
+    assert uv_child_overrides(["uv", "pip", "list"]) == BOTH
+
+
+@pytest.mark.parametrize("value", ["1", "true", "t", "yes", "y", "on", "TRUE", " 1 "])
+def test_a_true_uv_system_python_is_a_choice_of_interpreter(
+    no_operator_choice, monkeypatch, value
+):
+    monkeypatch.setenv("UV_SYSTEM_PYTHON", value)
+    assert uv_child_overrides(["uv", "pip", "list"]) == {"UV_NO_PROJECT": "1"}
+
+
+def test_the_choice_is_read_from_the_environment_the_child_gets(
+    no_operator_choice, monkeypatch
+):
+    # The child's own environment names an interpreter: the merge of the
+    # overrides over it must not replace it.
+    assert uv_child_overrides(["uv", "pip", "list"], env={"UV_PYTHON": "/x/py"}) == {
+        "UV_NO_PROJECT": "1"
+    }
+    # And this process's environment does not count when the child's is given.
+    monkeypatch.setenv("UV_PYTHON", "/elsewhere/py")
+    assert uv_child_overrides(["uv", "pip", "list"], env={}) == BOTH
 
 
 def test_other_interpreters_modules_and_programs_are_not_uv(no_operator_choice):
