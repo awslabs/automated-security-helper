@@ -12,7 +12,7 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PureWindowsPath
-from typing import Annotated, Any, Iterable, List, Optional, Tuple
+from typing import Annotated, Any, Iterable, List, NoReturn, Optional, Tuple
 
 import typer
 
@@ -337,6 +337,19 @@ def _bin_directory_problem(directory: Path) -> Optional[str]:
     if probe != directory and not os.access(probe, os.W_OK | os.X_OK):
         return f"{probe} is not writable"
     return None
+
+
+def _refuse_bin_directory(target_bin_path: Optional[Path], reason: str) -> NoReturn:
+    """Print why the bin directory cannot be made and exit with the
+    invalid-configuration code. The one refusal behind both the read made before
+    the first plugin is built and the ``mkdir`` that follows the installs' last
+    refusal, so the two say the same words."""
+    print(
+        f"[red]The bin directory {escape(str(target_bin_path))} cannot be "
+        f"created: {escape(reason)}. Name a directory with --bin-path "
+        "(or ASH_BIN_PATH) that can be made.[/red]"
+    )
+    raise typer.Exit(EXIT_INVALID_CONFIG)
 
 
 def _canonical_tool_names(
@@ -1110,19 +1123,24 @@ def install_dependencies(
     absolute_bin_path = Path(os.path.abspath(target_bin_path))
     set_environ("ASH_BIN_PATH", str(absolute_bin_path))
 
-    # Checked here, nothing made: a bin directory that cannot be made is a
-    # refusal before any plugin is built. Building bandit, checkov, semgrep and
-    # the jupyter converter probes their version with `uv tool run ... --version`,
-    # so with the check only at the mkdir below every build and probe ran, and
-    # downloaded, before a --bin-path that could never be made was refused.
-    problem = _bin_directory_problem(absolute_bin_path)
-    if problem is not None:
-        print(
-            f"[red]The bin directory {escape(str(target_bin_path))} cannot be "
-            f"created: {escape(problem)}. Name a directory with --bin-path "
-            "(or ASH_BIN_PATH) that can be made.[/red]"
-        )
-        raise typer.Exit(EXIT_INVALID_CONFIG)
+    # Read, nothing made, before the first plugin is built: a bin directory that
+    # cannot be made is a refusal before any build. Building bandit, checkov,
+    # semgrep and the jupyter converter probes their version with `uv tool run
+    # ... --version`, so with the check only at the mkdir below every build and
+    # probe ran, and downloaded, before a --bin-path that could never be made was
+    # refused. Made at the first build, not here, so that the refusals which need
+    # no build keep the codes and the order they had: an unknown --tool (2), a
+    # skipped one (nothing to install, 0), a config a scan refuses (3).
+    bin_directory_read = False
+
+    def refuse_an_unmakable_bin_directory() -> None:
+        nonlocal bin_directory_read
+        if bin_directory_read:
+            return
+        bin_directory_read = True
+        problem = _bin_directory_problem(absolute_bin_path)
+        if problem is not None:
+            _refuse_bin_directory(target_bin_path, problem)
 
     console.print(
         Panel(
@@ -1238,6 +1256,7 @@ def install_dependencies(
         --plugin-type left out, without recording that kind's failures against
         this run's outcome.
         """
+        refuse_an_unmakable_bin_directory()
         found: List[tuple] = []
         failed: List[PluginInstallOutcome] = []
         plugin_module_input = _plugin_kind(plugin_type)
@@ -1358,6 +1377,7 @@ def install_dependencies(
         raise typer.Exit(EXIT_INVALID_CONFIG)
 
     def build(plugin_type, plugin_module_input, plugin_class, declared_name) -> None:
+        refuse_an_unmakable_bin_directory()
         try:
             # The plugin's own section of the resolved config, looked up the way
             # the scan path looks it up (ExecutionEngine.get_scanner). Without
@@ -1642,19 +1662,16 @@ def install_dependencies(
     # The bin directory is made here, after every refusal above (a --config that is
     # not there, a configuration a scan refuses, a plugin module that does not
     # load, an unknown --tool or --plugin-type): made first, a refused run that
-    # printed "Nothing installed" had still created it. A regular file at the
-    # path, a file as a parent or a parent this user cannot write is a refusal
-    # with the invalid-configuration code, as an unusable --config is, where it
-    # was a traceback with the failed-install code.
+    # printed "Nothing installed" had still created it. What this can refuse is
+    # what the read before the first build (refuse_an_unmakable_bin_directory)
+    # could not see or that changed since: a run that built no plugin, a
+    # directory removed or made unwritable in between, a failure only mkdir
+    # reports. It is the same refusal, with the invalid-configuration code as an
+    # unusable --config is, where it was a traceback with the failed-install code.
     try:
         absolute_bin_path.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        print(
-            f"[red]The bin directory {escape(str(target_bin_path))} cannot be "
-            f"created: {escape(error_text(e))}. Name a directory with --bin-path "
-            "(or ASH_BIN_PATH) that can be made.[/red]"
-        )
-        raise typer.Exit(EXIT_INVALID_CONFIG)
+        _refuse_bin_directory(target_bin_path, error_text(e))
 
     ash_environment_requirements: List[str] = []
     # For run_command's lines about each child; reset once the installs are done.

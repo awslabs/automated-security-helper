@@ -289,6 +289,93 @@ def test_an_unmakable_bin_path_is_refused_before_any_plugin_is_built(
     assert building_scanner == [], building_scanner
 
 
+@pytest.fixture
+def named_scanner(building_scanner, monkeypatch):
+    """The same scanner, but one that declares the name it is built under, so a
+    ``--tool`` run reads the names without building anything: the shape of every
+    bundled plugin."""
+    monkeypatch.setattr(
+        dependencies, "declared_plugin_name", lambda _cls: "builds-a-probe"
+    )
+    return building_scanner
+
+
+def test_an_unknown_tool_keeps_its_own_code_before_an_unusable_bin_path(
+    named_scanner, tmp_path
+):
+    """The read of the bin directory came before the tool names were checked, so
+    `--tool gryp --bin-path <file>/bin` exited 3 where the unknown name exits 2
+    ("installs nothing, and starts no program", the exit-code reference)."""
+    occupied = tmp_path / "occupied"
+    occupied.write_text("a file\n", encoding="utf-8")
+
+    result = runner.invoke(
+        dependencies_app, ["--bin-path", str(occupied / "bin"), "--tool", "gryp"]
+    )
+
+    assert result.exit_code == EXIT_BAD_SELECTION, result.output
+    assert "cannot be created" not in _flat(result.output), result.output
+    assert named_scanner == [], named_scanner
+
+
+def test_a_run_that_skips_every_unknown_tool_still_exits_zero_whatever_the_bin_path(
+    named_scanner, tmp_path, monkeypatch
+):
+    """With the unknown-tools setting at `skip` and nothing but unknown names the
+    run installs nothing and exits 0; the early read turned it into an exit 3 for
+    a bin directory nothing was going to be put in."""
+    monkeypatch.setenv(dependencies.UNKNOWN_TOOLS_SETTING, "skip")
+    occupied = tmp_path / "occupied"
+    occupied.write_text("a file\n", encoding="utf-8")
+
+    result = runner.invoke(
+        dependencies_app, ["--bin-path", str(occupied / "bin"), "--tool", "gryp"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "cannot be created" not in _flat(result.output), result.output
+
+
+def test_a_known_tool_with_an_unusable_bin_path_is_still_refused_before_it_is_built(
+    named_scanner, tmp_path
+):
+    """The control for the two tests above: the read is made before the first
+    build, and a name that is known reaches it."""
+    occupied = tmp_path / "occupied"
+    occupied.write_text("a file\n", encoding="utf-8")
+
+    result = runner.invoke(
+        dependencies_app, ["--bin-path", str(occupied / "bin"), "--tool", "builds-a-probe"]
+    )
+
+    assert result.exit_code == EXIT_INVALID_CONFIG, result.output
+    assert "cannot be created" in _flat(result.output), result.output
+    assert named_scanner == [], named_scanner
+
+
+def test_the_mkdir_after_the_builds_refuses_in_the_same_words(
+    named_scanner, tmp_path, monkeypatch
+):
+    """What the read made before the first build does not see (a directory
+    removed or made unwritable in between) is caught by the mkdir after the
+    installs' last refusal, with the one refusal: the same code and the same
+    words, not a traceback. The read is made to find nothing here."""
+    monkeypatch.setattr(dependencies, "_bin_directory_problem", lambda _dir: None)
+    occupied = tmp_path / "occupied"
+    occupied.write_text("a file\n", encoding="utf-8")
+
+    result = runner.invoke(
+        dependencies_app, ["--bin-path", str(occupied / "bin"), "--tool", "builds-a-probe"]
+    )
+
+    assert result.exit_code == EXIT_INVALID_CONFIG, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    flat = _flat(result.output)
+    assert "cannot be created" in flat, result.output
+    assert "Name a directory with --bin-path (or ASH_BIN_PATH)" in flat, result.output
+    assert named_scanner == [False], named_scanner
+
+
 def test_a_usable_bin_path_is_still_made_after_the_plugins_are_built(
     building_scanner, tmp_path
 ):
