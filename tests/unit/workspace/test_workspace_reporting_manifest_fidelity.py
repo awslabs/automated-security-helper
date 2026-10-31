@@ -225,14 +225,42 @@ class TestAPerProjectArtefactBelongsToTheRunThatWroteIt:
         """Every report step parsed the whole unified file for one field, on
         a default run's six disabled reporters too; the caller's set spares it."""
         _, output_dir, _ = workspace
+        calls: list = []
 
-        def never(results_path):  # pragma: no cover - the assertion is the point
-            raise AssertionError("the results file was parsed for the completed set")
+        def recording(results_path):
+            # Records and answers; it does not raise, because the step records a
+            # failure of its own reporters and an exception raised here could be
+            # swallowed by a handler around the call, which would pass this test
+            # whether or not the file was parsed.
+            calls.append(results_path)
+            return set()
 
-        monkeypatch.setattr(reporting, "_projects_with_a_completed_run", never)
+        monkeypatch.setattr(reporting, "_projects_with_a_completed_run", recording)
 
         _emit(workspace, FakePerProjectReporter, completed_projects=["api", "web"])
 
+        assert calls == []
+        entry = _manifest(output_dir)["reporters"]["fake-per-project"]
+        assert entry["missing_per_project_artifacts"] == []
+
+    def test_without_the_callers_set_the_results_file_is_read_once(
+        self, workspace, monkeypatch
+    ):
+        """The control for the test above: the same stub is reached when the
+        caller gives no set, so an empty ``calls`` there means the file was not
+        read, not that the stub was never in the way."""
+        _, output_dir, _ = workspace
+        calls: list = []
+
+        def recording(results_path):
+            calls.append(results_path)
+            return {"api", "web"}
+
+        monkeypatch.setattr(reporting, "_projects_with_a_completed_run", recording)
+
+        _emit(workspace, FakePerProjectReporter)
+
+        assert len(calls) == 1, calls
         entry = _manifest(output_dir)["reporters"]["fake-per-project"]
         assert entry["missing_per_project_artifacts"] == []
 
