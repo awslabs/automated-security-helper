@@ -2709,9 +2709,15 @@ def _discard_project_output(project_output: Path) -> None:
     removes the link entry and leaves its target, and a results file reached
     through a link would otherwise still read as present beside the FAILED
     verdict. A link at any other name is left alone, as every other write here
-    refuses to follow one.
+    refuses to follow one. A link is read with ``os.lstat`` and ``_is_link_stat``,
+    which also name a Windows junction; ``Path.is_symlink()`` does not, and a
+    junction was taken for the directory it points at and removed through.
     """
+    import os
     import shutil
+    import stat
+
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
 
     try:
         entries = list(project_output.iterdir())
@@ -2728,14 +2734,18 @@ def _discard_project_output(project_output: Path) -> None:
         if path.name not in _SCAN_OUTPUT_NAMES:
             continue
         try:
-            if path.is_symlink():
+            info = os.lstat(path)
+            if _is_link_stat(info):
                 # Before the directory test, which follows the link: the link
                 # entry goes and its target is not touched.
                 path.unlink(missing_ok=True)
-            elif path.is_dir():
+            elif stat.S_ISDIR(info.st_mode):
                 shutil.rmtree(path)
             else:
                 path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            # Gone between the listing and the read: nothing to remove.
+            continue
         except OSError as error:
             ASH_LOGGER.warning(
                 f"Could not remove the abandoned project's output {path}: "
