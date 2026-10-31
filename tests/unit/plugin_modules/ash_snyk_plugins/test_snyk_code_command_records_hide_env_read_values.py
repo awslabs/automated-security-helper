@@ -181,10 +181,11 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
         tmp_path, monkeypatch, directory_name=MARKED_DIRECTORY
     )
 
-    # The fake snyk was the binary that ran, and it ran on a copy of the scan set:
-    # the directory argument is a temporary directory, not the scanned one. The
-    # records name the scanned directory.
-    assert argv[0] == str(snyk_on_path), argv
+    # The command is the bare name the scanner builds: the spawn layer, faked here,
+    # is what resolves it, so the fake binary's path is not in the argument list.
+    # The scan ran on a copy of the scan set: the directory argument is a temporary
+    # directory, not the scanned one. The records name the scanned directory.
+    assert argv[0] == "snyk", argv
     source = tmp_path / MARKED_DIRECTORY / "src"
     # The argv element as the command spelled it (as_posix), kept as a string for
     # the record check below: str(Path(...)) re-spells it with backslashes on
