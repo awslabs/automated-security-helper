@@ -1791,16 +1791,16 @@ def _descriptor_leads_to_the_judged_path(opened: OpenedConfig, resolved: Path) -
 
 
 def _identity_held_after_the_judgment(
-    path: Path, resolved: Path, held: Optional[List[OpenedConfig]]
+    resolved: Path, held: Optional[List[OpenedConfig]]
 ) -> FileIdentity:
-    """What a read of ``path`` is held to, once the permit admitted ``resolved``.
+    """What a read is held to, once the permit admitted ``resolved``.
 
     ``resolved``, the path that was judged, is opened now, after the judgment (a
     name the permit refused is never opened), and the identity is the
     descriptor's, when the descriptor leads to that very path
     (``OpenedConfig.real``). It is the judged path that is opened and not the
-    name ``path``: a link re-pointed between the judgment and the open would
-    make the open reach a file outside the grant. The open does not follow a
+    name the candidate was found by: a link re-pointed between the judgment and
+    the open would make the open reach a file outside the grant. The open does not follow a
     link at the last component, so a leaf swapped for one since the judgment is
     not opened through it either. The identity is never looked up from the name
     again: that was a second lookup beside the one the judgment made, so a link
@@ -1923,7 +1923,7 @@ def _check_candidates(
         resolved = _resolved_if_permitted(candidate.path, permit)
         if resolved is None:
             raise _not_permitted(candidate.path)
-        identity = _identity_held_after_the_judgment(candidate.path, resolved, held)
+        identity = _identity_held_after_the_judgment(resolved, held)
         checked.append(replace(candidate, identity=identity))
     return checked
 
@@ -5261,9 +5261,11 @@ def resolve_config_document(
     # before the open is refused. The same identity holds the literal
     # re-resolution of a refused chain (_environment_blind_error), so a root
     # swapped between the two resolutions is refused there too.
-    held = expect if expect is not None else identity_to_hold(config_path)
+    root_identity = expect if expect is not None else identity_to_hold(config_path)
     try:
-        data, _unconfined, _owned = _resolve(config_path, (), state, expect=held)
+        data, _unconfined, _owned = _resolve(
+            config_path, (), state, expect=root_identity
+        )
     except ASHConfigSourceError as error:
         if reader is read_config_file_literally:
             raise
@@ -5293,7 +5295,7 @@ def resolve_config_document(
             opened.close()
     if blind_for is not None:
         blind = _environment_blind_error(
-            config_path, root, permit_base, blind_for, expect=held
+            config_path, root, permit_base, blind_for, expect=root_identity
         )
         # The fresh error's traceback carries this frame, and a walker that
         # prints frame locals (a debugger, a verbose traceback renderer) would
