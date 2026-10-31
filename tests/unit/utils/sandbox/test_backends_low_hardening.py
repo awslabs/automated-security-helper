@@ -170,8 +170,11 @@ def test_a_failed_root_export_is_tried_again(layout, monkeypatch):
     keychain.write_text("")
     monkeypatch.setattr(backends, "_TRUST_ROOT_KEYCHAINS", (str(keychain),))
     monkeypatch.setattr(backends, "_trust_roots_cache", [])
+    # A failed export records that it was warned of; the list is the module's, so
+    # it is replaced here and the warning state of later tests is left as it was.
+    monkeypatch.setattr(backends, "_trust_roots_warned", [])
     answers = [
-        subprocess.CompletedProcess([], 1, stdout="", stderr="timed out"),
+        subprocess.CompletedProcess([], 1, stdout="", stderr="export refused"),
         subprocess.CompletedProcess([], 0, stdout="BEGIN CERTIFICATE\n", stderr=""),
     ]
     monkeypatch.setattr(
@@ -221,6 +224,7 @@ def test_a_root_export_that_ran_out_of_time_is_not_tried_again(layout, monkeypat
     keychain.write_text("")
     monkeypatch.setattr(backends, "_TRUST_ROOT_KEYCHAINS", (str(keychain),))
     monkeypatch.setattr(backends, "_trust_roots_cache", [])
+    monkeypatch.setattr(backends, "_trust_roots_warned", [])
     calls = []
 
     def hanging(*args, **kwargs):
@@ -616,13 +620,32 @@ def test_a_root_home_gets_no_tmpfs(layout):
     assert Path("/") not in tmpfs
 
 
+def _option_at(argv, flag, path):
+    """The position of ``flag`` followed by ``path`` among the options of a plan."""
+    return next(
+        i for i, a in enumerate(argv) if a == flag and argv[i + 1] == path.as_posix()
+    )
+
+
 def test_bwrap_binds_the_uv_tool_lock_read_write(layout):
+    """The lock is inside the read-only tools directory, the case the grant is for:
+    its bind comes after the directory's, or the directory's would cover the lock
+    and uv would get EROFS."""
     lock = layout.tmp / "tools" / ".lock"
     lock.parent.mkdir()
     lock.write_text("")
-    argv = _bwrap().plan(["/bin/true"], {}, _policy(layout, uv_tool_locks=(lock,))).argv
+    policy = _policy(
+        layout, read_only=(layout.system, lock.parent), uv_tool_locks=(lock,)
+    )
+
+    argv = _bwrap().plan(["/bin/true"], {}, policy).argv
+
     assert _real(lock) in _mounts(argv, "--bind")
     assert _real(lock) not in _mounts(argv, "--ro-bind")
+    assert _real(lock.parent) in _mounts(argv, "--ro-bind")
+    assert _option_at(argv, "--ro-bind", _real(lock.parent)) < _option_at(
+        argv, "--bind", _real(lock)
+    )
 
 
 @POSIX
@@ -762,13 +785,24 @@ def test_firejail_refuses_a_path_it_would_read_as_a_pattern(layout):
 
 @pytest.mark.skipif(os.name == "nt", reason="firejail's plan reads os.getuid()")
 def test_firejail_grants_the_uv_tool_lock(layout):
+    """The lock is inside the read-only tools directory, the case the grant is for:
+    the read-write option comes after the directory's read-only one, or firejail
+    would make the lock read-only again."""
     lock = layout.tmp / "tools" / ".lock"
     lock.parent.mkdir()
     lock.write_text("")
     backend = FirejailBackend()
     backend._executable = "/fj"
-    argv = backend.plan(["/bin/true"], {}, _policy(layout, uv_tool_locks=(lock,))).argv
+    policy = _policy(
+        layout, read_only=(layout.system, lock.parent), uv_tool_locks=(lock,)
+    )
+
+    argv = backend.plan(["/bin/true"], {}, policy).argv
+
     assert f"--read-write={_real(lock).as_posix()}" in argv
+    assert argv.index(f"--read-only={_real(lock.parent).as_posix()}") < argv.index(
+        f"--read-write={_real(lock).as_posix()}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1009,6 +1043,37 @@ def test_a_refused_profile_leaves_no_temp_directory(layout, monkeypatch):
         SandboxExecBackend().plan(["/bin/true"], {}, _policy(layout))
 
     assert list(scratch.iterdir()) == []
+
+
+def test_a_refused_profile_leaves_no_cache_roots_or_unpack_directory(
+    layout, monkeypatch
+):
+    """The plan makes four directories before the profile is built: the private
+    TMPDIR, the private cache under the results directory, the one that holds the
+    system trust roots and the unpack directory. A profile that is refused leaves
+    none of them, so each is removed through the one cleanup list the plan fills in
+    place."""
+    scratch = layout.tmp / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    monkeypatch.setattr(backends, "_system_trust_roots", lambda: "BEGIN CERTIFICATE\n")
+
+    def refusing(self, *args, **kwargs):
+        raise SandboxUnavailable("cannot express the profile")
+
+    monkeypatch.setattr(SandboxExecBackend, "profile", refusing)
+    policy = _policy(
+        layout,
+        cache_env=("UV_CACHE_DIR",),
+        unpack_dir_env="UNPACK_DIR",
+        system_trust_roots=True,
+    )
+
+    with pytest.raises(SandboxUnavailable):
+        SandboxExecBackend().plan(["/bin/true"], {}, policy)
+
+    assert list(scratch.iterdir()) == []
+    assert list(layout.results.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
