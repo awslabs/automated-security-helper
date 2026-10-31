@@ -264,6 +264,21 @@ class TestALeadingSeparatorMatchesNoRelativePath:
         with pytest.raises(WorkspacePatternError, match="leading '/'"):
             _down("/api/vendor/", "api", kind=IGNORE_PATH)
 
+    @pytest.mark.parametrize(
+        ("pattern", "kind"),
+        [("/api/src/x.py", SUPPRESSION), ("/api/vendor/", IGNORE_PATH)],
+    )
+    def test_the_refusal_tells_the_operator_to_remove_the_slash(self, pattern, kind):
+        """A line copied from a project's config reads ``/api/src/x.py`` as
+        rooted there and is refused here, so the message has to name the way out:
+        the same entry without its leading ``/`` is the workspace-relative one."""
+        with pytest.raises(WorkspacePatternError) as excinfo:
+            _down(pattern, "api", kind=kind)
+
+        message = str(excinfo.value)
+        assert "remove the leading '/'" in message
+        assert pattern in message
+
     def test_a_separator_before_a_leading_double_star_is_absorbed(self):
         """The one separator the matcher absorbs: ``/**/x.py`` is ``**/x.py``."""
         assert file_path_matches("api/sub/x.py", "/**/x.py") is True
