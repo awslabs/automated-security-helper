@@ -3340,6 +3340,10 @@ def _fold_taxonomy(self_run: "Run", taxonomy: "ToolComponent") -> None:
     if existing is None:
         self_run.taxonomies.append(taxonomy.model_copy(deep=True))
         return
+    if existing.guid is None and taxonomy.guid is not None:
+        # A kept taxon reference names its taxonomy by the guid the incoming
+        # run gave it, so the taxonomy the aggregate holds carries it too.
+        existing.guid = taxonomy.guid
     incoming_taxa = taxonomy.taxa or []
     if not incoming_taxa:
         return

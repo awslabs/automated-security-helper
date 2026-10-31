@@ -1821,6 +1821,51 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         assert [item.id for item in taxonomies[0].taxa] == ["CWE-1", "CWE-79"]
         assert [item.id for item in taxonomies[1].taxa] == ["A01"]
 
+    def test_a_taxonomy_without_a_guid_takes_the_one_the_incoming_run_gives(self):
+        """The aggregate holds ``CWE`` with no guid and the incoming run's
+        ``CWE`` carries one. The kept taxon reference names its taxonomy by
+        that guid, so the taxonomy the aggregate holds takes it, and the
+        reference names a component the run has."""
+        guid = "6f1c9c3a-1b2d-4e5f-8a9b-0c1d2e3f4a5b"
+        aggregated = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "aggregate",
+                    [],
+                    taxonomies=[{"name": "CWE", "taxa": [{"id": "CWE-1"}]}],
+                )
+            ]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            taxa=[{"index": 1, "toolComponent": {"index": 0}}],
+                        )
+                    ],
+                    taxonomies=[
+                        {
+                            "name": "CWE",
+                            "guid": guid,
+                            "taxa": [{"id": "CWE-1"}, {"id": "CWE-79"}],
+                        }
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        run = aggregated.runs[0]
+        taxon = run.results[0].taxa[0].root
+        assert taxon.toolComponent.guid == guid
+        assert [item.name for item in run.taxonomies] == ["CWE"]
+        assert run.taxonomies[0].guid == guid
+        assert [item.id for item in run.taxonomies[0].taxa] == ["CWE-1", "CWE-79"]
+
     def test_a_taxon_naming_nothing_by_id_or_guid_is_dropped(self):
         """An index past the end of the named taxonomy leaves the reference
         with neither an id nor a guid once the indices are dropped; it names no taxon,
