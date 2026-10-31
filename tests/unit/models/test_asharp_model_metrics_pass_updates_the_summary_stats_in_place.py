@@ -13,7 +13,8 @@ were set on the new one, and its extras, and the copy in ``save_model`` is gone.
 
 The controls say the dump of the set fields carries the keys it carried when the
 object was replaced, that only what was set on the source reaches the target, and that
-two models never share a summary object. A metadata that never set ``summary_stats``
+two models never share a summary object, whether each holds the default metadata or one
+built without the key. A metadata that never set ``summary_stats``
 (read from a file that lacks the key) counts the field as set once the pass has filled
 it, so the dump that leaves out unset fields carries the block.
 """
@@ -190,6 +191,20 @@ def test_a_metadata_that_never_set_summary_stats_carries_them_after_the_pass():
 def test_two_models_never_share_a_summary_object():
     first = _model(_result("R1"))
     second = _model(_result("R2"))
+    assert first.metadata.summary_stats is not second.metadata.summary_stats
+
+    populate_metrics_from_unified_source(first)
+
+    assert first.metadata.summary_stats.critical == 1
+    assert second.metadata.summary_stats.critical == 0
+
+
+def test_two_metadata_built_without_the_key_never_share_a_summary_object():
+    # ``ReportMetadata.summary_stats`` is a class-level default instance, not a
+    # default factory. The pass fills the held object in place, so a default that
+    # two metadata shared would carry one model's counts into the other.
+    first = _model(_result("R1"), metadata=ReportMetadata(project_name="first"))
+    second = _model(_result("R2"), metadata=ReportMetadata(project_name="second"))
     assert first.metadata.summary_stats is not second.metadata.summary_stats
 
     populate_metrics_from_unified_source(first)
