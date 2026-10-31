@@ -1883,9 +1883,9 @@ def _exec_rules(
     # names something. Never empty in practice: /usr is executable, and the private
     # TMPDIR is always denied.
     rules = []
-    for verdict, paths in (("allow", executable), ("deny", denied), ("allow", nested)):
+    for action, paths in (("allow", executable), ("deny", denied), ("allow", nested)):
         if paths:
-            rules.append(f"({verdict} process-exec {_sbpl_subpaths(paths)})")
+            rules.append(f"({action} process-exec {_sbpl_subpaths(paths)})")
     # uv's tools-directory lock is the one file inside an executable tool path
     # the scanner may write (profile grants it file-write*): a file it can write
     # and run would be a program of its own making, so exec is denied there last.

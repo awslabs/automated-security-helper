@@ -17,9 +17,9 @@ than resolved with them left out.
 Each scan here targets a directory outside the upload, so the uploaded file is not
 in the scanned tree and nothing but the new flag confines it.
 
-The scans go through the real ``_run_scan_async``, ``run_ash_scan`` and
-orchestrator, and stop inside ``resolve_config``: the wrapper below calls the real
-function, records what it returned, and raises so no scanner runs.
+The scans run the real ``_run_scan_async``, ``run_ash_scan`` and orchestrator, and
+end inside ``resolve_config``: the wrapper below calls the real function, records
+what it returned, and raises so no scanner runs.
 """
 
 from __future__ import annotations
