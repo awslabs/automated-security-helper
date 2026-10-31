@@ -38,13 +38,6 @@ from automated_security_helper.config.config_linter import (
 pytestmark = pytest.mark.unit
 
 
-def _active_yaml(text: str) -> dict:
-    """The config as a scan would read it: comment lines dropped."""
-    return yaml.safe_load(
-        "\n".join(line for line in text.split("\n") if not line.strip().startswith("#"))
-    )
-
-
 def _setup(tmp_path: Path, config_text: str, unused: list) -> Path:
     config_path = tmp_path / ".ash" / ".ash.yaml"
     config_path.parent.mkdir(parents=True)
@@ -88,7 +81,7 @@ def test_another_sections_suppressions_list_is_left_alone(tmp_path):
 
     assert [i.path for i in fixed_issues] == ["global_settings.suppressions[0]"]
     assert "# - path: tool/a.py" not in fixed_content
-    data = _active_yaml(fixed_content)
+    data = yaml.safe_load(fixed_content)
     assert data["scanners"]["custom-tool"]["options"]["suppressions"] == [
         {"path": "tool/a.py", "rule_id": "X1"}
     ]
@@ -123,7 +116,7 @@ def test_a_block_scalar_line_starting_with_the_key_does_not_reset_the_count(
 
     assert [i.path for i in fixed_issues] == ["global_settings.suppressions[2]"]
     assert "# - path: src/c.py" in fixed_content
-    data = _active_yaml(fixed_content)
+    data = yaml.safe_load(fixed_content)
     assert [s["path"] for s in data["global_settings"]["suppressions"]] == [
         "src/a.py",
         "src/b.py",
@@ -185,7 +178,7 @@ def test_every_entry_commented_out_leaves_an_empty_list_in_a_crlf_file(tmp_path)
     assert len(fixed_issues) == 2
     assert "\n" not in fixed_content.replace("\r\n", "")
     assert fixed_content.count("# [ash-lint") == 2
-    data = _active_yaml(fixed_content.replace("\r\n", "\n"))
+    data = yaml.safe_load(fixed_content.replace("\r\n", "\n"))
     assert data["global_settings"]["suppressions"] == []
     assert data["global_settings"]["severity_threshold"] == "MEDIUM"
     assert data["global_settings"]["ignore_paths"] == [{"path": "vendor/**"}]
@@ -380,7 +373,7 @@ def test_a_comment_between_entries_is_kept_as_it_is(tmp_path):
     fixed = fixed_content.replace("\r\n", "\n")
     assert "    # kept as written\n" in fixed
     assert "# # kept" not in fixed
-    data = _active_yaml(fixed)
+    data = yaml.safe_load(fixed)
     assert [s["path"] for s in data["global_settings"]["suppressions"]] == ["src/b.py"]
 
 
@@ -498,7 +491,7 @@ def test_an_anchor_inside_the_commented_entries_only_is_no_refusal():
     )
 
     assert commented == {0, 1}
-    data = _active_yaml(fixed)
+    data = yaml.safe_load(fixed)
     assert [s["path"] for s in data["global_settings"]["suppressions"]] == [
         "tests/c.py"
     ]
@@ -596,5 +589,5 @@ def test_an_entry_read_from_the_environment_in_a_crlf_file_is_matched(
     assert [i.path for i in fixed_issues] == ["global_settings.suppressions[0]"]
     assert "\r\n" in fixed_content
     assert "# - path: ${ASH_U06_CRLF_PATH}" in fixed_content
-    data = _active_yaml(fixed_content.replace("\r\n", "\n"))
+    data = yaml.safe_load(fixed_content.replace("\r\n", "\n"))
     assert [s["path"] for s in data["global_settings"]["suppressions"]] == ["src/b.py"]
