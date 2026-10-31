@@ -134,14 +134,17 @@ def _later_sweep_removes(
     boundary: SessionBoundary, session_id: str, root: Path
 ) -> None:
     """The boundary's own sweep, run as the server runs it before a request,
-    removes what the failed removal left. The id is still issued, since its
-    removal never succeeded, and being issued keeps nothing by itself: only an
-    open event stream does (``_sweep_if_due``). A sweep called directly with no
-    ``in_use`` would show a removal the server never makes."""
+    removes what the failed removal left. Being issued keeps nothing by itself:
+    only an open event stream does (``_sweep_if_due``), so what the sweep needs
+    is that the session has none open. That is what is asserted, not that the id
+    stays issued: for a shutdown or a finished sse stream nothing can send the
+    removal again, and a DELETE that can (the tests above) pins the issued id
+    itself. A sweep called directly with no ``in_use`` would show a removal the
+    server never makes."""
     workspace = root / session_id
     assert workspace.is_dir(), "the failed removal should leave the tree"
-    assert session_id in boundary._issued, (
-        "the failed removal should keep the id issued"
+    assert session_id not in boundary._open_streams, (
+        "the failed removal should leave no event stream open"
     )
     _age(workspace, 2 * boundary.session_workspace_ttl)
     boundary._next_sweep = 0.0
