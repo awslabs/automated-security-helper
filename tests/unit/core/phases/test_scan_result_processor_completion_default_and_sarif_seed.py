@@ -155,6 +155,62 @@ def _process_sarif(tmp_path, model: AshAggregatedResults) -> SarifReport:
     return report
 
 
+def _invocation_recorded_for(tmp_path, metadata: dict, attached: dict) -> dict:
+    """The ``invocation_details`` the processor attaches for one SARIF container
+    whose scanner's own run had already attached *attached*."""
+    processor, _ = _processor(tmp_path)
+    report = _scanner_sarif("bandit")
+    report.attach_scanner_details("bandit", None, attached)
+    container = ScanResultsContainer(
+        scanner_name="bandit",
+        target=str(processor.plugin_context.source_dir),
+        target_type="source",
+        metadata=metadata,
+    )
+    container.raw_results = report
+    with (
+        patch(
+            "automated_security_helper.core.phases.scan_result_processor."
+            "apply_suppressions_to_sarif",
+            side_effect=lambda sarif_report, **kwargs: sarif_report,
+        ),
+        patch.object(
+            SarifReport,
+            "attach_scanner_details",
+            autospec=True,
+            side_effect=SarifReport.attach_scanner_details,
+        ) as attach,
+    ):
+        processor.process_container(container, AshAggregatedResults())
+    return attach.call_args.kwargs["invocation_details"]
+
+
+class TestTheInvocationKeepsWhatTheScannersRunRecorded:
+    """The processor merged the container's exit code and duration over the
+    invocation the scanner's run had attached, and a container with none wrote
+    None over a recorded exit code."""
+
+    def test_a_container_without_an_exit_code_leaves_the_recorded_one(self, tmp_path):
+        # Red at the base: exit_code None, from the container's own empty field.
+        details = _invocation_recorded_for(
+            tmp_path,
+            metadata={"scanner_version": "1.7"},
+            attached={"exit_code": 2, "command_line": "bandit -r ."},
+        )
+
+        assert details["exit_code"] == 2
+        assert details["command_line"] == "bandit -r ."
+
+    def test_a_metadata_exit_code_still_wins_over_the_recorded_one(self, tmp_path):
+        details = _invocation_recorded_for(
+            tmp_path,
+            metadata={"scanner_version": "1.7", "exit_code": 3},
+            attached={"exit_code": 2},
+        )
+
+        assert details["exit_code"] == 3
+
+
 class TestAModelWithNoSarifSeedsItFromTheDefault:
     """With ``sarif`` None on the model, the first scanner's report became the
     aggregate: the combined SARIF carried that scanner's driver, and the two were one

@@ -226,14 +226,15 @@ class ScanResultProcessor:
                                 for item in value
                             ]
                         invocation_details[key] = value
-                if "exit_code" in results.metadata or hasattr(results, "exit_code"):
-                    invocation_details["exit_code"] = results.metadata.get(
-                        "exit_code", results.exit_code
-                    )
-                if "duration" in results.metadata or hasattr(results, "duration"):
-                    invocation_details["duration"] = results.metadata.get(
-                        "duration", results.duration
-                    )
+                # Only what the metadata states. ``hasattr`` on a model is true for
+                # every field, set or not, so the branch these replace took the
+                # container's own value whenever the metadata had none, and a
+                # container that had none either wrote None over the exit code
+                # and duration the scanner's run had attached. The container's
+                # values are the fallback below, when they exist.
+                for key in ("exit_code", "duration"):
+                    if results.metadata.get(key) is not None:
+                        invocation_details[key] = results.metadata[key]
 
             if hasattr(results, "start_time") and results.start_time:
                 invocation_details["start_time"] = (
