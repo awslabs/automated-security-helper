@@ -38,7 +38,7 @@ from automated_security_helper.cli.report import (
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("own_environment")]
 
 
 class _Terminal(io.StringIO):
@@ -57,13 +57,6 @@ def _write_results(directory: Path) -> Path:
 
 def _report(*args):
     return CliRunner().invoke(app, ["report", "--log-level", "ERROR", *args])
-
-
-@pytest.fixture(autouse=True)
-def _own_environment(monkeypatch, tmp_path):
-    monkeypatch.delenv("ASH_CONFIG", raising=False)
-    monkeypatch.delenv("ASH_OUTPUT_DIR", raising=False)
-    monkeypatch.chdir(tmp_path)
 
 
 # --- the writer ---

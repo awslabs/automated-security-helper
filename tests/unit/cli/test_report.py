@@ -338,6 +338,9 @@ def test_a_linked_output_or_reports_directory_is_refused(
     plugin.report.return_value = "rendered"
     plugin_class = MagicMock(return_value=plugin)
     plugin_class.__name__ = "MockTextReporter"
+    # The reporter answers to the format asked for, so the refusal below is the
+    # link check's and not an unknown format's.
+    _declares_name(plugin_class, "text")
     mock_plugin_manager.plugin_modules.return_value = [plugin_class]
     monkeypatch.chdir(tmp_path)
 

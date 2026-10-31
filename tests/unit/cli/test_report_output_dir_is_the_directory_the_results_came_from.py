@@ -26,7 +26,7 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("own_environment")]
 
 SARIF_REPORT = (
     "automated_security_helper.plugin_modules.ash_builtin.reporters."

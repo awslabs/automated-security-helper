@@ -23,9 +23,12 @@ import pytest
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.utils.helpers import importing_this_checkout
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+    pytest.mark.usefixtures("own_environment"),
+]
 
 # From this checkout, which `-I` alone would not import; see importing_this_checkout.
 DRIVER = importing_this_checkout(

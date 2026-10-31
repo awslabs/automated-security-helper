@@ -24,6 +24,27 @@ from tests.unit.cli.off_host_plugin_support import (
 
 
 @pytest.fixture
+def own_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """An ``ash report`` run that reads nothing of the runner's environment.
+
+    The command finds a configuration from ``ASH_CONFIG`` and from a ``.ash``
+    file in the working directory or above it, and the output directory from
+    ``ASH_OUTPUT_DIR``. A runner can set the variables, and a checkout holds its
+    own ``.ash/.ash.yaml``, so a test that invokes the command from the runner's
+    directory reads whatever is there. Here neither variable is set and the
+    working directory is the test's own temporary directory, which is returned.
+    A test that needs another working directory changes it after this.
+
+    A test module asks for it with
+    ``pytest.mark.usefixtures("own_environment")``.
+    """
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_OUTPUT_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
 def plugin_site(tmp_path: Path) -> Path:
     """An installed plugin package, outside every scanned tree in these tests.
 
