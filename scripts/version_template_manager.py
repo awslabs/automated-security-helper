@@ -86,6 +86,7 @@ _FORM_PREFIX = {name: prefix for name, prefix, _branch in INSTALL_REF_FORMS}
 # build flag with `=`. The safety net has to be looser than the anchors, or a pin in a
 # spelling nobody anchored is never seen. A quote sits inside the prefix, in front of
 # the `v` that unrecognized_pins appends.
+_SELF_NAMING_FORMS = frozenset({"--ash-revision-to-install", "ash-version:"})
 _LOOSE_PREFIX = {
     "--branch": r"(?:--branch(?:[ \t]+|=)|(?<![\w-])-b[ \t]*)[\"']?",
     "rev:": r"(?<![\w-])rev:[ \t]+[\"']?",
@@ -459,6 +460,16 @@ class VersionTemplateManager:
         this repository: the pin in it is ASH's, in a shape no anchor reads.
         """
         return re.search(_ASH_REPOSITORY, text) is not None
+
+    @staticmethod
+    def form_names_this_repository(form: str) -> bool:
+        """Whether an install form names this repository by itself.
+
+        ``--ash-revision-to-install`` and ``ash-version:`` are ASH's own options, so a
+        pin in one is ASH's whatever else is around it: no allowance can excuse it,
+        and the only remedy for one the anchors miss is to widen the form's prefix.
+        """
+        return form in _SELF_NAMING_FORMS
 
     @staticmethod
     def unrecognized_pins(text: str) -> List[UnrecognizedPin]:

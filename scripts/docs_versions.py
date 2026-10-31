@@ -687,16 +687,28 @@ def unrecognized_pin_problems(
         named = any(entry in pin.entry for entry in allowed)
         if named and not manager.names_this_repository(pin.entry):
             continue
-        refused = (
-            "; its entry names this repository, which no allowance excuses"
-            if named
-            else ""
-        )
+        shape = "add its shape to scripts/version_template_manager.py"
+        if named:
+            # The allowance matched, and the entry names this repository: only the
+            # shape can fix it, so the allowance is not offered as the way out.
+            advice = (
+                f"its entry names this repository, which no allowance excuses; {shape}"
+            )
+        elif manager.form_names_this_repository(pin.form):
+            advice = (
+                f"this form names this repository itself, so no allowance can excuse "
+                f"it; {shape}, widening the form's prefix in INSTALL_REF_FORMS"
+            )
+        else:
+            advice = (
+                "if it is another project's, add it to KNOWN_THIRD_PARTY_PINS in "
+                "scripts/docs_versions.py (an allowance matches only the entry or "
+                "command that holds the pin, cut at the nearest `;`, `&`, `|` or "
+                f"backtick on each side of it), otherwise {shape}"
+            )
         problems.append(
             f"{where} has a {pin.form} pin of {pin.version} that no pattern of "
-            f"ASH_PIN_PATTERNS accepts: {pin.line!r}; if it is another project's, add it "
-            "to KNOWN_THIRD_PARTY_PINS in scripts/docs_versions.py, otherwise add its "
-            f"shape to scripts/version_template_manager.py{refused}"
+            f"ASH_PIN_PATTERNS accepts: {pin.line!r}; {advice}"
         )
     return problems
 

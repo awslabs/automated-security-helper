@@ -760,7 +760,16 @@ def test_a_pin_in_a_shape_no_pattern_knows_fails_the_check(form, text):
     problems = dv.unrecognized_pin_problems(manager, text, "1.2.3/page/")
     assert len(problems) == 1, problems
     assert problems[0].startswith(f"1.2.3/page/ has a {form} pin of 3.3.0 "), problems
-    assert "KNOWN_THIRD_PARTY_PINS" in problems[0]
+    if manager.form_names_this_repository(form):
+        # ASH's own option: an allowance cannot excuse it, so none is offered.
+        assert "no allowance can excuse it" in problems[0], problems
+        assert "KNOWN_THIRD_PARTY_PINS" not in problems[0], problems
+        assert "INSTALL_REF_FORMS" in problems[0], problems
+    else:
+        assert "KNOWN_THIRD_PARTY_PINS" in problems[0]
+        # An allowance matches the entry cut at the nearest separator, which the
+        # reader needs to know when the project sits across a `|` from the pin.
+        assert "nearest `;`, `&`, `|` or backtick" in problems[0], problems
 
 
 @pytest.mark.unit
@@ -1015,14 +1024,23 @@ def test_an_allowance_never_excuses_an_entry_that_names_this_repository(text, al
     problems = dv.unrecognized_pin_problems(manager, text, "page/", allowed)
     assert len(problems) == 1, problems
     assert "names this repository" in problems[0], problems
+    # The allowance cannot fix this entry, so it is not offered as the way out.
+    assert "add it to KNOWN_THIRD_PARTY_PINS" not in problems[0], problems
+    assert "add its shape to scripts/version_template_manager.py" in problems[0]
+
+
+# An allowance names a project as `<owner>/<name>`: both parts, no scheme or host.
+_PROJECT_NAME = re.compile(r"[\w.-]+/[\w.-]+")
 
 
 def _allowance_problems(manager, allowed):
     """What is wrong with each allowance: it must name a project, not a pin or ASH."""
     problems = []
     for entry in allowed:
-        if "/" not in entry:
-            problems.append(f"{entry!r} has no `/`, so it names no project")
+        if not _PROJECT_NAME.fullmatch(entry):
+            problems.append(
+                f"{entry!r} is not `<owner>/<name>`, so it names no project"
+            )
         if manager.unrecognized_pins(entry) or manager.release_pins(entry):
             problems.append(f"{entry!r} is a prefix and a version, not a project")
         if manager.names_this_repository(entry):
@@ -1047,6 +1065,12 @@ def test_every_known_third_party_pin_names_a_project():
         "other-project",
         "example/other-project@v2.0.0",
         REPO_URL,
+        # A slash alone, a scheme, a host and an owner with no name: each holds a `/`
+        # and each would excuse every entry that holds it.
+        "/",
+        "https://",
+        "github.com/",
+        "example/",
     ],
     ids=[
         "prefix-and-tag",
@@ -1055,6 +1079,10 @@ def test_every_known_third_party_pin_names_a_project():
         "no-slash",
         "pinned",
         "this-repository",
+        "slash-only",
+        "scheme-only",
+        "host-and-slash",
+        "owner-with-no-name",
     ],
 )
 def test_an_allowance_that_names_no_project_is_found(entry):
@@ -1107,6 +1135,13 @@ def _built_text(markdown: str, *, commands_only: bool) -> str:
     `code` element of its own, and a table is a `table`. The highlighter wraps a
     `text` sample in the `div` that page_text drops for main, so the sample is
     wrapped the same way here.
+
+    What this does not run: Material's extensions (tabs, admonitions, snippets,
+    superfences, inline highlighting). A `=== "Tab"` body is one indented code block
+    here, which keeps its lines, so the pins in it are read; a `text` sample inside a
+    tab would not be wrapped and so would be read for main, where the build drops it;
+    a `--8<--` include is not expanded. None of the templates holds such a sample or
+    include today, which the real-page tests below rely on.
     """
     html = _MARKDOWN.render(markdown)
     html = _TEXT_FENCE.sub(r'<div class="language-text highlight">\1</div>', html)
