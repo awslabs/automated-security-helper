@@ -7,8 +7,8 @@ git checkout may add.
 ASH imports every module ``ash_plugin_modules`` names into its own process. When the
 config was built from a file inside the scanned tree or any git checkout
 (``config/sandbox_grants.py`` decides that), the entries it adds beyond the trusted
-list (the defaults, an operator config outside the tree, and ``--config-overrides``)
-are kept only if they name an installed module: one that ``importlib.util.find_spec``
+list (the defaults, an operator config outside every checkout, and
+``--config-overrides``) are kept only if they name an installed module: one that ``importlib.util.find_spec``
 locates outside the scanned tree and outside every git checkout (a virtualenv inside
 a checkout counts as inside it). An entry that is not importable, or whose spec
 points into the tree or a checkout, is dropped with one warning naming
@@ -29,8 +29,9 @@ data to a remote service with the operator's credentials: ``ash_aws_plugins``'
 reporters send findings, from the ASH process and outside the scanner sandbox, and
 ``ash_snyk_plugins``' scanner sends the scanned source to Snyk with the operator's
 Snyk token. Their plugins are enabled by default, so naming the package is enough
-to send the data. An in-tree file's entry naming one of them, or a module inside
-one, is kept only when the trusted list names it or its package.
+to send the data. The entry of a file in the scanned tree or any git checkout that
+names one of them, or a module inside one, is kept only when the trusted list names
+it or its package.
 
 Each level of a dotted name is located without importing its parent packages
 (``_spec_without_importing``), so checking a name runs no code.
@@ -483,7 +484,8 @@ def refusal_reason(
     also_scanned: Sequence[Path] = (),
     invalidate_caches: bool = True,
 ) -> Optional[str]:
-    """Why ``name`` may not be imported for a config in the scanned tree, or None.
+    """Why ``name`` may not be imported for a config in the scanned tree or any git
+    checkout, or None.
 
     ``invalidate_caches`` drops the import system's caches before the lookup.
     A caller that judges a list of names drops them once itself and passes
@@ -1671,11 +1673,11 @@ def plugin_modules_by_trust(
     The operator's are ``operator_modules`` (``--ash-plugin-modules`` and
     ``ASH_PLUGIN_MODULES``) and the config's ``ash_plugin_modules`` entries that
     its recorded trusted list names: the defaults, an operator config outside
-    the tree, and ``--config-overrides``. A config with no trusted list recorded
-    was built only from the operator's files, so all of its entries are the
-    operator's. The rest came from a config file inside the scanned tree or one
-    an MCP client delivered, and passed ``confine_plugin_modules``. A module both
-    name is the operator's.
+    every checkout, and ``--config-overrides``. A config with no trusted list
+    recorded was built only from the operator's files, so all of its entries are
+    the operator's. The rest came from a config file inside the scanned tree or
+    any other git checkout, or one an MCP client delivered, and passed
+    ``confine_plugin_modules``. A module both name is the operator's.
 
     ``ScanExecutionEngine`` imports the second list inside
     ``ash_plugin_manager.untrusted_import``, so a later scan in the process that
