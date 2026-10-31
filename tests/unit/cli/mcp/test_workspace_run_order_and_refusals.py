@@ -127,6 +127,23 @@ class _Claim:
         self.order.append("worker_returns")
 
 
+def _same_path(first, second) -> bool:
+    """Whether two spellings name one place, once resolved."""
+    return Path(first).resolve() == Path(second).resolve()
+
+
+@pytest.fixture
+def _fresh_registry(monkeypatch):
+    """A scan registry of this test's own, so another test's scans occupy nothing."""
+    from automated_security_helper.core.resource_management import (
+        scan_registry as scan_registry_module,
+    )
+
+    registry = ScanRegistry()
+    monkeypatch.setattr(scan_registry_module, "_scan_registry", registry)
+    return registry
+
+
 class TestTheGitignoreIsWrittenOnceTheOutputDirectoryExists:
     def test_project_outputs_writes_no_gitignore(self, tmp_path):
         """Red at the base: ``_project_outputs`` called the writer before any mkdir.
@@ -240,6 +257,100 @@ class TestTheGitignoreIsWrittenOnceTheOutputDirectoryExists:
         with pytest.raises(ValueError, match="gitignore"):
             workspace_module._project_outputs(plan, settings)
         assert not (output_dir / "projects").exists()
+
+    @pytest.mark.asyncio
+    async def test_the_scan_calls_the_writer_once_the_directories_exist(
+        self, tmp_path, monkeypatch, _fresh_registry
+    ):
+        """The call site itself, driven through ``mcp_scan_workspace``.
+
+        The two tests above build the order by hand and cannot see the call
+        site: moving the writer back above ``_create_project_outputs`` or
+        deleting it left them green. The writer is replaced by a recorder that
+        notes, as it is called, whether the output directory and the project's
+        directory under it exist yet.
+        """
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+        monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
+        plan = _plan(tmp_path)
+        output_dir = Path(plan.workspace_root) / "out"
+        calls = []
+
+        def recording_writer(source_dir, target_dir):
+            target = Path(target_dir)
+            calls.append(
+                (
+                    Path(source_dir),
+                    target,
+                    target.is_dir(),
+                    (target / "projects" / "api").is_dir(),
+                )
+            )
+            return True
+
+        with (
+            patch.object(
+                workspace_module,
+                "ignore_output_dir_in_git",
+                side_effect=recording_writer,
+            ),
+            patch.object(workspace_module, "prewarm_plugin_registry"),
+            patch.object(workspace_module, "refuse_unresolvable_scanner_selection"),
+            patch.object(
+                workspace_module,
+                "execute_workspace",
+                side_effect=lambda p, s, **k: _result(p, s),
+            ),
+        ):
+            response = await workspace_module.mcp_scan_workspace(
+                workspace_file=plan.workspace_file, output_dir=str(output_dir)
+            )
+
+        assert len(calls) == 1, (calls, response)
+        source, target, directory_existed, project_existed = calls[0]
+        assert _same_path(source, plan.workspace_root), calls
+        assert _same_path(target, output_dir), calls
+        assert (directory_existed, project_existed) == (True, True)
+
+    @pytest.mark.asyncio
+    async def test_a_linked_gitignore_refuses_the_call_before_anything_is_made(
+        self, tmp_path, monkeypatch, _fresh_registry
+    ):
+        """A link at the output directory's ``.gitignore`` is a refused command line.
+
+        It is named by the pre-registration link check (``linked_output_component``
+        reads that name for a directory inside the workspace root), so the call
+        registers nothing, creates no project directory and runs nothing; the
+        writer, which follows creation, is never reached for it. The file the
+        link names is left as it was.
+        """
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+        monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
+        plan = _plan(tmp_path)
+        output_dir = Path(plan.workspace_root) / "out"
+        output_dir.mkdir()
+        kept = tmp_path / "elsewhere.txt"
+        kept.write_text("kept\n", encoding="utf-8")
+        (output_dir / ".gitignore").symlink_to(kept)
+
+        def must_not_run(*args, **kwargs):
+            raise AssertionError("a refused workspace scan must not run")
+
+        with patch.object(
+            workspace_module, "execute_workspace", side_effect=must_not_run
+        ):
+            response = await workspace_module.mcp_scan_workspace(
+                workspace_file=plan.workspace_file, output_dir=str(output_dir)
+            )
+
+        assert response["success"] is False, response
+        assert response.get("exit_code") == 3, response
+        assert ".gitignore" in str(response), response
+        assert _fresh_registry.list_scans() == []
+        assert [path.name for path in output_dir.iterdir()] == [".gitignore"]
+        assert kept.read_text(encoding="utf-8") == "kept\n"
 
 
 def _registered(registry: ScanRegistry, tmp_path: Path, output: Path, name: str) -> str:
