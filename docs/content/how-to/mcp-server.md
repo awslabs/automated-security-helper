@@ -542,9 +542,10 @@ restrict the server's own but not widen them. A file whose own `sandbox` section
   every git checkout and the scanned directory, and never the AWS or Snyk plugin modules,
   or a module inside either.
 
-Any other sandbox grant or plugin module a delivered file asks for, such as a
-`read_path_scanners`, `env_scanners` or `environment` entry, is dropped with a warning, as for a repository's
-config.
+Any other sandbox grant a delivered file asks for, such as a `read_path_scanners`,
+`env_scanners` or `environment` entry the server's settings lack, is refused the same
+way, with the setting named; an `environment` entry is named by its variable and
+never by its value.
 
 The server's settings are the ones in the file `ASH_CONFIG` names, and that file grants nothing
 when it is inside a git checkout, or inside the directory a scan covers, so keep it outside
