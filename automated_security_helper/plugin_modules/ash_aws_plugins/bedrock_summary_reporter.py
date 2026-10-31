@@ -827,9 +827,15 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
             description="Maximum number of tokens to generate in the response, at least 1 (Converse's range).",
         ),
     ]
+    # topP has the same range as temperature (the same InferenceConfiguration page:
+    # "Valid Range: Minimum value of 0. Maximum value of 1."), and a value outside
+    # it is refused by every fallback candidate alike.
     top_p: Annotated[
         float,
         Field(
+            ge=0,
+            le=1,
+            allow_inf_nan=False,
             description="Top-p parameter for the Bedrock model. Controls diversity of generated text.",
         ),
     ] = 0.9
