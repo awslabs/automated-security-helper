@@ -892,9 +892,10 @@ def secret_rule_ids(sarif_report: Any) -> Set[str]:
 #: (``SBOM``: syft), as ``utils/scanner_names.SCANNER_TOOL_TYPES`` declares them.
 #: An advisory titled "Hardcoded credentials in configuration" describes the
 #: dependency's weakness class, not a value in the scanned files, so such a
-#: finding is not a secret finding by its text and never a resource-level one:
-#: read as one, placed at line 1 of package.json with no column span, it masked
-#: every line of the file.
+#: finding is not a secret finding by its text, nor by a rule that is a secret
+#: rule only for its description, and never a resource-level one: read as one,
+#: placed at line 1 of package.json with no column span, it masked every line of
+#: the file.
 _DEPENDENCY_TOOL_TYPES = frozenset({"SCA", "SBOM"})
 
 
