@@ -550,6 +550,10 @@ def exec_with_socket_filter(allow_ip: bool, command: List[str]) -> NoReturn:
     try:
         os.execvp(command[0], command)
     except OSError as e:
+        # The exec did not happen, so the line below is written by this program
+        # with the default SIGPIPE just restored: a stderr whose reader is gone
+        # would end the process with the signal, not with exit 126.
+        _ignore_sigpipe()
         fail(f"exec {command[0]}: {e}")
 
 
@@ -560,9 +564,22 @@ def _restore_dispositions() -> None:
     disposition, so without this the scanner would run with them ignored, unlike
     the same scanner started unwrapped (subprocess restores them in every child
     it starts). Both exec routes of this program call it last before the exec.
+    A route whose exec then fails calls ``_ignore_sigpipe`` before it reports.
     """
     for restored in (signal.SIGPIPE, signal.SIGXFSZ):
         signal.signal(restored, signal.SIG_DFL)
+
+
+def _ignore_sigpipe() -> None:
+    """Make a write to a closed pipe an error again, not a signal.
+
+    After ``_restore_dispositions`` the default SIGPIPE ends a process that
+    writes to a pipe nobody reads. What this program writes from then on is the
+    report of a step that failed, followed by exit 126, and a child that died of
+    the signal first handed ASH -13 where it owed 126 (``_write_stderr`` drops
+    the error the ignored signal leaves).
+    """
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
 
 def _children_files(pid: int = 0) -> Optional[List[int]]:
@@ -827,28 +844,36 @@ def _run_child(
     happened, the child never returns into the wrapper's code and never exits
     with the interpreter's traceback and 1 (which scanners use for "findings"):
     the exit sits in a ``finally``, so an exception none of the clauses caught,
-    the reporting itself failing included, still ends in 126.
+    the reporting itself failing included, still ends in 126. Every report is
+    written with SIGPIPE ignored again: ``_child_setup`` ends by restoring its
+    default for the scanner, and a stderr whose reader is gone would otherwise
+    end the child with the signal before it could exit 126.
     """
+
+    def report(text: str) -> None:
+        _ignore_sigpipe()
+        _note(text)
+
     try:
         try:
             _child_setup(restrict)
         except SystemExit:
             pass
         except KeyboardInterrupt:
-            _note("stopped before the scanner started")
+            report("stopped before the scanner started")
         except BaseException as e:  # noqa: BLE001 - the child reports and exits
-            _note(f"restricting the scanner: {type(e).__name__}: {e}")
+            report(f"restricting the scanner: {type(e).__name__}: {e}")
         else:
             if parent is not None and os.getppid() != parent:
-                _note("the wrapper exited before the scanner started")
+                report("the wrapper exited before the scanner started")
             else:
                 try:
                     os.execve(command[0], command, os.environ)
                 except KeyboardInterrupt:
-                    _note("stopped before the scanner started")
+                    report("stopped before the scanner started")
                 except Exception as e:  # noqa: BLE001 - reported, then exit 126
                     # The scanner's path, and the error that quotes it.
-                    _note(f"exec {command[0]}: {e}")
+                    report(f"exec {command[0]}: {e}")
     finally:
         os._exit(126)
 

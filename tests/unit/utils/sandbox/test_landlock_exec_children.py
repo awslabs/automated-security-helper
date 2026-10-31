@@ -1060,3 +1060,82 @@ def test_the_stand_in_proc_is_only_opened_for_reading():
     assert proc.open("/proc/1/stat", "rb").read() == b"1 (init) S 0"
     with pytest.raises(AssertionError):
         proc.open("/proc/1/stat", "wb")
+
+
+class _RecordedStderr:
+    """A stderr that records each write among the events of the run."""
+
+    def __init__(self, events: List[Tuple[str, tuple]]) -> None:
+        self._events = events
+
+    def write(self, text: str) -> int:
+        self._events.append(("write", (text,)))
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+
+def _sigpipe_at_the_first_write(events: List[Tuple[str, tuple]]):
+    """The disposition SIGPIPE was last given before the first stderr write."""
+    disposition = None
+    for name, args in events:
+        if name == "signal" and args[0] == signal.SIGPIPE:
+            disposition = args[1]
+        if name == "write":
+            return disposition
+    raise AssertionError(f"nothing was written: {events}")
+
+
+def _refused_exec(*args) -> None:
+    raise OSError(errno.ENOENT, "No such file or directory", "/bin/true")
+
+
+@pytest.mark.parametrize("wrapper_alive", [True, False])
+def test_the_child_reports_a_failure_after_its_setup_with_sigpipe_ignored(
+    monkeypatch, wrapper_alive
+):
+    """``_child_setup`` ends by giving SIGPIPE its default for the scanner. The
+    report of an exec that failed, or of a wrapper that exited before the exec, is
+    written after that, to a stderr that may be a closed pipe: with the default
+    disposition the signal ends the child and ASH reads -13 where it owes 126."""
+    events: List[Tuple[str, tuple]] = []
+
+    def setup(restrict) -> None:
+        events.append(("setup", ()))
+        landlock_exec._restore_dispositions()
+
+    fake_os = _Recording(os, {"_exit"}, events)
+    fake_os.execve = _refused_exec
+    monkeypatch.setattr(landlock_exec, "os", fake_os)
+    monkeypatch.setattr(landlock_exec, "signal", _Recording(signal, {"signal"}, events))
+    monkeypatch.setattr(landlock_exec, "_child_setup", setup)
+    monkeypatch.setattr(sys, "stderr", _RecordedStderr(events))
+
+    landlock_exec._run_child(
+        ["/bin/true"], lambda: None, os.getppid() if wrapper_alive else -1
+    )
+
+    assert events[-1] == ("_exit", (126,))
+    assert _sigpipe_at_the_first_write(events) == signal.SIG_IGN
+
+
+def test_the_socket_filter_route_reports_a_failed_exec_with_sigpipe_ignored(
+    monkeypatch,
+):
+    """The same for the route that execs in place: it restores the dispositions,
+    and its exec failing is reported, with exit 126, after that."""
+    events: List[Tuple[str, tuple]] = []
+    fake_os = _Recording(os, set(), events)
+    fake_os.execvp = _refused_exec
+    monkeypatch.setattr(landlock_exec, "os", fake_os)
+    monkeypatch.setattr(landlock_exec, "signal", _Recording(signal, {"signal"}, events))
+    monkeypatch.setattr(landlock_exec, "libc", _Recording(None, {"prctl"}, events))
+    monkeypatch.setattr(landlock_exec, "apply_socket_seccomp", lambda allow_ip: None)
+    monkeypatch.setattr(sys, "stderr", _RecordedStderr(events))
+
+    with pytest.raises(SystemExit) as raised:
+        landlock_exec.exec_with_socket_filter(True, ["/bin/true"])
+
+    assert raised.value.code == 126
+    assert _sigpipe_at_the_first_write(events) == signal.SIG_IGN
