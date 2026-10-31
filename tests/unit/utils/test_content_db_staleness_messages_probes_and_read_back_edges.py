@@ -20,7 +20,10 @@ Properties of ``utils/content_db_staleness.py`` that nothing else pins:
 - a probe context of None is named in the unmeasurable record;
 - one record whose notification cannot be built does not keep the others out of
   the report;
-- a stale record that does not parse back still fails the scan.
+- a stale record that does not parse back still fails the scan;
+- a report whose error list holds more than the rejected databases' own errors
+  (an unevaluated target, a timeout) or that sets the could-not-halt flag is not
+  read as failed for a stale database alone.
 """
 
 from __future__ import annotations
@@ -282,3 +285,47 @@ def test_a_stale_record_that_does_not_parse_back_still_fails_the_scan():
     ]
     assert enforced[0].stale is True
     assert "could not be read back" in (enforced[0].error or "")
+
+
+@pytest.mark.parametrize(
+    ("report", "stale_only"),
+    [
+        # The control: the one error the executor adds for the rejected database.
+        (
+            {
+                "rejected_content_databases": ["grype-db"],
+                "errors": ["grype-db is stale"],
+            },
+            True,
+        ),
+        # A second error beside it: an unevaluated target adds a line of its own
+        # ("no rule was evaluated against <target>"), as a timeout does.
+        (
+            {
+                "rejected_content_databases": ["grype-db"],
+                "errors": [
+                    "grype-db is stale",
+                    "no rule was evaluated against template.yaml",
+                ],
+            },
+            False,
+        ),
+        # A scanner that could not be halted sets its own flag.
+        (
+            {
+                "rejected_content_databases": ["grype-db"],
+                "errors": ["grype-db is stale"],
+                "could_not_stop": True,
+            },
+            False,
+        ),
+        # No rejected database: nothing here is a stale database's error.
+        ({"errors": ["grype-db is stale"]}, False),
+    ],
+    ids=["only-the-rejected-error", "unevaluated-target", "flag-set", "none-rejected"],
+)
+def test_an_error_beyond_the_rejected_databases_is_not_stale_only(report, stale_only):
+    """The causes the check separates: the rejected databases' own errors, an
+    unevaluated target or a timeout (one more error line), and a scanner that
+    could not be halted (its flag)."""
+    assert staleness._error_only_for_a_stale_database(report) is stale_only
