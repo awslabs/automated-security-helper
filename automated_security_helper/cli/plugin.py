@@ -57,6 +57,26 @@ _PLUGIN_TYPES = (
     ("reporter", "reporters"),
 )
 
+
+def _reachable_label(entry) -> str:
+    """Map tri-state dependencies_satisfied to a Yes/No/Unknown label."""
+    if entry is None:
+        return "Unknown"
+    satisfied = entry.get("dependencies_satisfied")
+    if satisfied is True:
+        return "Yes"
+    if satisfied is False:
+        return "No"
+    return "Unknown"
+
+
+def _version_label(entry) -> str:
+    """Render the detected version, or 'Unknown' when none was detected."""
+    if entry is None:
+        return "Unknown"
+    return entry.get("version") or "Unknown"
+
+
 plugin_app = typer.Typer(
     name="plugin",
     help="Manage ASH plugins",
@@ -205,7 +225,7 @@ def list_plugins(
         admits = scan_plugin_filter(split_modules)
         selected = {
             kind: list(ash_plugin_manager.plugin_modules(kind, admits))
-            for kind in ("scanner", "converter", "reporter")
+            for kind, _title in _PLUGIN_TYPES
         }
         selected = ash_plugin_manager.plugins_loaded_by(selected, split_modules)
         # The option's entries as given, not split_modules: the trust filter
@@ -289,23 +309,6 @@ def list_plugins(
                 )
                 for scanner_class in scanner_classes:
                     scanner_inventory_by_class[scanner_class] = None
-
-        def _reachable_label(entry) -> str:
-            """Map tri-state dependencies_satisfied to a Yes/No/Unknown label."""
-            if entry is None:
-                return "Unknown"
-            satisfied = entry.get("dependencies_satisfied")
-            if satisfied is True:
-                return "Yes"
-            if satisfied is False:
-                return "No"
-            return "Unknown"
-
-        def _version_label(entry) -> str:
-            """Render the detected version, or 'Unknown' when none was detected."""
-            if entry is None:
-                return "Unknown"
-            return entry.get("version") or "Unknown"
 
         # Every listed plugin is built below from its section, as a scan builds
         # it, so the row shows the config the plugin's own model reads.
