@@ -213,6 +213,33 @@ class TestAbsoluteScannerUris:
         """file:///C:/x reduces to /C:/x, so a drive arrives spelled three ways."""
         assert to_workspace_uri(uri, "api", "C:/ws/api") == "api/src/w.py"
 
+    @pytest.mark.parametrize(
+        "uri,project,expected",
+        [
+            # A letter and a colon followed by a name are a POSIX directory name,
+            # not a drive: the path is rooted, and outside this project.
+            ("/x:legacy/src/x.py", "/ws/api", None),
+            ("file:///x:legacy/src/x.py", "/ws/api", None),
+            # The same name as a project directory: inside it, and rebased once.
+            ("/x:legacy/src/x.py", "/x:legacy", "api/src/x.py"),
+            ("file:///x:legacy/src/x.py", "/x:legacy", "api/src/x.py"),
+            # Control: a real drive, spelled with the separator file:/// leaves.
+            ("/C:/ws/api/src/w.py", "C:/ws/api", "api/src/w.py"),
+            ("file:///C:/ws/api/src/w.py", "C:/ws/api", "api/src/w.py"),
+        ],
+    )
+    def test_a_letter_colon_name_is_a_name_and_not_a_drive(
+        self, uri, project, expected
+    ):
+        """A rooted POSIX URI was read as unrooted on the colon alone.
+
+        ``/x:legacy/src/x.py`` lost its leading separator, became project-relative
+        and was rebased as ``api/x:legacy/src/x.py``, a path naming nothing and not
+        counted as unconvertible. The drive rule is the one the pattern converters
+        read (``utils.workspace_paths.drive_anchor``).
+        """
+        assert to_workspace_uri(uri, "api", project) == expected
+
     def test_a_relative_windows_uri_still_converts(self):
         assert to_workspace_uri("src\\w.py", "api", "C:/ws/api") == "api/src/w.py"
 
