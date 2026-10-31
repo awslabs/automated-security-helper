@@ -8473,6 +8473,14 @@
   is sent without its snippets. With `include_code_snippets` off (the default),
   `reports/ash.bedrock.summary.md` no longer carries snippets in its "Raw JSON"
   blocks.
+- **The S3 reporter uses `key_prefix` as written and warns once per run when it
+  does not end in `/`.** The object is named
+  `<key_prefix>[<project>/]ash-report-<time>.<extension>`, so a prefix of
+  `scans/repo-` gives `scans/repo-ash-report-<time>.json`, the name an existing
+  notification, lifecycle rule or query already matches. A prefix with no
+  trailing slash now logs one warning per run; the warning does not quote the
+  prefix, which can come from the environment. End the prefix with `/`, as the
+  default `ash-reports/` does, to place the report in a directory.
 - **Every finding's `id` in `ash.flat.json`, `ash.csv` and the MCP tools changes
   once.** It was `<scanner>-<rule>-<8 hex digits of a hash of the message>`, so
   two findings of one rule with one message shared an `id`, and rewording a
