@@ -137,7 +137,7 @@ import shutil
 import stat
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
 from automated_security_helper.core.exceptions import WorkspacePatternError
@@ -410,6 +410,22 @@ def project_relative_uri(uri: str, project_path: str) -> Any:
     # relative_to succeeds for the root itself, whose remainder is "."; that
     # names a directory, not a finding location.
     return remainder.as_posix() if remainder.parts else None
+
+
+def _artifact_uri_text(reduced: str, source_uri: str) -> str:
+    """The text to write into ``artifactLocation.uri`` for a reduced path.
+
+    *reduced* is the project-relative path with a ``file:`` URI's percent-escapes
+    already decoded, which is the form every comparison here needs. A SARIF
+    ``uri`` is a URI reference, so a reader decodes it again: written back
+    decoded, ``x%2541.py`` became ``x%41.py`` and was read as ``xA.py``, and
+    ``a%23b.py`` became ``a#b.py``, whose ``#`` starts a fragment. A source that
+    was a ``file:`` URI is therefore written re-encoded. A source with no scheme
+    was a bare path, whose ``%`` is part of the name, and is written as it is.
+    """
+    if source_uri.strip().lower().startswith("file:"):
+        return quote(reduced, safe="/")
+    return reduced
 
 
 def to_workspace_uri(
@@ -688,7 +704,7 @@ def rebase_run_for_project(
                 placed = None
             else:
                 placed = reduced
-                artifact["uri"] = reduced
+                artifact["uri"] = _artifact_uri_text(reduced, str(uri))
                 rewritten = True
 
             if placed is None:
