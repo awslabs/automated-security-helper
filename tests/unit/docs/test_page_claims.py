@@ -6933,8 +6933,21 @@ def test_ash_offline_turns_offline_mode_on_for_yes_true_and_1(
 #: ``_check_offline_cache``). The whole shape, so a warning about a directory that
 #: exists but holds no database cannot stand in for it.
 _OFFLINE_GRYPE_WARNING = re.compile(
-    r"Grype offline mode: the database directory .+ does not exist"
+    r"Grype offline mode: the database directory (.+?) does not exist"
 )
+
+
+def _default_grype_cache(home: Path) -> str:
+    """Where grype reads its database with no ``GRYPE_DB_CACHE_DIR`` and no
+    ``XDG_CACHE_HOME``, written out per platform rather than asked of the code
+    that names it: the XDG cache directory on Linux, ``Library/Caches`` on macOS,
+    ``%LOCALAPPDATA%\\cache`` on Windows (the test points ``LOCALAPPDATA`` under
+    the run's home)."""
+    if sys.platform == "win32":
+        return (home / "AppData" / "Local" / "cache" / "grype" / "db").as_posix()
+    if sys.platform == "darwin":
+        return (home / "Library" / "Caches" / "grype" / "db").as_posix()
+    return (home / ".cache" / "grype" / "db").as_posix()
 
 
 @pytest.mark.parametrize(
@@ -6985,9 +6998,52 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
     assert result.returncode == 2, (
         f"exit {result.returncode}, expected 2:\n{_output_tail(result)}"
     )
-    assert bool(_OFFLINE_GRYPE_WARNING.search(_config_scan_log(tree))) is warned, (
+    named = _OFFLINE_GRYPE_WARNING.search(_config_scan_log(tree))
+    assert (named is not None) is warned, (
         f"the grype warning is {'missing from' if warned else 'in'} ash.log"
     )
+    if named is not None:
+        # The directory is the default cache under this run's own home, not the
+        # operator's real one: a warning that names another directory would still
+        # match the shape above.
+        expected = _default_grype_cache(tmp_path / "home")
+        assert named.group(1) == expected, named.group(0)
+
+
+@pytest.mark.integration
+def test_an_offline_scan_names_the_missing_cache_grype_variable_points_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run-offline.md (Turn on offline mode).
+
+    The page's sentence names the cache grype would read, ``GRYPE_DB_CACHE_DIR`` first.
+    With the variable set to a directory that does not exist, the offline scan
+    exits 2 and its log warns about that directory, not the default one. The wording
+    is the validator's (``Cache directory does not exist: <path>``), not the
+    default-cache sentence the page quotes as an example, so the path is what is held.
+    """
+    assert_on_page(
+        _OFFLINE_PAGE, "naming the cache grype would read (`GRYPE_DB_CACHE_DIR`"
+    )
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    tree = _config_scan_tree(tmp_path, {"app.py": _CONFIG_SECRET})
+    missing = tmp_path / "cache-that-does-not-exist"
+    assert not missing.exists()
+    args = [*_CONFIG_SCAN, "--source-dir", str(tree), "--offline"]
+
+    result = _ash(
+        args,
+        cwd=tmp_path,
+        GRYPE_DB_CACHE_DIR=str(missing),
+        LOCALAPPDATA=str(tmp_path / "home" / "AppData" / "Local"),
+    )
+
+    assert result.returncode == 2, (
+        f"exit {result.returncode}, expected 2:\n{_output_tail(result)}"
+    )
+    log = _config_scan_log(tree)
+    assert f"Cache directory does not exist: {missing}" in log
+    assert _default_grype_cache(tmp_path / "home") not in log
 
 
 @pytest.mark.unit
@@ -9730,11 +9786,11 @@ def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
     every result the scan wrote, and the scan's own ``ash.log`` must stay, not the
     previous scan's; with none, ``partial.txt`` must stay. In the report phase
     the cancel lands while the plugin reporter, which runs after ASH's own, waits: the
-    reports that phase wrote must be gone, ``reports/ash.unused-suppressions.md``, which
-    its reporter writes beside them, with them. In every case the scan's ``ash.log`` must stay, and an
-    ``ash.log.jsonl`` that was there before the scan must be left as it was. The
-    control in each case is the scan under way when the cancel is sent, and for the
-    report phase that ASH's reports were written by then.
+    reports that phase wrote must be gone, ``reports/ash.unused-suppressions.md``
+    (which its reporter writes beside them) included. In every case the scan's
+    ``ash.log`` must stay, and an ``ash.log.jsonl`` that was there before the scan
+    must be left as it was. The control in each case is the scan under way when the
+    cancel is sent, and for the report phase that ASH's reports were written by then.
     """
     assert_on_page(MCP_TOOLS, _CANCEL_PUTS_BACK)
     assert_on_page(MCP_TOOLS, _CANCEL_LEAVES)
