@@ -53,10 +53,15 @@ def _plugin(context) -> PluginBase:
 
 def test_a_custom_command_is_returned_as_declared(plugin_context):
     """The shell=True example is a command line that needs the shell (a variable
-    to expand); an argv that already names its program is declared shell=False.
-    Neither is run here: the test pins the shape the installer is handed."""
+    to expand), declared as ONE element: a list handed to the shell runs its
+    first element as the command line and passes the rest to it as positional
+    parameters, so ``["echo", "$HOME"]`` would print an empty line, where the
+    one-element form expands the variable whether the runner passes the list on
+    or joins it first. An argv that already names its program is declared
+    shell=False. Neither is run here: the test pins the shape the installer is
+    handed."""
     plugin = _plugin(plugin_context)
-    through_the_shell = CustomCommand(args=["echo", "$HOME"], shell=True)
+    through_the_shell = CustomCommand(args=["echo $HOME"], shell=True)
     plain = CustomCommand(args=["echo", "ready"])
     plugin.custom_install_commands = {"linux": {"amd64": [through_the_shell, plain]}}
 
@@ -67,12 +72,14 @@ def test_a_custom_command_is_returned_as_declared(plugin_context):
 
 
 def test_the_installer_reads_the_shell_flag_off_the_returned_command(plugin_context):
-    """The consumer's side: what the installer runs, and how."""
+    """The consumer's side: how the installer reads the returned commands. That
+    the flag then reaches the runner is checked by driving the install loop, in
+    tests/unit/cli/test_dependencies_install_passes_the_shell_flag.py."""
     plugin = _plugin(plugin_context)
     plugin.custom_install_commands = {
         "linux": {
             "amd64": [
-                CustomCommand(args=["echo", "$HOME"], shell=True),
+                CustomCommand(args=["echo $HOME"], shell=True),
                 CustomCommand(args=["echo", "ready"]),
             ]
         }
@@ -80,7 +87,7 @@ def test_the_installer_reads_the_shell_flag_off_the_returned_command(plugin_cont
 
     checked = _well_formed_commands(plugin.get_installation_commands("linux", "amd64"))
 
-    assert checked == [(["echo", "$HOME"], True), (["echo", "ready"], False)]
+    assert checked == [(["echo $HOME"], True), (["echo", "ready"], False)]
 
 
 def test_a_returned_custom_command_still_reads_as_its_argv(plugin_context):
