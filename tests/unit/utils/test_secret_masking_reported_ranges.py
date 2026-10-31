@@ -266,6 +266,60 @@ class TestAKeyBlocksRangeOnLaterMaskings:
 
         assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
 
+    def _begin_line_finding_alone(self):
+        """No other finding's snippet shows the BEGIN line and nothing was
+        recorded on the finding: a single-finding file, or results a version
+        before the record was written saved."""
+        return _results(_key_finding(rule_id="CUSTOM-1", tags=["secret"]))
+
+    def test_the_findings_browser_masks_a_key_nothing_else_showed(self):
+        mask = source_snippet_masker(self._begin_line_finding_alone())
+
+        shown = mask("keys.py", 10, "".join([BEFORE_PEM] + PEM_LINES + [AFTER_PEM]))
+
+        assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
+
+    def test_a_text_that_shows_no_end_line_is_masked_to_its_last_line(self):
+        """The END line is past what the browser read: fail closed."""
+        mask = source_snippet_masker(self._begin_line_finding_alone())
+
+        shown = mask("keys.py", 10, "".join([BEFORE_PEM] + PEM_LINES[:3]))
+
+        assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 3
+
+    def test_a_reported_line_that_does_not_begin_a_block_is_masked_alone(self):
+        """Control: a finding on a body line, with the BEGIN line above it in the
+        text, covers that line and no more."""
+        finding = _result(
+            "CUSTOM-2",
+            "keys.py",
+            12,
+            "Custom finding",
+            "detect-secrets",
+            tags=["secret"],
+        )
+        mask = source_snippet_masker(_results(finding))
+
+        shown = mask("keys.py", 10, "".join([BEFORE_PEM] + PEM_LINES + [AFTER_PEM]))
+
+        assert shown == (
+            BEFORE_PEM
+            + PEM_LINES[0]
+            + MASKED_LINE
+            + "\n"
+            + PEM_LINES[2]
+            + PEM_LINES[3]
+            + AFTER_PEM
+        )
+
+    def test_the_browser_reads_the_results_and_changes_nothing(self):
+        model = self._begin_line_finding_alone()
+        before = model.model_dump_json()
+
+        source_snippet_masker(model)("keys.py", 10, "".join(PEM_LINES))
+
+        assert model.model_dump_json() == before
+
 
 class TestTheEndLineOfAnotherFileOfTheSameName:
     def test_an_earlier_end_line_in_another_file_does_not_cut_the_range(self):

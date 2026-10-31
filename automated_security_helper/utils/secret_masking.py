@@ -1913,6 +1913,31 @@ def _mask_lines(
     return "".join(out)
 
 
+def _with_key_blocks(
+    text: str, first_line: Optional[int], lines: _LineRanges
+) -> _LineRanges:
+    """``lines`` and, for each reported line of ``text`` that begins a PEM block,
+    the lines through the block's END line, or through the last line of ``text``
+    when it shows none.
+
+    For text read from the file itself (``source_snippet_masker``), where no
+    other finding's snippet may have shown the BEGIN line and no earlier masking
+    may have recorded the block: the index then holds the BEGIN line alone, and
+    the key's body, which the text shows, was kept. Nothing is recorded; the
+    text is the evidence.
+    """
+    if not isinstance(first_line, int) or _UNCOUNTED_LINE_BREAK.search(text):
+        return lines
+    split = _split_lines(text)
+    ends = [offset for offset, line in enumerate(split) if _PEM_END in line]
+    blocks: List[Tuple[int, int]] = []
+    for offset, line in enumerate(split):
+        if _PEM_BEGIN in line and first_line + offset in lines:
+            last = next((end for end in ends if end >= offset), len(split) - 1)
+            blocks.append((first_line + offset, first_line + last))
+    return lines | _LineRanges(blocks) if blocks else lines
+
+
 def _mask_snippet(
     content: Any,
     first_line: Optional[int],
@@ -2666,7 +2691,8 @@ def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], s
 
     For a reader that shows a finding's file from disk when the results hold no
     snippet for it (the findings browser): the lines at a location a secret
-    finding of ``results`` reports, and every value and shape the masking of
+    finding of ``results`` reports (a reported line that begins a PEM block, through
+    the block's END line), and every value and shape the masking of
     ``results`` found, are masked. ``results`` is read, never changed. The
     function takes the file's URI as the finding names it, the line number of
     the text's first line, and the text.
@@ -2682,6 +2708,9 @@ def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], s
         placed = index.lines_for(uri)
         if placed is not None:
             whole, lines = placed
+            # A reported line that begins a key block runs through the block's
+            # END line, though no snippet showed it and no record names it.
+            lines = _with_key_blocks(text, first_line, lines)
             text = _mask_lines(text, first_line, whole, lines)
         text = index.mask_values(text)
         # The values a secret finding exposed, whatever they look like, are
