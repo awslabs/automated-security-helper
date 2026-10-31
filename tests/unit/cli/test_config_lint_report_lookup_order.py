@@ -25,6 +25,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.config.config_linter import ConfigLinter
+from tests.unit.config.test_config_file_reads import _returns_promptly
 
 pytestmark = pytest.mark.unit
 
@@ -68,21 +69,31 @@ def test_a_plain_lint_of_a_tree_does_not_look_for_the_report(tmp_path, lookups):
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="the platform has no FIFOs")
 def test_a_config_that_is_a_fifo_is_refused_before_the_lookup(tmp_path, lookups):
-    """Red at the base: the lookup, which reads the config, ran first."""
+    """Red at the base: the lookup, which reads the config, ran first.
+
+    The command runs on a thread that is waited for with a timeout
+    (``_returns_promptly``): a regression of the refusal makes the open block
+    until something writes to the FIFO, and run on the test's own thread that
+    would stall the suite to the CI timeout instead of failing this test.
+    """
     fifo = tmp_path / ".ashrc.yaml"
     os.mkfifo(fifo)
+    outcome: dict = {}
 
-    result = _invoke(
-        [
-            "lint",
-            "--config",
-            str(fifo),
-            "--source-dir",
-            str(tmp_path),
-            "--fix-unused",
-        ]
-    )
+    def run() -> None:
+        outcome["result"] = _invoke(
+            [
+                "lint",
+                "--config",
+                str(fifo),
+                "--source-dir",
+                str(tmp_path),
+                "--fix-unused",
+            ]
+        )
 
+    assert _returns_promptly(run, fifo) is None
+    result = outcome["result"]
     assert result.exit_code == INVALID_CONFIG_EXIT, result.output
     assert lookups == []
 
