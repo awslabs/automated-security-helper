@@ -141,24 +141,44 @@ def test_a_line_break_entry_leaves_the_other_exclusions_in_place(tmp_path, caplo
     excludes nothing: the excluded_paths entry is reported when the scanner is
     built, the global ignore path when the scan's arguments are assembled."""
     source = _tree(tmp_path, ["app.py"])
+    converted = _tree(tmp_path, ["gen.py"], name="converted")
     with caplog.at_level(logging.WARNING):
+        # Each bad entry has a valid neighbour: dropping the whole list for one
+        # bad entry would leave the checks below on the bad entries alone.
         scanner = _scanner(
             source,
             tmp_path,
-            BanditScannerConfigOptions(excluded_paths=_ignore("ven\ndor")),
+            BanditScannerConfigOptions(excluded_paths=_ignore("ven\ndor", "vendor")),
         )
-        argv, _, _ = scanner._execute_scan(source, "source", _ignore("gen\nerated/**"))
+        argv, _, _ = scanner._execute_scan(
+            source, "source", _ignore("gen\nerated/**", "build/**")
+        )
+        # The pipeline scans the converted target next, with the same inputs.
+        converted_argv, _, _ = scanner._execute_scan(
+            converted, "converted", _ignore("gen\nerated/**", "build/**")
+        )
 
     entries = _entries(argv)
     assert entries, argv
     assert not any("\n" in entry or "\r" in entry for entry in entries), entries
     for entry in bandit_excluded_path_globs(source.as_posix(), ".venv/"):
         assert entry in entries
+    kept_entries = [
+        *bandit_excluded_path_globs(source.as_posix(), "vendor"),
+        *bandit_exclude_globs(source.as_posix(), "build/**"),
+    ]
+    assert kept_entries, "the valid neighbours must have a bandit form"
+    for entry in kept_entries:
+        assert entry in entries, (entry, entries)
+    kept_converted = bandit_excluded_path_globs(converted.as_posix(), "vendor")
+    assert kept_converted, "the valid neighbour must have a bandit form"
+    for entry in kept_converted:
+        assert entry in _entries(converted_argv), (entry, converted_argv)
     told = [
         record.message for record in caplog.records if "line break" in record.message
     ]
-    # Once per input: a warning repeated on every reprocess or scan would
-    # still satisfy an any().
+    # Once per input over both targets: a warning repeated on every reprocess
+    # or target would still satisfy an any().
     assert sum(repr("ven\ndor") in message for message in told) == 1, told
     assert sum(repr("gen\nerated/**") in message for message in told) == 1, told
 
@@ -417,6 +437,12 @@ def test_an_ini_entry_holding_a_line_break_is_left_out_with_a_warning(tmp_path, 
     old = f"{source.as_posix()}/legacy/old.py"
     assert not any(fnmatch.fnmatchcase(old, e) or e in old for e in entries), entries
     assert not any("\n" in e for e in entries)
+    # The entry before the bad one still reaches bandit: dropping the whole
+    # ini value for one bad entry would pass every check above.
+    kept = bandit_excluded_path_globs(source.as_posix(), "tests")
+    assert kept, "the valid entry must have a bandit form"
+    for entry in kept:
+        assert entry in entries, (entry, entries)
     assert any(
         "has no --exclude form" in record.getMessage() for record in caplog.records
     )
@@ -557,7 +583,18 @@ def test_an_ini_warning_is_given_once_per_build_not_once_per_target(tmp_path, ca
 
     with caplog.at_level(logging.WARNING):
         scanner._execute_scan(source, "source", [])
-        scanner._execute_scan(converted, "converted", [])
+        converted_argv, _, _ = scanner._execute_scan(converted, "converted", [])
+
+    # Said once, but still applied to the second target: a dedupe that also
+    # stopped the converted target from getting the entries would pass the
+    # counts below.
+    converted_entries = _entries(converted_argv)
+    root = converted.as_posix()
+    plain = bandit_excluded_path_globs(root, "test")
+    assert plain, "the plain-name entry must have a bandit form"
+    for entry in plain:
+        assert entry in converted_entries, (entry, converted_entries)
+    assert _covers(converted_entries, f"{root}/legacy/old.py"), converted_entries
 
     messages = [r.getMessage() for r in caplog.records]
     assert sum("is a plain name" in m for m in messages) == 1, messages
