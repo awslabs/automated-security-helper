@@ -50,21 +50,35 @@ def _layout(tmp_path, report, age_seconds=0):
     return config, path
 
 
-def test_the_helper_names_the_scanners_the_report_lists(tmp_path):
+def test_the_blocker_names_the_scanners_the_report_lists(tmp_path):
+    """The one question the command and the fixer ask of a report: its sentence
+    names the scanners the report lists as not run."""
     _config, path = _layout(
         tmp_path, {"unused_suppressions": [ENTRY], "scanners_not_run": ["bandit"]}
     )
 
-    assert ConfigLinter.unused_report_scanners_not_run(path) == ["bandit"]
+    blocker = ConfigLinter.unused_report_blocker(path)
+
+    assert blocker is not None
+    assert "(bandit)" in blocker
 
 
-def test_the_helper_is_empty_for_a_complete_or_unreadable_report(tmp_path):
+def test_the_blocker_is_empty_for_a_complete_report(tmp_path):
     _config, path = _layout(tmp_path, {"unused_suppressions": [ENTRY]})
-    assert ConfigLinter.unused_report_scanners_not_run(path) == []
+
+    assert ConfigLinter.unused_report_blocker(path) is None
+
+
+def test_the_blocker_says_so_for_an_unreadable_report(tmp_path):
+    """An unreadable report is a reason too: the removed scanner-list helper
+    answered an empty list for it and so disagreed with the blocker."""
+    _config, path = _layout(tmp_path, {"unused_suppressions": [ENTRY]})
 
     path.write_text("not json", encoding="utf-8")
-    assert ConfigLinter.unused_report_scanners_not_run(path) == []
-    assert ConfigLinter.unused_report_scanners_not_run(tmp_path / "missing.json") == []
+    assert "could not be read" in ConfigLinter.unused_report_blocker(path)
+    assert "could not be read" in ConfigLinter.unused_report_blocker(
+        tmp_path / "missing.json"
+    )
 
 
 def test_a_partial_report_is_not_asked_about_and_the_reason_is_printed(tmp_path):
