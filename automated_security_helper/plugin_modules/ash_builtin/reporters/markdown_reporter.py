@@ -103,15 +103,47 @@ def _reference_text(value) -> str:
     math, since the dollar signs delimit a formula on GitHub. Every other
     character is escaped as in ``_text``, and braces stay escaped on every other
     line.
+
+    Pieces that touch are put in one code span. Two code spans back to back
+    (``${A}${B}``, or a reference written against a mention or a URL) end and
+    open with a run of backticks that Markdown reads as part of one longer span,
+    so the reader saw the stray backticks and the text between them as code.
     """
     text = str(value or "")
-    parts = []
+    # (is_code, text) pieces in order: a reference, a mention or a URL is code,
+    # every other stretch is escaped.
+    pieces: list[tuple[bool, str]] = []
+
+    def add_plain(stretch: str) -> None:
+        stop = 0
+        for match in _AUTO_REFERENCE.finditer(stretch):
+            pieces.append((False, stretch[stop : match.start()]))
+            pieces.append((True, match.group()))
+            stop = match.end()
+        pieces.append((False, stretch[stop:]))
+
     end = 0
     for match in _ENV_REFERENCE.finditer(text):
-        parts.append(_text(text[end : match.start()]))
-        parts.append(markdown_code_span(match.group()))
+        add_plain(text[end : match.start()])
+        pieces.append((True, match.group()))
         end = match.end()
-    parts.append(_text(text[end:]))
+    add_plain(text[end:])
+
+    parts = []
+    code = None
+    for is_code, piece in pieces:
+        if is_code:
+            code = piece if code is None else code + piece
+            continue
+        if not piece:
+            # Nothing between two code pieces: they touch.
+            continue
+        if code is not None:
+            parts.append(markdown_code_span(code))
+            code = None
+        parts.append(_markdown_escaped(piece))
+    if code is not None:
+        parts.append(markdown_code_span(code))
     return "".join(parts)
 
 

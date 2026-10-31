@@ -8206,6 +8206,12 @@
   reports take these readings, and the kinds that state no finding, from one
   shared definition, so they cannot drift apart again.
 
+- **The Markdown report's project line puts adjacent references in one code
+  span.** A project name written as `${ORG}${REPO}`, or a reference written
+  against a mention or a URL, was printed as two code spans back to back, and
+  Markdown showed the backticks between them as text. Pieces that touch now
+  share one span.
+
 - **The GitHub GHAS report leaves out results that state no failing finding, and
   names its category only when asked.** A result whose SARIF `kind` is `pass`,
   `open`, `review`, `notApplicable` or `informational` (a cdk-nag rule that was

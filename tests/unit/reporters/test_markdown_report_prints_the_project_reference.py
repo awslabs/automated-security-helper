@@ -76,6 +76,21 @@ class TestTheReferenceHelper:
             "`https://example.com/a` `${X}`"
         )
 
+    def test_references_that_touch_are_one_code_span(self):
+        """Two spans back to back end and open with a run of backticks, which
+        Markdown reads as part of one longer span, so the reader saw them."""
+        assert _reference_text("${A}${B}") == "`${A}${B}`"
+        assert _reference_text("${A}${B}${C}") == "`${A}${B}${C}`"
+        assert _reference_text("@octocat${X}") == "`@octocat${X}`"
+        assert _reference_text("https://example.com/${X}") == (
+            "`https://example.com/${X}`"
+        )
+
+    def test_pieces_with_text_between_them_stay_apart(self):
+        # The control: only pieces that touch share a span.
+        assert _reference_text("${A} ${B}") == "`${A}` `${B}`"
+        assert "``" not in _reference_text("${A}/${B} ${C}${D}")
+
     def test_braces_stay_escaped_for_every_other_line(self):
         # The control: only the project line is a reference.
         assert _text(REFERENCE) == ESCAPED
@@ -99,6 +114,12 @@ class TestTheReportPrintsTheReference:
         )
 
         assert ESCAPED not in document
+
+    def test_two_touching_references_print_as_one_code_span(self, test_plugin_context):
+        document = _report(test_plugin_context, _model("${ZZ_ORG}${ZZ_REPO}"))
+
+        assert "`${ZZ_ORG}${ZZ_REPO}`" in document
+        assert "`${ZZ_ORG}``${ZZ_REPO}`" not in document
 
     def test_a_name_with_markdown_characters_is_still_escaped(
         self, test_plugin_context
