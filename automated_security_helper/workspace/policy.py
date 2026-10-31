@@ -256,6 +256,38 @@ def _as_named(path: PathLike) -> Path:
     return named if named.is_absolute() else Path(os.getcwd()) / named
 
 
+def _unexaminable(label: str, exc: OSError) -> WorkspaceDefinitionError:
+    """The refusal for a policy entry the filesystem would not let us examine.
+
+    One text for every place that stats a policy candidate: a policy file that
+    cannot be read is not treated as no policy, and the reason is the OS's own.
+    """
+    return _refuse(
+        f"{label} could not be examined ({exc.strerror or type(exc).__name__}); "
+        f"a policy file that cannot be read is not treated as no policy"
+    )
+
+
+def _entry_present_or_refuse(candidate: Path) -> bool:
+    """Whether an entry, link or not, is at *candidate*; any other error refuses.
+
+    ``os.lstat`` with the error kept: ``Path.is_file()`` raised a bare
+    ``PermissionError`` for an unsearchable ``.ash`` on Python 3.10-3.13 and
+    read it as no policy on 3.14, and ``lexists()`` reads every failure as
+    absence. Absence (not there, or a parent that is not a directory) is the one
+    error that means no policy at this name.
+    """
+    try:
+        os.lstat(candidate)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        raise _unexaminable(
+            f"workspace policy file '{candidate.as_posix()}'", exc
+        ) from exc
+    return True
+
+
 def _refuse_unless_a_file(candidate: Path) -> None:
     """Refuse a policy candidate that exists as an entry but is not a regular file.
 
@@ -274,10 +306,7 @@ def _refuse_unless_a_file(candidate: Path) -> None:
             f"cannot be read is not treated as no policy"
         ) from exc
     except OSError as exc:
-        raise _refuse(
-            f"{label} could not be examined ({exc.strerror or type(exc).__name__}); "
-            f"a policy file that cannot be read is not treated as no policy"
-        ) from exc
+        raise _unexaminable(label, exc) from exc
     if stat.S_ISDIR(mode):
         raise _refuse(f"{label} is a directory, not a file")
     if not stat.S_ISREG(mode):
@@ -586,10 +615,7 @@ def _load_policy(path: Path, named: Path, quote_values: bool) -> AshWorkspaceCon
     except FileNotFoundError as exc:
         raise _refuse(f"{label} does not exist") from exc
     except OSError as exc:
-        raise _refuse(
-            f"{label} could not be examined ({exc.strerror or type(exc).__name__}); "
-            f"a policy file that cannot be read is not treated as no policy"
-        ) from exc
+        raise _unexaminable(label, exc) from exc
     if not stat.S_ISREG(mode):
         raise _refuse(f"{label} is not a file")
 
@@ -699,20 +725,9 @@ def discover_workspace_policy_file(
             raise _policy_not_permitted(parent, directory)
         for name in WORKSPACE_POLICY_FILE_NAMES:
             candidate = parent / name
-            # The entry itself, link or not, with the error kept: Path.is_file()
-            # raised a bare PermissionError for an unsearchable .ash on Python
-            # 3.10-3.13 and read it as no policy on 3.14, and lexists() reads
-            # every failure as absence.
-            try:
-                os.lstat(candidate)
-            except (FileNotFoundError, NotADirectoryError):
+            # The entry itself, link or not, with the error kept.
+            if not _entry_present_or_refuse(candidate):
                 continue
-            except OSError as exc:
-                raise _refuse(
-                    f"workspace policy file '{candidate.as_posix()}' could not be "
-                    f"examined ({exc.strerror or type(exc).__name__}); a policy "
-                    f"file that cannot be read is not treated as no policy"
-                ) from exc
             if permit is not None:
                 if not permit(candidate):
                     raise _policy_not_permitted(candidate, directory)
@@ -766,19 +781,9 @@ def named_workspace_policy_path(
     for parent in (directory, directory / _POLICY_SUBDIR):
         for name in WORKSPACE_POLICY_FILE_NAMES:
             candidate = parent / name
-            # The entry itself, as discovery reads it: Path.is_file() raised a
-            # bare PermissionError for an unsearchable .ash on Python 3.10-3.13
-            # and read it as no policy on 3.14.
-            try:
-                os.lstat(candidate)
-            except (FileNotFoundError, NotADirectoryError):
+            # The entry itself, as discovery reads it.
+            if not _entry_present_or_refuse(candidate):
                 continue
-            except OSError as exc:
-                raise _refuse(
-                    f"workspace policy file '{candidate.as_posix()}' could not be "
-                    f"examined ({exc.strerror or type(exc).__name__}); a policy "
-                    f"file that cannot be read is not treated as no policy"
-                ) from exc
             if candidate.is_absolute():
                 return candidate
             return Path(os.getcwd()) / candidate
