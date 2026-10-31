@@ -716,7 +716,20 @@ class TestExchangedAttributions:
             _run(gate, 1, "project-b", {a_marker: (1, 0)}),
         ]
         violations = gate.check_each_project_shows_only_its_own_marker_rule(runs)
-        assert any("belonging to" in v for v in violations)
+        # Each run is reported on its own: run 0 holds B's marker and run 1 holds
+        # A's, so a report for one run alone would leave the other unnoticed.
+        assert any(
+            "project 'project-a' (run 0)" in v
+            and f"marker rule(s) ['{b_marker}']" in v
+            and "belonging to ['project-b']" in v
+            for v in violations
+        ), violations
+        assert any(
+            "project 'project-b' (run 1)" in v
+            and f"marker rule(s) ['{a_marker}']" in v
+            and "belonging to ['project-a']" in v
+            for v in violations
+        ), violations
         assert not any(
             "appear in no run at all" in v and a_marker in v for v in violations
         )
