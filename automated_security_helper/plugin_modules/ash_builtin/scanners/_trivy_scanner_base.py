@@ -32,6 +32,7 @@ import logging
 import math
 import os
 import re
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -244,12 +245,39 @@ _SKIP_ARGS_BUDGET = 1_000_000
 #: the ignored paths do not reach it today: ``trivy_skip_dirs`` and
 #: ``trivy_skip_files`` return no values when ``os.sep`` is not ``/``. The
 #: operator's skip entries do: ``_operator_skip_args`` holds them to it whenever
-#: ASH passes a skip flag of its own, its output-directory flag included.
+#: ASH passes a skip flag of its own, its output-directory flag included. Tokens
+#: are counted as the quoted command line takes them (``_skip_token_size``).
 _WINDOWS_SKIP_ARGS_BUDGET = 30_000
 
 #: The least the budget is cut to, so a host with a very large environment still
 #: gets the first ignored paths as skip flags.
 _SKIP_ARGS_FLOOR = 16_384
+
+
+def _skip_token_size(token: str) -> int:
+    """What ``token`` takes of the skip budget, its separator included.
+
+    Elsewhere the bytes the program is started with. On Windows the command line
+    is one string that CreateProcess holds to 32,767 UTF-16 units, built from the
+    arguments by ``subprocess.list2cmdline``, which wraps an argument holding a
+    space in quotes and puts a backslash before each ``"`` in it: a token that
+    holds spaces or quotes (an operator's directory name, a CSV-quoted entry) is
+    longer on the line than its bytes. The count is of that line.
+    """
+    if sys.platform == "win32":
+        line = subprocess.list2cmdline([token])
+        return len(line.encode("utf-16-le", "surrogatepass")) // 2 + 1
+    return len(os.fsencode(token)) + 1
+
+
+def _skip_tokens_size(arguments: List[str]) -> int:
+    """``_skip_token_size`` summed over the ``--skip-dirs`` and ``--skip-files``
+    tokens among ``arguments``."""
+    return sum(
+        _skip_token_size(argument)
+        for argument in arguments
+        if argument.startswith(("--skip-dirs", "--skip-files"))
+    )
 
 
 def skip_args_budget(environment: Mapping[str, str]) -> int:
@@ -1089,7 +1117,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         kept: List[str] = []
         size = 0
         for token in wanted:
-            size += len(os.fsencode(token)) + 1
+            size += _skip_token_size(token)
             if size > budget:
                 break
             kept.append(token)
@@ -1236,11 +1264,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         here: the warnings are given where the tokens are.
         """
         tokens, _ = self._operator_skip_tokens(final_args, quiet=True)
-        return sum(
-            len(os.fsencode(argument)) + 1
-            for argument in [*final_args, *tokens]
-            if argument.startswith(("--skip-dirs", "--skip-files"))
-        )
+        return _skip_tokens_size([*final_args, *tokens])
 
     def _operator_skip_tokens(
         self, final_args: List[str], *, quiet: bool = False
@@ -1251,11 +1275,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         ``quiet`` leaves out the warning for an entry holding a line break, for a
         caller that only sizes the entries (``_skip_args_reserved``).
         """
-        used = sum(
-            len(os.fsencode(argument)) + 1
-            for argument in final_args
-            if argument.startswith(("--skip-dirs", "--skip-files"))
-        )
+        used = _skip_tokens_size(final_args)
         budget = skip_args_budget(self._scan_environment())
         over_budget = 0
         tokens: List[str] = []
@@ -1284,7 +1304,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 token = f"{flag}={_csv_field(entry)}"
                 if token in final_args or token in tokens:
                     continue
-                size = len(os.fsencode(token)) + 1
+                size = _skip_token_size(token)
                 if over_budget or used + size > budget:
                     over_budget += 1
                     continue

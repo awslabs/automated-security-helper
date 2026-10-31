@@ -1855,3 +1855,41 @@ def test_the_operator_warning_fires_only_when_the_operators_own_list_overflows(
     assert not [a for a in argv if a.startswith("--skip-files=")], argv
     (warning,) = _operator_warnings(messages)
     assert warning.startswith("2 entries"), warning
+
+
+# --- the operator's entries on a Windows command line ------------------------------
+
+
+def test_operator_entries_with_spaces_are_counted_as_the_windows_line_builds_them(
+    tmp_path, monkeypatch
+):
+    """CreateProcess holds the whole command line to 32,767 UTF-16 units, and
+    ``subprocess.list2cmdline`` wraps an argument that holds a space in quotes. The
+    operator's tokens were counted by their bytes, without those quotes, so a long
+    list of directories with a space in the name overflowed the budget on the line
+    that was built and left no room for the rest of trivy's argv."""
+    scanner = _repo_scanner(tmp_path)
+    names = [f"dir {index:04d} with space" for index in range(2000)]
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": ",".join(names)}
+    monkeypatch.setattr(sys, "platform", "win32")
+    ashs_own = "--skip-dirs=.ash/ash_output"
+
+    with patch.object(scanner, "_plugin_log"):
+        tokens = scanner._operator_skip_args([ashs_own])
+
+    line = subprocess.list2cmdline([ashs_own, *tokens])
+    assert 0 < len(tokens) < 2000
+    assert len(line.encode("utf-16-le")) // 2 < trivy_base._WINDOWS_SKIP_ARGS_BUDGET
+
+
+def test_control_operator_skip_entries_without_spaces_count_as_their_bytes(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor,build"}
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    with patch.object(scanner, "_plugin_log"):
+        tokens = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
+
+    assert tokens == ["--skip-dirs=vendor", "--skip-dirs=build"]
