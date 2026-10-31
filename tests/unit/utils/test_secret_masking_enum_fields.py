@@ -202,3 +202,35 @@ class TestEnumFieldsOfAPlainJsonReport:
         assert location["state"]["token"] == _mask_secret_value(value)
         assert result["suppressions"][0]["state"] == "accepted"
         assert result["level"] == "warning"
+
+    def test_a_free_text_kind_is_still_masked(self):
+        """``kind`` is an enum on a result and a suppression only; a logical
+        location's or an address's ``kind`` is free text that can carry the value
+        a finding exposed, and every ``kind`` was skipped whatever its parent."""
+        value = _derived("json-kind-secret", 24)
+        tree = {
+            "results": [
+                {
+                    "kind": "fail",
+                    "suppressions": [{"kind": "inSource"}],
+                    "locations": [
+                        {
+                            "logicalLocations": [{"kind": "function " + value}],
+                            "physicalLocation": {
+                                "address": {"kind": "section " + value}
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+
+        mask_secret_values_in_tree(tree, values=[value])
+
+        result = tree["results"][0]
+        location = result["locations"][0]
+        masked = _mask_secret_value(value)
+        assert location["logicalLocations"][0]["kind"] == "function " + masked
+        assert location["physicalLocation"]["address"]["kind"] == "section " + masked
+        assert result["kind"] == "fail"
+        assert result["suppressions"][0]["kind"] == "inSource"

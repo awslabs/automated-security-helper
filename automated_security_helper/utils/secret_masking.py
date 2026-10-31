@@ -351,10 +351,16 @@ _ENUM_FIELDS = frozenset(
 )
 #: The same, for a report already reduced to plain JSON (``_is_skipped_key``),
 #: which carries no declarations: these names are enum-valued wherever SARIF uses
-#: them. ``state`` is not among them, because ``threadFlowLocation.state`` is a
-#: free-text map that can hold a secret; a suppression's ``state`` is told by its
-#: parent key instead.
-_ENUM_KEYS = frozenset({"level", "kind", "columnKind", "importance", "roles"})
+#: them. ``kind`` and ``state`` are not among them: ``Address.kind``,
+#: ``LogicalLocation.kind`` and ``Exception.kind`` are free text, and
+#: ``threadFlowLocation.state`` is a free-text map that can hold a secret; a
+#: result's and a suppression's ``kind``, and a suppression's ``state``, are told
+#: by the key their dict sits under instead (``_ENUM_KIND_PARENTS``).
+_ENUM_KEYS = frozenset({"level", "columnKind", "importance", "roles"})
+#: The plain-JSON keys under which a dict's ``kind`` is a SARIF enum: a run's or
+#: an external property set's ``results`` (``Result.kind``) and a result's
+#: ``suppressions`` (``Suppression.kind``).
+_ENUM_KIND_PARENTS = frozenset({"results", "suppressions"})
 #: Fields under which nothing is masked by value: a tool's rule metadata,
 #: taxonomies and policies, a result's rule reference and every ``tags`` list.
 #: They describe or classify findings; a finding tagged ``secret`` whose tag was
@@ -421,12 +427,14 @@ def _is_skipped_key(key: str, parent: Optional[str] = None) -> bool:
     """Whether nothing under a plain-JSON key of this name is masked by value.
 
     A report reduced to plain data carries no declarations, so its enum-valued
-    fields are known by name (``_ENUM_KEYS``), and a suppression's ``state`` by
-    the key its dict sits under (``parent``).
+    fields are known by name (``_ENUM_KEYS``), and a result's or suppression's
+    ``kind`` and a suppression's ``state`` by the key their dict sits under
+    (``parent``); a ``kind`` under any other key is free text and is masked.
     """
     return (
         _is_skipped(key)
         or key in _ENUM_KEYS
+        or (key == "kind" and parent in _ENUM_KIND_PARENTS)
         or (key == "state" and parent == "suppressions")
     )
 
