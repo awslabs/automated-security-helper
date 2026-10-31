@@ -189,3 +189,30 @@ class TestASweepFailureKeepsTheExceptionAlreadyPropagating:
 
         assert row.status == ScannerStatus.ERROR
         assert "the sweep broke" in _reason(row)
+
+
+class TestARefusalBeforeTheScanIsRedacted:
+    """``refuse_links_below`` takes no redaction values, so its refusal reaches the
+    row as the walk worded it, and whatever it names (a path under the results
+    directory, the error the walk met) can hold a value the configuration read
+    from the environment. The per-target handler redacts the exception with the
+    plugin's environment values, as it redacts the sweep's, and this pins it."""
+
+    CANARY = "env-read-canary-u18x-link-value"
+
+    def test_the_value_is_not_in_the_rows_reason(
+        self, plugin_context, sweeps, monkeypatch
+    ):
+        plugin_context.config._environment_values = [self.CANARY]
+
+        def refuse(root):
+            raise OSError(f"link {self.CANARY}/results/out refused below {root}")
+
+        monkeypatch.setattr(scanner_executor, "refuse_links_below", refuse)
+
+        row = _row(plugin_context, None)
+
+        assert row.status == ScannerStatus.ERROR
+        assert "refused below" in _reason(row), row.errors
+        assert self.CANARY not in _reason(row), row.errors
+        assert self.CANARY not in str(row.raw_results), row.raw_results
