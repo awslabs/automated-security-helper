@@ -1344,6 +1344,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # their findings are kept, and the run summary says "not every requested pack
         # was evaluated" for them, not "no rules were evaluated".
         self.targets_partly_evaluated = 0
+        # Of the failed targets, those no requested pack evaluated but CDK's own
+        # validation plugin did, with findings of its own kept in the report. The
+        # run summary says "no requested pack was evaluated" for them, not "no rules
+        # were evaluated", which would contradict the findings kept beside it.
+        self.targets_unevaluated_with_own_findings = 0
         self._reset_errors()
         self.exit_code = 0
         # The timing too, as ScannerPluginBase.scan() resets it. ``_post_scan`` sets
@@ -1667,6 +1672,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                                 f"{len(kept)} finding(s) are kept): {failure}"
                             )
                         else:
+                            if kept:
+                                self.targets_unevaluated_with_own_findings += 1
                             own = (
                                 f" ({len(kept)} finding(s) from CDK's own validation "
                                 "plugin are kept)"
@@ -1918,21 +1925,32 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # the run a success.
         scan_succeeded = self.targets_attempted <= 0 or self.targets_failed == 0
         if not scan_succeeded:
-            # Two kinds of failed target, told apart in the summary: a template no rule
-            # was evaluated against, and one a requested pack evaluated while another
-            # threw (its findings are in the report). Saying "no rules were evaluated"
-            # of the second contradicted the findings kept beside it.
+            # Three kinds of failed target, told apart in the summary: a template no
+            # rule was evaluated against, one a requested pack evaluated while another
+            # threw (its findings are in the report), and one no requested pack
+            # evaluated but CDK's own validation plugin did (its findings are in the
+            # report too). Saying "no rules were evaluated" of the last two contradicted
+            # the findings kept beside it.
             unevaluated = self.targets_failed - self.targets_partly_evaluated
-            if unevaluated >= self.targets_attempted:
+            own_only = self.targets_unevaluated_with_own_findings
+            no_rules = unevaluated - own_only
+            if no_rules >= self.targets_attempted:
                 ASH_LOGGER.error(
                     f"cdk-nag failed on all {self.targets_attempted} template(s) in {target}. "
                     "No rules were evaluated, so this result is NOT a clean scan."
                 )
-            elif unevaluated > 0:
+            elif no_rules > 0:
                 ASH_LOGGER.error(
-                    f"cdk-nag failed on {unevaluated} of "
+                    f"cdk-nag failed on {no_rules} of "
                     f"{self.targets_attempted} template(s) in {target}. No rules were "
                     "evaluated for the failed templates, so this result is NOT a clean scan."
+                )
+            if own_only > 0:
+                ASH_LOGGER.error(
+                    f"cdk-nag evaluated no requested pack on {own_only} of "
+                    f"{self.targets_attempted} template(s) in {target}. Only CDK's own "
+                    "validation plugin ran there and its findings are kept, but no "
+                    "requested rule was evaluated, so this result is NOT a clean scan."
                 )
             if self.targets_partly_evaluated > 0:
                 ASH_LOGGER.error(

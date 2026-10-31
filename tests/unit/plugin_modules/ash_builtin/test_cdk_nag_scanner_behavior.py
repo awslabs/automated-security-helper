@@ -1602,6 +1602,58 @@ def test_cdk_own_validation_plugins_entry_does_not_make_a_target_partly_evaluate
     assert not any("every requested pack on" in r.message for r in caplog.records)
 
 
+def test_a_template_only_cdks_own_plugin_evaluated_keeps_its_findings_and_says_so(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """Every requested pack threw, but CDK's own CloudFormation Validate plugin
+    evaluated the template and reported a finding. The finding is a fact about the
+    template and sits in the report, so the run summary may not say that no rules were
+    evaluated beside it. The summary names the true state instead: no requested pack
+    was evaluated, only CDK's own plugin ran. The control above holds the same state
+    with no finding, where "No rules were evaluated" stays the true statement.
+
+    The fixture's failure text names a pack inside the quoted payload, so the summary
+    is told apart on the head of the record, never on words the payload can carry."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={
+            wrapper_module.CDK_OWN_PLUGIN_NAME: [
+                nag_result(
+                    rule_id="CloudFormation-Validate-1",
+                    pack=wrapper_module.CDK_OWN_PLUGIN_NAME,
+                )
+            ]
+        },
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "AwsSolutions)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == ["CloudFormation-Validate-1"]
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 0
+    messages = [r.message for r in caplog.records]
+    assert any(
+        message.startswith("cdk-nag did not evaluate ")
+        and "1 finding(s) from CDK's own validation plugin are kept" in message
+        for message in messages
+    ), messages
+    assert any(
+        message.startswith("cdk-nag evaluated no requested pack on 1 of 1 template(s)")
+        for message in messages
+    ), messages
+    assert not any(message.startswith("cdk-nag failed on ") for message in messages), (
+        messages
+    )
+    assert not any("No rules were evaluated" in message for message in messages), (
+        messages
+    )
+
+
 def test_the_missing_dependency_reason_offers_no_install_hint_for_a_wrapper_import_failure(
     scanner, monkeypatch
 ):
