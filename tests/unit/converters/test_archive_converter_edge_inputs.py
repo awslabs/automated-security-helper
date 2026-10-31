@@ -374,6 +374,38 @@ def test_a_tar_gz_followed_by_other_bytes_is_extracted(
     assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
 
 
+def test_the_trailing_record_says_every_member_was_extracted(
+    test_plugin_context, monkeypatch
+):
+    """The record is a refusal, which a reader takes as something the scan left
+    out; here nothing of the archive's members was. The reason says so before
+    it counts the tail, so the results row is not read as a partial extraction."""
+    raw = tar_bytes({"a.py": "x = 1\n"}, gz=True) + b"TRAILER\n"
+
+    converter, _ = _convert_one(test_plugin_context, monkeypatch, "src.tar.gz", raw)
+
+    (refused,) = converter.refused_inputs
+    assert refused.reason.startswith("every member of its gzip data was extracted")
+    assert "the 8 bytes after the end of its gzip data" in refused.reason
+
+
+def test_the_bounded_tar_stream_reports_its_sources_trailing_bytes():
+    """The count the converter records is read through the bounded stream's own
+    method, not out of its wrapped source: 0 until the source has been read to
+    its end, the source's count after, and 0 for a source that keeps none."""
+    source = archive_converter._GzipMembersStream(
+        io.BytesIO(gzip.compress(b"x" * 100) + b"TRAILER\n")
+    )
+    bounded = archive_converter._BoundedTarStream(source)
+
+    assert bounded.trailing_bytes() == 0
+    assert source.read() == b"x" * 100
+    assert bounded.trailing_bytes() == 8
+
+    plain = archive_converter._BoundedTarStream(io.BytesIO(b"\0" * 1024))
+    assert plain.trailing_bytes() == 0
+
+
 def test_the_trailing_count_survives_a_seek_back_to_the_start():
     """The listing reads the gzip stream to its end, where the count is taken;
     extraction then seeks back to each member's data, which starts the stream

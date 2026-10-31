@@ -631,6 +631,15 @@ class _BoundedTarStream(io.RawIOBase):
     def end_header_pass(self) -> None:
         self._allowance = None
 
+    def trailing_bytes(self) -> int:
+        """How many bytes after the end of the gzip data the source stream found
+        and did not read (_GzipMembersStream.trailing), once the source has been
+        read to its end; 0 before that, and 0 for a source that keeps no such
+        count (a plain tar, a compressed stream of another kind). The one reader
+        of the count outside the stream, so the converter does not reach into
+        this stream's wrapped source for it."""
+        return getattr(self._raw, "trailing", None) or 0
+
     def block_at(self, offset: int) -> bytes:
         """The tar block at ``offset``: up to 512 bytes, fewer where the stream ends.
 
@@ -2153,13 +2162,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         left it out, and a reader of the results saw nothing of the bytes. A
         refusal, so the results name the count and archives_extracted_whole
         leaves the archive out; without a limit, so the completeness gate is not
-        failed by it: every member the gzip data held was extracted.
+        failed by it: every member the gzip data held was extracted, and the
+        reason says so first, because a refusal record is read as something the
+        scan left out, and here what was left out is the tail, not a member.
         """
         self.record_refused_input(
             TreeInputRefused(
                 archive,
-                f"{trailing} bytes after the end of its gzip data are not another "
-                "gzip member and were not read, so no scanner reads them",
+                f"every member of its gzip data was extracted; the {trailing} "
+                "bytes after the end of its gzip data are not another gzip member "
+                "and were not read, so no scanner reads them",
             )
         )
 
@@ -2778,7 +2790,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         # Bytes after a .tar.gz's gzip data ended the stream
                         # (_GzipMembersStream.trailing); recorded, so the archive is
                         # not read as extracted whole with bytes nothing read.
-                        trailing = getattr(tar_stream._raw, "trailing", None) or 0
+                        trailing = tar_stream.trailing_bytes()
                         if trailing:
                             self._record_trailing_bytes(archive_display, trailing)
                         if unreadable or stopped or ended:
