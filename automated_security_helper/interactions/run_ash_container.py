@@ -5339,10 +5339,15 @@ def run_ash_container(
     # Resolve ASH revision. One given was checked above (container_build_refusal);
     # an explicit revision decides the build, and the install is consulted (and
     # logs which source it builds from) only when none was given.
+    resolved_revision: str | None
     if ash_revision_to_install is not None:
         resolved_revision = ash_revision_to_install
-    else:
+    elif build:
         resolved_revision = get_ash_revision()
+    else:
+        # Only a build installs a revision; looking one up echoes and logs the
+        # source it builds from, which a run of a present image does not do.
+        resolved_revision = None
 
     # Only a build installs the revision, so only a build is refused for one the
     # build cannot take. A revision derived from the install (a direct_url.json

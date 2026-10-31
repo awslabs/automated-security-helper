@@ -345,6 +345,32 @@ def test_no_build_does_not_refuse_a_revision_derived_from_the_install(
     assert [cmd[1] for cmd in commands] == ["run"]
 
 
+def test_no_build_does_not_look_up_the_revision_at_all(commands, monkeypatch):
+    """The lookup echoes and logs the source a build installs from; a run of an
+    image that is already present builds nothing, so it said so for nothing."""
+    looked_up = []
+    monkeypatch.setattr(
+        rac, "get_ash_revision", lambda quiet=False: looked_up.append(quiet) or "v1"
+    )
+
+    result = rac.run_ash_container(source_dir="src", build=False, run=True)
+
+    assert result.returncode == 0, result.stderr
+    assert looked_up == []
+
+
+def test_a_build_still_looks_up_the_revision(commands, monkeypatch):
+    """Control."""
+    looked_up = []
+    monkeypatch.setattr(
+        rac, "get_ash_revision", lambda quiet=False: looked_up.append(quiet) or "v1"
+    )
+
+    rac.run_ash_container(source_dir="src", build=True, run=False)
+
+    assert looked_up == [False]
+
+
 def test_a_build_still_refuses_a_revision_derived_from_the_install(
     commands, monkeypatch, tmp_path
 ):
