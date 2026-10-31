@@ -87,6 +87,8 @@ def test_the_bound_counts_each_document_of_a_stream_on_its_own(monkeypatch):
 def test_the_default_bound_sits_above_what_the_alias_bound_lets_a_plain_file_hold():
     # A plain file of MAX_EXPANDED_NODES + 1 scalars loads (the alias bound's own
     # test); this bound stays above it, and above the most a file the config
-    # chain reads can hold (1 MiB, two bytes to a flow scalar).
+    # chain reads can hold (1 MiB; a flow mapping of bare keys composes a key
+    # node and an empty value node per key, about one node to a byte, plus the
+    # mapping and a few more).
     assert yaml_aliases.MAX_COMPOSED_NODES > yaml_aliases.MAX_EXPANDED_NODES + 4
-    assert yaml_aliases.MAX_COMPOSED_NODES > (1024 * 1024) // 2
+    assert yaml_aliases.MAX_COMPOSED_NODES > 1024 * 1024 + 3

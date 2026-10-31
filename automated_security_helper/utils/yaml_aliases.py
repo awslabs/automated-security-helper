@@ -54,9 +54,11 @@ MAX_EXPANDED_NODES = 100_000
 #: limit by it, and each node costs two marks and an event in memory, many times
 #: the bytes that wrote it. This is the bound for a read that has no byte cap of
 #: its own. The config chain caps a file at ``ASH_CONFIG_MAX_FILE_BYTES`` (1 MiB),
-#: which holds about half a million nodes at the most (two bytes to a flow
-#: scalar), so a configuration is far under it and a document past it is not one.
-MAX_COMPOSED_NODES = 1_000_000
+#: which holds a little over a million nodes at the most (a flow mapping of bare
+#: keys composes a key node and an empty value node for each key, about one node
+#: to a byte), so this bound sits above what that cap lets a file hold and a
+#: document past it is not a configuration.
+MAX_COMPOSED_NODES = 2_000_000
 
 #: The attribute the expanded node count is kept on, on each composed node.
 _SIZE_ATTR = "_ash_expanded_nodes"
