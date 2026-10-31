@@ -1377,11 +1377,20 @@ def test_a_relative_gitleaks_config_variable_is_anchored_where_the_operator_set_
     anchored = (operator_dir / "rules" / "gl.toml").resolve().as_posix()
     assert f"--config={anchored}" in calls[0]["argv"]
     repo_copy = (source / "rules" / "gl.toml").absolute().as_posix()
+    assert calls, "no gitleaks run was made"
     for call in calls:
+        # Every run, the first and each re-scan, is handed the anchored file.
+        assert f"--config={anchored}" in call["argv"], call["argv"]
         assert not any(repo_copy in a for a in call["argv"])
-        assert (
-            not (call["env"] or {}).get("GITLEAKS_CONFIG", "").startswith(str(source))
-        )
+        # And the environment the child really gets cannot lead gitleaks into
+        # the tree: a value set there is resolved where gitleaks runs (the
+        # run's working directory, a copy of the tree for a re-scan), and must
+        # land in neither the scanned tree nor that directory.
+        value = (call["env"] or {}).get("GITLEAKS_CONFIG")
+        if value:
+            resolved = (Path(call["cwd"]) / value).resolve()
+            assert not resolved.is_relative_to(source.resolve()), value
+            assert not resolved.is_relative_to(Path(call["cwd"]).resolve()), value
 
 
 # --------------------------------------------------------------------------- #
