@@ -239,6 +239,18 @@ def _environment_entries(entries: Iterable[str]) -> Tuple[str, ...]:
     return tuple(entries)
 
 
+def entry_variable_name(entry: str) -> Optional[str]:
+    """The variable name an environment *entry* starts with, or None when the part
+    before its first ``=`` is not a variable name.
+
+    The one place a message may show a part of an entry: a name never holds a value,
+    and anything that is not a name may be one (a pasted URL or key written without
+    its name), so a caller that has no name to show names the entry by its
+    position."""
+    name = entry.partition("=")[0]
+    return name if _ENV_NAME.fullmatch(name) else None
+
+
 def parse_environment(
     entries: Iterable[str],
 ) -> Tuple[Tuple[str, ...], Dict[str, str]]:
@@ -258,8 +270,9 @@ def parse_environment(
     backends do not, so a listed value would reach the scanner under two of the
     four.
     The error names the variable and never shows a value, which may be a secret:
-    an entry with no ``=`` that is not a variable name is named by its position,
-    because the whole entry may be a value written without its name.
+    an entry whose part before the first ``=`` is not a variable name is named by
+    its position, never by that part, because the entry may be a value written
+    without its name (a URL, or a padded key, holds ``=`` too).
 
     Raises:
         ValueError: The list is a string or a mapping, or an entry is not text,
@@ -275,10 +288,9 @@ def parse_environment(
             )
         name, has_value, value = entry.partition("=")
         if not _ENV_NAME.fullmatch(name):
-            shown = f"{name!r}" if has_value else f"number {position}"
             raise ValueError(
-                f"environment entry {shown} is not a variable name: write NAME to "
-                "pass the caller's value or NAME=value to set one"
+                f"environment entry number {position} is not a variable name: "
+                "write NAME to pass the caller's value or NAME=value to set one"
             )
         if name in DROPPED_ENV_NAMES:
             raise ValueError(

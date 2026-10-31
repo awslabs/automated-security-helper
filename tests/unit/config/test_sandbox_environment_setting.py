@@ -66,7 +66,6 @@ def test_an_empty_list_is_accepted_and_replaces_the_default():
         ("DB_PASSWORD=hunter2", "DB_PASSWORD"),
         ("TMPDIR=/somewhere", "TMPDIR"),
         (OUTER_RUN_ID_ENV, OUTER_RUN_ID_ENV),
-        ("A B=hunter2", "A B"),
     ],
 )
 def test_a_refused_entry_is_named_and_its_value_is_not_shown(entry, name):
@@ -75,6 +74,28 @@ def test_a_refused_entry_is_named_and_its_value_is_not_shown(entry, name):
 
     assert name in str(refused.value)
     assert "hunter2" not in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "A B=MARKER-value",
+        "MARKER-not-a-name=MARKER-value",
+        "https://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",
+        "MARKER+padded/ref==",
+    ],
+)
+def test_an_entry_that_starts_with_no_name_is_named_by_position_in_the_error(entry):
+    """The message of a validation error is shown wherever the config is read, and
+    ``hide_input_in_errors`` does not cover message text: a value pasted without its
+    name must not be in it."""
+    with pytest.raises(ValidationError) as refused:
+        SandboxConfig(environment=["MY_VAR", entry])
+
+    text = str(refused.value)
+    assert "number 2" in text
+    assert entry.partition("=")[0] not in text
+    assert "MARKER" not in text
 
 
 @pytest.mark.parametrize("shape", ["MY_VAR", {"MY_VAR": "1"}])
@@ -301,6 +322,35 @@ def test_a_delivered_entry_the_server_lacks_is_refused_by_variable_only(tmp_path
     assert "LD_PRELOAD" in reason
     assert "/tmp/x.so" not in reason
     assert "HTTP_PROXY" not in reason
+
+
+def test_a_delivered_entry_that_starts_with_no_name_is_refused_by_position_only(
+    tmp_path,
+):
+    """The denial reason is returned to the client: it names a variable, and an entry
+    that does not start with one only by its place in the delivered list."""
+    rules = ccp.rules_from(AshConfig())
+    document = {
+        "sandbox": {
+            "environment": [
+                "HTTP_PROXY",
+                "MARKER-not-a-name=MARKER-value",
+                "https://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",
+                "LD_PRELOAD=MARKER-path",
+                7,
+            ]
+        }
+    }
+
+    refusals = _refusals(document, rules, tmp_path)
+
+    assert [key for key, _ in refusals] == ["sandbox.environment"], refusals
+    reason = refusals[0][1]
+    assert "entry number 2" in reason, reason
+    assert "entry number 3" in reason, reason
+    assert "LD_PRELOAD" in reason, reason
+    assert "an entry of type int" in reason, reason
+    assert "MARKER" not in reason, reason
 
 
 def test_control_a_delivered_list_of_entries_the_server_has_is_not_refused(tmp_path):

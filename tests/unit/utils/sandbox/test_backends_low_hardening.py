@@ -1438,18 +1438,42 @@ def test_a_listed_tmpdir_is_refused_so_no_backend_passes_it(
         plan.run_cleanup()
 
 
-def test_the_refusal_of_a_malformed_entry_shows_no_value():
-    """An entry with no ``=`` may be a value written without its name, so it is
-    named by its place in the list; with one, only the part before it is shown."""
-    with pytest.raises(ValueError) as bare:
-        policy_module.parse_environment(["MY_VAR", "hunter2 or something else"])
-    assert "hunter2" not in str(bare.value)
-    assert "number 2" in str(bare.value)
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "MARKER value with spaces",
+        "A B=MARKER-value",
+        "MARKER-not-a-name=MARKER-value",
+        "MARKER-scheme://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",
+        "MARKER+padded/ref==",
+    ],
+)
+def test_the_refusal_of_a_malformed_entry_names_its_position_and_shows_none_of_it(
+    layout, entry
+):
+    """An entry whose part before the first ``=`` is not a variable name may be a
+    value written without its name (a URL, a padded key), so it is named by its place
+    in the list, never by that part."""
+    shown_before_the_equals = entry.partition("=")[0]
+    with pytest.raises(ValueError) as refused:
+        policy_module.parse_environment(["MY_VAR", entry])
+    text = str(refused.value)
+    assert "number 2" in text
+    assert shown_before_the_equals not in text
+    assert "MARKER" not in text
 
-    with pytest.raises(ValueError) as named:
-        policy_module.parse_environment(["A B=hunter2"])
-    assert "hunter2" not in str(named.value)
-    assert "A B" in str(named.value)
+    with pytest.raises(SandboxUnavailable, match="number 2") as unavailable:
+        _policy(layout, environment=("MY_VAR", entry))
+    assert shown_before_the_equals not in str(unavailable.value)
+    assert "MARKER" not in str(unavailable.value)
+
+
+def test_a_variable_name_before_the_equals_is_all_an_entry_may_show():
+    assert policy_module.entry_variable_name("MY_VAR=MARKER-value") == "MY_VAR"
+    assert policy_module.entry_variable_name("MY_VAR") == "MY_VAR"
+    assert policy_module.entry_variable_name("A B=MARKER-value") is None
+    assert policy_module.entry_variable_name("MY_VAR\n=MARKER-value") is None
+    assert policy_module.entry_variable_name("") is None
 
 
 @pytest.mark.parametrize("shape", ["MY_VAR", b"MY_VAR", {"MY_VAR": "1"}])

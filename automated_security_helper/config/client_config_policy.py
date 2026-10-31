@@ -1032,6 +1032,19 @@ def _scanner_gets_network(name: str, trusted: Any) -> bool:
     return bool(answers) and all(answers)
 
 
+def _environment_entry_label(entry: Any, position: int) -> str:
+    """How a denial names a delivered ``sandbox.environment`` *entry* (number
+    *position*, counting from one): its variable name when it starts with one, its
+    position otherwise, and its type when it is not text. Never the value: the
+    reason is returned to the client, and an entry that does not start with a name
+    may be a secret written without it."""
+    from automated_security_helper.utils.sandbox.policy import entry_variable_name
+
+    if not isinstance(entry, str):
+        return f"an entry of type {type(entry).__name__}"
+    return entry_variable_name(entry) or f"entry number {position}"
+
+
 def _widenings(
     document: Any,
     base: AshConfig,
@@ -1140,13 +1153,13 @@ def _widenings(
         listed, entries = _walk(section, ["environment"])
         if listed and isinstance(entries, list):
             # Named by variable, never by entry: a NAME=value entry holds a value,
-            # and this reason is returned to the client.
+            # and this reason is returned to the client. Only a part that is a
+            # variable name is shown; an entry that does not start with one may be
+            # a value written without its name, so it is named by its position.
             extra = list(
                 dict.fromkeys(
-                    entry.partition("=")[0]
-                    if isinstance(entry, str)
-                    else f"an entry of type {type(entry).__name__}"
-                    for entry in entries
+                    _environment_entry_label(entry, position)
+                    for position, entry in enumerate(entries, start=1)
                     if entry not in trusted.environment
                 )
             )
