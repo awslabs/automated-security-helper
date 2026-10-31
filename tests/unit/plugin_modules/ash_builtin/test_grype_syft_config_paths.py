@@ -122,11 +122,16 @@ def _scan(scanner, ctx, monkeypatch, target_type: str = "source") -> _Spawn:
     monkeypatch.setattr(
         type(scanner), "validate_plugin_dependencies", lambda self: True
     )
+    failure: Exception | None = None
     try:
         scanner.scan(target=target, target_type=target_type)
-    except Exception:
-        pass  # no tool ran, so there is no result file to read
+    except Exception as error:
+        # The fake tool wrote no result file, so a failure after the spawn is
+        # expected. One before it is not, and is raised below.
+        failure = error
     calls = [s for s in spawns if target.as_posix() in " ".join(s.command)]
+    if not calls and failure is not None:
+        raise failure
     assert calls, spawns
     return calls[-1]
 
