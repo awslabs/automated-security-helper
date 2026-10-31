@@ -52,6 +52,7 @@ from automated_security_helper.config.config_sources import (
     ResolvedConfigDocument,
     _resolve_dict_key,
     by_every_name,
+    check_search_directory,
     deep_merge,
     default_confinement_root,
     describe_config_path,
@@ -214,11 +215,17 @@ def find_config_file(
     Raises:
         ASHConfigInputNotPermittedError: for a file ``permit`` refuses. The
             message names it by its name in search_dir, never by what it
-            resolves to.
+            resolves to. Also, on Windows, for a ``search_dir`` that leads
+            through a network share, a device path or a link that cannot be
+            read; it is judged before any name is looked for under it.
     """
     if search_dir is None:
         search_dir = Path.cwd()
     if permit is not None:
+        # The directory itself first: the lookups below lstat a spelling through
+        # it, which follows a link among its components, so a directory that
+        # leads to a share is refused before any of them.
+        check_search_directory(Path(search_dir), permit)
         # Every name discovery looks at that is there, a link to a missing target
         # included, so the answer does not say whether the target exists.
         for candidate in discovery_candidates(Path(search_dir)):

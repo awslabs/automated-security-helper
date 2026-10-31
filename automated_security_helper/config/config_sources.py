@@ -1728,6 +1728,27 @@ def _identity_held_after_the_judgment(
     return identity
 
 
+def check_search_directory(
+    search_dir: Path, permit: Optional[PermitBase] = None
+) -> None:
+    """Refuse a directory to look for a config source in that leads to a share.
+
+    Under ``permit`` on Windows only. Every lookup of a name under `search_dir`
+    (``discovery_candidates``, ``_existing_candidates``) is an ``os.lstat`` of a
+    spelling that passes through it, which follows a link among its components;
+    so a caller that looks under a directory it was handed judges the directory
+    first, whether or not any config name is there, and calls this before the
+    first lookup.
+
+    Raises:
+        ASHConfigInputNotPermittedError: when the directory names a share or a
+            device, or a link on the way leads to one or cannot be read. The
+            message names the directory as given.
+    """
+    if permit is not None and _on_windows() and _refused_before_resolving(search_dir):
+        raise _search_dir_not_permitted(search_dir)
+
+
 def _existing_candidates(
     search_dir: Path, permit: Optional[PermitBase] = None
 ) -> List[ConfigSource]:
@@ -1737,11 +1758,7 @@ def _existing_candidates(
     anything looks inside it: whether a name exists there would otherwise answer
     whether a file exists in a directory the caller may not read.
     """
-    if permit is not None and _on_windows() and _refused_before_resolving(search_dir):
-        # Every lookup below is an lstat of a spelling that passes through
-        # `search_dir`, which follows a link among its components; so the
-        # directory is judged first, whether or not any config name is there.
-        raise _search_dir_not_permitted(search_dir)
+    check_search_directory(search_dir, permit)
     dot_ash = search_dir / ".ash"
     if permit is not None and _name_exists(dot_ash) and not _permitted(dot_ash, permit):
         raise _not_permitted(dot_ash)

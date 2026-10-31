@@ -35,7 +35,7 @@ from typing import Dict, List
 
 import pytest
 
-from automated_security_helper.config import config_sources
+from automated_security_helper.config import config_sources, resolve_config
 from automated_security_helper.core.exceptions import ASHConfigInputNotPermittedError
 
 pytestmark = [
@@ -382,3 +382,54 @@ def test_a_refused_candidate_is_never_opened(
         config_sources.discover_config_source(link, permit=permit)
 
     assert [name for name in opened if str(link) in name] == []
+
+
+def test_find_config_file_judges_a_search_directory_before_any_lookup(
+    tmp_path: Path, on_windows: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``find_config_file`` looks at every name under the directory
+    (``discovery_candidates``) before discovery runs. Those lookups lstat
+    ``lnk/.ash`` and ``lnk/<name>``, which follows ``lnk``, so a directory that
+    leads to a share is refused first, with nothing looked up under it."""
+    _real, link = _dir_linked_to_a_share(tmp_path, monkeypatch)
+    seen = _lstat_recording(monkeypatch)
+    resolved = _no_resolving(monkeypatch)
+    permit, asked = _recording_permit(True)
+
+    with pytest.raises(ASHConfigInputNotPermittedError) as raised:
+        resolve_config.find_config_file(link, permit=permit)
+
+    assert asked == []
+    assert resolved == []
+    assert _under(seen, link) == []
+    assert "Errno" not in str(raised.value)
+
+
+def test_find_config_file_still_reads_a_search_directory_that_is_a_local_link(
+    tmp_path: Path, on_windows: None
+) -> None:
+    """The control: a directory reached through a local link is looked in."""
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / ".ash.yaml").write_text("project_name: demo\n", encoding="utf-8")
+    link = tmp_path / "lnk"
+    link.symlink_to(real, target_is_directory=True)
+    permit, asked = _recording_permit(True)
+
+    found = resolve_config.find_config_file(link, permit=permit)
+
+    assert found == link / ".ash.yaml"
+    assert asked
+
+
+def test_find_config_file_off_windows_never_reads_a_search_directory_for_a_share(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The platform gate holds: off Windows nothing is judged before the lookups."""
+    _real, link = _dir_linked_to_a_share(tmp_path, monkeypatch)
+    permit, asked = _recording_permit(True)
+
+    found = resolve_config.find_config_file(link, permit=permit)
+
+    assert found == link / ".ash.yaml"
+    assert asked
