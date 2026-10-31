@@ -5,6 +5,9 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Tuple, TYPE_CHECKING
 
+from automated_security_helper.models.flat_vulnerability import (
+    recorded_artifact_path,
+)
 from automated_security_helper.utils.sarif_utils import (
     get_finding_id,
     is_not_a_finding,
@@ -336,12 +339,19 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # earlier location's line and source excerpt, a position that exists in
         # neither.
         if result.locations and len(result.locations) > 0:
-            for location in result.locations:
+            for index, location in enumerate(result.locations):
                 if not location.physicalLocation:
                     continue
                 loc = location.physicalLocation
                 if loc.root.artifactLocation and loc.root.artifactLocation.uri:
                     file_path = loc.root.artifactLocation.uri
+                    if index == 0:
+                        # A workspace scan writes a rebased uri percent-encoded
+                        # and records the path it names; the encoded text names
+                        # no file for GitLab to link the finding to.
+                        file_path = (
+                            recorded_artifact_path(result, file_path) or file_path
+                        )
                     if loc.root.region:
                         if loc.root.region.startLine:
                             start_line = loc.root.region.startLine

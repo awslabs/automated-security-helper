@@ -13,6 +13,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.models.flat_vulnerability import (
     extract_workspace_project,
+    recorded_artifact_path,
 )
 from automated_security_helper.models.workspace import SkippedProject
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
@@ -583,6 +584,16 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                                         and loc.artifactLocation.uri
                                     ):
                                         file_path = loc.artifactLocation.uri
+                                        if i == 0:
+                                            # A workspace scan writes a rebased
+                                            # uri percent-encoded and records
+                                            # the path it names.
+                                            file_path = (
+                                                recorded_artifact_path(
+                                                    result, file_path
+                                                )
+                                                or file_path
+                                            )
                                         ASH_LOGGER.debug(
                                             f"Extracted file path for {rule_id} location {i}: {file_path}"
                                         )
@@ -912,6 +923,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                             and first_location.physicalLocation.root.artifactLocation.uri
                         ):
                             file_path = first_location.physicalLocation.root.artifactLocation.uri
+                            file_path = (
+                                recorded_artifact_path(result, file_path) or file_path
+                            )
                             file_name = _file_name(file_path)
                             location_info = f" in {file_name}"
                             ASH_LOGGER.debug(

@@ -10,6 +10,9 @@ from typing import Dict, List, Literal, Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+from automated_security_helper.models.flat_vulnerability import (
+    recorded_artifact_path,
+)
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -722,6 +725,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             phys_loc = finding.locations[0].physicalLocation
             if phys_loc.root.artifactLocation and phys_loc.root.artifactLocation.uri:
                 location = phys_loc.root.artifactLocation.uri
+                # A workspace scan writes a rebased uri percent-encoded and
+                # records the path it names; show the path.
+                location = recorded_artifact_path(finding, location) or location
                 if phys_loc.root.region:
                     location += f":{phys_loc.root.region.startLine or 'N/A'}"
                 return location
