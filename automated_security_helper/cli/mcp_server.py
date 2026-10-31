@@ -1563,8 +1563,18 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         # target; it replaces neither map, and the totals are summed from the
         # files only when the producer gave none.
         producer_scanners = progress_info.get("scanners")
+        # Each scanner's map is copied when it is one. A value that is not a
+        # mapping (None for a scanner the producer has no targets for yet,
+        # say) is kept under its scanner as an empty map: dict() of it raised
+        # TypeError, and the catch-all below answered the whole poll as failed
+        # for one odd entry. The producer keeps its own guard on what it
+        # builds from the results file; this one holds for whatever reaches
+        # this tool.
         scanner_results: Dict[str, Any] = (
-            {name: dict(targets) for name, targets in producer_scanners.items()}
+            {
+                name: dict(targets) if isinstance(targets, dict) else {}
+                for name, targets in producer_scanners.items()
+            }
             if isinstance(producer_scanners, dict)
             else {}
         )

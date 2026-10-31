@@ -565,6 +565,43 @@ class TestGetScanProgress:
         assert "Boom" in result["error"]
         assert result["error_type"] == "RuntimeError"
 
+    @pytest.mark.asyncio
+    async def test_progress_keeps_a_scanner_whose_map_is_not_a_mapping(
+        self, mock_ctx, mock_scan_registry_entry, tmp_path
+    ):
+        """A producer entry whose value is not a mapping is kept under its
+        scanner with an empty map, beside the entries that are. Before, dict()
+        of the odd value raised TypeError and the catch-all answered the whole
+        poll as failed."""
+        from automated_security_helper.cli.mcp_server import get_scan_progress
+
+        mock_progress = {
+            "status": "running",
+            "scanners": {"bandit": None, "semgrep": {"source": {"findings": 1}}},
+        }
+        mock_registry = MagicMock()
+        mock_scan_registry_entry.output_directory = str(tmp_path)
+        mock_registry.get_scan.return_value = mock_scan_registry_entry
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
+                new_callable=AsyncMock,
+                return_value=mock_progress,
+            ),
+            patch(
+                "automated_security_helper.cli.mcp_server.get_scan_registry",
+                return_value=mock_registry,
+            ),
+        ):
+            result = await get_scan_progress(ctx=mock_ctx, scan_id="test-scan-123")
+
+        assert "success" not in result, result
+        assert result["scanners"] == {
+            "bandit": {},
+            "semgrep": {"source": {"findings": 1}},
+        }, result
+
 
 # ---------------------------------------------------------------------------
 # get_scan_results tool
