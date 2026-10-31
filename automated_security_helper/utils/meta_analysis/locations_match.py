@@ -1,3 +1,5 @@
+import os
+import re
 from typing import Dict, Optional
 from urllib.parse import unquote
 
@@ -213,10 +215,66 @@ def _normalize_file_path(path: str) -> str:
     return text.rstrip("/")
 
 
+_DRIVE_PATH = re.compile(r"[A-Za-z]:[\\/]")
+
+
+def resolve_scan_root(scan_root: Optional[str]) -> Optional[str]:
+    """*scan_root* as an absolute path with its symbolic links resolved, or None
+    when no root is given.
+
+    The root is compared as text against the paths in the reports, so it is
+    resolved once, here: a root reached through a link (``/var`` for
+    ``/private/var``) is the directory it points at. A root that is not absolute
+    names no directory (``.`` is whatever the process runs in) and is refused. A
+    root of the other system's spelling is kept as it is, since nothing here could
+    resolve it: a Windows drive path on a host that is not Windows, a path that
+    starts with one ``/`` on Windows.
+
+    Raises:
+        ValueError: *scan_root* is given and is not an absolute path.
+    """
+    if scan_root is None:
+        return None
+    text = os.fspath(scan_root)
+    if not text:
+        return None
+    if os.name != "nt" and _DRIVE_PATH.match(text):
+        return text
+    if os.name == "nt" and text.startswith("/") and not text.startswith("//"):
+        return text
+    if not os.path.isabs(text):
+        raise ValueError(
+            f"scan_root must be an absolute path, not {text!r}: a relative root "
+            "names whatever directory the process happens to run in"
+        )
+    return os.path.realpath(text)
+
+
+def _root_prefix(scan_root: str) -> Optional[str]:
+    """*scan_root* as the prefix paths below it start with (normalized, no
+    trailing separator): the empty string for the filesystem root, None when
+    the root names no directory."""
+    text = str(scan_root).replace("\\", "/")
+    prefix = _normalize_file_path(text)
+    if prefix:
+        return prefix
+    # ``/`` normalizes to nothing; so does ``./``, which is no directory.
+    if text.startswith("/") and not text.strip("/"):
+        return ""
+    return None
+
+
 def _below_root(path: str, root: str) -> str:
     """*path* (normalized) as a path relative to *root* (normalized) when it is
-    below it, else unchanged."""
-    if root and path.startswith(root + "/"):
+    below it, else unchanged. The drive letter of a Windows path is compared
+    without regard to case, as the file system does."""
+    if (
+        _DRIVE_PATH.match(root + "/")
+        and _DRIVE_PATH.match(path[:3])
+        and path[0].lower() == root[0].lower()
+    ):
+        path = root[0] + path[1:]
+    if path.startswith(root + "/"):
         return path[len(root) + 1 :]
     return path
 
@@ -233,15 +291,19 @@ def file_paths_match(file1: str, file2: str, scan_root: Optional[str] = None) ->
     the scan share their end (``src/main.py`` and ``services/api/src/main.py``),
     and it reads an aggregate that dropped a leading directory (``lib/a.py``
     written ``a.py``) as a file kept. With *scan_root*, the directory the scan was
-    run on, a path below it is read as the path relative to it and the two are
-    compared whole: no tail is ever matched, and an absolute path outside the
-    root names no file of the aggregate.
+    run on, a path below it is read as the path relative to it first, so the
+    files of the scan are compared whole and no tail is matched for them. An
+    absolute path outside the root is not a file of the scan the root can place,
+    so it keeps the tail rule against a relative path and matches an identical
+    path as before. The root is compared as it is given: see
+    :func:`resolve_scan_root` for one reached through a link.
     """
     norm1 = _normalize_file_path(file1)
     norm2 = _normalize_file_path(file2)
-    if scan_root:
-        root = _normalize_file_path(scan_root)
-        return _below_root(norm1, root) == _below_root(norm2, root)
+    root = _root_prefix(scan_root) if scan_root else None
+    if root is not None:
+        norm1 = _below_root(norm1, root)
+        norm2 = _below_root(norm2, root)
     if norm1 == norm2:
         return True
     for longer, shorter in ((norm1, norm2), (norm2, norm1)):

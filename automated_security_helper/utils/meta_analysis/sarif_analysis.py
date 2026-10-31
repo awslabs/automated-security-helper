@@ -139,15 +139,26 @@ def validate_sarif_aggregation(
             aggregate wrote without a leading directory (``lib/a.py`` as
             ``a.py``) is no longer read as the same file by the end of its
             path. Without it, a relative path matches an absolute one that ends
-            with it.
+            with it. The root is resolved once (``os.path.realpath``), so one
+            reached through a link names the directory it points at; a root
+            that is not an absolute path is refused. An absolute path outside
+            the root keeps the end-of-path rule against a relative one.
 
     Returns:
         Dict with validation results and statistics
+
+    Raises:
+        ValueError: *scan_root* is given and is not an absolute path.
     """
     from automated_security_helper.utils.meta_analysis.field_mapping import (
         comparable_field_paths,
         compare_result_fields,
     )
+    from automated_security_helper.utils.meta_analysis.locations_match import (
+        resolve_scan_root,
+    )
+
+    scan_root = resolve_scan_root(scan_root)
 
     validation_results: Dict[str, Any] = {
         "missing_fields": {},
