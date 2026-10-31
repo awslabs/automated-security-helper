@@ -851,12 +851,13 @@ def generate_html_report(
 
         # Add a cell for each reporter type
         for reporter_type in reporter_types:
-            mapped_field = ""
-            if (
-                reporter_type in reporter_mappings
-                and path in reporter_mappings[reporter_type]
-            ):
-                mapped_field = reporter_mappings[reporter_type][path]
+            # The mapping the presence check found for this path, else the
+            # reporter's own, looked up the way check_field_presence_in_reports
+            # looks it up: the mappings key every index as ``[]``, so a path
+            # written ``runs[0].results[0].x`` found none and its column was blank.
+            mapped_field = (info.get("reporter_mappings") or {}).get(
+                reporter_type
+            ) or reporter_mappings.get(reporter_type, {}).get(_mapping_key(path), "")
 
             html.append(f"        <td class='field-path'>{_escaped(mapped_field)}</td>")
         html.append("      </tr>")
