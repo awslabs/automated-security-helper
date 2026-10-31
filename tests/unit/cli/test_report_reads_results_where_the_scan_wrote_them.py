@@ -3,8 +3,8 @@
 
 """`ash report` writes where the scan wrote, names the file it refuses, and keeps going.
 
-The results are looked for where the scan wrote them (where the reporters'
-companion files go is pinned in
+The results are looked for where the scan wrote them (the directory a
+reporter's companion files are written to is pinned in
 test_report_output_dir_is_the_directory_the_results_came_from.py); a deleted
 working directory and a path the user cannot search are refusals, not
 tracebacks; the config file is
