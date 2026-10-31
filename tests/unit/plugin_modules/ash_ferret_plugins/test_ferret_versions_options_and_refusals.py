@@ -425,6 +425,81 @@ def test_a_link_whose_ignored_directory_fell_past_the_budget_refuses_the_target(
     assert scanner.exit_code is None
 
 
+@POSIX_ONLY
+def test_a_written_ignore_pattern_gives_way_to_the_pattern_of_a_link_that_needs_room(
+    mock_plugin_context, tmp_path, monkeypatch
+):
+    """``conf.js`` is an ignored link whose own ignore pattern is held by a kept
+    file's path (``conf.js.bak``), so it needs a pattern of its own. ``other/`` is
+    an ignored directory whose pattern was written and took the room: the two
+    together are one byte past the budget. The ignore pattern is optional (ASH drops
+    the findings under it after the scan), the link's is not, so the target is
+    scanned with the link excluded and no refusal blaming the patterns."""
+    root = _tree(mock_plugin_context.source_dir, ["conf.js.bak", "other/x.js"])
+    outside = tmp_path / "outside.js"
+    outside.write_text("x\n", encoding="utf-8")
+    (root / "conf.js").symlink_to(outside)
+    directory_pattern = os.fspath(root / "other") + os.sep + "*"
+    link_pattern = os.fspath(root / "conf.js")
+    monkeypatch.setattr(
+        ferret_scanner,
+        "_EXCLUDE_VALUE_BUDGET",
+        len(directory_pattern) + len(link_pattern),
+    )
+    scanner = _scanner(mock_plugin_context)
+    scanner.tool_version = "2.5.3"
+    started: list[list[str]] = []
+
+    _scan(
+        scanner,
+        _run_double({"returncode": 0}, EMPTY_SARIF, started),
+        root,
+        [
+            IgnorePathWithReason(path="conf.js", reason="generated"),
+            IgnorePathWithReason(path="other/", reason="third party"),
+        ],
+    )
+
+    (argv,) = started
+    patterns = argv[argv.index("--exclude") + 1].split(",")
+    assert link_pattern in patterns
+    assert directory_pattern not in patterns
+
+
+@POSIX_ONLY
+def test_an_ignored_file_under_a_left_out_entry_is_not_another_walked_file(
+    mock_plugin_context, tmp_path, monkeypatch
+):
+    """On the 2.4.x line a pattern also leaves out every path it is a substring of,
+    so a link ``vendor/conf.js`` next to ``vendor/conf.js.bak`` is refused when the
+    second file counts as one that must stay readable. It is ignored, with the
+    directory: its ignore pattern was left out for want of room, ferret-scan reads
+    it, and ASH drops its findings, so leaving it out too costs nothing."""
+    root = _tree(mock_plugin_context.source_dir, ["a/x.js", "vendor/conf.js.bak"])
+    outside = tmp_path / "outside.js"
+    outside.write_text("x\n", encoding="utf-8")
+    (root / "vendor" / "conf.js").symlink_to(outside)
+    link_pattern = os.fspath(root / "vendor" / "conf.js")
+    monkeypatch.setattr(ferret_scanner, "_EXCLUDE_VALUE_BUDGET", len(link_pattern))
+    scanner = _scanner(mock_plugin_context)
+    scanner.tool_version = "2.4.5"
+    started: list[list[str]] = []
+
+    _scan(
+        scanner,
+        _run_double({"returncode": 0}, EMPTY_SARIF, started),
+        root,
+        [
+            IgnorePathWithReason(path="a/", reason="generated"),
+            IgnorePathWithReason(path="vendor/", reason="third party"),
+        ],
+    )
+
+    (argv,) = started
+    patterns = argv[argv.index("--exclude") + 1].split(",")
+    assert link_pattern in patterns
+
+
 # --- the mandatory exclude budget -----------------------------------------------------
 
 

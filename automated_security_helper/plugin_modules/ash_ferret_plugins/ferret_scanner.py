@@ -1803,6 +1803,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 exclude_patterns,
                 ignored=ignored,
             )
+            mandatory_patterns = list(exclude_patterns)
             exclude_patterns.extend(ignore_patterns)
             if left_out:
                 self._plugin_log(
@@ -1818,40 +1819,68 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 # leave it out. That pattern is now known not to be written, so
                 # ferret-scan would read the file the link points at: such a link
                 # gets its own pattern after all, or refuses the target as a link
-                # nothing ignores does. The ignored files still under a written
-                # pattern are the ones ferret-scan does not read, so only they
-                # stay out of the 2.4.x substring test.
-                still_covered = _under_entries(
-                    ignored[1], [entry for entry in ignored[0] if entry not in left_out]
+                # nothing ignores does. No ignored file counts in the 2.4.x
+                # substring test: ferret-scan leaves a file out that way, and
+                # ASH drops the findings of an ignored file anyway.
+                left_out_entries = set(left_out)
+                written_entries = [
+                    entry for entry in ignored[0] if entry not in left_out_entries
+                ]
+                substring_match = self._exclude_matches_substrings()
+                link_patterns, link_count = _patterns_for_uncovered_links(
+                    target,
+                    walk,
+                    directory_links,
+                    ignored,
+                    written_entries,
+                    substring_match=substring_match,
                 )
-                uncovered = ignored[1] - still_covered
-                uncovered_links = [link for link in walk[1] if link in uncovered]
-                uncovered_directory_links = sorted(
-                    link for link in directory_links if link in uncovered
+                value_size = len(
+                    os.fsencode(",".join([*exclude_patterns, *link_patterns]))
                 )
-                if uncovered_links or uncovered_directory_links:
-                    exclude_patterns.extend(
-                        _link_exclude_patterns(
-                            target,
-                            (walk[0], uncovered_links),
-                            directory_links=uncovered_directory_links,
-                            substring_match=self._exclude_matches_substrings(),
-                            ignored=still_covered,
-                        )
+                if (
+                    link_patterns
+                    and value_size > _EXCLUDE_VALUE_BUDGET
+                    and ignore_patterns
+                ):
+                    # The ignore patterns are optional (ferret-scan reads what
+                    # they would leave out, and ASH drops those findings after
+                    # the scan), the links' patterns are not: the written
+                    # ignore patterns give way to make room, and the links they
+                    # covered then get patterns of their own.
+                    self._plugin_log(
+                        f"Not excluding {len(ignore_patterns)} more ignored "
+                        "path(s) from ferret-scan, to make room in its --exclude "
+                        "value for the links leaving the tree under ignored "
+                        "paths; ASH drops their findings after the scan.",
+                        target_type=target_type,
+                        level=logging.DEBUG,
                     )
-                    value_size = len(os.fsencode(",".join(exclude_patterns)))
-                    if value_size > _EXCLUDE_VALUE_BUDGET:
-                        raise ScannerError(
-                            f"Not running ferret-scan on {target.as_posix()}: its "
-                            f"--exclude value would be {value_size} bytes over "
-                            f"{len(exclude_patterns)} patterns once the "
-                            f"{len(uncovered_links) + len(uncovered_directory_links)} "
-                            "link(s) leaving the tree under ignored paths that got no "
-                            f"pattern are excluded themselves, past the "
-                            f"{_EXCLUDE_VALUE_BUDGET} bytes one argument may take, so "
-                            "ferret-scan could not be started with them all. Narrow "
-                            "exclude_patterns, or remove the links."
-                        )
+                    exclude_patterns = list(mandatory_patterns)
+                    link_patterns, link_count = _patterns_for_uncovered_links(
+                        target,
+                        walk,
+                        directory_links,
+                        ignored,
+                        [],
+                        substring_match=substring_match,
+                    )
+                    value_size = len(
+                        os.fsencode(",".join([*exclude_patterns, *link_patterns]))
+                    )
+                exclude_patterns.extend(link_patterns)
+                if value_size > _EXCLUDE_VALUE_BUDGET:
+                    raise ScannerError(
+                        f"Not running ferret-scan on {target.as_posix()}: its "
+                        f"--exclude value would be {value_size} bytes over "
+                        f"{len(exclude_patterns)} patterns once the "
+                        f"{link_count} "
+                        "link(s) leaving the tree under ignored paths that got no "
+                        f"pattern are excluded themselves, past the "
+                        f"{_EXCLUDE_VALUE_BUDGET} bytes one argument may take, so "
+                        "ferret-scan could not be started with them all. Remove "
+                        "the links, or narrow exclude_patterns."
+                    )
 
             # Temporarily swap in the extended list for argument resolution, and
             # put the configured list back whether or not resolving raises: the
@@ -2095,3 +2124,43 @@ def _target_is_empty(target: Path) -> bool:
         return target.is_dir() and not any(target.iterdir())
     except OSError:
         return False
+
+
+def _patterns_for_uncovered_links(
+    target: Path,
+    walk: Tuple[List[str], List[str]],
+    directory_links: List[str],
+    ignored: Tuple[List[str], Set[str]],
+    written_entries: Iterable[str],
+    *,
+    substring_match: bool,
+) -> Tuple[List[str], int]:
+    """``--exclude`` patterns for the links leaving ``target`` that no written
+    ignore pattern covers, and how many such links there are.
+
+    ``ignored`` is ``_ignored_relatives``'s answer; ``written_entries`` are the
+    ignored entries whose ignore pattern is in the value. A link under any other
+    ignored entry is left readable by ferret-scan, so it gets a pattern of its
+    own, as ``_link_exclude_patterns`` makes it. No ignored file counts as
+    another walked file in the 2.4.x substring test, including the ones under an
+    entry without a pattern: ferret-scan reads those, ASH drops their findings,
+    and a link pattern that also left one out would cost nothing.
+
+    Raises:
+        ScannerError: As ``_link_exclude_patterns`` does.
+    """
+    ignored_files = ignored[1]
+    still_covered = _under_entries(ignored_files, written_entries)
+    uncovered = ignored_files - still_covered
+    links = [link for link in walk[1] if link in uncovered]
+    directory = sorted(link for link in directory_links if link in uncovered)
+    if not links and not directory:
+        return [], 0
+    patterns = _link_exclude_patterns(
+        target,
+        ([path for path in walk[0] if path not in ignored_files], links),
+        directory_links=directory,
+        substring_match=substring_match,
+        ignored=still_covered,
+    )
+    return patterns, len(links) + len(directory)
