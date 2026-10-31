@@ -51,12 +51,24 @@ def _commented(index: int) -> LintIssue:
     )
 
 
-def _run(tmp_path: Path, monkeypatch, shown, written, *, report_exists=True):
+def _run(
+    tmp_path: Path,
+    monkeypatch,
+    shown,
+    written,
+    *,
+    report_exists=True,
+    listed=True,
+):
     """Run ``lint --fix-unused`` over a config, with the age read and the fixer
     stood in for. Returns the config, the result and the stand-ins' calls.
 
     ``report_exists`` puts the unused suppressions report where lint looks for
-    it; without one, lint looks and finds none."""
+    it; without one, lint looks and finds none. ``listed`` gives that report one
+    entry. Lint raises an issue for each entry a report lists, and the command
+    goes on to the fixer only when lint raised an issue at all, so a report that
+    lists nothing over a config with nothing else wrong ends the command at the
+    clean line, before the fixer."""
     config = tmp_path / ".ashrc.yaml"
     config.write_text(BEFORE, encoding="utf-8")
     report = (
@@ -64,7 +76,10 @@ def _run(tmp_path: Path, monkeypatch, shown, written, *, report_exists=True):
     )
     if report_exists:
         report.parent.mkdir(parents=True)
-        report.write_text(json.dumps({"unused_suppressions": []}), encoding="utf-8")
+        entries = [{"path": "src/0.py", "rule_id": "RULE-0"}] if listed else []
+        report.write_text(
+            json.dumps({"unused_suppressions": entries}), encoding="utf-8"
+        )
     calls: list[str] = []
 
     def age(*_a, **_k):
@@ -131,5 +146,27 @@ def test_a_report_lint_did_not_find_is_not_edited_from(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "No unused suppressions report found" in result.output
     assert "Commenting out" not in result.output
+    assert config.read_text(encoding="utf-8") == BEFORE
+    assert calls == [], calls
+
+
+def test_a_report_that_lists_nothing_over_a_clean_config_edits_nothing(
+    tmp_path, monkeypatch
+):
+    """Lint finds the report, the report lists no unused suppression and the
+    config has no other issue, so lint raises none: the command prints the clean
+    line and returns before the fixer. This is the shape that kept the two tests
+    above green only while their report listed an entry."""
+    config, result, calls = _run(
+        tmp_path,
+        monkeypatch,
+        shown=[_commented(0)],
+        written=("project_name: second\n", [_commented(0)], None),
+        listed=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Configuration is clean" in result.output
+    assert "No unused suppressions report found" not in result.output
     assert config.read_text(encoding="utf-8") == BEFORE
     assert calls == [], calls

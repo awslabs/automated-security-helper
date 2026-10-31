@@ -660,12 +660,18 @@ def test_fix_unused_writes_the_text_computed_after_the_prompt(tmp_path, monkeypa
     config = tmp_path / ".ashrc.yaml"
     config.write_text(VALID_CONFIG, encoding="utf-8")
     # A report where lint looks for it: the command edits only from a report
-    # lint listed, and writes nothing where lint found none.
+    # lint listed, and writes nothing where lint found none. The report lists an
+    # entry, because lint raises an issue for each entry and the command goes on
+    # to the fixer only when lint raised one; a report that lists nothing over
+    # this clean config ends the command at the clean line.
     report = (
         tmp_path / ".ash" / "ash_output" / "reports" / "ash.unused-suppressions.json"
     )
     report.parent.mkdir(parents=True)
-    report.write_text('{"unused_suppressions": []}', encoding="utf-8")
+    report.write_text(
+        '{"unused_suppressions": [{"path": "src/a.py", "rule_id": "RULE-A"}]}',
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         ConfigLinter,
         "get_unused_report_age",
