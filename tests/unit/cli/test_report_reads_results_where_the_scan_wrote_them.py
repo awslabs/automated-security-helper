@@ -295,6 +295,7 @@ def test_the_ash_config_file_is_confined_with_the_config_file(tmp_path, monkeypa
 # --- the command ---
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows cannot remove a working directory")
 def test_a_deleted_working_directory_is_the_usage_refusal(tmp_path):
     gone = tmp_path / "gone"
     gone.mkdir()
@@ -305,6 +306,24 @@ def test_a_deleted_working_directory_is_the_usage_refusal(tmp_path):
         result = _report("--format", "text")
     finally:
         os.chdir(before)
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "deleted or unmounted" in result.output, result.output
+
+
+def test_a_working_directory_that_cannot_be_read_is_the_usage_refusal(monkeypatch):
+    """The test above removes the directory the process is in, which Windows
+    refuses (PermissionError) before the command runs. ``Path.cwd`` raising
+    FileNotFoundError is all the refusal reads, so this one holds on every
+    platform."""
+
+    def gone():
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+
+    result = _report("--format", "text")
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
