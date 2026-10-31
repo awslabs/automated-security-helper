@@ -37,6 +37,7 @@ from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
 from automated_security_helper.core.resource_management.scan_management import (
+    cancel_scan,
     check_scan_progress,
     cleanup_scan_resources,
 )
@@ -657,6 +658,28 @@ class TestAScanAnotherCleanupRemovedIsAlreadyRemoved:
         assert result["success"] is False
         assert result["message"] == "Failed to clean up scan resources"
         assert "error_category" not in result
+
+
+class TestTheTwoAlreadyEndedAnswersOfACancelAreOne:
+    """A cancel gives the already-ended answer in two places: the check before
+    the cancel, and the registry declining it because the scan ended in
+    between. They were two copies of one dict; one helper gives both."""
+
+    def test_the_check_and_the_declined_cancel_answer_alike(self, registry, tmp_path):
+        ended = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
+        registry.get_scan.return_value = ended
+        with _use(registry):
+            checked = asyncio.run(cancel_scan("scan-1"))
+
+        running = _entry(tmp_path, status=MCScanStatus.RUNNING, has_runner=False)
+        registry.get_scan.side_effect = [running, ended]
+        registry.cancel_scan.return_value = False
+        with _use(registry):
+            declined = asyncio.run(cancel_scan("scan-1"))
+
+        assert checked["status"] == "completed"
+        assert checked["success"] is False
+        assert declined == checked
 
 
 class TestTheEntryIsReadAgainAfterTheWait:

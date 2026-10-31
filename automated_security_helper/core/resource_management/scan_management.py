@@ -101,6 +101,25 @@ def _remove_output_tree(output_dir: Path) -> bool:
     return not output_dir.exists()
 
 
+def _already_ended_response(scan_id: str, status: str) -> Dict[str, Any]:
+    """The answer to a cancel of a scan that has already ended in ``status``.
+
+    One spelling for both places that give it: the check before the cancel, and
+    the registry declining the cancel because the scan ended in between.
+    """
+    return {
+        "success": False,
+        "scan_id": scan_id,
+        "message": f"Scan is already in {status} state and cannot be cancelled",
+        "status": status,
+        "suggestions": [
+            "No action needed as the scan is already completed/incomplete/failed/cancelled",
+            "Use get_scan_results to retrieve results if the scan is completed",
+            "Start a new scan if needed",
+        ],
+    }
+
+
 def _removed_meanwhile_response(scan_id: str, why: str) -> Dict[str, Any]:
     """The not-found answer of a cleanup whose scan another cleanup removed.
 
@@ -236,17 +255,7 @@ async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[st
 
     # Check if scan is already completed
     if not entry.is_active():
-        return {
-            "success": False,
-            "scan_id": scan_id,
-            "message": f"Scan is already in {entry.status.value} state and cannot be cancelled",
-            "status": entry.status.value,
-            "suggestions": [
-                "No action needed as the scan is already completed/incomplete/failed/cancelled",
-                "Use get_scan_results to retrieve results if the scan is completed",
-                "Start a new scan if needed",
-            ],
-        }
+        return _already_ended_response(scan_id, entry.status.value)
 
     try:
         # Try to cancel the scan
@@ -286,20 +295,7 @@ async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[st
                 ],
             )
         if not ended.is_active():
-            return {
-                "success": False,
-                "scan_id": scan_id,
-                "message": (
-                    f"Scan is already in {ended.status.value} state and cannot "
-                    "be cancelled"
-                ),
-                "status": ended.status.value,
-                "suggestions": [
-                    "No action needed as the scan is already completed/incomplete/failed/cancelled",
-                    "Use get_scan_results to retrieve results if the scan is completed",
-                    "Start a new scan if needed",
-                ],
-            }
+            return _already_ended_response(scan_id, ended.status.value)
         return {
             "success": False,
             "scan_id": scan_id,
