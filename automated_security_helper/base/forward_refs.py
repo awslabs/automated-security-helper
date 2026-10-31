@@ -19,8 +19,11 @@ early would run against the still-mocked validator. The import runs OUTSIDE the
 lock: the last lines of ``config/ash_config.py`` call the resolvers back as that
 module finishes importing, so a thread importing it held its import lock and then
 asked for this one while a thread that first used the model held this lock and
-asked for the import lock. Reentrant, because importing ``config.ash_config``
-runs module bodies that can construct one of these models on the same thread.
+asked for the import lock. Reentrant, because ``bind`` rebuilds the model and a
+rebuild that constructs one of these models on the same thread asks for the lock
+again. The import is no reason for it: a model built during the import reaches
+``resolve`` while ``import_target`` still raises ImportError, so it never
+reaches the lock.
 """
 
 from __future__ import annotations
