@@ -256,11 +256,13 @@ class TestOfflineMode:
         logger.warning.assert_not_called()
 
     def test_an_unrecognized_value_is_online_and_said_once(self, monkeypatch, logger):
-        monkeypatch.setenv("ASH_OFFLINE", "on")
+        monkeypatch.setenv("ASH_OFFLINE", "enabled")
 
         assert is_offline_mode() is False
         assert is_offline_mode() is False
 
         # Red at the base: nothing said.
         logger.warning.assert_called_once()
-        assert "ASH_OFFLINE='on' is not recognized" in logger.warning.call_args.args[0]
+        assert (
+            "ASH_OFFLINE='enabled' is not recognized" in logger.warning.call_args.args[0]
+        )

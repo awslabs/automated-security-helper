@@ -1097,29 +1097,35 @@ ASH_EXIT_CODES: Dict[int, str] = {
 }
 
 
-#: The ASH_OFFLINE values that name online mode. Anything else that is not one of
-#: the offline values is unrecognized, and is said so once.
+#: The ASH_OFFLINE values that name offline mode, and the ones that name online
+#: mode. They are pairs (ON/OFF, Y/N, YES/NO, TRUE/FALSE, 1/0): a value that names
+#: one side of a pair names the other side's opposite too, so the words an operator
+#: reaches for to turn offline mode on work as the words for turning it off do.
+#: Anything else is unrecognized, and is said so once.
+_OFFLINE_OFFLINE_VALUES = ("YES", "TRUE", "1", "ON", "Y")
 _ONLINE_OFFLINE_VALUES = ("", "NO", "FALSE", "0", "OFF", "N")
 
 
 def is_offline_mode() -> bool:
     """Check if ASH is running in offline mode via ASH_OFFLINE env var.
 
-    YES, TRUE or 1, whatever the case and with the blanks around the value
+    YES, TRUE, 1, ON or Y, whatever the case and with the blanks around the value
     removed (``set ASH_OFFLINE=YES `` in a Windows ``cmd`` keeps the trailing
-    blank, and the container init script strips before it compares). A value that
-    is neither those nor a plain "no" leaves ASH online, and one warning says so:
-    ``on`` or ``y`` used to leave it online with nothing said.
+    blank, and the container init script strips before it compares). NO, FALSE, 0,
+    OFF, N and an empty value leave ASH online. Any other value leaves ASH online
+    too, and one warning says so. ``ON`` and ``Y`` used to be in that last group,
+    though their opposites ``OFF`` and ``N`` were accepted: an air-gapped run
+    that set ``ASH_OFFLINE=on`` went online with a warning.
     """
     raw = os.environ.get("ASH_OFFLINE")
     value = str(raw if raw is not None else "NO").strip().upper()
-    if value in ("YES", "TRUE", "1"):
+    if value in _OFFLINE_OFFLINE_VALUES:
         return True
     if value not in _ONLINE_OFFLINE_VALUES:
         warn_relative_value_once(
             "ASH_OFFLINE",
             str(raw),
             f"ASH_OFFLINE={raw!r} is not recognized, so ASH runs online. Set it to "
-            "YES, TRUE or 1 for offline mode.",
+            "YES, TRUE, ON, Y or 1 for offline mode.",
         )
     return False
