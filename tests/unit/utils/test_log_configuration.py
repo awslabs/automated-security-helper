@@ -54,14 +54,27 @@ CI_INDICATORS = [
 
 
 class FakeStream:
-    """A stdout/stderr stand-in with controllable encoding and reconfigure."""
+    """A stdout/stderr stand-in with controllable encoding and reconfigure.
 
-    def __init__(self, encoding="utf-8", reconfigure_error=None, detach_error=None):
+    It is a console a person reads unless ``terminal`` says it is redirected.
+    """
+
+    def __init__(
+        self,
+        encoding="utf-8",
+        reconfigure_error=None,
+        detach_error=None,
+        terminal=True,
+    ):
         if encoding is not _OMITTED:
             self.encoding = encoding
         self._reconfigure_error = reconfigure_error
         self._detach_error = detach_error
+        self._terminal = terminal
         self.written = []
+
+    def isatty(self):
+        return self._terminal
 
     def write(self, text):
         self.written.append(text)
@@ -446,6 +459,21 @@ def test_the_filter_escapes_a_character_the_console_cannot_write_and_drops_none(
 
     # cp1252 writes the "é", and has no snowman.
     assert record.msg == "café \\u2603"
+
+
+def test_the_filter_escapes_every_such_character_for_a_redirected_console(
+    on_windows,
+):
+    """Redirected to a file or a pipe, the code page the streams name is the
+    console's, not the reader's, so the ASCII rule applies."""
+    on_windows.setattr(sys, "stdout", FakeStream(encoding="cp1252", terminal=False))
+    on_windows.setattr(sys, "stderr", FakeStream(encoding="cp1252", terminal=False))
+    log_filter = WindowsSafeFilter()
+    record = logging.LogRecord("n", logging.INFO, "f", 1, "café ☃", None, None)
+
+    log_filter.filter(record)
+
+    assert record.msg == "caf\\xe9 \\u2603"
 
 
 def test_the_filter_with_no_console_knowledge_escapes_every_such_character(

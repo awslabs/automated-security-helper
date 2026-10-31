@@ -37,18 +37,33 @@ ZHE = "\N{CYRILLIC CAPITAL LETTER ZHE}"
 SUN = "\N{CJK UNIFIED IDEOGRAPH-65E5}"
 
 
-def _stream(encoding: str) -> io.TextIOWrapper:
-    return io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict")
+class _Terminal(io.TextIOWrapper):
+    """A text stream that says it is a console a person reads."""
+
+    def isatty(self) -> bool:
+        return True
 
 
-def _console(monkeypatch, stdout: str, stderr: str | None = None) -> None:
+def _stream(encoding: str, terminal: bool = True) -> io.TextIOWrapper:
+    kind = _Terminal if terminal else io.TextIOWrapper
+    return kind(io.BytesIO(), encoding=encoding, errors="strict")
+
+
+def _console(
+    monkeypatch,
+    stdout: str,
+    stderr: str | None = None,
+    terminal: bool = True,
+) -> None:
     monkeypatch.setattr(log, "_on_a_ci_runner", lambda: False)
-    monkeypatch.setattr("sys.stdout", _stream(stdout))
-    monkeypatch.setattr("sys.stderr", _stream(stderr or stdout))
+    monkeypatch.setattr("sys.stdout", _stream(stdout, terminal))
+    monkeypatch.setattr("sys.stderr", _stream(stderr or stdout, terminal))
 
 
-def _active_filter(monkeypatch, stdout: str, stderr: str | None = None):
-    _console(monkeypatch, stdout, stderr)
+def _active_filter(
+    monkeypatch, stdout: str, stderr: str | None = None, terminal: bool = True
+):
+    _console(monkeypatch, stdout, stderr, terminal)
     monkeypatch.setattr(log, "_detect_encoding_issues", lambda: True)
     return WindowsSafeFilter()
 
@@ -103,9 +118,74 @@ def test_a_stream_naming_no_known_encoding_keeps_the_ascii_rule(monkeypatch):
     class _Unnamed:
         encoding = "not-a-codec"
 
+        def isatty(self) -> bool:
+            return True
+
     monkeypatch.setattr("sys.stderr", _Unnamed())
 
     assert log._console_writes() is None
+
+
+def test_a_console_redirected_to_a_file_or_a_pipe_keeps_the_ascii_rule(monkeypatch):
+    # A redirected stream names the code page of the console it was started
+    # from, but the reader of the file or pipe decodes the bytes in a code page
+    # this process cannot see, so a raw cp1252 byte may show as garbage where
+    # the escape is unambiguous.
+    _console(monkeypatch, "cp1252", terminal=False)
+
+    assert log._console_writes() is None
+
+
+def test_one_redirected_stream_is_enough_to_keep_the_ascii_rule(monkeypatch):
+    _console(monkeypatch, "cp1252")
+    monkeypatch.setattr("sys.stderr", _stream("cp1252", terminal=False))
+
+    assert log._console_writes() is None
+
+    _console(monkeypatch, "cp1252")
+    monkeypatch.setattr("sys.stdout", _stream("cp1252", terminal=False))
+
+    assert log._console_writes() is None
+
+
+@pytest.mark.parametrize("failure", [AttributeError, ValueError, OSError])
+def test_a_stream_that_cannot_say_whether_it_is_a_terminal_keeps_the_ascii_rule(
+    monkeypatch, failure
+):
+    _console(monkeypatch, "cp1252")
+
+    class _Unsure:
+        encoding = "cp1252"
+
+        def isatty(self) -> bool:
+            raise failure("closed")
+
+    monkeypatch.setattr("sys.stdout", _Unsure())
+
+    assert log._console_writes() is None
+
+
+def test_a_stream_with_no_isatty_keeps_the_ascii_rule(monkeypatch):
+    _console(monkeypatch, "cp1252")
+
+    class _Bare:
+        encoding = "cp1252"
+
+    monkeypatch.setattr("sys.stderr", _Bare())
+
+    assert log._console_writes() is None
+
+
+def test_the_filter_escapes_an_accented_letter_into_a_redirected_stream(monkeypatch):
+    windows = _active_filter(monkeypatch, "cp1252", terminal=False)
+
+    assert _shown(windows, f"caf{E_ACUTE} {SUN}") == "caf\\xe9 \\u65e5"
+
+
+def test_the_filter_keeps_an_accented_letter_on_a_terminal(monkeypatch):
+    windows = _active_filter(monkeypatch, "cp1252", terminal=True)
+
+    assert _shown(windows, f"caf{E_ACUTE} {SUN}") == f"caf{E_ACUTE} \\u65e5"
 
 
 def test_the_filter_escapes_only_what_the_code_page_cannot_write(monkeypatch):

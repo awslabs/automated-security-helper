@@ -751,6 +751,14 @@ def _encodings_of(*streams: Any) -> Optional[Tuple[str, ...]]:
     return tuple(names)
 
 
+def _is_a_terminal(stream: Any) -> bool:
+    """Whether *stream* is a console a person reads, False when it cannot say."""
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 def _console_writes() -> Optional[Callable[[str], bool]]:
     """What the console writes of a character outside ASCII, or None for nothing.
 
@@ -760,9 +768,14 @@ def _console_writes() -> Optional[Callable[[str], bool]]:
     function that says whether stdout and stderr both write a character, so the
     filter escapes only what the code page cannot. None where nothing is known to
     be written: a CI runner, whose log other tools read in an encoding this
-    process cannot see, and a stream that names no encoding Python knows.
+    process cannot see, a stream that is not a terminal (redirected to a file
+    or a pipe, where the reader decodes the bytes with a code page this process
+    cannot see, and an escape is unambiguous where a raw byte may not be), and a
+    stream that names no encoding Python knows.
     """
     if _on_a_ci_runner():
+        return None
+    if not (_is_a_terminal(sys.stdout) and _is_a_terminal(sys.stderr)):
         return None
     names = _encodings_of(sys.stdout, sys.stderr)
     if names is None:
