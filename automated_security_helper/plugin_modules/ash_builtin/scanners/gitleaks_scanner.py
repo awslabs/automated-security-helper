@@ -267,14 +267,13 @@ MAX_IGNORE_FILE_BYTES = 32 * 1024 * 1024
 #: Windows. A longer prefix names no file, so it is never built.
 MAX_CANDIDATE_LENGTH = 32_767 if os.name == "nt" else 4_096
 
-#: Longest last component of a candidate: ``NAME_MAX``, 255 of the unit the
-#: platform's file systems count in (``NAME_MAX_IN_UTF16``).
+#: Longest last component of a candidate, in UTF-16 code units. NTFS, exFAT,
+#: vfat and HFS+ bound a name at 255 units, and any host can scan a tree on one
+#: of them, so the unit does not depend on the platform ASH runs on. ext4, xfs
+#: and APFS bound a name at 255 bytes. A name's units never exceed its bytes (a
+#: name of 100 CJK characters is 100 units and 300 bytes), so a name that fits
+#: in bytes fits here, and a name over this bound fits no file system.
 MAX_NAME_LENGTH = 255
-
-#: Whether a file name is bounded in UTF-16 code units, as NTFS bounds it, or in
-#: UTF-8 bytes, as Linux and APFS bound it. A name of 100 CJK characters is 100
-#: units and 300 bytes: a valid Windows name that a byte count would drop.
-NAME_MAX_IN_UTF16 = os.name == "nt"
 
 #: Most candidate names, and most characters in all, taken from the tree's
 #: ``.gitleaksignore``. One line splits at every colon, so a few lines of colons
@@ -330,16 +329,13 @@ def _write_private_copy(source: BinaryIO, destination: Path) -> None:
 
 
 def _name_length(name: str) -> int:
-    """``name``'s length in the unit this platform bounds a file name in.
+    """``name``'s length in UTF-16 code units, the unit ``MAX_NAME_LENGTH`` counts.
 
-    UTF-16 code units where ``NAME_MAX_IN_UTF16`` (a character outside the Basic
-    Multilingual Plane is two), UTF-8 bytes elsewhere. The name was decoded with
-    ``surrogateescape``, so an undecodable byte is one lone surrogate: one unit
-    here, and the one byte it was in the byte count.
+    A character outside the Basic Multilingual Plane is two units. The name was
+    decoded with ``surrogateescape``, so an undecodable byte is one lone
+    surrogate, which is one unit.
     """
-    if NAME_MAX_IN_UTF16:
-        return len(name.encode("utf-16-le", "surrogatepass")) // 2
-    return len(name.encode("utf-8", "surrogateescape"))
+    return len(name.encode("utf-16-le", "surrogatepass")) // 2
 
 
 def gitleaksignore_files(data: bytes) -> List[str]:
@@ -414,7 +410,7 @@ def gitleaksignore_candidates(data: bytes) -> Tuple[List[str], int]:
                 unread += len(colons) - number
                 break
             # The last component, measured before the prefix is built: more
-            # characters than NAME_MAX bytes is too long in any encoding.
+            # characters than NAME_MAX units is more units than that.
             first_of_last = joined.rfind("/", 0, position) + 1
             if position - first_of_last > MAX_NAME_LENGTH:
                 continue

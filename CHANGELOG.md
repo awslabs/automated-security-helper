@@ -8071,9 +8071,10 @@
   100,000 names from the file, and one line of colons no longer makes a name for
   each colon: names no file can have are not built, and what is left unread makes
   the scan incomplete. A name repeated on several lines counts once, and a name
-  is measured in UTF-16 code units on Windows, as NTFS bounds it, and in bytes
-  elsewhere. The report gives the files not re-scanned, which are real files and
-  not every name a colon split makes, and the names left unread as two separate
+  is measured in UTF-16 code units on every platform, as NTFS, exFAT, vfat and
+  HFS+ bound it, so a name that fits one of those file systems is not dropped
+  on a host that mounts it. The report gives the files not re-scanned, which
+  are real files and not every name a colon split makes, and the names left unread as two separate
   counts. A `.gitleaksignore` that changed
   while gitleaks ran fails the scan, and so does an empty re-scan report or one
   with no run, where each used to read as no dropped findings. Results under an

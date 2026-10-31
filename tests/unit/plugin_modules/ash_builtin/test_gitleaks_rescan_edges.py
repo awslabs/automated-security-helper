@@ -163,11 +163,12 @@ def test_a_long_directory_part_does_not_hide_a_short_last_component():
     assert files == [f"{directory}/x.py"]
 
 
-def test_a_name_is_measured_in_utf16_units_where_the_platform_counts_them(monkeypatch):
-    """NTFS bounds a name at 255 UTF-16 units. A name of 100 CJK characters is
-    100 units and 300 UTF-8 bytes, so a byte count dropped a name Windows can
-    hold, and the findings its ``.gitleaksignore`` line hides went unchecked."""
-    monkeypatch.setattr(module, "NAME_MAX_IN_UTF16", True, raising=False)
+def test_a_name_is_measured_in_utf16_units_on_every_platform():
+    """NTFS, exFAT, vfat and HFS+ bound a name at 255 UTF-16 units, and a host
+    of any kind can mount one of them. A name of 100 CJK characters is 100 units
+    and 300 UTF-8 bytes, so a byte count dropped a name such a tree holds, with
+    nothing counted as unread, and the findings its ``.gitleaksignore`` line
+    hides went unchecked."""
     name = chr(0x5B57) * 100
 
     files, unread = gitleaksignore_candidates(f"{name}:github-pat:1\n".encode())
@@ -176,10 +177,9 @@ def test_a_name_is_measured_in_utf16_units_where_the_platform_counts_them(monkey
     assert unread == 0
 
 
-def test_a_name_past_the_utf16_bound_is_still_dropped(monkeypatch):
+def test_a_name_past_the_utf16_bound_is_still_dropped():
     """A character outside the Basic Multilingual Plane is two units: 127 of
     them fit 255 units, 128 do not."""
-    monkeypatch.setattr(module, "NAME_MAX_IN_UTF16", True, raising=False)
     fits = chr(0x1F600) * 127
     too_long = chr(0x1F600) * 128
 
@@ -190,15 +190,18 @@ def test_a_name_past_the_utf16_bound_is_still_dropped(monkeypatch):
     assert files == [fits]
 
 
-def test_a_name_is_measured_in_bytes_where_the_platform_counts_them(monkeypatch):
-    """Linux bounds a name at 255 bytes, so the 300 bytes of 100 CJK characters
-    name no file there; this is the other side of the unit change."""
-    monkeypatch.setattr(module, "NAME_MAX_IN_UTF16", False, raising=False)
-    name = chr(0x5B57) * 100
+def test_a_name_at_the_unit_bound_is_kept_and_one_past_it_is_not():
+    """255 characters of three bytes each are 255 units and 765 bytes: the most a
+    file system that counts units can hold, and the bound the quadratic cap of
+    the character test keeps."""
+    fits = chr(0x5B57) * 255
+    too_long = chr(0x5B57) * 256
 
-    files, unread = gitleaksignore_candidates(f"{name}:github-pat:1\n".encode())
+    files, unread = gitleaksignore_candidates(
+        f"{fits}:github-pat:1\n{too_long}:github-pat:1\n".encode()
+    )
 
-    assert files == []
+    assert files == [fits]
     assert unread == 0
 
 
