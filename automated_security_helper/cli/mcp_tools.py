@@ -5579,6 +5579,13 @@ def _answer_get_config(
     # working directory deleted while the server runs): resolve_config then
     # judges the file by its own confinement root, which leaves out more,
     # never less, and the ASH_CONFIG pre-check below confines fail-closed.
+    #
+    # Whether the client named the file is read once, when the target needs it
+    # (a remote session that delivered nothing) and again below for the trusted
+    # base it is resolved against; the second use takes this reading, so the
+    # target and the base cannot be decided by two reads of a file that changed
+    # between them.
+    named_untrusted: Optional[bool] = None
     scanned_root: Optional[Path]
     if config_path is None:
         # Discovery above found `path` inside `search`, so `search` names a
@@ -5610,11 +5617,14 @@ def _answer_get_config(
             delivered = get_session_source_dir(
                 DEFAULT_SESSION_ID if session_id is None else session_id
             )
-            if delivered is not None and delivered.is_dir():
+            delivered_here = delivered is not None and delivered.is_dir()
+            if caller_is_remote(session_id) and not delivered_here:
+                named_untrusted = client_named_config_is_untrusted(
+                    path, session_id=session_id
+                )
+            if delivered_here:
                 scanned_root = delivered
-            elif caller_is_remote(session_id) and client_named_config_is_untrusted(
-                path, session_id=session_id
-            ):
+            elif named_untrusted:
                 # A network session that delivered nothing has no tree a scan
                 # of it may target: run_ash_scan refuses to fall back to the
                 # server's working directory for it (_resolve_omitted_source_dir),
@@ -5660,11 +5670,12 @@ def _answer_get_config(
     except (ASHConfigValidationError, OSError) as exc:
         # OSError as above: refused as a config, never the file asked for.
         return _config_load_failure(exc, None)
-    untrusted_config = (
-        client_named_config_is_untrusted(path, session_id=session_id)
-        if config_path is not None
-        else config_is_client_supplied(path)
-    )
+    if config_path is None:
+        untrusted_config = config_is_client_supplied(path)
+    elif named_untrusted is not None:
+        untrusted_config = named_untrusted
+    else:
+        untrusted_config = client_named_config_is_untrusted(path, session_id=session_id)
     # The trusted base a client-supplied config is resolved against: the
     # session's bound profile, written again from the binding when its file is
     # gone. Resolved before the load, so a binding that cannot be written again
