@@ -237,6 +237,20 @@ def default_cache_dir(
       is ``TMPDIR`` else ``/tmp`` on Unix, and on Windows ``TMP``, then ``TEMP``,
       then ``USERPROFILE``, then the Windows directory (GetTempPath).
 
+    Known deviations from the tools, left as they are (write absolute paths in
+    these variables and none of them applies):
+
+    - A relative or ``~`` value of ``GRYPE_DB_CACHE_DIR`` or ``TRIVY_CACHE_DIR`` is
+      expanded with ``Path.expanduser``, which also reads ``~user``. The tools
+      expand a home directory with their own function (adrg/xdg ``ExpandHome`` for
+      grype, as the review of this module read it, not measured), so a value such
+      as ``~bob/cache`` or one holding ``$HOME`` can name another directory to the
+      tool than to ASH.
+    - trivy with ``HOME`` unset in the scanner's own process falls to the
+      temporary directory, as ``os.UserCacheDir`` reports an error there; this
+      function takes this process's home instead when the scan's environment names
+      none, because every sandbox backend gives the scanner that home.
+
     Args:
         tool: ``grype`` or ``trivy``.
         env: The environment the scan runs with; the process environment when
