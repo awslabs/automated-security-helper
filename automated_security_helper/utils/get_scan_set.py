@@ -1914,10 +1914,13 @@ def get_ash_ignorespec_with_attribution(
             # One pattern the parser refuses used to raise out of here and abort
             # the scan, while the pruning pre-pass tolerated the same pattern.
             # Skipped and said: the rule applies to nothing, so the scan set is
-            # larger, never smaller. The rule is the repository's text, shown and
-            # not obeyed.
+            # larger, never smaller. The rule is the repository's text, which
+            # the log sinks show and do not obey: it goes in raw, quoted so its
+            # edges are visible, and the sink writes its controls as escapes
+            # once. Shown here first (or as its repr), the sink showed the shown
+            # text again, with the escapes' backslashes doubled.
             ASH_LOGGER.warning(
-                f"Skipped ignore rule {shown_not_obeyed(rule)!r} from {current_marker}: "
+                f'Skipped ignore rule "{rule}" from {current_marker}: '
                 f"it could not be compiled ({error})",
                 extra=NO_MARKUP,
             )
