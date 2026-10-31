@@ -809,10 +809,11 @@ class TestLinkedDirectories:
         was listed under the link's name only, and a workspace glob
         ``packages/ui/plugins/*`` found nothing in yarn's copy. A link into the
         package is not walked at all: the real directory is listed at its own
-        path in full, and the link contributes its own manifest alone. (The
-        earlier cure walked the real directory a second time through the link;
-        with two links per level that was 2^N walks, a bound the repository
-        could remove.)"""
+        path in full, and the link's name gets the manifests found below its
+        target listed afterwards, with no second walk (the walk-count test
+        below pins that). (The earlier cure walked the real directory a second
+        time through the link; with two links per level that was 2^N walks, a
+        bound the repository could remove.)"""
         repo = tmp_path / "repo"
         package = _yarn_package(repo)
         _manifest(package / "packages" / "ui", "ui")
@@ -828,6 +829,7 @@ class TestLinkedDirectories:
             "packages/ui/package.json",
             "packages/ui/plugins/x/package.json",
             "ui/package.json",
+            "ui/plugins/x/package.json",
             "yarn.lock",
         ]
 
@@ -965,6 +967,129 @@ class TestLinkedDirectories:
             "ui/package.json",
             "yarn.lock",
         ]
+
+    def test_members_below_a_link_into_the_package_are_listed_under_the_links_name(
+        self, tmp_path
+    ):
+        """``packages/foo -> ../libs/foo`` where ``libs/foo`` holds a member of its
+        own (``plugins/x``). The link is not walked, so only its own manifest
+        was listed under its name, and a member that yarn reaches through the
+        link's path (a nested workspace glob ``plugins/*`` read from
+        ``packages/foo``) was missing from yarn's copy and went unaudited. The
+        members found below the target are listed under the link's name too."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "libs" / "foo", "foo", workspaces=["plugins/*"])
+        _manifest(package / "libs" / "foo" / "plugins" / "x", "x")
+        (package / "packages").mkdir()
+        os.symlink("../libs/foo", package / "packages" / "foo")
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "libs/foo/package.json",
+            "libs/foo/plugins/x/package.json",
+            "package.json",
+            "packages/foo/package.json",
+            "packages/foo/plugins/x/package.json",
+            "yarn.lock",
+        ]
+        assert refused_inputs("yarn", package, roots=[repo]) == []
+
+    def test_members_below_a_linked_group_directory_are_listed_under_the_links_name(
+        self, tmp_path
+    ):
+        """A glob such as ``packages/*/*`` reaches a member only through the
+        linked group directory's path: ``libs/group/a`` is a member at
+        ``packages/group/a``. The group directory holds no manifest of its own,
+        so the link has none to list, and its member was the only thing to find."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "libs" / "group" / "a", "a")
+        (package / "packages").mkdir()
+        os.symlink("../libs/group", package / "packages" / "group")
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "libs/group/a/package.json",
+            "package.json",
+            "packages/group/a/package.json",
+            "yarn.lock",
+        ]
+
+    def test_each_of_two_links_to_one_directory_beside_the_package_lists_its_members(
+        self, tmp_path
+    ):
+        """Two links to ``shared`` beside the package: the first met is walked,
+        and the other is not (a real directory is walked once), but its name gets
+        the members of the walked one, whichever link os.walk meets first."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        shared = repo / "shared"
+        _manifest(shared, "shared")
+        _manifest(shared / "nested", "nested")
+        (package / "packages").mkdir()
+        os.symlink(shared, package / "packages" / "a", target_is_directory=True)
+        os.symlink(shared, package / "packages" / "b", target_is_directory=True)
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/a/nested/package.json",
+            "packages/a/package.json",
+            "packages/b/nested/package.json",
+            "packages/b/package.json",
+            "yarn.lock",
+        ]
+
+    def test_the_copy_holds_the_members_below_a_link_into_the_package(
+        self, tmp_path, trusted_copy_dirs
+    ):
+        """The copy yarn audits from has the member at the link's path."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "libs" / "foo", "foo", workspaces=["plugins/*"])
+        _manifest(package / "libs" / "foo" / "plugins" / "x", "x")
+        (package / "packages").mkdir()
+        os.symlink("../libs/foo", package / "packages" / "foo")
+        parent = tmp_path / "out"
+        parent.mkdir()
+
+        with package_manager_child(
+            "yarn", package, parent=parent, scan_root=repo, yarn_major=1
+        ) as child:
+            copied = sorted(
+                p.relative_to(child.cwd).as_posix()
+                for p in child.cwd.rglob("*")
+                if p.is_file()
+            )
+
+        assert "packages/foo/plugins/x/package.json" in copied, copied
+        assert "libs/foo/plugins/x/package.json" in copied, copied
+
+    def test_the_manifests_listed_under_links_are_bounded(self, tmp_path, monkeypatch):
+        """A link to a directory with many members would list every one of them
+        again under the link's name; past the cap the package is refused with the
+        reason, as for too many linked directories. The cap is monkeypatched low;
+        the fixture is four members below one linked directory."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        for index in range(4):
+            _manifest(package / "libs" / "foo" / f"m{index}", f"m{index}")
+        (package / "packages").mkdir()
+        os.symlink("../libs/foo", package / "packages" / "foo")
+        monkeypatch.setattr(child_module, "_MAX_LINK_ALIAS_MANIFESTS", 3)
+
+        with pytest.raises(
+            child_module.TooManyLinkedDirectories, match="more than 3 manifests"
+        ):
+            package_manager_inputs("yarn", package, roots=[repo])
+
+        monkeypatch.setattr(child_module, "_MAX_LINK_ALIAS_MANIFESTS", 4)
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+        assert "packages/foo/m3/package.json" in _rel(listed, package)
 
     def test_a_sibling_alias_of_a_member_lists_both_paths(self, tmp_path):
         """``packages/ui-alias -> ui`` beside the real member: whichever os.walk

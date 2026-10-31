@@ -160,6 +160,11 @@ _SKIPPED_DIR_NAMES = frozenset({"node_modules", ".git"})
 #: is not one yarn would audit in bounded time either.
 _MAX_LINKED_DIRECTORY_WALKS = 1000
 
+#: How many manifest paths the walk may add for the links it did not enter
+#: (``_manifests_below_links``) before it refuses the package, also with
+#: ``TooManyLinkedDirectories``. Each is a file yarn reads at the link's path.
+_MAX_LINK_ALIAS_MANIFESTS = 10000
+
 #: Why a file the package manager would read is not handed to it.
 LINK_LEAVES_TREE = "link leaves the scanned tree"
 NOT_A_REGULAR_FILE = "not a regular file"
@@ -197,7 +202,9 @@ class TooManyLinkedDirectories(ValueError):
     walk; this is the hard bound behind that rule, for a repository (ASH scans
     untrusted ones) laid out to reach thousands of distinct directories through
     links. The package is refused with this reason, which the scan loop records
-    as that audit's failure, rather than walked on.
+    as that audit's failure, rather than walked on. It is also raised when the
+    manifests listed again under the links that were not walked pass
+    ``_MAX_LINK_ALIAS_MANIFESTS``.
     """
 
 
@@ -625,6 +632,60 @@ def _links_into_skipped_dir(linked: Path, package_dir: Path) -> bool:
     return bool(_SKIPPED_DIR_NAMES.intersection(relative.parts))
 
 
+def _manifests_below_links(
+    aliases: Sequence[Tuple[Path, str]],
+    walked: Sequence[Path],
+    listed: Iterable[Path],
+) -> List[Path]:
+    """The manifests the walk found below each link's target, named by the link.
+
+    ``aliases`` are the links the input walk did not enter because their
+    target is listed at its own path (``package_manager_inputs``), each with the
+    real path of its target. yarn finds a workspace's members by walking the
+    paths its globs name, a link's path included, so a member below the target
+    (``libs/foo/plugins/x`` for ``packages/foo -> ../libs/foo``) is read at
+    ``packages/foo/plugins/x`` as well, and a glob such as ``packages/*/*``
+    reaches it only there. Listing the link's own ``package.json`` alone left
+    those members out of yarn's copy, and they went unaudited.
+
+    Nothing is walked again: ``walked`` already holds every manifest the walk
+    found, so each is matched against the targets above its real path. The
+    ``listed`` paths are skipped. At most ``_MAX_LINK_ALIAS_MANIFESTS`` paths
+    are added; past that the package is refused (``TooManyLinkedDirectories``),
+    since a repository with many links to one large directory would otherwise
+    multiply the copy.
+    """
+    targets: Dict[str, List[Path]] = {}
+    for linked, real in aliases:
+        targets.setdefault(real, []).append(linked)
+    seen = set(listed)
+    added: List[Path] = []
+    for manifest in walked:
+        # The real directory the manifest sits in; the name stays package.json
+        # whatever the file itself is.
+        real_home = os.path.realpath(manifest.parent)
+        directory = real_home
+        while True:
+            for linked in targets.get(directory, ()):
+                path = linked / os.path.relpath(real_home, directory) / manifest.name
+                if path in seen:
+                    continue
+                seen.add(path)
+                added.append(path)
+                if len(added) > _MAX_LINK_ALIAS_MANIFESTS:
+                    raise TooManyLinkedDirectories(
+                        f"more than {_MAX_LINK_ALIAS_MANIFESTS} manifests are "
+                        "reached through links to directories already listed, so "
+                        "the package's inputs cannot be listed in bounded time; "
+                        "the package was not audited"
+                    )
+            parent = os.path.dirname(directory)
+            if parent == directory:
+                break
+            directory = parent
+    return added
+
+
 def package_manager_inputs(
     binary: str,
     package_dir: Path,
@@ -662,7 +723,11 @@ def package_manager_inputs(
     finds them; the link's own ``package.json`` is listed as a file yarn reads
     at the link's path, and the alias is logged), and a link that resolves
     outside the package but inside a root is walked the first time it is
-    reached and listed by its own manifest alone after that. A walk that
+    reached and not walked after that. Each link left unwalked, a link back to
+    an ancestor excepted, also gets the manifests found below its target listed
+    under its own name (``_manifests_below_links``), without another walk: yarn
+    reads a member through the path a workspace glob names, and a glob over the
+    link's path reaches members the real path's glob does not. A walk that
     re-entered a real directory once per distinct link chain cost 2^N walks on
     a tree of N directories each holding two links to the next, a bound a
     scanned repository could remove; ``_MAX_LINKED_DIRECTORY_WALKS`` distinct
@@ -672,7 +737,9 @@ def package_manager_inputs(
     ``.git`` (left out like the real directories of those names), one that
     resolves to the package directory or an ancestor of it (which would walk
     the scanned tree again under the link's name), and one whose real path was
-    walked already; each has only its own ``package.json`` listed. A linked
+    walked already; each has its own ``package.json`` listed, and the last,
+    like a link into the package, also the members found below its target, as
+    above. A linked
     directory that resolves outside every root has only its own
     ``package.json`` listed, present or not, which ``input_refusal`` then refuses
     for resolving outside the tree, so the package is refused and nothing below
@@ -712,6 +779,11 @@ def package_manager_inputs(
     # package. The count of linked directories entered is capped as well.
     visited: set[str] = set()
     walked_links = 0
+    # The manifests the walk found, each at the path it was reached by, and the
+    # links it did not walk (link path, real path of the target): the manifests
+    # below such a target are listed again under the link's name afterwards.
+    walked: List[Path] = []
+    aliases: List[Tuple[Path, str]] = []
 
     def _walk(start: Path) -> None:
         nonlocal walked_links
@@ -726,6 +798,7 @@ def package_manager_inputs(
             ]
             if "package.json" in files and manifest.exists():
                 inputs.append(manifest)
+                walked.append(manifest)
             # os.walk does not descend a linked directory; yarn does.
             for d in dirs:
                 linked = here / d
@@ -739,8 +812,9 @@ def package_manager_inputs(
                         # and copied, three times per package.
                         continue
                     real = os.path.realpath(linked)
+                    loops_back = _within(here, linked)
                     if (
-                        _within(here, linked)
+                        loops_back
                         or _within(Path(real), package_dir)
                         or real in visited
                     ):
@@ -753,13 +827,19 @@ def package_manager_inputs(
                         # name, and a loop without end for the first two. Its
                         # own manifest is a file yarn reads at this path, so
                         # that is listed; nothing below it is walked, and the
-                        # alias is logged.
+                        # alias is logged. Except for a link back to an
+                        # ancestor, the manifests found below its target are
+                        # listed under the link's name too once the walk is
+                        # done (``_manifests_below_links``), since yarn
+                        # reaches those members through the link's path.
                         if (linked / "package.json").exists():
                             inputs.append(linked / "package.json")
+                        if not loops_back:
+                            aliases.append((linked, real))
                         ASH_LOGGER.debug(
                             f"npm-audit: {linked} is a link to {real}, which the "
-                            "walk lists at its own path; only the link's own "
-                            "manifest is listed under the link's name",
+                            "walk lists at its own path; its members are listed "
+                            "under the link's name without walking it again",
                             extra={"markup": False},
                         )
                         continue
@@ -784,6 +864,8 @@ def package_manager_inputs(
                     inputs.append(linked / "package.json")
 
     _walk(package_dir)
+    if aliases:
+        inputs.extend(_manifests_below_links(aliases, walked, inputs))
     return inputs
 
 
