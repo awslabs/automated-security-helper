@@ -95,6 +95,10 @@ PROC_SCAN_LIMIT = 4096
 #: How long the wrapper keeps reaping after its scanner exits on its own. Below
 #: ASH's SANDBOX_STOP_GRACE_SECONDS (10), so the wrapper finishes before ASH gives up on it.
 REAP_DEADLINE_SECONDS = 5.0
+#: How many reap passes in a row must find nothing before the reap ends ahead of
+#: its deadline. An orphan is reparented to the wrapper only once its own parent
+#: has exited, which can trail the scanner's exit, so one empty pass proves little.
+REAP_QUIET_PASSES = 5
 #: How long it keeps reaping once ASH has asked it to stop (SIGTERM, SIGINT or
 #: SIGHUP), counted from that signal, if that ends sooner. ASH SIGKILLs a wrapper
 #: still running when its grace after SIGTERM ends, and a wrapper killed while it
@@ -1010,7 +1014,7 @@ def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
         leftovers = _descendants(until=None if passes == 1 else deadline)
         if not leftovers:
             quiet += 1
-            if quiet >= 5:
+            if quiet >= REAP_QUIET_PASSES:
                 break
             time.sleep(0.01)
             continue

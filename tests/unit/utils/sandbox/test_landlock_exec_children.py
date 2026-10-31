@@ -397,17 +397,17 @@ def pidfd_refused(monkeypatch):
     return run
 
 
-def test_a_refused_pidfd_pin_falls_back_to_the_kill_by_number(pidfd_refused):
+@pytest.mark.parametrize("code", [errno.ENOSYS, errno.EPERM, errno.EMFILE])
+def test_a_refused_pidfd_pin_falls_back_to_the_kill_by_number(pidfd_refused, code):
     """pidfd_open refused by the kernel (ENOSYS or EPERM under a seccomp profile,
     EMFILE) is not "the process is gone": the descendant is still the scanner's
     and is killed by number, as on a kernel without the call. Each refusal here
     is the stand-in raising the errno, the EMFILE row included: the wrapper is not
     run out of descriptors, and the parent read that follows is the stand-in's."""
-    for code in (errno.ENOSYS, errno.EPERM, errno.EMFILE):
-        calls = pidfd_refused(code)
+    calls = pidfd_refused(code)
 
-        assert ("kill", (4242, signal.SIGKILL)) in calls
-        assert calls[-1] == ("returned", (True,))
+    assert ("kill", (4242, signal.SIGKILL)) in calls
+    assert calls[-1] == ("returned", (True,))
 
 
 def test_a_pidfd_pin_of_a_gone_process_sends_nothing(pidfd_refused):
@@ -592,7 +592,7 @@ def test_later_reap_passes_carry_the_deadline(reap_calls):
     assert walks[0] is None
     assert walks[1:] and all(until is deadline for until in walks[1:])
     assert kills == [11, 21]
-    assert len(walks) == 2 + 5
+    assert len(walks) == 2 + landlock_exec.REAP_QUIET_PASSES
     assert survivors == []
 
 
