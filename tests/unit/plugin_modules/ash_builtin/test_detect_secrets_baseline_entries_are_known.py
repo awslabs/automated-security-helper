@@ -275,6 +275,53 @@ def test_the_operators_baseline_entries_leave_the_report_and_a_new_secret_stays(
     assert _suppressed(report)["other.py"] == []
 
 
+@pytest.mark.parametrize("inside", [True, False], ids=["inside-the-tree", "outside"])
+def test_a_baseline_the_operator_names_inside_the_scanned_tree_only_marks(
+    tmp_path, monkeypatch, inside
+):
+    """An org-wide ``baseline_file: .secrets.baseline`` names each repository's
+    own committed baseline. The operator wrote the name, but the file is the
+    repository's, so its entries may mark a candidate and never remove it;
+    the settings-trust rule already reads the file that way. Named outside the
+    tree and its checkout, the same baseline removes its candidates (the
+    control)."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
+    (source / "other.py").write_text(f"KEY = '{NEW_SECRET}'\n", encoding="utf-8")
+    if inside:
+        baseline = source / ".secrets.baseline"
+        name = ".secrets.baseline"
+    else:
+        baseline = tmp_path / "operator.baseline"
+        name = str(baseline)
+    baseline.write_text(json.dumps(_baseline(KNOWN_ENTRIES)), encoding="utf-8")
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=name)
+        ),
+    )
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_from_option is True
+    assert scanner._baseline_entries_trusted() is (not inside)
+    _worker_returning(
+        scanner,
+        monkeypatch,
+        {"settings.py": [(1, KEPT_SECRET)], "other.py": [(1, NEW_SECRET)]},
+    )
+
+    report = scanner.scan(target=source, target_type="source")
+
+    if inside:
+        assert _findings(report) == [("other.py", 1), ("settings.py", 1)]
+        (reason,) = _suppressed(report)["settings.py"]
+        assert "repository controls" in reason
+    else:
+        assert _findings(report) == [("other.py", 1)]
+
+
 @pytest.mark.parametrize("operator_named", [True, False], ids=["operator", "repo"])
 def test_the_worker_is_told_whose_baseline_the_scan_runs_under(
     tmp_path, monkeypatch, operator_named

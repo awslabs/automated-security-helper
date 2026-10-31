@@ -1397,6 +1397,30 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             return Path(os.path.realpath(loaded_from)).parent
         return Path(os.path.realpath(getattr(self.context, "source_dir", None) or "."))
 
+    def _baseline_checkout_reason(self) -> Optional[str]:
+        """Why the baseline in use is the repository's file by where it sits, or None.
+
+        Judged by both the path as named and the file it resolves to; either
+        inside the scanned tree or a git checkout holding it makes the
+        baseline the repository's. An in-tree ``.secrets.baseline`` that is a
+        link out of the tree is named inside it (_baseline_named); a path the
+        operator names outside the tree that is a link INTO it resolves inside
+        it, and the file read is the repository's whatever the name. The named
+        path alone judged only the first case, so the second read the
+        repository's settings, its verification filter included, as the
+        operator's. The one reading for both trust rules: the settings of the
+        baseline (_untrusted_baseline_reason) and the candidates it lists
+        (_baseline_entries_trusted).
+        """
+        baseline = self._baseline_file_path()
+        judged = self._baseline_named if self._baseline_named is not None else baseline
+        config = getattr(self.context, "config", None)
+        root = getattr(config, "_scanned_root", None) or self.context.source_dir
+        why = scanned_checkout_reason(Path(judged), root)
+        if why is None and Path(judged) != Path(baseline):
+            why = scanned_checkout_reason(Path(baseline), root)
+        return why
+
     def _untrusted_baseline_reason(
         self, record: Optional[UntrustedDetectSecretsSettings]
     ) -> Optional[str]:
@@ -1425,20 +1449,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if not self._baseline_in_use():
             return None
         baseline = self._baseline_file_path()
-        # Judged by both the path as named and the file it resolves to; either
-        # inside the checkout makes the baseline the repository's. An in-tree
-        # ``.secrets.baseline`` that is a link out of the tree is named inside
-        # it (_baseline_named); a path the operator names outside the tree
-        # that is a link INTO it resolves inside it, and the file read is the
-        # repository's whatever the name. The named path alone judged only the
-        # first case, so the second read the repository's settings, its
-        # verification filter included, as the operator's.
-        judged = self._baseline_named if self._baseline_named is not None else baseline
-        config = getattr(self.context, "config", None)
-        root = getattr(config, "_scanned_root", None) or self.context.source_dir
-        why = scanned_checkout_reason(Path(judged), root)
-        if why is None and Path(judged) != Path(baseline):
-            why = scanned_checkout_reason(Path(baseline), root)
+        why = self._baseline_checkout_reason()
         if why is None and not self._baseline_from_option:
             why = (
                 "it was found in the scanned tree rather than named by the "
@@ -1465,7 +1476,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         file: ``baseline_file`` written by the operator's own settings
         (``--config-overrides`` included), or named by a config the operator did
         not write while the operator's own settings name that same file
-        (``same_baseline``). A baseline the scan found in the tree
+        (``same_baseline``), and the file is not inside the scanned tree or a
+        git checkout holding it (``_baseline_checkout_reason``): a name the
+        operator wrote that resolves into the checkout is still a file the
+        repository controls. A baseline the scan found in the tree
         (``.secrets.baseline``, ``.ash/.secrets.baseline``) is never the
         operator's record, whatever the settings-trust rule says of the
         checkout layout: the structure says so here, where an earlier shape fell
@@ -1480,6 +1494,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         worker is told the answer as ``baseline_trusted`` (``_scan_in_worker``).
         """
         if not self._baseline_in_use() or not self._baseline_from_option:
+            return False
+        # Naming the file is not enough when it sits in the scanned checkout:
+        # the repository controls it there, and an org-wide ``baseline_file:
+        # .secrets.baseline`` would let every repository's committed baseline
+        # remove any candidate by listing its hash. The same location test the
+        # settings-trust rule applies (_untrusted_baseline_reason).
+        if self._baseline_checkout_reason() is not None:
             return False
         record = getattr(
             getattr(self.context, "config", None),
@@ -2800,7 +2821,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         "(ASH) Listed in the detect-secrets baseline "
                         f"{Path(listed_in).as_posix()}, a file the scanned "
                         "repository controls; kept in the report as suppressed "
-                        "rather than removed, so it is counted. Name the baseline "
+                        "rather than removed, so it is counted. Name a baseline "
+                        "outside the scanned tree and the git checkout holding it "
                         "with scanners.detect-secrets.options.baseline_file in "
                         "the operator's own config to have its entries removed; "
                         "an entry the baseline audits as a real secret is "
