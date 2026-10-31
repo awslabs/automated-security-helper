@@ -93,6 +93,77 @@ def test_an_overlapping_result_is_still_offered_when_nothing_else_wants_it():
     assert results["unmatched_results"] == {}
 
 
+def _located_at_column(text, column):
+    result = _located(text, 10, 10)
+    result["locations"][0]["physicalLocation"]["region"]["startColumn"] = column
+    return result
+
+
+@pytest.mark.parametrize("order", ["dropped-first", "kept-first"])
+def test_two_findings_on_one_line_keep_their_own_copies(order):
+    """Two findings of one rule on the same lines have the same exact match. The
+    one whose copy was dropped took its sibling's copy when it came first, and
+    the sibling, whose copy was gone, was reported lost."""
+    dropped = _located("dropped", 10, 10)
+    kept = _located("kept", 10, 10)
+    originals = [dropped, kept] if order == "dropped-first" else [kept, dropped]
+
+    results = validate_sarif_aggregation(
+        {"bandit": _report(*originals)}, _report(copy.deepcopy(kept))
+    )
+
+    stats = results["match_statistics"]["bandit"]
+    assert stats["matched_results"] == 1
+    assert [e["message"] for e in results["unmatched_results"]["bandit"]] == ["dropped"]
+    # The finding that was kept lost no field, its message text included.
+    assert stats["fields_missing"] == 0
+    assert results["summary"]["critical_missing_fields"] == 0
+
+
+@pytest.mark.parametrize("order", ["dropped-first", "kept-first"])
+def test_two_findings_with_one_message_are_told_apart_by_their_column(order):
+    dropped = _located_at_column("same text", 1)
+    kept = _located_at_column("same text", 20)
+    originals = [dropped, kept] if order == "dropped-first" else [kept, dropped]
+
+    results = validate_sarif_aggregation(
+        {"bandit": _report(*originals)}, _report(copy.deepcopy(kept))
+    )
+
+    stats = results["match_statistics"]["bandit"]
+    assert stats["matched_results"] == 1
+    assert stats["fields_missing"] == 0
+
+
+def test_a_copy_whose_message_changed_is_still_matched_at_its_lines():
+    """The control: when no result carries the original's message the exact
+    location still decides, as before."""
+    changed = _located("rewritten", 10, 10)
+
+    results = validate_sarif_aggregation(
+        {"bandit": _report(_located("original", 10, 10))},
+        _report(copy.deepcopy(changed)),
+    )
+
+    assert results["match_statistics"]["bandit"]["matched_results"] == 1
+    assert results["unmatched_results"] == {}
+
+
+def test_same_finding_only_offers_a_result_with_the_same_message():
+    other = _located("other", 10, 10)
+    same = _located("short", 10, 10)
+
+    assert find_matching_result(SHORT, [other], same_finding_only=True) is None
+    # The exact tier alone still offers it.
+    assert find_matching_result(SHORT, [other], exact_only=True) is other
+    assert find_matching_result(SHORT, [other, same], same_finding_only=True) is same
+    # And it offers no overlapping result: it implies the exact tier.
+    assert (
+        find_matching_result(SHORT, [copy.deepcopy(LONG)], same_finding_only=True)
+        is None
+    )
+
+
 def test_exact_only_offers_no_overlapping_result():
     aggregated = [copy.deepcopy(LONG)]
 

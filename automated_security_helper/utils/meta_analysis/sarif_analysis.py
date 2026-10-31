@@ -293,10 +293,18 @@ def _match_originals(
     reported unmatched and the fields the dropped original lacked in the copy
     were reported as lost. Every original's exact match is therefore taken
     first, and an overlapping result is offered only to what is left.
+
+    Two findings of one rule on the same lines have the same exact match, so the
+    exact tier has a tier before it: a result at the original's own lines that
+    also carries its message (and start column, when both state one). Taken in
+    report order, the first of two such findings took the copy of the second
+    when only the second's copy was kept, and the second then read as lost.
     """
     taken_ids: Set[int] = set()
     matches: List[Optional[Dict]] = [None] * len(originals)
-    for exact_only in (True, False):
+    # (same finding only, exact only): the same finding at its own lines, then
+    # any result at its own lines, then any overlapping result.
+    for same_finding_only, exact_only in ((True, True), (False, True), (False, False)):
         for index, (scanner_name, original) in enumerate(originals):
             if matches[index]:
                 continue
@@ -307,6 +315,7 @@ def _match_originals(
                 scanner_name=scanner_name,
                 exact_only=exact_only,
                 scan_root=scan_root,
+                same_finding_only=same_finding_only,
             )
             if found:
                 taken_ids.add(id(found))
@@ -351,6 +360,7 @@ def find_matching_result(
     scanner_name: Optional[str] = None,
     exact_only: bool = False,
     scan_root: Optional[str] = None,
+    same_finding_only: bool = False,
 ) -> Optional[Dict]:
     """
     Find a matching result in the aggregated report using rule ID and location.
@@ -384,6 +394,10 @@ def find_matching_result(
             every original's exact match this way before it offers overlaps.
         scan_root: The directory the scan was run on, when known: files are
             then compared whole relative to it (see ``file_paths_match``)
+        same_finding_only: Offer only a result at the original's own file and
+            lines that also carries its message text and, when both state one,
+            its start column. Implies *exact_only*: of two findings of one rule
+            on the same lines this finds the copy that is each one's own.
 
     Returns:
         Matching result or None
@@ -391,6 +405,8 @@ def find_matching_result(
     from automated_security_helper.utils.meta_analysis.locations_match import (
         locations_match,
     )
+
+    exact_only = exact_only or same_finding_only
 
     # Extract matching criteria
     rule_id = _rule_identity(original_result)
@@ -430,6 +446,10 @@ def find_matching_result(
                 if rule_id is None and not _messages_agree(original_result, agg_result):
                     continue
                 if _locations_equal(location_info, agg_location, scan_root):
+                    if same_finding_only and not _same_finding(
+                        original_result, agg_result
+                    ):
+                        continue
                     return agg_result
                 if overlapping_match is None:
                     overlapping_match = agg_result
@@ -484,6 +504,35 @@ def _messages_agree(original_result: Dict, agg_result: Dict) -> bool:
     if not (original_result.get("message") and agg_result.get("message")):
         return True
     return get_message_text(original_result) == get_message_text(agg_result)
+
+
+def _start_column(result: Dict):
+    """The ``startColumn`` of a result's first location, else None."""
+    locations = result.get("locations")
+    if not (isinstance(locations, list) and locations):
+        return None
+    first = locations[0]
+    physical = first.get("physicalLocation") if isinstance(first, dict) else None
+    if not isinstance(physical, dict):
+        return None
+    region = physical.get("region")
+    if not region:
+        root = physical.get("root")
+        region = root.get("region") if isinstance(root, dict) else None
+    return region.get("startColumn") if isinstance(region, dict) else None
+
+
+def _same_finding(original_result: Dict, agg_result: Dict) -> bool:
+    """Whether two results at one place also carry one message text and, when
+    both state a start column, one start column."""
+    from automated_security_helper.utils.meta_analysis.locations_match import (
+        lines_equal,
+    )
+
+    if not _messages_agree(original_result, agg_result):
+        return False
+    column, agg_column = _start_column(original_result), _start_column(agg_result)
+    return column is None or agg_column is None or lines_equal(column, agg_column)
 
 
 # ---------------------------------------------------------------------------
