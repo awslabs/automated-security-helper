@@ -373,13 +373,88 @@ def test_a_list_entry_that_is_not_an_object_is_kept_as_written_too(entries):
     assert logger.warning.call_count == 1
 
 
+def _bom_with_licenses(licenses: list) -> CycloneDXReport:
+    return CycloneDXReport.model_validate(
+        {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "components": [{"type": "library", "name": "lib", "licenses": licenses}],
+        }
+    )
+
+
 def test_a_bare_license_id_does_not_refuse_the_component_that_carries_it():
+    """The load keeps the stored entry, so the component loads; the SBOM written
+    from it states the id as the SPDX expression CycloneDX 1.6 allows there."""
     with patch(LOGGER):
-        component = Component.model_validate(
-            {"type": "library", "name": "lib", "licenses": ["MIT"]}
+        report = _bom_with_licenses(["MIT"])
+        emitted = _as_the_reporter_emits(report)
+    assert report.components[0].name == "lib"
+    assert emitted["components"][0]["name"] == "lib"
+    assert emitted["components"][0]["licenses"] == [{"expression": "MIT"}]
+
+
+def test_the_written_sbom_holds_only_what_cyclonedx_allows_in_a_license_list():
+    """A bare id becomes an expression, an entry that is neither form is left
+    out, the two typed forms pass unchanged, and one warning counts both. The
+    stored BOM is left as it was."""
+    entries = [
+        "MIT",
+        {"license": {"id": "Apache-2.0"}},
+        {"expression": "MIT OR Apache-2.0", "bom-ref": "lic-1"},
+        7,
+        {"license": {}},
+    ]
+    with patch(LOGGER):
+        report = _bom_with_licenses(entries)
+    with patch(LOGGER) as logger:
+        emitted = _as_the_reporter_emits(report)
+    assert emitted["components"][0]["licenses"] == [
+        {"expression": "MIT"},
+        {"license": {"id": "Apache-2.0"}},
+        {"expression": "MIT OR Apache-2.0", "bom-ref": "lic-1"},
+    ]
+    assert logger.warning.call_count == 1
+    message = logger.warning.call_args.args[0]
+    assert "1 bare license id(s) were written as SPDX expressions" in message
+    assert "2 other entry(ies) were left out" in message
+    stored = report.components[0].licenses.root
+    assert len(stored) == len(entries), "the stored BOM changed"
+    assert stored[0] == "MIT" and stored[3] == 7 and stored[4] == {"license": {}}
+
+
+def test_a_nested_component_license_list_is_written_conforming_too():
+    with patch(LOGGER):
+        report = CycloneDXReport.model_validate(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "components": [
+                    {
+                        "type": "library",
+                        "name": "outer",
+                        "components": [
+                            {"type": "library", "name": "inner", "licenses": ["MIT"]}
+                        ],
+                    }
+                ],
+            }
         )
-    assert component.name == "lib"
-    assert component.model_dump(by_alias=True, exclude_none=True)["licenses"] == ["MIT"]
+        emitted = _as_the_reporter_emits(report)
+    inner = emitted["components"][0]["components"][0]
+    assert inner["licenses"] == [{"expression": "MIT"}]
+
+
+def test_control_a_conforming_license_list_is_written_as_stored_without_a_warning():
+    entries = [
+        {"license": {"id": "MIT"}},
+        {"expression": "MIT OR Apache-2.0", "bom-ref": "lic-1"},
+    ]
+    report = _bom_with_licenses(entries)
+    with patch(LOGGER) as logger:
+        emitted = _as_the_reporter_emits(report)
+    assert emitted["components"][0]["licenses"] == entries
+    logger.warning.assert_not_called()
 
 
 def test_a_stray_license_entry_does_not_refuse_the_component_that_carries_it():

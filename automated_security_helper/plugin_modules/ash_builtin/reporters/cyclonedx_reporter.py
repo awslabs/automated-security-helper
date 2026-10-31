@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Literal, TYPE_CHECKING
+from typing import Any, Dict, Literal, TYPE_CHECKING
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -15,7 +17,52 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
     AggregateType,
     Compositions,
     CycloneDXReport,
+    LicenseChoice,
+    LicenseEntry,
+    LicenseExpression,
 )
+
+
+def _conforming_licenses(value: Any, counts: Dict[str, int]) -> Any:
+    """``value`` with every license list reduced to what CycloneDX 1.6 allows.
+
+    A license list holds license objects and SPDX expressions. The model keeps
+    any other entry as written when it loads a stored BOM, so that one entry
+    does not refuse the component that carries it; a document written for
+    other tools must not repeat it. A bare id is written as an expression
+    (``"MIT"`` is an SPDX expression), and any other entry is left out. Both
+    are counted in ``counts``.
+
+    Models and lists are copied only where something changed, so the BOM given
+    in is left as it was.
+    """
+    if isinstance(value, LicenseChoice):
+        kept = []
+        for entry in value.root:
+            if isinstance(entry, (LicenseEntry, LicenseExpression)):
+                kept.append(entry)
+            elif isinstance(entry, str):
+                kept.append(LicenseExpression(expression=entry))
+                counts["expressions"] += 1
+            else:
+                counts["dropped"] += 1
+        unchanged = len(kept) == len(value.root) and all(
+            new is old for new, old in zip(kept, value.root)
+        )
+        return value if unchanged else value.model_copy(update={"root": kept})
+    if isinstance(value, BaseModel):
+        updates = {}
+        for name in value.model_fields_set:
+            current = getattr(value, name, None)
+            replaced = _conforming_licenses(current, counts)
+            if replaced is not current:
+                updates[name] = replaced
+        return value.model_copy(update=updates) if updates else value
+    if isinstance(value, list):
+        items = [_conforming_licenses(item, counts) for item in value]
+        if any(new is not old for new, old in zip(items, value)):
+            return items
+    return value
 
 
 def serialize_bom(report: CycloneDXReport) -> str:
@@ -35,8 +82,25 @@ def serialize_bom(report: CycloneDXReport) -> str:
     statement that the project has no components. An SBOM a scanner produced
     already sets these fields, carries its own metadata, and is dumped
     unchanged. ``report`` itself is left as it was: the copy is what is marked.
+
+    A license entry that is not a license object or an SPDX expression (a stored
+    results file can hold one; see :func:`_conforming_licenses`) is not
+    re-emitted: CycloneDX 1.6 consumers refuse a document that holds one. A bare
+    id is written as an expression and any other entry is left out, with one
+    warning that counts both.
     """
-    bom = report.model_copy()
+    counts = {"expressions": 0, "dropped": 0}
+    bom = _conforming_licenses(report, counts).model_copy()
+    if counts["expressions"] or counts["dropped"]:
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        ASH_LOGGER.warning(
+            "CycloneDX 1.6 allows only license objects and SPDX expressions in a "
+            "license list. In the SBOM written from this scan, "
+            f"{counts['expressions']} bare license id(s) were written as SPDX "
+            f"expressions and {counts['dropped']} other entry(ies) were left out; "
+            "the stored results are unchanged."
+        )
     # Every SBOM a scanner writes has metadata or a serial number; the default
     # model and its dump read back from a results file have neither.
     no_sbom = bom.metadata is None and bom.serialNumber is None and not bom.components
