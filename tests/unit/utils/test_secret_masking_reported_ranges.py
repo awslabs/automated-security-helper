@@ -588,3 +588,84 @@ class TestAPlaceholderColumn:
 
         assert _context(model, 1) == "x = 1\n"
         assert _context(model, 2) == FAR_LINE
+
+
+def _results_with_rules(rules, *results):
+    """A run whose tool lists ``rules``, as a scanner that writes rule metadata does."""
+    model = AshAggregatedResults()
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "test", "rules": rules}},
+                    "results": list(results),
+                }
+            ],
+        }
+    )
+    return model
+
+
+class TestARuleDescribedByAnAdvisoryTitle:
+    """npm-audit writes one rule per advisory, described by the advisory's title.
+
+    The title can name a hard-coded credential of the dependency; the finding's
+    own message does not, so the rule's description is the only route in.
+    """
+
+    TITLE_RULE = {
+        "id": "ADVISORY-1",
+        "shortDescription": {"text": "Hardcoded credentials in configuration"},
+    }
+
+    def _advisory(self, scanner):
+        return _result(
+            "ADVISORY-1",
+            "pkg/package.json",
+            1,
+            "Vulnerability in left-pad",
+            scanner,
+            end=1,
+            column=1,
+        )
+
+    def test_a_dependency_advisory_is_not_a_secret_finding_by_its_rules_title(self):
+        model = _results_with_rules(
+            [self.TITLE_RULE],
+            self._advisory("npm-audit"),
+            _neighbor("pkg/package.json", 1, 1, ["x = 1\n"]),
+            _neighbor("pkg/package.json", 40, 40, [FAR_LINE]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == "x = 1\n"
+        assert _context(model, 2) == FAR_LINE
+
+    def test_an_infrastructure_finding_is_still_a_secret_finding_by_its_rules_title(
+        self,
+    ):
+        model = _results_with_rules(
+            [self.TITLE_RULE],
+            self._advisory("cdk-nag"),
+            _neighbor("pkg/package.json", 40, 40, [FAR_LINE]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == MASKED_LINE + "\n"
+
+    def test_a_dependency_scanners_secret_tagged_rule_is_still_a_secret_rule(self):
+        """trivy is a dependency scanner whose secret rules carry the ``secret``
+        tag; a title that also says hard-coded credential does not drop them."""
+        tagged = dict(self.TITLE_RULE, properties={"tags": ["secret"]})
+        model = _results_with_rules(
+            [tagged],
+            self._advisory("trivy"),
+            _neighbor("pkg/package.json", 1, 1, ["x = 1\n"]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == MASKED_LINE + "\n"

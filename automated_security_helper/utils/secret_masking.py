@@ -918,9 +918,18 @@ def _is_dependency_finding(tool_types: AbstractSet[str]) -> bool:
 
 
 def is_secret_finding(
-    result: Any, secret_rule_ids: AbstractSet[str] = frozenset()
+    result: Any,
+    secret_rule_ids: AbstractSet[str] = frozenset(),
+    described_only_rule_ids: AbstractSet[str] = frozenset(),
 ) -> bool:
-    """Whether ``result`` reports a secret; see the module notes above."""
+    """Whether ``result`` reports a secret; see the module notes above.
+
+    ``described_only_rule_ids`` are the members of ``secret_rule_ids`` that are
+    there for what the rule says about itself, not for a secret tag. A
+    dependency advisory does not enter by one: the rule of an npm-audit advisory
+    is described by the advisory's title, which can name a hard-coded credential
+    of the dependency (``_DEPENDENCY_TOOL_TYPES``).
+    """
     from automated_security_helper.utils.scanner_tool_types import (
         SECRETS_TOOL_TYPE,
         result_tags,
@@ -928,14 +937,19 @@ def is_secret_finding(
     )
 
     rule_id = _rule_id_of(result)
-    if rule_id in secret_rule_ids or _is_secret_rule_id(rule_id):
+    tool_types = result_tool_types(result)
+    dependency = _is_dependency_finding(tool_types)
+    if rule_id in secret_rule_ids and not (
+        dependency and rule_id in described_only_rule_ids
+    ):
+        return True
+    if _is_secret_rule_id(rule_id):
         return True
     if any(_is_secret_tag(tag) for tag in result_tags(result)):
         return True
-    tool_types = result_tool_types(result)
     if SECRETS_TOOL_TYPE in tool_types:
         return True
-    if _is_dependency_finding(tool_types):
+    if dependency:
         # An advisory's text describes the dependency's weakness, not a value
         # or credential written into the scanned files.
         return False
@@ -1461,9 +1475,10 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
     _resolve_artifact_uris(sarif_report, index)
     rule_ids = secret_rule_ids(sarif_report)
     described = _rule_ids_described(sarif_report)
+    described_only = described - _rule_ids_tagged(sarif_report, _is_secret_tag)
     known: Optional[_KnownLines] = None
     for result in _all_results(sarif_report):
-        if not is_secret_finding(result, rule_ids):
+        if not is_secret_finding(result, rule_ids, described_only):
             continue
         index.secret_results.append(result)
         private_key = _is_private_key_finding(result)
