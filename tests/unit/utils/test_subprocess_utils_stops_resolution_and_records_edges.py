@@ -93,13 +93,12 @@ def _no_state_carried_between_tests(monkeypatch):
 class _FakeChild:
     """The members the stop paths use, recorded."""
 
-    def __init__(self, *, returncode=None, leads_group=False):
+    def __init__(self, *, returncode=None):
         self.pid = _FAKE_PID
         self.returncode = returncode
         self.calls: List[Any] = []
         self.args = ["tool"]
         self.stdout = self.stderr = self.stdin = None
-        self.leads_group = leads_group
 
     def poll(self):
         return self.returncode
@@ -441,8 +440,7 @@ def test_stop_after_interrupt_observes_before_it_signals_and_reaps_with_a_bound(
         spu.stop_after_interrupt(child, grace=0.01, child_got_the_interrupt=False)
     # The exit is observed before the SIGINT is sent, and observed again when
     # the second Ctrl-C arrives, before the kill: the interrupt arm's own
-    # observe-discard-reap step (stop_after_interrupt's documented order). The
-    # first shape of this assertion named three steps and was red by reading.
+    # observe-discard-reap step (stop_after_interrupt's documented order).
     assert order == ["observe", "sigint", "observe", "kill"]
     assert ("wait", spu._REAP_SECONDS) in child.calls
     assert ("wait", None) not in child.calls
@@ -457,8 +455,14 @@ def test_the_grace_wait_runs_inside_the_stop_grace_context(monkeypatch):
     the wait had never entered that context."""
     child = _FakeChild()
     seen: List[int] = []
+    real_sleep = spu.time.sleep
 
     def sleep(step):
+        # The replacement is process-wide: only the test's own thread is counted,
+        # and any other thread that sleeps meanwhile sleeps for real.
+        if threading.current_thread() is not threading.main_thread():
+            real_sleep(step)
+            return
         seen.append(cancellation._GRACE_WAITS)
         child.returncode = 0
 
@@ -667,7 +671,7 @@ def test_a_child_another_thread_reaped_reads_as_exited(monkeypatch):
     assert spu._has_exited(_FakeChild()) is True
 
 
-class _TimingOutOncePopen(_FakeChild):
+class _TimesOutOnEveryCallPopen(_FakeChild):
     def __init__(self, args, **kwargs):
         super().__init__()
         self.args = list(args)
@@ -677,7 +681,7 @@ class _TimingOutOncePopen(_FakeChild):
 
 
 def test_the_plain_runners_timeout_marks_the_record_stopped(monkeypatch):
-    monkeypatch.setattr(spu.subprocess, "Popen", _TimingOutOncePopen)
+    monkeypatch.setattr(spu.subprocess, "Popen", _TimesOutOnEveryCallPopen)
     monkeypatch.setattr(spu, "_start_in_own_group", lambda kwargs: None)
     # A spawn with a timeout counts and records its group (_begin_spawn,
     # _record_spawn); the stand-in stays out of the module's count and

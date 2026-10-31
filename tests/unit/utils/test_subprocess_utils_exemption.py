@@ -7,9 +7,10 @@ A scanned tree's virtual environment links its python to the interpreter that ru
 ASH. ``os.path.samefile`` calls the two one file, but the venv's python, started by
 its own path, reads the tree's pyvenv.cfg and site-packages, so it is an in-tree
 tool and is refused. An in-tree link named after another tool is refused for the
-same reason. Only the interpreter's own path is admitted: a tool installed beside
-it, when ASH runs from a virtual environment inside the scanned tree, is refused
-like any other in-tree file.
+same reason. The interpreter's own path is admitted, and so is a python-named link
+beside it that is the same file (the sibling modules pin that exemption and its
+limit); a tool installed beside it, when ASH runs from a virtual environment inside
+the scanned tree, is refused like any other in-tree file.
 """
 
 from __future__ import annotations
