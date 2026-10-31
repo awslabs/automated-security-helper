@@ -544,10 +544,32 @@ class TestAPlaceholderColumn:
         assert _has_columns(region) is expected
 
     def test_a_resource_finding_at_column_one_runs_to_the_end_of_the_file(self):
-        """The finding describes a hard-coded credential without quoting it and
-        reports column 1 with no end column: the later lines of its file are
-        masked, as for a finding that reports no column."""
+        """An infrastructure finding describes a hard-coded credential without
+        quoting it and reports column 1 with no end column: the later lines of
+        its file are masked, as for a finding that reports no column."""
         placed_at_column_one = _result(
+            "AwsSolutions-X1",
+            "infra/stack.json",
+            1,
+            "Hard-coded credentials in configuration",
+            "cdk-nag",
+            end=1,
+            column=1,
+        )
+        model = _results(
+            placed_at_column_one,
+            _neighbor("infra/stack.json", 40, 40, [FAR_LINE]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == MASKED_LINE + "\n"
+
+    def test_a_dependency_advisory_at_column_one_masks_nothing(self):
+        """A dependency scanner's advisory describes the dependency's weakness,
+        not a value in the manifest it is placed at: it is no secret finding, so
+        neither the manifest's first line nor its later lines are masked."""
+        advisory = _result(
             "ADVISORY-1",
             "pkg/package.json",
             1,
@@ -557,10 +579,12 @@ class TestAPlaceholderColumn:
             column=1,
         )
         model = _results(
-            placed_at_column_one,
+            advisory,
+            _neighbor("pkg/package.json", 1, 1, ["x = 1\n"]),
             _neighbor("pkg/package.json", 40, 40, [FAR_LINE]),
         )
 
         mask_secrets_in_results(model)
 
-        assert _context(model, 1) == MASKED_LINE + "\n"
+        assert _context(model, 1) == "x = 1\n"
+        assert _context(model, 2) == FAR_LINE

@@ -156,6 +156,29 @@ class TestAdditionalReportEntries:
             MASKED_LINE + "\n"
         )
 
+    def test_a_dependency_scanners_entry_is_not_a_secret_finding(self):
+        """An advisory's description names the dependency's weakness class; its
+        snippet is the manifest line it is placed at, which holds no value."""
+        model = _results(
+            [],
+            additional={
+                "npm-audit": [
+                    _entry(
+                        description="Hard-coded credentials in configuration",
+                        file_path="pkg/package.json",
+                        line_start=1,
+                        snippet="x = 1\n",
+                    )
+                ]
+            },
+        )
+
+        mask_secrets_in_results(model)
+
+        entry = model.additional_reports["npm-audit"][0]
+        assert entry["snippet"] == "x = 1\n"
+        assert entry["description"] == "Hard-coded credentials in configuration"
+
     def test_an_entry_that_quotes_a_value_is_a_secret_finding(self):
         model = _results(
             [],

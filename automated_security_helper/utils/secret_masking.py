@@ -897,6 +897,23 @@ def secret_rule_ids(sarif_report: Any) -> Set[str]:
     )
 
 
+#: Tool types whose findings describe a dependency, not the scanned code: a
+#: vulnerability advisory (``SCA``: npm-audit, grype, trivy) or an inventory entry
+#: (``SBOM``: syft), as ``utils/scanner_names.SCANNER_TOOL_TYPES`` declares them.
+#: An advisory titled "Hardcoded credentials in configuration" describes the
+#: dependency's weakness class, not a value in the scanned files, so such a
+#: finding is not a secret finding by its text and never a resource-level one:
+#: read as one, placed at line 1 of package.json with no column span, it masked
+#: every line of the file.
+_DEPENDENCY_TOOL_TYPES = frozenset({"SCA", "SBOM"})
+
+
+def _is_dependency_finding(tool_types: AbstractSet[str]) -> bool:
+    """Whether the tool types of a finding mark it as a dependency advisory or
+    inventory entry (``_DEPENDENCY_TOOL_TYPES``)."""
+    return any(tool_type in _DEPENDENCY_TOOL_TYPES for tool_type in tool_types)
+
+
 def is_secret_finding(
     result: Any, secret_rule_ids: AbstractSet[str] = frozenset()
 ) -> bool:
@@ -915,6 +932,10 @@ def is_secret_finding(
     tool_types = result_tool_types(result)
     if SECRETS_TOOL_TYPE in tool_types:
         return True
+    if _is_dependency_finding(tool_types):
+        # An advisory's text describes the dependency's weakness, not a value
+        # or credential written into the scanned files.
+        return False
     text = _text_of(getattr(result, "message", None)) or ""
     return _text_reports_a_secret(text)
 
@@ -1430,6 +1451,8 @@ def _snippet_cannot_be_placed(region: Any) -> bool:
 
 
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
+    from automated_security_helper.utils.scanner_tool_types import result_tool_types
+
     index = _SecretIndex()
     _resolve_artifact_uris(sarif_report, index)
     rule_ids = secret_rule_ids(sarif_report)
@@ -1445,9 +1468,16 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
         # cfn-nag reports a credential rule at its resource's first line only; the
         # property holding the value is somewhere after it. A finding that quotes
         # its value (bandit's "Possible hardcoded password: '...'") names the
-        # line itself and is not one of these.
-        resource_only = not quoted and (
-            _rule_id_of(result) in described or _describes_a_credential_in_code(text)
+        # line itself and is not one of these; nor is a dependency advisory,
+        # whose text describes the dependency and whose location is the
+        # manifest's first line (_DEPENDENCY_TOOL_TYPES).
+        resource_only = (
+            not quoted
+            and not _is_dependency_finding(result_tool_types(result))
+            and (
+                _rule_id_of(result) in described
+                or _describes_a_credential_in_code(text)
+            )
         )
         exposed: List[str] = []
         for value_start, value_end in quoted:
@@ -2540,6 +2570,10 @@ def _additional_entry_is_secret(entry: Dict[str, Any], scanner_name: Any) -> boo
     tags = entry.get("tags")
     if isinstance(tags, list) and any(_is_secret_tag(tag) for tag in tags):
         return True
+    if tool_type in _DEPENDENCY_TOOL_TYPES:
+        # A dependency advisory's text describes the dependency, not a value in
+        # the scanned files (_DEPENDENCY_TOOL_TYPES).
+        return False
     return any(_text_reports_a_secret(entry.get(name)) for name in _ENTRY_TEXTS)
 
 
