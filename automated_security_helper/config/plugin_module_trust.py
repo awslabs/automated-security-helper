@@ -332,19 +332,25 @@ def _location_is_own(location: Path, own: Path, *, as_named: bool) -> bool:
         return False
     if not as_named:
         return True
-    from automated_security_helper.config.sandbox_grants import _as_named
+    from automated_security_helper.config.sandbox_grants import (
+        _as_named,
+        _link_state,
+    )
 
     # The closest unresolved parent that is the package directory decides, and
     # it must be the directory itself. ``_named_within`` answers "is the package
     # one of the location's parents", which a link to the whole package
     # directory also satisfies (the check follows links), so an alias placed in
     # a repository would read as the package. An exemption has to fail the other
-    # way: a link standing for the package is not the package.
+    # way: a link standing for the package is not the package. A link is what
+    # ``_link_state`` calls one: a symlink, or on Windows a junction, which
+    # ``Path.is_symlink`` does not see. A parent that cannot be examined is not
+    # shown to be the directory itself, so it is not exempt either.
     named = _as_named(location)
     for candidate in (named, *named.parents):
         try:
             if candidate.samefile(own):
-                return not candidate.is_symlink()
+                return _link_state(candidate) is False
         except OSError:
             continue
     return False

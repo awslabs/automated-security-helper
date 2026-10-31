@@ -215,6 +215,48 @@ def test_a_link_to_the_whole_package_directory_is_not_the_package_as_named(
     assert reason is not None and "scanned tree" in reason, reason
 
 
+def test_a_link_that_path_is_symlink_does_not_see_is_still_not_the_package(
+    tmp_path, monkeypatch
+):
+    """A Windows junction to the package directory is a link the repository
+    placed, and ``Path.is_symlink`` answers False for it. The own-package test
+    asks the link predicate the sandbox grants use, so the junction is no more
+    the package than a symlink is. Modeled here by a symlink that
+    ``Path.is_symlink`` is made not to see."""
+    own = Path(automated_security_helper.__file__).resolve().parent
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    alias = repo / ALIAS
+    _symlink(alias, own)
+    real_is_symlink = Path.is_symlink
+    monkeypatch.setattr(
+        Path,
+        "is_symlink",
+        lambda self: False if self == alias else real_is_symlink(self),
+    )
+
+    assert not alias.is_symlink()
+    assert not _location_is_own(alias, own, as_named=True)
+    assert not _location_is_own(
+        alias / "plugin_modules" / "ash_aws_plugins", own, as_named=True
+    )
+    # The control: the package itself stays exempt.
+    assert _location_is_own(own, own, as_named=True)
+
+
+def test_a_package_directory_that_cannot_be_examined_is_not_exempt(monkeypatch):
+    """When the link state of the directory that is the package is unknown (a
+    parent the process cannot search), the exemption is not granted: it fails
+    closed, as the sandbox grants' link test does."""
+    own = Path(automated_security_helper.__file__).resolve().parent
+    monkeypatch.setattr(
+        "automated_security_helper.config.sandbox_grants._link_state",
+        lambda path: None,
+    )
+
+    assert not _location_is_own(own, own, as_named=True)
+
+
 def test_a_module_inside_an_also_scanned_tree_is_refused(tmp_path, monkeypatch):
     results = tmp_path / "results-repo"
     package = results / ALSO
