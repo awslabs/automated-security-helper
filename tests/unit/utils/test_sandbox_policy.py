@@ -3541,42 +3541,43 @@ def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
             )
             return {"returncode": 0, "stdout": "", "stderr": ""}
 
-    fake = SimpleNamespace(
-        command="stub-tool",
-        use_uv_tool=True,
-        # The package that provides the command (None: the command's own name)
-        # and the plugin's own offline mode, both passed to the runner's run.
-        uv_tool_package_name=None,
-        _is_offline_mode=lambda: False,
-        _values_to_redact=lambda: ("1.8",),
-        _uv_run_inputs_for_records=lambda: ("stub-tool==1.8",),
-        _get_tool_package_extras=lambda: None,
-        _get_tool_version_constraint=lambda: "==1.8",
-        _plugin_log=lambda *a, **k: None,
-        _uv_run_failure=None,
-        # The dispatch reads the stderr log's identity before the run (None:
-        # no log there) and hands it to the response builder by keyword.
-        _uv_stderr_log_identity=lambda results_dir: None,
-        _uv_response=lambda result, results_dir, **kwargs: result,
-        # The dispatch also reads the interpreter request (empty when unset)
-        # and, in its error arms, the after-the-start response (None when the
-        # launch started no child).
-        _uv_python_kwargs=dict,
-        _uv_failure_after_the_start=lambda *a, **k: None,
-        # The dispatch passes the plugin's --with dependencies to the run (None:
-        # none) and, in its error arms, redacts its own lines through the run's
-        # text layer; a real plugin inherits both from the mixin.
-        _get_tool_with_dependencies=lambda: None,
-        _shown_run_text=lambda text, record_values, record_inputs: text,
-    )
+    class _Plugin(UVToolMixin):
+        """Overrides only what a plugin supplies; the dispatch's own helpers (the
+        stderr log identity, the interpreter request, the after-the-start
+        response, the --with dependencies and the redacted error text) are the
+        mixin's, so a change to one of their signatures reaches this test."""
+
+        command = "stub-tool"
+        use_uv_tool = True
+        # The package that provides the command (None: the command's own name).
+        uv_tool_package_name = None
+
+        def _is_offline_mode(self):
+            return False
+
+        def _values_to_redact(self):
+            return ("1.8",)
+
+        def _uv_run_inputs_for_records(self):
+            return ("stub-tool==1.8",)
+
+        def _get_tool_package_extras(self):
+            return None
+
+        def _get_tool_version_constraint(self):
+            return "==1.8"
+
+        def _plugin_log(self, *args, **kwargs):
+            return None
+
+        def _uv_response(self, result, results_dir, **kwargs):
+            return result
 
     with mock_patch(
         "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
         return_value=_Runner(),
     ):
-        result = UVToolMixin._try_uv_tool_execution(
-            fake, ["stub-tool", "-r", "src"], tmp_path
-        )
+        result = _Plugin()._try_uv_tool_execution(["stub-tool", "-r", "src"], tmp_path)
 
     assert result is not None and result.get("returncode") == 0, result
     assert seen, "the fake runner never logged"
@@ -3682,6 +3683,10 @@ def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, 
     assert lines, [record.getMessage() for record in caplog.records]
     assert not any(value in line for line in lines), lines
     assert value not in str(refused.value), str(refused.value)
+    # The refusal is chained to nothing: a traceback or a logged exception of it
+    # prints its cause and its context too, and either would quote the OS error.
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None
 
 
 def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
@@ -3736,6 +3741,10 @@ def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
     ]
     assert notes, [record.getMessage() for record in caplog.records]
     notes.append(str(refused.value))
+    # What a traceback or a logged exception of the refusal would print besides
+    # its own text: its cause and its context, which are none.
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None
     return notes, results
 
 
@@ -3958,7 +3967,10 @@ def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypat
     The sweep still refuses the entry it could not remove, once, after it has
     walked everything else: the raise read here is that refusal (an OSError),
     never the redactor's RuntimeError, and the link after the failed one is
-    gone before it is raised."""
+    gone before it is raised. Whichever link the walk reaches first is the one
+    whose removal fails, so the check does not depend on the order the
+    directory lists its entries in: a sweep that stopped at the failure would
+    leave both links, whichever came first."""
     from automated_security_helper.utils.sandbox import fs_guard
     from automated_security_helper.utils.sandbox import scope as scope_module
 
@@ -3968,9 +3980,11 @@ def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypat
     (root / "zzz-link").symlink_to(tmp_path)
 
     real_unlink = os.unlink
+    failed: list = []
 
     def failing_unlink(name, *args, **kwargs):
-        if "aaa-link" in str(name):
+        if not failed and "-link" in str(name):
+            failed.append(Path(str(name)).name)
             raise OSError("the first removal fails")
         return real_unlink(name, *args, **kwargs)
 
@@ -3986,11 +4000,13 @@ def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypat
 
     # os.path.lexists, not Path.exists(follow_symlinks=False): the keyword
     # arrived in Python 3.12 and CI's 3.10 leg raises TypeError on it.
-    assert not os.path.lexists(root / "zzz-link"), (
-        "the symlink after the failed one must still be removed"
-    )
-    assert os.path.lexists(root / "aaa-link"), (
-        "the entry whose removal failed is what the refusal is about"
+    assert len(failed) == 1, failed
+    remaining = [
+        name for name in ("aaa-link", "zzz-link") if os.path.lexists(root / name)
+    ]
+    assert remaining == failed, (
+        "the entry whose removal failed is what the refusal is about, and the "
+        "other link must still be removed"
     )
 
 
