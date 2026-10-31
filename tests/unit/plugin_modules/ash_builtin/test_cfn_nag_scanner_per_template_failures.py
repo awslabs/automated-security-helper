@@ -384,8 +384,8 @@ def test_a_marker_only_template_without_a_byte_order_mark_is_skipped_as_unparsea
     stack carries a CloudFormation marker and no Resources mapping, so it is a
     template that could not be parsed, not a failed target: a marker alone never
     makes one. At the previous tip this route decided from the marker, so the file
-    was an ERROR named in the error record where its UTF-8 copy is a WARNING counted
-    as nothing."""
+    was an ERROR named in the error record where the UTF-8 copy of a stack like it
+    (saved by the test above) is a WARNING counted as nothing."""
     jinja = (
         "# Queue for {{ env }}\n"
         "{% for q in queues %}\n"
