@@ -743,24 +743,38 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 "kind is not 'fail' is; the OCSF report keeps them"
             )
 
-    @staticmethod
-    def _used_uri_base_ids(run: Any) -> set:
+    def _used_uri_base_ids(self, run: Any) -> set:
         """The base ids the locations of *run*'s results refer to: the ones the
-        file writes on a location (:meth:`_build_slim_locations`)."""
+        file writes on a location (:meth:`_build_slim_locations`).
+
+        Only what the file carries counts. A result the file leaves out
+        (:meth:`_left_out`) writes no location, and neither does a location
+        with no ``uri`` or one past the cap on locations per result; a base
+        used only by those was declared all the same, and two runs that
+        disagreed about it refused a document whose written results never
+        referred to it.
+        """
         used: set = set()
         for result in getattr(run, "results", None) or []:
+            if self._left_out(result):
+                continue
+            written = 0
             for location in getattr(result, "locations", None) or []:
                 physical = getattr(location, "physicalLocation", None)
                 physical = getattr(physical, "root", physical)
                 artifact = getattr(physical, "artifactLocation", None)
+                if not getattr(artifact, "uri", None):
+                    continue
+                written += 1
+                if written > _LOCATIONS_KEPT_PER_RESULT:
+                    break
                 base_id = getattr(artifact, "uriBaseId", None)
                 if base_id:
                     used.add(str(base_id))
         return used
 
-    @staticmethod
     def _merged_uri_base_ids(
-        runs: list, project_paths: Dict[int, Optional[str]]
+        self, runs: list, project_paths: Dict[int, Optional[str]]
     ) -> Optional[Dict[str, Dict[str, str]]]:
         """The ``originalUriBaseIds`` of every run whose URIs are not rebased,
         merged into the one table the emitted run declares.
@@ -783,9 +797,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 continue
             declared = GHASReporter._original_uri_base_ids(run)
             needed: set = set()
-            pending = [
-                key for key in GHASReporter._used_uri_base_ids(run) if key in declared
-            ]
+            pending = [key for key in self._used_uri_base_ids(run) if key in declared]
             while pending:
                 key = pending.pop()
                 if key in needed:

@@ -115,9 +115,12 @@ class TestUnjudgedKindsAreCounted:
     def test_a_document_refused_for_its_base_ids_still_counts_the_kinds(
         self, reporter, monkeypatch
     ):
-        """Two runs that declare one base id differently cannot share a table
-        and the document is not written; the open results it held are still
-        counted in the log."""
+        """Two runs whose written results refer to one base id that they
+        declare differently cannot share a table and the document is not
+        written; the open results it held (one of them in the second run, beside
+        the failing result that makes the base used there) are still counted in
+        the log. An open result alone does not make a base used: it is left
+        out of the file."""
         logger = MagicMock()
         monkeypatch.setattr(github_ghas_reporter, "ASH_LOGGER", logger)
         location = Location(
@@ -126,7 +129,7 @@ class TestUnjudgedKindsAreCounted:
             )
         )
 
-        def run(base_uri: str, kind: Kind = Kind.fail) -> Run:
+        def run(base_uri: str, *kinds: Kind) -> Run:
             return Run(
                 tool=Tool(driver=ToolComponent(name="ASH")),
                 results=[
@@ -137,6 +140,7 @@ class TestUnjudgedKindsAreCounted:
                         message=Message(text="a"),
                         locations=[location],
                     )
+                    for kind in kinds
                 ],
                 originalUriBaseIds={"SRCROOT": ArtifactLocation(uri=base_uri)},
             )
@@ -144,7 +148,10 @@ class TestUnjudgedKindsAreCounted:
         model = AshAggregatedResults()
         model.sarif = SarifReport(
             version="2.1.0",
-            runs=[run("file:///repo/"), run("file:///elsewhere/", Kind.open)],
+            runs=[
+                run("file:///repo/", Kind.fail),
+                run("file:///elsewhere/", Kind.fail, Kind.open),
+            ],
         )
 
         assert reporter.report(model) is None

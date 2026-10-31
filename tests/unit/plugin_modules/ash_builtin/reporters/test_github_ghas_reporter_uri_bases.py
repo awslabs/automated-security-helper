@@ -28,6 +28,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
+    Kind,
     Level,
     Location,
     Message,
@@ -137,6 +138,42 @@ class TestMultiRunBaseIds:
         assert "file:///repo/" in message
         assert "file:///elsewhere/" in message
         assert "runs 0 and 1" in message
+
+
+class TestOnlyWrittenResultsCount:
+    """A base counts as used only when a location the file writes refers to it."""
+
+    def test_a_base_only_a_left_out_result_uses_does_not_refuse_the_document(
+        self, reporter
+    ):
+        """The second run's one result is an open one, which the file leaves
+        out; its table disagreed with the first run's about SRCROOT, and the
+        whole document was refused, the first run's findings with it."""
+        left_out = _run("R2", {"SRCROOT": "file:///elsewhere/"})
+        left_out.results[0].kind = Kind.open
+        runs = [_run("R1", {"SRCROOT": "file:///repo/"}), left_out]
+
+        output = reporter.report(_model(*runs))
+
+        assert output is not None
+        doc = json.loads(output)["runs"][0]
+        assert [r["ruleId"] for r in doc["results"]] == ["R1"]
+        assert doc["originalUriBaseIds"] == {"SRCROOT": {"uri": "file:///repo/"}}
+
+    def test_a_base_only_a_location_with_no_uri_uses_does_not_refuse_the_document(
+        self, reporter
+    ):
+        """A location with no uri is not written, so the base id it names is
+        not written either."""
+        no_uri = _run("R2", {"SRCROOT": "file:///elsewhere/"})
+        no_uri.results[0].locations[0].physicalLocation.root.artifactLocation.uri = None
+        runs = [_run("R1", {"SRCROOT": "file:///repo/"}), no_uri]
+
+        output = reporter.report(_model(*runs))
+
+        assert output is not None
+        doc = json.loads(output)["runs"][0]
+        assert doc["originalUriBaseIds"] == {"SRCROOT": {"uri": "file:///repo/"}}
 
 
 class TestOnlyReferencedBasesAreDeclared:
