@@ -264,5 +264,6 @@ class TestOfflineMode:
         # Red at the base: nothing said.
         logger.warning.assert_called_once()
         assert (
-            "ASH_OFFLINE='enabled' is not recognized" in logger.warning.call_args.args[0]
+            "ASH_OFFLINE='enabled' is not recognized"
+            in logger.warning.call_args.args[0]
         )
