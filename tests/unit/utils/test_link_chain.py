@@ -18,7 +18,9 @@ unresolved, so a Windows share spelling can be a target on any platform.
 
 from __future__ import annotations
 
+import ntpath
 import os
+import posixpath
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -661,3 +663,75 @@ class TestTheChainReadingStartsFromTheDirectoryTheLinkIsReallyIn:
             )
             is None
         )
+
+
+class TestADriveSpellingKeepsItsStepBack:
+    """``_parent`` of a bare drive, and a link target that is a drive and no root.
+
+    ``ntpath.dirname("C:")`` is ``"C:"``, so the step above a bare drive was
+    dropped and ``C:..\\x`` was checked as ``C:x``. The functions are given the
+    Windows path module, so a run on any platform reads the Windows spellings.
+    """
+
+    def test_the_step_above_a_bare_drive_is_kept(self):
+        """Red at the base: the answer was ``C:``, the step lost."""
+        assert link_chain._parent("C:", pathmod=ntpath) == "C:.."
+
+    @pytest.mark.parametrize(
+        ("reached", "parent"),
+        [
+            ("", ".."),
+            ("C:..", "C:..\\.."),
+            ("C:a", "C:"),
+            ("C:\\", "C:\\"),
+            ("C:\\a", "C:\\"),
+            ("C:\\a\\b", "C:\\a"),
+        ],
+    )
+    def test_the_other_prefixes_keep_their_reading(self, reached, parent):
+        """Controls: the empty prefix and a prefix above its start keep the step,
+        a drive-relative name goes up to its bare drive, a root is its own
+        parent."""
+        assert link_chain._parent(reached, pathmod=ntpath) == parent
+
+    def test_a_posix_prefix_is_read_as_before(self):
+        assert link_chain._parent("/a/b", pathmod=posixpath) == "/a"
+        assert link_chain._parent("/", pathmod=posixpath) == "/"
+        assert link_chain._parent("a", pathmod=posixpath) == ""
+        assert link_chain._parent("..", pathmod=posixpath) == "../.."
+
+    @pytest.mark.parametrize("target", ["C:", "C:foo", "C:foo\\bar", "c:../x"])
+    def test_a_drive_and_no_root_is_a_target_that_cannot_be_judged(
+        self, tmp_path, target
+    ):
+        """Red at the base: the walk read ``C:foo`` as a name in the link's own
+        directory, found nothing there, and passed it. It is taken from the
+        current directory of that drive, which the link does not tell."""
+        link = tmp_path / "link"
+        link.symlink_to(target)
+
+        found = link_chain.first_unsafe_link(str(link))
+
+        assert found is not None
+        assert found.is_last is True
+        assert found.reaches_a_share is None
+        assert found.unexaminable is False
+        assert link_chain.link_chain_names_a_windows_share(str(link)) is None
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "C:\\ash-test-nothing-here",
+            "C:/ash-test-nothing-here",
+            "\\ash-test-nothing-here",
+            "ash-test-nothing-here",
+        ],
+    )
+    def test_a_rooted_or_relative_target_is_still_walked(self, tmp_path, target):
+        """Controls: a drive and a root, a root alone and a plain relative name
+        are not drive-relative; each leads to a name that is not there here, so
+        the walk ends unjudged."""
+        link = tmp_path / "link"
+        link.symlink_to(target)
+
+        assert link_chain.first_unsafe_link(str(link)) is None

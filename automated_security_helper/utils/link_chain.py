@@ -48,7 +48,9 @@ name up under it. A link met on the way is read with ``os.readlink`` and its
 target's names are walked next: from the directory the link is in, which is the
 one reached (``a\\l3`` with ``a`` a link to ``b\\c`` has ``l3`` in ``b\\c``, and a
 target ``..\\x`` of ``l3`` is ``b\\x``, not ``x`` beside ``a``), or from the
-target's own anchor when it has one. A link in a parent of a hop's target is
+target's own anchor when it has one (a target that is a drive and no root,
+``C:foo``, has neither: it is read from the current directory of that drive,
+and the chain is judged unreadable). A link in a parent of a hop's target is
 therefore examined before anything under it is, and a relative target is taken
 from where the link is, not from where the caller spelled it.
 
@@ -65,10 +67,12 @@ Nothing here decides a refusal's wording or its platform gate; the callers do
 
 from __future__ import annotations
 
+import ntpath
 import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import List, Optional, Tuple
 
 #: Links followed before a chain is given up on as unjudgeable: the bound
@@ -223,16 +227,34 @@ class _Finding:
     unexaminable: bool = False
 
 
-def _parent(reached: str) -> str:
-    """The directory above ``reached``, which holds no link, so this is its parent."""
-    if not reached or os.path.basename(reached) == "..":
-        # A relative prefix that has not left its start (or is already above
-        # it) goes up by a step that is kept, not collapsed.
-        return os.path.join(reached, "..")
-    parent = os.path.dirname(reached)
-    if not parent and os.path.splitdrive(reached)[0]:
-        return reached
-    return parent
+def _parent(reached: str, *, pathmod: ModuleType = os.path) -> str:
+    """The directory above ``reached``, which holds no link, so this is its parent.
+
+    ``pathmod`` is the path module that reads the spelling, ``os.path`` unless a
+    test reads a spelling of the other platform.
+    """
+    _, tail = pathmod.splitdrive(reached)
+    if not tail or pathmod.basename(reached) == "..":
+        # A relative prefix that has not left its start goes up by a step that
+        # is kept, not collapsed: the empty prefix, a bare drive (``C:``, which
+        # names the current directory of that drive, so ``dirname`` would give
+        # it back and lose the step), or a prefix already above its start.
+        return pathmod.join(reached, "..")
+    return pathmod.dirname(reached)
+
+
+def _is_drive_relative(target: str) -> bool:
+    """Whether ``target`` is a drive and no root: ``C:`` or ``C:foo``.
+
+    Such a spelling is taken from the current directory of that drive, a
+    per-process fact, and not from the directory the link is in, so what it
+    names cannot be told from the link alone. It is read as text, as the share
+    spellings are, whatever platform runs the reading.
+    """
+    drive, rest = ntpath.splitdrive(target)
+    if not drive or drive.startswith(("\\\\", "//")):
+        return False
+    return not rest.startswith(("\\", "/"))
 
 
 def _anchor_and_names(collapsed: str) -> Tuple[str, List[str]]:
@@ -252,8 +274,10 @@ def _split_target(directory: str, target: str) -> Tuple[str, List[str]]:
     """Where a link's target starts, and the names still to walk under it.
 
     A relative target starts at ``directory``, the one the link is in. A target
-    with an anchor starts there: a drive and a root, a root alone (on the
-    volume the link is on, as the OS takes it), or a drive alone.
+    with an anchor starts there: a drive and a root, or a root alone (on the
+    volume the link is on, as the OS takes it). A drive with no root is not
+    split here: it is read from the current directory of that drive, so the
+    callers answer it unjudgeable first (:func:`_is_drive_relative`).
 
     The target is collapsed by text first (``os.path.normpath``), so a ``..``
     after a name is a step back over that name, never a step up from wherever
@@ -332,6 +356,8 @@ def _walk_names(
             return None, _Finding(None)
         if names_a_windows_share(target):
             return None, _Finding(True)
+        if _is_drive_relative(target):
+            return None, _Finding(None)
         reached, target_names = _split_target(reached, target)
         pending.extend(reversed(target_names))
         spliced = True
@@ -363,6 +389,8 @@ def _chain_names_a_windows_share(text: str, budget: _Hops) -> Optional[bool]:
         return None
     if names_a_windows_share(target):
         return True
+    if _is_drive_relative(target):
+        return None
     start, target_names = _split_target(directory, target)
     _, finding = _walk_names(start, target_names, budget, spliced=True)
     if finding is None:
