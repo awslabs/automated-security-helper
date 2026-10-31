@@ -1430,8 +1430,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
         ``confine`` says whether the file the name resolves to has to lie in
         the entry's anchor directory or the scanned tree. It is True for an
-        entry a baseline supplied and for any entry of a configuration the
-        operator did not write; it defaults to ``from_baseline``.
+        entry a baseline supplied and for any entry of a configuration read
+        from files the operator did not write, except an absolute list the
+        operator's own config names too (``_operator_named_wordlist``); it
+        defaults to ``from_baseline``.
         """
         if confine is None:
             confine = from_baseline

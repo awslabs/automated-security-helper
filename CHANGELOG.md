@@ -8074,10 +8074,10 @@
   is measured in UTF-16 code units on every platform, as NTFS, exFAT, vfat and
   HFS+ bound it, so a name that fits one of those file systems is not dropped
   on a host that mounts it. The report gives the files not re-scanned, which
-  are real files and not every name a colon split makes, and the names left unread as two separate
-  counts. A `.gitleaksignore` that changed
-  while gitleaks ran fails the scan, and so does an empty re-scan report or one
-  with no run, where each used to read as no dropped findings. Results under an
+  are real files and not every name a colon split makes, and the names left
+  unread as two separate counts. A `.gitleaksignore` that changed while
+  gitleaks ran fails the scan, and so does an empty re-scan report or one with
+  no run, where each used to read as no dropped findings. Results under an
   earlier run's `.ash/ash_output` are dropped even when `--output-dir` points
   elsewhere, as they are under this run's. A `.gitleaksignore` that is a symlink
   to a directory, or a dangling one, is read as no ignore file instead of

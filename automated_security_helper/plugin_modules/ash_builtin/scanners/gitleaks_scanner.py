@@ -376,7 +376,10 @@ def gitleaksignore_candidates(data: bytes) -> Tuple[List[str], int]:
     and reading stops when ``MAX_IGNORE_CANDIDATES`` distinct names or
     ``MAX_IGNORE_CANDIDATE_CHARS`` characters have been made. What is left,
     counted by the colons of the lines not read, is the second value; the caller
-    reports it as names not evaluated, so the scan fails as incomplete.
+    reports it as names not evaluated, so the scan fails as incomplete. Once a
+    cap is reached, a colon met after it counts as unread whether or not the
+    name before it repeats one already returned: the cap is checked first, so
+    the work for each remaining line stays bounded.
     """
     files: List[str] = []
     seen: Set[str] = set()
