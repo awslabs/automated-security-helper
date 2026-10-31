@@ -71,11 +71,13 @@ def _contract_holds(pattern: str, prefix: str) -> None:
 
 
 class TestAColonInANameIsNotADrive:
-    @pytest.mark.parametrize("name", ["c:notes.py", "C:notes.py", "x:legacy"])
+    @pytest.mark.parametrize(
+        "name", ["c:notes.py", "C:notes.py", "x:legacy", "a:b.yaml"]
+    )
     def test_a_letter_colon_name_up_converts(self, name):
         assert to_workspace_pattern(name, "api") == f"api/{name}"
 
-    @pytest.mark.parametrize("name", ["*:Zone.Identifier", "1:x.py", "a:b.yaml"])
+    @pytest.mark.parametrize("name", ["*:Zone.Identifier", "1:x.py"])
     def test_a_non_letter_first_character_is_a_name_on_every_interpreter(self, name):
         """3.12+ read any ``X:`` prefix as a drive; 3.10 and 3.11 did not."""
         assert to_workspace_pattern(name, "api") == f"api/{name}"
@@ -105,6 +107,14 @@ class TestAColonInANameIsNotADrive:
             ("x:legacy/src/x.py", ""),
             ("1:x.py", ""),
             ("src/x.py", ""),
+            # The letter half of the rule on its own: each of these has the
+            # separator or the end after the colon, so only its first character
+            # keeps it from being a drive (3.12's PureWindowsPath reads them all
+            # as one, and str.isalpha() alone would read the last).
+            ("1:/x.py", ""),
+            ("*:", ""),
+            ("*:/x", ""),
+            ("é:/x", ""),
         ],
     )
     def test_the_drive_rule_is_shared_with_the_uri_reading(self, text, anchor):
