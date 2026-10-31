@@ -122,7 +122,7 @@ class TestAKeyBlocksRangeOnLaterMaskings:
         mask_secrets_in_results(model)
 
         recorded = model.sarif.runs[0].results[0].properties.model_dump()
-        assert recorded["masked_block_end"] == 14
+        assert recorded["masked_block_end"] == [14]
         assert "masked_to_end_of_file" not in recorded
         assert _region(model, 0).endLine == 11
 
@@ -185,7 +185,8 @@ class TestAKeyBlocksRangeOnLaterMaskings:
         assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 5
         assert _context(loaded, 2) == MASKED_LINE + "\n"
         recorded = loaded.sarif.runs[0].results[0].properties.model_dump()
-        assert recorded["masked_to_end_of_file"] is True
+        assert recorded["masked_to_end_of_file"] == [0]
+        assert "masked_block_end" not in recorded
 
     def test_an_end_line_found_later_bounds_the_range_and_drops_the_record(self):
         """Control: a later masking whose snippets show the END line keeps it on
@@ -208,7 +209,7 @@ class TestAKeyBlocksRangeOnLaterMaskings:
         assert _context(later, 2) == FAR_LINE
         recorded = later.sarif.runs[0].results[0].properties.model_dump()
         assert "masked_to_end_of_file" not in recorded
-        assert recorded["masked_block_end"] == 14
+        assert recorded["masked_block_end"] == [14]
 
     def test_a_recorded_end_line_bounds_the_range_once_its_snippets_are_masked(
         self,
@@ -228,7 +229,7 @@ class TestAKeyBlocksRangeOnLaterMaskings:
         assert _context(loaded, 2) == FAR_LINE
         assert _region(loaded, 0).endLine == 11
         recorded = loaded.sarif.runs[0].results[0].properties.model_dump()
-        assert recorded["masked_block_end"] == 14
+        assert recorded["masked_block_end"] == [14]
 
     def test_a_begin_line_finding_with_no_end_in_sight_keeps_its_range_on_reload(
         self,
@@ -465,10 +466,10 @@ LONG_PEM_LINES = [
 class TestAKeyFindingWithTwoLocations:
     """One finding reports its key in two files whose blocks end on different lines.
 
-    The range a masking records on the finding is one property per finding, so
-    the widest range over its locations is recorded: recording each location in
-    turn kept only the last one, and a later masking cut the other file's block
-    short.
+    The range a masking records on the finding is one entry per primary location,
+    in the order of its locations: one record per finding kept only the last
+    location's end (a later masking cut the other file's block short), and the
+    widest end per finding made a later masking hide more lines than the first.
     """
 
     def _model(self):
@@ -495,25 +496,31 @@ class TestAKeyFindingWithTwoLocations:
         assert _context(model, 1) == BEFORE_PEM + (MASKED_LINE + "\n") * 6 + AFTER_PEM
         assert _context(model, 2) == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
 
-    def test_the_widest_end_line_is_recorded_on_the_finding(self):
+    def test_each_locations_end_line_is_recorded_on_the_finding(self):
         """The longer block, reported first, ends at 16; the shorter, reported
-        second, at 14. The record is the widest, not the last."""
+        second, at 14. The record holds both, in the locations' order."""
         model = self._model()
 
         mask_secrets_in_results(model)
 
         recorded = model.sarif.runs[0].results[0].properties.model_dump()
-        assert recorded["masked_block_end"] == 16
+        assert recorded["masked_block_end"] == [16, 14]
         assert "masked_to_end_of_file" not in recorded
 
-    def test_a_second_masking_keeps_both_blocks_masked(self):
+    def test_a_second_masking_masks_the_same_lines_as_the_first(self):
+        """Every reload masks again; each location takes its own recorded end, so
+        the shorter file's lines after its block stay as they were."""
         model = self._model()
         mask_secrets_in_results(model)
+        once = (_context(model, 1), _context(model, 2))
 
         mask_secrets_in_results(model)
 
-        assert (MASKED_LINE + "\n") * 6 in _context(model, 1)
-        assert (MASKED_LINE + "\n") * 4 in _context(model, 2)
+        assert once == (
+            BEFORE_PEM + (MASKED_LINE + "\n") * 6 + AFTER_PEM,
+            BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM,
+        )
+        assert (_context(model, 1), _context(model, 2)) == once
 
 
 class TestAPlaceholderColumn:

@@ -949,33 +949,52 @@ def _same_file(first: str, second: str) -> bool:
 #: Where a reported range runs to when where it ends is unknown.
 _TO_END_OF_FILE = 2**62
 
-#: Properties a masking writes on a key finding to record where its range ran:
-#: to the END line some other finding's snippet showed (``masked_block_end``,
-#: that line's number) or, with no END line in any snippet, to the end of the
-#: file (``masked_to_end_of_file``). The next masking (every reload, a merge, the
-#: findings browser) takes the recorded range: by then the END line and every
-#: line of the block read as masked lines, so the snippets cannot place the block
-#: again, and the finding's own region is left as the scanner wrote it, because
-#: the file and lines are the finding's identity across scans.
+#: Properties a masking writes on a key finding to record where its range ran,
+#: per primary location in the order of the finding's ``locations``: to the END
+#: line some other finding's snippet showed (``masked_block_end``, a list with
+#: that line's number at the location's position and null where the location
+#: recorded no END line) or, with no END line in any snippet, to the end of the
+#: file (``masked_to_end_of_file``, the list of the positions that ran to it). A
+#: single number, or ``true``, is the record of an earlier version and applies to
+#: every location. The next masking (every reload, a merge, the findings
+#: browser) takes the recorded range: by then the END line and every line of the
+#: block read as masked lines, so the snippets cannot place the block again, and
+#: the finding's own region is left as the scanner wrote it, because the file
+#: and lines are the finding's identity across scans. One record per location:
+#: one per finding applied the widest location's end to every location, so a
+#: second masking hid more lines than the first.
 MASKED_BLOCK_END_PROPERTY = "masked_block_end"
 MASKED_TO_END_OF_FILE_PROPERTY = "masked_to_end_of_file"
 
 
-def _recorded_block_end(result: Any) -> Optional[int]:
-    """The END line an earlier masking recorded for this key finding, if any."""
+def _recorded_block_end(result: Any, position: int) -> Optional[int]:
+    """The END line an earlier masking recorded for the key finding's location at
+    ``position`` (its index among the finding's ``locations``), if any."""
     properties = getattr(result, "properties", None)
     recorded = _extra_of(properties).get(MASKED_BLOCK_END_PROPERTY)
-    return recorded if isinstance(recorded, int) and recorded > 0 else None
+    if isinstance(recorded, list):
+        recorded = recorded[position] if 0 <= position < len(recorded) else None
+    if isinstance(recorded, bool) or not isinstance(recorded, int):
+        return None
+    return recorded if recorded > 0 else None
 
 
-def _masked_to_end_of_file(result: Any) -> bool:
-    """Whether an earlier masking recorded this finding's range as running to the file's end."""
+def _masked_to_end_of_file(result: Any, position: int) -> bool:
+    """Whether an earlier masking recorded the finding's location at ``position``
+    as running to the file's end."""
     properties = getattr(result, "properties", None)
-    return bool(_extra_of(properties).get(MASKED_TO_END_OF_FILE_PROPERTY))
+    recorded = _extra_of(properties).get(MASKED_TO_END_OF_FILE_PROPERTY)
+    if isinstance(recorded, list):
+        return position in recorded
+    return bool(recorded)
 
 
-def _mark_masked_range(result: Any, block_end: Optional[int]) -> None:
-    """Record on ``result`` where its range ran: to ``block_end``, or to the file's end."""
+def _mark_masked_range(
+    result: Any, ends: List[Optional[int]], to_end_of_file: List[int]
+) -> None:
+    """Record on ``result`` where each primary location's range ran: to the END
+    line at its position in ``ends``, or to the file's end for the positions in
+    ``to_end_of_file``."""
     properties = getattr(result, "properties", None)
     if properties is None:
         from automated_security_helper.schemas.sarif_schema_model import PropertyBag
@@ -985,12 +1004,14 @@ def _mark_masked_range(result: Any, block_end: Optional[int]) -> None:
     extra = getattr(properties, "__pydantic_extra__", None)
     if not isinstance(extra, dict):
         return
-    if block_end is None:
+    if any(isinstance(end, int) for end in ends):
+        extra[MASKED_BLOCK_END_PROPERTY] = list(ends)
+    else:
         extra.pop(MASKED_BLOCK_END_PROPERTY, None)
-        extra[MASKED_TO_END_OF_FILE_PROPERTY] = True
+    if to_end_of_file:
+        extra[MASKED_TO_END_OF_FILE_PROPERTY] = list(to_end_of_file)
     else:
         extra.pop(MASKED_TO_END_OF_FILE_PROPERTY, None)
-        extra[MASKED_BLOCK_END_PROPERTY] = block_end
 
 
 #: A private-key finding's rule, message or tag.
@@ -1157,12 +1178,13 @@ class _SecretIndex:
         self._local_by_basename: Dict[str, List[int]] = {}
         #: id(secret finding) -> every value it exposed, whatever it looks like.
         self.values_of: Dict[int, Set[str]] = {}
-        #: (key finding, the END line its range ran to, or None for the end of the
-        #: file) for the masking to record on the finding (``_mask_report``), so
-        #: the next masking takes the same range instead of reading it off
-        #: snippet text, and the finding's own region is left as written. One
-        #: entry per finding: the widest range over its primary locations.
-        self.end_marks: List[Tuple[Any, Optional[int]]] = []
+        #: (key finding, the END line each primary location's range ran to in the
+        #: order of the finding's locations with None where a location recorded
+        #: none, the positions whose range ran to the end of the file) for the
+        #: masking to record on the finding (``_mask_report``), so the next
+        #: masking takes the same range per location instead of reading it off
+        #: snippet text, and the finding's own region is left as written.
+        self.end_marks: List[Tuple[Any, List[Optional[int]], List[int]]] = []
         #: id(artifact location) -> (the location, its artifact's uri, its
         #: uriBaseId), for a location of this report that names its file by index
         #: into the run's artifacts and carries no uri of its own
@@ -1443,14 +1465,13 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
         index.values_of[id(result)] = local
         primary = _locations_of(result)
         # The range a masking records on a finding (_mark_masked_range) is one
-        # per result, so a key finding with several primary locations records
-        # the widest of them: the end of the file when any location ran to it,
-        # else the furthest END line. Recording each location's own end in turn
-        # kept only the last one, and the next masking cut the other files'
-        # blocks short.
+        # per primary location: the END line that location's range ran to, or
+        # that it ran to the end of its file. One record per finding, with the
+        # widest location's end, made the next masking take that end at every
+        # location and hide more lines than the first did.
         marked = False
-        widest_end: Optional[int] = None
-        to_end_of_file = False
+        ends: List[Optional[int]] = [None] * len(primary)
+        to_end_of_file: List[int] = []
         # A related location of a secret finding (a credential literal reported
         # where it is used) is a secret location too: indexed as is, with no
         # key or resource range of its own.
@@ -1476,12 +1497,12 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                 # A finding whose range an earlier masking recorded is a key
                 # block on every later masking too, though its BEGIN line now
                 # reads as a masked line.
-                recorded = _recorded_block_end(result)
+                recorded = _recorded_block_end(result, position)
                 if (
                     private_key
                     or _starts_a_block(known, uri, start)
                     or recorded is not None
-                    or _masked_to_end_of_file(result)
+                    or _masked_to_end_of_file(result, position)
                 ):
                     # The END line some snippet shows now, else the one an
                     # earlier masking recorded (its line reads as masked by
@@ -1501,9 +1522,9 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                         end = _TO_END_OF_FILE
                     marked = True
                     if block_end is None:
-                        to_end_of_file = True
-                    elif widest_end is None or block_end > widest_end:
-                        widest_end = block_end
+                        to_end_of_file.append(position)
+                    else:
+                        ends[position] = block_end
                 elif (
                     resource_only
                     and not _has_columns(region)
@@ -1529,7 +1550,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                     local,
                 )
         if marked:
-            index.end_marks.append((result, None if to_end_of_file else widest_end))
+            index.end_marks.append((result, ends, to_end_of_file))
     return index
 
 
@@ -2350,8 +2371,8 @@ def _mask_report(
     # reload, ash merge, the findings browser) reads those lines as MASKED_LINE
     # and could not place the block again. The finding's own region is left as
     # the scanner wrote it: the file and lines are its identity across scans.
-    for result, block_end in index.end_marks:
-        _mark_masked_range(result, block_end)
+    for result, ends, to_end_of_file in index.end_marks:
+        _mark_masked_range(result, ends, to_end_of_file)
     for result in _all_results(sarif_report):
         message = getattr(result, "message", None)
         root: Any = getattr(message, "root", message)
