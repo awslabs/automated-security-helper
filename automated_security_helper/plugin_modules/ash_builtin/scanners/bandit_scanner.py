@@ -6,6 +6,7 @@ import glob
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import (
     Annotated,
@@ -437,13 +438,16 @@ def _config_file_filters(final_args: Sequence[Any]) -> Tuple[List[str], List[str
         return include, exclude_dirs
     data: Any = None
     if config_file.endswith(".toml"):
+        # tomllib is stdlib from Python 3.11; tomli, which pyproject.toml
+        # declares for older versions, is the same parser. Chosen by version so
+        # the type checker reads only the branch of the Python it checks for.
         try:
-            import tomllib
+            if sys.version_info >= (3, 11):
+                import tomllib
+            else:  # pragma: no cover - Python 3.10
+                import tomli as tomllib
         except ImportError:  # pragma: no cover - Python 3.10 without tomli
-            try:
-                import tomli as tomllib  # type: ignore[no-redef]
-            except ImportError:
-                return include, exclude_dirs
+            return include, exclude_dirs
         try:
             data = tomllib.loads(raw.decode("utf-8")).get("tool", {}).get("bandit")
         except (UnicodeDecodeError, ValueError, AttributeError):
