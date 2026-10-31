@@ -453,23 +453,25 @@ def _carry_file_identity(fd: int, before: os.stat_result | None) -> None:
     Called before any text is written to the staging file, so the text is never
     in a file more open than the one it replaces.
 
-    The owner first: a chown clears set-id bits on some systems, and it is
-    attempted only where the staging file's owner differs (a process running as
-    root over a bind-mounted config, say, which otherwise handed the file back
-    owned by root); without the privilege it is refused and the mode is still
-    carried. ACLs and extended attributes are not carried: the rename makes a
-    new file. A file with a second name is never renamed over
+    The owner and group first: a chown clears set-id bits on some systems, and
+    it is attempted only where the staging file's owner or group differs (a
+    process running as root over a bind-mounted config, say, which otherwise
+    handed the file back owned by root; a config given to a group this process
+    does not have as its own, whose staging file takes the process's group). A
+    chown the process may not make is not swallowed: the file would come back
+    with another owner or group than it had. The refusal is a PermissionError,
+    which the writers take as a place that cannot be staged
+    (``_staged_write_falls_back``), so the file is written in place and keeps
+    both. ACLs and extended attributes are not carried: the rename makes a new
+    file. A file with a second name is never renamed over
     (``_has_other_names``).
     """
     if before is None:
         return
     if hasattr(os, "fchown"):
-        try:
-            current = os.fstat(fd)
-            if (current.st_uid, current.st_gid) != (before.st_uid, before.st_gid):
-                os.fchown(fd, before.st_uid, before.st_gid)
-        except PermissionError:
-            pass
+        current = os.fstat(fd)
+        if (current.st_uid, current.st_gid) != (before.st_uid, before.st_gid):
+            os.fchown(fd, before.st_uid, before.st_gid)
     if hasattr(os, "fchmod"):
         os.fchmod(fd, stat.S_IMODE(before.st_mode))
 

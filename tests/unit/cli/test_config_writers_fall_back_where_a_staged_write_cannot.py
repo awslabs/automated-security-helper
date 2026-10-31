@@ -11,10 +11,12 @@ where the plain in-place write succeeded: a directory the user may not write
 (the staging file fails EACCES) and a single file bind-mounted into the
 container (the rename onto a mount point fails EBUSY). There the in-place write
 is made. A file with a second name is written in place too: a rename makes a new
-file under one name and leaves the other on the old text. The staged write makes
-a new inode at the umask's mode, so the file's own bits are put back before the
-rename (a 0600 config stays 0600). A write the lint fixers cannot make is
-reported on one line with exit 1, not a traceback.
+file under one name and leaves the other on the old text. So is a file given to
+a group the writer cannot give back to the staging file: the new inode takes the
+writer's own group, and the teammates the file was shared with would lose it. The
+staged write makes a new inode at the umask's mode, so the file's own bits are
+put back before the rename (a 0600 config stays 0600). A write the lint fixers
+cannot make is reported on one line with exit 1, not a traceback.
 """
 
 from __future__ import annotations
@@ -25,11 +27,13 @@ import os
 import stat
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from typer.testing import CliRunner
 
+from automated_security_helper.cli import config as config_module
 from automated_security_helper.cli.config import config_app
 
 pytestmark = pytest.mark.unit
@@ -147,6 +151,78 @@ def test_a_hard_linked_config_is_rewritten_under_both_names(
     assert _written(config_file)["fail_on_findings"] is False
     assert _written(other)["fail_on_findings"] is False
     assert config_file.stat().st_nlink == 2
+
+
+def _given_to_another_group(
+    monkeypatch: pytest.MonkeyPatch, config_file: Path, chown
+) -> tuple[int, int]:
+    """Make the config read as given to a group one above its real one, and send
+    every ``os.fchown`` to ``chown``. Returns the (owner, group) it reads as.
+
+    A real group change needs a group the test user belongs to besides its own,
+    which a venue may not have, so the writer's view of the file is replaced."""
+    real = config_file.stat()
+    shown = SimpleNamespace(
+        st_mode=real.st_mode,
+        st_uid=real.st_uid,
+        st_gid=real.st_gid + 1,
+        st_nlink=real.st_nlink,
+    )
+    monkeypatch.setattr(config_module, "_stat_to_keep", lambda target: shown)
+    monkeypatch.setattr(os, "fchown", chown)
+    return shown.st_uid, shown.st_gid
+
+
+@pytest.mark.skipif(not hasattr(os, "fchown"), reason="POSIX file groups")
+def test_a_config_given_to_a_group_the_writer_cannot_give_back_is_rewritten_in_place(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A config chgrp'd to a shared group and left group-writable: the staged
+    write's new inode takes the writer's own group, and giving the file's back is
+    refused (EPERM) for a group the writer is not in, so the teammates it was
+    shared with would lose it; the plain write kept the inode and its group."""
+    chowned: list[tuple[int, int]] = []
+
+    def refused_chown(fd, uid, gid):
+        chowned.append((uid, gid))
+        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+
+    wanted = _given_to_another_group(monkeypatch, config_file, refused_chown)
+    inode = config_file.stat().st_ino
+    replaced = _replaces_of(monkeypatch, config_file)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    # The group was asked for and refused: the write was then made in place.
+    assert chowned == [wanted]
+    assert replaced == []
+    assert _written(config_file)["fail_on_findings"] is False
+    assert config_file.stat().st_ino == inode
+    assert [p.name for p in config_file.parent.iterdir()] == [config_file.name]
+
+
+@pytest.mark.skipif(not hasattr(os, "fchown"), reason="POSIX file groups")
+def test_a_config_given_to_a_group_the_writer_can_give_back_is_still_replaced(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The positive control: a writer that is in the file's group (or is root) gets
+    the group onto the staging file, so the staged write still replaces the file
+    and the test above is not a write that is always in place."""
+    chowned: list[tuple[int, int]] = []
+
+    def allowed_chown(fd, uid, gid):
+        chowned.append((uid, gid))
+
+    wanted = _given_to_another_group(monkeypatch, config_file, allowed_chown)
+    replaced = _replaces_of(monkeypatch, config_file)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    assert chowned == [wanted]
+    assert len(replaced) == 1
+    assert _written(config_file)["fail_on_findings"] is False
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
