@@ -1539,7 +1539,8 @@ class AshAggregatedResults(RecordModel):
 
         The first call materializes the list and applies legacy side effects
         (setting summary_stats.suppressed and the scanner rows' suppressed
-        counts from the flattened findings, so a second pass sets the same
+        counts from the flattened findings and the suppressed findings the
+        scanners' dict results recorded, so a second pass sets the same
         counts again). Subsequent
         calls return the memoized list so the method is safe to call from
         reporters multiple times per run, for as long as the sarif and the
@@ -1601,14 +1602,10 @@ class AshAggregatedResults(RecordModel):
         # SARIF result into summary_stats and the scanner rows, so a bump here
         # counted each one a second time in the saved results. Setting the same
         # count twice is idempotent, and a model no metrics pass has visited
-        # still gets its counts from here.
-        suppressed_by_scanner: Dict[str, int] = {}
-        for flat_vuln in flat_vulns:
-            if flat_vuln.is_suppressed:
-                scanner_key = (flat_vuln.scanner or "").lower()
-                suppressed_by_scanner[scanner_key] = (
-                    suppressed_by_scanner.get(scanner_key, 0) + 1
-                )
+        # still gets its counts from here. A scanner's count is the one those
+        # metrics give it: its suppressed SARIF results plus the suppressed
+        # findings its dict result recorded (_suppressed_by_scanner).
+        suppressed_by_scanner = self._suppressed_by_scanner(flat_vulns)
         self.metadata.summary_stats.suppressed = sum(suppressed_by_scanner.values())
         for scanner_key, count in suppressed_by_scanner.items():
             self._apply_suppression_side_effects(scanner_key, count)
@@ -1636,6 +1633,40 @@ class AshAggregatedResults(RecordModel):
         self._flat_cache = flat_vulns
         self._flat_cache_source = source
         return flat_vulns
+
+    def _suppressed_by_scanner(
+        self, flat_vulns: List[FlatVulnerability]
+    ) -> Dict[str, int]:
+        """Each scanner's suppressed count, keyed by its lowercased name.
+
+        The suppressed flattened SARIF findings of the scanner, plus the suppressed
+        count a dict result of the scanner recorded on its per-target report: a
+        scanner that returned a dict instead of SARIF has findings the merged SARIF
+        never holds, and the unified metrics count them. Counted from the SARIF
+        alone, the flatten lowered what a metrics pass had written for such a
+        scanner. A scanner with neither has no entry.
+        """
+        from automated_security_helper.core.scanner_statistics_calculator import (
+            ScannerStatisticsCalculator,
+        )
+
+        counts: Dict[str, int] = {}
+        for flat_vuln in flat_vulns:
+            if flat_vuln.is_suppressed:
+                scanner_key = (flat_vuln.scanner or "").lower()
+                counts[scanner_key] = counts.get(scanner_key, 0) + 1
+
+        seen: set[str] = set()
+        for name in [*self.scanner_results, *self.additional_reports]:
+            if not isinstance(name, str) or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            recorded_by_dict = ScannerStatisticsCalculator._dict_result_counts(
+                self, name
+            ).suppressed
+            if recorded_by_dict:
+                counts[name.lower()] = counts.get(name.lower(), 0) + recorded_by_dict
+        return counts
 
     def _flat_source(self) -> tuple:
         """What to_flat_vulnerabilities flattens, as it stands now: the sarif and
