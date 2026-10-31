@@ -62,6 +62,7 @@ from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
+    SkippedProjectReason,
     is_workspace_scan,
 )
 from automated_security_helper.utils.severity_ladder import (
@@ -188,6 +189,21 @@ def workspace_policy_gates(model: "AshAggregatedResults") -> Dict[str, Optional[
     return gates
 
 
+def _skip_is_error(reason: Any) -> bool:
+    """Whether a project's recorded skip reason is an error skip.
+
+    The reason arrives as the enum member, or as its plain string from a record
+    built without validation; either is read through the enum's own property.
+    A reason the enum does not name is not an error skip.
+    """
+    if reason is None:
+        return False
+    try:
+        return SkippedProjectReason(reason).is_error
+    except ValueError:
+        return False
+
+
 def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]]:
     """One row per project, in workspace-file order, or ``[]`` for a single scan.
 
@@ -207,7 +223,7 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
         # a successful optimisation and an error skip is a project that was not
         # looked at, and they must not read the same.
         reason = getattr(project.skip_reason, "value", project.skip_reason)
-        if project.status is ProjectRunStatus.FAILED:
+        if project.status == ProjectRunStatus.FAILED:
             # The recorded status decides, ahead of every text field: a FAILED
             # project whose error is null or empty was still attempted and
             # produced no outcome, and workspace_exit_code fails the run for it.
@@ -215,7 +231,7 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # skip_reason arm, a FAILED project that also carried a skip reason
             # read SKIPPED.
             result = "FAILED"
-        elif project.status is ProjectRunStatus.SKIPPED:
+        elif project.status == ProjectRunStatus.SKIPPED:
             # A SKIPPED project was never scanned: its counts are zero because
             # nothing ran, not because nothing was found. The status decides
             # ahead of the error text, so a skipped project that also carries an
@@ -328,8 +344,12 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
         )
         # How the Result column is styled: red for a project that failed or was
         # skipped by an error (the workspace exits non-zero for both), muted for
-        # a skip that is a successful no-op.
-        if result.startswith("FAILED") or result == "SKIPPED (error)":
+        # a skip that is a successful no-op. Whether a skip is an error is the
+        # reason's own answer (``SkippedProjectReason.is_error``), as the
+        # headline's coverage count reads it, not the rendered text of the row.
+        if result.startswith("FAILED") or (
+            result.startswith("SKIPPED") and _skip_is_error(project.skip_reason)
+        ):
             state = "failed"
         elif result.startswith("SKIPPED"):
             state = "skipped"

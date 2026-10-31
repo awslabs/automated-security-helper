@@ -139,3 +139,55 @@ def test_a_failed_project_that_also_carries_a_skip_reason_reads_failed():
 
 def test_a_completed_clean_project_still_passes():
     assert _result(_model(_project("svc")), "svc") == "PASSED"
+
+
+def _unvalidated(key: str, **fields) -> WorkspaceProjectResult:
+    """A project record built without validation, so its status is a plain string."""
+    return WorkspaceProjectResult.model_construct(
+        project=key,
+        relative_path=key,
+        display_label=key,
+        output_path=f"projects/{key}",
+        **fields,
+    )
+
+
+def test_a_plain_string_status_is_read_as_the_status_it_names():
+    """The arms read the status by identity, so a record whose status arrived as
+    the string ``"failed"`` (built without validation) matched none of them and
+    fell through to PASSED with zero counts.
+
+    RED at the base: the row read PASSED.
+    """
+    model = _model(_unvalidated("svc", status="failed"))
+    assert _result(model, "svc") == "FAILED"
+    assert 'class="failed"' in html_workspace_section(model)
+
+
+def test_a_plain_string_skip_reason_of_error_is_styled_as_a_failure():
+    """Whether a skip is an error is the reason's own answer, in either spelling."""
+    model = _model(_unvalidated("docs", status="skipped", skip_reason="error"))
+    (row,) = workspace_project_rows(model)
+    assert row["result"] == "SKIPPED (error)"
+    assert row["state"] == "failed"
+    model = _model(_unvalidated("docs", status="skipped", skip_reason="no-changes"))
+    (row,) = workspace_project_rows(model)
+    assert row["state"] == "skipped"
+
+
+def test_a_completed_project_that_also_carries_an_error_text_never_reads_passed():
+    """A record that holds an error text is not shown as a clean scan.
+
+    ``workspace_exit_code`` reads the recorded status and its flags and not the
+    text, so it counts such a project as completed; the row errs on the failing
+    side rather than print PASSED over a record that names an error.
+    """
+    model = _model(_project("svc", error="the scanner reported a failure"))
+    assert _result(model, "svc") == "FAILED"
+
+
+def test_a_completed_project_that_also_carries_a_skip_reason_never_reads_passed():
+    from automated_security_helper.models.workspace import SkippedProjectReason
+
+    model = _model(_project("svc", skip_reason=SkippedProjectReason.NO_CHANGES))
+    assert _result(model, "svc") == "SKIPPED (no-changes)"
