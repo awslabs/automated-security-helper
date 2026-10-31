@@ -1612,16 +1612,27 @@ def _line_spans(physical: Any) -> List[Tuple[Optional[int], Optional[int]]]:
     return spans
 
 
-def _reaches_a_secret(physical: Any, index: _SecretIndex) -> bool:
-    """Whether a physical location lies on a line a secret finding reports."""
+def _reaches_a_secret(
+    physical: Any, index: _SecretIndex, reach: Callable[[], int] = lambda: 0
+) -> bool:
+    """Whether a physical location lies on a line a secret finding reports, or
+    within ``reach()`` lines of one.
+
+    ``reach`` is called only once the location's file is known to hold a reported
+    line, so a caller whose reach costs a read of the message pays for it there
+    and nowhere else.
+    """
     placed = index.lines_for(_uri_of(physical, index))
     if placed is None:
         return False
     whole, lines = placed
     if whole:
         return True
+    margin = reach()
     for first, last in _line_spans(physical):
-        if first is None or lines.overlaps(first, last if last is not None else first):
+        if first is None or lines.overlaps(
+            first - margin, (last if last is not None else first) + margin
+        ):
             return True
     return False
 
@@ -1650,14 +1661,6 @@ def _snippet_could_reach(physical: Any, snippet: str, index: _SecretIndex) -> bo
     return count > span and lines.overlaps(first - (count - span), first + count - 1)
 
 
-def _overlaps_a_secret(result: Any, index: _SecretIndex) -> bool:
-    """Whether a location of ``result`` lies on a line a secret finding reports."""
-    return any(
-        _reaches_a_secret(physical, index)
-        for physical in _physical_locations_of(result, related=True)
-    )
-
-
 #: The most lines of reach a fenced block gives (``_fenced_block_reach``). Scanners
 #: quote a few lines around a finding (the findings browser shows five either
 #: side); a longer block is an example or a remediation, not a context quote. Left
@@ -1681,38 +1684,36 @@ def _fenced_block_reach(text: str) -> int:
     return min(reach, _MAX_FENCED_REACH)
 
 
-def _fenced_block_could_quote_a_secret(result: Any, index: _SecretIndex) -> bool:
-    """Whether a fenced block in the message of ``result`` could quote a line a
-    secret finding reports without ``result`` lying on it.
+def _quotes_a_secret(result: Any, index: _SecretIndex) -> bool:
+    """Whether a location of ``result`` lies on a line a secret finding reports, or
+    a fenced block in its message could quote one.
 
     A message that quotes several lines of context around its finding's line
     (``_mask_fenced_code``) has no line numbers to place them by: a block of
-    ``n`` lines can reach ``n`` lines either side of the finding's own lines. It
-    is a secret finding's excerpt of those lines whenever one of them is
-    reported, so the block is masked whole.
+    ``n`` lines can reach ``n`` lines either side of the finding's own lines (at
+    most ``_MAX_FENCED_REACH``). It is a secret finding's excerpt of those lines
+    whenever one of them is reported, so the block is masked whole. The reach is
+    read from the message once, and only for a location in a file that holds a
+    reported line.
     """
-    message = getattr(result, "message", None)
-    root: Any = getattr(message, "root", message)
-    reach = 0
-    for name in ("text", "markdown"):
-        text = getattr(root, name, None) if root is not None else None
-        if isinstance(text, str):
-            reach = max(reach, _fenced_block_reach(text))
-    if reach <= 0:
-        return False
-    for physical in _physical_locations_of(result, related=True):
-        placed = index.lines_for(_uri_of(physical, index))
-        if placed is None:
-            continue
-        whole, lines = placed
-        if whole:
-            return True
-        for first, last in _line_spans(physical):
-            if first is None or lines.overlaps(
-                first - reach, (last if last is not None else first) + reach
-            ):
-                return True
-    return False
+    reaches: List[int] = []
+
+    def reach() -> int:
+        if not reaches:
+            message = getattr(result, "message", None)
+            root: Any = getattr(message, "root", message)
+            longest = 0
+            for name in ("text", "markdown"):
+                text = getattr(root, name, None) if root is not None else None
+                if isinstance(text, str):
+                    longest = max(longest, _fenced_block_reach(text))
+            reaches.append(longest)
+        return reaches[0]
+
+    return any(
+        _reaches_a_secret(physical, index, reach)
+        for physical in _physical_locations_of(result, related=True)
+    )
 
 
 def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
@@ -2403,9 +2404,7 @@ def _mask_tree(
             # lines, with no line numbers to place it by: masked whole, as its
             # properties.snippet and fixes are at those lines. A block of several
             # lines also reaches the lines around its finding's own.
-            if _overlaps_a_secret(node, index) or _fenced_block_could_quote_a_secret(
-                node, index
-            ):
+            if _quotes_a_secret(node, index):
                 message = getattr(node, "message", None)
                 root: Any = getattr(message, "root", message)
                 for name in ("text", "markdown"):
