@@ -7068,7 +7068,7 @@ def test_the_offline_trivy_row_says_how_the_version_check_is_turned_off() -> Non
         _OFFLINE_PAGE,
         "Every trivy scan gets `trivy --offline-scan`, so trivy contacts no package "
         "registry. trivy does not check for a newer release either: an online scan "
-        "gets `--skip-version-check`, and an offline one gets "
+        "gets `trivy --skip-version-check`, and an offline one gets "
         "`TRIVY_SKIP_VERSION_CHECK=true` in trivy's environment instead, since a "
         "trivy too old to know the flag refuses the command over it.",
     )
