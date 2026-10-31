@@ -35,15 +35,31 @@ def _with_the_collector_on() -> None:
         pytest.skip("the garbage collector is off in this session")
 
 
-def test_with_the_collector_on_the_cleanup_runs_on_a_thread_of_its_own():
+def test_with_the_collector_on_the_cleanup_runs_on_a_thread_of_its_own(monkeypatch):
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
     _with_the_collector_on()
+    # The worker is kept so it can be joined: the callback sets ``done`` itself,
+    # while ``SpawnPlan.run_cleanup`` is still running on the worker, so reading
+    # the plan's list right after ``done`` raced a thread nobody had joined.
+    made: list = []
+    make_thread = subprocess_utils.ash_thread
+
+    def recording_thread(*args, **kwargs):
+        worker = make_thread(*args, **kwargs)
+        made.append(worker)
+        return worker
+
+    monkeypatch.setattr(subprocess_utils, "ash_thread", recording_thread)
 
     subprocess_utils._run_cleanup_off_the_finalizer(plan)
 
     assert done.wait(5), "the cleanup never ran"
+    (worker,) = made
+    worker.join(5)
+    assert not worker.is_alive(), "the cleanup thread did not finish"
+    assert seen["thread"] == worker.ident
     assert seen["thread"] != threading.get_ident()
     assert plan.cleanup == []
 
@@ -68,7 +84,8 @@ def test_with_the_collector_off_the_cleanup_runs_inline():
 
 def test_a_thread_that_cannot_start_while_finalizing_runs_the_cleanup_inline():
     """Thread.start raises RuntimeError once the interpreter is finalizing with
-    gc still on; no registry call of this thread can be in progress then."""
+    gc still on (``sys.is_finalizing()`` reads True, and is patched to here); no
+    registry call of this thread can be in progress then."""
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
@@ -88,11 +105,13 @@ def test_a_thread_that_cannot_start_while_finalizing_runs_the_cleanup_inline():
 
 
 def test_a_thread_that_cannot_start_after_threadings_shutdown_runs_inline():
-    """threading's shutdown runs before atexit and before the finalizing flag,
-    the one that makes Thread.start refuse, is set. A start that fails inside
-    the atexit pass for another reason cannot leave the cleanup to atexit (a
-    callback registered during the pass never runs), so the main thread being
-    dead is read as shutdown and the cleanup runs inline."""
+    """threading's shutdown runs before atexit, and before the interpreter is
+    marked finalizing (the state ``sys.is_finalizing()`` reports, and the one
+    that makes Thread.start refuse). A start that fails inside the atexit pass
+    for another reason cannot leave the cleanup to atexit (a callback registered
+    during the pass never runs), so the main thread being dead is read as
+    shutdown and the cleanup runs inline: ``sys.is_finalizing()`` is patched to
+    False here, as it reads during that pass."""
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)
@@ -154,3 +173,38 @@ def test_the_popen_finalizer_runs_the_cleanup_off_its_own_thread(
     finalize.assert_called_once_with(
         process, subprocess_utils._run_cleanup_off_the_finalizer, plan
     )
+
+
+class _Collectable:
+    """A process stand-in a weak reference can follow."""
+
+
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
+def test_a_collected_popen_runs_the_plans_cleanup_on_a_thread_of_its_own(
+    mock_find_executable,
+):
+    """End to end: the registration above is not the behavior. Dropping the
+    last reference to the process runs the finalizer, and the plan's cleanup
+    runs on a thread other than the one that dropped it."""
+    mock_find_executable.return_value = "/usr/bin/tool"
+    _with_the_collector_on()
+    seen: dict = {}
+    done = threading.Event()
+    plan = _plan_recording_its_thread(seen, done)
+    # Held in a list the Popen stand-in empties, so the only reference left after
+    # the call is the caller's own.
+    holder = [_Collectable()]
+    with (
+        patch.object(
+            subprocess_utils.subprocess,
+            "Popen",
+            side_effect=lambda *args, **kwargs: holder.pop(),
+        ),
+        patch.object(subprocess_utils, "_prepare_spawn", return_value=plan),
+    ):
+        process = subprocess_utils.create_process_with_pipes(["tool"])
+    assert not done.is_set(), "the cleanup ran before the process was dropped"
+    del process
+    gc.collect()
+    assert done.wait(5), "the cleanup never ran after the process was dropped"
+    assert seen["thread"] != threading.get_ident()
