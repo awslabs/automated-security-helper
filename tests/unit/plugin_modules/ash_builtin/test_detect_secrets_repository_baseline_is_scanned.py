@@ -298,8 +298,9 @@ def test_the_real_worker_reports_nothing_on_a_baseline_that_only_lists(
     tmp_path, monkeypatch
 ):
     """The common case: a committed baseline of two entries and nothing else.
-    Scanned by the real worker with the default detectors it reports nothing on
-    the file, as it did before the baseline was scanned at all."""
+    Scanned by the real worker with the three detectors the baseline lists (AWS
+    keys, hex entropy and keywords) it reports nothing on the file, as it did
+    before the baseline was scanned at all."""
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
     source = Path(context.source_dir)
@@ -379,7 +380,14 @@ def test_the_operators_own_name_filter_still_reaches_the_worker(tmp_path, monkey
 
     scanner.scan(target=source, target_type="source")
 
-    assert seen["filters"].count(IS_BASELINE_FILE_FILTER) == 1
+    # The whole entry, not its count: a merge that kept the baseline's entry
+    # (naming ``.secrets.baseline``) in place of the operator's would pass a
+    # count of one.
+    assert [
+        item.get("filename")
+        for item in seen["entries"]
+        if item.get("path") == IS_BASELINE_FILE_FILTER
+    ] == ["vendored.baseline"]
 
 
 @pytest.mark.unit

@@ -211,8 +211,15 @@ def test_a_copy_the_copy_filesystem_reads_as_the_ignore_file_fails_the_scan(
     source = Path(scanner.context.source_dir)
     _write(source, ".GITLEAKSIGNORE")
 
+    real_samefile = os.path.samefile
+
     def samefile(first, second):
-        raise FileNotFoundError(os.fspath(second))
+        # Only the comparison with the ignore file is stood in for; the
+        # patched function is the shared ``os.path`` one, so any other caller
+        # in the process gets the real answer.
+        if os.path.basename(os.fspath(second)) == IGNORE_FILE_NAME:
+            raise FileNotFoundError(os.fspath(second))
+        return real_samefile(first, second)
 
     monkeypatch.setattr(module.os.path, "samefile", samefile)
     real_exists = Path.exists
