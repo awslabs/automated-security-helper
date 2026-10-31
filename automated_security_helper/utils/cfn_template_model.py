@@ -592,8 +592,10 @@ def judge_undecodable_candidate(
 
     * :data:`UNDECODABLE_TEMPLATE`: a reading's STRUCTURE is a template (a mapping
       with a ``Resources`` mapping, :func:`_structure_says_template`), or the second
-      read failed. A template ASH could not decode: the scanners count it as a
-      failed, unevaluated target, the tool-absent check as a template. The module's
+      read failed. A template ASH could not decode: cfn-lint, cfn-nag and
+      cfn-guard count it as a failed, unevaluated target, the tool-absent check as
+      a template. cdk-nag does not call this function: it names such a file in a
+      notice and counts no failed target. The module's
       rule holds here as on the UTF-8 route: a marker alone never makes a file a
       failed target; that takes a structure read. The structure is read the way
       the UTF-8 route reads it, by shape and without building a value

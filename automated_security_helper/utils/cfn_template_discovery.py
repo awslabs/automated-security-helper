@@ -46,8 +46,8 @@ The outcomes per file
   first cut made it a failed target from the marker alone); a file that is not
   CloudFormation (a UTF-16 ``appsettings.json``, a Latin-1 locale file) is returned
   in ``skipped`` with the reason, so the callers name it at WARNING and count
-  nothing, as cfn-nag skips it. Before this split one such file failed all three
-  CloudFormation scanners with no structure read at all;
+  nothing, as cfn-nag skips it. Before this split one such file failed cfn-lint,
+  cfn-nag and cfn-guard with no structure read at all;
 * a UTF-16 or UTF-32 template written without a byte-order mark: it decodes as
   UTF-8 without an error (NUL is valid UTF-8) and reaches the parsers
   NUL-interleaved, so it is found by ``cfn_template_model.unmarked_wide_template_reason``
