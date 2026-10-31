@@ -332,6 +332,15 @@ _UV_SUBCOMMANDS = frozenset(
 #: the scanned tree's ``.venv``.
 _UV_TRUE = frozenset({"1", "true", "t", "yes", "y", "on"})
 
+#: The subcommands that read ``UV_SYSTEM_PYTHON`` (uv 0.12): it is the environment
+#: form of ``--system``, an option only the ``uv pip`` family has. Any other
+#: subcommand, ``uv run`` first among them, ignores the variable, so for those it
+#: is no choice of interpreter and ASH's own is still named: counting it there left
+#: ``uv run bandit`` with no interpreter at all, and uv ran the ``.venv`` of the
+#: scanned tree. A subcommand missing from this set gets the interpreter; a gap
+#: adds the override, never drops it.
+_UV_SYSTEM_PYTHON_SUBCOMMANDS = frozenset({"pip"})
+
 
 def _uv_arguments(argv: Sequence[str]) -> Optional[List[str]]:
     """The arguments after the uv program in ``argv``, or None when it is not uv.
@@ -392,8 +401,9 @@ def uv_child_overrides(
     - ``UV_NO_PROJECT=1``, unless it names a ``uv --project`` itself;
     - ``UV_PYTHON`` set to ASH's interpreter, unless it names one (``uv --python``,
       ``uv -p``, ``uv --system``) or the environment the child gets, ``env`` (this
-      process's when None), already carries ``UV_PYTHON`` or a ``UV_SYSTEM_PYTHON``
-      uv reads as true. The caller merges the overrides over ``env``, so the
+      process's when None), already carries ``UV_PYTHON`` or, for the ``uv pip`` family
+      only (no other subcommand reads it), a ``UV_SYSTEM_PYTHON`` uv reads as true.
+      The caller merges the overrides over ``env``, so the
       choice is read from the mapping the merge would overwrite, never from
       somewhere else.
 
@@ -447,7 +457,8 @@ def uv_child_overrides(
         a in ("--python", "-p", "--system") or a.startswith("--python=") for a in own
     )
     operator_chose = bool(environment.get("UV_PYTHON")) or (
-        environment.get("UV_SYSTEM_PYTHON", "").strip().lower() in _UV_TRUE
+        subcommand in _UV_SYSTEM_PYTHON_SUBCOMMANDS
+        and environment.get("UV_SYSTEM_PYTHON", "").strip().lower() in _UV_TRUE
     )
     if not names_interpreter and not operator_chose:
         overrides["UV_PYTHON"] = sys.executable

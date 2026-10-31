@@ -146,6 +146,37 @@ def test_uvs_own_run_options_still_count(no_operator_choice):
     )
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["uv", "run", "bandit"],
+        ["uv", "sync"],
+        ["uv", "venv", ".venv"],
+        ["uv", "newcmd", "x"],
+    ],
+    ids=["run", "sync", "venv", "unlisted subcommand"],
+)
+def test_uv_system_python_is_no_choice_where_uv_does_not_read_it(
+    no_operator_choice, monkeypatch, argv
+):
+    """``UV_SYSTEM_PYTHON`` is the environment form of ``--system``, which only
+    the ``uv pip`` family has. A subcommand that does not read it still needs
+    ASH's interpreter named: counted as the operator's choice there, ``uv run
+    bandit`` got no ``UV_PYTHON`` and ran the scanned tree's own ``.venv``."""
+    monkeypatch.setenv("UV_SYSTEM_PYTHON", "1")
+    assert uv_child_overrides(argv) == BOTH
+
+
+def test_uv_system_python_is_a_choice_where_uv_reads_it(
+    no_operator_choice, monkeypatch
+):
+    monkeypatch.setenv("UV_SYSTEM_PYTHON", "1")
+    assert uv_child_overrides(["uv", "pip", "install", "x"]) == {"UV_NO_PROJECT": "1"}
+    # UV_PYTHON is read by every subcommand.
+    monkeypatch.setenv("UV_PYTHON", "/x/py")
+    assert uv_child_overrides(["uv", "run", "bandit"]) == {"UV_NO_PROJECT": "1"}
+
+
 def test_a_subcommand_that_runs_no_program_reads_every_argument(no_operator_choice):
     assert "UV_PYTHON" not in uv_child_overrides(
         ["uv", "pip", "install", "bandit", "-p", "3"]
