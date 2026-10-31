@@ -218,12 +218,11 @@ class ScannerStatisticsCalculator:
             )
 
             # Calculate duration from additional_reports (where container data is
-            # stored). None, not 0.0, for a scanner that did not run (excluded,
-            # or its dependencies missing) and recorded none: 0.0 rendered as
-            # "<1ms" in every table where ScannerMetrics documents None and
-            # format_duration prints "N/A". A scanner that ran and recorded no
-            # number (a null, a non-number) reads 0.0 below, the value its
-            # formatting readers have always been given.
+            # stored). None, not 0.0, whenever nothing recorded a number, for a
+            # scanner that ran as much as for one that did not (excluded, its
+            # dependencies missing, never constructed): 0.0 rendered as "<1ms" in
+            # every table where ScannerMetrics documents None and format_duration
+            # prints "N/A".
             duration: Optional[float] = None
 
             # First from the per-target reports, summed over every target the

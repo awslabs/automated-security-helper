@@ -3,8 +3,9 @@
 
 """ScannerStatisticsCalculator reads what the run recorded, and only that.
 
-- A scanner that did not run has no duration (None, rendered N/A), not 0.0; one
-  that ran and recorded no number reads 0.0, as its formatting readers expect.
+- A scanner that recorded no duration has none (None, rendered N/A), not 0.0,
+  whether or not it ran: a never-started ERROR row, an excluded one, and a run
+  whose report holds a null or a non-number all read None.
 - The legacy two-target row's durations are read off dicts and objects alike,
   and a None duration is not float()ed.
 - The scanner name falls back to ``scanner_details.tool_name`` when the details
@@ -158,6 +159,20 @@ class TestDuration:
 
         assert stats["odd"]["duration"] is None
         assert stats["nulled"]["duration"] is None
+
+    def test_a_scanner_that_never_started_reads_none_not_zero(self):
+        """An ERROR row for a scanner that never ran (it failed to construct, was
+        refused as a duplicate, or its module failed to import) carries no
+        duration. The none/zero rule keys on whether a number was recorded, not on
+        the row being excluded or missing, so it reads None and not 0.0, which
+        would render as "<1ms"."""
+        model = _model()
+        model.scanner_results["broken"] = SimpleNamespace(status="ERROR", duration=None)
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats["broken"]["error"] is True
+        assert stats["broken"]["duration"] is None
 
     @pytest.mark.parametrize("value", [math.nan, math.inf])
     def test_a_non_finite_duration_renders_as_not_available(self, value):
