@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -26,6 +27,8 @@ from automated_security_helper.cli.config import (
     _write_config_bytes,
     _write_config_text,
 )
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+from automated_security_helper.utils.sandbox.fs_guard import writable_root
 
 pytestmark = [
     pytest.mark.unit,
@@ -92,3 +95,77 @@ def test_root_and_a_missing_file_are_not_another_users(
 
     assert not _owned_by_another_user(status)
     assert not _owned_by_another_user(None)
+
+
+def _text_of(writer: Any) -> Any:
+    """The text the writer is given: str for the text writer, bytes for the other."""
+    return (lambda s: s) if writer is _write_config_text else (lambda s: s.encode())
+
+
+@pytest.mark.parametrize("writer", [_write_config_text, _write_config_bytes])
+def test_a_hard_linked_file_of_another_user_is_refused_below_a_guarded_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer: Any
+) -> None:
+    """Red at the base: the owner check raised before the guard was asked, and
+    the in-place fallback wrote through the second name of the file."""
+    root = tmp_path / "out"
+    root.mkdir()
+    elsewhere = tmp_path / "elsewhere.yaml"
+    elsewhere.write_bytes(b"project_name: before\n")
+    config = root / ".ash.yaml"
+    try:
+        os.link(elsewhere, config)
+    except OSError:
+        pytest.skip("hard links are not available here")
+    _someone_else(monkeypatch, config)
+
+    with writable_root(root):
+        with pytest.raises(OutputDirLinkRefused):
+            writer(config, _text_of(writer)("project_name: after\n"))
+
+    assert elsewhere.read_bytes() == b"project_name: before\n"
+    assert config.read_bytes() == b"project_name: before\n"
+
+
+@pytest.mark.parametrize("writer", [_write_config_text, _write_config_bytes])
+def test_a_file_under_a_symlinked_directory_is_refused_below_a_guarded_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer: Any
+) -> None:
+    """Red at the base: the same fallback wrote through a link the guard refuses."""
+    root = tmp_path / "out"
+    root.mkdir()
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / ".ash.yaml").write_bytes(b"project_name: before\n")
+    try:
+        os.symlink(real, root / "linked", target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available here")
+    config = root / "linked" / ".ash.yaml"
+    _someone_else(monkeypatch, config)
+
+    with writable_root(root):
+        with pytest.raises(OutputDirLinkRefused):
+            writer(config, _text_of(writer)("project_name: after\n"))
+
+    assert (real / ".ash.yaml").read_bytes() == b"project_name: before\n"
+
+
+@pytest.mark.parametrize("writer", [_write_config_text, _write_config_bytes])
+def test_a_plain_file_of_another_user_below_a_guarded_root_is_written_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer: Any
+) -> None:
+    """The positive control: one name, no link, so the guard accepts it and the
+    in-place write is still made, with the inode kept."""
+    root = tmp_path / "out"
+    root.mkdir()
+    config = root / ".ash.yaml"
+    config.write_bytes(b"project_name: before\n")
+    inode = config.stat().st_ino
+    _someone_else(monkeypatch, config)
+
+    with writable_root(root):
+        writer(config, _text_of(writer)("project_name: after\n"))
+
+    assert config.read_bytes() == b"project_name: after\n"
+    assert config.stat().st_ino == inode

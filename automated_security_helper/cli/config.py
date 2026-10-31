@@ -475,6 +475,10 @@ def _staged_write_falls_back(error: OSError) -> bool:
     A refusal the guard made on purpose (a link below a guarded root, a file
     another name refers to) is never one of them, whatever its errno: the
     in-place write would make the very write the guard refused.
+
+    The in-place write is itself made through the guard (``_write_in_place``):
+    a file this process may not write, or one another user owns, never reaches
+    the staged write, so the guard has not looked at it when the write is made.
     """
     if isinstance(error, OutputDirLinkRefused):
         return False
@@ -482,6 +486,29 @@ def _staged_write_falls_back(error: OSError) -> bool:
         errno.EBUSY,
         errno.EXDEV,
     )
+
+
+def _write_in_place(target: Path, data: str | bytes) -> None:
+    """Write ``data`` over the file at ``target`` where it is, through the write guard.
+
+    ``fs_guard.open_for_write`` opens the file as ``Path.write_text`` does and
+    truncates it only after it has checked it. Below a guarded root it refuses a
+    link at any component (OutputLinkRefused) and a file another name refers to
+    (OutputHardLinkRefused) before anything is changed; anywhere else it is the
+    plain open. The in-place write used to be a bare ``write_text``, so a file
+    taken to this path because the staged write was skipped (an owner this
+    process is not, a file it may not write) was written where the guard would
+    have refused it.
+    """
+    # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+    if isinstance(data, bytes):
+        with open_for_write(target, binary=True) as handle:
+            handle.write(data)
+    else:
+        with open_for_write(target, encoding="utf-8") as handle:
+            handle.write(data)
 
 
 def _write_config_text(config_path: Path, text: str) -> None:
@@ -513,7 +540,7 @@ def _write_config_text(config_path: Path, text: str) -> None:
     except OSError as error:
         if not _staged_write_falls_back(error):
             raise
-        target.write_text(text, encoding="utf-8")
+        _write_in_place(target, text)
 
 
 def _write_config_bytes(config_path: Path, data: bytes) -> None:
@@ -533,7 +560,7 @@ def _write_config_bytes(config_path: Path, data: bytes) -> None:
     except OSError as error:
         if not _staged_write_falls_back(error):
             raise
-        target.write_bytes(data)
+        _write_in_place(target, data)
 
 
 def _print_unchecked_plugin_options_note(check: ConfigCheck) -> None:
