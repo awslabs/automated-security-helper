@@ -2643,8 +2643,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         kept the three v1 integers as top-level keys beside the map, two
         "total" counts in one document. With both sides in the map shape the two
         merge whichever lockfile comes first, and ``["dependencies"]["total"]``
-        reads the map for a pnpm- or yarn-only scan too. A number that still
-        meets a dict under another key is read as that dict's ``total``. Two
+        reads the map for a pnpm- or yarn-only scan too. When only one side
+        gives a ``total``, the merged one is recounted from the merged counts
+        (``_recount_dependency_total``), never left smaller than its parts. A
+        number that still meets a dict under another key is read as that
+        dict's ``total``. Two
         values of other kinds cannot be combined: the first stays and the
         disagreement is logged once, since it is a count across tools and not
         a finding.
@@ -2664,9 +2667,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             elif cls._is_number(current) and isinstance(incoming, dict):
                 current = into[key] = {"total": current}
             if isinstance(current, dict) and isinstance(incoming, dict):
+                # Added together, two totals stay the sum of their parts. A
+                # total only one side gives sits beside parts both sides added
+                # to, so it is recounted from the merged parts afterwards.
+                one_sided_total = key == "dependencies" and not (
+                    cls._is_number(current.get("total"))
+                    and cls._is_number(incoming.get("total"))
+                )
                 cls._merge_metadata(current, incoming, lock_file)
                 if key == "vulnerabilities":
                     cls._recount_total(current)
+                elif one_sided_total:
+                    cls._recount_dependency_total(current)
             elif cls._is_number(current) and cls._is_number(incoming):
                 into[key] = current + incoming
             elif isinstance(current, list) and isinstance(incoming, list):
@@ -2731,6 +2743,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         ]
         if counted:
             counters["total"] = sum(counted)
+
+    @classmethod
+    def _recount_dependency_total(cls, counts: Dict[str, Any]) -> None:
+        """Set the merged dependency counts' ``total`` to the sum of the others.
+
+        Two maps that both give a ``total`` add it like any other count. When
+        only one side gives one (a bare v1 ``dependencies`` integer reads as
+        ``prod`` alone, and a map may not carry a total), adding left that
+        side's total beside parts both sides contributed to, so ``total`` read
+        smaller than ``prod`` alone. Recomputed from the counts present, as
+        ``_recount_total`` does for the severity counters; left alone when no
+        count is present.
+        """
+        counted = [
+            item
+            for name, item in counts.items()
+            if name != "total" and cls._is_number(item)
+        ]
+        if counted:
+            counts["total"] = sum(counted)
 
     @staticmethod
     def _is_number(value: Any) -> bool:

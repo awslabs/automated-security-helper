@@ -405,7 +405,7 @@ def test_merge_metadata_by_type():
 
     assert into == {
         "vulnerabilities": {"high": 3, "moderate": 1, "total": 4},
-        "dependencies": {"prod": 7, "dev": 1, "optional": 0, "total": 6},
+        "dependencies": {"prod": 7, "dev": 1, "optional": 0, "total": 8},
         "flags": ["a", "b"],
         "ok": True,
         "note": "first",
@@ -495,12 +495,44 @@ def test_a_bare_dependency_integer_merges_with_a_map_in_either_direction(
     integer_first,
 ):
     """The reading of the bare integer as ``prod`` is the same whichever side it
-    arrives on, so the merged map does not depend on the walk order. The map
-    side's ``total`` stays what that side gave (the bare side has none to add)."""
+    arrives on, so the merged map does not depend on the walk order. The bare
+    side gives no ``total``, so the merged one is recounted from the merged
+    parts: keeping the map side's 2 beside a ``prod`` of 7 left a total smaller
+    than one of its own parts."""
     bare = {"dependencies": 5}
     mapped = {"dependencies": {"prod": 2, "total": 2}}
     into, incoming = (bare, mapped) if integer_first else (mapped, bare)
 
     NpmAuditScanner._merge_metadata(into, incoming, "pnpm-lock.yaml")
 
-    assert into == {"dependencies": {"prod": 7, "total": 2}}, into
+    assert into == {"dependencies": {"prod": 7, "total": 7}}, into
+
+
+def test_a_total_one_side_does_not_give_is_recounted_from_the_merged_parts():
+    """The same shape with the gap on the v1 side: a pnpm report that carries
+    ``dependencies`` and ``devDependencies`` but no ``totalDependencies`` meets
+    an npm map that has a total. Adding only the map's total left it under the
+    sum of the parts both sides contributed to."""
+    into = {"dependencies": {"prod": 2, "dev": 1, "total": 3}}
+
+    NpmAuditScanner._merge_metadata(
+        into, {"dependencies": 4, "devDependencies": 1}, "pnpm-lock.yaml"
+    )
+
+    assert into == {"dependencies": {"prod": 6, "dev": 2, "total": 8}}, into
+
+
+def test_two_totals_are_still_added_like_the_other_counts():
+    """Control: when both sides give a total, the merged total is their sum,
+    which is also the sum of the merged parts."""
+    into = {"dependencies": {"prod": 2, "dev": 1, "total": 3}}
+
+    NpmAuditScanner._merge_metadata(
+        into,
+        {"dependencies": {"prod": 4, "dev": 0, "optional": 2, "total": 6}},
+        "package-lock.json",
+    )
+
+    assert into == {"dependencies": {"prod": 6, "dev": 1, "optional": 2, "total": 9}}, (
+        into
+    )
