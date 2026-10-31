@@ -294,6 +294,13 @@ AGGREGATED_RESULTS_FILENAME = "ash_aggregated_results.json"
 #: ``resolve_workspace`` produces gives each active project a threshold.
 _UNSTATED_SEVERITY_THRESHOLD = "MEDIUM"
 
+#: The key a workspace scan with no active project registers its output root
+#: under. A project key is never empty (``ProjectPlan.key`` has a minimum length
+#: of one), so this cannot name a project, and the responses leave it out of
+#: ``scan_ids`` (:func:`_scan_ids_of`): it is a claim on the root, not a scan a
+#: client can poll.
+_ROOT_CLAIM_KEY = ""
+
 
 class OutputDirectoryNotUsableError(MCPResourceError):
     """A file where a workspace scan's output directory, or a project's, goes.
@@ -451,6 +458,13 @@ def _caused_by(error: BaseException, kind: type) -> bool:
     return caused_by(error, kind)
 
 
+def _scan_ids_of(registered: Dict[str, str]) -> Dict[str, str]:
+    """The registered entries a client can poll: every project's, not the root claim."""
+    return {
+        key: scan_id for key, scan_id in registered.items() if key != _ROOT_CLAIM_KEY
+    }
+
+
 def _stopped_response(
     reason: str,
     registered: Dict[str, str],
@@ -483,7 +497,7 @@ def _stopped_response(
     response = _error_response(
         MCPResourceError(reason, context=context), "scan_workspace"
     )
-    response["scan_ids"] = dict(registered)
+    response["scan_ids"] = _scan_ids_of(registered)
     return response
 
 
@@ -1536,6 +1550,22 @@ def _register_projects(
                     project.gate_threshold or _UNSTATED_SEVERITY_THRESHOLD
                 ),
                 config_path=project.config_source,
+                max_active=max_active,
+                session_id=session_id,
+                slot=slot,
+                environment_values=environment_values,
+            )
+        if not registered:
+            # No active project (every project missing under
+            # allow_missing_projects, say): the run still writes its unified
+            # results and reports into the output root, and with no entry the
+            # registry could not tell a second workspace scan of the same root to
+            # wait. The workspace root stands for the claim, and it closes with
+            # the others.
+            registered[_ROOT_CLAIM_KEY] = registry.register_scan(
+                directory_path=str(plan.workspace_root),
+                output_directory=str(output_dir),
+                severity_threshold=_UNSTATED_SEVERITY_THRESHOLD,
                 max_active=max_active,
                 session_id=session_id,
                 slot=slot,
@@ -2943,7 +2973,7 @@ async def _scan_workspace(
         "results_path": str(result.results_path),
         "session_id": session_id,
         "session_config_path": session_config,
-        "scan_ids": registered,
+        "scan_ids": _scan_ids_of(registered),
         "scan_incomplete": _workspace_scan_incomplete(result.payload),
         "ceiling_unreachable_findings": _workspace_ceiling_unreachable(result.payload),
         # The request-scoped signal decides whether this client is told the
