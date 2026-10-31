@@ -208,16 +208,22 @@ class ConverterPluginBase(PluginBase, Generic[T]):
                 f"its config model {declared.__name__} cannot be built without a "
                 f"section ({detail})"
             )
-            log(
-                f"{self.__class__.__name__}: {reason}; the converter is "
-                "unavailable until it is configured"
-            )
             if self._overrides_dependency_check():
+                # Construction fails here, so there is no converter to be
+                # unavailable until it is configured.
+                log(
+                    f"{self.__class__.__name__}: {reason}; the converter cannot "
+                    "be built without it"
+                )
                 raise ScannerError(
                     f"{self.__class__.__name__} cannot be built without a config "
                     f"section: {reason}; configure it, or give the model's fields "
                     "defaults"
                 ) from error
+            log(
+                f"{self.__class__.__name__}: {reason}; the converter is "
+                "unavailable until it is configured"
+            )
             self.dependencies_satisfied = False
             self.dependency_unavailable_reason = reason
             self._config_fallback_reason = reason

@@ -253,6 +253,32 @@ def test_a_check_overriding_converter_given_no_config_fails_to_build(
     assert isinstance(raised.value.__cause__, ValidationError)
 
 
+def test_the_log_line_before_a_construction_error_does_not_call_the_converter_unavailable(
+    test_plugin_context,
+):
+    """A converter that overrides its dependency check is not built at all when its
+    model needs a section, so no converter is "unavailable until it is configured":
+    the line logged before the error said so, wrongly. It says the converter cannot
+    be built. The control: a converter that keeps the base check is built, and its
+    line still says unavailable until configured."""
+    with _ash_records() as records:
+        with pytest.raises(ScannerError):
+            CheckOverridingNeedyConverter(context=test_plugin_context)
+        SectionNeedingConverter(context=test_plugin_context)
+
+    lines = [
+        r.getMessage()
+        for r in records
+        if "cannot be built without a section" in r.getMessage()
+    ]
+    overriding = [m for m in lines if m.startswith("CheckOverridingNeedyConverter:")]
+    base_check = [m for m in lines if m.startswith("SectionNeedingConverter:")]
+    assert len(overriding) == 1 and len(base_check) == 1
+    assert "unavailable until it is configured" not in overriding[0]
+    assert "cannot be built without it" in overriding[0]
+    assert "unavailable until it is configured" in base_check[0]
+
+
 def test_a_check_overriding_converter_given_its_config_builds(test_plugin_context):
     """The control: with the section the model needs, the same converter is built
     and ready."""
