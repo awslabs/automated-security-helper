@@ -266,14 +266,22 @@ class TestThePostScanChecks:
         model.scanner_results["ran"] = ScannerTargetStatusInfo(
             status=ScannerStatus.PASSED
         )
+        # A scanner with findings completed too: an implementation that accepted
+        # PASSED alone would report every scanner with findings as incomplete.
+        model.scanner_results["found"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.FAILED
+        )
         model.scanner_results["crashed"] = ScannerTargetStatusInfo(
             status=ScannerStatus.ERROR
+        )
+        model.scanner_results["absent"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.MISSING
         )
 
         processor.validate_completion(model)
 
         processor.validation_manager.validate_execution_completion.assert_called_once_with(
-            ["ran"]
+            ["ran", "found"]
         )
 
     def test_a_given_list_is_passed_as_it_is(self, tmp_path):
