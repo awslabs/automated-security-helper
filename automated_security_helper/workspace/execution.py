@@ -1789,10 +1789,17 @@ def _workspace_root(project: ProjectPlan) -> Path:
 
 
 def _same_file(first: Optional[str | Path], second: Optional[str | Path]) -> bool:
-    """Whether two optional paths name the same file, or are both None."""
+    """Whether two optional paths name the same file, or are both None.
+
+    The comparison is the resolver's (``same_config_file``), the one the plan
+    was made with, so the plan and the scan cannot answer differently about a
+    link or a case-spelled path.
+    """
+    from automated_security_helper.workspace.resolver import same_config_file
+
     if first is None or second is None:
         return first is None and second is None
-    return Path(first).resolve() == Path(second).resolve()
+    return same_config_file(first, second)
 
 
 def _check_the_plans_operator_config(
@@ -1816,16 +1823,23 @@ def _check_the_plans_operator_config(
             (its digest differs from the plan's).
     """
     from automated_security_helper.config.resolve_config import operator_config_digest
-    from automated_security_helper.workspace.resolver import _operator_config
+    from automated_security_helper.workspace.resolver import (
+        _operator_config,
+        config_is_the_operators,
+    )
 
     operator = _operator_config(
         Path(settings.default_config_path) if settings.default_config_path else None,
         Path(settings.trusted_config_path) if settings.trusted_config_path else None,
     )
     # A project with no config of its own uses the default config alone, so
-    # nothing is layered over it.
-    own_config = project.config_source is not None and not _same_file(
-        project.config_source, settings.default_config_path
+    # nothing is layered over it. Whether a config is the operator's is the
+    # planner's own call with the same two files (default and trusted), not a
+    # second comparison here.
+    own_config = project.config_source is not None and not config_is_the_operators(
+        project.config_source,
+        settings.default_config_path,
+        settings.trusted_config_path,
     )
     expected = operator if own_config else None
     if not _same_file(project.operator_config, expected):
