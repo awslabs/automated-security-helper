@@ -735,6 +735,70 @@ class TestReportDegradation:
         # the default report metadata, whose project is named "ASH".
         assert [f["finding_info"]["uid"] for f in shortfalls] == [_shortfall_uid("ASH")]
 
+    def test_rules_that_cannot_be_read_do_not_lose_the_findings(
+        self, reporter, monkeypatch
+    ):
+        """The table of declared rules was built after the guard that covers the
+        read of the results, so a tool or rules structure that could not be read
+        raised out of ``report()`` and no file was written. The findings are
+        written; only the messages given by id lose their rule text."""
+
+        def unreadable(sarif):
+            raise RuntimeError("rules unreadable")
+
+        monkeypatch.setattr(ocsf_module, "_rule_descriptors", unreadable)
+
+        (finding,) = json.loads(
+            reporter.report(make_model([good_result("R1", text="kept")]))
+        )
+
+        assert finding["vulnerabilities"][0]["title"] == "R1"
+        assert finding["finding_info"]["desc"] == "kept"
+
+    def test_a_model_whose_project_name_cannot_be_read_still_gets_its_records(
+        self, reporter, monkeypatch
+    ):
+        """The project name is read as an argument, ahead of the guard of the
+        shortfall record's builder, so a model property that raised there went
+        to the array's handler and every finding was dropped for the error
+        response. The name reads as absent: the findings and the shortfall
+        record are written, the record under the identity shared by every scan
+        whose name is unknown."""
+
+        class UnreadableMetadata:
+            def __init__(self, model):
+                self._model = model
+
+            def __getattr__(self, name):
+                if name == "metadata":
+                    raise RuntimeError("metadata unreadable")
+                return getattr(self._model, name)
+
+        def broken_vulnerability(self, result, rules=None):
+            raise RuntimeError("no vulnerability")
+
+        monkeypatch.setattr(OcsfReporter, "_build_vulnerability", broken_vulnerability)
+
+        record, shortfall = json.loads(
+            reporter.report(UnreadableMetadata(make_model([good_result("R1")])))
+        )
+
+        assert record["vulnerabilities"][0]["title"] == "R1"
+        assert shortfall["finding_info"]["uid"] == _shortfall_uid("")
+
+    def test_the_scan_identity_skips_a_holder_that_cannot_be_read(self):
+        class Configuration:
+            project_name = "configured"
+
+        class Model:
+            ash_config = Configuration()
+
+            @property
+            def metadata(self):
+                raise RuntimeError("metadata unreadable")
+
+        assert ocsf_module._scan_identity(Model()) == "configured"
+
     def test_when_every_finding_fails_to_serialize_an_error_response_is_returned(
         self, reporter, monkeypatch
     ):

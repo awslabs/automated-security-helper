@@ -296,17 +296,21 @@ def _identity_part(value: Any) -> str:
 
 def _scan_identity(model: Any) -> str:
     """The configured name of the scanned project: the report metadata's, else
-    the configuration's, else "". Every read is guarded; a model this cannot
-    read still gets a shortfall record, one shared by every such scan.
+    the configuration's, else "". Every read is guarded, and a read that raises
+    (a property of the model that fails, not only a missing attribute) counts
+    as no name there: the call is evaluated as an argument, ahead of the guard
+    of the call it feeds, so a raise here dropped every finding. A model this
+    cannot read still gets a shortfall record, one shared by every such scan.
 
     The name is all the report model records of what was scanned (it holds no
     source directory or repository address), and its default is the same for
     every repository, so scans that keep the default share this identity."""
-    for holder in (
-        getattr(model, "metadata", None),
-        getattr(model, "ash_config", None),
-    ):
-        name = getattr(holder, "project_name", None)
+    for holder_name in ("metadata", "ash_config"):
+        try:
+            holder = getattr(model, holder_name, None)
+            name = getattr(holder, "project_name", None)
+        except Exception:  # noqa: BLE001 -- see the docstring
+            continue
         if isinstance(name, str) and name.strip():
             return name.strip()
     return ""
@@ -1376,7 +1380,17 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         identities = _fallback_identities(all_results, shared_ids)
         # The rules every run declares, read once, so a message given by id
         # is described by the string the rule names rather than by the key.
-        rules = _rule_descriptors(recorded_sarif)
+        # Guarded alone, as the read of the results above is: a tool or rules
+        # structure that cannot be read costs the messages given by id their
+        # rule text, and the findings are still written.
+        try:
+            rules = _rule_descriptors(recorded_sarif)
+        except Exception as e:  # noqa: BLE001 -- see the comment above
+            ASH_LOGGER.warning(
+                f"The rules of the SARIF report could not be read ({error_text(e)}); "
+                "messages given by id are described by the id"
+            )
+            rules = {}
 
         for i, result in enumerate(all_results):
             rule_id = result_rule_id(result) or f"result_{i}"
