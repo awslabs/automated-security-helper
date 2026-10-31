@@ -19,6 +19,7 @@ import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import (
+    ColumnKind,
     Kind,
     Kind1,
     Level,
@@ -178,6 +179,30 @@ class TestEnumFieldsOfAPlainJsonReport:
         assert result["level"] == "warning"
         assert result["suppressions"][0]["kind"] == "inSource"
         assert "i" + _derived("json-shape", 6) + "e" not in result["message"]["text"]
+
+    def test_a_value_equal_to_the_column_kind_leaves_it_alone(self):
+        """The enum string a value can equal. ``utf16CodeUnits`` holds digits, so
+        it is secret-shaped and propagates; the other enum words are letters
+        alone, which no value or shape masks, so the by-name exemption is
+        observable on this one. Without it the run's ``columnKind`` reads as a
+        masked token; the same word in a message is masked."""
+        word = ColumnKind.utf16CodeUnits.value
+        tree = {
+            "runs": [
+                {
+                    "columnKind": word,
+                    "results": [{"message": {"text": "column kind " + word}}],
+                }
+            ]
+        }
+
+        mask_secret_values_in_tree(tree, values=[word])
+
+        run = tree["runs"][0]
+        assert run["columnKind"] == word
+        assert run["results"][0]["message"]["text"] == (
+            "column kind " + _mask_secret_value(word)
+        )
 
     def test_a_thread_flow_locations_state_is_still_masked(self):
         """``state`` is an enum only on a suppression; a thread flow location's
