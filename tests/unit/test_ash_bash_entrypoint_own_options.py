@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -214,11 +215,38 @@ def suite_python(tmp_path: Path) -> Path:
     with an import error instead of skipping), and putting sys.executable's own
     directory first put the whole of it, /usr/bin for a system interpreter, ahead of
     the fixed-id bin, so the real `id` and every other host tool hid the test's
-    fakes, and the `python` found there need not have been sys.executable."""
+    fakes, and the `python` found there need not have been sys.executable.
+
+    The `python` is a small script that runs sys.executable by its own path, not a
+    symlink to it: a virtual environment's interpreter finds the environment's
+    packages from the directory it is started in, so one reached through a link in
+    some other directory ran as the base interpreter, without the CLI's
+    dependencies, and the three tests below failed with an import error."""
     bin_dir = tmp_path / "suite-python"
     bin_dir.mkdir()
-    (bin_dir / "python").symlink_to(sys.executable)
+    python = bin_dir / "python"
+    python.write_text(
+        f'#!/bin/bash\nexec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8"
+    )
+    python.chmod(0o755)
     return bin_dir
+
+
+def test_the_suite_python_keeps_the_suites_own_environment(suite_python):
+    """The `python` the fixture puts on PATH is the interpreter running the suite,
+    in the environment the suite runs in: it reports the same prefix, so it can
+    import what the suite imports. Started through a link in another directory, a
+    virtual environment's interpreter reported the base prefix instead."""
+    result = subprocess.run(  # nosec B603 - the fixture's own script, list args, no shell
+        [str(suite_python / "python"), "-c", "import sys; print(sys.prefix)"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == sys.prefix, result.stderr
 
 
 def _dirs(tmp_path: Path):
