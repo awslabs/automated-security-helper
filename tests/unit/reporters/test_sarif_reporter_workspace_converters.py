@@ -107,6 +107,18 @@ def test_a_single_directory_model_adds_nothing():
     assert workspace_converter_invocations(AshAggregatedResults()) == []
 
 
+def _says_it_dropped_the_shortfalls(caplog, project: str) -> bool:
+    """Whether a WARNING names *project* and says its converter shortfalls are not
+    attached to the document. A shortfall that is left out of the document must
+    not be left out silently."""
+    return any(
+        record.levelname == "WARNING"
+        and f"'{project}'" in record.getMessage()
+        and "not attached" in record.getMessage()
+        for record in caplog.records
+    )
+
+
 def _workspace_model(*projects: WorkspaceProjectResult, runs: int = 2):
     model = AshAggregatedResults()
     model.sarif = SarifReport(version="2.1.0", runs=[_run() for _ in range(runs)])
@@ -119,9 +131,12 @@ def _workspace_model(*projects: WorkspaceProjectResult, runs: int = 2):
     return model
 
 
-def test_a_project_with_no_run_index_adds_nothing_to_run_zero(test_plugin_context):
+def test_a_project_with_no_run_index_adds_nothing_to_run_zero(
+    test_plugin_context, caplog
+):
     """A project whose converters failed before it produced a run names no run,
-    and its shortfall is never written onto ``runs[0]`` by default."""
+    and its shortfall is never written onto ``runs[0]`` by default. It is not
+    dropped silently either: a warning names the project and its converters."""
     model = _workspace_model(
         _project("api", sarif_run_index=0),
         _project(
@@ -132,11 +147,14 @@ def test_a_project_with_no_run_index_adds_nothing_to_run_zero(test_plugin_contex
     )
 
     assert workspace_converter_invocations(model) == []
-    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+    with caplog.at_level("WARNING"):
+        doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
     assert all("invocations" not in run for run in doc["runs"])
+    assert _says_it_dropped_the_shortfalls(caplog, "web")
+    assert any("archive" in record.getMessage() for record in caplog.records)
 
 
-def test_a_run_index_past_the_runs_is_not_applied(test_plugin_context):
+def test_a_run_index_past_the_runs_is_not_applied(test_plugin_context, caplog):
     model = _workspace_model(
         _project("api", sarif_run_index=0),
         _project(
@@ -145,8 +163,10 @@ def test_a_run_index_past_the_runs_is_not_applied(test_plugin_context):
     )
 
     assert [index for index, _ in workspace_converter_invocations(model)] == [7]
-    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+    with caplog.at_level("WARNING"):
+        doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
     assert all("invocations" not in run for run in doc["runs"])
+    assert _says_it_dropped_the_shortfalls(caplog, "web")
 
 
 def test_two_converters_give_two_invocations_on_the_projects_run(
@@ -249,9 +269,12 @@ def test_the_invocation_follows_the_run_stamped_for_the_project(test_plugin_cont
     assert "invocations" not in api_run
 
 
-def test_a_run_stamped_for_another_project_is_never_written_onto(test_plugin_context):
+def test_a_run_stamped_for_another_project_is_never_written_onto(
+    test_plugin_context, caplog
+):
     """No run of the document is the project's: nothing is attached, rather than
-    the shortfall landing on whichever run the stale index names."""
+    the shortfall landing on whichever run the stale index names, and a warning
+    says the shortfalls are not in the document."""
     model = _stamped_model(
         "api",
         "other",
@@ -263,9 +286,11 @@ def test_a_run_stamped_for_another_project_is_never_written_onto(test_plugin_con
         ],
     )
 
-    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+    with caplog.at_level("WARNING"):
+        doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
 
     assert all("invocations" not in run for run in doc["runs"])
+    assert _says_it_dropped_the_shortfalls(caplog, "web")
 
 
 def test_the_stamped_run_wins_over_an_unstamped_run_at_a_stale_index(
@@ -299,11 +324,11 @@ def test_the_stamped_run_wins_over_an_unstamped_run_at_a_stale_index(
 
 
 def test_an_unstamped_run_in_a_stamped_document_is_not_written_onto(
-    test_plugin_context,
+    test_plugin_context, caplog
 ):
     """When the document's other runs are stamped, an unstamped run is some other
     run, not the project's: nothing is attached, as for a run stamped for
-    another project."""
+    another project, and a warning says so."""
     model = _stamped_model(
         None,
         "api",
@@ -313,9 +338,11 @@ def test_an_unstamped_run_in_a_stamped_document_is_not_written_onto(
         ],
     )
 
-    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+    with caplog.at_level("WARNING"):
+        doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
 
     assert all("invocations" not in run for run in doc["runs"])
+    assert _says_it_dropped_the_shortfalls(caplog, "web")
 
 
 def test_an_unstamped_run_at_the_index_is_still_the_projects_run(

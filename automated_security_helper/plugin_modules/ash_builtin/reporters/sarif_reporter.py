@@ -193,9 +193,20 @@ def workspace_converter_invocations(
     for project in projects:
         run_index = getattr(project, "sarif_run_index", None)
         rows = getattr(project, "incomplete_converters", None)
-        if not isinstance(run_index, int) or not isinstance(rows, dict) or not rows:
+        if not isinstance(rows, dict) or not rows:
             continue
         key = getattr(project, "project", None)
+        if not isinstance(run_index, int):
+            # A project whose converters failed before it produced a run names no
+            # run to write on, and writing on runs[0] by default would put its
+            # shortfalls on another project's run. Saying nothing would drop
+            # them silently, which is the loss this document exists to prevent.
+            ASH_LOGGER.warning(
+                f"Project '{key}' recorded converter shortfalls "
+                f"({', '.join(sorted(str(name) for name in rows))}) but names no "
+                "SARIF run; they are not attached to this document."
+            )
+            continue
         invocations = []
         for converter, reason in sorted(rows.items()):
             invocations.append(
