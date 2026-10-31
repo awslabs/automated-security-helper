@@ -270,6 +270,13 @@ def _skip_token_size(token: str) -> int:
     return len(os.fsencode(token)) + 1
 
 
+def _carries_skip_flag(arguments: List[str]) -> bool:
+    """Whether ``arguments`` holds a ``--skip-dirs`` or ``--skip-files`` token."""
+    return any(
+        argument.startswith(("--skip-dirs", "--skip-files")) for argument in arguments
+    )
+
+
 def _skip_tokens_size(arguments: List[str]) -> int:
     """``_skip_token_size`` summed over the ``--skip-dirs`` and ``--skip-files``
     tokens among ``arguments``."""
@@ -1243,12 +1250,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         whole command line to 32,767 characters). The entries that do not fit
         beside the skip tokens already in ``final_args`` are left out, in order from
         the first that overflows, with one warning that counts them; they do not
-        apply to this scan.
+        apply to this scan. A list that does not fit when ASH has no skip flag of its
+        own is not cut at all: ``_skip_args_reserved`` keeps the links from adding
+        one, so this returns nothing and trivy reads the whole list itself.
         """
-        if not any(
-            argument.startswith(("--skip-dirs", "--skip-files"))
-            for argument in final_args
-        ):
+        if not _carries_skip_flag(final_args):
             return []
         tokens, over_budget, first_dropped = self._operator_skip_tokens(final_args)
         if over_budget and first_dropped is not None:
@@ -1283,8 +1289,17 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         those are built, so a tree that fills ASH's share still carries the
         operator's own ``--skip-dirs`` / ``--skip-files`` entries. Nothing is logged
         here: the warnings are given where the tokens are.
+
+        When the operator's entries do not all fit and ``final_args`` carries no
+        skip flag of ASH's yet, the whole budget is reserved: the links add no skip
+        flag, ``_operator_skip_args`` then gives nothing back, and trivy reads the
+        operator's whole list itself from the variable or the config file. A flag
+        of ASH's own would replace that list, and the few bytes the sizing left
+        over would decide whether the tail of the list applies.
         """
-        tokens, _, _ = self._operator_skip_tokens(final_args, quiet=True)
+        tokens, over_budget, _ = self._operator_skip_tokens(final_args, quiet=True)
+        if over_budget and not _carries_skip_flag(final_args):
+            return skip_args_budget(self._scan_environment())
         return _skip_tokens_size([*final_args, *tokens])
 
     def _operator_skip_tokens(

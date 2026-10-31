@@ -2010,6 +2010,116 @@ def test_the_operator_warning_fires_only_when_the_operators_own_list_overflows(
     assert warning.startswith("2 entries"), warning
 
 
+#: The operator's long second entry and the first entry's token, as a skip-dirs
+#: token is counted: the long one does not fit beside the short one.
+_SHORT_ENTRY = "aaaa"
+_LONG_ENTRY = "x" * 40
+_SHORT_ENTRY_TOKEN = len(f"--skip-dirs={_SHORT_ENTRY}") + 1
+
+
+def _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch) -> None:
+    """Forty ignored files and a budget that holds the short entry, not the long
+    one, with 10 bytes to spare beyond one ignored-file token: the share the
+    sizing leaves over is big enough for one link token."""
+    monkeypatch.setattr(
+        trivy_base, "trivy_skip_files", lambda *a, **k: _ignored_files(40)
+    )
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: [])
+    monkeypatch.setattr(
+        trivy_base,
+        "skip_args_budget",
+        lambda environment: _SHORT_ENTRY_TOKEN + _IGNORED_FILE_TOKEN + 10,
+    )
+
+
+def _skip_tokens(argv: list[str]) -> list[str]:
+    return [a for a in argv if a.startswith(("--skip-dirs", "--skip-files"))]
+
+
+def test_an_operator_list_that_does_not_fit_is_left_to_trivy_not_cut_by_the_leftover(
+    tmp_path, monkeypatch
+):
+    """With no skip flag of ASH's own on the command line trivy reads the operator's
+    whole list from its variable. The sizing fills the budget to within one entry,
+    and the 39 bytes it left over let one ignored file in, which made ASH pass a
+    skip flag, moved the operator's list onto the command line and dropped its
+    tail: whether the tail applied turned on a few bytes. The links now get
+    nothing, so no flag of ASH's replaces the list, and what they leave out is
+    said as ASH's own, which has a fallback."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": f"{_SHORT_ENTRY},{_LONG_ENTRY}"}
+    _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    assert _skip_tokens(argv) == [], argv
+    assert not _operator_warnings(messages), messages
+    (links_warning,) = [m for m in messages if "ignored path(s)" in m]
+    assert links_warning.startswith("40 ignored path(s)"), links_warning
+
+
+def test_trivy_repo_also_leaves_an_operator_list_that_does_not_fit_to_trivy(
+    tmp_path, monkeypatch
+):
+    for module in (scanner_plugin, trivy_repo_scanner):
+        if hasattr(module, "find_executable"):
+            monkeypatch.setattr(module, "find_executable", lambda name: f"/bin/{name}")
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": f"{_SHORT_ENTRY},{_LONG_ENTRY}"}
+    scanner.dependencies_satisfied = True
+    _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch)
+    report = {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "Trivy", "rules": []}}, "results": []}],
+    }
+    argv: list[str] = []
+
+    def _run(self, command, **kwargs):
+        argv[:] = [str(a) for a in command]
+        destination = Path(command[command.index("--output") + 1])
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(report), encoding="utf-8")
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    messages, logging_patch = _logged(scanner)
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(TrivyRepoScanner, "_run_subprocess", autospec=True) as double,
+        logging_patch,
+    ):
+        double.side_effect = _run
+        scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
+
+    assert argv, "the double was not run"
+    assert _skip_tokens(argv) == [], argv
+    assert not _operator_warnings(messages), messages
+
+
+def test_control_a_list_that_fits_beside_the_short_entry_alone_is_still_given(
+    tmp_path, monkeypatch
+):
+    """The short entry fits, the links get what it leaves and the operator's own
+    list is still carried beside them: nothing changes for a list that fits."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": _SHORT_ENTRY}
+    _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    assert f"--skip-dirs={_SHORT_ENTRY}" in argv, argv
+    assert len([a for a in argv if a.startswith("--skip-files=")]) == 1, argv
+    assert not _operator_warnings(messages), messages
+
+
 # --- the operator's entries on a Windows command line ------------------------------
 
 
