@@ -261,6 +261,46 @@ def test_a_block_that_is_shown_says_so(test_plugin_context):
     assert "Shown, not as written" in document
 
 
+def _shown_notes(document: str) -> list:
+    return re.findall(r'<p class="shown-note"><small>(.*?)</small></p>', document)
+
+
+def test_the_note_names_a_broken_command_form_and_not_control_characters(
+    test_plugin_context,
+):
+    """RED at the base: the one fixed note said control characters were written
+    as escapes, for a block whose only change is a broken CI command form."""
+    document = _render(test_plugin_context, [_snippet_result("::error::injected")])
+
+    (note,) = _shown_notes(document)
+    assert "CI command forms are broken" in note, note
+    assert "control characters" not in note, note
+    assert "backslash" not in note, note
+
+
+def test_the_note_names_control_characters_when_the_block_holds_them(
+    test_plugin_context,
+):
+    document = _render(test_plugin_context, [_snippet_result("b = 1\x1b[31m")])
+
+    (note,) = _shown_notes(document)
+    assert "control characters are written as escapes" in note, note
+    assert "CI command forms" not in note, note
+    assert "backslash" not in note, note
+
+
+def test_the_note_names_each_change_a_block_holds(test_plugin_context):
+    document = _render(
+        test_plugin_context,
+        [_snippet_result('::error::x\na = "\\x41"\nb = 1\x1b[31m')],
+    )
+
+    (note,) = _shown_notes(document)
+    assert "control characters are written as escapes" in note, note
+    assert "CI command forms are broken" in note, note
+    assert "a backslash before text that reads as an escape is doubled" in note, note
+
+
 def test_one_predicate_takes_the_allowed_layout_as_a_parameter():
     from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
         _is_plain,

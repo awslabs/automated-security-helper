@@ -46,6 +46,22 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 _SEVERITY_ORDER = {name: index for index, name in enumerate(SEVERITIES)}
 
 
+def _has_controls(text: str, allowed: str = "") -> bool:
+    """Whether *text* holds a control or format character a viewer acts on.
+
+    The characters of *allowed* are admitted as layout, and a carriage return
+    before a line feed when the line feed is allowed.
+    """
+    for index, character in enumerate(text):
+        if character in allowed:
+            continue
+        if character == "\r" and "\n" in allowed and text.startswith("\n", index + 1):
+            continue
+        if is_shown_as_escape(character):
+            return True
+    return False
+
+
 def _is_plain(text: str, allowed: str = "") -> bool:
     """Whether *text* holds nothing a viewer acts on.
 
@@ -54,47 +70,48 @@ def _is_plain(text: str, allowed: str = "") -> bool:
     when the line feed is allowed. Multi-line text allows tab and line feed; a
     location allows nothing.
     """
-    if commands_broken(text) != text:
-        return False
-    for index, character in enumerate(text):
-        if character in allowed:
-            continue
-        if character == "\r" and "\n" in allowed and text.startswith("\n", index + 1):
-            continue
-        if is_shown_as_escape(character):
-            return False
-    return True
+    return commands_broken(text) == text and not _has_controls(text, allowed)
 
 
 #: What a block of scan text may hold and still be printed as written.
 _TEXT_LAYOUT = "\t\n"
 
 
-def _shown_text(text: Any) -> str:
-    """Multi-line scan text as the report prints it.
+def _shown_block(text: Any) -> tuple[str, str]:
+    """Multi-line scan text as the report prints it, and the note beside it.
 
-    Text with nothing in it a viewer acts on is printed as written. Showing it
-    anyway doubles the backslash of text that reads as an escape (a code
-    sample's ``\\x41``), so a reader sees a character the source does not hold.
-    Any other text is shown, not obeyed, keeping its lines.
-    """
-    value = "" if text is None else str(text)
-    return value if _is_plain(value, _TEXT_LAYOUT) else str(shown_not_obeyed(value))
-
-
-def _shown_note(text: Any) -> str:
-    """The note that says a block was shown, not printed as written, or ``""``.
-
-    Showing a block writes its controls as escapes and doubles every backslash
-    in it, on lines that hold nothing unusual too, so a copy of the block is not
-    the source. The reader is told when that is the case.
+    Text with nothing in it a viewer acts on is printed as written, with no
+    note (``""``). Showing it anyway doubles a backslash that comes before text
+    reading as an escape (a code sample's ``\\x41``), so a reader sees a
+    character the source does not hold. Any other text is shown, not obeyed,
+    keeping its lines, and the note says so. A plain block, the common case,
+    is read once.
     """
     value = "" if text is None else str(text)
     if _is_plain(value, _TEXT_LAYOUT):
-        return ""
+        return value, ""
+    return str(shown_not_obeyed(value)), _shown_note(value)
+
+
+def _shown_note(value: str) -> str:
+    """The note that says a block was shown, not printed as written.
+
+    Showing a block writes its controls as escapes, breaks its CI command
+    forms, and doubles a backslash that comes before text reading as an escape,
+    so a copy of the block is not the source. The reader is told, and the note
+    names only what the block holds: text whose one change is a broken command
+    form is not said to hold control characters.
+    """
+    changes = []
+    if _has_controls(value, _TEXT_LAYOUT):
+        changes.append("control characters are written as escapes")
+    if commands_broken(value) != value:
+        changes.append("CI command forms are broken")
+    if "\\" in value:
+        changes.append("a backslash before text that reads as an escape is doubled")
     return (
-        '<p class="shown-note"><small>Shown, not as written: control characters '
-        "are written as escapes and backslashes are doubled.</small></p>"
+        '<p class="shown-note"><small>Shown, not as written: '
+        f"{'; '.join(changes)}.</small></p>"
     )
 
 
@@ -438,23 +455,26 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 )
                 if value is not None
             )
-            snippet = (
+            snippet = ""
+            if finding.code_snippet:
                 # Shown, not obeyed: the snippet keeps its lines, and its
                 # controls and CI command forms are written out. Source that
                 # holds none of them is printed as written.
-                f'<pre role="region" tabindex="0" aria-label="Code snippet for finding {index}"><code>{html.escape(_shown_text(finding.code_snippet))}</code></pre>'
-                f"{_shown_note(finding.code_snippet)}"
-                if finding.code_snippet
-                else ""
-            )
+                shown_snippet, snippet_note = _shown_block(finding.code_snippet)
+                snippet = (
+                    f'<pre role="region" tabindex="0" aria-label="Code snippet for finding {index}"><code>{html.escape(shown_snippet)}</code></pre>'
+                    f"{snippet_note}"
+                )
             reason = finding.suppression_justification or "No reason provided"
-            suppression = (
-                '<p class="suppression-reason"><strong>Suppression reason:</strong> '
+            suppression = ""
+            if finding.is_suppressed:
                 # The reason can come from the scan: shown, keeping its lines.
-                f"{html.escape(_shown_text(reason))}</p>{_shown_note(reason)}"
-                if finding.is_suppressed
-                else ""
-            )
+                shown_reason, reason_note = _shown_block(reason)
+                suppression = (
+                    '<p class="suppression-reason"><strong>Suppression reason:</strong> '
+                    f"{html.escape(shown_reason)}</p>{reason_note}"
+                )
+            shown_description, description_note = _shown_block(finding.description)
             # The scanner's name, as the filter's options show it.
             scanner = _scanner_label(finding.scanner)
             cards.append(
@@ -476,8 +496,8 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 f'<button type="button" class="quiet-button copy-location js-only" '
                 f'aria-label="Copy location for finding {index}" data-copy-location="{safe_location}">Copy</button></span></p>'
                 f'<details><summary>Finding details</summary><div class="finding-body">'
-                f'<p class="finding-description">{html.escape(_shown_text(finding.description))}</p>'
-                f"{_shown_note(finding.description)}"
+                f'<p class="finding-description">{html.escape(shown_description)}</p>'
+                f"{description_note}"
                 f"{context}{suppression}{snippet}</div></details></div></article>"
             )
         return "\n".join(cards)
