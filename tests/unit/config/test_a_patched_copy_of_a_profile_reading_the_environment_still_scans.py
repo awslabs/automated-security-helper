@@ -110,8 +110,13 @@ def _scan_outcome(target: Path) -> Any:
     def recording(*args: Any, **kwargs: Any) -> AshConfig:
         try:
             resolved.append(real(*args, **kwargs))
-        except Exception as exc:  # noqa: BLE001 -- the outcome under test
-            resolved.append(exc)
+        except (ValueError, OSError) as refusal:
+            # Only a config refusal is an outcome (ASHConfigValidationError and
+            # its source, unset-variable and not-permitted kinds are ValueErrors,
+            # and so is a model's validation error; an unreadable file is an
+            # OSError). Any other exception is a fault in the harness or the
+            # product and ends the test as it is raised.
+            resolved.append(refusal)
         raise _StopAfterResolution
 
     output = target / ".ash" / "ash_output"

@@ -26,9 +26,10 @@ only, where a symbolic link can be made and a file can be replaced under an open
 descriptor.
 
 Red at the base: the first three ids held the file the name led to after the
-judgment, and the fourth found no descriptor open at the compare. The last two
-are controls that hold at both ends: a refused name is not opened, and the check
-that reads no identity opens nothing.
+judgment, the descriptor-open id found no descriptor open at the compare, and
+the directory and pipe ids held the identity of the directory or pipe itself.
+The last two are controls that hold at both ends: a refused name is not opened,
+and the check that reads no identity opens nothing.
 """
 
 from __future__ import annotations
@@ -207,6 +208,39 @@ def test_a_name_the_permit_refuses_is_never_opened(
         discover_config_source(repo, permit=lambda path: path != outside.resolve())
 
     assert opened == []
+
+
+def test_a_directory_at_the_config_name_is_judged_by_name_and_held_to_nothing(
+    tmp_path: Path,
+) -> None:
+    """Only a regular file is opened and vouched for: a directory at the name is
+    judged by the path it resolves to, and a read held to what discovery took
+    refuses it, as it refuses any file that is not the one judged."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".ash.yaml").mkdir()
+
+    discovery = discover_config_source(repo, permit=lambda path: True)
+
+    assert discovery.selected is not None
+    assert discovery.selected.identity == ABSENT_FILE
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="a named pipe needs os.mkfifo")
+def test_a_pipe_at_the_config_name_is_never_opened_and_held_to_nothing(
+    tmp_path: Path,
+) -> None:
+    """A FIFO opens only when a writer is there, and an open can act on a device:
+    the name is told by its type from stat and judged by name, so discovery
+    neither waits on it nor holds its identity."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    os.mkfifo(repo / ".ash.yaml")
+
+    discovery = discover_config_source(repo, permit=lambda path: True)
+
+    assert discovery.selected is not None
+    assert discovery.selected.identity == ABSENT_FILE
 
 
 def test_the_check_that_reads_no_identity_opens_nothing(
