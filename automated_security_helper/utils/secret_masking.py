@@ -615,50 +615,49 @@ def _physical_locations_of(result: Any, related: bool = False) -> Iterable[Any]:
             yield physical
 
 
-#: id(artifact location) -> (the location, its artifact's uri, its uriBaseId), for
-#: a location that names its file by index into the run's artifacts and carries
-#: no uri of its own (``_resolve_artifact_uris``). ``_uri_of`` reads it in place
-#: of the location's own uri, so the location is left as written. The location
-#: is kept with its entry so its id is not reused while the map holds it; each
-#: ``_resolve_artifact_uris`` rebuilds the map for the report it indexes.
-_RESOLVED_ARTIFACT_URIS: Dict[int, Tuple[Any, str, Any]] = {}
-
-
-def _uri_of(physical: Any) -> Any:
-    """The uri of a node's ``artifactLocation``: its own, or the one its artifact
-    index resolved to (``_resolve_artifact_uris``)."""
+def _uri_of(physical: Any, index: Optional["_SecretIndex"] = None) -> Any:
+    """The uri of a node's ``artifactLocation``: its own, or, given the index of
+    the report it belongs to, the one its artifact index resolved to
+    (``_resolve_artifact_uris``, ``_SecretIndex.resolved_uris``)."""
     location = getattr(physical, "artifactLocation", None)
     uri = getattr(location, "uri", None)
-    if uri is None and location is not None:
-        resolved = _RESOLVED_ARTIFACT_URIS.get(id(location))
+    if uri is None and location is not None and index is not None:
+        resolved = index.resolved_uris.get(id(location))
         if resolved is not None and resolved[0] is location:
             return resolved[1]
     return uri
 
 
-def _resolve_artifact_uris(sarif_report: Any) -> None:
+def _resolve_artifact_uris(sarif_report: Any, index: "_SecretIndex") -> None:
     """Record the URI of every artifact location that names its file by index only.
 
     SARIF lets a location name its artifact through ``artifactLocation.index``
     into the run's ``artifacts`` array with no ``uri`` of its own. The maskings
     below read the URI (``_uri_of``), so such a location was neither indexed as
     a secret location nor placed for masking. The URI (and ``uriBaseId``) the
-    artifact carries is recorded for the location in ``_RESOLVED_ARTIFACT_URIS``
-    and read from there, not written onto the location: the results are read,
-    never changed, by the masker that only reads them
-    (``source_snippet_masker``), and a location is left as the scanner wrote it.
+    artifact carries is recorded for the location in ``index.resolved_uris`` and
+    read from there, not written onto the location: the results are read, never
+    changed, by the masker that only reads them (``source_snippet_masker``), and
+    a location is left as the scanner wrote it. The map lives on the index of
+    the one report, never in module state: maskings run on several threads at
+    once (one per orchestrator), and a shared map one of them cleared emptied
+    another's entries.
     """
-    _RESOLVED_ARTIFACT_URIS.clear()
     for container in list(getattr(sarif_report, "runs", None) or []) + list(
         _external_properties_of(sarif_report)
     ):
         artifacts = list(getattr(container, "artifacts", None) or [])
         if not artifacts:
             continue
-        _resolve_artifact_uris_in(container, artifacts, set())
+        _resolve_artifact_uris_in(container, artifacts, set(), index.resolved_uris)
 
 
-def _resolve_artifact_uris_in(node: Any, artifacts: List[Any], seen: Set[int]) -> None:
+def _resolve_artifact_uris_in(
+    node: Any,
+    artifacts: List[Any],
+    seen: Set[int],
+    resolved: Dict[int, Tuple[Any, str, Any]],
+) -> None:
     if isinstance(node, (str, Enum)) or id(node) in seen:
         return
     if isinstance(node, BaseModel):
@@ -677,19 +676,21 @@ def _resolve_artifact_uris_in(node: Any, artifacts: List[Any], seen: Set[int]) -
                     base = getattr(node, "uriBaseId", None)
                     if base is None:
                         base = getattr(location, "uriBaseId", None)
-                    _RESOLVED_ARTIFACT_URIS[id(node)] = (node, uri, base)
+                    resolved[id(node)] = (node, uri, base)
             return
         for name in fields:
-            _resolve_artifact_uris_in(getattr(node, name, None), artifacts, seen)
+            _resolve_artifact_uris_in(
+                getattr(node, name, None), artifacts, seen, resolved
+            )
         return
     if isinstance(node, list):
         seen.add(id(node))
         for item in node:
-            _resolve_artifact_uris_in(item, artifacts, seen)
+            _resolve_artifact_uris_in(item, artifacts, seen, resolved)
     elif isinstance(node, dict):
         seen.add(id(node))
         for item in node.values():
-            _resolve_artifact_uris_in(item, artifacts, seen)
+            _resolve_artifact_uris_in(item, artifacts, seen, resolved)
 
 
 def _external_properties_of(sarif_report: Any) -> List[Any]:
@@ -1061,12 +1062,12 @@ class _KnownLines:
                 yield self.lines[candidate]
 
 
-def _known_lines(sarif_report: Any) -> _KnownLines:
+def _known_lines(sarif_report: Any, index: "_SecretIndex") -> _KnownLines:
     """The text of every line any snippet of the report places."""
     known = _KnownLines()
     for result in _all_results(sarif_report):
         for physical in _physical_locations_of(result, related=True):
-            uri = _uri_of(physical)
+            uri = _uri_of(physical, index)
             for name in ("region", "contextRegion"):
                 region = getattr(physical, name, None)
                 known.record(
@@ -1162,6 +1163,13 @@ class _SecretIndex:
         #: snippet text, and the finding's own region is left as written. One
         #: entry per finding: the widest range over its primary locations.
         self.end_marks: List[Tuple[Any, Optional[int]]] = []
+        #: id(artifact location) -> (the location, its artifact's uri, its
+        #: uriBaseId), for a location of this report that names its file by index
+        #: into the run's artifacts and carries no uri of its own
+        #: (``_resolve_artifact_uris``). ``_uri_of`` reads it in place of the
+        #: location's own uri, so the location is left as written. The location
+        #: is kept with its entry so its id is not reused while the map holds it.
+        self.resolved_uris: Dict[int, Tuple[Any, str, Any]] = {}
         self._pattern: Optional[re.Pattern[str]] = None
 
     def add_values(self, values: Iterable[str]) -> None:
@@ -1400,8 +1408,8 @@ def _snippet_cannot_be_placed(region: Any) -> bool:
 
 
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
-    _resolve_artifact_uris(sarif_report)
     index = _SecretIndex()
+    _resolve_artifact_uris(sarif_report, index)
     rule_ids = secret_rule_ids(sarif_report)
     described = _rule_ids_described(sarif_report)
     known: Optional[_KnownLines] = None
@@ -1451,7 +1459,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
             if physical is None:
                 continue
             is_primary = position < len(primary)
-            uri = _normalized_uri(_uri_of(physical))
+            uri = _normalized_uri(_uri_of(physical, index))
             if uri is None:
                 continue
             region = getattr(physical, "region", None)
@@ -1464,7 +1472,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                 # its END line, which only some other finding's snippet may show.
                 # With no END line known, every later line is masked.
                 if known is None:
-                    known = _known_lines(sarif_report)
+                    known = _known_lines(sarif_report, index)
                 # A finding whose range an earlier masking recorded is a key
                 # block on every later masking too, though its BEGIN line now
                 # reads as a masked line.
@@ -1549,9 +1557,7 @@ def _line_spans(physical: Any) -> List[Tuple[Optional[int], Optional[int]]]:
 def _overlaps_a_secret(result: Any, index: _SecretIndex) -> bool:
     """Whether a location of ``result`` lies on a line a secret finding reports."""
     for physical in _physical_locations_of(result, related=True):
-        placed = index.lines_for(
-            getattr(getattr(physical, "artifactLocation", None), "uri", None)
-        )
+        placed = index.lines_for(_uri_of(physical, index))
         if placed is None:
             continue
         whole, lines = placed
@@ -1571,7 +1577,7 @@ def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
     if not index.local_values:
         return found
     for physical in _physical_locations_of(result, related=True):
-        uri = _normalized_uri(_uri_of(physical))
+        uri = _normalized_uri(_uri_of(physical, index))
         if uri is None:
             continue
         for first, last in _line_spans(physical):
@@ -2147,27 +2153,27 @@ def _mask_tree(
         seen.add(id(node))
         fields = type(node).model_fields
         if "artifactLocation" in fields and "contextRegion" in fields:
-            placed = index.lines_for(_uri_of(node))
+            placed = index.lines_for(_uri_of(node, index))
             if placed is not None:
                 _mask_region(getattr(node, "region", None), placed)
                 _mask_region(getattr(node, "contextRegion", None), placed)
         elif "physicalLocation" in fields and "annotations" in fields:
             # A location's annotations are regions of its physical location's
             # file, placed by their own lines.
-            placed = index.lines_for(_uri_of(_physical_of(node)))
+            placed = index.lines_for(_uri_of(_physical_of(node), index))
             if placed is not None:
                 for region in getattr(node, "annotations", None) or []:
                     _mask_region(region, placed)
         elif "artifactLocation" in fields and "regions" in fields:
             # An attachment: regions of interest in the file it names.
-            placed = index.lines_for(_uri_of(node))
+            placed = index.lines_for(_uri_of(node, index))
             if placed is not None:
                 for region in getattr(node, "regions", None) or []:
                     _mask_region(region, placed)
         elif "artifactLocation" in fields and "replacements" in fields:
             # A fix's change to one file: its deleted regions are placed by
             # their lines; what it inserts at a reported line is masked whole.
-            placed = index.lines_for(_uri_of(node))
+            placed = index.lines_for(_uri_of(node, index))
             if placed is not None:
                 whole, lines = placed
                 for replacement in getattr(node, "replacements", None) or []:
@@ -2199,9 +2205,7 @@ def _mask_tree(
             snippet = _extra_of(properties).get("snippet")
             physical = next(iter(_physical_locations_of(node)), None)
             if isinstance(snippet, str) and physical is not None:
-                placed = index.lines_for(
-                    getattr(getattr(physical, "artifactLocation", None), "uri", None)
-                )
+                placed = index.lines_for(_uri_of(physical, index))
                 if placed is not None:
                     whole, lines = placed
                     region = getattr(physical, "region", None)

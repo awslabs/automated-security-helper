@@ -20,7 +20,9 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.secret_masking import (
     MASKED_LINE,
+    _index_secrets,
     _normalized_uri,
+    _uri_of,
     mask_secrets_in_results,
 )
 
@@ -72,6 +74,10 @@ def _results(*results, artifacts=None):
 def _snippet(model, position):
     physical = model.sarif.runs[0].results[position].locations[0].physicalLocation
     return physical.root.region.snippet.text
+
+
+def _physical_of(model, position):
+    return model.sarif.runs[0].results[position].locations[0].physicalLocation.root
 
 
 class TestNormalizedUriForms:
@@ -148,6 +154,66 @@ class TestAnArtifactNamedByIndex:
         assert location.uriBaseId is None
         assert location.index == 0
         assert _snippet(model, 1) == MASKED_LINE + "\n"
+
+    def test_a_fenced_block_of_a_finding_at_an_index_only_location_is_masked(self):
+        """The finding that overlaps the secret line names its file by index only;
+        its message's fenced block is its excerpt of that line, masked whole."""
+        model = _results(
+            _result("B105", 5, HARDCODED + f"'{VALUE}'"),
+            _result(
+                "B404",
+                5,
+                "import\n\n```python\n" + SECRET_LINE + "```",
+                artifact={"index": 0},
+            ),
+            artifacts=[{"location": {"uri": "app.py"}}],
+        )
+
+        mask_secrets_in_results(model)
+
+        text = model.sarif.runs[0].results[1].message.root.text
+        assert text.startswith("import\n\n```")
+        assert MASKED_LINE in text
+        assert VALUE not in text
+
+    def test_the_snippet_property_of_a_finding_at_an_index_only_location_is_masked(
+        self,
+    ):
+        """``properties.snippet`` is placed by the location's lines; the location
+        names its file by index only."""
+        neighbor = _result("B404", 5, "import", artifact={"index": 0})
+        neighbor["properties"]["snippet"] = SECRET_LINE
+        model = _results(
+            _result("B105", 5, HARDCODED + f"'{VALUE}'"),
+            neighbor,
+            artifacts=[{"location": {"uri": "app.py"}}],
+        )
+
+        mask_secrets_in_results(model)
+
+        properties = model.sarif.runs[0].results[1].properties
+        assert getattr(properties, "snippet") == MASKED_LINE + "\n"
+
+    def test_two_reports_indexed_in_turn_keep_their_own_resolutions(self):
+        """The resolved URIs live on each report's index, not in module state:
+        maskings run on several threads at once, and a shared map one of them
+        rebuilt emptied another's entries."""
+        first = _results(
+            _result("B105", 5, HARDCODED + f"'{VALUE}'", artifact={"index": 0}),
+            artifacts=[{"location": {"uri": "app.py"}}],
+        )
+        second = _results(
+            _result("B105", 5, HARDCODED + f"'{VALUE}'", artifact={"index": 0}),
+            artifacts=[{"location": {"uri": "other.py"}}],
+        )
+
+        index_first = _index_secrets(first.sarif)
+        index_second = _index_secrets(second.sarif)
+
+        assert _uri_of(_physical_of(first, 0), index_first) == "app.py"
+        assert _uri_of(_physical_of(second, 0), index_second) == "other.py"
+        assert _uri_of(_physical_of(first, 0), index_second) is None
+        assert _uri_of(_physical_of(first, 0)) is None
 
     def test_an_index_past_the_artifacts_is_left_alone(self):
         """Control: nothing is invented for an index the run does not have."""
