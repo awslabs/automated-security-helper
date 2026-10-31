@@ -1379,6 +1379,15 @@ def _landlock_program(name: str) -> str:
     )
 
 
+#: The most bytes the Landlock policy document may take as the wrapper's
+#: ``--policy`` argument. Linux takes one command-line argument of at most 128 KiB
+#: (MAX_ARG_STRLEN: 32 pages of 4 KiB), and a spawn whose argument is longer fails
+#: with "Argument list too long" before the wrapper starts, whatever the scanner.
+#: The document grows with the entries beside the way to a home that a granted path
+#: holds (``_around``), so a plan past this size is refused with the cause named.
+_LANDLOCK_POLICY_LIMIT = 96 * 1024
+
+
 class LandlockBackend(SandboxBackend):
     name = "landlock"
     platforms = ("linux",)
@@ -1506,12 +1515,24 @@ class LandlockBackend(SandboxBackend):
             # wrapper changes into the private TMPDIR instead, as bwrap and
             # sandbox-exec move such a process out of ASH's directory.
             document["cwd"] = private_tmp.as_posix()
+        policy_text = json.dumps(document)
+        if len(policy_text) > _LANDLOCK_POLICY_LIMIT:
+            paths = sum(len(v) for v in document.values() if isinstance(v, list))
+            raise SandboxUnavailable(
+                f"the Landlock policy for this spawn lists {paths} paths "
+                f"({len(policy_text)} bytes), more than the {_LANDLOCK_POLICY_LIMIT} "
+                "bytes one command-line argument can carry. A granted path that "
+                "holds a home directory is replaced by every entry beside the way "
+                "to the home, so a path with many entries makes the document grow; "
+                "grant a narrower path than the one that holds the home, or use "
+                "another sandbox mode."
+            )
         cmd = [
             sys.executable,
             "-I",
             str(LANDLOCK_EXEC),
             "--policy",
-            json.dumps(document),
+            policy_text,
             "--",
             resolved_argv0,
             *argv[1:],

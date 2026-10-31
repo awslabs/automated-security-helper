@@ -28,6 +28,7 @@ from automated_security_helper.utils.sandbox.backends import (
 )
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
+    SandboxUnavailable,
     build_scanner_policy,
 )
 
@@ -190,6 +191,54 @@ def test_landlock_keeps_the_policys_own_path_inside_the_home(
 
     assert _real(source) in granted
     assert _holding(granted, home) == []
+
+
+def _landlock_plan(policy, tmp_path, monkeypatch):
+    """The Landlock plan of ``policy``, its private root made under ``tmp_path``."""
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    return LandlockBackend().plan([sys.executable], {"PATH": "/usr/bin"}, policy)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Landlock is a Linux backend; its plan document is read on POSIX hosts",
+)
+def test_landlock_refuses_a_document_longer_than_one_argument_can_be(
+    prefix, tmp_path, monkeypatch
+):
+    """A path holding a home is granted as every entry beside the way to the home.
+
+    The document travels as one command-line argument, which the kernel limits to
+    128 KiB, so a path with thousands of entries would fail every spawn with
+    "Argument list too long" before the wrapper started. The plan is refused
+    instead, naming the cause, and the private directory it made is removed. The
+    limit is set to the size of this tree's own document so the tree stays small:
+    one byte less refuses it, and the size itself plans it.
+    """
+    for number in range(20):
+        (prefix.root / f"entry-{number}").mkdir()
+    policy = _policy(tmp_path / "src")
+    plan = _landlock_plan(policy, tmp_path, monkeypatch)
+    try:
+        size = len(plan.argv[plan.argv.index("--policy") + 1])
+    finally:
+        plan.run_cleanup()
+    assert list(tmp_path.glob("ash-sandbox-*")) == []
+    monkeypatch.setattr(backends_module, "_LANDLOCK_POLICY_LIMIT", size - 1)
+
+    with pytest.raises(SandboxUnavailable, match="one command-line") as refused:
+        _landlock_plan(policy, tmp_path, monkeypatch)
+
+    assert f"({size} bytes)" in str(refused.value), str(refused.value)
+    assert "narrower path" in str(refused.value), str(refused.value)
+    assert list(tmp_path.glob("ash-sandbox-*")) == []
+
+    monkeypatch.setattr(backends_module, "_LANDLOCK_POLICY_LIMIT", size)
+    plan = _landlock_plan(policy, tmp_path, monkeypatch)
+    try:
+        assert len(plan.argv[plan.argv.index("--policy") + 1]) == size
+    finally:
+        plan.run_cleanup()
 
 
 def _last_file_read_rule(lines, path):
