@@ -13,10 +13,10 @@ fails the run for the FAILED one.
 The rule for a record whose status and texts disagree. A FAILED or SKIPPED
 status decides ahead of both texts. A COMPLETED status does not hide a text:
 an error text reads FAILED, and a skip reason reads ``SKIPPED (reason)`` unless
-the project also exceeds its threshold, when it reads FAILED, because
-``workspace_exit_code`` counts a COMPLETED project as completed and fails the
-run for the findings, whatever reason the record also holds. No such record
-reads PASSED.
+the project also exceeds its threshold (FAILED) or its scan is incomplete
+(``FAILED (incomplete)``), because ``workspace_exit_code`` counts a COMPLETED
+project as completed and fails the run for either, whatever reason the record
+also holds. No such record reads PASSED.
 """
 
 import pytest
@@ -260,3 +260,39 @@ def test_a_completed_project_failed_for_its_findings_shows_the_counts():
     assert row["result"] == "SKIPPED (no-changes)"
     assert row["findings"] == "n/a", row
     assert row["actionable"] == "n/a", row
+
+
+def test_a_completed_incomplete_project_with_a_skip_reason_reads_failed():
+    """The run fails for an incomplete scan, so the row does not read SKIPPED.
+
+    RED at the base of this change: the skip-reason arm guarded only
+    ``exceeds_threshold``, so a COMPLETED record with a skip reason and
+    ``scan_incomplete`` set, no breach, read ``SKIPPED (no-changes)`` in the
+    muted skipped style while ``workspace_exit_code`` returned INTERNAL_ERROR
+    for it. The row keeps the counts, as any completed project's row does.
+    """
+    from automated_security_helper.models.workspace import (
+        SkippedProjectReason,
+        WorkspaceExitCode,
+        workspace_exit_code,
+    )
+
+    project = _project(
+        "svc",
+        skip_reason=SkippedProjectReason.NO_CHANGES,
+        scan_incomplete=True,
+        incomplete_scanners=["semgrep"],
+        finding_count=1,
+        actionable_finding_count=0,
+    )
+    model = _model(project)
+
+    assert workspace_exit_code(model.workspace.projects) == (
+        WorkspaceExitCode.INTERNAL_ERROR
+    )
+    (row,) = workspace_project_rows(model)
+    assert row["result"] == "FAILED (incomplete)"
+    assert row["state"] == "failed"
+    assert row["findings"] == 1, row
+    assert row["actionable"] == 0, row
+    assert 'class="failed"' in html_workspace_section(model)

@@ -227,7 +227,16 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
         # COMPLETED record's row. One answer for the Result arm and for the
         # count columns below: a row that reads FAILED for a threshold breach
         # must also show the counts that breach was read from, not "n/a".
-        read_as_skip = project.skip_reason is not None and not project.exceeds_threshold
+        #
+        # The two fields are the ones workspace_exit_code reads for a COMPLETED
+        # entry whatever its texts say: a breach returns ACTIONABLE_FINDINGS and
+        # an incomplete scan returns INTERNAL_ERROR, so a skip reason that hid
+        # either would print the optimistic half of two disagreeing verdicts.
+        read_as_skip = (
+            project.skip_reason is not None
+            and not project.exceeds_threshold
+            and not project.scan_incomplete
+        )
         if project.status == ProjectRunStatus.FAILED:
             # The recorded status decides, ahead of every text field: a FAILED
             # project whose error is null or empty was still attempted and
@@ -245,10 +254,11 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
         elif read_as_skip:
             # Fallbacks for a record whose status does not say: the text fields.
             # A COMPLETED record that carries a skip reason is read by its
-            # findings first: workspace_exit_code counts such a project as
-            # completed and fails the run when it exceeds its threshold, so a
-            # row that read SKIPPED for it would hide the finding the run fails
-            # for. The arms below then give it FAILED.
+            # findings and its completeness first: workspace_exit_code counts
+            # such a project as completed and fails the run when it exceeds its
+            # threshold or its scan is incomplete, so a row that read SKIPPED
+            # for it would hide what the run fails for. The arms below then
+            # give it FAILED.
             result = f"SKIPPED ({reason})"
         elif project.error:
             result = "FAILED"
