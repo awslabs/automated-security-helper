@@ -434,6 +434,48 @@ class TestThePreScanLinkCheckBuildsTheSameReporterSet:
 
         assert seen["plugin_modules"] == ["my_org.ash_plugins"]
 
+    def test_the_three_callers_hand_the_selection_the_same_inputs(
+        self, workspace, monkeypatch
+    ):
+        """The pre-scan link check, the pre-scan refusal and the report step each
+        build the set from the same four inputs; given the same ones they pass the
+        selection the same values, so the set cannot drift on any of them. Only
+        ``check_dependencies`` differs, by design: the pre-scan callers must not
+        contact a remote service."""
+        plan, output_dir, results_path = workspace
+        inputs = {
+            "output_formats": ("fake-merged",),
+            "python_based_plugins_only": True,
+            "reporter_classes": [FakeMergedReporter],
+            "plugin_modules": ["my_org.ash_plugins"],
+        }
+        recorded: dict = {}
+        label = [""]
+        real = reporting._selected_reporters
+
+        def recording(**kwargs):
+            recorded[label[0]] = {key: kwargs[key] for key in inputs}
+            recorded[label[0] + " dependencies"] = kwargs.get("check_dependencies")
+            return real(**kwargs)
+
+        monkeypatch.setattr(reporting, "_selected_reporters", recording)
+
+        label[0] = "link check"
+        refuse_linked_workspace_report_paths(plan, output_dir, **inputs)
+        label[0] = "unsupported"
+        reporting.unsupported_reporter_names(plan, output_dir, **inputs)
+        label[0] = "report step"
+        emit_workspace_reports(plan, output_dir, results_path, **inputs)
+
+        assert recorded["link check"] == inputs
+        assert recorded["unsupported"] == inputs
+        assert recorded["report step"] == inputs
+        # The one argument that differs, and which way: checking a reporter's
+        # dependencies can call a remote service, so only the report step does.
+        assert recorded["link check dependencies"] is False
+        assert recorded["unsupported dependencies"] is False
+        assert recorded["report step dependencies"] in (None, True)
+
 
 class _NoneConfig(ReporterPluginConfigBase):
     name: str = "fake-none"
