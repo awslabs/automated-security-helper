@@ -126,10 +126,13 @@ def test_a_removal_that_fails_inside_its_handling_is_named(
 ) -> None:
     failing = _workspace(root, FAILING)
 
-    def refused(session_id):
+    # The step the sweep's handling runs under its guard for a session with a
+    # workspace (the rename aside, the dropping of the session's state); a
+    # session with none takes _remove_session_state, which this sweep does not.
+    def refused(session_id, sandbox):
         raise OSError(errno.EACCES, "Permission denied", str(failing))
 
-    monkeypatch.setattr(sessions, "_remove_session_state", refused)
+    monkeypatch.setattr(sessions, "_set_session_state_aside", refused)
 
     removed = sessions.sweep_stale_workspaces(1.0, now=time.time() + 3600)
 

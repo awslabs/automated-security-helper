@@ -190,7 +190,9 @@ def test_a_refused_guard_lets_the_change_go_on_and_warns_once(
     registry existed, and the process-wide latch says so once."""
     _sandbox(root, REPLICATED)
 
-    def refused(_root):
+    # The busy gate asks for the guard with a bounded wait (``wait=``), so the
+    # stand-in takes the keyword as the real guard does.
+    def refused(_root, **_kwargs):
         raise OSError(errno.ENOLCK, "No locks available")
 
     monkeypatch.setattr(sessions, "_scan_presence_guard", refused)
