@@ -440,11 +440,16 @@ def _read_ash_bedrock_defaults() -> Tuple[str, ...]:
     prints that number -- redact_values matches a four-character needle like
     "4000" as a whole word, which mangled a line printing that count, and a
     date inside a model id. ASH_BEDROCK_MODEL_ID joins whatever its shape.
+
+    A blank value is no value: the options read it as unset (``stripped_or_none``
+    in the model id's default factory, ``_number_or_default`` for the knobs), so
+    it is no needle either, and the value is the one the option holds, without
+    the whitespace around it.
     """
     return tuple(
         value
         for name in _ASH_BEDROCK_DEFAULT_VARS
-        if (value := os.environ.get(name))
+        if (value := stripped_or_none(os.environ.get(name)))
         and not (name in _ASH_BEDROCK_NUMERIC_KNOBS and _purely_numeric(value))
     )
 
@@ -780,8 +785,18 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     model_id: Annotated[
         str,
         Field(
-            default_factory=lambda: os.environ.get(
-                "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            # A blank value is unset, as a blank temperature or token count
+            # is: it would otherwise be the model id. The read keeps the
+            # built-in id as its second argument, the shape the reference
+            # pages are generated from.
+            default_factory=lambda: (
+                stripped_or_none(
+                    os.environ.get(
+                        "ASH_BEDROCK_MODEL_ID",
+                        "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                    )
+                )
+                or "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
             ),
             description="Bedrock model ID to use for generating summaries.",
         ),
