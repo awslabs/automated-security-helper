@@ -417,9 +417,11 @@ class TestSharedFindingIdsLayering:
 
 
 class TestTheSeverityNormalizationKeepsItsKinds:
-    def test_an_open_result_is_still_not_graded(self):
-        """The normalization skips every result whose kind is not ``fail``;
-        this consolidation changes which function says so, not the answer."""
+    def test_a_result_that_states_no_finding_is_still_not_graded(self):
+        """The normalization skips a result whose kind says no problem was found
+        and grades a finding of the same rule beside it: the skip is made result
+        by result, not for the rule or the run. ``open`` and ``review`` assert a
+        finding and are graded (test_sarif_severity_normalization_kinds.py)."""
         rule = ReportingDescriptor(
             id="R1", properties=PropertyBag(**{"security-severity": "9.0"})
         )
@@ -428,11 +430,14 @@ class TestTheSeverityNormalizationKeepsItsKinds:
             runs=[
                 Run(
                     tool=Tool(driver=ToolComponent(name="t", rules=[rule])),
-                    results=[_result(kind=Kind.open), _result(kind=Kind.fail)],
+                    results=[
+                        _result(kind=Kind.notApplicable),
+                        _result(kind=Kind.fail),
+                    ],
                 )
             ],
         )
         normalize_sarif_result_severities(report)
-        open_result, failing = report.runs[0].results
-        assert open_result.properties is None
+        not_applicable, failing = report.runs[0].results
+        assert not_applicable.properties is None
         assert getattr(failing.properties, "issue_severity", None) == "CRITICAL"
