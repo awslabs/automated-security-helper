@@ -75,7 +75,10 @@ function Invoke-ASH {
     working directory is the scanned checkout, so a link anywhere under it counts. The
     one exception is -SourceDir itself: a linked directory passed as -SourceDir is the
     operator's own spelling of the source, as `./ash` takes it, so the default output
-    inside it is not refused for that link. The refusal names the link; pass the
+    inside it, and an -OutputDir spelled through it, are not refused for that link. An
+    -OutputDir that is that link itself is refused, as any linked output directory is,
+    and so is a link above -SourceDir on the way to the output (`./ash` accepts links
+    at or above its source; Invoke-ASH does not). The refusal names the link; pass the
     resolved path instead, with no link in it.
     A refusal of the default names -OutputDir as the way to write elsewhere; a refusal
     of an -OutputDir that was given does not.
@@ -1743,9 +1746,15 @@ function Invoke-ASH {
         # The working directory is checked as well as -SourceDir, and fails closed: in CI
         # the working directory is the scanned checkout, so a link there may be one the
         # repository committed. -SourceDir itself is the one component left out when it
-        # is a link: it is the operator's own spelling of the source, as ./ash takes it
-        # (links at or above the source are its operator's there), and the default
-        # output directory is spelled through it; a link below it still counts.
+        # is a link ABOVE the output directory: it is the operator's own spelling of the
+        # source, as ./ash takes it (links at or above the source are its operator's
+        # there, a looser rule than this one, which still refuses a link above
+        # -SourceDir), and the default output directory is spelled through it; a link
+        # below it still counts. The output directory itself is never left out, so
+        # `-OutputDir linked` with the same link as -SourceDir is refused as a link, as
+        # ./ash refuses a linked output directory wherever it is; without that, -NoRun,
+        # which skips the source-or-above check below, accepted it and the write check
+        # made and deleted a file in the link's target.
         # Case is ignored on Windows and macOS, whose volumes usually ignore it, so an
         # -OutputDir typed in another case is still found to be below them.
         $outputDirAbsolute = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
@@ -1774,8 +1783,9 @@ function Invoke-ASH {
         $candidate = $outputDirAbsolute
         while ($candidate) {
             $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
-            $isTheSource = [string]::Equals($candidate.TrimEnd($separator), $sourceDirItself, $pathComparison)
-            if ($null -ne $item -and $item.LinkType -and -not $isTheSource) {
+            $isTheSourceAbove = (-not [string]::Equals($candidate, $outputDirAbsolute, $pathComparison)) -and
+                [string]::Equals($candidate.TrimEnd($separator), $sourceDirItself, $pathComparison)
+            if ($null -ne $item -and $item.LinkType -and -not $isTheSourceAbove) {
                 $global:LASTEXITCODE = $refusalExitCode
                 throw "The output directory '$(Format-AshShownValue $OutputDir)' is reached through a link ('$(Format-AshShownValue $candidate)'). ASH does not write through a link below the working directory or inside -SourceDir, where the scanned repository could have placed it. Remove the link, or pass -OutputDir as the resolved path, with no link in it$outputHint."
             }

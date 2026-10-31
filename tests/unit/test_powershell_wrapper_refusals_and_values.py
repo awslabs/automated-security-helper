@@ -770,6 +770,35 @@ def test_a_linked_source_directory_is_the_operators_own_spelling(
 
 
 @pytest.mark.integration
+@_POSIX_ONLY
+@pytest.mark.parametrize("run", ["-NoRun", "a-run"])
+def test_the_linked_source_itself_as_the_output_directory_is_refused(
+    run, pwsh, recording_docker, tmp_path
+):
+    """-OutputDir names the same link -SourceDir does. The link is the operator's
+    spelling of the source, but the output directory itself is never written through
+    a link, as `./ash` refuses a linked output directory wherever it is: the scan's
+    output and the cleanup of the previous run's would go where the link points.
+    Before, the exemption of the source link covered this case too; a run was still
+    refused as the source directory itself, but -NoRun skips that check, so -NoRun
+    accepted the output and the write check made and deleted a file in the link's
+    target. Refused as a link with 3 either way now, before anything runs."""
+    (tmp_path / "real").mkdir()
+    (tmp_path / "linked").symlink_to(tmp_path / "real", target_is_directory=True)
+    arguments = "-SourceDir linked -OutputDir linked"
+    if run == "-NoRun":
+        arguments = "-NoRun " + arguments
+
+    result = _invoke(pwsh, tmp_path, recording_docker, arguments)
+
+    stderr = " ".join(result.stderr.split())
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "reached through a link" in stderr, result.stderr
+    assert "is the source directory" not in stderr, result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("output", ["the-default", "given"])
 def test_a_refused_default_output_directory_names_the_parameter(
     output, pwsh, recording_docker, tmp_path

@@ -1358,7 +1358,11 @@
   `Invoke-ASH` works the default out once `-SourceDir` has passed its checks (a
   default worked out while the parameters bound failed on an empty `-SourceDir`
   ahead of the refusal) and takes a `-SourceDir` that is itself a link under the
-  working directory as `./ash` does. A refusal of the default output directory (a
+  working directory, the one link shape this loosens: a link above `-SourceDir` on the
+  way to the output (`work-link/src`) is still refused, where `./ash` accepts every
+  link at or above its source, so the two wrappers' rules differ there, and an
+  `-OutputDir` that is the source link itself is refused as a linked output
+  directory, as `./ash` refuses one wherever it is. A refusal of the default output directory (a
   file at the path, a directory that cannot be created, entered or written, or one
   reached through a link the repository commits) gives the reason and names
   `--output-dir`, or `-OutputDir`, as the way to write elsewhere; a refusal of an
