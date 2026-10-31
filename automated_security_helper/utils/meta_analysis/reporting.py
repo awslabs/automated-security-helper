@@ -3,10 +3,10 @@
 
 """Report generation: HTML reports, JQ queries, reporter mappings, field presence."""
 
-import html
 import json
 import re
 import shlex
+from html import escape as _escape_html
 from typing import Any, Dict, List, Optional, Set
 
 from automated_security_helper.utils.meta_analysis.field_mapping import (
@@ -42,7 +42,7 @@ def _escaped(value: Any) -> str:
     directory names ASH did not write, so a ``<`` or ``&`` in one is data, not
     markup.
     """
-    return html.escape(str(value), quote=True)
+    return _escape_html(str(value), quote=True)
 
 
 # ---------------------------------------------------------------------------
