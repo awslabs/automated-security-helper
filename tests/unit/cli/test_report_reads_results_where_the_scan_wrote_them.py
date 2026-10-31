@@ -245,7 +245,8 @@ def test_a_place_the_user_cannot_search_is_not_a_second_results_file(tmp_path):
     assert result.exit_code == 0, result.output
     assert "More than one" not in result.output, result.output
     assert "cannot be searched" in result.output, result.output
-    assert locked.as_posix() in " ".join(result.output.split()), result.output
+    # The directory that cannot be searched is named, not a file in it.
+    assert f"{locked.as_posix()}cannotbesearched" in "".join(result.output.split())
     assert results.as_posix() in " ".join(result.output.split()), result.output
 
 
@@ -271,7 +272,8 @@ def test_a_place_the_user_cannot_search_above_the_file_found_is_refused(tmp_path
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     flat = " ".join(result.output.split())
     assert "cannot be searched" in flat, result.output
-    assert (locked / "ash_aggregated_results.json").as_posix() in flat, result.output
+    # The refusal names the directory the operator makes searchable.
+    assert f"{locked.as_posix()}cannotbesearched" in "".join(result.output.split())
     assert "Reporting on" not in flat, result.output
 
 

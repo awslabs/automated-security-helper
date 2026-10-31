@@ -1026,12 +1026,14 @@ def report_command(
         if outranking:
             # A usage error, like the refusal above: the operator makes the
             # directory searchable, or names the one that holds the results.
+            # The directory is named, not the file in it: the file's open is what
+            # failed, and the directory is what the operator changes.
             _print_refusal(
                 "[red]Error: {} cannot be searched, and a scan results file there, "
                 "if one exists, ranks above {}, which would otherwise be reported "
                 "on. Make the directory searchable, or point --output-dir at the "
                 "directory that holds the one to report on.[/red]",
-                ", ".join(path.as_posix() for path in outranking),
+                ", ".join(path.parent.as_posix() for path in outranking),
                 found_results_files[0].as_posix(),
             )
             raise typer.Exit(ASH_EXIT_USAGE_ERROR)
@@ -1050,7 +1052,7 @@ def report_command(
         _print_refusal(
             "[yellow]Warning: {} cannot be searched, so a scan results file there, "
             "if one exists, is not reported on. Reporting on {}.[/yellow]",
-            ", ".join(path.as_posix() for path in unsearched_results_paths),
+            ", ".join(path.parent.as_posix() for path in unsearched_results_paths),
             results_file.as_posix(),
         )
 
