@@ -157,10 +157,9 @@ class TestAPerProjectArtefactBelongsToTheRunThatWroteIt:
         )
 
         entry = _manifest(output_dir)["reporters"]["fake-per-project"]
-        assert [item["project"] for item in entry["per_project_artifacts"]] == [
-            "api",
-            "web",
-        ]
+        # Named as missing and not offered as an artefact: the file on disk is
+        # not this run's, and listing it beside api's told a consumer it was.
+        assert [item["project"] for item in entry["per_project_artifacts"]] == ["api"]
         assert entry["missing_per_project_artifacts"] == ["web"]
 
     def test_a_file_for_a_skipped_project_is_missing_too(self, workspace, tmp_path):
@@ -193,7 +192,32 @@ class TestAPerProjectArtefactBelongsToTheRunThatWroteIt:
         _emit(workspace, FakePerProjectReporter, completed_projects=["api"])
 
         entry = _manifest(output_dir)["reporters"]["fake-per-project"]
+        assert [item["project"] for item in entry["per_project_artifacts"]] == ["api"]
         assert entry["missing_per_project_artifacts"] == ["web"]
+
+    def test_a_failed_project_with_output_is_listed_when_the_caller_says_so(
+        self, workspace, tmp_path
+    ):
+        """The control for the test above: the results file calls ``web`` failed,
+        and the caller, which knows its output was written, lists it. A status of
+        COMPLETED is not what makes a file this run's."""
+        plan, output_dir, _ = workspace
+        results = self._results_with(tmp_path, {"api": "completed", "web": "failed"})
+
+        emit_workspace_reports(
+            plan=plan,
+            output_dir=output_dir,
+            results_path=results,
+            reporter_classes=[FakePerProjectReporter],
+            completed_projects=["api", "web"],
+        )
+
+        entry = _manifest(output_dir)["reporters"]["fake-per-project"]
+        assert [item["project"] for item in entry["per_project_artifacts"]] == [
+            "api",
+            "web",
+        ]
+        assert entry["missing_per_project_artifacts"] == []
 
     def test_with_the_callers_set_the_results_file_is_not_parsed_for_it(
         self, workspace, monkeypatch

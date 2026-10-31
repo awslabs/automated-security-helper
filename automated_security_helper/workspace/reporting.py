@@ -387,25 +387,31 @@ def _per_project_artifacts(
 ) -> Tuple[List[Dict[str, str]], List[str]]:
     """Where a per-project reporter's N artefacts are, and which are missing.
 
-    Every project in the plan is listed, including skipped ones, so that a
-    consumer reading the manifest sees the full set the operator asked for. The
-    missing list is what distinguishes "this project was skipped" from "the
-    manifest is pointing at nothing", which an operator would otherwise have to
-    resolve by checking the filesystem by hand.
+    Every project in the plan appears in one of the two lists, including skipped
+    ones, so that a consumer reading the manifest sees the full set the operator
+    asked for. The missing list is what distinguishes "this project was skipped"
+    from "the manifest is pointing at nothing", which an operator would
+    otherwise have to resolve by checking the filesystem by hand.
 
-    *completed*, when given, is the set of project keys this run's scan
-    completed (:func:`_projects_with_a_completed_run`): a project outside it is
-    missing whatever is on disk, because a file there is an earlier run's.
+    *completed*, when given, is the set of project keys whose own output this
+    run wrote (:func:`emit_workspace_reports` takes it from the caller, or reads
+    the keys of the completed projects from the results file). A project outside
+    it is named in the missing list only: a file in its reports directory is an
+    earlier run's, and listing it beside this run's artefacts offered a consumer
+    a stale report as current. A project inside it is listed whether or not its
+    file is there, and missing when it is not.
     """
     entries: List[Dict[str, str]] = []
     missing: List[str] = []
     for project in plan.projects:
+        if completed is not None and project.key not in completed:
+            missing.append(project.key)
+            continue
         relative = (
             Path(PROJECTS_DIR_NAME) / project.key / REPORTS_DIR_NAME / filename
         ).as_posix()
         entries.append({"project": project.key, "path": relative})
-        ran = completed is None or project.key in completed
-        if not ran or not (output_dir / relative).is_file():
+        if not (output_dir / relative).is_file():
             missing.append(project.key)
     return entries, missing
 
@@ -1000,13 +1006,17 @@ def emit_workspace_reports(
             (``execution.workspace_plugin_modules``). With ``reporter_classes``
             unset, only ASH's built-in reporters and those of these modules are
             considered.
-        completed_projects: The keys of the projects this run scanned to
-            completion, which the caller holds in memory (each project's
-            ``outcome.status``). A per-project artefact on disk is this run's
-            only for such a project (:func:`_per_project_artifacts`). ``None``
-            reads them from the results file instead
+        completed_projects: The keys of the projects whose own output this run
+            wrote, which the caller holds in memory. That is not the same as
+            the projects whose status is COMPLETED: a project that FAILED after
+            its output was set up wrote its reports this run and belongs here.
+            A per-project artefact on disk is this run's only for such a project
+            (:func:`_per_project_artifacts`). ``None`` reads the COMPLETED
+            projects from the results file instead
             (:func:`_projects_with_a_completed_run`), a whole-file parse per
-            report step that a caller with the outcomes in hand never needs.
+            report step that a caller with the outcomes in hand never needs,
+            and which cannot tell a failed project that wrote its output from
+            one that did not.
 
     Returns:
         What was written, what was withheld, and what refused. The caller passes
@@ -1219,8 +1229,8 @@ def emit_workspace_reports(
             entry["missing_per_project_artifacts"] = missing
             ASH_LOGGER.verbose(
                 f"Reporter {name} is per-project in workspace mode; "
-                f"{len(entries) - len(missing)} of {len(entries)} per-project "
-                f"artefact(s) present. No merged artefact is produced."
+                f"{len(plan.projects) - len(missing)} of {len(plan.projects)} "
+                f"per-project artefact(s) present. No merged artefact is produced."
             )
             if missing:
                 ASH_LOGGER.warning(
