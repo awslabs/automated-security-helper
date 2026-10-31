@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import http.client
 import inspect
 import io
+import logging
 import os
 import platform
 import stat
@@ -50,18 +52,36 @@ not_root = pytest.mark.skipif(
 )
 
 
+_UNSET = object()
+
+
 class _Response:
     """What urlopen yields: a body read in chunks, a Content-Length header, and
     http.client's ``chunked`` flag (True when Transfer-Encoding: chunked framed the
-    body, in which case http.client ignores any Content-Length)."""
+    body, in which case http.client ignores any Content-Length).
 
-    def __init__(self, body: bytes, declared, chunked: bool = False, length=None):
+    The headers are an ``HTTPMessage``, as a real response's are, so a lookup is
+    case-insensitive; ``header`` spells the name another way. ``length`` is
+    http.client's parsed length: a number, or None for a chunked body or a header
+    it rejected. Left out, the object carries no such field, as a fake or another
+    client's response does; a chunked response sets it to None, as http.client
+    does."""
+
+    def __init__(
+        self,
+        body: bytes,
+        declared,
+        chunked: bool = False,
+        length=_UNSET,
+        header: str = "Content-Length",
+    ):
         self._body = io.BytesIO(body)
-        self.headers = {"Content-Length": str(declared)}
+        self.headers = http.client.HTTPMessage()
+        self.headers[header] = str(declared)
         self.chunked = chunked
-        # http.client's parsed length, set only when a test gives one: a fake
-        # without it stands for a response object that carries no such field.
-        if length is not None:
+        if chunked and length is _UNSET:
+            length = None
+        if length is not _UNSET:
             self.length = length
 
     def read(self, amount=-1):
@@ -118,6 +138,8 @@ def test_a_body_cut_short_is_retried_not_reported_as_tampering(
     )
     assert len(attempts) == 2
     assert installed.read_bytes() == _BODY
+    # The first attempt's partial file is gone: only the installed file remains.
+    assert [p.name for p in (tmp_path / "bin").iterdir()] == ["tool.bin"]
 
 
 def test_a_body_cut_short_on_the_last_attempt_raises_the_connection_error(
@@ -132,6 +154,61 @@ def test_a_body_cut_short_on_the_last_attempt_raises_the_connection_error(
     with pytest.raises(ConnectionError, match="closed after 5 of"):
         download_utils.download_file(_URL, tmp_path / "bin", expected_sha256=_DIGEST)
     assert not (tmp_path / "bin" / "tool.bin").exists()
+    # No staging file is left beside where the tool would have been installed.
+    bin_dir = tmp_path / "bin"
+    assert not bin_dir.exists() or [p.name for p in bin_dir.iterdir()] == []
+
+
+def test_a_content_length_header_is_found_whatever_its_case(monkeypatch, tmp_path):
+    """A response's headers are looked up without regard to case; a fake holding a
+    plain dict under the one spelling hid a lookup that would have missed
+    ``content-length``."""
+    monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", "1")
+    monkeypatch.setattr(
+        download_utils.urllib.request,
+        "urlopen",
+        lambda url, **kwargs: _Response(_BODY[:5], len(_BODY), header="content-length"),
+    )
+    with pytest.raises(ConnectionError, match="closed after 5 of"):
+        download_utils.download_file(_URL, tmp_path / "bin", expected_sha256=_DIGEST)
+
+
+class _StallsAfterTheFirstChunk(_Response):
+    """A body whose socket times out in the middle of the transfer."""
+
+    def __init__(self, body: bytes, declared):
+        super().__init__(body, declared)
+        self._reads = 0
+
+    def read(self, amount=-1):
+        self._reads += 1
+        if self._reads > 1:
+            raise TimeoutError("the read timed out")
+        return self._body.read(5)
+
+
+def test_a_timeout_in_the_middle_of_the_body_is_retried(
+    monkeypatch, tmp_path, quick_retry
+):
+    """The connect timeout is covered above; this one fires after bytes have
+    arrived. The attempt ends as a TimeoutError the retry policy repeats, and the
+    second connection delivers the whole file."""
+    attempts = []
+
+    def urlopen(url, **kwargs):
+        attempts.append(url)
+        if len(attempts) == 1:
+            return _StallsAfterTheFirstChunk(_BODY, len(_BODY))
+        return _Response(_BODY, len(_BODY))
+
+    monkeypatch.setattr(download_utils.urllib.request, "urlopen", urlopen)
+    installed = download_utils.download_file(
+        _URL, tmp_path / "bin", expected_sha256=_DIGEST
+    )
+    assert len(attempts) == 2
+    assert installed.read_bytes() == _BODY
+    assert hashlib.sha256(installed.read_bytes()).hexdigest() == _DIGEST
+    assert [p.name for p in (tmp_path / "bin").iterdir()] == ["tool.bin"]
 
 
 @posix_only
@@ -164,6 +241,33 @@ def test_with_no_usable_home_receipts_are_skipped_and_nothing_raises(
     assert not download_utils._already_installed(
         tmp_path / "bin", "tool", _URL, _DIGEST
     )
+
+
+@posix_only
+def test_an_install_with_no_usable_home_still_installs_and_warns_once(
+    monkeypatch, tmp_path, caplog
+):
+    """The receipt is skipped, the tool is not: the install returns the installed
+    file, and the one thing said about the missing store is a WARNING that names the
+    receipt and says the next install downloads again."""
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(
+        download_utils.urllib.request,
+        "urlopen",
+        lambda url, **kwargs: _Response(_BODY, len(_BODY)),
+    )
+    with caplog.at_level(logging.WARNING):
+        installed = download_utils.install_binary_from_url(
+            _URL, tmp_path / "bin", expected_sha256=_DIGEST
+        )
+    assert installed.read_bytes() == _BODY
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING and "receipt" in record.getMessage()
+    ]
+    assert len(warnings) == 1, warnings
+    assert "re-download" in warnings[0]
 
 
 @posix_only
