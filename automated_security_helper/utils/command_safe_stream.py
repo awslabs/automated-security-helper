@@ -244,20 +244,18 @@ class CommandSafeStream:
                 # the outer text instead of ahead of it or inside it.
                 self._pending.append(text)
                 return len(text)
-            if self._checked_buffer is not None:
-                # Bytes a buffer write left held land first, where they were
-                # written, not after this text.
-                self._checked_buffer._emit_held()
             self._mid_write = True
-            # A write deferred after the last drain's final empty check,
-            # before _mid_write was cleared, is still in _pending with no
-            # write under way to drain it. It lands first: it was made
-            # before this text, and left to the drain below it would have
-            # landed after it. Its error is held, not raised here: raised
-            # from the same try as this text's write, a stranded item's
-            # error lost the caller's own text on a wrap whose drain had
-            # nothing to do with it. The text lands, then the held error.
-            stranded = self._land_stranded()
+            # Bytes a buffer write left held land first, where they were
+            # written, not after this text. Then a write deferred after the
+            # last drain's final empty check, before _mid_write was cleared,
+            # and still in _pending with no write under way to drain it: it
+            # was made before this text, and left to the drain below it would
+            # have landed after it. Their errors are held, not raised here:
+            # raised from the same try as this text's write, an error of the
+            # held bytes or of a stranded item lost the caller's own text,
+            # which on a checked wrap (sys.stderr in MCP server mode) is every
+            # message. The text lands, then the first held error.
+            stranded = self._land_ahead()
             try:
                 written = self._write_text(text)
             except BaseException:
@@ -267,6 +265,21 @@ class CommandSafeStream:
             if stranded is not None:
                 raise stranded
             return written
+
+    def _land_ahead(self) -> BaseException | None:
+        """Land what a write has to land ahead of its own text: the bytes a
+        buffer write left held, then the writes stranded in _pending. Returns
+        the first error either raised instead of raising it, so the write that
+        found them can still land its own text. Run with _mid_write set, under
+        the lock."""
+        held: BaseException | None = None
+        if self._checked_buffer is not None:
+            try:
+                self._checked_buffer._emit_tail()
+            except BaseException as exc:
+                held = exc
+        stranded = self._land_stranded()
+        return held if held is not None else stranded
 
     def _land_stranded(self) -> BaseException | None:
         """Drain the writes stranded in _pending ahead of a new write, returning
@@ -330,8 +343,15 @@ class CommandSafeStream:
             # before the first deferred TEXT item, the tail landed after the
             # deferred BYTE items before it (b"caf\xc3" then [b"B2", "T"] wrote
             # caf, B2, \xc3, T), neither where it was written nor joined to the
-            # rest of its character.
-            self._checked_buffer._emit_tail()
+            # rest of its character. A batch of byte items alone leaves the tail
+            # held for the next write, which joins it to the rest of its
+            # character. The emit is inside the hold-first-error scheme like
+            # every item: a tail write that raised, outside it, left every
+            # pending item stranded.
+            try:
+                self._checked_buffer._emit_tail()
+            except BaseException as exc:
+                error = exc
         while self._pending:
             item = self._pending.pop(0)
             try:

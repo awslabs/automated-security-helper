@@ -156,6 +156,83 @@ def test_a_stranded_writes_error_does_not_lose_the_callers_text():
     assert wrap._mid_write is False
 
 
+def test_a_stranded_writes_error_does_not_lose_the_callers_text_on_a_checked_wrap():
+    """The same as above on a wrap that checks its bytes, the shape of
+    sys.stderr in MCP server mode: the bytes a buffer write left held were landed
+    first, outside the held-error scheme, and a stranded item's error came out of
+    that step before the caller's text was written."""
+
+    class Refusing(io.StringIO):
+        def write(self, text: str) -> int:
+            if text == "bad\n":
+                raise OSError("refused")
+            return super().write(text)
+
+    target = Refusing()
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    wrap._pending = ["bad\n"]
+    with pytest.raises(OSError, match="refused"):
+        wrap.write("mine\n")
+    assert target.getvalue() == "mine\n", target.getvalue()
+    assert wrap._pending == []
+    assert wrap._mid_write is False
+
+
+class _Buffer:
+    """A byte buffer whose next write can be made to refuse."""
+
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+        self.refuse_next = False
+
+    def write(self, data: bytes) -> int:
+        if self.refuse_next:
+            self.refuse_next = False
+            raise OSError("tail refused")
+        self.writes.append(data)
+        return len(data)
+
+    def flush(self) -> None:
+        return None
+
+
+class _TextWithBuffer:
+    """A text target that is not a terminal and has a byte buffer of its own."""
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+        self.buffer = _Buffer()
+
+    def write(self, text: str) -> int:
+        self.texts.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return False
+
+
+def test_a_failing_tail_write_does_not_strand_the_deferred_items():
+    """The held tail is emitted ahead of the first deferred text item; that write
+    raising used to leave the drain before its loop, so every pending item stayed
+    stranded. The error is held like an item's: the items land, then it is raised."""
+    target = _TextWithBuffer()
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    wrap.buffer.write(b"caf\xc3")
+    assert target.buffer.writes == [b"caf"], target.buffer.writes
+    target.buffer.refuse_next = True
+    # A signal handler's text write inside a byte write: deferred.
+    wrap._mid_write = True
+    wrap.write("T\n")
+    with pytest.raises(OSError, match="tail refused"):
+        wrap._end_write(failed=False)
+    assert target.texts == ["T\n"], target.texts
+    assert wrap._pending == []
+    assert wrap._mid_write is False
+
+
 def test_the_held_tail_lands_ahead_of_every_deferred_item():
     """Bytes a byte write left held (an incomplete character's start) land once,
     before the deferred items, byte items included: emitted only before the first
