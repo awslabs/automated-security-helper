@@ -228,6 +228,30 @@ class FakeRuns:
         return {"returncode": code, "stdout": self.stdout if code == 0 else ""}
 
 
+class FakeRunsWithStderr(FakeRuns):
+    """``FakeRuns`` that also writes each run's stderr log as the runner does.
+
+    ``<results_dir>/<ClassName>.stderr.log`` is replaced by the run's stderr, and
+    a run with none empties a log an earlier run left there
+    (``subprocess_utils._write_stream_log``); under ``stderr_preference="write"``
+    the response itself carries no stderr, so this log is the only place the
+    tool's text is. One entry of *stderrs* per call, the last repeating; the
+    placeholder ``<config>`` in an entry is the run's ``-config-file`` value.
+    """
+
+    def __init__(self, scanner, stdout: str, returncodes: list, stderrs: list):
+        super().__init__(scanner, stdout, returncodes)
+        self.stderrs = list(stderrs)
+
+    def __call__(self, command, **kwargs):
+        text = self.stderrs.pop(0) if len(self.stderrs) > 1 else self.stderrs[0]
+        text = text.replace("<config>", command[command.index("-config-file") + 1])
+        log = Path(kwargs["results_dir"]) / f"{type(self.scanner).__name__}.stderr.log"
+        if text or log.is_file():
+            log.write_text(text, encoding="utf-8")
+        return super().__call__(command, **kwargs)
+
+
 # --------------------------------------------------------------------------- #
 # A builtin scanner, on by default
 # --------------------------------------------------------------------------- #
@@ -1042,6 +1066,164 @@ def test_a_tree_config_actionlint_refuses_moves_the_run_to_a_copy_outside_the_tr
         "actionlint exited 3 with a repository actionlint config present" in caplog.text
     )
     assert "local `uses: ./...` references are not resolved" in caplog.text
+
+
+_EMPTY_STDOUT = '{"version":"1","errors":[]}'
+
+
+@pytest.mark.unit
+def test_an_exit_3_that_names_the_config_file_given_is_not_run_again_from_a_copy(
+    repo, monkeypatch, on_path, caplog
+):
+    """actionlint exits 3 for a ``-config-file`` it cannot read as well, before
+    any project search. A copy outside the tree reads the same file, so the
+    second run cannot help; ASH reported the repository's config as the cause
+    and told the user to fix a file that may be fine. The error text is the
+    tool's: its stderr log names the path it opened."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+    (repo / "ci").mkdir()
+    (repo / "ci" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
+    fake = FakeRunsWithStderr(
+        scanner,
+        _EMPTY_STDOUT,
+        [3],
+        ['actionlint: could not parse config file "<config>": a marker\n'],
+    )
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ScannerError, match="actionlint exited 3"):
+            scanner.scan(target=repo, target_type="source")
+
+    ((_, kwargs),) = fake.calls
+    assert kwargs["cwd"] == repo
+    assert "names the -config-file it was given" in caplog.text
+    assert "linted from a copy outside the tree" not in caplog.text
+
+
+@pytest.mark.unit
+def test_an_exit_3_that_names_the_repository_config_is_run_again_from_a_copy(
+    repo, monkeypatch, on_path, caplog
+):
+    """The tool's error names the repository's config: it is the cause, said
+    once, before the second run. The second run's empty stderr replaces the
+    first run's log, so none of the first run's text stays attached to a scan
+    the second run made successful."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+    scanner = _scanner(repo)
+    fake = FakeRunsWithStderr(
+        scanner,
+        _EMPTY_STDOUT,
+        [3, 0],
+        [
+            (
+                "could not parse config file "
+                f'"{repo.as_posix()}/.github/actionlint.yaml": FIRST-RUN-MARKER\n'
+            ),
+            "",
+        ],
+    )
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
+
+    with caplog.at_level(logging.WARNING):
+        report = scanner.scan(target=repo, target_type="source")
+
+    assert isinstance(report, SarifReport)
+    (_, first), (_, second) = fake.calls
+    assert Path(first["cwd"]) == repo
+    assert not Path(second["cwd"]).resolve().is_relative_to(repo.resolve())
+    marker = "actionlint exited 3 with a repository actionlint config present"
+    assert caplog.text.count(marker) == 1
+    log = Path(first["results_dir"]) / "ActionlintScanner.stderr.log"
+    assert log.read_text(encoding="utf-8") == ""
+    assert "FIRST-RUN-MARKER" not in "\n".join(scanner.errors)
+
+
+@pytest.mark.unit
+def test_an_exit_3_from_the_copy_too_is_not_blamed_on_the_repository_config(
+    repo, monkeypatch, on_path, caplog
+):
+    """Nothing in the error names a config, so the batch is run again from the
+    copy to find out. It exits 3 there as well: the repository's config, which
+    the copy does not read, is not the cause, and the user is not told to fix
+    it. The scan fails with actionlint's own code."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+    scanner = _scanner(repo)
+    fake = FakeRunsWithStderr(scanner, _EMPTY_STDOUT, [3], [""])
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ScannerError, match="actionlint exited 3"):
+            scanner.scan(target=repo, target_type="source")
+
+    assert len(fake.calls) == 2
+    assert "is not the cause of the failure" in caplog.text
+    assert "Fix or remove the file" not in caplog.text
+
+
+@pytest.mark.unit
+def test_a_workflow_that_cannot_be_copied_leaves_actionlints_own_exit_3(
+    repo, monkeypatch, on_path, caplog
+):
+    """Reading a workflow for the copy raised its OSError out of the scan, so
+    the error reported was the read's and actionlint's own was lost. The first
+    run's exit 3 is reported, and the copy's failure is said in a log line."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+    scanner = _scanner(repo)
+    fake = FakeRunsWithStderr(scanner, _EMPTY_STDOUT, [3], ["a marker\n"])
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
+
+    def cannot_copy(target, workflows):
+        raise PermissionError("a planted refusal")
+
+    monkeypatch.setattr(scanner, "_stage_workflows", cannot_copy)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ScannerError, match="actionlint exited 3"):
+            scanner.scan(target=repo, target_type="source")
+
+    assert len(fake.calls) == 1
+    assert "ASH could not copy the workflows" in caplog.text
+
+
+@pytest.mark.unit
+def test_stderr_names_configs_reads_the_log_and_never_raises(tmp_path):
+    """The log is searched for the paths and nothing of it is returned; a log
+    that is missing, empty or unreadable names neither."""
+    log = tmp_path / "ActionlintScanner.stderr.log"
+    repository = ["/r/.github/actionlint.yaml", "/r/.github/actionlint.yml"]
+
+    assert module.stderr_names_configs(log, repository, "/c/a.yaml") == (False, False)
+    log.write_text("")
+    assert module.stderr_names_configs(log, repository, "/c/a.yaml") == (False, False)
+    log.write_text('could not parse config file "/r/.github/actionlint.yml": x\n')
+    assert module.stderr_names_configs(log, repository, "/c/a.yaml") == (True, False)
+    log.write_text('could not read config file "/c/a.yaml": x\n')
+    assert module.stderr_names_configs(log, repository, "/c/a.yaml") == (False, True)
+    log.write_text("a failure that names no config\n")
+    assert module.stderr_names_configs(log, repository, "/c/a.yaml") == (False, False)
+    assert module.stderr_names_configs(tmp_path, repository, "/c/a.yaml") == (
+        False,
+        False,
+    )
+
+
+@pytest.mark.unit
+def test_repository_config_paths_lists_both_names_at_each_root_once(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    spelled = module.repository_config_paths([root, root])
+
+    assert spelled == [
+        (root / ".github" / "actionlint.yaml").as_posix(),
+        (root / ".github" / "actionlint.yml").as_posix(),
+    ]
 
 
 @pytest.mark.unit

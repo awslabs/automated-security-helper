@@ -96,7 +96,11 @@ Decisions, and why
    ``_stage_workflows``), with a
    warning: the findings and their paths are the same, and the copy has no
    project root, so local ``uses: ./...`` references are not resolved on that run.
-   An operator's file that
+   Exit 3 also comes from a ``-config-file`` actionlint cannot read, so the retry
+   reads the run's stderr log (never quoted or logged) for the path it names: the
+   ``-config-file`` alone means no retry, the repository's config means it is the
+   cause, and when neither is named the second run decides, the repository's
+   config being blamed only if the copy succeeds. An operator's file that
    does not exist is an error, not a silent fallback, and one whose ``paths``
    section has ``ignore`` patterns is logged with the patterns. The operator's file
    may be inside the scanned tree, but one there that resolves outside the tree
@@ -231,7 +235,10 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.path_probe import probe_path
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.fs_guard import (
+    open_for_write,
+    read_bytes_at_most,
+)
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import (
@@ -796,6 +803,51 @@ def config_present(roots: Iterable[Path]) -> bool:
         probe_path(root / name, "exists")
         for root in roots
         for name in _DEFAULT_CONFIG_CANDIDATES
+    )
+
+
+#: How much of a run's stderr log is searched for the config files it names.
+_STDERR_SEARCH_BYTES = 256 * 1024
+
+
+def repository_config_paths(roots: Iterable[Path]) -> List[str]:
+    """Every spelling of the repository config files at *roots*, as POSIX text.
+
+    actionlint names the file it could not read or parse by the path it opened,
+    which it builds from its project root as it found it: the root as named and
+    the root's real path are both listed.
+    """
+    spelled: List[str] = []
+    for root in roots:
+        for base in (root, Path(os.path.realpath(root))):
+            for name in _DEFAULT_CONFIG_CANDIDATES:
+                text = (base / name).as_posix()
+                if text not in spelled:
+                    spelled.append(text)
+    return spelled
+
+
+def stderr_names_configs(
+    log_path: Path, repository_paths: Iterable[str], operator_path: str
+) -> Tuple[bool, bool]:
+    """``(names_a_repository_config, names_the_config_file_given)`` for one run.
+
+    Whether the start of the run's stderr log, written under
+    ``stderr_preference="write"`` (the run's response carries no stderr text),
+    holds the path of a repository config or of the ``-config-file`` ASH gave
+    actionlint. The text is searched and never kept, quoted or logged: a config
+    actionlint refuses may be quoted in it. A log that cannot be read names
+    neither.
+    """
+    try:
+        text = read_bytes_at_most(log_path, _STDERR_SEARCH_BYTES).decode(
+            "utf-8", errors="replace"
+        )
+    except (OSError, ValueError):
+        return False, False
+    return (
+        any(path in text for path in repository_paths),
+        bool(operator_path) and operator_path in text,
     )
 
 
@@ -2014,52 +2066,113 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     and self.exit_code == 3
                     and not (isinstance(response, dict) and response.get("timed_out"))
                 ):
-                    # actionlint found a project root for a workflow in this
-                    # batch and refused the repository config there (its exit 3
-                    # before any file is linted). From here every batch runs
-                    # from the copy, where it finds no project root and so reads
-                    # no config of the tree's.
-                    run_root = self._stage_workflows(target, workflows)
-                    self._plugin_log(
-                        "actionlint exited 3 with a repository actionlint config "
-                        "present at a project root of the scanned tree ("
-                        + ", ".join(root.as_posix() for root in roots)
-                        + "). It parses that file while it looks for the project "
-                        "root, before the -config-file it is given is consulted, "
-                        "and exits 3 on one it cannot read or parse (a wrong type, "
-                        "a duplicate key, an invalid glob), so the workflows are "
-                        "linted from a copy outside the tree. The findings and "
-                        "their paths are the same; local `uses: ./...` references "
-                        "are not resolved on this run, since the copy has no "
-                        "project root. Fix or remove the file to lint in place.",
-                        target_type=target_type,
-                        level=logging.WARNING,
+                    # actionlint exited 3 with a repository config at a project
+                    # root. It exits 3 for that file when it cannot read or parse
+                    # it, which it does before any file is linted, but also for a
+                    # -config-file it cannot read and other fatal errors. What
+                    # the run's stderr log names decides the next step: the
+                    # -config-file alone means a copy cannot help; a repository
+                    # config means it is the cause; neither (the text is the
+                    # tool's and may be absent) runs the batch again from the
+                    # copy, where it finds no project root and so reads no config
+                    # of the tree's, and the second run says whether the config
+                    # was the cause. From here every batch runs from the copy.
+                    # The stderr log is the run's own: each run replaces it, so
+                    # a second run that succeeds leaves nothing of the first
+                    # run's text, and with "write" none of it is in self.errors.
+                    names_repository, names_operator = stderr_names_configs(
+                        results_dir / f"{self.__class__.__name__}.stderr.log",
+                        repository_config_paths(roots),
+                        config_file.as_posix(),
                     )
-                    retry_timeout = effective_timeout
-                    if deadline is not None:
-                        retry_timeout = deadline - time.monotonic()
-                        if retry_timeout <= 0:
-                            limit = self._timeout_limit_token(effective_timeout)
-                            raise ScannerError(
-                                text_without_values(
-                                    f"actionlint timed out after {limit}: the run "
-                                    "over this target's workflows used the whole "
-                                    "limit before it could be run again from a copy "
-                                    "outside the tree. Raise "
-                                    "scanners.actionlint.options.scan_timeout if "
-                                    "this target legitimately needs longer.",
-                                    self._values_to_redact(),
-                                )
+                    rerun = names_repository or not names_operator
+                    if not rerun:
+                        self._plugin_log(
+                            "actionlint exited 3 and its error names the "
+                            f"-config-file it was given ({config_file.as_posix()}), "
+                            "not a repository config, so the workflows are not "
+                            "run again from a copy outside the tree: a copy reads "
+                            "the same -config-file.",
+                            target_type=target_type,
+                            level=logging.WARNING,
+                        )
+                    else:
+                        try:
+                            run_root = self._stage_workflows(target, workflows)
+                        except OSError as exc:
+                            # A workflow actionlint could not read is the usual
+                            # reason: the copy fails on it, and its OSError would
+                            # replace actionlint's own error as the scan's. The
+                            # first run's exit 3 stands and is reported.
+                            rerun = False
+                            self._plugin_log(
+                                "ASH could not copy the workflows to run actionlint "
+                                f"again from outside the tree ({type(exc).__name__}); "
+                                "the exit 3 from the first run is reported as it is.",
+                                target_type=target_type,
+                                level=logging.WARNING,
                             )
-                    response = self._run_subprocess(
-                        command=final_args,
-                        results_dir=results_dir,
-                        stdout_preference="return",
-                        stderr_preference="write",
-                        cwd=run_root,
-                        timeout=retry_timeout,
-                    )
-                    self._record_target_exit_code(response)
+                    if rerun:
+                        repository_warning = (
+                            "actionlint exited 3 with a repository actionlint "
+                            "config present at a project root of the scanned tree ("
+                            + ", ".join(root.as_posix() for root in roots)
+                            + "). It parses that file while it looks for the "
+                            "project root, before the -config-file it is given is "
+                            "consulted, and exits 3 on one it cannot read or parse "
+                            "(a wrong type, a duplicate key, an invalid glob), so "
+                            "the workflows are linted from a copy outside the "
+                            "tree. The findings and their paths are the same; "
+                            "local `uses: ./...` references are not resolved on "
+                            "this run, since the copy has no project root. Fix or "
+                            "remove the file to lint in place."
+                        )
+                        if names_repository:
+                            self._plugin_log(
+                                repository_warning,
+                                target_type=target_type,
+                                level=logging.WARNING,
+                            )
+                        retry_timeout = effective_timeout
+                        if deadline is not None:
+                            retry_timeout = deadline - time.monotonic()
+                            if retry_timeout <= 0:
+                                limit = self._timeout_limit_token(effective_timeout)
+                                raise ScannerError(
+                                    text_without_values(
+                                        f"actionlint timed out after {limit}: the "
+                                        "run over this target's workflows used the "
+                                        "whole limit before it could be run again "
+                                        "from a copy outside the tree. Raise "
+                                        "scanners.actionlint.options.scan_timeout "
+                                        "if this target legitimately needs longer.",
+                                        self._values_to_redact(),
+                                    )
+                                )
+                        response = self._run_subprocess(
+                            command=final_args,
+                            results_dir=results_dir,
+                            stdout_preference="return",
+                            stderr_preference="write",
+                            cwd=run_root,
+                            timeout=retry_timeout,
+                        )
+                        self._record_target_exit_code(response)
+                        if not names_repository:
+                            if self.exit_code == 3:
+                                self._plugin_log(
+                                    "actionlint exited 3 from the copy outside the "
+                                    "tree as well, so the repository's actionlint "
+                                    "config is not the cause of the failure.",
+                                    target_type=target_type,
+                                    level=logging.WARNING,
+                                )
+                            elif self.exit_code in self.success_exit_codes:
+                                self._plugin_log(
+                                    repository_warning,
+                                    target_type=target_type,
+                                    level=logging.WARNING,
+                                )
 
                 if isinstance(response, dict) and response.get("timed_out"):
                     # The limit through the shared token, so an environment-read
