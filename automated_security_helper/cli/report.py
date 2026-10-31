@@ -436,6 +436,11 @@ def _write_report_data(content: str, stream: TextIO) -> None:
     stream that checks what it is given for CI commands is written past. A stream
     with no byte buffer under it is written as text.
 
+    The bytes equal the file in reports/ for every line end but one: a CRLF the
+    report already holds. ``write_text_atomically`` opens the file with
+    ``newline=None``, so on Windows it writes that CRLF as CR CR LF, while this
+    keeps it as CRLF (see below). On Linux and macOS the two are the same bytes.
+
     A line end the report already writes as CRLF (CSV rows) is kept as it is:
     only a line feed with no carriage return before it is written as os.linesep.
     Replacing every line feed turned a CRLF into CR CR LF on Windows, a blank
@@ -508,7 +513,8 @@ def _write_report(
 
     To a regular file (``ash report --format sarif > ash.sarif``) the report is
     the reporter's output, with the bytes the report phase writes to reports/
-    (_write_report_data), so the file is a SARIF file. It is not byte for byte the
+    (_write_report_data; a CRLF the report holds is the one line end that differs
+    from that file on Windows), so the file is a SARIF file. It is not byte for byte the
     file the scan wrote: a report rendered again from the saved results can
     differ (SARIF carries fields the saved results default, and CSV, HTML and
     Markdown are stamped with the time they are rendered). A CI runner reads a
