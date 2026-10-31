@@ -174,7 +174,7 @@ def test_the_pre_check_says_nothing_of_the_entry_when_the_values_could_not_be_re
 ):
     """The sandbox could not read its redaction values: nothing can be hidden, so
     the value-free line is logged and raised, naming neither entry nor root."""
-    row, reason, _refusals = _run_with_an_unlistable_entry(
+    row, reason, refusals = _run_with_an_unlistable_entry(
         plugin_context,
         tmp_path,
         monkeypatch,
@@ -183,10 +183,12 @@ def test_the_pre_check_says_nothing_of_the_entry_when_the_values_could_not_be_re
         values_unread=True,
     )
 
+    # The refusals the guard logged ("Could not ..."), as the test above counts
+    # them. The executor's own "Failed to execute ..." line carries the same
+    # sentence in its tail, so a count over every record holding the phrase reads
+    # two for one refusal.
     unnamed = [
-        record.getMessage()
-        for record in caplog.records
-        if "redaction values could not be read" in record.getMessage()
+        line for line in refusals if "redaction values could not be read" in line
     ]
     assert row.status == ScannerStatus.ERROR, row.status
     assert len(unnamed) == 1, [record.getMessage() for record in caplog.records]
