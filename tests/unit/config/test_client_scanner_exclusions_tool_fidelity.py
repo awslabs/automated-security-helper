@@ -168,6 +168,26 @@ def test_an_expiry_that_is_not_a_date_makes_the_file_unreadable(text, yaml_forma
         parse_trivy_ignore_file(text, yaml_format=yaml_format, today=date(2026, 1, 1))
 
 
+def test_an_empty_plain_expiry_field_makes_the_file_unreadable():
+    """``CVE-1 exp:`` has an ``exp:`` field with nothing after it. trivy parses
+    the field with ``time.Parse`` and drops the line when that fails, so the
+    finding is reported. The empty text was read as no expiry (``if not value``
+    before the date check), so the entry applied and its findings were marked
+    suppressed. An empty field now makes the file unreadable like any other
+    field that is not a date. A line with no ``exp:`` field at all, and a YAML
+    ``expired_at`` left empty (trivy's zero time), are unchanged."""
+    today = date(2026, 1, 1)
+    with pytest.raises(ValueError, match="not a YYYY-MM-DD date"):
+        parse_trivy_ignore_file("CVE-1 exp:\nCVE-2\n", yaml_format=False, today=today)
+    assert parse_trivy_ignore_file("CVE-2\n", yaml_format=False, today=today) == [
+        ("CVE-2", ())
+    ]
+    document = yaml.safe_dump({"vulnerabilities": [{"id": "CVE-3", "expired_at": ""}]})
+    assert parse_trivy_ignore_file(document, yaml_format=True, today=today) == [
+        ("CVE-3", ())
+    ]
+
+
 @pytest.mark.parametrize(
     "field",
     ["2099-01-01T00:00", "2099-01-01x", "2099-1-1", "2099-01-011", "2099.01.01"],

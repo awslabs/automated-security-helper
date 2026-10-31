@@ -2186,7 +2186,11 @@ def _expired(value: Any, today: date, whole_field: bool = False) -> bool:
             date it could not read; ``_entry_expired`` reads a client entry's
             unreadable expiration as expired, the same side.
     """
-    if not value:
+    # A plain line's ``exp:`` with nothing after it is a field trivy fails to
+    # parse, which is not the same as a line with no field (None): it falls
+    # through to the date check below. A YAML ``expired_at`` left empty is the
+    # zero time trivy reads as no expiry.
+    if value is None or (not value and not whole_field):
         return False
     text = str(value)
     try:
