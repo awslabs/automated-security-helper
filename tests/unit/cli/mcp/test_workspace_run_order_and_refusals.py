@@ -677,6 +677,14 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
         holder.start()
         assert held.wait(timeout=5)
 
+        real_under_lock = workspace_module._under_session_lock
+        waiting = threading.Event()
+
+        def noting_under_lock(*args, **kwargs):
+            # Set as the runner enters the lock's wait, before it can block.
+            waiting.set()
+            return real_under_lock(*args, **kwargs)
+
         def run() -> None:
             try:
                 with (
@@ -686,6 +694,11 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
                         side_effect=lambda p, s, **k: _result(p, s),
                     ),
                     patch.object(workspace_module, "ScanPresence") as presence,
+                    patch.object(
+                        workspace_module,
+                        "_under_session_lock",
+                        side_effect=noting_under_lock,
+                    ),
                 ):
                     presence.return_value.__enter__.return_value = None
                     presence.return_value.__exit__.return_value = False
@@ -706,7 +719,9 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
         try:
             runner = threading.Thread(target=run)
             runner.start()
-            runner.join(timeout=0.5)
+            # The runner is provably at the lock, not merely slow to start: a
+            # short join passed whether or not it had got that far.
+            assert waiting.wait(timeout=5), "the runner never reached the lock"
             assert "clock started" not in order, order
             released.set()
             runner.join(timeout=5)
@@ -1155,6 +1170,47 @@ class TestAThreadThatReadsTheTreeHoldsTheClaim:
                     output_dir=str(tmp_path / "out"),
                     claim=claim,
                 )
+            )
+            assert await asyncio.to_thread(entered.wait, 10)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            claim.call_returns()
+            assert counted.returned == 0
+            release.set()
+            assert await asyncio.to_thread(counted.released.wait, 10)
+
+        assert counted.returned == 1
+
+    @pytest.mark.asyncio
+    async def test_a_call_cancelled_during_the_plan_resolution_keeps_the_claim(
+        self, tmp_path, monkeypatch, _fresh_registry
+    ):
+        """The first of the call's offloads, ahead of the settings builder that
+        the test above blocks: ``_resolve`` reads the workspace file, the policy
+        file and every project's config. A mutant that runs it on a plain worker
+        thread again releases the claim at the call's exit, under the thread."""
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+        monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_resolve(*args, **kwargs):
+            entered.set()
+            release.wait(timeout=10)
+            raise RuntimeError("stand-in resolution ended")
+
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+        plan = _plan(tmp_path)
+        scan = workspace_module._in_a_run_log_scope_of_its_own(
+            workspace_module._scan_workspace
+        )
+
+        with patch.object(workspace_module, "_resolve", side_effect=blocking_resolve):
+            task = asyncio.ensure_future(
+                scan(workspace_file=plan.workspace_file, claim=claim)
             )
             assert await asyncio.to_thread(entered.wait, 10)
             task.cancel()
