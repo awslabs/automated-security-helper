@@ -247,6 +247,86 @@ class TestAnUnknownProvenanceFieldIsDropped:
             )
 
 
+class TestAMisspelledProvenanceFieldIsCalledOut:
+    """A key that is close to a field this version reads is dropped like any
+    other, but the warning says what the drop costs: with ``candidate_scanners``
+    read as absent, the merge's coverage check for the partitioned set is
+    skipped, and a bare list of ignored names does not tell the operator that."""
+
+    @staticmethod
+    def _said(record):
+        from unittest.mock import patch
+
+        from automated_security_helper.core import sharding
+
+        sharding._WARNED_PROVENANCE_KEYS.clear()
+        with patch.object(sharding.ASH_LOGGER, "warning") as warning:
+            restored = ShardAssignment.model_validate(record)
+        return restored, [call.args[0] for call in warning.call_args_list]
+
+    def test_a_misspelled_candidate_field_names_the_field_it_resembles(self):
+        restored, said = self._said(
+            {
+                "shard_index": 0,
+                "shard_count": 2,
+                "assigned_scanners": ["bandit"],
+                "candidate_scaner": ["bandit", "grype"],
+            }
+        )
+
+        assert restored.candidate_scanners is None
+        (text,) = said
+        assert "candidate_scaner (for candidate_scanners)" in text
+        assert "not checked for coverage" in text
+
+    def test_an_unrelated_new_field_gets_no_resemblance_sentence(self):
+        """The control: a field from a newer ASH is only named."""
+        _, said = self._said(
+            {
+                "shard_index": 0,
+                "shard_count": 2,
+                "field_from_a_newer_ash": True,
+            }
+        )
+
+        (text,) = said
+        assert "field_from_a_newer_ash" in text
+        assert "does not match" not in text
+
+    def test_a_close_key_beside_the_real_field_is_not_called_a_misspelling(self):
+        """The real field is supplied, so nothing was lost by the extra key."""
+        restored, said = self._said(
+            {
+                "shard_index": 0,
+                "shard_count": 2,
+                "candidate_scanners": ["bandit"],
+                "candidate_scanner": ["bandit"],
+            }
+        )
+
+        assert restored.candidate_scanners == ["bandit"]
+        (text,) = said
+        assert "does not match" not in text
+
+    def test_the_merge_still_skips_the_check_it_cannot_run(self):
+        """What the warning describes is real: every shard carrying the
+        misspelling merges, and the union check does not run."""
+        shards = [
+            ShardAssignment.model_validate(
+                {
+                    "shard_index": index,
+                    "shard_count": 2,
+                    "assigned_scanners": assigned,
+                    "candidate_scaner": sorted(SCANNERS),
+                }
+            )
+            for index, assigned in ((0, ["bandit", "grype"]), (1, ["checkov"]))
+        ]
+
+        # semgrep is assigned to no shard; with the set unread, nothing says so.
+        verify_shard_coverage(shards)
+
+
 class TestPartitionWithNoSelection:
     def test_no_index_and_no_count_is_a_selection_error(self):
         with pytest.raises(ShardSelectionError, match="both --shard-index"):

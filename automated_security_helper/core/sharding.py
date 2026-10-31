@@ -97,6 +97,7 @@ count without knowing the scanner count.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 from collections.abc import Iterable, Sequence
 from itertools import islice
@@ -226,6 +227,33 @@ class ShardAssignment(StrippedRecordModel):
         str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
     )
 
+    @classmethod
+    def _near_misses(cls, dropped: Sequence[str], data: dict) -> str:
+        """The sentence that says a dropped key looks like a misspelled field.
+
+        Dropping a key is right for a field a newer ASH added, and wrong for a
+        known field spelled differently: ``candidate_scaner`` is read as no
+        candidate set at all, which skips the one coverage check that needs it.
+        A hand-edited record is the only way to get there, and the line above
+        does not say what the dropped key cost, so a name close to a field this
+        version reads (and not already supplied under its own name) is called
+        out with the field it resembles.
+        """
+        wanted = [name for name in cls.model_fields if name not in data]
+        found = []
+        for key in dropped:
+            close = difflib.get_close_matches(key, wanted, n=1, cutoff=0.8)
+            if close:
+                found.append(f"{_cut_text(key, _DROPPED_TEXT_SHOWN)} (for {close[0]})")
+        if not found:
+            return ""
+        return (
+            " Read as absent, because the name does not match: "
+            + ", ".join(found)
+            + ". A shard with no candidate_scanners is not checked for coverage "
+            "of the set it was partitioned from."
+        )
+
     @model_validator(mode="before")
     @classmethod
     def _name_the_dropped_keys(cls, data: Any) -> Any:
@@ -276,6 +304,7 @@ class ShardAssignment(StrippedRecordModel):
                         f"this ASH does not know and ignores: {names}. The results "
                         "file was written by another ASH version; the fields this "
                         "version knows are read as usual."
+                        + cls._near_misses(dropped, data)
                     ),
                     extra=NO_MARKUP,
                 )
