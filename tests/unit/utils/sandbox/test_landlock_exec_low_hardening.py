@@ -217,6 +217,19 @@ def test_a_fork_that_fails_exits_126(monkeypatch, capsys):
 
 
 def test_a_restriction_error_in_the_child_is_reported_as_such(monkeypatch, capsys):
+    # The child writes each report with SIGPIPE and SIGXFSZ ignored again; the
+    # module's own ``signal`` is replaced, so the calls are recorded and the pytest
+    # worker's dispositions are not touched.
+    dispositions = []
+    monkeypatch.setattr(
+        landlock_exec,
+        "signal",
+        SimpleNamespace(
+            SIG_IGN=signal.SIG_IGN,
+            signal=lambda signum, handler: dispositions.append((signum, handler)),
+        ),
+    )
+
     def exit_(code):
         raise _Exit(code)
 
@@ -243,6 +256,10 @@ def test_a_restriction_error_in_the_child_is_reported_as_such(monkeypatch, capsy
         landlock_exec._run_child(["/bin/true"], lambda: None)
     assert raised.value.code == 126
     assert "exec /bin/true" in capsys.readouterr().err
+    assert set(dispositions) == {
+        (signal.SIGPIPE, signal.SIG_IGN),
+        (signal.SIGXFSZ, signal.SIG_IGN),
+    }
 
 
 def test_a_pid_no_longer_in_the_tree_is_not_killed(monkeypatch):
