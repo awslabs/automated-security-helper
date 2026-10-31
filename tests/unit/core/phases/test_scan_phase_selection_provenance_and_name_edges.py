@@ -382,6 +382,49 @@ class TestTwoScannersWithOneName:
         assert any("#2" in key for key in later_rows), later_rows
         assert "twin" not in results.scanner_results
 
+    def test_a_selected_later_holder_runs_when_the_first_holder_is_left_out(self, ctx):
+        """Selection is decided for every holder of a name before one is chosen.
+        Red at the base: the first holder was chosen in discovery order, so the
+        selected later holder was recorded as a duplicate, the first was recorded
+        under the name as left out, and nothing ran under the name."""
+        first = _scanner_class("twin", python_only=False)
+        second = _scanner_class("twin", python_only=True)
+        second.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second])
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase, python_based_plugins_only=True)
+
+        tasks = executor_class.call_args.kwargs["scanner_tasks"]
+        assert [task[0] for task in tasks] == ["twin"]
+        assert tasks[0][1] is second.return_value
+        assert "twin" not in results.scanner_results
+        left_out = [key for key in results.scanner_results if key.startswith("twin (")]
+        assert len(left_out) == 1, left_out
+        assert results.scanner_results[left_out[0]].status == ScannerStatus.SKIPPED
+        assert results.scanner_results[left_out[0]].excluded is True
+        assert not any(
+            row.status == ScannerStatus.ERROR
+            for row in results.scanner_results.values()
+        )
+
+    def test_the_control_no_holder_selected_keeps_the_first_as_the_name(self, ctx):
+        first = _scanner_class("twin", python_only=False)
+        second = _scanner_class("twin", python_only=False)
+        second.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second])
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase, python_based_plugins_only=True)
+
+        assert executor_class.call_args.kwargs["scanner_tasks"] == []
+        assert results.scanner_results["twin"].status == ScannerStatus.SKIPPED
+        later_rows = [key for key in results.scanner_results if "OtherTwin" in key]
+        assert len(later_rows) == 1
+        assert results.scanner_results[later_rows[0]].status == ScannerStatus.SKIPPED
+
     def test_a_later_carrier_of_a_refused_name_is_told_the_first_does_not_run(
         self, ctx, logger
     ):

@@ -280,6 +280,39 @@ def _not_selected_reasons(selection: Any, names: Any) -> List[str]:
     return reasons
 
 
+def _selected_holder_first(
+    instances: List[Any], is_selected: Callable[[Any], bool]
+) -> List[Any]:
+    """*instances*, with each shared scanner name's first selected holder first.
+
+    The first scanner to carry a name is the one that runs; every later holder
+    is recorded under a row of its own. That order was the order of discovery,
+    so a name whose first holder the operator left out (a Python-only run
+    reaching a scanner that needs a tool) and whose later holder was selected
+    ran nothing under the name: the selected holder was recorded as a
+    duplicate and the unselected one as the name's row. Selection is decided
+    for every holder here, before any is registered. Each name keeps the
+    positions its holders had; only which holder takes the first of them
+    changes, and the others follow in discovery order. A name with no selected
+    holder keeps its order, and a name carried once is untouched.
+    """
+    positions_by_name: Dict[str, List[int]] = {}
+    for position, instance in enumerate(instances):
+        key = _scanner_display_name(instance).lower().strip()
+        positions_by_name.setdefault(key, []).append(position)
+    ordered = list(instances)
+    for positions in positions_by_name.values():
+        if len(positions) < 2:
+            continue
+        chosen = next((p for p in positions if is_selected(instances[p])), None)
+        if chosen is None or chosen == positions[0]:
+            continue
+        holders = [instances[chosen]] + [instances[p] for p in positions if p != chosen]
+        for position, holder in zip(positions, holders):
+            ordered[position] = holder
+    return ordered
+
+
 def _holds_a_regular_file(directory: Any) -> bool:
     """Whether any regular file sits under ``directory``, whatever its name.
 
@@ -1022,6 +1055,18 @@ class ScanPhase(EnginePhase):
                 # a later holder is told the first does not run.
                 first_by_name: Dict[str, Any] = {}
                 refused_by_name: Dict[str, Any] = {}
+                scanner_instances = _selected_holder_first(
+                    scanner_instances,
+                    lambda candidate: (
+                        operator_selection(
+                            candidate,
+                            _scanner_display_name(candidate),
+                            enabled_scanners=enabled_scanners,
+                            excluded_scanners=excluded_scanners,
+                            python_only=python_based_plugins_only,
+                        ).selected
+                    ),
+                )
                 for plugin_instance in scanner_instances:
                     display_name = _scanner_display_name(plugin_instance)
                     name_key = display_name.lower().strip()
