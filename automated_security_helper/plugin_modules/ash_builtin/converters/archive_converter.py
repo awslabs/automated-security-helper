@@ -1457,12 +1457,17 @@ def _target_name(archive_file: str, archive_display: str) -> str:
 def _unused_target(results_dir: Path, name: str) -> Path:
     """``results_dir / name``, or with ``-2``, ``-3`` ... appended if that exists.
 
-    The name comes from _target_name: get_normalized_filename, which folds ``/``
-    and ``.`` to ``__`` and other runs of non-word characters to ``-``, so two
-    archives can map to one name (``a b.zip`` and ``a-b.zip``), cut where it is
-    too long for a file name. Each archive is extracted into a directory no
-    other archive wrote, so removing it on a failure removes only what this
-    archive wrote, and two archives never overwrite each other's members.
+    The name comes from _target_name: get_normalized_filename, which gives
+    distinct archive paths distinct names (``.`` becomes ``__``, ``/`` becomes
+    ``_s``, ``_`` becomes ``_0`` and any other character that is not a word
+    character or ``-`` an escape of its code point, so ``a b.zip`` and
+    ``a-b.zip`` stay apart), cut with a digest of the path where it is too
+    long for a file name. The counter is therefore only for a directory of that
+    name that already exists in ``results_dir``, such as one a filesystem that
+    ignores case takes for the same name (``A.zip`` and ``a.zip``). Each
+    archive is extracted into a directory no other archive wrote, so removing
+    it on a failure removes only what this archive wrote, and two archives never
+    overwrite each other's members.
     """
     target = results_dir / name
     counter = 2
