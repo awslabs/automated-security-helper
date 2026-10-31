@@ -1099,6 +1099,69 @@ def test_a_config_that_is_a_link_or_not_a_regular_file_moves_the_run_first(
     assert "OUTSIDE-MARKER" not in caplog.text
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_a_config_reached_through_a_linked_github_directory_moves_the_run_first(
+    tmp_path, monkeypatch, on_path, caplog
+):
+    """The link is on the directory, not on the file: ``is_symlink`` of
+    ``.github/actionlint.yaml`` reads False, and by name the file sits in the
+    tree. actionlint would open it through the link and, were it malformed,
+    quote the outside file on stderr. The real path is judged, so the run moves
+    to the copy before actionlint starts, and nothing of the outside file is
+    logged."""
+    tree = tmp_path / "tree"
+    (tree / ".git").mkdir(parents=True)
+    workflows = tree / "app" / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    shutil.copy(FIXTURE_REPO / ".github" / "workflows" / "clean.yml", workflows)
+    outside = tmp_path / "outside"
+    (outside / "workflows").mkdir(parents=True)
+    (outside / "actionlint.yaml").write_text(
+        "self-hosted-runner:\n  labels: OUTSIDE-MARKER-LABEL\n"
+    )
+    (tree / ".github").symlink_to(outside, target_is_directory=True)
+    scanner = _scanner(tree)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=tree, target_type="source")
+
+    ((_, kwargs),) = fake.calls
+    run_root = Path(kwargs["cwd"])
+    assert not run_root.resolve().is_relative_to(tree.resolve())
+    assert (run_root / "app" / ".github" / "workflows" / "clean.yml").is_file()
+    assert (
+        f".github/actionlint.yaml at {tree.as_posix()} is reached through a link"
+        in caplog.text
+    )
+    assert "OUTSIDE-MARKER-LABEL" not in caplog.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_config_to_avoid_names_a_link_on_a_directory_before_the_file(tmp_path):
+    """The same judgment without a scan: a candidate whose directory is a link is
+    reported as reached through a link, whether the link points outside the tree
+    or at another directory of it; the same file reached by no link is not."""
+    tree = tmp_path / "tree"
+    (tree / ".git").mkdir(parents=True)
+    real_dir = tree / "real-github"
+    (real_dir / "workflows").mkdir(parents=True)
+    (real_dir / "actionlint.yaml").write_text("self-hosted-runner: 1\n")
+    (tree / ".github").symlink_to(real_dir, target_is_directory=True)
+
+    assert module.config_to_avoid(tree, [tree]) == (
+        tree,
+        ".github/actionlint.yaml",
+        "reached through a link",
+    )
+
+    (tree / ".github").unlink()
+    real_dir.rename(tree / ".github")
+    assert module.config_to_avoid(tree, [tree]) is None
+
+
 @pytest.mark.unit
 def test_a_target_with_no_project_root_is_not_staged_and_an_exit_3_is_an_error(
     repo, monkeypatch, on_path, caplog

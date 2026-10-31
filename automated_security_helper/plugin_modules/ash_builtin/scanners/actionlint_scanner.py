@@ -724,20 +724,30 @@ def config_to_avoid(
 ) -> Optional[Tuple[Path, str, str]]:
     """``(root, name, shape)`` for the first repository actionlint config, among
     *roots*, that actionlint would read and ASH must keep it from reading: a
-    link, anything but a regular file, or a file outside the scanned tree.
+    link (the file itself, or a directory on the way to it), anything but a
+    regular file, or a file outside the scanned tree.
 
     actionlint picks the first of ``.github/actionlint.yaml`` and ``.yml`` that
     ``os.Stat`` finds at a project root (a dangling link is passed over) and reads
     it with ``os.ReadFile``, which follows a link and blocks on a FIFO. The run
     stays in the tree only when every root's candidate is absent or is a plain
-    regular file inside the scanned tree; actionlint then reads that file itself,
-    and a file it refuses is caught by its exit code (the batch is run again from
-    a copy outside the tree). Nothing here opens a file: a candidate of any other
-    shape is judged by its stat alone, and the run is moved to the copy before
-    actionlint, or ASH, could read through it.
+    regular file inside the scanned tree, reached through no link; actionlint then
+    reads that file itself, and a file it refuses is caught by its exit code (the
+    batch is run again from a copy outside the tree). Nothing here opens a file: a
+    candidate of any other shape is judged by its stat alone, and the run is moved
+    to the copy before actionlint, or ASH, could read through it.
+
+    The file is judged by where it really is. A link on the last component is
+    seen by ``is_symlink``; a link on a directory before it (``.github`` itself)
+    leaves the last component an ordinary file as far as that test goes, so the
+    real path is compared with the root's real path joined to the name, and any
+    difference is a link on the way. The scanned tree is the target's real path
+    for the same reason: a name that merely sits under the target is not a file
+    inside it.
     """
-    tree = Path(target).absolute()
+    tree = Path(os.path.realpath(target))
     for root in roots:
+        real_root = Path(os.path.realpath(root))
         for name in _DEFAULT_CONFIG_CANDIDATES:
             path = root / name
             if not probe_path(path, "exists"):
@@ -746,7 +756,10 @@ def config_to_avoid(
                 return root, name, "a link"
             if not probe_path(path, "is_file"):
                 return root, name, "not a regular file"
-            if root != tree and tree not in root.parents:
+            real = Path(os.path.realpath(path))
+            if real != real_root / name:
+                return root, name, "reached through a link"
+            if not real.is_relative_to(tree):
                 return root, name, "outside the scanned tree"
             break
     return None
