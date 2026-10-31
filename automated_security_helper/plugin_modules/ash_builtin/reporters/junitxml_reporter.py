@@ -178,23 +178,26 @@ def _scanner_threshold(
 #: and the two noncharacters. A scanner message, a suppression justification or a
 #: property value can carry one (a file name in a scanned repository may), and a
 #: document holding one is not well-formed, so no JUnit consumer reads it.
-_XML_FORBIDDEN = re.compile(
-    "[%s-%s%s%s%s-%s%s-%s%s%s]"
-    % tuple(
-        chr(point)
-        for point in (
-            0x00,
-            0x08,
-            0x0B,
-            0x0C,
-            0x0E,
-            0x1F,
-            0xD800,
-            0xDFFF,
-            0xFFFE,
-            0xFFFF,
-        )
-    )
+_XML_FORBIDDEN_CLASS = (
+    "[\x00-\x08\x0b\x0c\x0e-\x1f"
+    + chr(0xD800)
+    + "-"
+    + chr(0xDFFF)
+    + chr(0xFFFE)
+    + chr(0xFFFF)
+    + "]"
+)
+
+#: The text of an escape ``_xml_text`` writes, in the lower-case hex it writes:
+#: ``xNN`` for a forbidden code below U+0100, ``uNNNN`` for a surrogate or one of
+#: the two noncharacters.
+_XML_ESCAPE_TEXT = r"x(?:0[0-8bcef]|1[0-9a-f])|u(?:d[89a-f][0-9a-f]{2}|fffe|ffff)"
+
+#: A forbidden character, or a run of backslashes that comes before text that
+#: reads as one of the escapes written for it (or before such a character), which
+#: has to be doubled so the written escape stays apart from a literal one.
+_XML_TEXT = re.compile(
+    rf"(?<!\\)(\\+)(?={_XML_ESCAPE_TEXT}|{_XML_FORBIDDEN_CLASS})|{_XML_FORBIDDEN_CLASS}"
 )
 
 
@@ -204,15 +207,20 @@ def _xml_text(value: object) -> str:
     Written out (``\\x01``, ``\\ufffe``) rather than dropped, so a reader can
     see what the text held; the layout characters XML allows (tab, newline,
     carriage return) are kept as they are, because ``system-out`` is joined
-    with newlines.
+    with newlines. A backslash run before text that reads as one of those
+    escapes is doubled, as the other reports do, so a message that holds the
+    four characters ``\\x01`` is not taken for one that held U+0001.
     """
     text = "" if value is None else str(value)
 
     def shown(match: re.Match[str]) -> str:
+        run = match.group(1)
+        if run:
+            return run * 2
         point = ord(match.group(0))
         return f"\\x{point:02x}" if point < 0x100 else f"\\u{point:04x}"
 
-    return _XML_FORBIDDEN.sub(shown, text)
+    return _XML_TEXT.sub(shown, text)
 
 
 def _as_flag(value: object) -> bool | None:
