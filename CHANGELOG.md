@@ -2610,6 +2610,19 @@
   bidirectional-formatting characters escaped in the text summary, on the console
   and in the log.
 
+- **npm-audit's rule ids for advisories that carry no URL, or share one, now end in
+  the audit tool's advisory id.** An advisory with no usable URL had the rule id
+  `npm-<package>` whatever the advisory, so two of them on one package folded into one
+  result and the second one's severity, CWE and CVSS were dropped. Where the tool
+  gives an advisory id (npm's `source`, or the id of a yarn or pnpm record) the rule
+  id is now `npm-<package>-<id>`, and advisories of different titles that sit behind
+  one collection URL take the same `-<id>` ending after the URL's last segment. Both
+  advisories now show as results. A suppression whose `rule_id` names the old id
+  (`npm-left-pad`) no longer matches, so the finding it hid is reported again until
+  the suppression names the new id, which the finding shows. A package whose name ends
+  in `-<number>` and another package's advisory id can spell the same rule id; that is
+  a limit of the id's shape and is unchanged here.
+
 - **npm-audit's package managers read none of the scanned repository's settings
   files, and run no file it names.** npm, pnpm and yarn ran in the package's
   directory, so the repository's `.npmrc` (and, for pnpm, `pnpm-workspace.yaml`),
