@@ -1525,11 +1525,20 @@ class ScannerStatisticsCalculator:
         Only this scanner's own reports are read (``_own_reports``): a report filed under
         this name that names another scanner is not this scanner's ERROR, and a name-less
         report's ERROR counts for the key it is filed under.
+
+        A failure container counts as ERROR whatever status it carries
+        (``_is_failure_report``): ``ScanResultsContainer.for_failure`` writes FAILED,
+        and ``_status_info_from_report`` already reads it as an error for the one report
+        it is given. Without the same reading here, a crashed run filed under one tree
+        beside a clean report on the source tree was lost, because only the chosen
+        report had been read for the failure's marks.
         """
         reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
 
         for target_report in reports.values():
-            if target_report.get("status") != ScannerStatus.ERROR.value:
+            status = target_report.get("status")
+            crashed = ScannerStatisticsCalculator._is_failure_report(target_report)
+            if status != ScannerStatus.ERROR.value and not crashed:
                 continue
             if (
                 not include_partial_loss

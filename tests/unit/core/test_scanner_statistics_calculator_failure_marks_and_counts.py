@@ -162,6 +162,57 @@ class TestAnExceptionIsAFailuresMarkEverywhere:
         assert error is False
 
 
+class TestACrashedTreeBesideACleanSourceIsAnError:
+    """``any_target_errored`` read ``status == "ERROR"`` only, and
+    ``_status_info_from_report`` read a failure's marks only on the one report it
+    was given (the source tree's). A failure container filed under another tree
+    carries FAILED, so beside a clean source report the crash was lost and the
+    scanner read PASSED."""
+
+    @staticmethod
+    def _model_with_a_crashed_converted_tree(**crash_marks) -> AshAggregatedResults:
+        return _model(
+            {
+                "bandit": {
+                    "source": _report("bandit"),
+                    "converted": _report(
+                        "bandit", "converted", status="FAILED", **crash_marks
+                    ),
+                }
+            }
+        )
+
+    def test_a_failure_container_on_another_tree_reads_as_an_errored_target(self):
+        model = self._model_with_a_crashed_converted_tree(
+            exception="RuntimeError: the run raised"
+        )
+
+        assert ScannerStatisticsCalculator.any_target_errored(model, "bandit") is True
+        assert (
+            ScannerStatisticsCalculator.any_target_errored(
+                model, "bandit", include_partial_loss=False
+            )
+            is True
+        )
+
+    def test_the_scanner_reads_error_beside_a_clean_source_report(self):
+        model = self._model_with_a_crashed_converted_tree(
+            raw_results={"status": "failed", "errors": ["the run raised"]}
+        )
+
+        _, _, error = ScannerStatisticsCalculator.get_scanner_status_info(
+            model, "bandit"
+        )
+
+        assert error is True
+
+    def test_a_failed_report_with_no_failure_mark_is_not_an_error(self):
+        """Control: FAILED alone is "found issues", the grade a finding earns."""
+        model = self._model_with_a_crashed_converted_tree(severity_counts={"high": 1})
+
+        assert ScannerStatisticsCalculator.any_target_errored(model, "bandit") is False
+
+
 def _sarif(scanner_name: str, levels: list[str]) -> SarifReport:
     return SarifReport(
         runs=[
