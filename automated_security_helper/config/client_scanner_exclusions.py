@@ -281,25 +281,28 @@ class ClientScannerExclusion(BaseModel):
         """
         if self.kind == "bandit":
             return bandit_would_skip(self.pattern, relative=relative, absolute=absolute)
-        outside = _names_no_root(relative)
+        # The path is placed once, and every matcher reads the placed form: a
+        # matcher handed the spelling (``x/../vendor/a.py``) would take its
+        # ``x`` and ``..`` for directories of the file.
+        placed = _placed_in_tree(relative)
         if self.kind == "checkov":
-            return not outside and checkov_skips(
+            return placed is not None and checkov_skips(
                 self.pattern,
                 absolute,
-                relative,
+                placed,
                 timeout=self.scan_timeout,
                 budget=budget,
             )
         if self.kind == "glob":
-            return not outside and any(
-                glob_excludes(pattern, relative) for pattern in self._globs()
+            return placed is not None and any(
+                glob_excludes(pattern, placed) for pattern in self._globs()
             )
         if not rule_id or not _same_trivy_id(rule_id, self.pattern):
             return False
         if not self.paths:
             return True
-        return not outside and any(
-            trivy_path_matches(path, relative) for path in self.paths
+        return placed is not None and any(
+            trivy_path_matches(path, placed) for path in self.paths
         )
 
     def _globs(self) -> List[str]:
@@ -363,13 +366,29 @@ def _names_no_root(relative: str) -> bool:
     a leading ``..`` was looked for before, and an unanchored entry hid such a
     finding as a file inside the tree.
     """
+    return _placed_in_tree(relative) is None
+
+
+def _placed_in_tree(relative: str) -> Optional[str]:
+    """The path ``relative`` names from the scan root, collapsed; None when it names no file of the tree.
+
+    Every leading ``./`` is taken off before the root and drive checks, so
+    ``.//etc/x`` and ``./C:/x`` read as the absolute paths they are, not as
+    paths inside the tree. What is left is collapsed (``posixpath.normpath``),
+    so ``x/../vendor/a.py`` is ``vendor/a.py``. The matchers are handed this
+    form and never the spelling: ``glob_excludes`` kept the ``..`` as a
+    directory of the file, and an unanchored entry ``x`` hid a finding the
+    scanner had reported at ``vendor/a.py``, which this module never does.
+    """
     below = _slashed(relative)
-    if below.startswith("/") or _has_a_drive(below):
-        return True
+    while below.startswith("./"):
+        below = below[2:]
+    if not below or below.startswith("/") or _has_a_drive(below):
+        return None
     below = posixpath.normpath(below)
-    if below in ("", "."):
-        return True
-    return below.split("/", 1)[0] == ".."
+    if below == "." or below.split("/", 1)[0] == "..":
+        return None
+    return below
 
 
 def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
@@ -394,13 +413,11 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
         bandit_excluded_path_globs,
     )
 
-    if _names_no_root(relative):
+    below = _placed_in_tree(relative)
+    if below is None:
         # An absolute "relative" path is the SARIF step's sign that it could
         # not place the finding under the source directory: no root is known.
         return False
-    below = _slashed(relative)
-    while below.startswith("./"):
-        below = below[2:]
     path = _slashed(absolute)
     if not path.endswith("/" + below):
         return False

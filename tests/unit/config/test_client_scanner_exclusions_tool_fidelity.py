@@ -317,6 +317,84 @@ def test_every_spelling_of_a_path_outside_the_tree_hides_nothing(
     )
 
 
+_UNANCHORED_ENTRIES = [
+    ("semgrep", "exclude", "glob", "x", (), None),
+    ("checkov", "skip_path", "checkov", "x", (), None),
+    ("trivy-repo", "ignore_file", "trivy-ignore-file", "CVE-1", ("**/x",), "CVE-1"),
+]
+_UNANCHORED_IDS = ["glob", "checkov", "trivy"]
+
+
+@pytest.mark.parametrize(
+    ("scanner", "option", "kind", "pattern", "paths", "rule_id"),
+    _UNANCHORED_ENTRIES,
+    ids=_UNANCHORED_IDS,
+)
+def test_a_path_that_climbs_back_in_is_matched_as_the_file_it_names(
+    scanner, option, kind, pattern, paths, rule_id
+):
+    """The finding is at ``vendor/a.py``, spelled ``x/../vendor/a.py``. Its
+    path was collapsed to decide whether it is inside the tree, but each
+    matcher was handed the spelling, which kept ``x`` and ``..`` as directories
+    of the file: an unanchored client entry ``x`` matched the ``x`` and hid a
+    finding the scanner had reported, against the module's rule that a finding
+    its matching misses is reported and never hidden. Every kind now reads the
+    collapsed path, so an entry that names ``x`` leaves the file alone and an
+    entry that names ``vendor`` still hides it."""
+    entry = ClientScannerExclusion(
+        scanner=scanner,
+        option=option,
+        kind=kind,
+        pattern=pattern,
+        reason="r",
+        paths=("x/**",) if kind == "trivy-ignore-file" else paths,
+    )
+    assert not entry.hides(
+        relative="x/../vendor/a.py", absolute="/s/vendor/a.py", rule_id=rule_id
+    )
+    control = ClientScannerExclusion(
+        scanner=scanner,
+        option=option,
+        kind=kind,
+        pattern="vendor" if kind != "trivy-ignore-file" else pattern,
+        reason="r",
+        paths=("**/vendor/**",) if kind == "trivy-ignore-file" else (),
+    )
+    assert control.hides(
+        relative="x/../vendor/a.py", absolute="/s/vendor/a.py", rule_id=rule_id
+    )
+
+
+@pytest.mark.parametrize(
+    ("scanner", "option", "kind", "pattern", "paths", "rule_id"),
+    _UNANCHORED_ENTRIES,
+    ids=_UNANCHORED_IDS,
+)
+@pytest.mark.parametrize(
+    ("spelled", "absolute"),
+    [(".//etc/x", "/etc/x"), ("./C:/x", "C:/x")],
+    ids=["dot-slash-root", "dot-slash-drive"],
+)
+def test_a_dot_slash_before_a_root_or_a_drive_is_still_outside_the_tree(
+    scanner, option, kind, pattern, paths, rule_id, spelled, absolute
+):
+    """``.//etc/x`` and ``./C:/x`` are the absolute paths ``//etc/x`` and
+    ``C:/x`` once the leading ``./`` is taken off. The root and drive checks
+    ran before that strip, so both read as paths inside the tree and an
+    unanchored entry named ``x`` hid them. The strip now comes first. The
+    control is the same file name written inside the tree."""
+    entry = ClientScannerExclusion(
+        scanner=scanner,
+        option=option,
+        kind=kind,
+        pattern=pattern,
+        reason="r",
+        paths=paths,
+    )
+    assert not entry.hides(relative=spelled, absolute=absolute, rule_id=rule_id)
+    assert entry.hides(relative="etc/x", absolute="/s/etc/x", rule_id=rule_id)
+
+
 @pytest.mark.parametrize(
     "sibling",
     ["vendor_old/x.py", "vendor.py", "vendors/x.py", "avendor/x.py"],
