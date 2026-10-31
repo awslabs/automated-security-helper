@@ -1467,8 +1467,14 @@ def update(
     # A config a scan refuses for its plugin modules is not written: get,
     # validate and validate-plugin-dependencies refuse the same entries with
     # exit 3, so a file written with one was reported updated and then refused
-    # by every reader.
-    _refuse_a_config_a_scan_refuses(updated_config, f"Not updating {config_path}")
+    # by every reader. The wizard's policy (unfindable=False): a module inside
+    # ASH's plugin namespace that no installed package provides yet is written,
+    # since the operator may install it next and the check commands name it
+    # until then; refusing it here made a --set of an unrelated key fail on a
+    # file the wizard had just written.
+    _refuse_a_config_a_scan_refuses(
+        updated_config, f"Not updating {config_path}", unfindable=False
+    )
 
     # The file as it is now, read once for the schema line and the keep_from
     # data, and compared with the bytes the refusal checks read: a file changed
