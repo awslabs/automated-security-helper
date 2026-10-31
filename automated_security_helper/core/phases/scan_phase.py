@@ -1571,18 +1571,13 @@ class ScanPhase(EnginePhase):
                         # change nothing while implying it fixed something.
                         is_enabled = selection.enabled
                         if not (is_in_enabled_scanners and is_enabled):
-                            not_selected_reasons = []
-                            if not is_enabled:
-                                not_selected_reasons.append(
-                                    "disabled in the configuration (enabled: false)"
-                                )
-                            if not is_in_enabled_scanners:
-                                not_selected_reasons.append(
-                                    f"not named by {names.allowlist}"
-                                )
+                            # The one helper and its one order, as the rows of a
+                            # scanner left out at registration are worded: this
+                            # list used to name "disabled" before "not named", so
+                            # one deselected scanner read differently by path.
                             aggregated_results = self._record_scanner_not_selected(
                                 display_name,
-                                ", ".join(not_selected_reasons),
+                                ", ".join(_not_selected_reasons(selection, names)),
                                 aggregated_results,
                                 excluded_scanner_names,
                             )
