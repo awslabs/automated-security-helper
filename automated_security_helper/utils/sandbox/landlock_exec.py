@@ -491,6 +491,10 @@ def _parse_policy(text: str) -> Dict[str, Any]:
     ``add_path_rule`` skips a path that does not exist, so the grant would go in
     silence. ASH's backend sends resolved paths only (backends.py ``_plan``), so
     a relative one is a caller's defect and is refused.
+
+    A path with a NUL byte, or a lone surrogate the filesystem encoding cannot
+    hold, is refused too (``_refuse_unusable_path``): the system calls raise
+    ValueError or UnicodeEncodeError for it, not the OSError their callers read.
     """
     try:
         policy = json.loads(text)
@@ -993,7 +997,7 @@ def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
     """Kill and reap what the scanner left, until the tree is empty or the deadline.
 
     Returns the pids a pass still found once the loop ended: an empty list when
-    five quiet passes in a row found nothing, the survivors when the deadline
+    REAP_QUIET_PASSES passes in a row found nothing, the survivors when the deadline
     ended the loop first, so the caller can say that something outlived the stop.
     An orphan is reparented here only once its own parent has exited, which can
     trail the scanner's exit, so "no children" has to hold for a short while.
