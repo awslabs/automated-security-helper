@@ -106,13 +106,19 @@ def test_a_returned_custom_command_still_reads_as_its_argv(plugin_context):
 
 def test_a_dependency_still_renders_as_an_argv_without_a_shell(plugin_context):
     """The control: a declared dependency is an array of arguments, run without
-    a shell, as before."""
+    a shell, as before.
+
+    An npm dependency, because its argv is rendered from the declaration alone. A
+    pip dependency is rendered by probing the running interpreter for pip or uv,
+    so the control would read the test environment instead of the plugin."""
     plugin = _plugin(plugin_context)
     plugin.dependencies = {
         "linux": {
             "amd64": [
                 PluginDependency(
-                    name="pip-side", version="1.0.0", package_manager=PackageManager.PIP
+                    name="side-tool",
+                    version="1.0.0",
+                    package_manager=PackageManager.NPM,
                 )
             ]
         }
@@ -120,6 +126,6 @@ def test_a_dependency_still_renders_as_an_argv_without_a_shell(plugin_context):
 
     commands = plugin.get_installation_commands("linux", "amd64")
 
-    assert len(commands) == 1
+    assert commands == [["npm", "install", "-g", "side-tool@1.0.0"]]
     assert isinstance(commands[0], list)
     assert _well_formed_commands(commands)[0][1] is False
