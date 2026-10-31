@@ -2,6 +2,7 @@
 
 import contextvars
 import math
+import re
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -296,8 +297,21 @@ def _finding_severity_level(severity: Any) -> str:
     return "medium"
 
 
+#: A number as a tool prints it: ASCII digits with an optional sign, decimal point and
+#: exponent. Python's own ``float`` also takes digit separators (``1_0``) and digits of
+#: other scripts, which a tool's severity name can spell without meaning a score.
+_PLAIN_NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?", re.ASCII)
+
+
 def _score_in_text(word: str) -> float | None:
-    """The finite number the text *word* spells, or None."""
+    """The finite number the text *word* spells in plain decimal notation, or None.
+
+    The assumption is that a numeric string is a CVSS 0 to 10 score as a tool
+    prints it, so only plain notation counts: ``1_0`` and the digits of other
+    scripts are names, not the numbers Python would read them as.
+    """
+    if _PLAIN_NUMBER.fullmatch(word) is None:
+        return None
     try:
         score = float(word)
     except ValueError:

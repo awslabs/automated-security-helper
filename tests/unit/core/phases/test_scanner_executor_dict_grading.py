@@ -318,12 +318,15 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.severity_counts.total == 1
         assert row.finding_count == 1
 
-    @pytest.mark.parametrize("text", ["abc", "nan", "inf", "-inf", "9.8.1"])
+    @pytest.mark.parametrize(
+        "text", ["abc", "nan", "inf", "-inf", "9.8.1", "1_0", "9_8", "1_0.5"]
+    )
     def test_text_that_is_not_a_finite_number_is_still_a_name(
         self, plugin_context, text
     ):
-        """Control: only a finite number is a score. The rest is a name ASH
-        cannot place, which counts as info as before."""
+        """Control: only a finite number in plain decimal notation is a score. The
+        rest is a name ASH cannot place, which counts as info as before: Python's
+        digit separator makes ``1_0`` the float 10.0, which would count critical."""
         row = _row(plugin_context, {"findings": [{"severity": text}]})
 
         assert row.severity_counts.info == 1, row.severity_counts
