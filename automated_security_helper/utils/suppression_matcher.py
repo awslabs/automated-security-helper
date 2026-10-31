@@ -21,7 +21,9 @@ from automated_security_helper.models.core import (
     expiration_has_passed,
 )
 from automated_security_helper.utils.path_matching import (
+    _match_form,
     _path_pattern_matches,
+    _pattern_components,
     directory_spelling,
     ignore_path_pattern,
 )
@@ -352,7 +354,10 @@ def warn_unmatched_directory_suppressions(
         directory = path.rstrip("/\\")
         if not directory:
             continue
-        if directory.replace("\\", "/").rsplit("/", 1)[-1] == "**":
+        # As the matcher reads it: one slash after a trailing ``**`` is part of
+        # it (``build/**/`` is ``build/**``), a second is a component of its own
+        # that no path has (``build/**//`` matches nothing and is warned about).
+        if _pattern_components(_match_form(path))[-1] == "**":
             continue
         written = (recorded or {}).get(id(suppression), {}).get("path")
         if isinstance(written, str) and written.rstrip("/\\"):

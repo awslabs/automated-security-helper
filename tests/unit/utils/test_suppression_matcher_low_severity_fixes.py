@@ -71,7 +71,7 @@ def _finding(path: str = "src/a.py", rule_id: str = "R1") -> FlatVulnerability:
 
 
 class TestUnmatchedDirectoryWarning:
-    @pytest.mark.parametrize("path", ["build/**/", "build\\**\\", "**/", "a/b/**//"])
+    @pytest.mark.parametrize("path", ["build/**/", "build\\**\\", "**/"])
     def test_a_path_ending_in_doublestar_and_a_slash_is_not_called_literal(
         self, ash_warnings, path
     ):
@@ -88,10 +88,15 @@ class TestUnmatchedDirectoryWarning:
         follows another component than ``**`` is still named."""
         literal = AshSuppression(path="build/", rule_id="R1", reason="r")
         deeper = AshSuppression(path="build/**/*/", rule_id="R2", reason="r")
+        # One slash after ``**`` is part of it; a second is a component no path
+        # has, so this one matches nothing.
+        doubled = AshSuppression(path="a/b/**//", rule_id="R3", reason="r")
 
-        warn_unmatched_directory_suppressions([literal, deeper], used_ids=set())
+        warn_unmatched_directory_suppressions(
+            [literal, deeper, doubled], used_ids=set()
+        )
 
-        assert len(ash_warnings) == 2
+        assert len(ash_warnings) == 3
 
     def test_a_path_read_from_the_environment_is_quoted_by_its_reference(
         self, ash_warnings
