@@ -546,10 +546,13 @@ def test_a_recorded_failure_counts_as_a_completion_in_a_cancelled_run(
     tmp_path, monkeypatch
 ):
     """A scanner whose results could not be processed is recorded as a failure,
-    and that is a completion too: the next completed scanner's SCAN_COMPLETE
-    counts it. Three scanners -- s1's processing fails, s2 completes, s0
-    carries the cancel -- so s2's payload says 2 of 3, the failure counted and
-    the cancel's own future not."""
+    and that is a finished turn too: it is announced with its own SCAN_COMPLETE,
+    ``succeeded`` False, and the next completed scanner's SCAN_COMPLETE counts
+    it. Three scanners -- s1's processing fails, s2 completes, s0 carries the
+    cancel -- so s1's payload says it did not succeed, s2's says 2 of 3, the
+    failure counted and the cancel's own future not. (The failed turn used to
+    send no event at all; every finished turn is announced now, so a subscriber
+    that waits for the last turn sees it end.)"""
     import concurrent.futures
 
     from automated_security_helper.core.phases import scanner_executor as module
@@ -610,11 +613,16 @@ def test_a_recorded_failure_counts_as_a_completion_in_a_cancelled_run(
         if event_type == AshEventType.SCAN_COMPLETE and kwargs.get("scanner") == "s2"
     ]
     assert completions, "the cell shows nothing: s2 never completed"
-    assert not any(
-        kwargs.get("scanner") == "s1"
+    failed_turns = [
+        kwargs
         for event_type, kwargs in events
-        if event_type == AshEventType.SCAN_COMPLETE
-    ), "the cell shows nothing: s1 completed instead of failing"
+        if event_type == AshEventType.SCAN_COMPLETE and kwargs.get("scanner") == "s1"
+    ]
+    assert len(failed_turns) == 1, failed_turns
+    assert failed_turns[0]["succeeded"] is False, (
+        "the cell shows nothing: s1 was announced as a success instead of a failure"
+    )
+    assert completions[0]["succeeded"] is True, completions
     assert completions[0]["completed_count"] == 2, completions
     assert completions[0]["total_count"] == 3, completions
 
