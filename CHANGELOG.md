@@ -177,6 +177,23 @@
   followed or written through, a warning names the entry, and the scan goes on;
   with a sandbox the link is refused before the scan starts, as above.
 
+  The sweep after each sandboxed spawn no longer passes over what it cannot
+  examine, and a scan that passed before can now end `ERROR` because of it. A
+  directory below a scanner's results directory that cannot be opened or listed, an
+  entry that cannot be examined or removed, a tree nested past 200 directories, and
+  a results directory root that cannot be checked are each refused: logged as a
+  warning (redacted with the plugin's environment values; at most 50 are logged in
+  full per sweep, then the rest are counted), left as found, and the sweep goes on
+  with the rest of the tree and the other roots. It then raises one error that
+  carries the first refusal's text and counts the others, and the scanner's row is
+  `ERROR` with that reason unless a failure of the scan itself is already the
+  reason. Before, a scanner could keep a symlink out of the sweep by making its
+  directory unlistable, and the scan passed with the link in place. The check that
+  runs before a sandboxed scanner starts (`refuse_links_below`) refuses a results
+  directory root that is itself a symlink, and redacts and logs its refusals the
+  same way instead of chaining the operating system's error, which carries the
+  full path.
+
   If a sandbox was requested and cannot be provided, ASH never falls back to
   running the scanner unsandboxed, and the scan exits 1. A backend named
   explicitly (`--sandbox bwrap`) that is unavailable records the scanner as an
