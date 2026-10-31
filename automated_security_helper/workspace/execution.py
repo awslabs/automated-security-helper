@@ -1418,6 +1418,13 @@ def _scan_one_project(
         ASH_LOGGER.info(f"Project '{project.key}' stopped: it was cancelled")
         if handed and abandoned is not None and not _claim_commit(abandoned):
             _discard_project_output(project_output)
+        elif handed:
+            # A cancel read at the scan's own results-file write ends it with the
+            # previous results still set aside, for the caller to settle (the
+            # orchestrator leaves them so on purpose, as the CLI's write does),
+            # and this call is the project's caller. A cancel that landed in the
+            # phases already put them back, and a second put-back does nothing.
+            _put_previous_results_back(orchestrator)
         cancelled = _failed_outcome(
             project,
             settings,
@@ -1485,6 +1492,21 @@ def _scan_one_project(
         # output reads them from the outcome, and the outcome was built here.
         failed.secret_values = exposed_secret_values(results)
         return failed
+
+
+def _put_previous_results_back(orchestrator: Any) -> None:
+    """Put a cancelled project's previous results back where the scan found them.
+
+    With ``keep_previous_results`` the orchestrator sets the previous results aside
+    and, once its phases have finished, drops them when the scan counts as having
+    results. A cancel read at the results-file write ends the scan with neither
+    done, and leaves the settling to the caller. The orchestrator's own method is
+    called when there is one: the factory is injectable, and a stand-in without it
+    has nothing set aside. The method does not raise.
+    """
+    settle = getattr(orchestrator, "settle_previous_results", None)
+    if callable(settle):
+        settle(restore=True)
 
 
 def _reduce_project_scan(
