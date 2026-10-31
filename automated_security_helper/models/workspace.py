@@ -162,7 +162,9 @@ Only a ``NO_CHANGES`` skip counts as examined, by identity. The model admits a
 ``SKIPPED`` entry with no ``skip_reason`` (``as_skipped_project`` leaves it out
 of the payload), and a gate must not read an unexpected state as a pass: such an
 entry neither counts as examined nor is set aside, so a run of only such entries
-exits 4. A test written as "any entry whose reason is not ERROR" read that entry
+exits 4. Beside a completed project it also exits 4 when nothing else decides
+the status: a failure, an incomplete scan or an actionable finding outranks it,
+and a clean sibling does not clear it. A test written as "any entry whose reason is not ERROR" read that entry
 as examined and exited 0.
 
 History: from 2026-10-29 22:51Z the branch read ``entries and all(skip_reason is
@@ -1075,8 +1077,10 @@ def workspace_exit_code(
     Returns:
         The contract code, always as an enum member rather than a literal, so
         that a future renumbering cannot leave a stale integer behind. Never
-        returns ``WORKSPACE_ERROR`` except for the nothing-was-attempted case;
-        every other definition or policy failure is raised before execution.
+        returns ``WORKSPACE_ERROR`` except for the nothing-was-attempted case
+        and for a skipped project that records no reason beside projects that
+        are otherwise clean; every other definition or policy failure is raised
+        before execution.
     """
     entries = list(projects)
 
@@ -1084,6 +1088,13 @@ def workspace_exit_code(
         entry for entry in entries if entry.status is ProjectRunStatus.COMPLETED
     ]
     failed = [entry for entry in entries if entry.status is ProjectRunStatus.FAILED]
+    # A skipped project that records no reason. The model admits one and nothing
+    # produces one on purpose.
+    unexplained = [
+        entry
+        for entry in entries
+        if entry.status is ProjectRunStatus.SKIPPED and entry.skip_reason is None
+    ]
 
     if not completed and not failed:
         # Nothing was attempted. A resolution-time ERROR skip (a missing project
@@ -1105,9 +1116,10 @@ def workspace_exit_code(
         # model admits a SKIPPED entry with no skip_reason at all, and a gate
         # must not turn an unexpected state into a pass. Such an entry is
         # neither examined nor set aside, and it is not passed over beside an
-        # unchanged sibling either: the run exits 4 whenever one is present,
-        # because a project whose skip nothing explains may be code nothing
-        # examined.
+        # unchanged sibling either: with no project completed or failed the run
+        # exits 4 whenever one is present, because a project whose skip nothing
+        # explains may be code nothing examined. Beside a completed or failed
+        # project it is read at the end of this function.
         #
         # Nothing examined means no project was named, every project named was
         # missing, or no entry says a project was looked at: exiting 0 would
@@ -1117,7 +1129,6 @@ def workspace_exit_code(
             for entry in entries
             if entry.skip_reason is SkippedProjectReason.NO_CHANGES
         ]
-        unexplained = [entry for entry in entries if entry.skip_reason is None]
         if examined and not unexplained:
             return WorkspaceExitCode.SUCCESS
         return WorkspaceExitCode.WORKSPACE_ERROR
@@ -1146,4 +1157,10 @@ def workspace_exit_code(
         # it has in single-project mode. Named rather than written as 2, so that
         # renumbering the table cannot silently turn this into another code.
         return WorkspaceExitCode.ACTIONABLE_FINDINGS
+    if unexplained:
+        # Every other status above says something about the code that was
+        # scanned, and outranks this one. Reaching here means those projects
+        # were clean, which says nothing about the project whose skip nothing
+        # explains: it may be code nothing examined, so the run is not a pass.
+        return WorkspaceExitCode.WORKSPACE_ERROR
     return WorkspaceExitCode.SUCCESS
