@@ -967,6 +967,8 @@
           ]),
           'unstoppable_tools': dict({
           }),
+          'withheld_scanner_thresholds': list([
+          ]),
         }),
         dict({
           'actionable_finding_count': 0,
@@ -1014,6 +1016,8 @@
           ]),
           'unstoppable_tools': dict({
           }),
+          'withheld_scanner_thresholds': list([
+          ]),
         }),
         dict({
           'actionable_finding_count': 0,
@@ -1061,6 +1065,8 @@
           ]),
           'unstoppable_tools': dict({
           }),
+          'withheld_scanner_thresholds': list([
+          ]),
         }),
       ]),
       'results_path': '<TMP>/allowed/work/.ash/ash_output/ash_workspace_results.json',

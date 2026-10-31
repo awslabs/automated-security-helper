@@ -283,7 +283,7 @@ Resolve a VS Code workspace file into a scan plan without scanning anything.
 
 A workspace policy file, named or found in the workspace file's directory or its `.ash` directory, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.
 
-On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted`, `environment_value_in_longer_string`, `invalid_session_id`, `output_dir_not_usable` and `session_identity_required`, or the class name of an exception.
+On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted`, `environment_value_in_longer_string`, `invalid_session_id`, `output_dir_not_usable`, `session_busy` and `session_identity_required`, or the class name of an exception.
 
 ## run_ash_workspace_scan
 
@@ -305,7 +305,7 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 
 A workspace policy file, named or found in the workspace file's directory or its `.ash` directory, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.
 
-On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted`, `environment_value_in_longer_string`, `invalid_session_id`, `output_dir_not_usable`, `session_identity_required`, `session_scan_limit` and `source_delivery_busy`, or the class name of an exception.
+On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted`, `environment_value_in_longer_string`, `invalid_session_id`, `output_dir_not_usable`, `session_busy`, `session_identity_required`, `session_scan_limit` and `source_delivery_busy`, or the class name of an exception.
 
 ## select_profile
 

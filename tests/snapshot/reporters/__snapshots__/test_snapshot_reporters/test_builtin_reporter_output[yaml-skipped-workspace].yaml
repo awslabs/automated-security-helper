@@ -737,6 +737,7 @@ workspace:
     status: completed
     unevaluated_rules: []
     unstoppable_tools: {}
+    withheld_scanner_thresholds: []
   - actionable_finding_count: 1
     ceiling_unreachable_findings: {}
     converter_refusals: []
@@ -771,6 +772,7 @@ workspace:
     status: completed
     unevaluated_rules: []
     unstoppable_tools: {}
+    withheld_scanner_thresholds: []
   - actionable_finding_count: 0
     ceiling_unreachable_findings: {}
     converter_refusals: []
@@ -803,6 +805,7 @@ workspace:
     status: skipped
     unevaluated_rules: []
     unstoppable_tools: {}
+    withheld_scanner_thresholds: []
   refusal_detail: null
   skipped_projects:
   - detail: '''docs'' does not exist as a directory at ''<REPO>/tests/test_data/snapshot_fixture/workspace/docs'''

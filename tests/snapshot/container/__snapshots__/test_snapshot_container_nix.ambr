@@ -37,7 +37,8 @@
         '-c',
         '''
           import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
-          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+          exec(compile("import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()", '<ash>', 'exec'))
+  
         ''',
         'scan',
         '--source-dir',
@@ -99,7 +100,8 @@
         '-c',
         '''
           import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
-          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+          exec(compile("import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()", '<ash>', 'exec'))
+  
         ''',
         'scan',
         '--source-dir',
@@ -152,7 +154,8 @@
         '-c',
         '''
           import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
-          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+          exec(compile("import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()", '<ash>', 'exec'))
+  
         ''',
         'scan',
         '--source-dir',
@@ -229,7 +232,8 @@
         '-c',
         '''
           import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
-          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+          exec(compile("import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()", '<ash>', 'exec'))
+  
         ''',
         'scan',
         '--source-dir',
@@ -280,7 +284,8 @@
         '-c',
         '''
           import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
-          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+          exec(compile("import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()", '<ash>', 'exec'))
+  
         ''',
         'scan',
         '--source-dir',
@@ -332,7 +337,8 @@
         '-c',
         '''
           import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
-          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+          exec(compile("import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()", '<ash>', 'exec'))
+  
         ''',
         'scan',
         '--source-dir',

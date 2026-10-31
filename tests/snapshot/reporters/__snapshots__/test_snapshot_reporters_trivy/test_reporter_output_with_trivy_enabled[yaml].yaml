@@ -561,13 +561,7 @@ sarif:
     - '
 
       '
-    originalUriBaseIds:
-      ROOTPATH:
-        description: null
-        index: -1
-        properties: null
-        uri: file:///src/
-        uriBaseId: null
+    originalUriBaseIds: null
     policies: []
     properties:
       tags: []
@@ -602,8 +596,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: package-lock.json
-            uriBaseId: ROOTPATH
+            uri: file:///src/package-lock.json
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -697,8 +691,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: package-lock.json
-            uriBaseId: ROOTPATH
+            uri: file:///src/package-lock.json
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -792,8 +786,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: package-lock.json
-            uriBaseId: ROOTPATH
+            uri: file:///src/package-lock.json
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -887,8 +881,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: package-lock.json
-            uriBaseId: ROOTPATH
+            uri: file:///src/package-lock.json
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -982,8 +976,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: package-lock.json
-            uriBaseId: ROOTPATH
+            uri: file:///src/package-lock.json
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -1077,8 +1071,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: requirements.txt
-            uriBaseId: ROOTPATH
+            uri: file:///src/requirements.txt
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -1171,8 +1165,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: requirements.txt
-            uriBaseId: ROOTPATH
+            uri: file:///src/requirements.txt
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -1265,8 +1259,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: requirements.txt
-            uriBaseId: ROOTPATH
+            uri: file:///src/requirements.txt
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -1359,8 +1353,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: requirements.txt
-            uriBaseId: ROOTPATH
+            uri: file:///src/requirements.txt
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:
@@ -1453,8 +1447,8 @@ sarif:
             description: null
             index: -1
             properties: null
-            uri: requirements.txt
-            uriBaseId: ROOTPATH
+            uri: file:///src/requirements.txt
+            uriBaseId: null
           contextRegion: null
           properties: null
           region:

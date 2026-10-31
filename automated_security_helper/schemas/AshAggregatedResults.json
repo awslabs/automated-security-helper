@@ -756,6 +756,19 @@
           "description": "An optional identifier which can be used to reference the annotation elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the annotation elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "signature": {
           "anyOf": [
             {
@@ -1565,25 +1578,6 @@
           },
           "description": "Converter configurations by name."
         },
-        "extends": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Base config file(s) this config extends: a path, or a list of paths applied in order, relative to this file. Mappings merge key by key; lists and scalars from this file replace the base's. Paths must stay inside the repository being scanned; URLs are refused.",
-          "title": "Extends"
-        },
         "external_reports_to_include": {
           "default": [],
           "description": "List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools.",
@@ -1755,40 +1749,65 @@
           },
           "description": "Configuration for MCP server resource management and limits"
         },
+        "mcp_resource_management": {
+          "$ref": "#/$defs/MCPResourceManagementConfig",
+          "default": {
+            "enable_health_checks": true,
+            "enable_resource_logging": true,
+            "health_check_interval_seconds": 60,
+            "log_resource_operations": false,
+            "max_concurrent_scans": 3,
+            "max_concurrent_scans_per_session": 2,
+            "max_concurrent_tasks": 20,
+            "max_directory_size_mb": 1000,
+            "max_message_size_bytes": 10485760,
+            "max_path_length": 4096,
+            "memory_critical_threshold_mb": 2048,
+            "memory_warning_threshold_mb": 1024,
+            "operation_timeout_seconds": 180,
+            "scan_timeout_seconds": 1800,
+            "shutdown_timeout_seconds": 30,
+            "task_count_warning_threshold": 15,
+            "thread_pool_max_workers": 4
+          },
+          "description": "Configuration for MCP server resource management and limits"
+        },
         "output_formats": {
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ExportFormat"
+                  },
+                  {
+                    "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                    "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                    "type": "string"
+                  }
+                ]
               },
               "type": "array"
             },
             {
-              "type": "string"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExportFormat"
+                },
+                {
+                  "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                  "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                  "type": "string"
+                }
+              ]
             },
             {
               "type": "null"
             }
           ],
+          "default": [],
           "description": "Reports to write, by reporter name (for example sarif, markdown, github-ghas): a list, one name, or names separated by commas. Narrows the enabled reporters; it does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats list on the command line replaces this list.",
           "title": "Output Formats"
-        },
-        "patch": {
-          "anyOf": [
-            {
-              "items": {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list.",
-          "title": "Patch"
         },
         "project_name": {
           "default": "ash-scan",
@@ -2625,6 +2644,19 @@
       "additionalProperties": false,
       "properties": {
         "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "anyOf": [
             {
               "$ref": "#/$defs/RefType"
@@ -4150,6 +4182,19 @@
           "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
+          "title": "BOM Reference"
+        },
         "counterEvidence": {
           "anyOf": [
             {
@@ -4498,6 +4543,19 @@
           "description": "An optional identifier which can be used to reference the component elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the component elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "components": {
           "anyOf": [
             {
@@ -4674,6 +4732,23 @@
           "title": "Component Manufacturer"
         },
         "mime-type": {
+          "anyOf": [
+            {
+              "pattern": "^[-+a-z0-9.]+/[-+a-z0-9.]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The optional mime-type of the component. When used on file components, the mime-type can provide additional context about the kind of file being represented, such as an image, font, or executable. Some library or framework components may also have an associated mime-type.",
+          "examples": [
+            "image/jpeg"
+          ],
+          "title": "Mime-Type"
+        },
+        "mime_type": {
           "anyOf": [
             {
               "pattern": "^[-+a-z0-9.]+/[-+a-z0-9.]+$",
@@ -4945,6 +5020,19 @@
           "description": "An optional identifier which can be used to reference the dataset elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the dataset elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "classification": {
           "anyOf": [
             {
@@ -5148,6 +5236,11 @@
         "confidence": {
           "anyOf": [
             {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
               "maximum": 1.0,
               "minimum": 0.0,
               "type": "number"
@@ -5243,6 +5336,19 @@
           "title": "BOM references"
         },
         "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the composition elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "anyOf": [
             {
               "$ref": "#/$defs/RefType"
@@ -5489,6 +5595,11 @@
         },
         "score": {
           "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "integer"
+            },
             {
               "maximum": 1.0,
               "minimum": 0.0,
@@ -6113,6 +6224,7 @@
       "type": "array"
     },
     "CustomCommand": {
+      "description": "An install command a plugin declares, with its argv and a shell flag.\n\n``get_installation_commands`` returns a custom command as this object, so\nthe installer reads ``shell`` beside the argv. A reader that indexes,\nslices, iterates or searches the entry reads its ``args``, as it read the\nbare argv list the method used to return in its place; the flag rides\nbeside and is read by name.\n\n``shell=False`` (the default): ``args`` is the argv handed to the program\nunchanged, no shell in between. ``shell=True``: the installer joins the\nwords with single spaces into ONE command line and hands that line to the\nshell as written, so each word carries its own quoting, and shell syntax in\nit (a ``$VARIABLE``, a redirection, a pipe) is expanded and interpreted by\nthe shell. Declare ``shell=True`` only when that expansion is the point; a\ncommand that already names its program and arguments is an argv and stays\n``shell=False``.",
       "properties": {
         "args": {
           "items": {
@@ -6266,6 +6378,18 @@
           "default": null,
           "description": "External references provide a way to document systems, sites, and information that may be relevant but are not included with the BOM. They may also establish specific relationships within or external to the BOM.",
           "title": "External References"
+        },
+        "field_schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "$Schema"
         },
         "formulation": {
           "anyOf": [
@@ -7430,6 +7554,19 @@
           "description": "An optional identifier which can be used to reference the energy provider elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the energy provider elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "description": {
           "anyOf": [
             {
@@ -7670,6 +7807,19 @@
           "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
+          "title": "BOM Reference"
+        },
         "created": {
           "anyOf": [
             {
@@ -7853,6 +8003,36 @@
         "unknown"
       ],
       "title": "ExecutionEnvironment",
+      "type": "string"
+    },
+    "ExportFormat": {
+      "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict, asff and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
+      "enum": [
+        "aggregated",
+        "text",
+        "flat-json",
+        "yaml",
+        "csv",
+        "html",
+        "dict",
+        "junitxml",
+        "markdown",
+        "sarif",
+        "asff",
+        "ocsf",
+        "cyclonedx",
+        "spdx",
+        "custom",
+        "github-ghas",
+        "gitlab-sast",
+        "gitlab-cyclonedx",
+        "unused-suppressions",
+        "aws-security-hub",
+        "bedrock-summary-reporter",
+        "cloudwatch-logs",
+        "s3"
+      ],
+      "title": "ExportFormat",
       "type": "string"
     },
     "ExternalProperties": {
@@ -8887,6 +9067,19 @@
       "additionalProperties": false,
       "properties": {
         "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the formula elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "anyOf": [
             {
               "$ref": "#/$defs/RefType"
@@ -11449,6 +11642,19 @@
           "description": "An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "id": {
           "anyOf": [
             {
@@ -11572,6 +11778,19 @@
           "description": "An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "id": {
           "anyOf": [
             {
@@ -11682,10 +11901,7 @@
           {
             "$ref": "#/$defs/LicenseExpression"
           },
-          {
-            "additionalProperties": true,
-            "type": "object"
-          }
+          {}
         ]
       },
       "title": "License Choice",
@@ -11720,6 +11936,19 @@
           "default": null
         },
         "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "anyOf": [
             {
               "$ref": "#/$defs/RefType"
@@ -13402,6 +13631,19 @@
           "description": "An optional identifier which can be used to reference the model card elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the model card elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "considerations": {
           "anyOf": [
             {
@@ -13992,6 +14234,19 @@
           "description": "An optional identifier which can be used to reference the occurrence elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the occurrence elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "line": {
           "anyOf": [
             {
@@ -14260,6 +14515,19 @@
           "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "email": {
           "anyOf": [
             {
@@ -14329,6 +14597,19 @@
           "title": "Organization Address"
         },
         "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "anyOf": [
             {
               "$ref": "#/$defs/RefType"
@@ -15274,6 +15555,19 @@
       "additionalProperties": false,
       "properties": {
         "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the address elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "anyOf": [
             {
               "$ref": "#/$defs/RefType"
@@ -17639,6 +17933,19 @@
       "additionalProperties": false,
       "properties": {
         "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "anyOf": [
             {
               "$ref": "#/$defs/RefType"
@@ -21132,6 +21439,19 @@
           "description": "An optional identifier which can be used to reference the service elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the service elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "data": {
           "anyOf": [
             {
@@ -21342,6 +21662,19 @@
           "title": "Service Version"
         },
         "x-trust-boundary": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A boolean value indicating if use of the service crosses a trust zone or boundary. A value of true indicates that by using the service, a trust boundary is crossed. A value of false indicates that by using the service, a trust boundary is not crossed.",
+          "title": "Crosses Trust Boundary"
+        },
+        "x_trust_boundary": {
           "anyOf": [
             {
               "type": "boolean"
@@ -22091,6 +22424,19 @@
           "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
+          "title": "BOM Reference"
+        },
         "description": {
           "anyOf": [
             {
@@ -22745,8 +23091,29 @@
     },
     "Task": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "bom-ref"
+              ]
+            },
+            {
+              "required": [
+                "bom_ref"
+              ]
+            }
+          ]
+        }
+      ],
       "properties": {
         "bom-ref": {
+          "$ref": "#/$defs/RefType",
+          "description": "An optional identifier which can be used to reference the task elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "$ref": "#/$defs/RefType",
           "description": "An optional identifier which can be used to reference the task elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
@@ -22951,7 +23318,6 @@
         }
       },
       "required": [
-        "bom-ref",
         "uid",
         "taskTypes"
       ],
@@ -24067,8 +24433,29 @@
     },
     "Trigger": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "bom-ref"
+              ]
+            },
+            {
+              "required": [
+                "bom_ref"
+              ]
+            }
+          ]
+        }
+      ],
       "properties": {
         "bom-ref": {
+          "$ref": "#/$defs/RefType",
+          "description": "An optional identifier which can be used to reference the trigger elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "$ref": "#/$defs/RefType",
           "description": "An optional identifier which can be used to reference the trigger elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
@@ -24224,7 +24611,6 @@
         }
       },
       "required": [
-        "bom-ref",
         "uid",
         "type"
       ],
@@ -25033,6 +25419,19 @@
           "description": "An optional identifier which can be used to reference the vulnerability elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
         },
+        "bom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the vulnerability elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
         "created": {
           "anyOf": [
             {
@@ -25587,8 +25986,29 @@
     },
     "Workflow": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "bom-ref"
+              ]
+            },
+            {
+              "required": [
+                "bom_ref"
+              ]
+            }
+          ]
+        }
+      ],
       "properties": {
         "bom-ref": {
+          "$ref": "#/$defs/RefType",
+          "description": "An optional identifier which can be used to reference the workflow elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "$ref": "#/$defs/RefType",
           "description": "An optional identifier which can be used to reference the workflow elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
@@ -25825,7 +26245,6 @@
         }
       },
       "required": [
-        "bom-ref",
         "uid",
         "taskTypes"
       ],
@@ -25834,6 +26253,22 @@
     },
     "Workspace": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "bom-ref"
+              ]
+            },
+            {
+              "required": [
+                "bom_ref"
+              ]
+            }
+          ]
+        }
+      ],
       "properties": {
         "accessMode": {
           "anyOf": [
@@ -25865,6 +26300,11 @@
           "title": "Aliases"
         },
         "bom-ref": {
+          "$ref": "#/$defs/RefType",
+          "description": "An optional identifier which can be used to reference the workspace elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "$ref": "#/$defs/RefType",
           "description": "An optional identifier which can be used to reference the workspace elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
           "title": "BOM Reference"
@@ -25996,7 +26436,6 @@
         }
       },
       "required": [
-        "bom-ref",
         "uid"
       ],
       "title": "Workspace",
@@ -26237,19 +26676,11 @@
           "title": "Scan Incomplete",
           "type": "boolean"
         },
-        "scanner_reasons": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Why each SKIPPED, MISSING or ERROR scanner gave no result, for this project alone: a SKIPPED or MISSING row's skipped_reason or missing_reason, and the first error an ERROR scanner's reports recorded, such as a constructor that raised. A scanner that ran, or that recorded no reason, is not listed. Empty in a workspace file written before the field existed.",
-          "title": "Scanner Reasons",
-          "type": "object"
-        },
         "scanner_thresholds": {
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Per scanner name (as properties.scanner_name records it), the threshold the verdict graded that scanner's findings by when it is the scanner's own options.severity_threshold, with the workspace ceiling folded in; a scanner not listed was graded by severity_threshold. The unified results carry no ash_config, so a reader that regrades a finding (the merged reporters, the MCP result filters) has no other source for the scanner's gate and judged every project at ASH's default. A scanner whose own threshold the scan read from an environment variable is not listed either: the environment's value is not published here, as no report surface prints it, so a reader grades that scanner by severity_threshold. Empty in a workspace file written before the field existed.",
+          "description": "Per scanner name (as properties.scanner_name records it), the threshold the verdict graded that scanner's findings by when it is the scanner's own options.severity_threshold, with the workspace ceiling folded in; a scanner not listed was graded by severity_threshold. The unified results carry no ash_config, so a reader that regrades a finding (the merged reporters, the MCP result filters) has no other source for the scanner's gate and judged every project at ASH's default. A scanner whose own threshold the scan read from an environment variable is not listed either: the environment's value is not published here, as no report surface prints it, so a reader grades that scanner by severity_threshold; its name is in withheld_scanner_thresholds, so the reader can tell that grade from the verdict's. Empty in a workspace file written before the field existed.",
           "title": "Scanner Thresholds",
           "type": "object"
         },
@@ -26327,6 +26758,14 @@
           "description": "Scanner name to reason, for each scanner whose run ended with a tool ASH could not stop, as the single-scan payload's could_not_stop rows record it. Such a tool may still write into the project's output after the verdict read it, so the project fails (scan_incomplete) whatever fail_on_incomplete_scanners says, as `ash --source-dir P` does. Empty in a workspace file written before the field existed.",
           "title": "Unstoppable Tools",
           "type": "object"
+        },
+        "withheld_scanner_thresholds": {
+          "description": "The scanners (as properties.scanner_name records them) whose own threshold the verdict graded by but whose value is withheld from scanner_thresholds because the scan read it from an environment variable. The names only, never the values. A reader that regrades a finding of such a scanner (threshold_for_scanner answers severity_threshold for it) is told here that the verdict's gate was another, undisclosed one, so it can defer to the carried actionable counts or flag the finding instead of silently grading it by the project gate. Empty when no threshold was withheld, and in a workspace file written before the field existed.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Withheld Scanner Thresholds",
+          "type": "array"
         }
       },
       "required": [
@@ -26584,7 +27023,7 @@
         },
         "online_audits": {
           "default": false,
-          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode.",
+          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode or this scanner's own `offline` option is true.",
           "title": "Online Audits",
           "type": "boolean"
         },
@@ -26719,6 +27158,19 @@
       "additionalProperties": false,
       "properties": {
         "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the object elsewhere in the BOM. Every bom-ref must be unique within the BOM.",
+          "title": "BOM Reference"
+        },
+        "bom_ref": {
           "anyOf": [
             {
               "$ref": "#/$defs/RefType"

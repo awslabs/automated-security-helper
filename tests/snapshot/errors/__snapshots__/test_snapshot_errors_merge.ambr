@@ -177,7 +177,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: These scanners appear in shard results but no shard was assigned them: trivy (PASSED, seen in shard0/ash_aggregated_results.json). No shard ran them, so merging would report them as deliberately skipped rather than never attempted. The status of each is named above because the cause differs: the executors resolved different scanner sets (one missing a plugin module, or a config override applied to some jobs and not others), or a scanner was excluded by every shard's partition. A scanner that failed to construct, or whose plugin module failed to import, is recorded ERROR or MISSING instead and is reported through --fail-on-incomplete-scanners rather than refused here.
+      Refusing to merge: These scanners appear in shard results but no shard was assigned them: trivy (PASSED, seen in shard0/ash_aggregated_results.json). No shard ran them, so merging would report them as deliberately skipped rather than never attempted. The status of each is named above because the cause differs: the executors resolved different scanner sets (one missing a plugin module, or a config override applied to some jobs and not others), or a scanner was excluded by every shard's partition. A scanner that failed to construct, or whose plugin module failed to import, is recorded ERROR or MISSING instead and is reported through --fail-on-incomplete-scanners rather than refused here; one the operator deselected is recorded SKIPPED as excluded and is not refused either.
   
     ''',
   })

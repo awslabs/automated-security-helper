@@ -31,7 +31,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -79,7 +79,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -127,7 +127,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -175,7 +175,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -223,7 +223,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -271,7 +271,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2
@@ -319,7 +319,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2
@@ -367,7 +367,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2
@@ -415,7 +415,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2
@@ -463,7 +463,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2

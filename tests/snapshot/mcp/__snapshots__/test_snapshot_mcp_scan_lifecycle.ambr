@@ -1724,7 +1724,7 @@
       'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
-          'actionable': 2,
+          'actionable': None,
           'critical': 1,
           'high': 0,
           'info': 0,

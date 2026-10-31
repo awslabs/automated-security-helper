@@ -2935,6 +2935,7 @@
       "type": "object"
     },
     "CustomCommand": {
+      "description": "An install command a plugin declares, with its argv and a shell flag.\n\n``get_installation_commands`` returns a custom command as this object, so\nthe installer reads ``shell`` beside the argv. A reader that indexes,\nslices, iterates or searches the entry reads its ``args``, as it read the\nbare argv list the method used to return in its place; the flag rides\nbeside and is read by name.\n\n``shell=False`` (the default): ``args`` is the argv handed to the program\nunchanged, no shell in between. ``shell=True``: the installer joins the\nwords with single spaces into ONE command line and hands that line to the\nshell as written, so each word carries its own quoting, and shell syntax in\nit (a ``$VARIABLE``, a redirection, a pipe) is expanded and interpreted by\nthe shell. Declare ``shell=True`` only when that expansion is the point; a\ncommand that already names its program and arguments is an argv and stays\n``shell=False``.",
       "properties": {
         "args": {
           "items": {
@@ -7770,7 +7771,7 @@
             }
           ],
           "default": false,
-          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode.",
+          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode or this scanner's own `offline` option is true.",
           "title": "Online Audits"
         },
         "persona": {
