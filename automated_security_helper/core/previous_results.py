@@ -341,16 +341,24 @@ class PreviousResults:
             # The first free name: a leftover that could not be removed holds
             # DISCARDING_DIR_NAME, and a rename onto it is refused, which used
             # to send the discard into deleting the held set in place.
+            skipped: list[Path] = []
             for target in self._discarding_paths():
                 if _exists(target):
+                    skipped.append(target)
                     continue
                 try:
                     self.held.rename(target)
                 except OSError:
+                    skipped.append(target)
                     continue
                 moved_to = target
                 break
             if moved_to is None:
+                ASH_LOGGER.debug(
+                    f"No free name to move the held previous results to in "
+                    f"{self.output_dir}; deleting them in place. Skipped: "
+                    f"{', '.join(path.name for path in skipped)}"
+                )
                 # Every rename was refused: the held set is deleted in place,
                 # which can end partway. The marker says so first, so the next
                 # set aside removes what is left instead of taking it for the

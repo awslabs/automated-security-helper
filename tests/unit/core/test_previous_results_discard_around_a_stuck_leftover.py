@@ -27,6 +27,7 @@ Each test states the assertion that fails at the base.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,7 @@ from automated_security_helper.core.previous_results import (
     STAGING_DIR_NAME,
     PreviousResults,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
@@ -90,6 +92,47 @@ def test_an_unremovable_leftover_does_not_skip_the_staging_and_marker_removal(
     assert not staging.exists()
     assert not marker.exists()
     assert leftover.is_dir()
+
+
+def test_a_discard_with_no_free_name_says_which_names_it_skipped(
+    tmp_path, monkeypatch, caplog
+):
+    """Every name for the moved set is a leftover that cannot be removed, so the
+    held set is deleted in place. That is said at DEBUG, with the names."""
+    caplog.set_level(logging.DEBUG, logger=ASH_LOGGER.name)
+    output = _with_previous(tmp_path)
+    previous = PreviousResults(output)
+    previous.set_aside()
+    # The control: DEBUG is captured, and a discard with a free name is silent.
+    assert "Set the previous results aside" in caplog.text
+    previous.discard()
+    assert "No free name" not in caplog.text
+
+    output = _with_previous(tmp_path / "again")
+    previous = PreviousResults(output)
+    previous.set_aside()
+    names = [
+        DISCARDING_DIR_NAME,
+        *(f"{DISCARDING_DIR_NAME}.{index}" for index in range(2, 10)),
+    ]
+    for name in names:
+        (output / name).mkdir()
+        (output / name / "stuck").write_text("x", encoding="utf-8")
+    real_remove = previous_results_module._remove
+
+    def remove(path: Path) -> None:
+        if Path(path).name in names:
+            raise PermissionError(13, "Permission denied", str(path))
+        real_remove(path)
+
+    monkeypatch.setattr(previous_results_module, "_remove", remove)
+
+    # Red without the line: nothing in the log said the delete was in place.
+    PreviousResults(output).discard()
+
+    text = caplog.text
+    assert "No free name" in text, text
+    assert all(name in text for name in names), text
 
 
 def test_a_discard_whose_own_delete_is_refused_still_raises(tmp_path, monkeypatch):
