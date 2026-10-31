@@ -13,7 +13,7 @@ the command reports as a failed server, exit 1.
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, List, Optional
 from unittest.mock import patch
 
 import pytest
@@ -46,8 +46,9 @@ class _ServerThatServed(_ServerThatNeverStarts):
         self.started = True
 
 
-def _run_with(server_class) -> List[str]:
-    calls: List[str] = []
+def _run_with(server_class, calls: Optional[List[str]] = None) -> List[str]:
+    """Run the runner over ``server_class``; ``calls`` is filled even when it raises."""
+    calls = [] if calls is None else calls
     with (
         patch.object(mcp_cli, "_uvicorn_server_class", return_value=server_class),
         patch.object(mcp_cli, "_note_the_signal_that_stops"),
@@ -74,6 +75,22 @@ def test_a_server_that_never_started_raises():
     """Red at the base: ``_run_uvicorn`` returned and the command exited 0."""
     with pytest.raises(RuntimeError, match="did not start"):
         _run_with(_ServerThatNeverStarts)
+
+
+def test_a_server_that_never_started_still_kills_the_tool_process_groups():
+    """The refusal does not skip the cleanup that follows every run.
+
+    ``run()`` returned with ``started`` False, so the runner raises; the groups
+    of the tool processes it started are killed on the way out all the same,
+    and no signal is left recorded for the next run.
+    """
+    calls: List[str] = []
+
+    with pytest.raises(RuntimeError, match="did not start"):
+        _run_with(_ServerThatNeverStarts, calls)
+
+    assert calls == ["kill_running_groups"]
+    assert mcp_cli._stop_signal is None
 
 
 def test_a_server_that_served_returns():

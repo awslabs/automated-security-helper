@@ -5,6 +5,8 @@
 
 import asyncio
 import json
+import os
+import threading
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -96,7 +98,16 @@ class TestMonitorScanProgress:
         ):
             await monitor_scan_progress(mock_ctx, "scan-abc")
 
-        mock_ctx.report_progress.assert_awaited()
+        # The scan's own ending, not the timeout the fixture's cap would send
+        # after sixty seconds: the completion progress and summary were sent
+        # and the timeout warning was not.
+        mock_ctx.report_progress.assert_any_await(
+            progress=1.0,
+            total=1.0,
+            message="Scan completed, parsing results...",
+        )
+        mock_ctx.info.assert_any_await("Scan completed with no findings.")
+        mock_ctx.warning.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_exits_when_scan_status_is_failed(self, mock_ctx, tmp_path):
@@ -123,7 +134,8 @@ class TestMonitorScanProgress:
         ):
             await monitor_scan_progress(mock_ctx, "scan-fail")
 
-        mock_ctx.error.assert_awaited()
+        mock_ctx.error.assert_awaited_once_with("Scan failed: Scanner crashed")
+        mock_ctx.warning.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_exits_when_scan_status_is_cancelled(self, mock_ctx, tmp_path):
@@ -149,7 +161,8 @@ class TestMonitorScanProgress:
         ):
             await monitor_scan_progress(mock_ctx, "scan-cancelled")
 
-        mock_ctx.info.assert_awaited()
+        mock_ctx.info.assert_awaited_once_with("Scan was cancelled.")
+        mock_ctx.warning.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_handles_cancellation_gracefully(self, mock_ctx, tmp_path):
@@ -234,23 +247,32 @@ def _results_reply(**summary_stats) -> dict:
     return {"success": True, "summary_stats": summary_stats}
 
 
-async def _completed_scan(mock_ctx, tmp_path, results_reply, **monitor_kwargs):
-    """Run the monitor over a scan whose aggregated results already exist."""
+async def _completed_scan(
+    mock_ctx, tmp_path, results_reply, *, progress_calls=None, **monitor_kwargs
+):
+    """Run the monitor over a scan whose aggregated results already exist.
+
+    ``progress_calls``, when given, receives the keywords of every call the
+    monitor makes to the progress tool, the scan-info lookup included.
+    """
     output_dir = tmp_path / ".ash" / "ash_output"
     output_dir.mkdir(parents=True)
     (output_dir / "ash_aggregated_results.json").write_text("{}")
     get_results = AsyncMock(return_value=results_reply)
 
+    async def completed(scan_id, **kwargs):
+        if progress_calls is not None:
+            progress_calls.append(kwargs)
+        return {
+            "success": True,
+            "status": "completed",
+            "directory_path": str(tmp_path),
+        }
+
     with (
         patch(
             "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
-            new=AsyncMock(
-                return_value={
-                    "success": True,
-                    "status": "completed",
-                    "directory_path": str(tmp_path),
-                }
-            ),
+            new=completed,
         ),
         patch(
             "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
@@ -343,24 +365,38 @@ class TestCompletionSummaryReadsTheResultsReply:
         completion summary was never sent for a delivered tree. Red at the base:
         the call carried no session.
         """
+        progress_calls: list = []
         get_results = await _completed_scan(
             mock_ctx,
             tmp_path,
             _results_reply(severity_counts={}, total=0),
             session_id="session-a",
+            progress_calls=progress_calls,
         )
 
         assert get_results.await_count == 1
         assert get_results.await_args.kwargs.get("session_id") == "session-a"
+        # The registry shows a scan only to its own session, so the lookup and
+        # every poll are made as that session too, not only the results read.
+        assert len(progress_calls) >= 2, progress_calls
+        assert all(call.get("session_id") == "session-a" for call in progress_calls), (
+            progress_calls
+        )
 
     @pytest.mark.asyncio
     async def test_the_default_session_passes_no_session(self, mock_ctx, tmp_path):
         """Control: with no session the results call names none, as before."""
+        progress_calls: list = []
         get_results = await _completed_scan(
-            mock_ctx, tmp_path, _results_reply(severity_counts={}, total=0)
+            mock_ctx,
+            tmp_path,
+            _results_reply(severity_counts={}, total=0),
+            progress_calls=progress_calls,
         )
 
         assert "session_id" not in get_results.await_args.kwargs
+        assert progress_calls, "the monitor never asked the progress tool"
+        assert all("session_id" not in call for call in progress_calls), progress_calls
 
 
 def _progress_sequence(tmp_path, *statuses):
@@ -500,6 +536,13 @@ class TestCompletionFollowsTheRegistryStatus:
         assert get_results.await_count == 1
 
 
+def _close_quietly(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
 class TestScannerResultsAreReadWithoutFollowingLinks:
     """A scanner's results file is read only when it is a regular file at its name.
 
@@ -537,7 +580,62 @@ class TestScannerResultsAreReadWithoutFollowingLinks:
             for call in mock_ctx.report_progress.await_args_list
         ]
         assert not any("9 critical" in m for m in messages), messages
-        mock_ctx.warning.assert_awaited()
+        # The warning is the refusal of this link, not any warning at all.
+        mock_ctx.warning.assert_awaited_once()
+        warning = str(mock_ctx.warning.await_args.args[0])
+        assert "bandit/source" in warning, warning
+        assert "is a link" in warning, warning
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on this platform")
+    @pytest.mark.asyncio
+    async def test_a_fifo_at_the_results_name_is_refused_without_blocking(
+        self, mock_ctx, tmp_path
+    ):
+        """A FIFO at the name is not read, and opening it does not wait for a writer.
+
+        The test holds a write end open with a payload in it. A plain ``open()``
+        and ``read()`` would take the payload and then wait for the writer to
+        close, which blocks the event loop, so a timer closes the write end after
+        a few seconds: a regression then reports the payload as the scanner's
+        counts and fails on the assertion instead of hanging the run.
+        """
+        output_dir = tmp_path / "proj" / ".ash" / "ash_output"
+        scanner_dir = output_dir / "scanners" / "bandit" / "source"
+        scanner_dir.mkdir(parents=True)
+        fifo = scanner_dir / "ASH.ScanResults.json"
+        os.mkfifo(fifo)
+        writer = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+        os.write(writer, json.dumps({"severity_counts": {"critical": 9}}).encode())
+        release = threading.Timer(5.0, _close_quietly, args=(writer,))
+        release.start()
+        try:
+            with (
+                patch(
+                    "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
+                    new=_progress_sequence(tmp_path / "proj", "running", "completed"),
+                ),
+                patch(
+                    "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
+                    new=AsyncMock(return_value=_results_reply(total=0)),
+                ),
+                patch("asyncio.sleep", new=AsyncMock()),
+            ):
+                await asyncio.wait_for(
+                    monitor_scan_progress(mock_ctx, "scan-fifo"), timeout=30
+                )
+        finally:
+            release.cancel()
+            _close_quietly(writer)
+
+        messages = [
+            str(call.kwargs.get("message", ""))
+            for call in mock_ctx.report_progress.await_args_list
+        ]
+        assert not any("9 critical" in m for m in messages), messages
+        mock_ctx.warning.assert_awaited_once()
+        warning = str(mock_ctx.warning.await_args.args[0])
+        assert "bandit/source" in warning, warning
+        assert "is not a regular file" in warning, warning
 
     @pytest.mark.asyncio
     async def test_a_regular_results_file_is_read(self, mock_ctx, tmp_path):
@@ -569,6 +667,41 @@ class TestScannerResultsAreReadWithoutFollowingLinks:
         assert any("bandit completed source scan: 2 high" in m for m in messages)
 
 
+class _Sweeps:
+    """Counts the workspace monitor's reads of a results file, to wait on its polls.
+
+    The tests below used to sleep for a stretch of wall-clock time and assume the
+    monitor had polled meanwhile. A negative test (a project is NOT complete) then
+    passed on a monitor that had not polled at all. This waits until the monitor
+    has read a results file a given number of further times, so the assertion
+    that follows is about what the monitor saw, not about how long it took.
+    """
+
+    def __init__(self, monkeypatch) -> None:
+        self.reads = 0
+        self._real = progress_monitor._results_file_state
+        self._waiting: list = []
+        monkeypatch.setattr(progress_monitor, "_results_file_state", self._read)
+
+    def _read(self, output_dir):
+        self.reads += 1
+        for target, event in self._waiting:
+            if self.reads >= target:
+                event.set()
+        return self._real(output_dir)
+
+    async def after(self, more: int) -> None:
+        """Return once the monitor has read a results file ``more`` more times."""
+        event = asyncio.Event()
+        self._waiting.append((self.reads + more, event))
+        await asyncio.wait_for(event.wait(), timeout=10)
+
+
+@pytest.fixture
+def sweeps(monkeypatch) -> _Sweeps:
+    return _Sweeps(monkeypatch)
+
+
 class TestWorkspaceProgressCountsOnlyNewResults:
     """A project is complete when its results file changed, not when one exists.
 
@@ -580,7 +713,7 @@ class TestWorkspaceProgressCountsOnlyNewResults:
 
     @pytest.mark.asyncio
     async def test_a_pre_existing_results_file_is_not_a_completed_project(
-        self, tmp_path
+        self, tmp_path, sweeps
     ):
         from automated_security_helper.cli.mcp.progress_monitor import (
             monitor_workspace_progress,
@@ -594,7 +727,8 @@ class TestWorkspaceProgressCountsOnlyNewResults:
         task = asyncio.ensure_future(
             monitor_workspace_progress(report, {"a": out}, poll_interval=0.01)
         )
-        await asyncio.sleep(0.1)
+        # Its baseline read, then two sweeps of the file that is already there.
+        await sweeps.after(3)
         try:
             messages = [
                 str(call.kwargs.get("message", "")) for call in report.await_args_list
@@ -608,7 +742,7 @@ class TestWorkspaceProgressCountsOnlyNewResults:
 
     @pytest.mark.asyncio
     async def test_a_previous_file_put_back_after_the_set_aside_is_not_complete(
-        self, tmp_path
+        self, tmp_path, sweeps
     ):
         """Red at the base: the monitor took its own baseline as it started, which
         is after the workspace scan had set the previous results aside, so it read
@@ -634,9 +768,9 @@ class TestWorkspaceProgressCountsOnlyNewResults:
                 report, {"a": out}, poll_interval=0.01, before=before
             )
         )
-        await asyncio.sleep(0.05)
+        await sweeps.after(2)  # sweeps that find the file absent
         set_aside.rename(results)
-        await asyncio.sleep(0.1)
+        await sweeps.after(3)  # sweeps that find the previous file put back
         try:
             messages = [
                 str(call.kwargs.get("message", "")) for call in report.await_args_list
@@ -649,7 +783,9 @@ class TestWorkspaceProgressCountsOnlyNewResults:
                 await task
 
     @pytest.mark.asyncio
-    async def test_a_rewritten_results_file_completes_the_project(self, tmp_path):
+    async def test_a_rewritten_results_file_completes_the_project(
+        self, tmp_path, sweeps
+    ):
         """Control: the scan writing its own results is counted."""
         from automated_security_helper.cli.mcp.progress_monitor import (
             monitor_workspace_progress,
@@ -664,7 +800,7 @@ class TestWorkspaceProgressCountsOnlyNewResults:
         task = asyncio.ensure_future(
             monitor_workspace_progress(report, {"a": out}, poll_interval=0.01)
         )
-        await asyncio.sleep(0.05)
+        await sweeps.after(2)  # the file is read unchanged before it is rewritten
         results.write_text('{"metadata": {}}')
         await asyncio.wait_for(task, timeout=5)
 
