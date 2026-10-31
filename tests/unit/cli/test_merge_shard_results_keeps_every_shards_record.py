@@ -583,6 +583,28 @@ class TestAScannerRowNoShardOwnsIsKept:
             merge_shard_results(as_loaded(shards))
         assert "fell-between-shards" in str(held.value)
 
+    def test_a_name_only_some_shards_left_to_another_is_not_called_a_hole(self):
+        """The control for "every shard": one shard left the unassigned name to
+        another shard and a second shard recorded it PASSED, the mixed-status
+        shape the base already refuses. It still refuses, and the refusal does
+        not call it a hole, because the rows contradict that sentence. Red at
+        the base: the sentence was appended whenever any row carried the split's
+        reason."""
+        shards = build_shards(2)
+        shards[0].scanner_results["split-and-run"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.SKIPPED,
+            excluded=True,
+            dependencies_satisfied=True,
+            skipped_reason="assigned to another shard (this run is shard 0 of 2)",
+        )
+        shards[1].scanner_results["split-and-run"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.PASSED, dependencies_satisfied=True
+        )
+
+        with pytest.raises(ShardCoverageError, match="split-and-run") as held:
+            merge_shard_results(as_loaded(shards))
+        assert "hole in the partition" not in str(held.value)
+
     def test_an_unowned_error_row_survives_adoption(self):
         shards = build_shards(2)
         shards[1].scanner_results["broken.plugin.module"] = ScannerTargetStatusInfo(

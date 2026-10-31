@@ -905,9 +905,12 @@ def _verify_scanner_union(
     # Whether every row a name carries says the operator deselected the scanner
     # (``excluded``), read beside the status; False as soon as one row does not.
     deselected: Dict[str, bool] = {}
-    # Whether some row a name carries was written by the shard split ("assigned to
-    # another shard"), which sets the same ``excluded`` flag as a deselection.
+    # Whether SOME row a name carries was written by the shard split ("assigned to
+    # another shard"), which sets the same ``excluded`` flag as a deselection: one
+    # such row is enough to deny the deselection exemption. Whether EVERY row was:
+    # that is the partition hole the refusal names as such.
     left_to_another_shard: Dict[str, bool] = {}
+    left_to_another_shard_by_all: Dict[str, bool] = {}
     for results_file, results, _ in shards:
         for scanner, entry in results.scanner_results.items():
             key = _normalized(scanner)
@@ -920,8 +923,14 @@ def _verify_scanner_union(
             reason = getattr(entry, "skipped_reason", None)
             # The prefix is the scan phase's own spelling (core/constants.py), the one
             # place both writer and reader take it from.
-            left_to_another_shard[key] = left_to_another_shard.get(key, False) or (
-                isinstance(reason, str) and reason.startswith(SHARD_SPLIT_REASON_PREFIX)
+            split_row = isinstance(reason, str) and reason.startswith(
+                SHARD_SPLIT_REASON_PREFIX
+            )
+            left_to_another_shard[key] = (
+                left_to_another_shard.get(key, False) or split_row
+            )
+            left_to_another_shard_by_all[key] = (
+                left_to_another_shard_by_all.get(key, True) and split_row
             )
 
     # An unclaimed row is only an offence when it claims its scanner's outcome is
@@ -1001,7 +1010,13 @@ def _verify_scanner_union(
         )
     )
     unclaimed = sorted(orphans - set(exempted))
-    holes = [name for name in unclaimed if left_to_another_shard.get(name, False)]
+    # Named as a hole only when EVERY row says "assigned to another shard": a name
+    # one shard left to another and another shard recorded otherwise is unclaimed
+    # on the mixed-status ground alone, and the sentence below would contradict its
+    # rows.
+    holes = [
+        name for name in unclaimed if left_to_another_shard_by_all.get(name, False)
+    ]
 
     # Ahead of the refusal below so the disclosure is emitted whether or not this
     # call goes on to raise. Both sets are drawn from `orphans`, so a merge can
