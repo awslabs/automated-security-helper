@@ -26,6 +26,9 @@ Each test pins one behavior the scanner lacked:
   file that wrote it;
 * a word list name could reach any file the scanning user can read, through
   ``..``, an absolute name or a link, once its entry was trusted;
+* a word list entry of a configuration read from the repository's own files
+  was exempt from that confinement, as the operator's entries are, so the
+  tree could name any regular file on the host as its word list;
 * a non-string exclude pattern raised TypeError past the ``re.error`` handler;
 * a request the scanner could not serialize was left part-written in the
   results directory;
@@ -48,6 +51,9 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.config.secret_verification_trust import (
+    UntrustedDetectSecretsSettings,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     detect_secrets_scanner as module,
@@ -482,6 +488,105 @@ def test_a_configured_word_list_is_anchored_at_the_config_file_not_the_baseline(
     assert entry.file_name == expected.as_posix()
     assert expected.parent == Path(os.path.realpath(tmp_path / "cfg"))
     assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
+
+
+def _operator_scanner_naming(tmp_path, monkeypatch, file_name: str, *, config_file):
+    """The operator's own config names ``file_name`` as its word list; the file
+    sits at ``<tmp>/secret/words.txt``, outside the scanned tree and outside
+    the directory of the config file (``<tmp>/cfg/ash.yaml``) when there is one."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "_module_importable", lambda name: True)
+    context = _context(tmp_path)
+    (tmp_path / "secret").mkdir()
+    (tmp_path / "secret" / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    if config_file:
+        (tmp_path / "cfg").mkdir()
+        context.config._loaded_from = tmp_path / "cfg" / "ash.yaml"
+    return _scanner(
+        context,
+        scan_settings=DetectSecretsScanSettings(
+            filters_used=[{"path": WORDLIST_FILTER, "file_name": file_name}]
+        ),
+    )
+
+
+def test_the_operators_absolute_word_list_outside_the_tree_is_kept(
+    tmp_path, monkeypatch
+):
+    """An operator's config naming an absolute list on the host worked before
+    the confinement; the confinement is for what a baseline supplies."""
+    words = tmp_path / "secret" / "words.txt"
+    scanner = _operator_scanner_naming(
+        tmp_path, monkeypatch, str(words), config_file=False
+    )
+    (entry,) = _wordlist_entries(scanner)
+    expected = Path(os.path.realpath(words))
+    assert entry.file_name == expected.as_posix()
+    assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
+
+
+def test_the_operators_relative_word_list_may_leave_its_config_files_directory(
+    tmp_path, monkeypatch
+):
+    scanner = _operator_scanner_naming(
+        tmp_path, monkeypatch, "../secret/words.txt", config_file=True
+    )
+    (entry,) = _wordlist_entries(scanner)
+    expected = Path(os.path.realpath(tmp_path / "secret" / "words.txt"))
+    assert entry.file_name == expected.as_posix()
+
+
+def _repository_written_scanner_naming(tmp_path, monkeypatch, file_name):
+    """A configuration read from the repository's own files (the record
+    resolve_config leaves on it) names ``file_name`` as its word list; no
+    baseline is in use. ``<tmp>/secret/words.txt`` lies outside the scanned
+    tree, and the scanned tree holds ``words.txt`` too."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "_module_importable", lambda name: True)
+    context = _context(tmp_path)
+    (tmp_path / "secret").mkdir()
+    (tmp_path / "secret" / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    (context.source_dir / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    context.config._untrusted_detect_secrets_settings = UntrustedDetectSecretsSettings(
+        reason="the configuration was read from the scanned repository"
+    )
+    return _scanner(
+        context,
+        scan_settings=DetectSecretsScanSettings(
+            filters_used=[{"path": WORDLIST_FILTER, "file_name": file_name}]
+        ),
+    )
+
+
+def test_a_repository_written_configs_word_list_outside_the_tree_is_refused(
+    tmp_path, monkeypatch, caplog
+):
+    """The operator's own entry may name a list anywhere on the host; an entry
+    of a configuration the repository wrote may not, or the tree would choose
+    which host file the worker reads and which findings leave the report."""
+    outside = tmp_path / "secret" / "words.txt"
+    with caplog.at_level(logging.WARNING):
+        scanner = _repository_written_scanner_naming(
+            tmp_path, monkeypatch, str(outside)
+        )
+    assert _wordlist_entries(scanner) == []
+    assert "Ignoring the detect-secrets wordlist filter" in caplog.text
+    assert "resolves outside the directory of the file that named the entry" in (
+        caplog.text
+    )
+    assert "words.txt" not in caplog.text
+    assert _handed_wordlists(scanner, monkeypatch) == []
+
+
+def test_a_repository_written_configs_word_list_inside_the_tree_is_kept(
+    tmp_path, monkeypatch
+):
+    """Control: the confinement is on where the file resolves; a list the
+    scanned tree holds was accepted before and still is."""
+    scanner = _repository_written_scanner_naming(tmp_path, monkeypatch, "words.txt")
+    (entry,) = _wordlist_entries(scanner)
+    expected = Path(os.path.realpath(tmp_path / "src" / "words.txt"))
+    assert entry.file_name == expected.as_posix()
 
 
 def test_a_word_list_that_is_not_there_drops_the_filter_with_a_warning(

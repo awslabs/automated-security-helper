@@ -1266,10 +1266,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         scan, as did an entry without the package or without those keys.
 
         A relative name is anchored where the entry was written: the directory
-        of the file that named it, per entry (``_wordlist_anchor``), and the
-        file it resolves to has to lie inside that directory or inside the
-        scanned tree, trusted or not: a ``..``, an absolute name or a link that
-        leaves both is refused. The entry is
+        of the file that named it, per entry (``_wordlist_anchor``). For an
+        entry the baseline supplied, the file it resolves to has to lie inside
+        that directory or inside the scanned tree, trusted or not: a ``..``, an
+        absolute name or a link that leaves both is refused. So is an entry of a
+        configuration read from files the operator did not write (the record
+        ``_untrusted_detect_secrets_settings``), which holds entries a
+        repository chose. Only an entry of the operator's own configuration is
+        not confined: an absolute name, or a relative one that leaves the
+        directory of its config file, is the operator's to choose. The entry is
         kept with the resolved absolute path and the defaults detect-secrets'
         own ``initialize`` uses for the keys it lacks; one its source may not
         supply, one that resolves outside those places, one whose file is not a
@@ -1279,13 +1284,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """
         settings = self.config.options.scan_settings
         filters_from_baseline = "filters_used" in loaded_from_baseline
+        # Set when the configuration was read from files the operator did not
+        # write (resolve_config); the record is read whatever the baseline did,
+        # because that configuration reaches the entries below as well.
+        record = getattr(
+            getattr(self.context, "config", None),
+            "_untrusted_detect_secrets_settings",
+            None,
+        )
         untrusted: Optional[str] = None
         if filters_from_baseline:
-            record = getattr(
-                getattr(self.context, "config", None),
-                "_untrusted_detect_secrets_settings",
-                None,
-            )
             untrusted = self._untrusted_baseline_reason(record)
         kept = []
         for item in settings.filters_used:
@@ -1297,6 +1305,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 item,
                 from_baseline=from_baseline,
                 untrusted=untrusted if from_baseline else None,
+                # An entry is the operator's own only when the configuration
+                # that holds it is: one read from the repository's files is
+                # confined like a baseline's entry.
+                confine=from_baseline or record is not None,
             )
             if reason is None:
                 kept.append(item)
@@ -1310,7 +1322,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         settings.filters_used = kept
 
     def _wordlist_filter_refusal(
-        self, item: Any, *, from_baseline: bool, untrusted: Optional[str] = None
+        self,
+        item: Any,
+        *,
+        from_baseline: bool,
+        untrusted: Optional[str] = None,
+        confine: Optional[bool] = None,
     ) -> Optional[str]:
         """Why ``item``, a wordlist filter entry, cannot reach the worker; None
         when it can, with its ``file_name`` made absolute and its keys filled.
@@ -1319,7 +1336,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         operator's (``_untrusted_baseline_reason``), or None when it is or the
         entry is the operator's own. An untrusted entry is refused before its
         ``file_name`` is read or resolved.
+
+        ``confine`` says whether the file the name resolves to has to lie in
+        the entry's anchor directory or the scanned tree. It is True for an
+        entry a baseline supplied and for any entry of a configuration the
+        operator did not write; it defaults to ``from_baseline``.
         """
+        if confine is None:
+            confine = from_baseline
         if untrusted is not None:
             return (
                 f"it was loaded from the baseline's settings, and {untrusted}. "
@@ -1345,10 +1369,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if not path.is_absolute():
             path = anchor / path
         real = Path(os.path.realpath(path))
-        # Confined to where the entry was written or to the scanned tree, by the
-        # file the name resolves to: a ``..``, an absolute name or a link that
-        # leaves both is refused, trusted or not. The worker reads the file,
-        # and a word list is read only from the operator's own places.
+        # An entry a BASELINE supplied is confined to where the baseline sits or
+        # to the scanned tree, by the file the name resolves to: a ``..``, an
+        # absolute name or a link that leaves both is refused, trusted or not.
+        # So is an entry of a configuration read from files the operator did
+        # not write. Only an entry of the operator's own configuration is not:
+        # the operator wrote the name, and an absolute path to a list kept
+        # elsewhere on the host (the form that worked before this check) is the
+        # operator's to choose. Who wrote the entry is what decides, not
+        # whether a baseline was loaded: the repository's configuration holds
+        # entries too.
         config = getattr(self.context, "config", None)
         scan_root = Path(
             os.path.realpath(
@@ -1357,7 +1387,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 or "."
             )
         )
-        if not (is_within(real, anchor) or is_within(real, scan_root)):
+        if confine and not (is_within(real, anchor) or is_within(real, scan_root)):
             return (
                 "its word list file (file_name) resolves outside the directory of "
                 "the file that named the entry and outside the scanned directory "
