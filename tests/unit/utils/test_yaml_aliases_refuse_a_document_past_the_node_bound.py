@@ -6,11 +6,12 @@
 The alias bound counts only what aliases add, so a document with no alias was
 composed without limit: a file of ``- 1`` lines becomes a node for each line,
 and a node costs two marks and an event, many times the bytes that wrote it.
-The config readers cap a file's bytes, which keeps their documents far under
-any node bound, but the loader states no byte bound of its own. It now counts
-the nodes composed in place (an alias adds none) and refuses at the first one
-past MAX_COMPOSED_NODES, as a composer error, so a caller refuses the file as
-one that does not parse and never builds the rest of it.
+The config readers cap a file's bytes at 1 MiB, which keeps their documents
+under the default bound by about half (a flow mapping of bare keys composes
+about one node to a byte), but the loader states no byte bound of its own. It
+now counts the nodes composed in place (an alias adds none) and refuses at the
+first one past MAX_COMPOSED_NODES, as a composer error, so a caller refuses the
+file as one that does not parse and never builds the rest of it.
 
 The bound is read through the module and patched low, as the alias bound's tests
 do, so the cases stay a few lines long.
