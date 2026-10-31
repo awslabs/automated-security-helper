@@ -68,6 +68,15 @@ def test_a_label_that_is_a_short_value_is_not_applied(tmp_path, short):
     # characters alone unless the text quotes it, so the text is unchanged and
     # the label was applied, where an exact match was dropped before.
     assert _applied(tmp_path, short, value=short) == "recorded"
+
+
+@pytest.mark.parametrize("short", ["a", "ab", "api"])
+def test_a_label_with_surrounding_space_that_is_a_short_value_is_not_applied(
+    tmp_path, short
+):
+    # Red without the equality arm, for the same reason as the unpadded form
+    # above. Its own test, because the helper makes its directories under
+    # tmp_path and a second call in one test would find them already there.
     assert _applied(tmp_path, f"  {short}  ", value=short) == "recorded"
 
 
