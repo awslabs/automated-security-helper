@@ -537,10 +537,17 @@ class TestShortfalls:
 
     @classmethod
     def _shortfall_uid_for(
-        cls, reporter, monkeypatch, project_name: str, description: str = ""
+        cls,
+        reporter,
+        monkeypatch,
+        project_name: str | None = None,
+        description: str = "",
     ) -> str:
+        """The shortfall uid for a model named *project_name*; None leaves the
+        model's own default name in place."""
         model = _model(*cls._broken_and_fine_results())
-        model.metadata.project_name = project_name
+        if project_name is not None:
+            model.metadata.project_name = project_name
         if description:
             model.description = description
         return cls._shortfall_uid_of(reporter, monkeypatch, model)
@@ -595,19 +602,21 @@ class TestShortfalls:
         self, reporter, monkeypatch
     ):
         """The project name is the only identity the report model carries, and
-        its default is the same for every repository. Two scans that keep it get
-        the same uid even when their reports' descriptions differ (the only
-        other field the test varies); a repository that needs its own record
-        sets ``project_name``. This pins the limit the module comment states,
-        so a change to it is made on purpose."""
+        the model's own default is the same for every repository. Two scans
+        whose model keeps it (the name is left unset here, not set to a value)
+        get the same uid even when their reports' descriptions differ (the only
+        other field the test varies), and it is the uid of the default name,
+        ``ASH``; a repository that needs its own record sets ``project_name``.
+        This pins the limit the module comment states, so a change to it is
+        made on purpose."""
         first = self._shortfall_uid_for(
-            reporter, monkeypatch, "ash-scan", description="first repository"
+            reporter, monkeypatch, description="first repository"
         )
         second = self._shortfall_uid_for(
-            reporter, monkeypatch, "ash-scan", description="second repository"
+            reporter, monkeypatch, description="second repository"
         )
 
-        assert first == second
+        assert first == second == _shortfall_uid("ASH")
 
     def test_the_fixed_string_is_a_seed_and_the_label_selects_the_record(
         self, reporter, metadata
