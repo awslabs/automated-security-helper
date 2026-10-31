@@ -249,10 +249,17 @@ def test_unparseable_results_are_not_quoted(scan, nix_shell, results_json, reaso
     assert "\x1b[31m" not in shown and "\n::" not in shown, repr(shown)
 
 
-@_POSIX_TEXT
-def test_equals_form_of_mode_is_rewritten(scan, snapshot, nix_shell):
-    # `--mode=nix` is one token; the inner invocation must still get --mode=local,
-    # or it would try to enter the shell again.
+def test_the_hosts_equals_form_of_mode_is_not_forwarded(scan, nix_shell):
+    """`--mode=nix` is one token on the host's command line. The inner command is
+    built from the scan's own options, so that spelling is not forwarded, and the
+    inner scan gets the local mode once, or it would try to enter the shell
+    again."""
     args = ["scan", "--mode=nix", *SCAN[3:]]
     nix_shell.returncode = 1
-    assert _seen(scan(args), nix_shell) == snapshot
+
+    scan(args)
+
+    (command,) = nix_shell.commands
+    assert not [token for token in command if token.startswith("--mode=")], command
+    assert command.count("--mode") == 1, command
+    assert command[command.index("--mode") + 1] == "local", command

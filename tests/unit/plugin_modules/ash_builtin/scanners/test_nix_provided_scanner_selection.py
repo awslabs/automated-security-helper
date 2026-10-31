@@ -16,6 +16,7 @@ Only ``uv tool ...`` is faked, and every call to it is recorded. The wrapper,
 its ``--version`` run, and the ``uv pip install --dry-run`` verdict are real.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -186,9 +187,15 @@ def test_the_pinned_checkov_runs_directly(nix_mode, plugin_context):
     assert recorder.scan_resolves == []
 
 
-def test_a_too_old_pinned_checkov_is_missing_with_the_version_named(
-    nix_mode, plugin_context
+def test_a_too_old_pinned_checkov_is_missing_and_the_log_names_the_constraint(
+    nix_mode, plugin_context, monkeypatch
 ):
+    logged = []
+
+    def record(self, *message, level=15, **_kwargs):
+        logged.append((level, " ".join(message)))
+
+    monkeypatch.setattr(CheckovScanner, "_plugin_log", record)
     wrapper, recorder = nix_mode("3.1.0")
     scanner = CheckovScanner(context=plugin_context, config=CheckovScannerConfig())
 
@@ -199,6 +206,14 @@ def test_a_too_old_pinned_checkov_is_missing_with_the_version_named(
     assert "Offline mode: checkov cannot be used" in reason
     assert "the installed package does not satisfy the version constraint" in reason
     assert str(wrapper) not in reason
+    # What the results leave out, the log keeps: a run that dropped the constraint
+    # from the log as well would leave the operator nothing to act on.
+    (line,) = [
+        text
+        for level, text in logged
+        if level >= logging.ERROR and "Offline mode: checkov at " in text
+    ]
+    assert ">=3.2.0,<4.0.0" in line, line
     assert "Nix flake" in reason and "flake.nix" in reason
     assert "numpy" not in reason
     assert recorder.network_capable == [], (

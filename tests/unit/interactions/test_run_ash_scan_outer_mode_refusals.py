@@ -6,7 +6,8 @@
 * The container mode's pre-run parse check decodes a JSON config as the scan's
   own reader does (``utf-8-sig``), so a file with a byte order mark the scan
   loads is not refused on the host.
-* The two exit-3 handlers that print a config refusal with Rich markup escape
+* The exit-3 handlers that print a config refusal with Rich markup (the workspace
+  container scan's, the shared printer's and local mode's denied-field one) escape
   the error's text: a bracket sequence in a path raised MarkupError out of the
   handler instead of exiting.
 * ``--min-severity`` reads a result as qualifying only when it is actionable
@@ -74,17 +75,28 @@ def _workspace_plan(tmp_path):
     return resolve_workspace(definition)
 
 
-def test_a_config_refusal_whose_text_reads_as_markup_still_exits(tmp_path, monkeypatch):
+def test_a_config_refusal_whose_text_reads_as_markup_still_exits(
+    tmp_path, monkeypatch, capsys
+):
     """The refusal's text names a path; one holding a closing tag with no open
-    tag raised MarkupError out of the handler instead of exiting."""
+    tag raised MarkupError out of the handler instead of exiting.
+
+    Exit 3 is every config refusal's code, so the test shows the handler itself
+    ran: the patched check was reached, its text was printed as text, and the
+    container runner, stubbed to a code no refusal uses, was not what exited."""
     from automated_security_helper.config import resolve_config
 
+    # A config the environment names would be refused before the patched check
+    # and share the exit code.
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
     plan = _workspace_plan(tmp_path)
     config = tmp_path / "ops" / "ash.yaml"
     config.parent.mkdir()
     config.write_text("project_name: ops\n", encoding="utf-8")
+    reached = []
 
     def refuse(_config, _root):
+        reached.append(True)
         raise ASHConfigValidationError("the config at [/x] is in the checkout")
 
     monkeypatch.setattr(resolve_config, "check_operator_config", refuse)
@@ -94,7 +106,7 @@ def test_a_config_refusal_whose_text_reads_as_markup_still_exits(tmp_path, monke
         ras,
         "run_ash_container",
         lambda **kwargs: rac._not_started(
-            create_completed_process(args=[], returncode=4)
+            create_completed_process(args=[], returncode=99)
         ),
     )
     monkeypatch.chdir(tmp_path)
@@ -114,6 +126,9 @@ def test_a_config_refusal_whose_text_reads_as_markup_still_exits(tmp_path, monke
         ras._run_container_mode(opts, MagicMock())
 
     assert exited.value.code == int(WorkspaceExitCode.INVALID_PROJECT_CONFIG)
+    assert reached == [True]
+    captured = capsys.readouterr()
+    assert "[/x]" in captured.out + captured.err
 
 
 def test_the_shared_printer_shows_a_markup_shaped_message_as_text(capsys):
@@ -187,62 +202,16 @@ def _finding(scanner: str, level: str, issue_severity: str) -> dict:
 def _results_with_two_findings(tmp_path):
     """A MEDIUM bandit finding the scanner's own CRITICAL threshold makes
     non-actionable, and a LOW semgrep finding the global LOW threshold makes
-    actionable; both in the model and in the SARIF file the run left."""
-    from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.models.asharp_model import (
-        AshAggregatedResults,
-        ScannerStatusInfo,
-    )
-    from automated_security_helper.schemas.sarif_schema_model import (
-        Result,
-        Run,
-        SarifReport,
-        Tool,
-        ToolComponent,
-    )
-
-    AshConfig.model_rebuild()
-    AshAggregatedResults.model_rebuild()
+    actionable; the same two in the model and in the SARIF file the run
+    recorded as written (the helper below makes both the way the report phase
+    does)."""
     findings = [
         _finding("bandit", "warning", "MEDIUM"),
         _finding("semgrep", "note", "LOW"),
     ]
-    results = AshAggregatedResults()
-    results.ash_config = AshConfig.model_validate(
-        {
-            "project_name": "min-severity",
-            "global_settings": {"severity_threshold": "LOW"},
-            "scanners": {"bandit": {"options": {"severity_threshold": "CRITICAL"}}},
-        }
+    return _results_with_the_file_apart_from_the_model(
+        tmp_path, in_model=findings, in_file=findings
     )
-    results.sarif = SarifReport(
-        version="2.1.0",
-        runs=[
-            Run(
-                tool=Tool(driver=ToolComponent(name="ASH", version="1.0")),
-                results=[Result.model_validate(finding) for finding in findings],
-            )
-        ],
-    )
-    results.scanner_results["bandit"] = ScannerStatusInfo()
-    results.scanner_results["semgrep"] = ScannerStatusInfo()
-    sarif_file = tmp_path / "out" / "reports" / "ash.sarif"
-    sarif_file.parent.mkdir(parents=True, exist_ok=True)
-    sarif_file.write_text(
-        json.dumps(
-            {
-                "version": "2.1.0",
-                "runs": [
-                    {
-                        "tool": {"driver": {"name": "ASH", "version": "1.0"}},
-                        "results": findings,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    return results
 
 
 def _opts(tmp_path, min_severity):
