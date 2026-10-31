@@ -157,6 +157,12 @@ def test_lint_names_the_ignored_run_instead_of_listing_unused_entries(tmp_path):
         and "--ignore-suppressions" in i.message
     ]
     assert [i.severity for i in issues] == [LintSeverity.INFO], result.issues
+    # The notice is the only unused-suppression issue, and it is not fixable: a
+    # fixable one would have the CLI offer --fix-unused, which comments nothing
+    # out on such a report.
+    unused = [i for i in result.issues if i.category == LintCategory.SUPPRESSION_UNUSED]
+    assert unused == issues, result.issues
+    assert issues[0].fixable is False
 
 
 def test_fix_unused_comments_nothing_out_on_a_not_evaluated_report(tmp_path):
@@ -171,9 +177,28 @@ def test_fix_unused_comments_nothing_out_on_a_not_evaluated_report(tmp_path):
             "not_evaluated": UnusedSuppressionsReporter.NOT_EVALUATED,
         },
     )
-    before = config_path.read_text(encoding="utf-8")
+    before = config_path.read_bytes().decode("utf-8")
 
     fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
 
     assert fixed_issues == []
     assert fixed_content == before
+
+
+def test_fix_unused_comments_the_listed_entry_out_on_an_evaluated_report(tmp_path):
+    """The positive control for the test above: the same config and report
+    location, the report evaluated, and the listed entry is commented out. A
+    lookup that never found the report would pass the test above too."""
+    config_path = _config_with_report(
+        tmp_path,
+        {
+            "unused_suppressions": [
+                {"path": "src/app.py", "rule_id": "B201", "reason": "one"}
+            ]
+        },
+    )
+
+    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert [i.path for i in fixed_issues] == ["global_settings.suppressions[0]"]
+    assert "# - path: src/app.py" in fixed_content

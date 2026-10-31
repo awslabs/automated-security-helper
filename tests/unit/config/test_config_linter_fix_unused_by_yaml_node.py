@@ -48,7 +48,11 @@ def _active_yaml(text: str) -> dict:
 def _setup(tmp_path: Path, config_text: str, unused: list) -> Path:
     config_path = tmp_path / ".ash" / ".ash.yaml"
     config_path.parent.mkdir(parents=True)
-    config_path.write_text(config_text, encoding="utf-8")
+    # Bytes: write_text turns every "\n" into "\r\n" on Windows, so a test
+    # about line breaks wrote a different file there (a CRLF text became
+    # "\r\r\n"), and the fixer, which keeps the file's own breaks, read back
+    # text no "\n"-written assertion matched.
+    config_path.write_bytes(config_text.encode("utf-8"))
     reports = tmp_path / ".ash" / "ash_output" / "reports"
     reports.mkdir(parents=True)
     (reports / "ash.unused-suppressions.json").write_text(
@@ -329,13 +333,18 @@ def test_a_repeated_suppressions_key_is_refused_with_a_reason(tmp_path):
 
 def test_a_list_with_nothing_unused_in_it_is_not_refused_for_its_shape(tmp_path):
     """The shape is checked only when there is something to comment out: a
-    flow sequence whose entries are all in use reads as nothing to do."""
+    flow sequence whose entries are all in use reads as nothing to do. The
+    report names an entry the file does not hold, so the run gets past the
+    empty-report return and the matching step and reaches the point where the
+    shape would be checked, with nothing unused to check it for; an empty
+    report returned before either and would not have noticed the check moving
+    ahead of the matching."""
     config_path = _setup(
         tmp_path,
         "project_name: demo\n"
         "global_settings:\n"
         "  suppressions: [{path: src/a.py, rule_id: B101, reason: one}]\n",
-        [],
+        [{"path": "src/gone.py", "rule_id": "B999", "reason": "x"}],
     )
     # The bytes as written: the fixer keeps the file's own line breaks, and
     # ``read_text`` would fold a Windows CRLF to LF before the comparison.
@@ -372,4 +381,184 @@ def test_a_comment_between_entries_is_kept_as_it_is(tmp_path):
     assert "    # kept as written\n" in fixed
     assert "# # kept" not in fixed
     data = _active_yaml(fixed)
+    assert [s["path"] for s in data["global_settings"]["suppressions"]] == ["src/b.py"]
+
+
+# --- refusals: an edit that would break the file, or a list that cannot be found ---
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        pytest.param(
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - &b101 {rule_id: B101, path: tests/a.py, reason: r}\n"
+            "    - <<: *b101\n"
+            "      path: tests/b.py\n",
+            id="entry-merged-into-a-kept-one",
+        ),
+        pytest.param(
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - path: tests/a.py\n"
+            "      rule_id: B101\n"
+            '      reason: &shared "Test code"\n'
+            "    - path: tests/b.py\n"
+            "      rule_id: B102\n"
+            "      reason: *shared\n",
+            id="reason-aliased-by-a-kept-entry",
+        ),
+    ],
+)
+def test_an_unused_entry_whose_anchor_a_kept_entry_uses_is_refused(
+    tmp_path, config_text
+):
+    """Red at the base: the first entry was commented out, its anchor with it,
+    the alias in the kept entry pointed at nothing, and the written file no
+    longer parsed ("found undefined alias"); the next lint exited 3 on it."""
+    config_path = _setup(
+        tmp_path,
+        config_text,
+        [{"path": "tests/a.py", "rule_id": "B101", "reason": "r"}],
+    )
+    before = config_path.read_bytes()
+
+    with pytest.raises(UnusedSuppressionsNotEditable, match="anchor"):
+        ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert config_path.read_bytes() == before
+
+
+def test_an_anchor_inside_the_commented_entries_only_is_no_refusal(tmp_path):
+    """The control: an anchor whose every alias is in an entry commented out
+    with it leaves a file that parses, and the edit is made."""
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: tests/a.py\n"
+        "      rule_id: B101\n"
+        '      reason: &shared "Test code"\n'
+        "    - path: tests/b.py\n"
+        "      rule_id: B102\n"
+        "      reason: *shared\n"
+        "    - path: tests/c.py\n"
+        "      rule_id: B103\n"
+        "      reason: three\n",
+        [
+            {"path": "tests/a.py", "rule_id": "B101", "reason": "Test code"},
+            {"path": "tests/b.py", "rule_id": "B102", "reason": "Test code"},
+        ],
+    )
+
+    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert len(fixed_issues) == 2
+    data = _active_yaml(fixed_content)
+    assert [s["path"] for s in data["global_settings"]["suppressions"]] == [
+        "tests/c.py"
+    ]
+
+
+def test_a_list_supplied_through_a_merge_key_is_refused_not_called_done(tmp_path):
+    """Red at the base: the loaded document holds the entries (the merge key
+    supplies them), the composer does not flatten the merge, so the walker
+    found no list and reported nothing to do, right after lint listed the
+    entries as fixable."""
+    config_path = _setup(
+        tmp_path,
+        "base: &base\n"
+        "  suppressions:\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: one\n"
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  <<: *base\n",
+        [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
+    )
+    before = config_path.read_bytes()
+
+    with pytest.raises(UnusedSuppressionsNotEditable, match="merge key"):
+        ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert config_path.read_bytes() == before
+
+
+def test_a_tagged_list_is_refused_for_its_tag(tmp_path):
+    """Red at the base: the tag placed the node at the tag, no dash was found
+    at its column, and the refusal read "1 entries but 0 list dashes"."""
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions: !!seq\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: one\n",
+        [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
+    )
+
+    with pytest.raises(UnusedSuppressionsNotEditable, match="tag"):
+        ConfigLinter.fix_unused_suppressions(config_path)
+
+
+def test_a_repeated_global_settings_key_is_refused_with_a_reason(tmp_path):
+    """The loader keeps the last mapping, a text walk would edit the first; the
+    file is left as it is and the refusal names the repeated key."""
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/x.py\n"
+        "      rule_id: B101\n"
+        "      reason: shadowed\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: one\n",
+        [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
+    )
+    before = config_path.read_bytes()
+
+    with pytest.raises(UnusedSuppressionsNotEditable, match="global_settings"):
+        ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert config_path.read_bytes() == before
+
+
+def test_an_entry_read_from_the_environment_in_a_crlf_file_is_matched(
+    tmp_path, monkeypatch
+):
+    """The text with its CRLF breaks goes to the environment-reference record
+    too: the references are read by the YAML parser, not line by line, so a
+    carriage return never reaches an entry's written form and the report's
+    entry (the written form, ``${VAR}``) still matches."""
+    monkeypatch.setenv("ASH_U06_CRLF_PATH", "src/a.py")
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\r\n"
+        "global_settings:\r\n"
+        "  suppressions:\r\n"
+        "    - path: ${ASH_U06_CRLF_PATH}\r\n"
+        "      rule_id: B101\r\n"
+        "      reason: one\r\n"
+        "    - path: src/b.py\r\n"
+        "      rule_id: B102\r\n"
+        "      reason: two\r\n",
+        [{"path": "${ASH_U06_CRLF_PATH}", "rule_id": "B101", "reason": "one"}],
+    )
+
+    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert [i.path for i in fixed_issues] == ["global_settings.suppressions[0]"]
+    assert "\r\n" in fixed_content
+    assert "# - path: ${ASH_U06_CRLF_PATH}" in fixed_content
+    data = _active_yaml(fixed_content.replace("\r\n", "\n"))
     assert [s["path"] for s in data["global_settings"]["suppressions"]] == ["src/b.py"]

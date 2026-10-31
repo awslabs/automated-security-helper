@@ -24,18 +24,28 @@ from automated_security_helper.config.config_linter import ConfigLinter, LintCat
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize("section", ["scanners", "reporters", "converters"])
 @pytest.mark.parametrize("key", ["on", "true", "1"])
-def test_a_non_string_section_key_does_not_end_the_lint_run(tmp_path, key):
-    """Red at the base: ``TypeError: argument of type 'bool' is not iterable``."""
+def test_a_non_string_section_key_does_not_end_the_lint_run(tmp_path, key, section):
+    """Red at the base: ``TypeError: argument of type 'bool' is not iterable``,
+    from the ``"-" in key`` test over each of the three sections' keys. The
+    lint runs to its end and reports no legacy-name issue for a key that is
+    not a name at all."""
     config_path = tmp_path / ".ash.yaml"
     config_path.write_text(
-        f"project_name: demo\nscanners:\n  {key}:\n    enabled: false\n",
+        f"project_name: demo\n{section}:\n  {key}:\n    enabled: false\n",
         encoding="utf-8",
     )
 
     result = ConfigLinter.lint(config_path)
 
-    assert result.issues is not None
+    legacy = [
+        i
+        for i in result.issues
+        if i.category
+        in (LintCategory.LEGACY_NAME_CONFLICT, LintCategory.LEGACY_NAME_VARIANT)
+    ]
+    assert legacy == [], result.issues
 
 
 def test_the_conflict_message_says_the_two_sections_are_merged(tmp_path):

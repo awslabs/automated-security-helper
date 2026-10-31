@@ -59,7 +59,7 @@ def test_scanners_that_did_not_run_are_named_with_a_caveat(tmp_path):
     context = _context(tmp_path)
     model = _model(
         bandit={"status": ScannerStatus.PASSED},
-        semgrep={"status": ScannerStatus.MISSING, "dependencies_satisfied": False},
+        semgrep={"status": ScannerStatus.MISSING},
         checkov={"status": ScannerStatus.ERROR},
         grype={"status": ScannerStatus.SKIPPED},
     )
@@ -83,6 +83,32 @@ def test_the_markdown_copy_carries_the_caveat(tmp_path):
     ).read_text(encoding="utf-8")
     assert "Scanners that did not run" in markdown
     assert "semgrep" in markdown
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        pytest.param(
+            {"status": ScannerStatus.PASSED, "dependencies_satisfied": False},
+            id="dependencies-not-satisfied",
+        ),
+        pytest.param(
+            {"status": ScannerStatus.PASSED, "excluded": True},
+            id="excluded",
+        ),
+    ],
+)
+def test_each_reason_a_scanner_did_not_run_counts_on_its_own(tmp_path, fields):
+    """Each condition the reporter reads is set alone, with a PASSED status,
+    so the row counts as not run for that condition and no other. The
+    fixture's values are the type a scan writes to ``scanner_results``
+    (``Dict[str, ScannerTargetStatusInfo]``, a flat record per scanner)."""
+    context = _context(tmp_path)
+    model = _model(bandit={"status": ScannerStatus.PASSED}, semgrep=fields)
+
+    report = json.loads(UnusedSuppressionsReporter(context=context).report(model))
+
+    assert report["scanners_not_run"] == ["semgrep"]
 
 
 def test_a_scan_where_every_scanner_ran_carries_no_caveat(tmp_path):

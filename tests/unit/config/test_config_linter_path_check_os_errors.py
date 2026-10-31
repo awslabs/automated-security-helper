@@ -28,12 +28,53 @@ through, and green at the base on 3.13 and later, where ``is_dir`` is
 Python 3.12.15 at the base: name-past-name-max red, embedded-nul green.
 """
 
+import errno
+
 import pytest
 import yaml
 
+from automated_security_helper.config import config_linter
 from automated_security_helper.config.config_linter import ConfigLinter, LintCategory
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        pytest.param(OSError(errno.ENAMETOOLONG, "File name too long"), id="os-error"),
+        pytest.param(ValueError("embedded null byte"), id="value-error"),
+    ],
+)
+def test_a_helper_that_refuses_the_probe_does_not_end_the_lint_run(
+    tmp_path, monkeypatch, raised
+):
+    """Both guarded arms, on every interpreter: the real-filesystem case below
+    reaches the OSError arm on Python 3.12 and older only (3.13's is_dir swallows
+    ENAMETOOLONG), and the ValueError arm on none (Path.exists has caught it
+    everywhere), so the arms are pinned here with the helpers made to raise."""
+
+    def refuse(*_args, **_kwargs):
+        raise raised
+
+    monkeypatch.setattr(config_linter, "absolute_path_warning", refuse)
+    monkeypatch.setattr(config_linter, "path_pattern_advice", refuse)
+    config_path = tmp_path / ".ash.yaml"
+    config_path.write_text(
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: probe\n",
+        encoding="utf-8",
+    )
+
+    result = ConfigLinter.lint(config_path, source_dir=tmp_path)
+
+    assert [
+        i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
+    ] == []
 
 
 @pytest.mark.parametrize(

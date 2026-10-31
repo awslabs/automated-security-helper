@@ -11,8 +11,9 @@ ConfigValidator and the environment record, which these tests are not about.
 
 from __future__ import annotations
 
+import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -76,6 +77,61 @@ class TestValidatorWarningCategory:
         assert [i.category for i in result.issues] == [LintCategory.OTHER]
         assert result.issues[0].severity == LintSeverity.WARNING
         assert LintCategory.SYNTAX_ERROR not in {i.category for i in result.issues}
+
+    def test_an_error_in_words_lint_does_not_know_is_not_a_syntax_error_either(
+        self,
+    ):
+        """Red at the base: the fallback of ``_validator_error_to_lint_issue``
+        gave an unrecognized ERROR message SYNTAX_ERROR, so the CLI took a file
+        that had parsed for one it could not load and skipped both fixers."""
+        issue = ConfigLinter._validator_error_to_lint_issue(
+            "A refusal in words lint has no pattern for", {}
+        )
+
+        assert issue.severity == LintSeverity.ERROR
+        assert issue.category == LintCategory.OTHER
+
+
+class TestFixableMarkReads:
+    def test_the_environment_is_read_once_for_every_issue(self, tmp_path, monkeypatch):
+        """Red at the base: ``uses_env_references`` opened and parsed the file
+        once per fixable issue."""
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+        calls = {"n": 0}
+        real = config_linter.uses_env_references
+
+        def counted(path):
+            calls["n"] += 1
+            return real(path)
+
+        monkeypatch.setattr(config_linter, "uses_env_references", counted)
+        result = LintResult(config_path=config_path)
+        result.issues = [_issue(LintCategory.SUPPRESSION_EXPIRED) for _ in range(5)]
+
+        ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
+
+        assert calls["n"] == 1
+        assert [i.fixable for i in result.issues] == [True] * 5
+
+    def test_a_file_that_cannot_be_read_again_keeps_the_marks(
+        self, tmp_path, monkeypatch
+    ):
+        """A read failure here was a traceback out of lint(); the marks stand and
+        the fixer reports its own refusal when it runs."""
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+
+        def gone(_path):
+            raise OSError("went away")
+
+        monkeypatch.setattr(config_linter, "uses_env_references", gone)
+        result = LintResult(config_path=config_path)
+        result.issues = [_issue(LintCategory.SUPPRESSION_EXPIRED)]
+
+        ConfigLinter._clear_fixable_a_fixer_refuses(config_path, result)
+
+        assert [i.fixable for i in result.issues] == [True]
 
 
 class TestFixableMarks:
@@ -200,6 +256,41 @@ class TestUnusedReport:
                 "reports/ash.unused-suppressions.json",
                 id="reporters-not-a-mapping",
             ),
+            pytest.param(
+                {"reporters": {"unused-suppressions": None}},
+                "reports/ash.unused-suppressions.json",
+                id="null-section-enables-the-reporter-with-its-defaults",
+            ),
+            pytest.param(
+                {
+                    "reporters": {
+                        "unused_suppressions": {"extension": "a.json"},
+                        "unused-suppressions": {"extension": "b.json"},
+                    }
+                },
+                "reports/ash.b.json",
+                id="two-spellings-the-canonical-one-wins",
+            ),
+            pytest.param(
+                {
+                    "reporters": {
+                        "unused-suppressions": {"extension": "b.json"},
+                        "unused_suppressions": {"extension": "a.json"},
+                    }
+                },
+                "reports/ash.b.json",
+                id="two-spellings-whatever-the-order",
+            ),
+            pytest.param(
+                {
+                    "reporters": {
+                        "unused_suppressions": {"extension": "a.json"},
+                        "unused-suppressions": {"enabled": True},
+                    }
+                },
+                "reports/ash.a.json",
+                id="two-spellings-the-canonical-one-sets-no-extension",
+            ),
         ],
     )
     def test_the_report_name_follows_the_reporters_extension(
@@ -249,7 +340,14 @@ class TestReportAge:
         class SpringForward(datetime):
             @classmethod
             def now(cls, tz=None):
-                return datetime(2026, 3, 8, 3, 30)
+                # One instant, 03:30 PDT on the morning the clocks moved: given
+                # as ``tz`` asks, so a reading made with ``now(timezone.utc)``
+                # gets the same instant and not a naive value that would make
+                # the subtraction raise for the wrong reason.
+                instant = datetime(2026, 3, 8, 10, 30, tzinfo=timezone.utc)
+                if tz is not None:
+                    return instant.astimezone(tz)
+                return instant.astimezone().replace(tzinfo=None)
 
         monkeypatch.setattr(config_linter, "datetime", SpringForward)
 
@@ -296,16 +394,62 @@ class TestWhichSuppressionsTheReportLists:
         message read ``rule_id='None'``."""
         assert ConfigLinter._rule_shown(entry) == "*"
 
-    def test_only_the_files_own_entries_are_fixable(self):
-        own = {"path": "src/own.py", "rule_id": "B1"}
-        other = {"path": "src/base.py", "rule_id": "B2"}
-
-        ids = ConfigLinter._own_suppression_ids(
-            {"global_settings": {"suppressions": [own]}}, []
+    def test_only_the_files_own_entries_are_fixable(self, tmp_path, monkeypatch):
+        """An entry an ``extends`` base supplies is reported unused with the
+        file's, since a scan reads the merged list, and is not fixable: the
+        fixer edits the file's own text, where the base's entry is not. The
+        earlier form of this test never handed the other entry to the code, so
+        its "not in ids" held whatever the code did."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "base.yaml").write_text(
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - path: src/base.py\n"
+            "      rule_id: B2\n"
+            "      reason: base\n",
+            encoding="utf-8",
+        )
+        config_path = tmp_path / ".ash.yaml"
+        config_path.write_text(
+            "extends: base.yaml\n"
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - path: src/own.py\n"
+            "      rule_id: B1\n"
+            "      reason: own\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "out"
+        (out / "reports").mkdir(parents=True)
+        (out / "reports" / "ash.unused-suppressions.json").write_text(
+            json.dumps(
+                {
+                    "unused_suppressions": [
+                        {"path": "src/own.py", "rule_id": "B1", "reason": "own"},
+                        {"path": "src/base.py", "rule_id": "B2", "reason": "base"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
         )
 
-        assert ConfigLinter._make_suppression_id(own) in ids
-        assert ConfigLinter._make_suppression_id(other) not in ids
+        result = ConfigLinter.lint(config_path, output_dir=out, check_unused=True)
+
+        unused = {
+            issue.message: issue.fixable
+            for issue in result.issues
+            if issue.category == LintCategory.SUPPRESSION_UNUSED
+            and issue.severity == LintSeverity.WARNING
+        }
+        own = [
+            fixable for message, fixable in unused.items() if "src/own.py" in message
+        ]
+        base = [
+            fixable for message, fixable in unused.items() if "src/base.py" in message
+        ]
+        assert own == [True], unused
+        assert base == [False], unused
 
 
 class TestCommentedOutEntries:

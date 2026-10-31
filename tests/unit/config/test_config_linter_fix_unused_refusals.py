@@ -31,7 +31,10 @@ pytestmark = pytest.mark.unit
 def _write(tmp_path: Path, config_text: str) -> tuple[Path, Path]:
     config_path = tmp_path / ".ash" / ".ash.yaml"
     config_path.parent.mkdir(parents=True)
-    config_path.write_text(config_text, encoding="utf-8")
+    # Bytes, so the file holds the text as written on Windows too (write_text
+    # would turn its "\n" into "\r\n" there, and the fixer keeps the file's
+    # own breaks, so ``fixed_content == before`` compared two line endings).
+    config_path.write_bytes(config_text.encode("utf-8"))
     reports = tmp_path / ".ash" / "ash_output" / "reports"
     reports.mkdir(parents=True)
     return config_path, reports / "ash.unused-suppressions.json"
@@ -78,7 +81,7 @@ def test_a_report_lint_cannot_read_comments_nothing_out(tmp_path, report_bytes):
         "      reason: one\n",
     )
     report.write_bytes(report_bytes)
-    before = config_path.read_text(encoding="utf-8")
+    before = config_path.read_bytes().decode("utf-8")
 
     fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
 
@@ -106,7 +109,7 @@ def test_a_report_that_is_a_directory_comments_nothing_out(tmp_path):
         "      reason: one\n",
     )
     report.mkdir()
-    before = config_path.read_text(encoding="utf-8")
+    before = config_path.read_bytes().decode("utf-8")
 
     fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
 
@@ -129,7 +132,7 @@ def test_a_shape_lint_guards_is_returned_unchanged(tmp_path, config_text):
     """Red at the base: ``.get`` on None, or on a list, raised."""
     config_path, report = _write(tmp_path, config_text)
     report.write_text(GOOD_REPORT, encoding="utf-8")
-    before = config_path.read_text(encoding="utf-8")
+    before = config_path.read_bytes().decode("utf-8")
 
     fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
 
