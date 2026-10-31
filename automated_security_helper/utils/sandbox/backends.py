@@ -1486,10 +1486,15 @@ def _landlock_program(name: str) -> str:
     )
 
 
+#: What Linux takes as one command-line argument on a kernel with 4 KiB pages:
+#: MAX_ARG_STRLEN, 32 pages. A kernel with larger pages takes more, so this is the
+#: smallest limit the policy document has to fit under.
+_KERNEL_ARGUMENT_LIMIT = 128 * 1024
+
 #: The most bytes the Landlock policy document may take as the wrapper's
-#: ``--policy`` argument. Linux takes one command-line argument of at most 128 KiB
-#: (MAX_ARG_STRLEN: 32 pages of 4 KiB), and a spawn whose argument is longer fails
-#: with "Argument list too long" before the wrapper starts, whatever the scanner.
+#: ``--policy`` argument: 32 KiB under ``_KERNEL_ARGUMENT_LIMIT``, a margin for
+#: the kernel's accounting, since a spawn whose argument is longer fails with
+#: "Argument list too long" before the wrapper starts, whatever the scanner.
 #: The document grows with the entries beside the way to a home that a granted path
 #: holds (``_around``), so a plan past this size is refused with the cause named.
 _LANDLOCK_POLICY_LIMIT = 96 * 1024
@@ -1628,11 +1633,14 @@ class LandlockBackend(SandboxBackend):
             raise SandboxUnavailable(
                 f"the Landlock policy for this spawn lists {paths} paths "
                 f"({len(policy_text)} bytes), more than the {_LANDLOCK_POLICY_LIMIT} "
-                "bytes one command-line argument can carry. A granted path that "
-                "holds a home directory is replaced by every entry beside the way "
-                "to the home, so a path with many entries makes the document grow; "
-                "grant a narrower path than the one that holds the home, or use "
-                "another sandbox mode."
+                "bytes ASH lets one command-line argument take. Linux refuses an "
+                f"argument over {_KERNEL_ARGUMENT_LIMIT} bytes (32 pages of 4 KiB; "
+                "more where pages are larger), and ASH keeps a margin under that "
+                "limit. A granted path that holds a home directory is replaced by "
+                "every entry beside the way to the home, so a path with many "
+                "entries makes the document grow; grant a narrower path than the "
+                "one that holds the home. A read path ASH adds itself cannot be "
+                "narrowed that way: use another sandbox mode for that scan."
             )
         cmd = [
             sys.executable,

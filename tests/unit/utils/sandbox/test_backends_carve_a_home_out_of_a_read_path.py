@@ -252,6 +252,12 @@ def test_landlock_refuses_a_document_longer_than_one_argument_can_be(
 
     assert f"({size} bytes)" in str(refused.value), str(refused.value)
     assert "narrower path" in str(refused.value), str(refused.value)
+    # The kernel's limit is named with the pages it counts, and the cap is said to
+    # keep a margin under it; the remedy says what to do for a path ASH adds itself.
+    assert f"over {backends_module._KERNEL_ARGUMENT_LIMIT} bytes" in str(refused.value)
+    assert "over 131072 bytes (32 pages of 4 KiB" in str(refused.value)
+    assert "margin" in str(refused.value), str(refused.value)
+    assert "another sandbox mode" in str(refused.value), str(refused.value)
     assert list(tmp_path.glob("ash-sandbox-*")) == []
 
     monkeypatch.setattr(backends_module, "_LANDLOCK_POLICY_LIMIT", size)
