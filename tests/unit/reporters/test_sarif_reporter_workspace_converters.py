@@ -11,6 +11,7 @@ one invocation per converter it recorded in ``incomplete_converters``, on the
 run its ``sarif_run_index`` names, never on ``runs[0]`` by default.
 """
 
+import copy
 import json
 
 import pytest
@@ -361,12 +362,53 @@ def test_an_unstamped_run_at_the_index_is_still_the_projects_run(
     assert len(doc["runs"][1]["invocations"]) == 1
 
 
+def _dump(model: AshAggregatedResults) -> str:
+    """The model's SARIF as text, so a later comparison sees an append to a list
+    the model holds, which a snapshot of the lists themselves would share."""
+    return model.sarif.model_dump_json(
+        by_alias=True, exclude_none=True, exclude_unset=True
+    )
+
+
 def test_the_scans_own_sarif_is_left_alone(model, test_plugin_context):
-    before = [run.invocations for run in model.sarif.runs]
+    before = copy.deepcopy([run.invocations for run in model.sarif.runs])
+    before_dump = _dump(model)
 
     SarifReporter(context=test_plugin_context).report(model)
 
     # The invocation is written into the emitted document only; the model's
     # own runs keep whatever they held (the Run default is an empty list).
     assert [run.invocations for run in model.sarif.runs] == before
+    assert _dump(model) == before_dump
     assert not model.sarif.runs[1].invocations
+
+
+def test_a_run_that_already_has_invocations_is_left_alone_too(test_plugin_context):
+    """The case the reporter appends to in its copy: runs that already hold a
+    scanner's invocation. The model keeps exactly those and no converter one."""
+    model = _workspace_model(
+        _project("api", sarif_run_index=0),
+        _project(
+            "web", sarif_run_index=1, incomplete_converters={"archive": "crashed"}
+        ),
+    )
+    model.sarif.runs[0].invocations = [_scanner_invocation("semgrep")]
+    model.sarif.runs[1].invocations = [_scanner_invocation("bandit")]
+    before_dump = _dump(model)
+
+    SarifReporter(context=test_plugin_context).report(model)
+
+    assert _dump(model) == before_dump
+    assert len(model.sarif.runs[1].invocations) == 1
+
+
+def test_a_second_report_does_not_double_the_converter_invocations(
+    model, test_plugin_context
+):
+    reporter = SarifReporter(context=test_plugin_context)
+
+    first = json.loads(reporter.report(model))
+    second = json.loads(reporter.report(model))
+
+    assert second == first
+    assert len(second["runs"][1]["invocations"]) == 1
