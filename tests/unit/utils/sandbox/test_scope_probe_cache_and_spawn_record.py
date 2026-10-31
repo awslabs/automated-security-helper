@@ -34,6 +34,7 @@ import platform
 import shlex
 import subprocess
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -93,7 +94,12 @@ def _backend(name="bwrap"):
 
 
 class _Clock:
-    """A monotonic clock the test advances by hand."""
+    """A monotonic clock the test advances by hand.
+
+    Everything else of the ``time`` module is the real one's, so code in the scope
+    module that asks for another clock fails for its own reason, not with an
+    AttributeError about a stand-in.
+    """
 
     def __init__(self):
         self.now = 1000.0
@@ -104,6 +110,9 @@ class _Clock:
     def advance(self, seconds):
         self.now += seconds
 
+    def __getattr__(self, name):
+        return getattr(time, name)
+
 
 @pytest.fixture
 def clock(monkeypatch):
@@ -111,6 +120,13 @@ def clock(monkeypatch):
     clock = _Clock()
     monkeypatch.setattr(scope, "time", clock)
     return clock
+
+
+def test_the_stand_in_clock_leaves_the_rest_of_time_alone(clock):
+    # Red at the base: AttributeError, the stand-in had only monotonic().
+    assert scope.time.time is time.time
+    assert scope.time.sleep is time.sleep
+    assert scope.time.monotonic() == clock.now
 
 
 PAST_THE_WINDOW = scope._TRANSIENT_RETRY_SECONDS + 1.0
