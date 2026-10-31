@@ -1310,12 +1310,17 @@ def strip_client_scanner_exclusions(
                     # it, and a copy kept in a shape that carries no expiration
                     # (a plain string) would have applied for good.
                     operator_entry = operator_entries[pattern]
-                    if _entry_expired(_entry_fields(operator_entry)[2]):
-                        # The client's, only when a delivered file wrote it: an
-                        # operator entry no delivered file touched is dropped
-                        # all the same (the scanner would not apply it) but
-                        # not blamed on the client.
-                        if pattern in client_patterns:
+                    operator_expiration = _entry_fields(operator_entry)[2]
+                    if _entry_expired(operator_expiration):
+                        # The client's, when a delivered file wrote it or the
+                        # option holds the path with terms other than the
+                        # operator's (an override, which no file carries): an
+                        # operator entry nobody else touched is dropped all the
+                        # same (the scanner would not apply it) but not blamed
+                        # on the client.
+                        if pattern in client_patterns or _expiration_day(
+                            expiration
+                        ) != _expiration_day(operator_expiration):
                             expired.append(pattern)
                         else:
                             expired_by_operator.append(pattern)
@@ -1609,6 +1614,15 @@ def _entry_fields(entry: Any) -> Tuple[Optional[str], Optional[str], Any]:
     if isinstance(entry, str):
         return pattern, reason, None
     return pattern, reason, getattr(entry, "expiration", None)
+
+
+def _expiration_day(expiration: Any) -> Optional[str]:
+    """An entry's expiration as its YYYY-MM-DD day, None for none.
+
+    A YAML date, a validated model's text and a timestamp read alike, so two
+    spellings of one day compare equal.
+    """
+    return str(expiration)[:10] if expiration else None
 
 
 def _entry_expired(expiration: Any) -> bool:

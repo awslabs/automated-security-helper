@@ -352,6 +352,47 @@ def test_an_expired_operator_entry_is_blamed_on_the_client_only_when_a_delivered
     ), written._resolution_warnings
 
 
+def test_an_override_repeating_an_expired_operator_path_is_blamed_on_the_client(
+    tmp_path,
+):
+    """A client's config override reaches the option with no delivered file, so
+    the patterns the delivered files wrote did not include it, and the warning
+    for its dropped copy said the entry had "expired in the operator's own
+    config". The option holds the path with a day other than the operator's:
+    the operator did not write that value, so the warning names the client. An
+    entry that matches the operator's expired day stays the operator's."""
+    operator = _operator_bandit(
+        {"path": "legacy", "reason": "op", "expiration": "2000-01-01"}
+    )
+    override = AshConfig()
+    override.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="legacy", reason="client", expiration="2099-01-01"),
+    ]
+
+    _strip(override, {}, operator, tmp_path)
+
+    warnings = override._resolution_warnings
+    assert _bandit_paths(override) == []
+    assert override._client_scanner_exclusions == []
+    assert any(
+        "'legacy'" in warning and "MCP client delivered" in warning
+        for warning in warnings
+    ), warnings
+    assert not any("operator's own config" in warning for warning in warnings), warnings
+
+    same_day = AshConfig()
+    same_day.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="legacy", reason="op", expiration="2000-01-01"),
+    ]
+
+    _strip(same_day, {}, operator, tmp_path)
+
+    assert any(
+        "'legacy'" in warning and "operator's own config" in warning
+        for warning in same_day._resolution_warnings
+    ), same_day._resolution_warnings
+
+
 @pytest.mark.parametrize(
     ("expiration", "kept"),
     [("2000-01-01", []), ("2099-01-01", ["shared"])],
