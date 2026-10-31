@@ -175,6 +175,56 @@ def test_the_encoding_of_a_damaged_template_does_not_change_its_answer(context):
     assert len(found.templates) == 4
 
 
+# The same Jinja-templated stack with an ASCII comment, so that its UTF-16 and
+# UTF-32 bytes, written without a byte-order mark, are valid UTF-8 (NUL is valid
+# UTF-8) and take the route of text that reaches the parsers NUL-interleaved.
+JINJA_STACK_ASCII = (
+    "# Queue for {{ env }}\n"
+    "{% for q in queues %}\n"
+    "Resources:\n"
+    "  {{ q }}:\n"
+    "    Type: AWS::SQS::Queue\n"
+    "{% endfor %}\n"
+)
+
+
+@pytest.mark.unit
+def test_a_marker_only_template_without_a_byte_order_mark_reads_unparseable(context):
+    """A UTF-16 or UTF-32 file written without a byte-order mark reaches the
+    parsers NUL-interleaved, and is read again in those encodings. When the reading
+    carries a CloudFormation marker but no reading of it has a Resources mapping, it
+    is a damaged template, not a failed target: a marker alone never makes one, on
+    any route. At the previous tip this route decided from the marker, so the two
+    wide copies were unreadable while the UTF-8 copy of the same text was
+    unparseable. All three now read alike."""
+    source = Path(context.source_dir)
+    (source / "jinja-utf8.yaml").write_bytes(JINJA_STACK_ASCII.encode("utf-8"))
+    (source / "jinja-utf16-nomark.yaml").write_bytes(
+        JINJA_STACK_ASCII.encode("utf-16-le")
+    )
+    (source / "jinja-utf32-nomark.yaml").write_bytes(
+        JINJA_STACK_ASCII.encode("utf-32-be")
+    )
+    # What makes the wide copies reach the NUL-interleaved route and not the
+    # UnicodeDecodeError arm: their bytes decode as UTF-8.
+    for name in ("jinja-utf16-nomark.yaml", "jinja-utf32-nomark.yaml"):
+        assert b"\x00" in (source / name).read_bytes()
+        (source / name).read_bytes().decode("utf-8")
+
+    found = discover_templates(context, "source")
+
+    assert [shown for shown, _ in found.unparseable] == [
+        "jinja-utf16-nomark.yaml",
+        "jinja-utf32-nomark.yaml",
+        "jinja-utf8.yaml",
+    ]
+    assert found.unreadable == []
+    assert found.skipped == []
+    for _, reason in found.unparseable:
+        assert reason.startswith("it could be a CloudFormation template"), reason
+    assert len(found.templates) == 4
+
+
 @pytest.mark.unit
 def test_a_second_read_that_fails_is_answered_as_a_template(context):
     """The judgment reads the candidate again; a file gone or swapped under the

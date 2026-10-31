@@ -376,6 +376,44 @@ def test_the_encoding_of_a_damaged_template_does_not_change_how_it_is_counted(
     )
 
 
+def test_a_marker_only_template_without_a_byte_order_mark_is_skipped_as_unparseable(
+    scanner, deps_available, subprocess_double
+):
+    """A UTF-16 file written without a byte-order mark reaches the parsers
+    NUL-interleaved and is read again as UTF-16. Read that way, the Jinja-templated
+    stack carries a CloudFormation marker and no Resources mapping, so it is a
+    template that could not be parsed, not a failed target: a marker alone never
+    makes one. At the previous tip this route decided from the marker, so the file
+    was an ERROR named in the error record where its UTF-8 copy is a WARNING counted
+    as nothing."""
+    jinja = (
+        "# Queue for {{ env }}\n"
+        "{% for q in queues %}\n"
+        "Resources:\n"
+        "  {{ q }}:\n"
+        "    Type: AWS::SQS::Queue\n"
+        "{% endfor %}\n"
+    )
+    name = "jinja-utf16-nomark.yaml"
+    (scanner.context.work_dir / name).write_bytes(jinja.encode("utf-16-le"))
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 0
+    assert not scanner.unevaluated_targets
+    skipped = [
+        e
+        for e in scanner.errors
+        if "Skipped" in e and name in e and "could not be parsed" in e
+    ]
+    assert len(skipped) == 1, scanner.errors
+    assert not any("did not evaluate" in e and name in e for e in scanner.errors)
+
+
 def test_errors_are_reset_for_each_scan_call(scanner, deps_available):
     """A line recorded by an earlier scan() call is not carried into the next.
 
