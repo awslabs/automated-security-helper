@@ -11,9 +11,7 @@ to provide a higher-level interface for scan management.
 """
 
 import asyncio
-import os
 import shutil
-import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -25,6 +23,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
     DEFAULT_SCAN_SESSION,
     get_scan_registry,
 )
+from automated_security_helper.utils import output_dir_links
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -118,45 +117,6 @@ def _resolved_output_dir(
     except ValueError:
         return None
     return resolved
-
-
-#: The reparse tag of a mount point, which is what a junction is. ``stat`` defines
-#: the name on Windows builds only, so the value is spelled here (the Windows
-#: header's mount-point tag: 0xA in the top four bits, 3 in the low bits) for the
-#: platforms where a test hands the check a status of its own.
-_IO_REPARSE_TAG_MOUNT_POINT = getattr(
-    stat, "IO_REPARSE_TAG_MOUNT_POINT", (0xA << 28) | 3
-)
-
-
-def _is_junction(path: Path) -> bool:
-    """Whether ``path`` is itself a Windows junction: a mount-point reparse point.
-
-    ``Path.is_symlink`` is False for a junction, while ``Path.resolve`` follows
-    it, so a removal that refuses links by ``is_symlink`` alone deletes the
-    junction's target. ``Path.is_junction``, which sees it, exists only from
-    3.12; before that the status of the path itself (``lstat``, which does not
-    follow it) carries the reparse-point flag and the reparse tag, on Windows
-    only: elsewhere the attributes do not exist and the answer is False. The
-    flag alone is not enough: a cloud-files placeholder or a projected
-    directory is a reparse point too, and a real directory to remove, so the
-    tag must be the mount-point tag. A path that cannot be read answers False;
-    the delete that follows reports it.
-    """
-    is_junction = getattr(path, "is_junction", None)
-    if is_junction is not None:
-        try:
-            return bool(is_junction())
-        except OSError:
-            return False
-    try:
-        status = os.lstat(path)
-    except OSError:
-        return False
-    attributes = getattr(status, "st_file_attributes", 0)
-    if not attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
-        return False
-    return getattr(status, "st_reparse_tag", 0) == _IO_REPARSE_TAG_MOUNT_POINT
 
 
 def _remove_output_tree(output_dir: Path) -> bool:
@@ -619,8 +579,14 @@ async def cleanup_scan_resources(
                     # would fail on every retry and keep the entry for good.
                     # A Windows junction is one too, and is_symlink does not
                     # see it while resolve() follows it, so the delete below
-                    # would take its target.
-                    if output_dir.is_symlink() or _is_junction(output_dir):
+                    # would take its target. The junction question is the one
+                    # every other output-directory check asks
+                    # (output_dir_links.is_junction: a mount-point reparse
+                    # point, so a cloud-files placeholder or a projected
+                    # directory is still removed).
+                    if output_dir.is_symlink() or output_dir_links.is_junction(
+                        output_dir
+                    ):
                         raise _OutputDirectoryInUse(
                             "the output directory is itself a symbolic link or "
                             "a junction, which is left in place with what it "

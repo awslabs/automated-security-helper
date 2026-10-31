@@ -52,6 +52,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
 pytestmark = pytest.mark.unit
 
 _MODULE = "automated_security_helper.core.resource_management.scan_management"
+_LINKS_MODULE = "automated_security_helper.utils.output_dir_links"
 
 
 @pytest.fixture
@@ -533,19 +534,23 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         """A Windows junction is a link to the delete as much as a symbolic
         link is, but ``Path.is_symlink`` is False for it before Python 3.12
         while ``resolve()`` follows it, so the check passed and the delete took
-        the junction's target. The junction answer is the module's
-        ``_is_junction``; here it reads True for the output directory (the
-        Windows test below makes a real one)."""
+        the junction's target. The junction answer is the shared
+        ``output_dir_links.is_junction``, the one every other output-directory
+        check asks; here it reads True for the output directory (the Windows
+        test below makes a real one). Like the symbolic link, the junction is
+        left in place and the entry goes."""
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         output = _output_of(entry)
         registry.get_scan.return_value = entry
 
         with (
             _use(registry),
-            patch(f"{_MODULE}._is_junction", lambda path: path == output),
+            patch(f"{_LINKS_MODULE}.is_junction", lambda path: Path(path) == output),
         ):
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
+        assert result["success"] is True
+        assert result["removed_from_registry"] is True
         assert result["removed_output"] is False
         assert "junction" in result["output_dir_error"]
         assert (output / "ash_aggregated_results.json").exists()
@@ -557,7 +562,7 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         output = _output_of(entry)
         registry.get_scan.return_value = entry
 
-        with _use(registry), patch(f"{_MODULE}._is_junction", lambda path: False):
+        with _use(registry), patch(f"{_LINKS_MODULE}.is_junction", lambda path: False):
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
         assert result["removed_output"] is True
@@ -592,78 +597,44 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         assert "junction" in result["output_dir_error"]
         assert (elsewhere / "keep.txt").exists()
 
-    def test_the_junction_answer_comes_from_is_junction_where_the_path_has_one(self):
-        from automated_security_helper.core.resource_management.scan_management import (
-            _is_junction,
-        )
-
-        class Junction:
-            def is_junction(self):
-                return True
-
-        class Refusing:
-            def is_junction(self):
-                raise OSError("unreadable")
-
-        assert _is_junction(Junction()) is True
-        assert _is_junction(Refusing()) is False
-
-    def test_the_junction_answer_reads_the_reparse_flag_where_the_path_has_no_method(
-        self,
+    @pytest.mark.parametrize(
+        ("reparse_tag", "left_in_place"),
+        [(0xA0000003, True), (0x9000001A, False)],
+        ids=["mount_point", "cloud_files_placeholder"],
+    )
+    def test_the_removal_asks_the_shared_helper_where_the_python_has_no_isjunction(
+        self, registry, tmp_path, reparse_tag, left_in_place
     ):
-        """Before Python 3.12 a path has no ``is_junction``: the file attributes
-        and the reparse tag of the path itself say it (Windows only; elsewhere
-        the attributes are absent and the answer is False). The flag alone is
-        not a junction: a cloud-files placeholder or a projected directory is a
-        reparse point with another tag, and a real directory to remove."""
+        """Before Python 3.12 there is no ``os.path.isjunction``: the shared
+        helper reads the file attributes and the reparse tag of the path itself
+        (Windows only; elsewhere the attributes are absent and the answer is
+        False). The flag alone is not a junction: a cloud-files placeholder or a
+        projected directory is a reparse point with another tag, and a real
+        directory to remove, so only the mount-point tag leaves the directory in
+        place. The module no longer keeps a copy of that rule of its own, so the
+        fake ``os`` handed to the helper decides both cases."""
         import stat
 
-        from automated_security_helper.core.resource_management.scan_management import (
-            _is_junction,
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
+        output = _output_of(entry)
+        registry.get_scan.return_value = entry
+        older_python = SimpleNamespace(
+            path=SimpleNamespace(),
+            lstat=lambda path: SimpleNamespace(
+                st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT,
+                st_reparse_tag=reparse_tag,
+            ),
         )
 
-        class OlderPath:
-            pass
+        with _use(registry), patch(f"{_LINKS_MODULE}.os", older_python):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
-        mount_point_tag = 0xA0000003
-        cloud_files_tag = 0x9000001A
-
-        def lstat_with(attributes, **extra):
-            return lambda path: SimpleNamespace(st_file_attributes=attributes, **extra)
-
-        flagged = SimpleNamespace(
-            lstat=lstat_with(
-                stat.FILE_ATTRIBUTE_REPARSE_POINT, st_reparse_tag=mount_point_tag
-            )
-        )
-        another_reparse_point = SimpleNamespace(
-            lstat=lstat_with(
-                stat.FILE_ATTRIBUTE_REPARSE_POINT, st_reparse_tag=cloud_files_tag
-            )
-        )
-        flagged_without_a_tag = SimpleNamespace(
-            lstat=lstat_with(stat.FILE_ATTRIBUTE_REPARSE_POINT)
-        )
-        plain = SimpleNamespace(
-            lstat=lstat_with(stat.FILE_ATTRIBUTE_DIRECTORY, st_reparse_tag=0)
-        )
-        linux_like = SimpleNamespace(lstat=lambda path: SimpleNamespace())
-
-        def unreadable(path):
-            raise OSError("gone")
-
-        with patch(f"{_MODULE}.os", flagged):
-            assert _is_junction(OlderPath()) is True
-        with patch(f"{_MODULE}.os", another_reparse_point):
-            assert _is_junction(OlderPath()) is False
-        with patch(f"{_MODULE}.os", flagged_without_a_tag):
-            assert _is_junction(OlderPath()) is False
-        with patch(f"{_MODULE}.os", plain):
-            assert _is_junction(OlderPath()) is False
-        with patch(f"{_MODULE}.os", linux_like):
-            assert _is_junction(OlderPath()) is False
-        with patch(f"{_MODULE}.os", SimpleNamespace(lstat=unreadable)):
-            assert _is_junction(OlderPath()) is False
+        assert result["success"] is True
+        assert result["removed_from_registry"] is True
+        assert result["removed_output"] is not left_in_place
+        assert output.exists() is left_in_place
+        if left_in_place:
+            assert "junction" in result["output_dir_error"]
 
     def test_a_vanished_entry_is_judged_on_the_path_that_was_deleted(
         self, registry, tmp_path
