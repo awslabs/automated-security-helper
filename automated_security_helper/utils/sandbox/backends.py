@@ -245,6 +245,14 @@ class SpawnPlan:
     #: hold (uv links its cache entries) is ASH's own, not something the scanner
     #: left to be counted and removed as a scanner's.
     private_dirs: List[Path] = field(default_factory=list)
+    #: Whether any of this spawn's caches is not a throwaway overlay: mounted
+    #: read-only, or granted as it is, so that a write to it is refused or reaches
+    #: the host. True unless the backend mounted every cache of this plan through
+    #: an overlay (bwrap, when each cache's filesystem took one), which is the
+    #: only case a caller may trust a cache write to be discarded. The answer is
+    #: the plan's own: ``caches_are_throwaway`` on the backend is a record of the
+    #: filesystems probed so far, and a later plan can meet one that refuses.
+    caches_read_only: bool = True
 
     def run_cleanup(self) -> None:
         """Run each cleanup once; later calls do nothing."""
@@ -813,25 +821,30 @@ class BwrapBackend(SandboxBackend):
         #: the record of its answer happen under one lock.
         self._overlay_devices: Dict[int, bool] = {}
         self._overlay_lock = threading.Lock()
+        #: Whether any probed filesystem refused an overlay. Set under the lock,
+        #: before the refusal is recorded, and read without it, so a reader never
+        #: waits for a probe that is still running.
+        self._overlay_refused = False
 
     @property
     def caches_are_throwaway(self) -> bool:
         """Whether the probe found overlays supported, at least one filesystem a
         cache was found on has been probed, and none of them refused one.
 
-        A cache on a filesystem that refuses to be an overlay's lower layer is
-        mounted read-only (_overlay_over), so once a plan has met one the answer
-        is False for the backend: a caller that trusts True writes into a cache
-        that is read-only. Until a plan has probed a filesystem nothing is known
-        about the caches, and the answer is False as well: an empty record is not
-        a record of no refusals. The answer for one cache is ``_overlay_over``'s.
+        This is the backend's record so far, not an answer about a spawn: a cache
+        on a filesystem that refuses to be an overlay's lower layer is mounted
+        read-only (_overlay_over), and a plan whose cache sits on a filesystem not
+        probed yet can still meet one. Whether a spawn's own caches are throwaway
+        is ``SpawnPlan.caches_read_only`` of its plan. Until a plan has probed a
+        filesystem nothing is known about the caches, and the answer is False: an
+        empty record is not a record of no refusals. The read takes no lock, so it
+        returns at once while a probe runs.
         """
-        with self._overlay_lock:
-            return (
-                self._overlay
-                and bool(self._overlay_devices)
-                and all(self._overlay_devices.values())
-            )
+        return (
+            self._overlay
+            and bool(self._overlay_devices)
+            and not self._overlay_refused
+        )
 
     def _probe(self) -> Optional[str]:
         found = _sandbox_program("bwrap")
@@ -900,6 +913,10 @@ class BwrapBackend(SandboxBackend):
                     )
                 except (OSError, subprocess.SubprocessError) as e:
                     failure = f"{type(e).__name__}: {e}"
+                if failure:
+                    # Before the record: a reader that sees the device sees the
+                    # refusal too (``caches_are_throwaway`` reads without the lock).
+                    self._overlay_refused = True
                 self._overlay_devices[device] = failure is None
                 if failure:
                     # The path and bwrap's own words can name a value an option
@@ -1115,7 +1132,11 @@ class BwrapBackend(SandboxBackend):
             )
         cleanup += _uv_lock_watch(policy)
         return SpawnPlan(
-            argv=cmd, env=child_env, cleanup=cleanup, private_dirs=private_dirs
+            argv=cmd,
+            env=child_env,
+            cleanup=cleanup,
+            private_dirs=private_dirs,
+            caches_read_only=caches_read_only,
         )
 
 

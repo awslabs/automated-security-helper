@@ -468,6 +468,91 @@ def test_the_throwaway_property_is_false_until_a_filesystem_has_been_probed(
     assert backend.caches_are_throwaway is True
 
 
+def test_the_throwaway_property_does_not_wait_for_a_probe_that_is_running():
+    """A cache filesystem is probed under ``_overlay_lock``, for as long as the
+    probe takes (up to its bound). The property is a read of the record, and a
+    reader must not queue behind that probe: with the lock held here, as a probe
+    holds it, the read still returns, on its own thread so a block shows as a
+    thread that has not finished."""
+    backend = _bwrap(overlay=True)
+    backend._overlay_devices[1] = True
+    answers = []
+    reader = threading.Thread(
+        target=lambda: answers.append(backend.caches_are_throwaway)
+    )
+
+    with backend._overlay_lock:
+        reader.start()
+        reader.join(2)
+        waited_for_the_lock = reader.is_alive()
+    reader.join(5)
+
+    assert not waited_for_the_lock
+    assert answers == [True]
+
+
+def test_a_plan_says_whether_its_own_caches_are_read_only(layout, monkeypatch):
+    """The backend's property is a record of the filesystems probed so far, and a
+    later plan can meet a cache on one that refuses. Each plan carries its own
+    answer: False when every cache it mounts took an overlay (and for a plan with
+    no cache), True when any cache is read-only, and True for a backend whose
+    probe found no overlays. A plan built without the field reads True, the
+    answer of the backends that never mount an overlay."""
+    taking = layout.tmp / "taking"
+    refusing = layout.tmp / "refusing"
+    taking.mkdir()
+    refusing.mkdir()
+    monkeypatch.setattr(backends, "_probe_run", lambda argv, env=None: None)
+    monkeypatch.setattr(backends, "_true", lambda: "/fake/true")
+    cache_env = ("UV_CACHE_DIR",)
+
+    def read_only_of(backend, **fields) -> bool:
+        plan = backend.plan(["/bin/true"], {}, _policy(layout, **fields))
+        try:
+            return plan.caches_read_only
+        finally:
+            plan.run_cleanup()
+
+    overlay = _bwrap(overlay=True)
+    assert read_only_of(overlay) is False
+    assert read_only_of(overlay, cache=(taking,), cache_env=cache_env) is False
+    assert overlay.caches_are_throwaway is True
+    # The next plan meets a filesystem that refuses an overlay.
+    monkeypatch.setattr(overlay, "_overlay_over", lambda real: real != _real(refusing))
+    assert read_only_of(overlay, cache=(refusing,), cache_env=cache_env) is True
+    assert read_only_of(overlay, cache=(taking, refusing), cache_env=cache_env) is True
+
+    assert read_only_of(_bwrap(overlay=False), cache=(taking,)) is True
+    assert backends.SpawnPlan(argv=[], env={}).caches_read_only is True
+
+
+def test_a_refusing_filesystem_is_recorded_before_the_device(layout, monkeypatch):
+    """``caches_are_throwaway`` reads the record without the lock, so the refusal
+    flag is set before the device's answer is recorded: a reader that finds the
+    device in the record finds the refusal too. The stand-in record notes what the
+    flag read when the device was written."""
+    cache = layout.tmp / "cache"
+    cache.mkdir()
+    monkeypatch.setattr(backends, "_true", lambda: "/fake/true")
+    monkeypatch.setattr(
+        backends, "_probe_run", lambda argv, env=None: "exit 1: refused"
+    )
+    backend = _bwrap(overlay=True)
+    seen = []
+
+    class Recording(dict):
+        def __setitem__(self, key, value):
+            seen.append((value, backend._overlay_refused))
+            super().__setitem__(key, value)
+
+    backend._overlay_devices = Recording()
+
+    assert backend._overlay_over(cache) is False
+
+    assert seen == [(False, True)]
+    assert backend.caches_are_throwaway is False
+
+
 @pytest.mark.parametrize(
     "raised",
     [OSError(2, "bwrap is gone"), subprocess.TimeoutExpired(["bwrap"], 20)],
