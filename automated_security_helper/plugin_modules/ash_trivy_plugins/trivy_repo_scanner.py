@@ -359,6 +359,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         # scan refused before the tool starts reports none, not the 0 set above.
         self.exit_code = None
 
+        # Set by the except block below; declared here so a way out of the try body
+        # that neither returns nor raises cannot reach the final raise unbound.
+        failure: Optional[str] = None
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
@@ -552,8 +555,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         # is not redacted, is attached to the new one neither as __context__ nor
         # as __cause__: `raise ... from None` would only hide it from the default
         # traceback while leaving it readable on the object. Every other exit of
-        # the try body returns, so this line is reached from the except alone.
-        raise ScannerError(failure)
+        # the try body returns, so this line is reached from the except alone; a
+        # future exit that falls through gets the generic text, not an unbound name.
+        raise ScannerError(failure or "Trivy scan failed")
 
 
 def _target_is_empty(target: Path) -> bool:

@@ -515,6 +515,18 @@ def test_a_values_hook_that_raises_leaves_the_error_text_out(tmp_path):
     assert "values hook" in message
 
 
+def test_a_run_that_wrote_no_results_file_returns_none_and_does_not_raise(tmp_path):
+    """The catch-all raise after the try block is reached from the except alone,
+    because every other way out of the try body returns. A run that wrote no
+    results file is one of those: it returns None, and does not fall through to
+    the raise."""
+    scanner = _scanner(tmp_path)
+
+    result = _scan(scanner, _run_double({"returncode": 0}, None))
+
+    assert result is None
+
+
 def test_an_empty_target_does_not_keep_the_previous_targets_start_time(tmp_path):
     scanner = _scanner(tmp_path)
     scanner.start_time = datetime.now(timezone.utc)
