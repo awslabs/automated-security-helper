@@ -1733,11 +1733,6 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         excluded.discard(None)
         return result_tool_types(finding_dict) & excluded
 
-    def _is_secret_scanner(self, finding_dict: Dict[str, Any]) -> bool:
-        """Whether the finding's scanner type is the secrets type and
-        ``exclude_scanner_types`` names it."""
-        return SECRETS_TOOL_TYPE in self._excluded_tool_types(finding_dict)
-
     def _excludes_secrets(self) -> bool:
         """Whether ``exclude_scanner_types`` names the secrets type.
 
