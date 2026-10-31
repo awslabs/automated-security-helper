@@ -39,36 +39,49 @@ class _Item:
         self.added.append(marker.name)
 
 
-def _hook():
+@pytest.fixture
+def marks_added(pytestconfig):
+    """Call the CLI conftest's hook on one stand-in item and return the marks it added.
+
+    The conftest registers its ``mcp`` marker in its own ``pytest_configure``, which
+    pytest runs only in a session that collected ``tests/integration/cli``, and
+    ``--strict-markers`` (pytest.ini) refuses ``pytest.mark.mcp`` until it is
+    registered. Running that hook here, once per call, makes the result the same
+    whether this file is run alone or with the rest of the suite; registering a
+    marker line again is harmless.
+    """
     spec = importlib.util.spec_from_file_location(
         "_cli_integration_conftest_under_test", CONFTEST
     )
     assert spec is not None and spec.loader is not None, CONFTEST
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.pytest_collection_modifyitems
+    module.pytest_configure(pytestconfig)
+
+    def marks(directory: str, name: str) -> list[str]:
+        item = _Item(INTEGRATION / directory / "test_stand_in.py", name)
+        module.pytest_collection_modifyitems(SimpleNamespace(), [item])
+        return item.added
+
+    return marks
 
 
-def _marks_added(directory: str, name: str) -> list[str]:
-    item = _Item(INTEGRATION / directory / "test_stand_in.py", name)
-    _hook()(SimpleNamespace(), [item])
-    return item.added
+def test_a_workflow_named_test_beside_the_cli_tests_is_marked_slow(marks_added):
+    assert marks_added("cli", "test_scan_workflow_is_reported") == ["slow"]
 
 
-def test_a_workflow_named_test_beside_the_cli_tests_is_marked_slow():
-    assert _marks_added("cli", "test_scan_workflow_is_reported") == ["slow"]
-
-
-def test_an_mcp_named_test_beside_the_cli_tests_is_marked_mcp():
-    assert _marks_added("cli", "test_mcp_tools_are_listed") == ["mcp"]
+def test_an_mcp_named_test_beside_the_cli_tests_is_marked_mcp(marks_added):
+    assert marks_added("cli", "test_mcp_tools_are_listed") == ["mcp"]
 
 
 @pytest.mark.parametrize("directory", ["scanners", "converters", "core", "docs"])
-def test_a_workflow_named_test_in_a_sibling_directory_is_left_unmarked(directory):
+def test_a_workflow_named_test_in_a_sibling_directory_is_left_unmarked(
+    marks_added, directory
+):
     """The directory's own conftest does not load with the CLI tests' conftest, so
     the name rule must not decide whether this test runs."""
-    assert _marks_added(directory, "test_scan_workflow_is_reported") == []
+    assert marks_added(directory, "test_scan_workflow_is_reported") == []
 
 
-def test_an_mcp_named_test_in_a_sibling_directory_is_left_unmarked():
-    assert _marks_added("scanners", "test_mcp_tools_are_listed") == []
+def test_an_mcp_named_test_in_a_sibling_directory_is_left_unmarked(marks_added):
+    assert marks_added("scanners", "test_mcp_tools_are_listed") == []
