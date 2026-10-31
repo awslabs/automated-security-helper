@@ -26,6 +26,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
+)
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerTargetStatusInfo,
@@ -144,6 +147,169 @@ def _one_medium_finding_model(project: "str | None") -> AshAggregatedResults:
     return model
 
 
+def _assert_rows_grade_by_another_gate(
+    emitter: ReportContentEmitter, model: AshAggregatedResults, project_gate: str
+) -> None:
+    """The fixture's precondition: the scanner rows do not grade at the project's gate.
+
+    The scanner rows count by the scanner resolver, which with the merged file's
+    missing ash_config answers ASH's default for every project. A test of the
+    headline's recount is only meaningful while that answer differs from the gate
+    the project recorded, so the precondition is stated as that difference and not
+    as a disagreement between a row and the headline.
+    """
+    assert emitter.get_scanner_results(), "the fixture must exercise the scanner rows"
+    resolved, _source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+        model, "bandit"
+    )
+    assert resolved != project_gate, resolved
+
+
+def _one_bandit_finding_model(
+    level: str, project: str, **properties
+) -> AshAggregatedResults:
+    """One bandit finding of SARIF *level* in *project*, bandit among the scanners run.
+
+    No recorded config, so the scanner resolver grades at ASH's default; *properties*
+    are written on the result beside the scanner name and the project.
+    """
+    model = AshAggregatedResults()
+    model.ash_config = None
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "ASH"}},
+                    "results": [
+                        {
+                            "ruleId": "RULE-ONE",
+                            "level": level,
+                            "message": {"text": "one finding"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": "src/a.py"}
+                                    }
+                                }
+                            ],
+                            "properties": {
+                                "scanner_name": "bandit",
+                                "workspace_project": project,
+                                **properties,
+                            },
+                        }
+                    ],
+                    "invocations": [],
+                }
+            ],
+        }
+    )
+    model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
+    return model
+
+
+class TestAWorkspaceHeadlineGradesAsTheProjectOutcomeDid:
+    """The headline recounts findings the way the project's outcome graded them.
+
+    The outcome (and the exit code that follows it) resolves a finding's gate
+    from the scanner's own recorded threshold first and the project's second,
+    and leaves out the findings of a scanner only the workspace policy added
+    when that policy does not gate. The recount used the project's gate alone,
+    so a headline could read "No actionable findings" above a project row that
+    failed, or "Review required" for a run that exits clean.
+    """
+
+    def test_a_scanners_own_gate_decides_before_the_projects(self, tmp_path):
+        """Project gate HIGH, bandit's own gate LOW, one LOW bandit finding.
+
+        RED at the base: graded at the project's HIGH the LOW finding is not
+        actionable, so the headline read "No actionable findings" in the success
+        tone for a project whose outcome failed on that finding.
+        """
+        model = _one_bandit_finding_model("note", "svc")
+        model.workspace = _workspace(
+            tmp_path,
+            _project(
+                "svc", severity_threshold="HIGH", scanner_thresholds={"bandit": "LOW"}
+            ),
+        )
+
+        summary = ReportContentEmitter(
+            model, human_presentation=True
+        ).get_scan_summary()
+
+        assert summary["actionable"] == 1, summary
+        assert summary["title"] == "Review required", summary
+        assert summary["tone"] == "danger", summary
+
+    def test_a_scanners_gate_does_not_move_another_scanners_findings(self, tmp_path):
+        """The control: a scanner with no gate of its own is graded at the project's."""
+        model = _one_bandit_finding_model("note", "svc")
+        model.workspace = _workspace(
+            tmp_path,
+            _project(
+                "svc", severity_threshold="HIGH", scanner_thresholds={"semgrep": "LOW"}
+            ),
+        )
+
+        summary = ReportContentEmitter(
+            model, human_presentation=True
+        ).get_scan_summary()
+
+        assert summary["actionable"] == 0, summary
+        assert summary["title"] == "No actionable findings", summary
+
+    def test_a_non_gating_policy_finding_is_not_actionable(self, tmp_path):
+        """A policy scanner's finding, with the policy's gate off, left the outcome.
+
+        RED at the base: the MEDIUM finding was graded at the project's MEDIUM
+        gate, so the headline read "Review required" in the danger tone for a
+        run whose exit code is clean.
+        """
+        model = _one_bandit_finding_model("warning", "svc", origin="workspace-policy")
+        model.workspace = _workspace(
+            tmp_path,
+            _project("svc", policy_scanners_gate=False, policy_origin_finding_count=1),
+        )
+
+        summary = ReportContentEmitter(
+            model, human_presentation=True
+        ).get_scan_summary()
+
+        assert summary["actionable"] == 0, summary
+        assert summary["title"] == "No actionable findings", summary
+        assert summary["tone"] == "success", summary
+
+    def test_a_gating_policy_finding_is_actionable(self, tmp_path):
+        """The control: with the policy's gate on the outcome counted it."""
+        model = _one_bandit_finding_model("warning", "svc", origin="workspace-policy")
+        model.workspace = _workspace(
+            tmp_path,
+            _project("svc", policy_scanners_gate=True, policy_origin_finding_count=1),
+        )
+
+        summary = ReportContentEmitter(
+            model, human_presentation=True
+        ).get_scan_summary()
+
+        assert summary["actionable"] == 1, summary
+        assert summary["title"] == "Review required", summary
+
+    def test_a_policy_tag_without_the_origin_is_actionable(self, tmp_path):
+        """The outcome reads the origin alone; a tag does not leave a finding out."""
+        model = _one_bandit_finding_model("warning", "svc", tags=["workspace-policy"])
+        model.workspace = _workspace(
+            tmp_path, _project("svc", policy_scanners_gate=False)
+        )
+
+        summary = ReportContentEmitter(
+            model, human_presentation=True
+        ).get_scan_summary()
+
+        assert summary["actionable"] == 1, summary
+
+
 class TestAWorkspaceFindingIsGradedByItsProjectsGate:
     @pytest.fixture
     def model(self, tmp_path) -> AshAggregatedResults:
@@ -209,9 +375,7 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         """
         model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
         emitter = ReportContentEmitter(model, human_presentation=True)
-        rows = emitter.get_scanner_results()
-        assert rows, "the fixture must exercise the scanner-row path"
-        assert sum(row["actionable"] for row in rows) == 0, rows
+        _assert_rows_grade_by_another_gate(emitter, model, "ALL")
         assert emitter.get_scan_summary()["actionable"] == 1
 
     def test_the_title_follows_the_recount_when_a_project_gate_is_stricter(
@@ -232,8 +396,7 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         )
         model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
         emitter = ReportContentEmitter(model, human_presentation=True)
-        rows = emitter.get_scanner_results()
-        assert any(row["status"] == "FAILED" for row in rows), rows
+        _assert_rows_grade_by_another_gate(emitter, model, "HIGH")
 
         summary = emitter.get_scan_summary()
 
@@ -266,8 +429,7 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
             }
         }
         emitter = ReportContentEmitter(model, human_presentation=True)
-        rows = emitter.get_scanner_results()
-        assert any(row["status"] == "FAILED" for row in rows), rows
+        _assert_rows_grade_by_another_gate(emitter, model, "HIGH")
 
         summary = emitter.get_scan_summary()
 

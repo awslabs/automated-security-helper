@@ -21,9 +21,11 @@ if TYPE_CHECKING:
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    workspace_policy_gates,
     workspace_project_scanner_thresholds,
     workspace_project_thresholds,
 )
+from automated_security_helper.utils.policy_origin import is_policy_origin
 from automated_security_helper.utils.severity_ladder import severity_fails_threshold
 from collections import Counter
 
@@ -167,6 +169,14 @@ class ReportContentEmitter:
         # threshold the scan read from an environment variable is listed at the
         # strictest gate), read once for the same reason.
         self._project_scanner_thresholds = workspace_project_scanner_thresholds(model)
+        # The projects whose policy-scanner findings were reported and left out
+        # of the outcome (policy_scanners_gate explicitly off). The JUnit report
+        # reads the same table, so the reports and the exit code grade alike.
+        self._policy_not_gating = {
+            project
+            for project, gate in workspace_policy_gates(model).items()
+            if gate is False
+        }
 
         # Get unified scanner metrics - always compute from the model to ensure consistency
         # The scanner_results in the model contain ScannerStatusInfo objects, not ScannerMetrics
@@ -542,6 +552,15 @@ class ReportContentEmitter:
         # Get scanner name
         scanner_name = vuln.scanner or "Unknown"
 
+        # A finding from a scanner only the workspace policy added, in a project
+        # whose policy_scanners_gate is off, is reported and left out of that
+        # project's outcome, so it is not actionable here either.
+        if (
+            vuln.workspace_project in self._policy_not_gating
+            and self._is_policy_origin_finding(vuln)
+        ):
+            return False
+
         # The gate the finding's own outcome used. In a workspace the merged
         # results carry no ash_config, so the scanner resolver answers ASH's
         # default for every project; each project's record carries the gate
@@ -570,6 +589,22 @@ class ReportContentEmitter:
 
         # Determine if the finding is actionable based on the threshold
         return self._is_severity_actionable(severity, threshold)
+
+    @staticmethod
+    def _is_policy_origin_finding(vuln: FlatVulnerability) -> bool:
+        """Whether *vuln*'s recorded properties mark it policy-origin.
+
+        Read from the flattened finding's property bag, as the project's outcome
+        reads the result's: the ``origin`` property alone, never a tag.
+        """
+        recorded = getattr(vuln, "properties", None)
+        if not recorded:
+            return False
+        try:
+            properties = json.loads(recorded)
+        except (TypeError, ValueError):
+            return False
+        return is_policy_origin(properties)
 
     def _is_severity_actionable(self, severity: str, threshold: str) -> bool:
         """Whether a finding of *severity* is actionable under *threshold*.
