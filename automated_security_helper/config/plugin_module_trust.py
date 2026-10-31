@@ -1,15 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Which ``ash_plugin_modules`` entries a config file in the scanned tree may add.
+"""Which ``ash_plugin_modules`` entries a config file in the scanned tree or any
+git checkout may add.
 
 ASH imports every module ``ash_plugin_modules`` names into its own process. When the
-config was built from a file inside the scanned tree (``config/sandbox_grants.py``
-decides that), the entries it adds beyond the trusted list (the defaults, an
-operator config outside the tree, and ``--config-overrides``) are kept only if
-they name an installed module: one that ``importlib.util.find_spec`` locates
-outside the scanned tree and outside every git checkout (a virtualenv inside a
-checkout counts as inside it). An entry that is not importable, or whose spec
+config was built from a file inside the scanned tree or any git checkout
+(``config/sandbox_grants.py`` decides that), the entries it adds beyond the trusted
+list (the defaults, an operator config outside the tree, and ``--config-overrides``)
+are kept only if they name an installed module: one that ``importlib.util.find_spec``
+locates outside the scanned tree and outside every git checkout (a virtualenv inside
+a checkout counts as inside it). An entry that is not importable, or whose spec
 points into the tree or a checkout, is dropped with one warning naming
 ``ash_plugin_modules``. An entry
 outside the plugin namespace is kept, unimported, so the scan refuses it with exit
