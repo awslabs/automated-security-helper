@@ -460,6 +460,69 @@ def test_a_readable_but_unsearchable_directory_is_refused_once_not_once_per_entr
     assert "; and " not in str(refused.value), str(refused.value)
 
 
+@pytest.mark.parametrize("walk", ["descriptors", "by-name"])
+def test_one_entry_refused_among_examined_ones_does_not_end_its_directory(
+    tmp_path, caplog, monkeypatch, walk
+):
+    """An entry the OS refuses to examine after others were examined (an LSM
+    denial, a FUSE filesystem) is that entry alone, not an unsearchable directory:
+    it is refused once, and the entries listed after it and the subdirectories
+    below the same directory are still swept. The refusal is injected into
+    ``os.lstat`` (no mode is taken away, no security module is involved) and the
+    listing order is fixed, so the refused entry sits between a regular file
+    examined before it and a link after it."""
+    root = tmp_path / "results"
+    target = tmp_path / "target.txt"
+    target.write_text("x")
+    (root / "d-sub").mkdir(parents=True)
+    (root / "d-sub" / "inner-link").symlink_to(target)
+    (root / "a-ok").write_text("x")
+    (root / "b-denied").write_text("x")
+    (root / "c-link").symlink_to(target)
+
+    real_lstat = os.lstat
+
+    def refuse_one_entry(path, *args, **kwargs):
+        if os.path.basename(os.fspath(path)) == "b-denied":
+            raise PermissionError(errno.EACCES, "Permission denied", os.fspath(path))
+        return real_lstat(path, *args, **kwargs)
+
+    real_listdir = os.listdir
+
+    def listdir_in_name_order(path="."):
+        return sorted(real_listdir(path))
+
+    if walk == "by-name":
+        monkeypatch.delattr(os, "fwalk")
+    walked = _record_os_walk(monkeypatch)
+    recorded_walk = os.walk
+
+    def walk_in_name_order(top, *args, **kwargs):
+        for dirpath, dirnames, filenames in recorded_walk(top, *args, **kwargs):
+            dirnames.sort()
+            filenames.sort()
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(os, "listdir", listdir_in_name_order)
+    monkeypatch.setattr(os, "walk", walk_in_name_order)
+    monkeypatch.setattr(os, "lstat", refuse_one_entry)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        with pytest.raises(PermissionError) as refused:
+            fs_guard.sweep_writable([root])
+
+    assert bool(walked) == (walk == "by-name"), (walk, walked)
+    assert "b-denied" in str(refused.value), str(refused.value)
+    assert len(_warnings(caplog, "Could not examine")) == 1, [
+        record.getMessage() for record in caplog.records
+    ]
+    assert os.path.exists(root / "b-denied"), "the refused entry is left as found"
+    assert not os.path.lexists(root / "c-link"), "the link after it is removed"
+    assert not os.path.lexists(root / "d-sub" / "inner-link"), (
+        "the subdirectory beside it is still entered"
+    )
+
+
 @needs_unprivileged
 def test_refusals_past_the_warning_limit_are_counted_and_said_once(
     tmp_path, caplog, monkeypatch

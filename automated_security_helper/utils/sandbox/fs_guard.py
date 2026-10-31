@@ -480,11 +480,15 @@ def _walk_descriptor(
             # and refuses their lstat (EACCES): a link there would otherwise be
             # passed over, the hole the sweep and the pre-check exist to close.
             refuse(_REFUSE_EXAMINE, _below(relative, name), error)
-            if error.errno == errno.EACCES:
-                # Search permission belongs to the directory, so every other
-                # entry fails the same way: one refusal for the directory (it
-                # names the first entry), not one warning per entry, which for
-                # a scanner's directory of 100,000 files was 100,000 lines.
+            if error.errno == errno.EACCES and not statuses:
+                # Search permission belongs to the directory, so when the
+                # very first entry fails every other one fails the same way:
+                # one refusal for the directory (it names the first entry),
+                # not one warning per entry, which for a scanner's directory
+                # of 100,000 files was 100,000 lines. An entry refused after
+                # others were examined is that entry alone (an LSM denial, a
+                # FUSE filesystem): the directory is searchable, so the walk
+                # goes on with the rest of it and its subdirectories.
                 break
             continue
         statuses[name] = status
@@ -695,6 +699,7 @@ def _sweep_by_name(
         root, onerror=unlistable, followlinks=False
     ):
         relative = relative_to_root(dirpath)
+        examined = False
         for name in list(dirnames) + filenames:
             path = os.path.join(dirpath, name)
             try:
@@ -703,14 +708,20 @@ def _sweep_by_name(
                 continue
             except OSError as error:
                 refuse(_REFUSE_EXAMINE, _below(relative, name), error)
-                if error.errno == errno.EACCES:
-                    # As in the descriptor walk: the directory is not
-                    # searchable, so one refusal stands for all its entries,
-                    # and for the subdirectories os.walk would then refuse to
-                    # enter one by one.
+                if error.errno == errno.EACCES and not examined:
+                    # As in the descriptor walk: when the first entry fails
+                    # the directory is not searchable, so one refusal stands
+                    # for all its entries, and for the subdirectories os.walk
+                    # would then refuse to enter one by one.
                     dirnames.clear()
                     break
+                # One entry refused among examined ones: the walk goes on with
+                # the others, and does not descend into the entry it could not
+                # examine (the descriptor walk does not either).
+                if name in dirnames:
+                    dirnames.remove(name)
                 continue
+            examined = True
             if not _is_special(mode):
                 continue
             removed += remove(name, None, path, _below(relative, name))
