@@ -4,6 +4,7 @@
 """CLI command for installing dependencies for ASH plugins."""
 
 import contextvars
+import functools
 import logging
 import os
 import platform
@@ -933,7 +934,38 @@ def run_command(args: List[str], shell: bool = False):
         return 1
 
 
+def _consoles_that_no_color_turns_off() -> tuple:
+    """The consoles ``--no-color`` turns color off on: the panels' and the table's,
+    the error one and the shared one the ``print()`` lines are written through."""
+    return (console, err_console, global_console())
+
+
+def _puts_color_back(command):
+    """Run *command*, then put each console's ``no_color`` back as it was.
+
+    ``--no-color`` sets ``no_color`` on consoles the process keeps: the module's
+    two and the shared one. Left set, a command run after it in the same process
+    (a test runner, an embedding host, an MCP server) printed without color
+    though it asked for color: the same in-process reason ``_INSTALL_VALUES`` is
+    reset when the installs are done. Put back whatever way *command* ends, a
+    refusal (``typer.Exit``) included, which is why this wraps the command and
+    does not sit in its closing ``finally``.
+    """
+
+    @functools.wraps(command)
+    def run(*args, **kwargs):
+        before = [(sink, sink.no_color) for sink in _consoles_that_no_color_turns_off()]
+        try:
+            return command(*args, **kwargs)
+        finally:
+            for sink, was in before:
+                sink.no_color = was
+
+    return run
+
+
 @dependencies_app.command(name="install")
+@_puts_color_back
 def install_dependencies(
     # A str, not a Path: Typer makes "" Path(""), whose str() is ".", the same as
     # an explicit ".", so `--bin-path "$UNSET_VAR"` installed into the working
@@ -1011,7 +1043,7 @@ def install_dependencies(
     if not color:
         # --no-color reached the logger only; the panels, the table and the
         # print() lines, written through these consoles, stayed colored.
-        for sink in (console, err_console, global_console()):
+        for sink in _consoles_that_no_color_turns_off():
             sink.no_color = True
 
     # An unknown --plugin-type is refused first, before anything is resolved,

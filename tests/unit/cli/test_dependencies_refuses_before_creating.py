@@ -574,7 +574,45 @@ def test_no_color_reaches_the_panels_and_the_print_lines(
     """--no-color reached the logger only. The panels are written through
     ``dependencies.console``, which the fixture replaces with a console that is
     already without color; it is set to color here, so the assertion reaches the
-    command's own change and not the fixture's."""
+    command's own change and not the fixture's. Read while the command runs: it
+    puts the consoles back when it ends (the tests below)."""
+    from automated_security_helper.utils.console import global_console
+
+    shared = global_console()
+    monkeypatch.setattr(shared, "no_color", False)
+    monkeypatch.setattr(dependencies.err_console, "no_color", False)
+    monkeypatch.setattr(dependencies.console, "no_color", False)
+    during: dict = {}
+    real = dependencies._refuse_a_named_config_that_does_not_exist
+
+    def spy(config):
+        during.update(
+            shared=shared.no_color,
+            error=dependencies.err_console.no_color,
+            panels=dependencies.console.no_color,
+        )
+        return real(config)
+
+    monkeypatch.setattr(dependencies, "_refuse_a_named_config_that_does_not_exist", spy)
+
+    runner.invoke(
+        dependencies_app,
+        ["--bin-path", str(tmp_path / "bin"), "--tool", "sarif", "--no-color"],
+    )
+
+    assert during == {"shared": True, "error": True, "panels": True}, during
+
+
+@pytest.mark.parametrize(
+    "tool", ["sarif", "no-such-tool-zz"], ids=["a run that ends", "a refused run"]
+)
+def test_no_color_is_put_back_when_the_command_ends(
+    quiet_machine, tmp_path, monkeypatch, tool
+):
+    """--no-color set `no_color` on the module's consoles and the shared one and
+    never put it back, so the next command run in the same process (a test
+    runner, an embedding host) printed without color though it asked for color.
+    Put back for a refusal as well as for a run that ends."""
     from automated_security_helper.utils.console import global_console
 
     shared = global_console()
@@ -584,9 +622,9 @@ def test_no_color_reaches_the_panels_and_the_print_lines(
 
     runner.invoke(
         dependencies_app,
-        ["--bin-path", str(tmp_path / "bin"), "--tool", "sarif", "--no-color"],
+        ["--bin-path", str(tmp_path / "bin"), "--tool", tool, "--no-color"],
     )
 
-    assert shared.no_color is True
-    assert dependencies.err_console.no_color is True
-    assert dependencies.console.no_color is True
+    assert shared.no_color is False
+    assert dependencies.err_console.no_color is False
+    assert dependencies.console.no_color is False
