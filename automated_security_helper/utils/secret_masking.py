@@ -2886,6 +2886,18 @@ def _yaml_double_quoted(value: str) -> str:
     return value
 
 
+def _markdown_reported(value: str) -> str:
+    """``value`` as the Markdown report writes it: HTML-escaped, then each Markdown
+    syntax character backslash-escaped. The reporter's own function, imported when
+    called as ``_yaml_double_quoted`` imports ``report_yaml``, so the spelling the
+    masker tries cannot drift from the one the report writes."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
+        _markdown_escaped,
+    )
+
+    return _markdown_escaped(value)
+
+
 def _shown(value: str) -> str:
     """``value`` as the HTML and text reports show it (``terminal_text``): control
     and format characters, and a backslash before text that reads as an escape,
@@ -2951,8 +2963,8 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: quote(value, safe="!$&'()*+,%/:;=?@[]\\^|`{}"),
     lambda value: quote(value, safe="!$&()*+,%/:;=?@[]\\^|`{}"),
     # The Markdown reporter: HTML-escaped, then every Markdown character
-    # backslash-escaped (markdown_reporter._text).
-    lambda value: _MARKDOWN_CHARACTER.sub(r"\\\1", html.escape(value, quote=False)),
+    # backslash-escaped, by the reporter's own function.
+    _markdown_reported,
     # The YAML report's double-quoted scalar (report_yaml), with its upper-case
     # escapes of every character outside ASCII.
     _yaml_double_quoted,
@@ -2965,9 +2977,6 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     # quote and the layout characters escaped, the single quote not.
     _xml_attribute,
 )
-
-#: The characters the Markdown reporter backslash-escapes in a value.
-_MARKDOWN_CHARACTER = re.compile(r"([\\`*_\[\]{}#|~])")
 
 #: In a JSON or YAML string the character before a value can be the letter of
 #: an escape: JSON's ``\n``, ``\t``, ``\r``, ``\b``, ``\f`` and ``\uXXXX``, and

@@ -111,6 +111,18 @@ class TestTheMarkdownReportersSpelling:
         )
         assert _as_markdown(MARKDOWN_VALUE) not in masked
 
+    def test_the_spelling_masked_is_the_one_the_report_writes(self):
+        """The masker takes its Markdown spelling from the reporter's own escaping;
+        this writes the expected spelling out (a backslash before each of ``_``
+        and ``*``), so a change to either side shows here."""
+        written = VALUE[:6] + "\\_" + VALUE[6:] + "\\*"
+        assert _as_markdown(MARKDOWN_VALUE) == written
+
+        masked = mask_secret_values_in_text("| " + written + " |", [MARKDOWN_VALUE])
+
+        assert written not in masked
+        assert VALUE not in masked
+
     def test_a_second_pass_recognizes_its_own_escaped_output(self):
         """A Markdown report is re-masked on every workspace pass; the masked
         token, escaped by the reporter, is its own output and changes no more."""
