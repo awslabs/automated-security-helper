@@ -408,10 +408,28 @@ def _is_within(path: Path, parent: Path) -> bool:
 _ca_unspelled_warned: Set[Tuple[str, str]] = set()
 
 
+def _link_inside_a_home(spelling: Path, homes: Sequence[Path]) -> bool:
+    """Whether ``spelling`` passes through a symlink that lives inside one of ``homes``.
+
+    ``spelling`` is the path as the operator wrote it. A backend that hides the home
+    shows what the link names by the resolved path alone, so the link itself, a
+    ``~/.config/corp/ca.pem`` pointing at ``/etc/ssl/certs/corp.pem``, is missing
+    inside the sandbox and the scanner's open of the written path fails. A path the
+    host cannot examine counts as having no such link.
+    """
+    try:
+        links = _links_to_recreate(spelling)
+    except OSError:
+        return False
+    return any(_is_within(where, home) for where, _ in links for home in homes)
+
+
 def _operator_ca_reads(
     policy: SandboxPolicy,
     child_env: Mapping[str, str],
     spell: Optional[Callable[[Path], str]] = None,
+    recreates_links: bool = False,
+    warns_of_hidden_links: bool = False,
 ) -> List[Path]:
     """The files and directories the operator's CA-bundle settings name, as spelled.
 
@@ -437,6 +455,14 @@ def _operator_ca_reads(
     SandboxUnavailable for one it cannot write). An entry it refuses is left out
     with a warning, once, rather than refusing every spawn: the grant is a
     convenience, and the setting is still passed through as it was without it.
+
+    An entry written through a symlink that sits inside a home (a dotfile-managed
+    ``~/.config/corp/ca.pem`` pointing at ``/etc/ssl/certs/corp.pem``) is kept even
+    when what it names is visible already, if ``recreates_links``: the backend
+    writes the link into the hidden home from the spelling, which it can do only
+    for an entry it is given. A backend that cannot write a link
+    (``warns_of_hidden_links``) grants what the link names and warns, once, that
+    the written path stays unreadable.
     """
     listed, configured = parse_environment(policy.environment)
     started = startup_environ()
@@ -473,7 +499,21 @@ def _operator_ca_reads(
             # Visible already, unless a home carved out of the path that shows it
             # (a HOME under /opt) is where it sits.
             in_a_home = any(real == h or _is_within(real, h) for h in homes)
-            if not in_a_home and any(real == p or _is_within(real, p) for p in seen):
+            hidden_link = _link_inside_a_home(Path(entry), homes)
+            if hidden_link and warns_of_hidden_links:
+                if (f"{name} link", entry) not in _ca_unspelled_warned:
+                    _ca_unspelled_warned.add((f"{name} link", entry))
+                    ASH_LOGGER.warning(
+                        f"${name} names {entry!r}, a symlink inside the home "
+                        "directory. What it points to is readable in the scanner "
+                        "sandbox, the link is not, so a scanner that opens the "
+                        "written path will not find it. Point it at the file itself."
+                    )
+            if (
+                not in_a_home
+                and not (hidden_link and recreates_links)
+                and any(real == p or _is_within(real, p) for p in seen)
+            ):
                 continue
             if spell is not None:
                 try:
@@ -750,7 +790,7 @@ class BwrapBackend(SandboxBackend):
         child_env = policy.filter_env(env)
         # The bundle or directory the operator's CA-bundle settings name, readable
         # even where it sits under the home directory the sandbox hides.
-        ca_reads = _operator_ca_reads(policy, child_env)
+        ca_reads = _operator_ca_reads(policy, child_env, recreates_links=True)
         for p in ca_reads:
             add(p, _RO)
         caches_read_only = not self._overlay
@@ -1141,7 +1181,9 @@ class FirejailBackend(SandboxBackend):
         # even where it sits under the home directory --private hides.
         ca_reads = [
             _real(p)
-            for p in _operator_ca_reads(policy, child_env, spell=_firejail_path)
+            for p in _operator_ca_reads(
+                policy, child_env, spell=_firejail_path, warns_of_hidden_links=True
+            )
         ]
         granted = [
             _real(p)

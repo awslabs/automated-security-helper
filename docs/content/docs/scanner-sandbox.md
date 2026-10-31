@@ -231,6 +231,11 @@ it needs.
   So is an entry that the backend cannot write in its options (a path with `~` or `*`
   under firejail, or a control character under sandbox-exec): it is passed through
   but not granted, with a warning, and the scan goes on.
+  A setting written through a symlink that sits inside your home directory
+  (`~/.config/corp/ca.pem` pointing at `/etc/ssl/certs/corp.pem`) is readable under
+  bwrap, which recreates the link inside the sandbox. Firejail cannot recreate a
+  link: it grants the file the link points to, warns once, and the written path stays
+  unreadable. Point the setting at the file itself there.
 - No local IPC endpoint is reachable, with or without a network: not the Docker or
   Podman socket, the session bus, `$SSH_AUTH_SOCK`, the journal, nor a socket in a
   directory the sandbox mounts, such as the Nix daemon's under `/nix`. On Linux every

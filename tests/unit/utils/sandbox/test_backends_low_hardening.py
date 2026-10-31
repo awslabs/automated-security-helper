@@ -1171,6 +1171,99 @@ def test_a_ca_entry_the_backend_cannot_spell_is_left_out_not_refused(
     assert len(warnings) == 1, warnings
 
 
+def _linked_bundle(layout, directory):
+    """A CA bundle in the shown system directory, linked to from ``directory``.
+
+    Returns (the link as the operator would write it, the file it names).
+    """
+    target = layout.system / "corp.pem"
+    target.write_text("")
+    link = directory / "ca.pem"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+    return link, target
+
+
+@POSIX
+def test_bwrap_recreates_a_ca_link_nested_under_the_home(layout, monkeypatch):
+    """A link below the hidden home to a file the policy shows is written inside.
+
+    ``SSL_CERT_FILE=~/.config/corp/ca.pem`` pointing into a read-only system path:
+    the file is visible, so the grant used to end there, and nothing wrote the
+    link into the sandbox's private home. The scanner's open of the written path
+    failed with ENOENT as it did before the CA settings were granted at all.
+    """
+    link, target = _linked_bundle(layout, layout.home / ".config" / "corp")
+    env = {"SSL_CERT_FILE": str(link)}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+
+    plan = _plan_of("bwrap", layout, monkeypatch, _policy(layout), env)
+    try:
+        assert plan.env["SSL_CERT_FILE"] == str(link)
+        assert _symlinks(plan.argv).get(link) == str(target), plan.argv
+        assert _real(layout.system) in _mounts(plan.argv, "--ro-bind")
+    finally:
+        plan.run_cleanup()
+
+
+@POSIX
+def test_a_ca_link_outside_the_home_adds_no_link_and_no_warning(
+    layout, monkeypatch, caplog
+):
+    """The control of the two tests around it: the link sits in a shown directory.
+
+    Nothing hides it, so bwrap writes no link for it and firejail has nothing to
+    warn about; the setting is passed through as written.
+    """
+    link, _ = _linked_bundle(layout, layout.system / "links")
+    env = {"SSL_CERT_FILE": str(link)}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+    monkeypatch.setattr(backends, "_ca_unspelled_warned", set())
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        for kind in ("bwrap", "firejail"):
+            plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+            try:
+                assert plan.env["SSL_CERT_FILE"] == str(link)
+                if kind == "bwrap":
+                    assert link not in _symlinks(plan.argv), plan.argv
+            finally:
+                plan.run_cleanup()
+
+    assert not [r for r in caplog.records if "symlink" in r.getMessage()]
+
+
+@POSIX
+def test_firejail_warns_once_of_a_ca_link_it_cannot_show_in_the_home(
+    layout, monkeypatch, caplog
+):
+    """firejail cannot write a link, so the written path stays unreadable: say so.
+
+    The file the link names is still granted, the setting is passed through, and
+    the plan does not fail. One warning for the entry, however many spawns.
+    """
+    link, target = _linked_bundle(layout, layout.home / ".config" / "corp")
+    env = {"SSL_CERT_FILE": str(link)}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+    monkeypatch.setattr(backends, "_ca_unspelled_warned", set())
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        for _ in range(2):
+            plan = _plan_of("firejail", layout, monkeypatch, _policy(layout), env)
+            try:
+                assert plan.env["SSL_CERT_FILE"] == str(link)
+            finally:
+                plan.run_cleanup()
+
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if "SSL_CERT_FILE" in record.getMessage() and "symlink" in record.getMessage()
+    ]
+    assert len(warnings) == 1, warnings
+    assert repr(str(link)) in warnings[0]
+
+
 def test_the_default_environment_list_is_the_proxy_family_and_the_ca_set(layout):
     """With no list written, exactly these are passed, and nothing else the caller has."""
     expected = _PROXY_NAMES | _CA_NAMES
