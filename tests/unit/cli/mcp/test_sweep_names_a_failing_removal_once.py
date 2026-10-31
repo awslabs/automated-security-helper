@@ -85,15 +85,17 @@ def test_a_sweep_that_removes_the_session_makes_its_next_failure_new(
     that removes the session forgets it, and when the id is used again and its
     removal fails again the warning comes again."""
     sandbox = _aged_workspace(root, STUCK)
-    real_remove = sessions._remove_session_state
+    real_set_aside = sessions._set_session_state_aside
     failing = {"now": True}
 
-    def removal(session_id: str) -> None:
+    # The step the sweep runs under its guard for a session with a workspace;
+    # when it works, the sweep goes on to forget the failure it named.
+    def removal(session_id: str, sandbox_path: Path):
         if failing["now"]:
             raise PermissionError(13, "Permission denied", str(sandbox))
-        real_remove(session_id)
+        return real_set_aside(session_id, sandbox_path)
 
-    monkeypatch.setattr(sessions, "_remove_session_state", removal)
+    monkeypatch.setattr(sessions, "_set_session_state_aside", removal)
 
     with caplog.at_level(logging.WARNING):
         sessions.sweep_stale_workspaces(1.0, now=time.time() + 3600)
