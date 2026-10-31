@@ -159,9 +159,34 @@ def test_an_expiry_that_is_not_a_date_makes_the_file_unreadable(text, yaml_forma
     whatever trivy made of a date it could not read. The file is unreadable, as
     one with a scalar section is, so none of its entries is applied and every
     finding they name is reported; the client entry's own rule reads an
-    unreadable expiration as expired, the same side."""
+    unreadable expiration as expired, the same side. For the plain format this
+    is a deliberate divergence from trivy, which logs the one line and keeps
+    the others (``CVE-2`` here): it reports more, never less, and is pinned so
+    that nobody changes it to drop only the bad line without deciding to."""
     with pytest.raises(ValueError, match="not a YYYY-MM-DD date"):
         parse_trivy_ignore_file(text, yaml_format=yaml_format, today=date(2026, 1, 1))
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["2099-01-01T00:00", "2099-01-01x", "2099-1-1", "2099-01-011", "2099.01.01"],
+)
+def test_a_plain_expiry_field_is_read_whole_not_cut_at_ten_characters(field):
+    """trivy parses the whole ``exp:`` field with ``time.Parse("2006-01-02")``
+    and drops the entry when that fails. Cut at ten characters, ``2099-01-01T..``
+    and ``2099-01-01x`` read as a date in the future, so the entry applied and
+    its findings were suppressed that trivy had reported. A field that is not
+    a whole date makes the file unreadable, like ``exp:soon``: none of its
+    entries is applied (a deliberate divergence from trivy's one-line skip)."""
+    with pytest.raises(ValueError, match="not a YYYY-MM-DD date"):
+        parse_trivy_ignore_file(
+            f"CVE-1 exp:{field}\nCVE-2\n", yaml_format=False, today=date(2026, 1, 1)
+        )
+
+    plain = "CVE-3 exp:2099-01-01\n"
+    assert parse_trivy_ignore_file(plain, yaml_format=False, today=date(2026, 1, 1)) == [
+        ("CVE-3", ())
+    ]
 
 
 def test_a_hash_later_in_a_plain_ignore_line_is_text_not_a_comment():

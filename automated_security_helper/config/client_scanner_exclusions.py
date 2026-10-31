@@ -1954,7 +1954,13 @@ def parse_trivy_ignore_file(
     day from which the entry no longer applies. A ``#`` later in the line is
     text, not a comment: the line was cut at its first ``#`` before, so
     ``CVE-X # exp:2020-01-01`` lost its expiry and applied, while trivy reads
-    the field and drops the expired entry. The YAML format (``.trivyignore.yaml``)
+    the field and drops the expired entry. The field is read whole: anything but
+    a plain YYYY-MM-DD date (``2099-01-01T00:00``, ``2099-01-01x``) makes the
+    file unreadable (ValueError), where trivy logs the line and skips only it.
+    That divergence is deliberate and errs toward reporting: no entry of an
+    unreadable file is applied, so every finding it names stays reported,
+    the entries trivy would still have honored included. The YAML format
+    (``.trivyignore.yaml``)
     lists entries with ``id``, optional ``paths`` and optional ``expired_at``
     under ``vulnerabilities``, ``misconfigurations``, ``secrets`` and
     ``licenses``.
@@ -2019,13 +2025,16 @@ def parse_trivy_ignore_file(
             (field[len("exp:") :] for field in fields[1:] if field.startswith("exp:")),
             None,
         )
-        if _expired(expiry, today):
+        if _expired(expiry, today, whole_field=True):
             continue
         found.append((fields[0], ()))
     return found
 
 
-def _expired(value: Any, today: date) -> bool:
+_PLAIN_EXPIRY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+
+
+def _expired(value: Any, today: date, whole_field: bool = False) -> bool:
     """Whether a trivy ignore entry with this expiry no longer applies on ``today``.
 
     From the start of the day named, as trivy reads it (the entry is dropped
@@ -2044,8 +2053,19 @@ def _expired(value: Any, today: date) -> bool:
     """
     if not value:
         return False
+    text = str(value)
     try:
-        return date.fromisoformat(str(value)[:10]) <= today
+        if whole_field:
+            # The plain format's ``exp:`` field is parsed whole, as
+            # ``time.Parse("2006-01-02", ...)`` parses it: cut at ten
+            # characters, ``2099-01-01T00:00`` and ``2099-01-01x`` read as a
+            # date that applies, where trivy takes neither as one.
+            if _PLAIN_EXPIRY.match(text) is None:
+                raise ValueError(text)
+        else:
+            # A YAML date or timestamp object is its first ten characters.
+            text = text[:10]
+        return date.fromisoformat(text) <= today
     except ValueError as exc:
         raise ValueError(
             f"an entry's expiry {str(value)!r} is not a YYYY-MM-DD date"
