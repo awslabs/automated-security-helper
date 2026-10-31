@@ -273,10 +273,11 @@ def _text(node: ast.AST) -> str | None:
 
 def _bindings(tree: ast.AST) -> dict[str, list[ast.AST | None]]:
     """Each name ``tree`` binds, in any scope, with the value of each binding:
-    the value of a plain ``name = value``, and None for every other way a name is
-    bound (a parameter, an import, a def or class, a loop or ``with`` target, an
-    ``except ... as``, a match capture, ``:=``, an annotated or augmented
-    assignment, one target of several)."""
+    the value of a plain ``name = value`` or of an annotated ``name: type =
+    value`` (the annotation does not change what the name is bound to), and None
+    for every other way a name is bound (a parameter, an import, a def or class,
+    a loop or ``with`` target, an ``except ... as``, a match capture, ``:=``, an
+    annotation with no value, an augmented assignment, one target of several)."""
     plain = {
         id(node.targets[0]): node.value
         for node in ast.walk(tree)
@@ -284,6 +285,15 @@ def _bindings(tree: ast.AST) -> dict[str, list[ast.AST | None]]:
         and len(node.targets) == 1
         and isinstance(node.targets[0], ast.Name)
     }
+    plain.update(
+        {
+            id(node.target): node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign)
+            and node.value is not None
+            and isinstance(node.target, ast.Name)
+        }
+    )
     bindings: dict[str, list[ast.AST | None]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
@@ -506,6 +516,12 @@ UNDECIDED = {
         "from rich.logging import RichHandler\nshown = True\n"
         "handler = RichHandler(tracebacks_show_locals=shown)\n"
     ),
+    # An annotation does not decide the value: an annotated name bound to True
+    # is still a setting no one decides.
+    "an-annotated-name-bound-to-true": (
+        "from rich.logging import RichHandler\nshown: bool = True\n"
+        "handler = RichHandler(tracebacks_show_locals=shown)\n"
+    ),
     "the-standard-traceback-with-locals": (
         "import traceback\n"
         "def trace(error):\n"
@@ -641,6 +657,19 @@ DECIDED = {
         "from typer.main import _typer_developer_exception_attr_name\n"
         "def render(error):\n"
         "    config = getattr(error, _typer_developer_exception_attr_name, None)\n"
+        "    return Traceback.from_exception(\n"
+        "        type(error), error, None,\n"
+        "        show_locals=bool(config.pretty_exceptions_show_locals),\n"
+        "    )\n"
+    ),
+    # The annotation is typing only: cli/entrypoint.py reads the tag as
+    # ``tag: Any = getattr(...)``, and that is the same binding.
+    "typer-s-own-setting-read-back-into-an-annotated-name": (
+        "from typing import Any\n"
+        "from rich.traceback import Traceback\n"
+        "from typer.main import _typer_developer_exception_attr_name\n"
+        "def render(error):\n"
+        "    config: Any = getattr(error, _typer_developer_exception_attr_name, None)\n"
         "    return Traceback.from_exception(\n"
         "        type(error), error, None,\n"
         "        show_locals=bool(config.pretty_exceptions_show_locals),\n"
