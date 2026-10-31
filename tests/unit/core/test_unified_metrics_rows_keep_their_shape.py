@@ -146,9 +146,10 @@ class TestTheRebuiltRow:
 
         row = model.scanner_results["tool"]
         assert row.dependencies_satisfied is True
-        # The rebuilt status says the tool ran and the reports carry no code, so
-        # the row's recorded code is the only record of it and is kept.
-        assert row.exit_code == 3
+        # The row said MISSING, so its code 3 is not the record of a run: the
+        # rebuilt status says the tool ran, the reports carry no code, and the
+        # row carries none. Red at the base: the stale 3 survived the rebuild.
+        assert row.exit_code is None
 
         _populate_scanner_results_from_unified_metrics(
             model, [_metrics(status="MISSING", dependencies_missing=True, exit_code=2)]
@@ -176,6 +177,27 @@ class TestTheRebuiltRow:
             )
 
             assert model.scanner_results["tool"].exit_code == 3, ran
+
+    def test_a_code_on_a_row_that_did_not_say_the_tool_ran_is_not_kept(self):
+        """The row's own status decides whether its code is the record of a run:
+        an ERROR row of an older file carries the model's default 0 and a MISSING
+        or SKIPPED row a stale code, and the rebuild kept them when it reached a
+        status under which the tool ran. Red at the base: the code survived."""
+        for recorded in ("MISSING", "SKIPPED", "ERROR"):
+            for rebuilt in ("ERROR", "PASSED"):
+                model = AshAggregatedResults()
+                model.scanner_results["tool"] = ScannerTargetStatusInfo(
+                    status=ScannerStatus(recorded), exit_code=0
+                )
+
+                _populate_scanner_results_from_unified_metrics(
+                    model, [_metrics(status=rebuilt, exit_code=None)]
+                )
+
+                assert model.scanner_results["tool"].exit_code is None, (
+                    recorded,
+                    rebuilt,
+                )
 
     def test_a_row_whose_tool_never_ran_carries_none_whatever_it_recorded(self):
         """The control: a MISSING or SKIPPED tool ran nothing, so a code the row

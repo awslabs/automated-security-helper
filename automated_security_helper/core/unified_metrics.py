@@ -1156,7 +1156,21 @@ def _populate_scanner_results_from_unified_metrics(
         # else: an excluded scanner's ``excluded: true`` came back false, the same as
         # a scanner that ran and had nothing to scan, and exit_code and any extra
         # field were lost too.
-        fields = _row_fields(aggregated_results.scanner_results.get(scanner_name))
+        previous = aggregated_results.scanner_results.get(scanner_name)
+        fields = _row_fields(previous)
+        previous_status = (
+            previous.get("status")
+            if isinstance(previous, dict)
+            else getattr(previous, "status", None)
+        )
+        # Whether the row ITSELF said the tool ran (PASSED or FAILED), as opposed
+        # to the status the rebuild reaches now: a code on a MISSING or SKIPPED
+        # row is from a tool that did not run, and an ERROR row of an older file
+        # carries the model's default 0.
+        previous_ran = getattr(previous_status, "value", previous_status) in (
+            ScannerStatus.PASSED.value,
+            ScannerStatus.FAILED.value,
+        )
         fields.update(
             severity_counts=consolidated_severity_counts,
             finding_count=metrics.total,
@@ -1172,8 +1186,12 @@ def _populate_scanner_results_from_unified_metrics(
         # has to carry an explicit None. One exception: the metrics read the
         # code from the per-target reports, and a results file whose rows carry
         # a code while its reports carry none (an older writer, a merged file)
-        # has the row as the code's only record. A row whose status says the
-        # tool ran keeps that code rather than having it erased by the rebuild.
+        # has the row as the code's only record. A row whose own status says the
+        # tool ran (PASSED or FAILED) keeps that code rather than having it
+        # erased by the rebuild, when the rebuilt status says it ran too. A
+        # code on a row that said MISSING, SKIPPED or ERROR is not the record
+        # of a run: kept, a stale code survived a rebuild to PASSED, and an
+        # older file's default 0 survived on an ERROR row.
         # The skipped reason is written when the metrics have one and dropped
         # when they have none (the metrics are the authority: a row's stale
         # reason is not kept), without passing a None that would mark the field
@@ -1182,6 +1200,7 @@ def _populate_scanner_results_from_unified_metrics(
         if (
             metrics.exit_code is None
             and status in _RAN_STATUSES
+            and previous_ran
             and isinstance(recorded_code, int)
             and not isinstance(recorded_code, bool)
         ):
