@@ -225,6 +225,24 @@ class TestSharedIdsByPosition:
         assert not flat_describes_result(_flat("id", "R1", "app/main.py", 8), result)
         assert not flat_describes_result(_flat("id", "R1", "app/main.py", None), result)
 
+    def test_blanks_around_a_rule_id_or_a_path_do_not_keep_the_row_from_pairing(self):
+        """The flattening strips every string it records, so the row of a
+        result whose ``ruleId`` or URI carries blanks holds the stripped text.
+        Compared with the result's raw text it never paired, and the report
+        printed the legacy id for that finding."""
+        result = _result(" R1 ", "a", uri=" app/main.py ")
+        row = _flat("id-1", "R1", "app/main.py")
+
+        assert flat_describes_result(row, result)
+        assert shared_ids_by_position([row], [result]) == ["id-1"]
+
+    def test_stripping_blanks_does_not_make_another_rule_or_file_match(self):
+        # The control: only the blanks are ignored.
+        result = _result(" R1 ", "a", uri=" app/main.py ")
+
+        assert not flat_describes_result(_flat("id", "R2", "app/main.py"), result)
+        assert not flat_describes_result(_flat("id", "R1", "app/other.py"), result)
+
     def test_a_start_line_given_only_by_the_context_region_is_read(self):
         """The flattening takes ``contextRegion.startLine`` when ``region`` names
         no line, so its row carries the context line; a read of ``region`` alone

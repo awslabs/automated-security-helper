@@ -80,22 +80,38 @@ def flat_describes_result(item: Any, result: Any) -> bool:
     and is percent-decoded, as the flattening does; any other URI is compared
     as written), and that location's start
     line: the region's, else the context region's (None on both sides when the
-    result names no line). The line is compared because two hits of one rule in
+    result names no line). The rule id and the path are compared without the
+    blanks around them, because the flattening strips every string it records.
+    The line is compared because two hits of one rule in
     one file differ in nothing else a row carries, and a flattening that ordered
     them the other way round swapped their ids with no sign. A read that raises
     is a mismatch, never an exception: the caller is deciding which id to print.
     """
     try:
-        flat_rule = getattr(item, "rule_id", None) or None
-        result_rule = getattr(result, "ruleId", None) or None
+        flat_rule = _stripped(getattr(item, "rule_id", None))
+        result_rule = _stripped(getattr(result, "ruleId", None))
         if flat_rule != result_rule:
             return False
-        flat_file = getattr(item, "file_path", None) or None
-        if flat_file != _first_file_path(result):
+        flat_file = _stripped(getattr(item, "file_path", None))
+        if flat_file != _stripped(_first_file_path(result)):
             return False
         return getattr(item, "line_start", None) == _first_start_line(result)
     except Exception:  # noqa: BLE001 -- see the docstring
         return False
+
+
+def _stripped(value: Any) -> Any:
+    """*value* without surrounding whitespace when it is text, None when empty.
+
+    ``FlatVulnerability`` strips every string field it holds, so a rule id or a
+    path that the result carries with blanks around it is recorded without
+    them. Both sides of the comparison are read the same way, or the row of a
+    result whose rule id is padded would never pair with it and its report
+    would print the legacy id.
+    """
+    if isinstance(value, str):
+        value = value.strip()
+    return value or None
 
 
 def _first_start_line(result: Any) -> Optional[int]:
