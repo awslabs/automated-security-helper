@@ -823,6 +823,22 @@ class TestARowWithoutBucketsLeavesTheFilteredBucketsUnknown:
         # The buckets the view does not select are known to be empty.
         assert by_severity["low"] == 0
 
+    def test_a_selection_that_keeps_every_counted_bucket_keeps_the_exact_total(self):
+        """The scanners stage derives total 2 from the row's finding_count. A
+        severities selection that hides no counted bucket changes nothing, so
+        the total stays 2 beside the buckets, which stay unknown; it used to
+        become None because the unknown buckets could not be summed."""
+        filtered = apply_content_filters(
+            self._results_with_a_row_that_only_counts(),
+            scanners="trivy",
+            severities="critical,high,medium,low,info",
+        )
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        assert by_severity["total"] == 2
+        assert by_severity["high"] is None
+        assert by_severity["critical"] is None
+
     def test_selecting_no_counted_bucket_keeps_the_total_known(self):
         # Control: green before and after the cure. Only suppressed findings are
         # selected, which the one total rule does not count, so the unknown

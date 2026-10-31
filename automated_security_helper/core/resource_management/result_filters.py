@@ -989,7 +989,18 @@ def apply_content_filters(
             else summary_stats
         )
         if "total" in summary_stats:
-            summary_stats["total"] = _total_of_known(buckets)
+            known_total = _total_of_known(buckets)
+            # A selection that keeps every counted bucket keeps the whole view:
+            # when a bucket is unknown (a row that counts findings and records no
+            # breakdown) the total the earlier stage derived from the rows'
+            # counts is exact, and stays. Deriving None from the unknown buckets
+            # there reported no total beside a selection that hides nothing, as
+            # the actionable count below does not.
+            keeps_every_counted_bucket = set(_COUNTED_SEVERITY_KEYS) <= set(
+                severity_list
+            )
+            if known_total is not None or not keeps_every_counted_bucket:
+                summary_stats["total"] = known_total
         # actionable is recounted when the findings it counts are at hand: the
         # SARIF results kept above, judged by the thresholds the scan recorded.
         # Without the SARIF (the summary and minimal levels never load it) the
