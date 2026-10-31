@@ -258,6 +258,10 @@ class TestALeadingSeparatorMatchesNoRelativePath:
         no workspace-relative path; converted to ``src/x.py`` it suppressed a
         file it never matched."""
         assert file_path_matches("api/src/x.py", "/api/src/x.py") is False
+        # The ignore kind is read by its own matcher, which turns a trailing '/'
+        # into a directory form: the leading '/' is still literal there.
+        for path in ("api/vendor/x.py", "api/vendor/lib/x.py", "vendor/x.py"):
+            assert ignore_path_matches(path, "/api/vendor/") is False, path
 
         with pytest.raises(WorkspacePatternError, match="leading '/'"):
             _down("/api/src/x.py", "api")
@@ -287,3 +291,21 @@ class TestALeadingSeparatorMatchesNoRelativePath:
 
         assert converted == "**/x.py"
         _contract_holds("/**/x.py", "api", converted)
+
+    def test_the_absorbed_separator_is_absorbed_for_an_ignore_path_too(self):
+        """The ignore kind has its own matcher: ``/**/vendor/`` is read as
+        ``**/vendor/``, so it is converted, not refused, and agrees with it."""
+        for path in ("api/vendor/x.py", "api/sub/vendor/lib/x.py", "api/other.py"):
+            assert ignore_path_matches(path, "/**/vendor/") is ignore_path_matches(
+                path, "**/vendor/"
+            ), path
+
+        converted = _down("/**/vendor/", "api", kind=IGNORE_PATH)
+
+        assert converted == _down("**/vendor/", "api", kind=IGNORE_PATH)
+        for path in ("vendor/x.py", "sub/vendor/lib/x.py", "other.py"):
+            workspace_side = ignore_path_matches(f"api/{path}", "/**/vendor/")
+            project_side = (
+                False if converted is None else ignore_path_matches(path, converted)
+            )
+            assert project_side is workspace_side, path

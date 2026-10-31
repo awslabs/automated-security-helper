@@ -713,10 +713,12 @@ _PATHS = [
 _PATTERN_PARTS = ["x", "X", "sub", "y.py", "*", "**", "?", "x*", "*.py", "[xX]", "."]
 
 #: The shapes named for this contract, over the project "x" and from the top,
-#: and the two reported defects.
+#: and the two reported defects. The anchors "/" and "/**/" put a leading
+#: separator in front of each shape, so both matchers decide it: a rooted pattern
+#: is refused for each kind, and "/**/" is the one the matcher absorbs.
 _NAMED_SHAPES = [
     anchor + shape
-    for anchor in ("", "x/", "X/", "*/", "**/", "x/sub/")
+    for anchor in ("", "x/", "X/", "*/", "**/", "x/sub/", "/", "/**/")
     for shape in ("x/", "x/**", "./x", "x/./y", "x", "", "X", "X/", "x//y", "**/")
 ] + ["api/vendor/", "./api/x.py"]
 
@@ -772,8 +774,8 @@ class TestDownConversionPerKind:
     def test_the_sweep_is_not_vacuous(self, kind):
         """Hundreds of pairs convert, and both verdicts occur among them.
 
-        Of the 1,764 pairs, 379 suppressions and 427 ignore paths convert; the
-        floor is below both, so a change that refused or dropped everything
+        Of the 1,878 pairs, hundreds of suppressions and of ignore paths convert;
+        the floor is below both, so a change that refused or dropped everything
         fails here instead of passing the agreement cells by having no answers.
         """
         outcomes = [
@@ -782,7 +784,7 @@ class TestDownConversionPerKind:
             for prefix in _PREFIXES
         ]
         converted = [o for o in outcomes if o is not None and o[0] is not None]
-        assert len(_PATTERNS) == 294
+        assert len(_PATTERNS) == 313
         assert len(converted) >= 350
         verdicts = {
             _MATCHERS[kind](path, rewritten)
