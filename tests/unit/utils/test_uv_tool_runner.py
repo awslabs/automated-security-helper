@@ -3992,23 +3992,6 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
                 " not installed through uv, so it is never a uv install input"
             ),
         ),
-        (
-            "scanners/semgrep_scanner.py",
-            '"SEMGREP_RULES_CACHE_DIR" in os.environ',
-        ): (
-            1,
-            "an offline-mode presence check for the rules cache",
-        ),
-        (
-            "scanners/semgrep_scanner.py",
-            'os.environ["SEMGREP_RULES_CACHE_DIR"]',
-        ): (
-            1,
-            (
-                "the offline rules path, written into SEMGREP_RULES for the"
-                " semgrep child's environment, never a uv install input"
-            ),
-        ),
     }
 
     @staticmethod
