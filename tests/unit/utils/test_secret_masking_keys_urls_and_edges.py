@@ -18,10 +18,10 @@ credential.
 import hashlib
 import string
 from types import SimpleNamespace
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import AnyUrl, BaseModel, ConfigDict
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -29,6 +29,7 @@ from automated_security_helper.utils.secret_masking import (
     _mask_secret_value,
     _propagates,
     _region_last_line,
+    mask_secret_values_in_text,
     mask_secret_values_in_tree,
     mask_secrets_in_results,
 )
@@ -243,6 +244,48 @@ class TestAUrlTypedField:
         assert form not in uri
         assert self.SPECIAL not in uri
         assert _mask_secret_value(self.SPECIAL) in uri
+
+    #: ``[ ] \ ^ |``: the characters the URL standard has moved in and out of the
+    #: path's percent-encode set. The masker tries the path with all five raw and
+    #: with all five encoded; a library that encodes some of them writes a third
+    #: spelling.
+    EDGES = (
+        _derived("url-edge", 5)
+        + "["
+        + _derived("url-edge-b", 3)
+        + "]"
+        + _derived("url-edge-c", 3)
+        + "\\"
+        + _derived("url-edge-d", 3)
+        + "^"
+        + _derived("url-edge-e", 3)
+        + "|"
+        + _derived("url-edge-f", 2)
+        + "9"
+    )
+
+    def test_a_value_with_the_path_edge_characters_is_masked_as_the_library_writes_it(
+        self,
+    ):
+        """The path spelling is read from the installed library, not assumed: the
+        URL's path is taken as ``str(url)`` writes it and must be gone after
+        masking, whichever of the five characters the library encodes. The scheme
+        is not a special one, so a backslash is kept as a character of the path
+        and not read as a slash. A failure names the spelling the library writes."""
+        assert _propagates(self.EDGES)
+        written = str(AnyUrl(f"git://example.com/{self.EDGES}/repo"))
+        prefix, suffix = "git://example.com/", "/repo"
+        assert written.startswith(prefix) and written.endswith(suffix)
+        spelling = written[len(prefix) : -len(suffix)]
+        # Only percent-encoding changed the value, so the spelling is the
+        # library's choice of encode set and nothing else.
+        assert unquote(spelling) == self.EDGES
+
+        masked = mask_secret_values_in_text(written, [self.EDGES])
+
+        assert masked != written
+        assert spelling not in masked, f"unmasked path spelling: {spelling}"
+        assert self.EDGES not in masked
 
     def test_a_url_path_that_holds_nothing_exposed_is_kept(self):
         """Control: the same URL shape with another value in its path."""
