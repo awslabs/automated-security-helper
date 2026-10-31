@@ -118,6 +118,22 @@ _GRYPE_REPLACEMENT = "�"
 _ONE_UNDECODABLE_CHARACTER = "[\ud800-\udfff]"
 
 
+def _holds_a_database(cache: Path) -> bool:
+    """Whether *cache* holds a grype database: ``<schema version>/vulnerability.db``.
+
+    grype keeps one directory per schema version under its cache, so the version
+    is not named here. A cache that cannot be listed holds none that can be read.
+    """
+    try:
+        versions = os.listdir(cache)
+    except OSError:
+        return False
+    return any(
+        os.path.isfile(os.path.join(cache, version, "vulnerability.db"))
+        for version in versions
+    )
+
+
 def _name_grype_garbled(root: Path, uri: str, separators: Optional[str] = None) -> str:
     """The name under *root* that *uri* garbles, or *uri* as grype wrote it.
 
@@ -719,10 +735,22 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                     self._plugin_log(msg, level=logging.WARNING)
             return
         cache = default_cache_dir("grype", snapshot_environ())
-        if not cache.is_dir():
+        # os.path.isdir, not Path.is_dir: under a directory this process cannot
+        # search, Path.is_dir raises PermissionError on Python 3.10-3.13, out of
+        # the scanner's construction, where os.path.isdir answers False.
+        if not os.path.isdir(cache):
             self._plugin_log(
                 f"Grype offline mode: the database directory {cache.as_posix()} "
                 "does not exist, so grype has no vulnerability database to read. "
+                "Download one with network access, or set GRYPE_DB_CACHE_DIR to a "
+                "cache that holds one.",
+                level=logging.WARNING,
+            )
+        elif not _holds_a_database(cache):
+            self._plugin_log(
+                f"Grype offline mode: the database directory {cache.as_posix()} "
+                "holds no vulnerability database (no <schema version>/"
+                "vulnerability.db under it), so grype has none to read. "
                 "Download one with network access, or set GRYPE_DB_CACHE_DIR to a "
                 "cache that holds one.",
                 level=logging.WARNING,

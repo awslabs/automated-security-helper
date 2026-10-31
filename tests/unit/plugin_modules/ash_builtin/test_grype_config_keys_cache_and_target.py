@@ -346,7 +346,8 @@ def test_control_offline_with_a_default_cache_present_nothing_is_said(
     root, monkeypatch, caplog
 ):
     present = root / "cache" / "grype"
-    present.mkdir(parents=True)
+    (present / "6").mkdir(parents=True)
+    (present / "6" / "vulnerability.db").write_bytes(b"db")
     monkeypatch.setattr(grype_scanner, "default_cache_dir", lambda *a, **k: present)
 
     with caplog.at_level(logging.WARNING):
@@ -354,6 +355,50 @@ def test_control_offline_with_a_default_cache_present_nothing_is_said(
 
     assert present.as_posix() not in caplog.text
     assert "environment variable not set" not in caplog.text
+
+
+def test_offline_with_an_empty_default_cache_the_missing_database_is_said(
+    root, monkeypatch, caplog
+):
+    """A directory that exists is not a database: a fresh cache directory, or one
+    another tool made, holds nothing grype can read. trivy's twin check looks for
+    the database file for the same reason. The schema version is not named: grype
+    keeps a directory per version."""
+    empty = root / "cache" / "grype"
+    empty.mkdir(parents=True)
+    (empty / "6").mkdir()
+    monkeypatch.setattr(grype_scanner, "default_cache_dir", lambda *a, **k: empty)
+
+    with caplog.at_level(logging.WARNING):
+        _grype(_context(root))
+
+    (line,) = [
+        r.getMessage() for r in caplog.records if empty.as_posix() in r.getMessage()
+    ]
+    assert "holds no vulnerability database" in line, line
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+def test_offline_a_cache_under_an_unsearchable_directory_is_judged_missing_not_raised(
+    root, monkeypatch, caplog
+):
+    """``Path.is_dir`` raises ``PermissionError`` on Python 3.10-3.13 under a
+    directory this process cannot search, out of the scanner's construction."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root searches every directory")
+    locked = root / "locked"
+    locked.mkdir()
+    cache = locked / "grype"
+    cache.mkdir()
+    monkeypatch.setattr(grype_scanner, "default_cache_dir", lambda *a, **k: cache)
+    locked.chmod(0)
+    try:
+        with caplog.at_level(logging.WARNING):
+            _grype(_context(root))
+    finally:
+        locked.chmod(0o755)
+
+    assert cache.as_posix() in caplog.text
 
 
 # --- the target ---------------------------------------------------------------------
