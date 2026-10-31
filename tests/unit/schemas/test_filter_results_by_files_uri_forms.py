@@ -40,6 +40,23 @@ from automated_security_helper.schemas.sarif_schema_model import (
 pytestmark = pytest.mark.unit
 
 
+def _link_top_levels(monkeypatch, links: dict[str, str]) -> None:
+    """Make each top-level directory in *links* read as a symlink to its target.
+
+    ``Path.is_symlink`` and ``Path.readlink`` both answer from *links* (a dict
+    the caller may empty later), so the same fake serves a check that asks
+    whether the entry is a link and one that reads where it points; an entry not
+    in *links* is no link (``readlink`` raises the error a real file does)."""
+
+    def fake_readlink(self):
+        if self.as_posix() in links:
+            return Path(links[self.as_posix()])
+        raise OSError(22, "Invalid argument", self.as_posix())
+
+    monkeypatch.setattr(Path, "is_symlink", lambda self: self.as_posix() in links)
+    monkeypatch.setattr(Path, "readlink", fake_readlink)
+
+
 def _result(uri: str | None, line: int = 1) -> Result:
     return Result(
         ruleId="R",
@@ -230,7 +247,7 @@ class TestWindowsForms:
         and the result was dropped as if it named another tree. A top-level
         directory that is a symlink lets the candidate be resolved; the same
         call with no link at ``/tmp`` still compares it as spelled."""
-        links = {"/tmp"}
+        links = {"/tmp": "private/tmp"}
         original = Path.resolve
 
         def fake_resolve(self, *args, **kwargs):
@@ -240,7 +257,7 @@ class TestWindowsForms:
             return original(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "resolve", fake_resolve)
-        monkeypatch.setattr(Path, "is_symlink", lambda self: self.as_posix() in links)
+        _link_top_levels(monkeypatch, links)
 
         assert (
             _resolved_relative_text(
@@ -272,12 +289,115 @@ class TestWindowsForms:
             return original(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "resolve", fake_resolve)
-        monkeypatch.setattr(Path, "is_symlink", lambda self: self.as_posix() == "/tmp")
+        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})
         report = _report("file:///tmp/proj/src/a.py", "/work/other/b.py")
 
         report.filter_results_by_files({"src/a.py"}, Path("/private/tmp/proj"))
 
         assert _lines(report) == [1]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-rooted paths")
+    def test_a_parent_step_after_a_linked_top_level_is_never_resolved(
+        self, monkeypatch
+    ):
+        """``/tmp/../../net/<host>/x.py`` starts at a link, so the first segment
+        says nothing about where it ends: ``Path.resolve`` follows ``/tmp`` to
+        ``/private/tmp``, steps up to ``/`` and looks at ``/net/<host>``, the
+        automounted directory the filter exists to keep off. A candidate with a
+        ``..`` component is compared as spelled; the same call without the
+        ``..`` still resolves."""
+        resolved: list[str] = []
+
+        def recording_resolve(self, *args, **kwargs):
+            resolved.append(self.as_posix())
+            return Path("/private" + self.as_posix())
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})
+
+        assert (
+            _resolved_relative_text(
+                "/tmp/../../net/example.com/x.py",
+                "/private/tmp/proj",
+                False,
+                "/private/tmp/proj",
+            )
+            is None
+        )
+        assert resolved == []
+
+        assert (
+            _resolved_relative_text(
+                "/tmp/proj/src/a.py", "/private/tmp/proj", False, "/private/tmp/proj"
+            )
+            == "src/a.py"
+        )
+        assert resolved == ["/tmp/proj/src/a.py"]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-rooted paths")
+    def test_a_result_with_a_parent_step_is_filtered_without_a_resolve(
+        self, monkeypatch
+    ):
+        """The same fact end to end: the filter drops the result, and no
+        candidate carrying ``..`` reaches ``Path.resolve``."""
+        resolved: list[str] = []
+        original = Path.resolve
+
+        def recording_resolve(self, *args, **kwargs):
+            resolved.append(self.as_posix())
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})
+        report = _report(
+            "file:///tmp/../../net/example.com/x.py", "/private/tmp/proj/src/a.py"
+        )
+
+        report.filter_results_by_files({"src/a.py"}, "/private/tmp/proj")
+
+        assert _lines(report) == [2]
+        assert [p for p in resolved if ".." in p] == []
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-rooted paths")
+    @pytest.mark.parametrize(
+        ("links", "kept"),
+        [
+            pytest.param({"/tmp": "private/tmp"}, True, id="relative-into-the-root"),
+            pytest.param({"/tmp": "/private/tmp"}, True, id="absolute-into-the-root"),
+            pytest.param(
+                {"/tmp": "../private/tmp"}, True, id="collapsed-against-slash"
+            ),
+            pytest.param(
+                {"/tmp": "net/example.com/tmp"}, False, id="into-another-tree"
+            ),
+            pytest.param(
+                {"/tmp": "/net/example.com/tmp"}, False, id="absolute-elsewhere"
+            ),
+            pytest.param({}, False, id="not-a-link"),
+        ],
+    )
+    def test_a_top_level_link_is_followed_only_toward_the_source_dir(
+        self, monkeypatch, links, kept
+    ):
+        """A link at the top level is how one directory gets two spellings, and
+        the filter resolves a candidate under it only when the link points at the
+        source directory's own top segment. A link into another tree (an
+        automounter map is one) is not followed because a scanner named it."""
+        resolved: list[str] = []
+
+        def recording_resolve(self, *args, **kwargs):
+            resolved.append(self.as_posix())
+            return Path("/private" + self.as_posix())
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+        _link_top_levels(monkeypatch, links)
+
+        found = _resolved_relative_text(
+            "/tmp/proj/src/a.py", "/private/tmp/proj", False, "/private/tmp/proj"
+        )
+
+        assert found == ("src/a.py" if kept else None)
+        assert resolved == (["/tmp/proj/src/a.py"] if kept else [])
 
     def test_a_remote_mount_result_is_filtered_without_a_resolve(self, monkeypatch):
         resolved: list[str] = []

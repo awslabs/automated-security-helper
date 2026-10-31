@@ -72,6 +72,7 @@ import re
 from datetime import datetime
 from enum import Enum
 import json
+import posixpath
 from pathlib import Path, PurePath, PurePosixPath
 from typing import Dict, List, Literal, Optional, Sequence, Union
 from urllib.parse import unquote
@@ -2530,24 +2531,37 @@ def _first_segment(text: Optional[str], fold_case: bool) -> Optional[str]:
     return parts[0].lower() if fold_case else parts[0]
 
 
-def _top_level_is_a_link(candidate: str) -> bool:
-    """Whether the first directory of a POSIX-rooted *candidate* is a symlink here.
+def _top_level_link_leads_under(
+    candidate: str, resolved_root: Optional[str], fold_case: bool
+) -> bool:
+    """Whether the first directory of a POSIX-rooted *candidate* is a symlink here
+    whose target starts under the resolved source directory's top segment.
 
-    Reads that one entry (``/tmp`` for ``/tmp/proj/a.py``) and walks nothing
-    else, so it cannot reach into an automounted directory. A top-level link
-    (``/tmp`` to ``/private/tmp``, ``/home`` to ``/var/home``) is how the same
-    directory gets two spellings, so a candidate under one is resolved toward the
-    place the link names even when the source directory was given resolved. False
-    for a candidate that is not rooted at ``/`` (a drive path, a relative one) and
-    for a name that cannot be read.
+    Reads that one entry (``/tmp`` for ``/tmp/proj/a.py``) with one ``readlink``
+    and walks nothing else. A top-level link (``/tmp`` to ``/private/tmp``,
+    ``/home`` to ``/var/home``) is how the same directory gets two spellings, so
+    a candidate under one is resolved toward the place the link names even when
+    the source directory was given resolved. The link counts only when where it
+    points (made absolute against ``/`` and collapsed) begins at the same
+    top-level segment as *resolved_root*: the filter resolves toward places the
+    source directory already reaches, so a link into some other tree, an
+    automounter map included, is never followed on a scanner's say-so. False for
+    a candidate that is not rooted at ``/`` (a drive path, a relative one), for
+    an entry that is not a link, and for a name that cannot be read.
     """
     parts = PurePosixPath(candidate).parts
     if len(parts) < 2 or parts[0] != "/":
         return False
     try:
-        return Path("/", parts[1]).is_symlink()
+        target = Path("/", parts[1]).readlink().as_posix()
     except (OSError, ValueError):
         return False
+    # A relative target is relative to the directory holding the link, "/".
+    absolute_target = posixpath.normpath(posixpath.join("/", target))
+    leads_to = _first_segment(absolute_target, fold_case)
+    return leads_to is not None and leads_to == _first_segment(
+        resolved_root, fold_case
+    )
 
 
 def _resolved_relative_text(
@@ -2578,14 +2592,23 @@ def _resolved_relative_text(
     is a mount of that host; so a candidate is resolved only when it starts
     under the same top-level segment as the source directory, as resolved or as
     given (*lexical_root*), or under a top-level directory that is itself a
-    symlink (``_top_level_is_a_link``): the filter resolves toward places the
+    symlink pointing under the resolved source directory's top segment
+    (``_top_level_link_leads_under``): the filter resolves toward places the
     source directory already reaches, and a URI anywhere else is compared as
     spelled. The link case is the source directory given resolved
     (``/private/tmp/x``, ``/var/home/u/x``) while the scanner wrote the link's
     spelling (``/tmp/x``, ``/home/u/x``), where the first segments differ.
+
+    A candidate with a ``..`` component is never resolved either: the first
+    segment says where a path starts, not where it ends, and
+    ``/tmp/../../net/<host>/x.py`` starts at a link, steps up to ``/`` and
+    reaches the automounted directory this function exists to keep off. Such a
+    URI is compared as spelled, which only the lexical comparison above could
+    match.
+
     None when the root could not be resolved, neither spelling matches, the
-    candidate is UNC-rooted or starts elsewhere and did not match as spelled, or
-    the candidate cannot be resolved.
+    candidate is UNC-rooted, has a ``..`` component, or starts elsewhere and did
+    not match as spelled, or the candidate cannot be resolved.
     """
     if resolved_root is None:
         return None
@@ -2594,13 +2617,15 @@ def _resolved_relative_text(
         return relative
     if candidate.startswith("//"):
         return None
+    if ".." in PurePosixPath(candidate).parts:
+        return None
     first = _first_segment(candidate, fold_case)
     if first is None:
         return None
     if first not in (
         _first_segment(resolved_root, fold_case),
         _first_segment(lexical_root, fold_case),
-    ) and not _top_level_is_a_link(candidate):
+    ) and not _top_level_link_leads_under(candidate, resolved_root, fold_case):
         return None
     try:
         resolved_candidate = root_text(Path(candidate).resolve())
