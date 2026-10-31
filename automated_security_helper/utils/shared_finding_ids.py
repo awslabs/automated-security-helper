@@ -36,9 +36,11 @@ def shared_ids_by_position(flat: List[Any], results: List[Any]) -> List[Optional
     was read from a scanner's additional report and describes no SARIF result
     (a row without the attribute is read as a SARIF row). With as many SARIF rows
     as results the two line up by position; otherwise the rows are walked in
-    order and each result takes the next row that describes it, so an extra or
-    missing row costs the position it sits at alone. None at a position whose row
-    carries no usable id or describes another result.
+    order and each result takes the next row, at or after the last one taken,
+    that describes it: an extra row is skipped and a result with no row gets
+    None. The walk never goes back, so a result whose row lies before the last
+    one taken (rows and results in different orders) gets None as well. None
+    at a position whose row carries no usable id or describes another result.
     """
     rows = [item for item in flat if getattr(item, "source_report", None) is None]
     ids: List[Optional[str]] = []
@@ -74,8 +76,9 @@ def flat_describes_result(item: Any, result: Any) -> bool:
 
     Compared the way ``FlatVulnerability.from_sarif_result`` reads them: the
     result's ``ruleId`` (not a ``rule.id`` reference), its first location's
-    artifact URI reduced to a path (a ``file:`` URI loses its scheme and host
-    and is percent-decoded, as the flattening does), and that location's start
+    artifact URI reduced to a path (a ``file://`` URI loses its scheme and host
+    and is percent-decoded, as the flattening does; any other URI is compared
+    as written), and that location's start
     line: the region's, else the context region's (None on both sides when the
     result names no line). The line is compared because two hits of one rule in
     one file differ in nothing else a row carries, and a flattening that ordered

@@ -222,10 +222,10 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
 
         The distinct ids do not make GitLab keep both vulnerabilities in every
         case. It merges two vulnerabilities that share a location and any one
-        identifier other than CWE, and two hits of one rule at one line also
-        share the scanner's rule identifier (``<scanner>-rule``). The ids keep
-        apart the findings that carry no rule identifier, a result with no rule
-        id or one with no scanner name.
+        identifier other than CWE or WASC, and two hits of one rule at one line
+        also share the scanner's rule identifier (``<scanner>-rule``). The ids
+        keep apart the findings that carry no rule identifier, a result with no
+        rule id or one with no scanner name.
         """
         identifier = vuln["id"]
         count = seen.get(identifier, 0)

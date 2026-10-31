@@ -8050,6 +8050,12 @@
   every scan of the same tree and the same identity across the reports. A finding
   the flattening cannot vouch for is keyed on the result alone: scanner, workspace
   project, rule, message, file and lines, with two identical results numbered.
+  The message in that key is read as every other report reads it (its text, else
+  its markdown, else the id of the message string), so two findings at one site
+  whose messages are given in markdown or by id are no longer numbered as repeats
+  of one another, and a result that states no finding takes no number. A record
+  the reporter builds in its reduced form carries the uid its whole record would
+  have, and only its degraded label tells the two apart.
 
 - **The OCSF report leaves out results that state no failing finding, and says
   when its array is short.** A result whose SARIF `kind` is `pass`, `notApplicable`
@@ -8076,9 +8082,9 @@
   rule at one line that the flattening could not pair used to share one `id` and
   one ASH finding-id identifier; they now carry distinct ones: the first keeps
   the id it always had, the second is numbered. GitLab merges vulnerabilities
-  that share a location and any identifier other than CWE, so two such findings
-  that both carry the scanner's rule identifier still read as one there; the
-  distinct ids keep apart those that carry no rule identifier.
+  that share a location and any identifier other than CWE or WASC, so two such
+  findings that both carry the scanner's rule identifier still read as one
+  there; the distinct ids keep apart those that carry no rule identifier.
 
 - **The GitLab SAST and OCSF reports read a result's rule and message as the
   SARIF schema allows.** A result that names its rule as `rule.id` instead of
