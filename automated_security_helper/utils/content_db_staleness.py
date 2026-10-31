@@ -206,6 +206,11 @@ class ContentDbAgeRecord:
     #: its bound" beside an age equal to the bound. The recorded age keeps ``age`` and
     #: the message consistent with the recorded decision.
     recorded_age_seconds: Optional[int] = None
+    #: The record is a stand-in for a results-file entry that could not be read back
+    #: (``_unreadable_record``): its bound, age and policy are not known, so the
+    #: message says that instead of quoting a 0s bound. Omitted from ``to_dict`` when
+    #: False, like ``absent``.
+    bound_unknown: bool = False
 
     @property
     def age(self) -> Optional[timedelta]:
@@ -241,6 +246,16 @@ class ContentDbAgeRecord:
                 f"({self.error or 'the tool reports no database'}). The scanner had "
                 "nothing to match against, so it is recorded ERROR whatever "
                 f"content_db_staleness says. To create it, {self.refresh}."
+            )
+        if self.bound_unknown:
+            # Nothing was read: no bound to quote, and no policy to say the scan
+            # failed or went on. The remedy is the same either way.
+            remedy = f" To refresh it, {self.refresh}." if self.refresh else ""
+            return (
+                f"Content database {self.name} ({self.scanner}): {self.error}, so its "
+                "age and bound are unknown and it cannot be shown to be inside its "
+                "bound. Whether the scan accepted it was not recorded in a form that "
+                f"can be read back.{remedy}"
             )
         bound = go_duration(self.max_age)
         whose = (
@@ -334,6 +349,7 @@ class ContentDbAgeRecord:
             "timestamp_label": self.timestamp_label,
             **({"policy_source": self.policy_source} if self.policy_source else {}),
             **({"absent": True} if self.absent else {}),
+            **({"bound_unknown": True} if self.bound_unknown else {}),
         }
 
     @classmethod
@@ -354,6 +370,7 @@ class ContentDbAgeRecord:
             timestamp_label=str(data.get("timestamp_label") or "built"),
             policy_source=data.get("policy_source") or None,
             absent=data.get("absent") is True,
+            bound_unknown=data.get("bound_unknown") is True,
             # The scan's own decision, kept as it was written; a file from before
             # the field was written (no boolean) is measured from its timestamps.
             recorded_stale=(
@@ -1028,7 +1045,12 @@ def _unreadable_record(
     entry carries: a record ASH wrote and cannot read is no evidence of a fresh
     database, and dropped it left the exit-code gate and the reports with nothing
     where the scan had recorded a failure. The bound is unknown, so the record
-    carries none; ``recorded_stale`` keeps it stale whatever the bound.
+    carries none (``bound_unknown``); ``recorded_stale`` keeps it stale whatever the
+    bound. The policy is ``warn``, never read from the entry: with no notification
+    level beside it nothing says the scan failed on it, and the exit-code gate reads
+    levels, so a record shown as "The scan fails" disagreed with the exit code.
+    ``stale_content_databases`` sets the policy from the notification's level
+    afterwards, so a stale record that failed the scan still does.
     """
     data = raw if isinstance(raw, Mapping) else {}
     text = str(error) or type(error).__name__
@@ -1039,13 +1061,14 @@ def _unreadable_record(
         measured_by=str(data.get("measured_by") or ""),
         max_age=timedelta(0),
         measured_at=measured_at or datetime.now(timezone.utc),
-        policy=str(data.get("policy") or DEFAULT_STALENESS_POLICY),
+        policy=STALENESS_WARN,
         bound_source=str(data.get("bound_source") or ""),
         bound_is_tool_default=False,
         refresh=str(data.get("refresh") or ""),
         error=f"the recorded measurement could not be read back ({text})",
         timestamp_label=str(data.get("timestamp_label") or "built"),
         recorded_stale=True,
+        bound_unknown=True,
     )
 
 

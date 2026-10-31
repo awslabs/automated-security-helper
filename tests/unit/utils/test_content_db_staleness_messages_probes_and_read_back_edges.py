@@ -220,6 +220,35 @@ def test_one_record_that_cannot_be_rendered_does_not_drop_the_others(monkeypatch
     assert recorded["name"] == "grype-db"
 
 
+def test_a_record_that_does_not_parse_back_is_not_shown_as_an_enforced_failure():
+    """The property list carries no notification level, so nothing says the scan
+    failed on an entry that cannot be read back. It was given the default `fail`
+    policy and a 0s bound, which read in the reports as "The scan fails ... inside
+    its 0s bound" while the exit-code gate, which reads levels, had nothing."""
+    raw = {"name": "grype-db", "scanner": "grype", "measured_at": "not a timestamp"}
+    results = SimpleNamespace(
+        sarif=SimpleNamespace(
+            runs=[
+                SimpleNamespace(
+                    invocations=[
+                        SimpleNamespace(
+                            properties={staleness.INVOCATION_PROPERTY: [raw]}
+                        )
+                    ]
+                )
+            ]
+        )
+    )
+    (record,) = staleness.content_db_records(results)
+    assert record.stale is True
+    assert record.enforced is False
+    message = record.message()
+    assert "0s" not in message
+    assert "scan fails" not in message.lower()
+    assert "unknown" in message
+    assert "could not be read back" in message
+
+
 def test_a_stale_record_that_does_not_parse_back_still_fails_the_scan():
     descriptor = SimpleNamespace(
         root=SimpleNamespace(id=staleness.STALE_NOTIFICATION_ID)
