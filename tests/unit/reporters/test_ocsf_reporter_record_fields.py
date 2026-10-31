@@ -343,8 +343,10 @@ class TestFindingUidIsStableAcrossRuns:
 class TestTheIdentityOfAResultWithNoSharedId:
     @staticmethod
     def _markdown_result(markdown: str) -> Result:
-        # The schema requires ``text`` on a message that carries markdown, so a
-        # message "given in markdown" is an empty ``text`` beside the markdown.
+        # SARIF 3.11.8 and the model's ``Message1`` variant require ``text``
+        # beside ``markdown``, so a message "given in markdown" is built here as
+        # an empty ``text`` beside the markdown. The ``Message2`` variant, which
+        # names a message string by id, does not require it.
         return Result(
             ruleId="R1",
             level=Level.error,
