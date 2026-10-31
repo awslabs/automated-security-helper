@@ -179,15 +179,72 @@ def test_control_a_refused_create_of_a_missing_lock_file_raises_that_refusal(
     assert [flags & _ACCESS_MODE for flags in opened] == [os.O_RDWR, os.O_RDONLY]
 
 
-def test_control_a_refusal_other_than_permission_propagates(tmp_path, monkeypatch):
+def _refusing_writes_with(monkeypatch, code, opened):
+    """Opens of the lock file for writing fail with *code*; every open is recorded.
+    Opening it read-only is not refused, so a fallback to it would succeed."""
     real_open = os.open
 
     def refusing(path, flags, *args, **kwargs):
         if os.fspath(path).endswith(".lock"):
-            raise OSError(errno.EROFS, "Read-only file system")
+            opened.append(flags & _ACCESS_MODE)
+            if flags & _ACCESS_MODE != os.O_RDONLY:
+                raise OSError(code, os.strerror(code), os.fspath(path))
         return real_open(path, flags, *args, **kwargs)
 
     monkeypatch.setattr(file_lock.os, "open", refusing)
+
+
+@pytest.mark.parametrize("code", [errno.EIO, errno.ENAMETOOLONG])
+def test_control_a_refusal_other_than_permission_or_a_read_only_file_system_propagates(
+    tmp_path, monkeypatch, code
+):
+    opened = []
+    _refusing_writes_with(monkeypatch, code, opened)
+
+    with pytest.raises(OSError) as raised:
+        with file_lock.exclusive_lock(tmp_path / "cache" / ".lock"):
+            pass
+
+    assert raised.value.errno == code
+    # Exactly one open: the error came from the read-write open and was not
+    # followed by a read-only try, which the refusal above would have let succeed.
+    assert opened == [os.O_RDWR]
+
+
+@pytest.mark.skipif(file_lock.fcntl is None, reason="no flock on this platform")
+def test_a_read_only_file_system_falls_back_to_a_read_only_lock(tmp_path, monkeypatch):
+    """A lock file that already exists on a read-only mount cannot be opened for
+    writing (EROFS) but can be locked read-only, as a file this account may not
+    write can; the lock is taken, not refused."""
+    lock_file = tmp_path / "cache" / ".lock"
+    lock_file.parent.mkdir()
+    lock_file.touch()
+    opened = []
+    _refusing_writes_with(monkeypatch, errno.EROFS, opened)
+
+    entered = False
+    with file_lock.exclusive_lock(lock_file):
+        entered = True
+
+    assert entered
+    assert opened == [os.O_RDWR, os.O_RDONLY]
+
+
+def test_a_lock_file_that_cannot_be_made_on_a_read_only_file_system_is_refused(
+    tmp_path, monkeypatch
+):
+    """A read-only mount refuses to make the name, and there is nothing to open
+    read-only at a name that does not exist; the read-write open's EROFS is the
+    caller's, not the read-only open's FileNotFoundError."""
+    real_open = os.open
+
+    def read_only_mount(path, flags, *args, **kwargs):
+        writes = flags & (os.O_CREAT | _ACCESS_MODE) != os.O_RDONLY
+        if os.fspath(path).endswith(".lock") and writes:
+            raise OSError(errno.EROFS, "Read-only file system", os.fspath(path))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(file_lock.os, "open", read_only_mount)
 
     with pytest.raises(OSError) as raised:
         with file_lock.exclusive_lock(tmp_path / "cache" / ".lock"):

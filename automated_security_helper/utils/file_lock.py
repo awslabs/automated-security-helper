@@ -113,12 +113,16 @@ def _open_lock_file(path: Path) -> int:
     Read-write first. On a network mount (NFS since Linux 2.6.12, CIFS) ``flock``
     is emulated with byte-range locks, and an exclusive byte-range lock needs a
     descriptor open for writing: a read-only descriptor made ``flock(LOCK_EX)``
-    raise ``EBADF`` there. Read-only only when the read-write open is refused: a
-    lock file another account created in a shared cache (mode 0644) is readable
-    where it is not writable, and on a local filesystem ``flock`` takes an
-    exclusive lock on a read-only descriptor, so the second account's update is
-    serialized rather than failing. A link at the name is not followed where the
-    platform can refuse one (``O_NOFOLLOW``).
+    raise ``EBADF`` there. Read-only only when the read-write open is refused for
+    want of permission (``EACCES``, ``EPERM``) or because the file system is
+    read-only (``EROFS``): a lock file another account created in a shared cache
+    (mode 0644) is readable where it is not writable, a lock file on a read-only
+    mount is too, and on a local filesystem ``flock`` takes an exclusive lock on a
+    read-only descriptor, so the update is serialized rather than failing. A lock
+    file that does not exist on a read-only mount cannot be made, and the
+    ``EROFS`` of the read-write open propagates. Any other refusal (``EIO``,
+    ``ENAMETOOLONG``) propagates at once. A link at the name is not followed
+    where the platform can refuse one (``O_NOFOLLOW``).
 
     The read-only open does not ask to create the file. Only the read-write open
     does, and a refusal of it can come from the create itself: on Linux with
@@ -142,7 +146,9 @@ def _open_lock_file(path: Path) -> int:
     common = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(path, os.O_RDWR | os.O_CREAT | common, 0o644)
-    except PermissionError as refused:
+    except OSError as refused:
+        if not (isinstance(refused, PermissionError) or refused.errno == errno.EROFS):
+            raise
         try:
             fd = os.open(path, os.O_RDONLY | common)
         except FileNotFoundError:
