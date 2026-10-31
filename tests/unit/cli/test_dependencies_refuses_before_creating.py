@@ -304,28 +304,31 @@ def test_a_deleted_working_directory_is_the_usage_refusal(
 
 @pytest.mark.parametrize("how", ["option", "environment"])
 def test_a_relative_bin_path_under_a_deleted_working_directory_is_the_usage_refusal(
-    quiet_machine, tmp_path, how
+    quiet_machine, monkeypatch, how
 ):
     """The bin path was made absolute before the working directory was checked,
     and os.path.abspath reads the working directory for a relative path: the
     command ended in a FileNotFoundError traceback, exit 1, where the same
-    deleted directory with an absolute --bin-path is the usage refusal."""
-    gone = tmp_path / "gone"
-    gone.mkdir()
-    before = os.getcwd()
-    os.chdir(gone)
-    try:
-        gone.rmdir()
-        if how == "option":
-            result = runner.invoke(
-                dependencies_app, ["--bin-path", "bin", "--tool", "sarif"]
-            )
-        else:
-            result = runner.invoke(
-                dependencies_app, ["--tool", "sarif"], env={"ASH_BIN_PATH": "bin"}
-            )
-    finally:
-        os.chdir(before)
+    deleted directory with an absolute --bin-path is the usage refusal.
+
+    The directory is not removed for real: Windows refuses to remove a process's
+    working directory (WinError 32), and the unit tier runs there too. os.getcwd
+    is what both os.path.abspath (on POSIX) and Path.cwd read, so making it raise
+    stands in for the removed directory on every platform."""
+
+    def gone():
+        raise FileNotFoundError(errno.ENOENT, "the working directory was removed")
+
+    monkeypatch.setattr(os, "getcwd", gone)
+
+    if how == "option":
+        result = runner.invoke(
+            dependencies_app, ["--bin-path", "bin", "--tool", "sarif"]
+        )
+    else:
+        result = runner.invoke(
+            dependencies_app, ["--tool", "sarif"], env={"ASH_BIN_PATH": "bin"}
+        )
 
     assert result.exit_code == 5, (result.output, result.exception)
     assert result.exception is None or isinstance(result.exception, SystemExit)
