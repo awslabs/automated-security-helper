@@ -423,7 +423,7 @@ class TestAKeptDirectoryGoesOnlyWhileAnEntryStands:
         return kept
 
     def test_it_stays_when_the_entry_this_call_placed_is_gone(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, capsys
     ):
         # Red before: the call that placed the entry deleted every directory marked
         # for the tool, whether or not its entry was still at the name, and the
@@ -452,8 +452,15 @@ class TestAKeptDirectoryGoesOnlyWhileAnEntryStands:
         assert not final.exists()
         assert kept.exists(), "the directory holding the only copy was deleted"
         assert (kept / "old" / "LICENSE").read_bytes() == b"new\n"
+        # The install line still prints, so the note on stderr is what tells the
+        # reader that the name is empty and a directory was kept. Red before: nothing
+        # was printed to stderr, and the line said "Installed" alone.
+        streams = capsys.readouterr()
+        assert f"no license entry stands at {final} now" in streams.err
+        assert "install demo again" in streams.err
+        assert "Installed demo license files" in streams.out
 
-    def test_it_goes_when_an_entry_stands_at_the_name(self, tmp_path):
+    def test_it_goes_when_an_entry_stands_at_the_name(self, tmp_path, capsys):
         """Control: the retried install of the tool supersedes the old copy."""
         third_party = tmp_path / "third-party"
         third_party.mkdir()
@@ -462,6 +469,7 @@ class TestAKeptDirectoryGoesOnlyWhileAnEntryStands:
         installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
 
         assert not kept.exists()
+        assert "no license entry stands" not in capsys.readouterr().err
         assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
 
     def test_it_goes_when_the_files_prove_the_entry_though_asking_raises(

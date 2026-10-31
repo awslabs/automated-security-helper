@@ -1257,7 +1257,7 @@ _PUBLISH_WORK_PREFIX = ".ash-third-party-"
 _PUBLISH_KEPT_MARKER = "KEPT"
 
 
-def _remove_kept_work_dirs(third_party_dir: Path, final: Path, staged: Path) -> None:
+def _remove_kept_work_dirs(third_party_dir: Path, final: Path, staged: Path) -> bool:
     """Delete the work directories an earlier publish of ``final.name`` kept.
 
     Called once a publish of the tool has put its new entry at ``final``, which
@@ -1271,14 +1271,17 @@ def _remove_kept_work_dirs(third_party_dir: Path, final: Path, staged: Path) -> 
     the entry this call placed aside and failed to put it back; the directory it
     kept then holds the only copy, and deleting it would leave the name empty with
     the install reported as done.
+
+    Returns False when nothing stood at ``final`` and so no directory was looked at,
+    True otherwise.
     """
     if not (_present(final, unknown=False) or _same_files(staged, final)):
-        return
+        return False
     tool = final.name
     try:
         candidates = sorted(third_party_dir.iterdir())
     except OSError:
-        return
+        return True
     for path in candidates:
         if not path.name.startswith(_PUBLISH_WORK_PREFIX):
             continue
@@ -1288,6 +1291,7 @@ def _remove_kept_work_dirs(third_party_dir: Path, final: Path, staged: Path) -> 
             continue
         if marked.strip() == tool:
             shutil.rmtree(path, ignore_errors=True)
+    return True
 
 
 def _same_files(first: Path, second: Path) -> bool:
@@ -1415,7 +1419,12 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
             )
         else:
             shutil.rmtree(work, ignore_errors=True)
-    _remove_kept_work_dirs(third_party_dir, final, staged)
+    if not _remove_kept_work_dirs(third_party_dir, final, staged):
+        print(
+            f"no license entry stands at {final} now, so a directory kept for the "
+            f"previous {final.name} entry stays in place; install {final.name} again",
+            file=sys.stderr,
+        )
     print(f"Installed {staged.name} license files to {final}", flush=True)
     return final
 
