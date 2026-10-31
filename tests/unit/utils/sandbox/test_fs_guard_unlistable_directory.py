@@ -694,12 +694,14 @@ def test_refuse_links_below_hides_an_env_read_value(tmp_path, caplog):
 
 @needs_unprivileged
 def test_refuse_links_below_logs_nothing_when_given_no_values(tmp_path, caplog):
-    """The scanner executor calls the pre-check with the results directory alone,
-    before any sandbox scope is active, so nothing could redact a warning there: a
-    directory named after an option value would be logged as it is. With no values
-    and no word that they could not be read, the refusal is raised and not logged,
-    and the caller's handler redacts the raise as it redacts any error of the scan.
-    Passing the values (even none) or ``values_unread`` still logs, as above."""
+    """A caller that passes no values has given nothing to redact with, and no
+    sandbox scope is active before a scan starts: a directory named after an option
+    value would be logged as it is. With no values and no word that they could not
+    be read, the refusal is raised and not logged, and the caller's handler redacts
+    the raise as it redacts any error of the scan. Passing the values (even none)
+    or ``values_unread`` still logs, as above. The scanner executor is not this
+    caller: it passes the sandbox's values, as the test of the executor's pre-check
+    shows (test_fs_guard_a_refused_pre_check_is_redacted_from_the_executor.py)."""
     value = "PRECHECKSECRET-9923"
     root = tmp_path / "results"
     locked = root / f"dir-{value}"
