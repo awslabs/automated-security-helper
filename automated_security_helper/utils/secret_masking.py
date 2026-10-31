@@ -2767,7 +2767,8 @@ def _xml_attribute(value: str) -> str:
 #: How a value is written into the text formats reports use: as is, inside a JSON
 #: string, HTML or XML text and attributes, doubled quotes (CSV, YAML), a
 #: backslash-escaped single quote (shell and script strings), percent-encoded
-#: (URLs, with a space as ``%20`` or ``+``), inside a YAML double-quoted scalar,
+#: (URLs, with a space as ``%20`` or ``+``, and as a pydantic URL writes its
+#: userinfo), inside a YAML double-quoted scalar,
 #: as the reports show it, and as the JUnit report's XML attributes carry it.
 _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: value,
@@ -2784,6 +2785,11 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: value.replace("\\", "\\\\").replace("'", "\\'"),
     lambda value: quote(value, safe=""),
     lambda value: quote_plus(value, safe=""),
+    # A URL's userinfo as pydantic writes it (the WHATWG spelling): ``@ : / ; = [
+    # \ ] ^ |`` percent-encoded, ``! $ & ' ( ) * + ,`` and ``%`` left as they are.
+    # A credential written into a URL as is (``https://user:pa@ss!1@host``) is
+    # in ``str(url)`` in this spelling, which neither form above matches.
+    lambda value: quote(value, safe="!$&'()*+,%"),
     # The Markdown reporter: HTML-escaped, then every Markdown character
     # backslash-escaped (markdown_reporter._text).
     lambda value: _MARKDOWN_CHARACTER.sub(r"\\\1", html.escape(value, quote=False)),

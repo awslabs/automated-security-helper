@@ -174,6 +174,27 @@ class TestAUrlTypedField:
 
         assert VALUE not in uri
 
+    def test_a_value_written_into_the_url_as_is_is_masked_in_pydantics_spelling(self):
+        """A producer that writes the credential into the URL without encoding
+        it: pydantic percent-encodes the ``@`` of the userinfo and leaves the
+        ``!`` as it is, a spelling that neither the plain value nor
+        ``quote(value, safe="")`` matches."""
+        password = (
+            _derived("url-userinfo", 5) + "@!" + _derived("url-userinfo-b", 5) + "9"
+        )
+        url = f"https://user:{password}@example.com/repo"
+        model = _report_with_a_url(url, _bandit(HARDCODED + f"'{password}'"))
+        written = str(model.sarif.runs[0].versionControlProvenance[0].repositoryUri)
+        assert "%40!" in written and password not in written
+
+        mask_secrets_in_results(model)
+
+        uri = str(model.sarif.runs[0].versionControlProvenance[0].repositoryUri)
+        assert quote(password, safe="!$&'()*+,%") not in uri
+        assert quote(password, safe="") not in uri
+        assert password not in uri
+        assert _mask_secret_value(password) in uri
+
     def test_a_url_that_holds_nothing_exposed_is_kept(self):
         """Control."""
         url = "https://example.com/repo"
