@@ -57,8 +57,12 @@ _AUTO_REFERENCE = re.compile(
 
 def _markdown_escaped(text: str) -> str:
     """*text* with ``<``, ``>`` and ``&`` as entities and each Markdown syntax
-    character backslash-escaped."""
-    return re.sub(r"([\\`*_\[\]{}#|~])", r"\\\1", html.escape(text, quote=False))
+    character backslash-escaped.
+
+    ``$`` is one of them: GitHub reads a pair of dollar signs as a formula, so
+    scanner text such as ``cost $5 and $6`` rendered as math without it.
+    """
+    return re.sub(r"([\\`*_\[\]{}#|~$])", r"\\\1", html.escape(text, quote=False))
 
 
 def _text(value) -> str:

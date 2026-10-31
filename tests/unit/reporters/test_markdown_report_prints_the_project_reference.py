@@ -29,7 +29,7 @@ from automated_security_helper.schemas.sarif_schema_model import Result
 pytestmark = pytest.mark.unit
 
 REFERENCE = "${ZZ_PROJECT_REFERENCE}"
-ESCAPED = "$\\{ZZ\\_PROJECT\\_REFERENCE\\}"
+ESCAPED = "\\$\\{ZZ\\_PROJECT\\_REFERENCE\\}"
 
 
 def _model(project_name: str) -> AshAggregatedResults:
@@ -90,6 +90,13 @@ class TestTheReferenceHelper:
         # The control: only pieces that touch share a span.
         assert _reference_text("${A} ${B}") == "`${A}` `${B}`"
         assert "``" not in _reference_text("${A}/${B} ${C}${D}")
+
+    def test_a_dollar_sign_outside_a_reference_is_escaped(self):
+        """GitHub reads a pair of dollar signs as a formula, so any ``$`` that is
+        not part of a written reference gets a backslash, and a reference is
+        still one unescaped code span."""
+        assert _text("cost $5 and $6") == "cost \\$5 and \\$6"
+        assert _reference_text("cost $5 and $6 ${X}") == "cost \\$5 and \\$6 `${X}`"
 
     def test_braces_stay_escaped_for_every_other_line(self):
         # The control: only the project line is a reference.
