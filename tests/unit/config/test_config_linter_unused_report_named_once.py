@@ -138,3 +138,109 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
     assert result.exception is None or isinstance(result.exception, SystemExit)
     assert seen["age"] is merged
     assert seen["fix"] is merged
+
+
+def test_lint_records_the_report_it_read(tmp_path):
+    """Red at the base: the result had no such field, so nothing downstream
+    could take the file lint listed the entries from."""
+    config, reports = _layout(tmp_path)
+    report = reports / "ash.unused-suppressions.json"
+    report.write_text(REPORT, encoding="utf-8")
+
+    result = ConfigLinter.lint(
+        config, output_dir=tmp_path / ".ash" / "ash_output", check_unused=True
+    )
+
+    assert result.unused_report_path == report
+
+
+def test_lint_without_a_report_records_none(tmp_path):
+    """The positive control: no report, so there is no file to hand on."""
+    config, _reports = _layout(tmp_path)
+
+    result = ConfigLinter.lint(
+        config, output_dir=tmp_path / ".ash" / "ash_output", check_unused=True
+    )
+
+    assert result.unused_report_path is None
+
+
+def test_the_age_read_and_the_fixer_take_the_file_lint_read(tmp_path):
+    """Red at the base: neither took a report path, and a lookup by name found
+    nothing here (the report is not at the default place or under that name)."""
+    config, _reports = _layout(tmp_path)
+    elsewhere = tmp_path / "elsewhere" / "listed.json"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(REPORT, encoding="utf-8")
+
+    found = ConfigLinter.get_unused_report_age(config, report_path=elsewhere)
+    fixed, issues, stamp = ConfigLinter.fix_unused_suppressions(
+        config, report_path=elsewhere
+    )
+
+    assert found is not None
+    assert found[0] == elsewhere
+    assert len(issues) == 1
+    assert stamp is not None
+    assert "# - path: src/a.py" in fixed
+
+
+def test_a_given_report_that_is_gone_is_not_replaced_by_a_lookup(tmp_path):
+    """The report at the default place is not read in place of the one lint
+    named when that one has since gone: the entries are lint's, from its file."""
+    config, reports = _layout(tmp_path)
+    (reports / "ash.unused-suppressions.json").write_text(REPORT, encoding="utf-8")
+    gone = tmp_path / "elsewhere" / "listed.json"
+
+    assert ConfigLinter.get_unused_report_age(config, report_path=gone) is None
+    _fixed, issues, stamp = ConfigLinter.fix_unused_suppressions(
+        config, report_path=gone
+    )
+    assert issues == []
+    assert stamp is None
+    # The control: without a path the lookup by name finds the report.
+    assert ConfigLinter.get_unused_report_age(config) is not None
+
+
+def test_the_command_hands_the_report_lint_read_to_the_age_read_and_the_fixer(
+    tmp_path, monkeypatch
+):
+    """Red at the base: the result carried no report path (constructing it with
+    one raised), and the command named the report again for each call."""
+    config = tmp_path / ".ashrc.yaml"
+    config.write_text("project_name: demo\n", encoding="utf-8")
+    listed = tmp_path / "listed.json"
+    issue = LintIssue(
+        severity=LintSeverity.INFO,
+        category=LintCategory.SUPPRESSION_UNUSED,
+        message="Unused suppression: path='src/a.py', rule_id='B101'",
+    )
+    monkeypatch.setattr(
+        ConfigLinter,
+        "lint",
+        staticmethod(
+            lambda **_: LintResult(
+                issues=[issue], config_path=config, unused_report_path=listed
+            )
+        ),
+    )
+    seen = {}
+
+    def age(config_path, output_dir=None, report_config=None, report_path=None):
+        seen["age"] = report_path
+        return (listed, datetime.now(), 0.0)
+
+    def fix(config_path, output_dir=None, report_config=None, report_path=None):
+        seen["fix"] = report_path
+        return None, [], None
+
+    monkeypatch.setattr(ConfigLinter, "get_unused_report_age", staticmethod(age))
+    monkeypatch.setattr(ConfigLinter, "fix_unused_suppressions", staticmethod(fix))
+
+    result = CliRunner().invoke(
+        config_app, ["lint", "--config", str(config), "--fix-unused", "-y"]
+    )
+
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert seen["age"] == listed
+    assert seen["fix"] == listed

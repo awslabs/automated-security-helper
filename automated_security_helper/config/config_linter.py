@@ -227,6 +227,12 @@ class LintResult:
     # that un-marked the issues, so the CLI does not open and parse the file a
     # second time to give the reason.
     fix_refused_for_environment: bool = False
+    # The unused suppressions report the lint found (``check_unused``), or None
+    # when it found none or did not look. The age read and ``--fix-unused`` take
+    # this file and do not name a report a second time: they resolved the chain
+    # again without the scanned tree (``--source-dir``), which can name another
+    # report than the one lint listed the entries from.
+    unused_report_path: Optional[Path] = None
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: ``<value>`` when
@@ -645,6 +651,7 @@ class ConfigLinter:
         config_path: Path,
         output_dir: Optional[Path] = None,
         report_config: Any = None,
+        report_path: Optional[Path] = None,
     ) -> Tuple[Optional[str], List[LintIssue], Optional[datetime]]:
         """Comment out unused suppressions in the config based on the unused suppressions report.
 
@@ -669,6 +676,9 @@ class ConfigLinter:
                 reads the report lint named; without it the chain is resolved
                 here, which can name another report when lint resolved it with
                 a scanned tree (``--source-dir``) this call does not know.
+            report_path: The report file lint read (``LintResult.unused_report_path``).
+                Passed, that file is the report and none is looked for, so the
+                entries commented out are the ones lint listed from it.
 
         Returns:
             Tuple of (fixed_content, list_of_commented_suppressions, report_timestamp)
@@ -705,8 +715,8 @@ class ConfigLinter:
         # a scan reads the merged configuration, so an extension an `extends`
         # base sets names the report it writes, and the fixer, which named it
         # from this file's own data, found no report of that scan.
-        report_path, report_timestamp = cls._find_unused_report(
-            config_path, output_dir, report_config
+        report_path, report_timestamp = cls._unused_report_to_read(
+            config_path, output_dir, report_config, report_path
         )
 
         if report_path is None:
@@ -1369,17 +1379,19 @@ class ConfigLinter:
         config_path: Path,
         output_dir: Optional[Path] = None,
         report_config: Any = None,
+        report_path: Optional[Path] = None,
     ) -> Optional[Tuple[Path, datetime, float]]:
         """Get the age of the unused suppressions report.
 
-        ``report_config`` is the configuration that names the report, as for
+        ``report_config`` is the configuration that names the report, and
+        ``report_path`` the report file lint read; both as for
         ``fix_unused_suppressions``.
 
         Returns:
             Tuple of (report_path, report_timestamp, age_in_seconds) or None if not found
         """
-        report_path, report_timestamp = cls._find_unused_report(
-            config_path, output_dir, report_config
+        report_path, report_timestamp = cls._unused_report_to_read(
+            config_path, output_dir, report_config, report_path
         )
         if report_path is None or report_timestamp is None:
             return None
@@ -2248,6 +2260,7 @@ class ConfigLinter:
         report_path, report_timestamp = cls._find_unused_report(
             config_path, output_dir, named_by
         )
+        result.unused_report_path = report_path
 
         if report_path is None:
             result.issues.append(
@@ -2548,23 +2561,49 @@ class ConfigLinter:
 
         for search_dir in search_dirs:
             report_path = search_dir / report_name
-            # One stat answers both "is there a report" and "when was it
-            # written". ``Path.exists`` before Python 3.14 re-raises every
-            # error but "not found", so a directory the user cannot search
-            # ended the lint in a traceback; an unreadable path has no report
-            # to read, as for ``is_regular_file``. Nor has a name that is a
-            # directory, a FIFO or a device: the reader would be handed it
-            # (a FIFO's open waits for a writer).
-            try:
-                status = report_path.stat()
-            except (OSError, ValueError):
-                continue
-            if not stat.S_ISREG(status.st_mode):
-                continue
-            report_timestamp = datetime.fromtimestamp(status.st_mtime)
-            return report_path, report_timestamp
+            report_timestamp = cls._regular_file_mtime(report_path)
+            if report_timestamp is not None:
+                return report_path, report_timestamp
 
         return None, None
+
+    @staticmethod
+    def _regular_file_mtime(report_path: Path) -> Optional[datetime]:
+        """When the regular file at ``report_path`` was written, else None.
+
+        One stat answers both "is there a report" and "when was it written".
+        ``Path.exists`` before Python 3.14 re-raises every error but "not
+        found", so a directory the user cannot search ended the lint in a
+        traceback; an unreadable path has no report to read, as for
+        ``is_regular_file``. Nor has a name that is a directory, a FIFO or a
+        device: the reader would be handed it (a FIFO's open waits for a
+        writer).
+        """
+        try:
+            status = report_path.stat()
+        except (OSError, ValueError):
+            return None
+        if not stat.S_ISREG(status.st_mode):
+            return None
+        return datetime.fromtimestamp(status.st_mtime)
+
+    @classmethod
+    def _unused_report_to_read(
+        cls,
+        config_path: Path,
+        output_dir: Optional[Path],
+        report_config: Any,
+        report_path: Optional[Path],
+    ) -> Tuple[Optional[Path], Optional[datetime]]:
+        """The report the age read and the fixer take: ``report_path`` when the
+        caller holds the file lint read (``LintResult.unused_report_path``),
+        else the one ``_find_unused_report`` names."""
+        if report_path is None:
+            return cls._find_unused_report(config_path, output_dir, report_config)
+        timestamp = cls._regular_file_mtime(Path(report_path))
+        if timestamp is None:
+            return None, None
+        return Path(report_path), timestamp
 
     @classmethod
     def _check_suppression_symbol(

@@ -2096,6 +2096,7 @@ def lint(
                     lint_result.resolved_data
                     if isinstance(lint_result.resolved_data, dict)
                     else None,
+                    report_path=lint_result.unused_report_path,
                 )
                 or applied
             )
@@ -2227,6 +2228,7 @@ def _apply_unused_fixes(
     non_interactive: bool,
     color: bool,
     report_config: Any = None,
+    report_path: Path | None = None,
 ) -> bool:
     """Comment out unused suppressions in the config file. Returns whether the
     file was written. A list the fixer cannot edit (a repeated key, a flow
@@ -2235,15 +2237,24 @@ def _apply_unused_fixes(
     ``report_config`` is the merged configuration lint named the report from
     (``LintResult.resolved_data``): the age read and the fixer take the report
     from it, so they read the report lint listed, not one a second resolution of
-    the chain (without the scanned tree) names."""
+    the chain (without the scanned tree) names.
+
+    ``report_path`` is the report file lint read (``LintResult.unused_report_path``).
+    The age read and the fixer take that file: a config whose chain does not
+    resolve (an ``extends`` that cannot be read) left ``report_config`` empty, and
+    each of them then named a report by its own resolution, which can be another
+    file than the one lint listed the entries from."""
     from automated_security_helper.config.config_linter import (
         ConfigLinter,
         UnusedSuppressionsNotEditable,
     )
 
+    # Only the file lint read is passed on, and only when there is one.
+    pinned = {} if report_path is None else {"report_path": report_path}
+
     # Check report age first
     report_info = ConfigLinter.get_unused_report_age(
-        config_path, output_dir, report_config
+        config_path, output_dir, report_config, **pinned
     )
 
     if report_info is None:
@@ -2285,7 +2296,7 @@ def _apply_unused_fixes(
         # unchanged when the fixer refuses.
         try:
             return ConfigLinter.fix_unused_suppressions(
-                config_path, output_dir, report_config
+                config_path, output_dir, report_config, **pinned
             )
         except UnusedSuppressionsNotEditable as exc:
             secho(
