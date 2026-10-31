@@ -437,6 +437,42 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                     )
                     text_parts.append("")
 
+            # The list above is the actionable findings. A finding the project's
+            # outcome left out is counted in the summary, so it is named here.
+            left_out = emitter.get_policy_not_gating_findings(
+                self.config.options.max_detailed_findings
+            )
+            if left_out:
+                text_parts.append("NOT GATING (WORKSPACE POLICY)")
+                text_parts.append("-----------------------------")
+                text_parts.append(
+                    f"Showing {len(left_out)} of {summary['policy_not_gating']} "
+                    "findings reported and left out of the outcome because "
+                    "policy_scanners_gate is off."
+                )
+                text_parts.append(
+                    f"{'Severity':<10} {'Scanner':<15} {'Rule ID':<15} {'Title':<30} {'File':<30}"
+                )
+                text_parts.append(
+                    f"{'-' * 10} {'-' * 15} {'-' * 15} {'-' * 30} {'-' * 30}"
+                )
+                for finding in left_out:
+                    # Each field comes from the scan: shown on one line before it
+                    # is cut to its column, as the findings overview does.
+                    severity = str(shown_on_one_line(finding["severity"]))
+                    scanner = str(shown_on_one_line(finding["scanner"]))[:15]
+                    rule_id = str(shown_on_one_line(finding["rule_id"]))[:15]
+                    title = str(shown_on_one_line(finding["title"]))[:30]
+                    file_path = str(shown_on_one_line(finding["file_path"]))[:30]
+                    text_parts.append(
+                        f"{severity:<10} "
+                        f"{scanner:<15} "
+                        f"{rule_id:<15} "
+                        f"{title:<30} "
+                        f"{file_path:<30}"
+                    )
+                text_parts.append("")
+
         # Add footer
         text_parts.append("-" * 80)
         text_parts.append(

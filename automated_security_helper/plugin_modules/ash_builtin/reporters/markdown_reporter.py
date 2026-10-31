@@ -636,6 +636,42 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                         "Configure `max_detailed_findings` to adjust this limit.\n"
                     )
 
+            # The list above is the actionable findings. A finding the project's
+            # outcome left out is counted in the summary, so it is named here.
+            left_out = emitter.get_policy_not_gating_findings(
+                options.max_detailed_findings
+            )
+            if left_out:
+                parts.extend(
+                    [
+                        "## Not gating (workspace policy)\n",
+                        (
+                            f"Showing {len(left_out)} of "
+                            f"{summary['policy_not_gating']} findings reported and "
+                            "left out of the outcome because "
+                            "`policy_scanners_gate` is off.\n"
+                        ),
+                        "| Severity | Scanner | Rule ID | Title | File |",
+                        "| --- | --- | --- | --- | --- |",
+                    ]
+                )
+                for finding in left_out:
+                    parts.append(
+                        "| "
+                        + " | ".join(
+                            _cell(shown_on_one_line(finding[key]))
+                            for key in (
+                                "severity",
+                                "scanner",
+                                "rule_id",
+                                "title",
+                                "file_path",
+                            )
+                        )
+                        + " |"
+                    )
+                parts.append("")
+
         if not options.compact:
             parts.extend(
                 [

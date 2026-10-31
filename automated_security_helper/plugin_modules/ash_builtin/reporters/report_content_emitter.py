@@ -719,6 +719,38 @@ class ReportContentEmitter:
 
         return [self._create_detailed_finding(vuln) for vuln in findings_to_show]
 
+    def get_policy_not_gating_findings(
+        self, max_findings: int = 20
+    ) -> List[Dict[str, Any]]:
+        """The findings reported and left out of their project's outcome.
+
+        The rows of :meth:`get_findings_overview` for the findings
+        :meth:`is_policy_not_gating` names, most severe first, limited to
+        *max_findings*. :meth:`get_detailed_findings` lists the actionable
+        findings only, so without this list a report that counts these findings
+        in its summary names none of them.
+        """
+        left_out = [vuln for vuln in self.flat_vulns if self.is_policy_not_gating(vuln)]
+        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+        left_out.sort(
+            key=lambda vuln: (
+                severity_order.get(str(vuln.severity).upper(), 5),
+                vuln.file_path or "",
+                vuln.line_start or 0,
+                vuln.rule_id or "",
+            )
+        )
+        return [
+            {
+                "severity": vuln.severity or "UNKNOWN",
+                "scanner": vuln.scanner or "Unknown",
+                "rule_id": vuln.rule_id or "N/A",
+                "title": vuln.title or "Unknown Issue",
+                "file_path": vuln.file_path or "N/A",
+            }
+            for vuln in left_out[: max(max_findings, 0)]
+        ]
+
     def _create_detailed_finding(self, vuln: FlatVulnerability) -> Dict[str, Any]:
         """Create a detailed finding dictionary from a vulnerability."""
         # Format location

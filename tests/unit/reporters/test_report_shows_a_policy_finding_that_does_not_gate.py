@@ -42,6 +42,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.report_conte
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
     TextReporter,
+    TextReporterConfig,
+    TextReporterConfigOptions,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
@@ -367,3 +369,96 @@ class TestTheHeadlineDoesNotDenyIt:
         for out in (text, markdown):
             assert "1 workspace-policy finding is reported and left out" in out, out
             assert "workspace-policy findings left out of the outcome" in out, out
+
+
+class TestEveryReportNamesIt:
+    def test_the_scope_menu_offers_the_status_by_the_cards_own_value(
+        self, not_gating_model, test_plugin_context
+    ):
+        """RED at the base: the scope menu held actionable, all active,
+        suppressed and all, so no scope showed only these findings. The option's
+        value is the card's data-status, which the script's filter already
+        matches against the chosen scope."""
+        document = HtmlReporter(context=test_plugin_context).report(not_gating_model)
+
+        (menu,) = re.findall(
+            r'<select id="finding-scope">(.*?)</select>', document, re.DOTALL
+        )
+        assert '<option value="policy-not-gating">Not gating</option>' in menu, menu
+        assert _card_statuses(document)["POLICY-CRIT"] == "policy-not-gating"
+
+    def test_the_markdown_report_lists_it_apart_from_the_actionable_findings(
+        self, not_gating_model, test_plugin_context
+    ):
+        """RED at the base: the detailed list holds the actionable findings only,
+        so the report counted the finding and named none of it."""
+        out = MarkdownReporter(context=test_plugin_context).report(not_gating_model)
+
+        heading = "## Not gating (workspace policy)"
+        assert heading in out, out
+        # Up to the next heading: the findings the sections after it name are
+        # not this section's.
+        section = out.split(heading, 1)[1].split("\n## ", 1)[0]
+        assert "Showing 1 of 1 findings reported and left out of the outcome" in section
+        assert "POLICY-CRIT" in section, section
+        assert "PLAIN-LOW" not in section, section
+
+    def test_the_markdown_report_has_no_such_section_without_one(
+        self, gating_model, test_plugin_context
+    ):
+        out = MarkdownReporter(context=test_plugin_context).report(gating_model)
+
+        assert "Not gating (workspace policy)" not in out, out
+
+    def test_the_text_report_lists_it_when_it_lists_findings(
+        self, not_gating_model, test_plugin_context
+    ):
+        reporter = TextReporter(
+            context=test_plugin_context,
+            config=TextReporterConfig(
+                options=TextReporterConfigOptions(include_detailed_findings=True)
+            ),
+        )
+
+        out = reporter.report(not_gating_model)
+
+        heading = "NOT GATING (WORKSPACE POLICY)"
+        assert heading in out, out
+        section = out.split(heading, 1)[1]
+        assert "Showing 1 of 1 findings reported and left out of the outcome" in section
+        assert "POLICY-CRIT" in section, section
+        assert "PLAIN-LOW" not in section, section
+
+    def test_the_text_report_is_unchanged_without_one(
+        self, gating_model, test_plugin_context
+    ):
+        reporter = TextReporter(
+            context=test_plugin_context,
+            config=TextReporterConfig(
+                options=TextReporterConfigOptions(include_detailed_findings=True)
+            ),
+        )
+
+        out = reporter.report(gating_model)
+
+        assert "NOT GATING (WORKSPACE POLICY)" not in out, out
+
+    def test_the_list_is_limited_and_ordered_by_severity(self, tmp_path):
+        findings = [
+            _result("POLICY-AAA", "note", origin="workspace-policy"),
+            _result("POLICY-ZZZ", "error", origin="workspace-policy"),
+            _result("POLICY-MMM", "warning", origin="workspace-policy"),
+        ]
+        model = _model(
+            tmp_path,
+            findings,
+            policy_scanners_gate=False,
+            policy_origin_finding_count=3,
+        )
+        emitter = ReportContentEmitter(model, human_presentation=True)
+
+        rows = emitter.get_policy_not_gating_findings(2)
+
+        assert [row["rule_id"] for row in rows] == ["POLICY-ZZZ", "POLICY-MMM"], rows
+        assert emitter.get_policy_not_gating_findings(0) == []
+        assert emitter.get_policy_not_gating_findings(-1) == []
