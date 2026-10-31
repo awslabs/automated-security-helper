@@ -43,8 +43,9 @@ baseline trusted (the operator named it), one the baseline's audit marked
 entry is reported, because a baseline the scanned repository wrote itself (the in-tree
 file the scanner loads by default) may mark a finding but may not remove it. Trusted
 or not, the baseline's copy of a secret the scan found again is left out, since the
-scanned copy reports it once. A baseline with no ``results`` mapping holds no
-entries. OUTPUT is created with mode 0600, as the request file is.
+scanned copy reports it once, and the scanned copy carries the audit marks
+(``is_secret``, ``is_verified``) of the copy that was left out. A baseline with no
+``results`` mapping holds no entries. OUTPUT is created with mode 0600, as the request file is.
 
 A secret found by this scan also carries ``ash_start_column``, the 1-based column its
 value starts at in its line, when the value is found there. detect-secrets reports no
@@ -356,10 +357,62 @@ def _output_of(collection: Any, accepted: _Accepted) -> List[List[Any]]:
         for secret in secrets
         if getattr(secret, "secret_value", None)
     }
+    marks = _marks_of_dropped_copies(collection, found_again, root)
     return [
-        [key, _records_of(key, secrets, accepted, root, found_again)]
+        [key, _records_of(key, secrets, accepted, root, found_again, marks)]
         for key, secrets in collection.data.items()
     ]
+
+
+#: The audit marks a baseline records for a secret: ``is_secret`` (None when it
+#: was never audited) and ``is_verified``, by the relative key, type and hash.
+_Marks = Dict[Tuple[str, str, str], Tuple[Optional[bool], bool]]
+
+
+def _marks_of_dropped_copies(
+    collection: Any, found_again: Set[Tuple[str, str, str]], root: str
+) -> _Marks:
+    """The audit marks of each baseline copy that ``_records_of`` leaves out
+    because the scan found its secret again.
+
+    A copy with no value is the baseline's. Its marks are what the scanned copy
+    would otherwise lose: ``is_secret`` from the first copy that has one, and
+    ``is_verified`` if any copy was verified.
+    """
+    marks: _Marks = {}
+    for key, secrets in collection.data.items():
+        relative = _relative_key(key, root)
+        for secret in secrets:
+            triple = (relative, secret.type, secret.secret_hash)
+            if getattr(secret, "secret_value", None) or triple not in found_again:
+                continue
+            is_secret, is_verified = marks.get(triple, (None, False))
+            if is_secret is None:
+                is_secret = getattr(secret, "is_secret", None)
+            marks[triple] = (
+                is_secret,
+                is_verified or bool(getattr(secret, "is_verified", False)),
+            )
+    return marks
+
+
+def _with_baseline_marks(secret: Any, relative: str, marks: Optional[_Marks]) -> Any:
+    """*secret* carrying the marks of the baseline copy the scan found again.
+
+    The rule of ``SecretsCollection.merge``: ``is_secret`` is taken only when the
+    scanned copy has none, and ``is_verified`` only upward. A baseline copy has no
+    value, so only a scanned secret takes marks.
+    """
+    if not marks or not getattr(secret, "secret_value", None):
+        return secret
+    is_secret, is_verified = marks.get(
+        (relative, secret.type, secret.secret_hash), (None, False)
+    )
+    if getattr(secret, "is_secret", None) is None and is_secret is not None:
+        secret.is_secret = is_secret
+    if is_verified and not getattr(secret, "is_verified", False):
+        secret.is_verified = True
+    return secret
 
 
 def _relative_key(key: str, root: str) -> str:
@@ -375,12 +428,14 @@ def _records_of(
     accepted: _Accepted,
     root: str,
     found_again: Optional[Set[Tuple[str, str, str]]] = None,
+    marks: Optional[_Marks] = None,
 ) -> List[Any]:
     """The OUTPUT records of the secrets keyed by *key*, each with its column.
 
     A secret the baseline accepted as not a secret is left out, and so is a
     baseline copy (no value) of a secret the scan found again (*found_again*:
-    the relative key, type and hash of each scanned secret). The lines read for
+    the relative key, type and hash of each scanned secret); the scanned copy
+    takes that copy's audit marks (*marks*). The lines read for
     the column are cached for this key only: every secret under one key is in
     one file, so a cache shared by every key held every finding file's lines for
     the whole collection, and is released with the key's records.
@@ -388,7 +443,7 @@ def _records_of(
     lines_by_file: Dict[str, Optional[List[str]]] = {}
     relative = _relative_key(key, root)
     return [
-        _with_column(secret, lines_by_file)
+        _with_column(_with_baseline_marks(secret, relative, marks), lines_by_file)
         for secret in secrets
         if not _is_accepted(accepted, key, secret, root)
         and not (

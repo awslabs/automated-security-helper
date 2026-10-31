@@ -111,6 +111,93 @@ def test_a_lone_files_absolute_key_matches_the_baselines_relative_key(tmp_path):
     ]
 
 
+def _marked(filename: str, value, *, is_secret=None, is_verified=False):
+    """A secret whose JSON carries its audit marks as ``PotentialSecret.json()``
+    writes them: ``is_verified`` always, ``is_secret`` only once it was audited."""
+    secret = _secret(filename, value)
+    secret.is_secret = is_secret
+    secret.is_verified = is_verified
+
+    def written():
+        record = {
+            "filename": secret.filename,
+            "line_number": secret.line_number,
+            "type": secret.type,
+            "is_verified": secret.is_verified,
+        }
+        if secret.is_secret is not None:
+            record["is_secret"] = secret.is_secret
+        return record
+
+    secret.json = written
+    return secret
+
+
+def test_the_scanned_copy_carries_the_audit_marks_of_the_baseline_copy(tmp_path):
+    """A caller that hands the worker a baseline: the baseline's copy of a secret
+    found again is left out, and the one record left must still say the baseline
+    audited it as a secret and verified it."""
+    root = str(tmp_path)
+    scanned = _marked(os.path.join(root, "a.txt"), "placeholder-one")
+    from_baseline = _marked("a.txt", None, is_secret=True, is_verified=True)
+    from_baseline.secret_hash = scanned.secret_hash
+    collection = SimpleNamespace(root=root, data={"a.txt": [from_baseline, scanned]})
+
+    output = detect_secrets_worker._output_of(collection, set())
+
+    ((_, records),) = output
+    assert len(records) == 1
+    assert records[0]["filename"] == scanned.filename
+    assert records[0].get("is_secret") is True
+    assert records[0]["is_verified"] is True
+
+
+def test_the_marks_cross_from_a_relative_key_to_a_lone_files_absolute_key(tmp_path):
+    root = str(tmp_path)
+    absolute = os.path.join(root, "a.txt")
+    scanned = _marked(absolute, "placeholder-one")
+    from_baseline = _marked("a.txt", None, is_secret=False)
+    from_baseline.secret_hash = scanned.secret_hash
+    collection = SimpleNamespace(
+        root=root, data={"a.txt": [from_baseline], absolute: [scanned]}
+    )
+
+    output = detect_secrets_worker._output_of(collection, set())
+
+    assert [(key, len(records)) for key, records in output] == [
+        ("a.txt", 0),
+        (absolute, 1),
+    ]
+    assert output[1][1][0].get("is_secret") is False
+
+
+def test_a_mark_the_scanned_copy_already_has_is_not_overwritten(tmp_path):
+    """Control, as ``SecretsCollection.merge`` carries marks: ``is_secret`` only
+    onto a copy that has none, ``is_verified`` only upward, and a baseline entry
+    with no scanned twin keeps its own marks."""
+    root = str(tmp_path)
+    scanned = _marked(
+        os.path.join(root, "a.txt"),
+        "placeholder-one",
+        is_secret=False,
+        is_verified=True,
+    )
+    from_baseline = _marked("a.txt", None, is_secret=True, is_verified=False)
+    from_baseline.secret_hash = scanned.secret_hash
+    alone = _marked("b.txt", None, is_secret=True, is_verified=True)
+    collection = SimpleNamespace(
+        root=root, data={"a.txt": [from_baseline, scanned], "b.txt": [alone]}
+    )
+
+    output = detect_secrets_worker._output_of(collection, set())
+
+    (_, first), (_, second) = output
+    assert len(first) == 1
+    assert first[0].get("is_secret") is False
+    assert first[0]["is_verified"] is True
+    assert second == [alone.json()]
+
+
 def test_a_baseline_without_results_loads_as_an_empty_collection():
     pytest.importorskip("detect_secrets")
     for baseline in ({"version": "1.5.0"}, {"version": "1.5.0", "results": None}, None):
