@@ -5586,16 +5586,16 @@
   is; any other text after `file://` is a path exactly as written, relative or
   absolute, as the AWS CLI reads the prefix, so a `%` in a file's name stays a
   `%`. It used to be parsed as a URI, so `file://params.json` was refused as a
-  remote host and a `#` in a file's name cut the name. A document nested too deeply to parse, a number too large for a
-  whole-number parameter and a file name with a null byte (`file://a%00b`) are
-  usage refusals, not tracebacks. `--help` and
-  `--generate-cli-skeleton` run before the document is read, so a bad document
-  blocks neither. The document's values rank above environment variables, as
-  documented: an environment value the parameter's type refused used to fail the
-  run even when the document set that parameter. The skeleton writes `null` for a
-  parameter that is required or that an environment variable backs, so an
-  unedited skeleton no longer overrides the variable with the default; its
-  `--generate-cli-skeleton` help says so.
+  remote host and a `#` in a file's name cut the name. A document nested too
+  deeply to parse, a number too large for a whole-number parameter and a
+  `file:///` path with a null byte (`%00`) are usage refusals, not tracebacks.
+  `--help` and `--generate-cli-skeleton` run before the document is read, so a
+  bad document blocks neither. The document's values rank above environment
+  variables, as documented: an environment value the parameter's type refused
+  used to fail the run even when the document set that parameter. The skeleton
+  writes `null` for a parameter that is required or that an environment variable
+  backs, so an unedited skeleton no longer overrides the variable with the
+  default; its `--generate-cli-skeleton` help says so.
 
 - **`ash plugin list` lists what a scan with the configuration loads, on or off,
   built as the scan builds it.** It listed every class registered in the process, so
