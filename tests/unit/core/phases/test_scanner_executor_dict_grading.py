@@ -202,6 +202,21 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.severity_counts.medium == 0
         assert row.finding_count == 1
 
+    @pytest.mark.parametrize("name", [" HIGH ", "High\n", "\thigh"])
+    def test_a_severity_name_is_read_without_its_surrounding_whitespace(
+        self, plugin_context, name
+    ):
+        """The keys of a severity_counts dict are stripped before they are matched;
+        the severity of a finding was lowercased but not stripped, so a tool that
+        pads its words counted a high finding as info and the row graded PASSED.
+        Red at the base: info 1, high 0, PASSED."""
+        row = _row(plugin_context, {"findings": [{"severity": name}]})
+
+        assert row.status == ScannerStatus.FAILED
+        assert row.severity_counts.high == 1
+        assert row.severity_counts.info == 0
+        assert row.finding_count == 1
+
     def test_a_finding_that_is_not_a_mapping_is_read_as_medium(self, plugin_context):
         row = _row(plugin_context, {"findings": [7, {"severity": "high"}]})
 

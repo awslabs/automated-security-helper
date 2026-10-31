@@ -1960,6 +1960,11 @@ class ScannerExecutor:
                                         )
                                         if not isinstance(severity, str):
                                             severity = "medium"
+                                        # Stripped, as the keys of a severity_counts
+                                        # dict are: increment lowercases the name
+                                        # but not its spaces, so " HIGH " counted
+                                        # as info and graded PASSED.
+                                        severity = severity.strip()
                                         try:
                                             counted.increment(severity)
                                         except ValueError:
