@@ -188,12 +188,9 @@ class TestResultMessageText:
         assert result_message_text(short) == "Found {3} and x"
         # A number with more digits than a list could hold, and a word, are not
         # placeholders this function fills.
-        odd = _result(
-            message=Message(
-                root=Message1(text="{12345678901234567890} {name}", arguments=["x"])
-            )
-        )
-        assert result_message_text(odd) == "{12345678901234567890} {name}"
+        text = "{" + "9" * 20 + "} {name}"
+        odd = _result(message=Message(root=Message1(text=text, arguments=["x"])))
+        assert result_message_text(odd) == text
 
     def test_a_message_with_no_arguments_is_returned_as_written(self):
         """The control: braces in a scanner's own text are not touched when the
