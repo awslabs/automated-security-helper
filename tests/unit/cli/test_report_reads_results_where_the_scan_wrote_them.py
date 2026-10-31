@@ -3,9 +3,11 @@
 
 """`ash report` writes where the scan wrote, names the file it refuses, and keeps going.
 
-The reporters' companion files and the link checks follow the results that
-were found, not --output-dir as given; a deleted working directory and a
-path the user cannot search are refusals, not tracebacks; the config file is
+The results are looked for where the scan wrote them (where the reporters'
+companion files go is pinned in
+test_report_output_dir_is_the_directory_the_results_came_from.py); a deleted
+working directory and a path the user cannot search are refusals, not
+tracebacks; the config file is
 read once; the OSError and parse refusals name a file, never "None"; the
 ASH_CONFIG file is held with the --config file; a reporter is found by the
 name it declares and one that cannot be built is a failed run, not a
@@ -384,27 +386,6 @@ def test_a_config_with_a_null_byte_in_the_document_is_refused_as_not_found(tmp_p
     assert "Configuration file not found" in result.output, result.output
     assert "Traceback" not in result.output, result.output
     assert "ValueError" not in result.output, result.output
-
-
-def test_companion_files_follow_the_results_that_were_found(tmp_path, monkeypatch):
-    """--output-dir named the project; the results were found under its
-    .ash/ash_output, and the reporters wrote into <project>/reports."""
-    project = tmp_path / "project"
-    results = _write_results(project / ".ash" / "ash_output")
-    seen: list = []
-    real = report_module.PluginContext
-
-    def recording(**kwargs):
-        seen.append(kwargs["output_dir"])
-        return real(**kwargs)
-
-    monkeypatch.setattr(report_module, "PluginContext", recording)
-
-    result = _report("--format", "text", "--output-dir", str(project))
-
-    assert result.exit_code == 0, result.output
-    assert seen == [results.parent], seen
-    assert not (project / "reports").exists()
 
 
 def test_a_reporter_that_cannot_be_built_is_a_failed_run_not_a_mistyped_format(
