@@ -193,8 +193,9 @@ WORDLIST_FILTER = "detect_secrets.filters.wordlist.should_exclude_secret"
 WORDLIST_DEFAULT_MIN_LENGTH = 3
 
 #: The type detect-secrets reports for a run of hex digits with high entropy, which
-#: is how it reads the ``hashed_secret`` values a baseline lists
-#: (``DetectSecretsScanner._baseline_hash_echoes``).
+#: is one of the ways it reads the ``hashed_secret`` values a baseline lists
+#: (``DetectSecretsScanner._baseline_hash_echoes``; the keyword detector reads
+#: them as well, as "Secret Keyword", so the echo drop does not look at the type).
 HEX_HIGH_ENTROPY_TYPE = "Hex High Entropy String"
 
 
@@ -2336,10 +2337,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """The hashes of the ``hashed_secret`` values a baseline lists.
 
         detect-secrets' hex entropy detector reads each ``hashed_secret`` in a
-        baseline as a high-entropy string, and a finding is keyed by the hash of
+        baseline as a high-entropy string, and its keyword detector reads it as
+        the value of a key named for a secret. A finding is keyed by the hash of
         the string it found, so the finding on such a value has the hash of that
-        value. A baseline scanned as an ordinary file reports one such finding
-        per entry; those, and only those, are dropped
+        value, whichever detector made it. A baseline scanned as an ordinary
+        file reports such findings for every entry; those, and only those (a
+        finding on a value the baseline does not list stays), are dropped
         (``scan``). A value that is not 40 hexadecimal digits is not a hash
         detect-secrets wrote, so its finding stays.
         """
@@ -2625,7 +2628,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # name, under a key the shape check admits
             # (``{"results": {}, "notes": "<live key>"}``). The detectors'
             # reading of the hashes it lists is dropped from the findings
-            # instead (_baseline_hash_echoes), and nothing else on the file.
+            # instead (_baseline_hash_echoes) whichever detector made them,
+            # and nothing else on the file.
             # Only a baseline the scan has (the parsed document): a chosen
             # file that turned out malformed is not in use
             # (_process_config_options fell back to the default settings), so
@@ -2938,10 +2942,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     if (
                         baseline_echoes
                         and uri in baseline_names
-                        and finding.type == HEX_HIGH_ENTROPY_TYPE
                         and finding.secret_hash in baseline_echoes
                     ):
-                        # The detectors reading a hash the baseline lists.
+                        # A detector reading a hash the baseline lists. Whatever
+                        # its type: the hex detectors read the value on its own,
+                        # and the keyword detector reads it as the value of the
+                        # ``hashed_secret`` key. The hash of the found value is
+                        # already one the baseline lists.
                         continue
                     key = (uri, finding.secret_hash, finding.type)
                     is_known = key in known
