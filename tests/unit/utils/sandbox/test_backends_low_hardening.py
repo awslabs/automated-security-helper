@@ -334,6 +334,78 @@ def test_only_the_caches_on_a_refusing_filesystem_get_a_private_directory(
         plan.run_cleanup()
 
 
+def test_a_cache_inside_an_overlaid_one_that_is_read_only_gets_a_private_directory(
+    layout, monkeypatch
+):
+    """A mount of another filesystem inside an overlaid cache is bound read-only on
+    top of the overlay, so a variable naming a path in it is redirected although
+    the path is also under the overlaid cache. A variable naming a path that only
+    the overlaid cache covers keeps its value (the control).
+    """
+    taking = layout.tmp / "cache"
+    refusing = taking / "uv"
+    refusing.mkdir(parents=True)
+    (taking / "other").mkdir()
+    backend = _bwrap(overlay=True)
+    monkeypatch.setattr(backend, "_overlay_over", lambda real: real != _real(refusing))
+    policy = _policy(
+        layout,
+        cache=(taking, refusing),
+        cache_env=("UV_CACHE_DIR", "OTHER_CACHE_DIR"),
+        env_names=("OTHER_CACHE_DIR",),
+    )
+    env = {
+        "UV_CACHE_DIR": str(refusing / "wheels"),
+        "OTHER_CACHE_DIR": str(taking / "other"),
+    }
+
+    plan = backend.plan(["/bin/true"], env, policy)
+    try:
+        assert _real(taking) in _mounts(plan.argv, "--overlay-src")
+        assert _real(refusing) in _mounts(plan.argv, "--ro-bind")
+        assert plan.env["OTHER_CACHE_DIR"] == str(taking / "other")
+        private = Path(plan.env["UV_CACHE_DIR"])
+        assert private.is_dir()
+        assert _real(layout.results) in _real(private).parents
+        assert len(plan.private_dirs) == 1
+    finally:
+        plan.run_cleanup()
+
+
+def test_the_throwaway_property_is_false_once_a_cache_filesystem_refuses(
+    layout, monkeypatch
+):
+    """The property says every cache plans so far was mounted as an overlay: a plan
+    that mounted one read-only (its filesystem refused) makes it False, and a
+    backend whose caches all took an overlay keeps True."""
+    cache = layout.tmp / "cache"
+    cache.mkdir()
+    monkeypatch.setattr(backends, "_true", lambda: "/fake/true")
+    policy = _policy(layout, cache=(cache,), cache_env=("UV_CACHE_DIR",))
+
+    monkeypatch.setattr(backends, "_probe_run", lambda argv, env=None: None)
+    taking = _bwrap(overlay=True)
+    assert taking.caches_are_throwaway is True
+    plan = taking.plan(["/bin/true"], {}, policy)
+    try:
+        assert taking.caches_are_throwaway is True
+    finally:
+        plan.run_cleanup()
+
+    monkeypatch.setattr(
+        backends,
+        "_probe_run",
+        lambda argv, env=None: "exit 1: refused" if "--overlay-src" in argv else None,
+    )
+    refusing = _bwrap(overlay=True)
+    assert refusing.caches_are_throwaway is True
+    plan = refusing.plan(["/bin/true"], {}, policy)
+    try:
+        assert refusing.caches_are_throwaway is False
+    finally:
+        plan.run_cleanup()
+
+
 @pytest.mark.parametrize(
     "raised",
     [OSError(2, "bwrap is gone"), subprocess.TimeoutExpired(["bwrap"], 20)],

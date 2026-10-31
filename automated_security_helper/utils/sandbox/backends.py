@@ -79,7 +79,10 @@ def _with_socket_filter(argv: Sequence[str]) -> List[str]:
 
 
 def _private_caches(
-    policy: SandboxPolicy, child_env: Dict[str, str], overlaid: Sequence[Path] = ()
+    policy: SandboxPolicy,
+    child_env: Dict[str, str],
+    overlaid: Sequence[Path] = (),
+    read_only: Sequence[Path] = (),
 ) -> Tuple[List[Callable[[], None]], List[Path]]:
     """Give the tools that must write a cache a private one.
 
@@ -99,8 +102,13 @@ def _private_caches(
     resolved, that got one: a variable whose value in ``child_env`` names a path
     on or under one of them is left alone, since what the tool writes there is the
     overlay's and goes with it, and only the variables for the read-only caches
-    are redirected. A variable with no value in ``child_env`` names a cache this
-    function cannot place, so it is redirected as before.
+    are redirected. ``read_only`` names the caches, resolved, that were mounted
+    read-only in the same plan: one of them can sit inside an overlaid cache (a
+    mount of another filesystem under it), and a value under it is redirected
+    although it is also under the overlaid one, because the deepest cache that
+    covers the value is the mount the tool writes to. A variable with no value in
+    ``child_env`` names a cache this function cannot place, so it is redirected
+    as before.
 
     Returns the cleanup step that removes the directory and, for
     ``SpawnPlan.private_dirs``, the directory itself, so the spawn's sweep of the
@@ -109,7 +117,7 @@ def _private_caches(
     redirected = [
         name
         for name in policy.cache_env
-        if not _names_a_path_under(child_env.get(name), overlaid)
+        if not _on_an_overlaid_cache(child_env.get(name), overlaid, read_only)
     ]
     if not redirected:
         return [], []
@@ -134,13 +142,26 @@ def _private_caches(
     return [lambda: shutil.rmtree(root, ignore_errors=True)], [root]
 
 
-def _names_a_path_under(value: Optional[str], roots: Sequence[Path]) -> bool:
-    """Whether ``value``, a variable's value, names a path at or under one of
-    ``roots`` (resolved paths) once resolved itself; False for no value."""
-    if not value or not roots:
+def _on_an_overlaid_cache(
+    value: Optional[str], overlaid: Sequence[Path], read_only: Sequence[Path]
+) -> bool:
+    """Whether ``value``, a variable's value, names a path whose deepest covering
+    cache is one of ``overlaid`` (resolved paths) once resolved itself.
+
+    A cache is covering when the path is at or under it. ``read_only`` are the
+    caches mounted read-only: one inside an overlaid cache is mounted on top of
+    it, so a path under both is the read-only mount's. False for no value, for no
+    covering cache, and when the deepest covering cache is a read-only one.
+    """
+    if not value or not overlaid:
         return False
     named = _real(Path(value))
-    return any(named == root or root in named.parents for root in roots)
+    covering = [
+        (len(root.parts), root in overlaid)
+        for root in (*overlaid, *read_only)
+        if named == root or root in named.parents
+    ]
+    return bool(covering) and max(covering)[1]
 
 
 @dataclass
@@ -734,10 +755,16 @@ class BwrapBackend(SandboxBackend):
 
     @property
     def caches_are_throwaway(self) -> bool:
-        """Whether the probe found overlays supported; a cache on a filesystem that
-        refuses to be an overlay's lower layer is still mounted read-only
-        (_overlay_over)."""
-        return self._overlay
+        """Whether the probe found overlays supported and no filesystem a cache was
+        found on has refused one.
+
+        A cache on a filesystem that refuses to be an overlay's lower layer is
+        mounted read-only (_overlay_over), so once a plan has met one the answer
+        is False for the backend: a caller that trusts True writes into a cache
+        that is read-only. The answer for one cache is ``_overlay_over``'s.
+        """
+        with self._overlay_lock:
+            return self._overlay and all(self._overlay_devices.values())
 
     def _probe(self) -> Optional[str]:
         found = _sandbox_program("bwrap")
@@ -849,6 +876,9 @@ class BwrapBackend(SandboxBackend):
         # only the variables of the read-only ones when the two kinds meet in one
         # plan (one cache on a filesystem that refuses, the others not).
         overlaid: List[Path] = []
+        # And the ones that did not, which _private_caches needs to tell a value
+        # under a read-only cache that sits inside an overlaid one.
+        read_only_caches: List[Path] = []
         for p in policy.cache:
             real = _real(p)
             if self._overlay and self._overlay_over(real):
@@ -857,6 +887,7 @@ class BwrapBackend(SandboxBackend):
             else:
                 caches_read_only = True
                 add(p, _RO)
+                read_only_caches.append(real)
         for p in policy.writable:
             add(p, _RW)
         # uv's tools-directory lock, which `uv tool run` opens read-write before it
@@ -1012,7 +1043,9 @@ class BwrapBackend(SandboxBackend):
         cleanup: List[Callable[[], None]] = []
         private_dirs: List[Path] = []
         if caches_read_only:
-            cleanup, private_dirs = _private_caches(policy, child_env, overlaid)
+            cleanup, private_dirs = _private_caches(
+                policy, child_env, overlaid, read_only_caches
+            )
         return SpawnPlan(
             argv=cmd, env=child_env, cleanup=cleanup, private_dirs=private_dirs
         )
