@@ -52,6 +52,7 @@ Each test here pins one reading that went wrong before:
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -95,6 +96,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils import content_db_staleness as staleness
+from automated_security_helper.utils import link_exclusions
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 
@@ -429,12 +431,49 @@ def test_under_a_small_budget_the_directory_tokens_survive_the_file_tokens(
     assert tokens == ["--skip-dirs=vendor/"]
 
 
-def test_the_budget_on_windows_fits_the_command_line_limit(monkeypatch):
-    """CreateProcess holds the whole command line to 32,767 characters; a budget
-    near 1 MB kept trivy from starting there."""
+def test_skip_tokens_at_the_windows_budget_keep_the_whole_command_line_in_limit(
+    tmp_path, monkeypatch
+):
+    """CreateProcess holds the whole command line, in UTF-16 units after
+    ``list2cmdline`` has quoted it, to 32,767; a budget near 1 MB kept trivy from
+    starting there. The limit is on the whole line, so the check builds one: the
+    tokens that fit the budget, with the rest of a trivy command around them."""
+    scanner = _repo_scanner(tmp_path)
+    source = Path(scanner.context.source_dir)
+    many = [f"ignored/{index}/{'x' * 200}.txt" for index in range(1_000)]
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(trivy_base, "trivy_skip_files", lambda *a, **k: many)
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: [])
+    messages, logging_patch = _logged(scanner)
 
-    assert 0 < skip_args_budget({}) <= 32_767
+    with logging_patch:
+        tokens = scanner._link_skip_args(source, [])
+
+    command = [
+        "trivy",
+        "repository",
+        "--format",
+        "sarif",
+        "--output",
+        "C:\\Users\\scanner\\output\\" + "o" * 200,
+        *tokens,
+        "C:\\Users\\scanner\\source\\" + "s" * 200,
+    ]
+    line = subprocess.list2cmdline(command)
+    assert 0 < len(tokens) < len(many)
+    assert len(line.encode("utf-16-le")) // 2 <= 32_767
+
+
+def test_no_skip_token_is_built_on_windows_so_its_budget_bounds_nothing_yet(
+    tmp_path, monkeypatch
+):
+    """The budget above is for tokens that are not built there today: the helpers
+    that make them answer nothing when ``os.sep`` is not ``/``. If one starts to,
+    this fails, and the budget test above stops being a spare."""
+    monkeypatch.setattr(link_exclusions.os, "sep", "\\")
+
+    assert link_exclusions.trivy_skip_dirs(tmp_path) == []
+    assert link_exclusions.trivy_skip_files(tmp_path) == []
 
 
 def test_the_budget_elsewhere_reads_the_hosts_arg_max_less_the_environment(

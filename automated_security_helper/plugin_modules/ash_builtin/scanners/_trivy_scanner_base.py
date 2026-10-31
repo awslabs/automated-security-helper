@@ -216,7 +216,10 @@ _GLOB_SPECIAL = frozenset("*?[]{}\\")
 _SKIP_ARGS_BUDGET = 1_000_000
 
 #: The budget on Windows, where CreateProcess holds the whole command line to
-#: 32,767 characters and the rest of the argv needs its share.
+#: 32,767 characters and the rest of the argv needs its share. Nothing reaches it
+#: today: ``trivy_skip_dirs`` and ``trivy_skip_files`` return no values when
+#: ``os.sep`` is not ``/``, so no skip token is built there. It bounds the tokens
+#: should that change.
 _WINDOWS_SKIP_ARGS_BUDGET = 30_000
 
 #: The least the budget is cut to, so a host with a very large environment still
@@ -227,7 +230,9 @@ _SKIP_ARGS_FLOOR = 16_384
 def skip_args_budget(environment: Mapping[str, str]) -> int:
     """How many bytes the skip tokens for the ignored paths may take on this host.
 
-    Windows: ``_WINDOWS_SKIP_ARGS_BUDGET``. Elsewhere half of the host's ARG_MAX
+    Windows: ``_WINDOWS_SKIP_ARGS_BUDGET`` (no skip token is built there today, see
+    its comment, so this branch bounds nothing yet). Elsewhere half of the host's
+    ARG_MAX
     (``os.sysconf``; about 2 MiB on Linux, about 1 MiB on macOS, where it covers
     the arguments, the environment and their pointers together) less the bytes
     ``environment`` takes, floored at ``_SKIP_ARGS_FLOOR`` and never above
