@@ -23,11 +23,13 @@ from pathlib import Path
 # passes that directory: a relative input and the existence check are then resolved
 # against it too, so the answer does not depend on where the caller happens to be
 # running (or on whether it can enter that directory at all).
-def get_shortest_name(input: str | Path, cwd: Path | None = None):  # noqa: A002
+def get_shortest_name(input: str | Path, cwd: str | Path | None = None):  # noqa: A002
     if input == ".":
         # Just return the input, it's already referencing the relative path to CWD
         return input
     in_path = Path(input)
+    # `cwd` is expected to be absolute. A relative one is made absolute against the
+    # calling process's directory, not against the process the name is computed for.
     base = None if cwd is None else Path(cwd).absolute()
     probe = in_path if base is None or in_path.is_absolute() else base / in_path
     if not probe.exists():
