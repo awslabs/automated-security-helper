@@ -665,8 +665,9 @@ def _kill_recorded_groups() -> None:
             # Only while that pid is still a live child of this process: a
             # group id left recorded after its child was reaped (the discard
             # never ran) is a pid another process can hold by now, and the
-            # fallback kill landed on it. One waitpid(WNOHANG) tells the two
-            # apart in one syscall, as the signal frame allows.
+            # fallback kill landed on it. _is_live_child tells the two apart in
+            # one syscall, as the signal frame allows (waitid with WNOWAIT, which
+            # leaves an exited child unreaped for the Popen that owns it).
             if _is_live_child(pgid):
                 try:
                     os.kill(pgid, signal.SIGKILL)

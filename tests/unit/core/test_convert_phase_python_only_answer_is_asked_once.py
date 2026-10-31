@@ -134,9 +134,11 @@ class TestAnInconsistentAnswerIsOneFailureNotThree:
         results = _run(plugin_context, [_InconsistentConverter])
 
         row = results.converter_results["inconsistent-converter"]
-        # Red at the base: the second question answered True, so the filter
-        # admitted the converter whose dependency loop had skipped it, and it
-        # ran with no recorded dependency answer.
+        # Red at the base: the question was asked three times, and the second
+        # answered True, so the filter looked at a converter whose dependency
+        # loop had skipped it and its row read as a missing tool, not as the
+        # check that raised. It did not run: the filter admits a converter
+        # only with a recorded dependency answer of True.
         assert _InconsistentConverter.asked == 1
         assert row.failure and "is_python_only() check raised" in row.failure
         assert "RuntimeError" in row.failure
