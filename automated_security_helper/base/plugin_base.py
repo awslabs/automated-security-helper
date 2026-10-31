@@ -6,6 +6,7 @@ from datetime import datetime
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 from typing import (
     Annotated,
@@ -689,6 +690,12 @@ def _log_identity(path: Path | None) -> Tuple[int, int, int, int] | None:
     return (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns)
 
 
+#: Guards every instance's ``_processed_responses`` list. One module-level lock,
+#: not one per instance: a plugin instance is copied (``model_copy``,
+#: ``deepcopy``) and a lock cannot be. The three methods that use it hold it for
+#: one short list pass, so sharing it costs nothing measurable.
+_PROCESSED_MARKS_LOCK = threading.Lock()
+
 #: The response flags that say the tool did not finish its scan, so whatever
 #: scan() made of the run, the scan is graded ERROR (_record_kept_flag).
 _UNFINISHED_RUN_FLAGS = ("timed_out", "cancelled", "result_rejected", "signaled")
@@ -1322,18 +1329,27 @@ class PluginBase(UVToolMixin, BaseModel):
 
     def _mark_processed(self, response: Any) -> None:
         """Remember that *response* has been folded into exit_code and errors."""
-        if not self._was_processed(response):
-            self._processed_responses.append(response)
+        with _PROCESSED_MARKS_LOCK:
+            if not any(seen is response for seen in self._processed_responses):
+                self._processed_responses.append(response)
 
     def _was_processed(self, response: Any) -> bool:
         """Whether *response* (this object, by identity) is marked processed."""
-        return any(seen is response for seen in self._processed_responses)
+        with _PROCESSED_MARKS_LOCK:
+            return any(seen is response for seen in self._processed_responses)
 
     def _forget_processed(self, response: Any) -> None:
-        """Retire *response*'s mark; the recorders call this, so every path does."""
-        self._processed_responses[:] = [
-            seen for seen in self._processed_responses if seen is not response
-        ]
+        """Retire *response*'s mark; the recorders call this, so every path does.
+
+        The three mark methods share one lock. The retirement rebuilds the list
+        and writes it back, so a mark another thread added between the two
+        steps was dropped, and the response it named was folded into exit_code
+        and errors a second time (its stdout and stderr lines doubled).
+        """
+        with _PROCESSED_MARKS_LOCK:
+            self._processed_responses[:] = [
+                seen for seen in self._processed_responses if seen is not response
+            ]
 
     def _worse_exit_code(self, current: int | None, new: int) -> int:
         """The worse of two runs' exit codes, for the accumulated ``exit_code``.
