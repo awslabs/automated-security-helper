@@ -665,7 +665,13 @@ class TestScanRegistry:
         mock_validate_severity_threshold,
         mock_validate_config_path,
     ):
-        """Test cancelling a scan when there's a permission error."""
+        """A refused signal is recorded on the scan and does not block the cancel.
+
+        Raising here left the entry active with its cancel event never set, so
+        a scan whose recorded process could not be signalled could not be
+        cancelled at all. The cancel event still stops it; the refusal is kept
+        as a warning on the entry.
+        """
         registry = ScanRegistry()
 
         # Register a scan
@@ -681,10 +687,12 @@ class TestScanRegistry:
         mock_kill.side_effect = PermissionError()
 
         # Cancel the scan
-        with pytest.raises(MCPResourceError) as excinfo:
-            registry.cancel_scan(scan_id)
+        assert registry.cancel_scan(scan_id) is True
 
-        assert "Permission denied" in str(excinfo.value)
+        entry = registry._registry[scan_id]
+        assert entry.status == MCScanStatus.CANCELLED
+        assert entry.cancel_event.is_set()
+        assert any("Permission denied" in warning for warning in entry.warnings)
 
     def test_cleanup_scan(
         self,
