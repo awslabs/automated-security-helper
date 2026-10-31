@@ -303,9 +303,10 @@ def _scan_identity(model: Any) -> str:
     """The configured name of the scanned project: the report metadata's, else
     the configuration's, else "". Every read is guarded, and a read that raises
     (a property of the model that fails, not only a missing attribute) counts
-    as no name there: the call is evaluated as an argument, ahead of the guard
-    of the call it feeds, so a raise here dropped every finding. A model this
-    cannot read still gets a shortfall record, one shared by every such scan.
+    as no name there and is logged at debug level: the call is evaluated as an
+    argument, ahead of the guard of the call it feeds, so a raise here dropped
+    every finding. A model this cannot read still gets a shortfall record, one
+    shared by every such scan.
 
     The name is all the report model records of what was scanned (it holds no
     source directory or repository address), and its default is the same for
@@ -314,7 +315,11 @@ def _scan_identity(model: Any) -> str:
         try:
             holder = getattr(model, holder_name, None)
             name = getattr(holder, "project_name", None)
-        except Exception:  # noqa: BLE001 -- see the docstring
+        except Exception as e:  # noqa: BLE001 -- see the docstring
+            ASH_LOGGER.debug(
+                f"Could not read the project name from the model's {holder_name}: "
+                f"{error_text(e)}"
+            )
             continue
         if isinstance(name, str) and name.strip():
             return name.strip()

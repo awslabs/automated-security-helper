@@ -16,6 +16,7 @@ real read from a typo in the reporter.
 """
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -798,6 +799,24 @@ class TestReportDegradation:
                 raise RuntimeError("metadata unreadable")
 
         assert ocsf_module._scan_identity(Model()) == "configured"
+
+    def test_a_holder_that_cannot_be_read_leaves_a_trace_in_the_log(self, monkeypatch):
+        """The read that raised was skipped with no line at all, so a project
+        name that came out blank, or as the configuration's, left nothing to
+        explain why. The skip is logged at debug level with the holder's name
+        and the error."""
+        logger = MagicMock()
+        monkeypatch.setattr(ocsf_module, "ASH_LOGGER", logger)
+
+        class Model:
+            @property
+            def metadata(self):
+                raise RuntimeError("metadata unreadable")
+
+        assert ocsf_module._scan_identity(Model()) == ""
+
+        logged = [call.args[0] for call in logger.debug.call_args_list]
+        assert any("metadata" in line and "unreadable" in line for line in logged)
 
     def test_when_every_finding_fails_to_serialize_an_error_response_is_returned(
         self, reporter, monkeypatch
