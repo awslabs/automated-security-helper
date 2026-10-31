@@ -8000,11 +8000,11 @@
 - **The GitLab SAST report's `scan.status` reads `failure` whenever the scan was
   incomplete, and `scan.messages` says why.** The status used to read `success`
   unless a scanner had failed outright, so a scan that lost a converter, could
-  not evaluate a rule, ran against a content database past its age bound or
-  skipped a workspace project was uploaded as a complete, successful scan. The
-  status now follows the same incompleteness facts the exit code reads, and each
-  fact adds one `warn` message naming the scanner, converter, rule, database or
-  project and what is absent from the report because of it. Two findings of one
+  not evaluate a rule or ran against a content database past its age bound was
+  uploaded as a complete, successful scan. The status now follows the same
+  incompleteness facts the exit code reads, and each fact adds one `warn`
+  message naming the scanner, converter, rule or database and what is absent
+  from the report because of it. Two findings of one
   rule at one line that the flattening could not pair, which shared one `id` and
   one ASH finding-id identifier so GitLab kept one of them, now carry distinct
   ids: the first keeps the id it always had, the second is numbered.
