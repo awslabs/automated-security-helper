@@ -2092,7 +2092,10 @@ def test_every_refusal_that_shows_a_value_escapes_its_hidden_characters(tmp_path
 #: ``$envConfigHeld`` is one of four phrases the helper picks for the character a
 #: --mount cannot take in the ASH_CONFIG path. Both are allowed by the extent the walk
 #: reaches on its way up from the variable, so ``$id`` on its own stays unlisted: the
-#: value, ``$id[1]``, goes through Format-AshShownValue.
+#: value, ``$id[1]``, goes through Format-AshShownValue. ``$outputHint`` is empty or
+#: one fixed sentence the helper picks, naming -OutputDir as the way to write
+#: elsewhere after a refusal of the default output directory: text the helper chose,
+#: so Format-AshShownValue, which is for caller values, would only alter it.
 _INTERPOLATED_AS_IS = {
     "$createReason",
     "$writeReason",
@@ -2116,6 +2119,7 @@ _INTERPOLATED_AS_IS = {
     "$envConfigHeld",  # a newline, a carriage return, a comma or a double quote
     "$runnerRefusal",  # the OCI_RUNNER refusal, built from $tried
     "$mountRefusal",  # the --mount refusal, built from shown paths and a held phrase
+    "$outputHint",  # '' or the fixed hint naming -OutputDir, chosen by the helper
 }
 
 
