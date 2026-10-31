@@ -580,7 +580,9 @@ def test_a_member_under_a_file_member_is_refused_alone(
     The extractor failed on it, and the whole archive was recorded as a failed
     input, ``x.js`` and ``ok.js`` lost with it, so two members were enough to keep
     an archive's content from being scanned. The member is refused alone now,
-    naming the file its path runs through, and the rest is extracted."""
+    with a reason saying its path runs through a file (the log line names which
+    file, so the reason stays one string per kind for the listing cap), and the
+    rest is extracted."""
     maker = _zip if kind == "zip" else _tar
     archive = maker(
         Path(test_plugin_context.source_dir) / f"a.{kind}",
@@ -593,7 +595,7 @@ def test_a_member_under_a_file_member_is_refused_alone(
     assert converter.failed_inputs == []
     (refused,) = converter.refused_inputs
     assert (refused.path, refused.member) == (f"a.{kind}", "x.js/y.js")
-    assert "'x.js'" in refused.reason, refused.reason
+    assert "runs through a path" in refused.reason, refused.reason
     assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
 
 
