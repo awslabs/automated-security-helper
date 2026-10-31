@@ -191,7 +191,7 @@ def _operator_document(tmp_path: Path) -> Path:
     return tmp_path / "operator" / "ash.yaml"
 
 
-def _strip(config, delivered: dict, operator: dict | None, tmp_path: Path):
+def _strip(config, delivered: dict, operator: dict | None, tmp_path: Path, base=None):
     documents = {
         _operator_document(tmp_path): operator or {},
         tmp_path / "c.yaml": delivered,
@@ -199,7 +199,7 @@ def _strip(config, delivered: dict, operator: dict | None, tmp_path: Path):
     return strip_client_scanner_exclusions(
         config,
         documents,
-        AshConfig(),
+        AshConfig() if base is None else base,
         source_dir=tmp_path,
         scanned_root=tmp_path,
         is_delivered=lambda path: Path(path) == tmp_path / "c.yaml",
@@ -391,6 +391,55 @@ def test_an_override_repeating_an_expired_operator_path_is_blamed_on_the_client(
         "'legacy'" in warning and "operator's own config" in warning
         for warning in same_day._resolution_warnings
     ), same_day._resolution_warnings
+
+
+def test_an_operator_file_respelling_a_trusted_expired_path_is_not_blamed_on_the_client(
+    tmp_path,
+):
+    """The trusted config keeps a path it holds, so an operator chain file that
+    writes the same path with another day does not replace the expired entry,
+    while the merged option holds the file's entry. Its day differs from the
+    kept entry's, which the day comparison took for a client's override, and the
+    warning said a config an MCP client delivered had expired. The day belongs
+    to the operator file that wrote it, so the operator is named; an entry
+    with a day no operator file wrote stays the client's."""
+    base = AshConfig()
+    base.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="legacy", reason="op", expiration="2000-01-01"),
+    ]
+    operator = _operator_bandit(
+        {"path": "legacy", "reason": "op2", "expiration": "2099-01-01"}
+    )
+    merged = AshConfig()
+    merged.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="legacy", reason="op2", expiration="2099-01-01"),
+    ]
+
+    _strip(merged, {}, operator, tmp_path, base=base)
+
+    warnings = merged._resolution_warnings
+    assert _bandit_paths(merged) == []
+    assert merged._client_scanner_exclusions == []
+    assert any(
+        "'legacy'" in warning and "operator's own config" in warning
+        for warning in warnings
+    ), warnings
+    assert not any("MCP client delivered" in warning for warning in warnings), warnings
+
+    # The control: an override with a day neither the trusted config nor the
+    # operator file holds is still the client's.
+    override = AshConfig()
+    override.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="legacy", reason="client", expiration="2088-01-01"),
+    ]
+
+    _strip(override, {}, operator, tmp_path, base=base)
+
+    assert _bandit_paths(override) == []
+    assert any(
+        "'legacy'" in warning and "MCP client delivered" in warning
+        for warning in override._resolution_warnings
+    ), override._resolution_warnings
 
 
 @pytest.mark.parametrize(

@@ -1260,6 +1260,17 @@ def strip_client_scanner_exclusions(
             spec,
             [section_key for section_key in spellings if section_key != read_key],
         )
+        # The expiration days the operator files wrote for each pattern under
+        # the spelling the scanner reads. The merged option holds the chain's
+        # last entry for a pattern, which can be an operator file's with
+        # another day than the entry that kept the pattern first (the trusted
+        # config's), so a day that differs from the kept entry's does not by
+        # itself say the client wrote it.
+        operator_days = _expiration_days_written(
+            operator_documents,
+            spec,
+            [] if read_key is None else [read_key],
+        )
         for key, section in sections:
             options = _options_of(section)
             if options is None:
@@ -1335,15 +1346,26 @@ def strip_client_scanner_exclusions(
                     operator_entry = operator_entries[pattern]
                     operator_expiration = _entry_fields(operator_entry)[2]
                     if _entry_expired(operator_expiration):
-                        # The client's, when a delivered file wrote it or the
-                        # option holds the path with terms other than the
-                        # operator's (an override, which no file carries): an
-                        # operator entry nobody else touched is dropped all the
-                        # same (the scanner would not apply it) but not blamed
-                        # on the client.
-                        if pattern in client_patterns or _expiration_day(
-                            expiration
-                        ) != _expiration_day(operator_expiration):
+                        # The client's, when a delivered file wrote it. An entry
+                        # with a day an operator file wrote for the path is that
+                        # file's, though the chain's last file may spell the
+                        # path with another day than the entry that expired.
+                        # Otherwise the day decides: an option that holds the
+                        # path with terms other than the operator's is an
+                        # override, which no file carries. An operator entry
+                        # nobody else touched is dropped all the same (the
+                        # scanner would not apply it) but not blamed on the
+                        # client.
+                        held_day = _expiration_day(expiration)
+                        if pattern in client_patterns:
+                            blames_the_client = True
+                        elif held_day in operator_days.get(pattern, ()):
+                            blames_the_client = False
+                        else:
+                            blames_the_client = held_day != _expiration_day(
+                                operator_expiration
+                            )
+                        if blames_the_client:
                             expired.append(pattern)
                         else:
                             expired_by_operator.append(pattern)
@@ -1453,6 +1475,31 @@ def _patterns_written(
         for spelling in spellings:
             for value in _document_values(document, spec, spelling):
                 found |= _patterns_in(value)
+    return found
+
+
+def _expiration_days_written(
+    documents: Sequence[Tuple[Path, Any]],
+    spec: ScannerExclusionOption,
+    spellings: Sequence[str],
+) -> Dict[str, Set[Optional[str]]]:
+    """The expiration days ``documents`` write for each pattern at ``spec``'s option under ``spellings`` (None for an entry with none)."""
+    found: Dict[str, Set[Optional[str]]] = {}
+    for _path, document in documents:
+        for spelling in spellings:
+            for value in _document_values(document, spec, spelling):
+                if isinstance(value, str):
+                    entries: List[Any] = [value]
+                elif isinstance(value, list):
+                    entries = value
+                else:
+                    continue
+                for entry in entries:
+                    pattern, _reason, expiration = _entry_fields(entry)
+                    if pattern is not None:
+                        found.setdefault(pattern, set()).add(
+                            _expiration_day(expiration)
+                        )
     return found
 
 
