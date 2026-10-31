@@ -1527,8 +1527,17 @@ class ScannerExecutor:
                                 )
                                 # A link already there is refused as ASH's writes
                                 # refuse one; the sweep after each spawn would
-                                # remove it without a word.
-                                refuse_links_below(sandbox.results_dir)
+                                # remove it without a word. The same values the
+                                # sweep after the spawn redacts with are passed:
+                                # no scope is active yet, so a refusal that names
+                                # an entry or the root is redacted and logged
+                                # here, as the sweep's refusals are, rather than
+                                # raised alone for the handler below.
+                                refuse_links_below(
+                                    sandbox.results_dir,
+                                    sandbox.environment_values,
+                                    values_unread=sandbox.environment_values_unread,
+                                )
                             # The config files ASH writes for this run's tool live
                             # in a directory of the run's own, outside the scanned
                             # tree, which the sandbox lets the scanner read and
