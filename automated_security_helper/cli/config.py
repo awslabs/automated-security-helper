@@ -205,7 +205,7 @@ def _working_directory() -> Path:
 
 
 def _refuse_a_config_a_scan_refuses(
-    ash_config: AshConfig, frame: str, *, unfindable: bool = True
+    ash_config: AshConfig, frame: str, *, refuse_unfindable: bool = True
 ) -> None:
     """Exit 3 before writing a config whose ``ash_plugin_modules`` a scan refuses.
 
@@ -217,7 +217,7 @@ def _refuse_a_config_a_scan_refuses(
 
     The check has two halves: a name outside ASH's plugin namespace, which no
     install can admit, and a name inside it that no installed package provides
-    yet. With ``unfindable=False`` only the first refuses: the wizard writes a
+    yet. With ``refuse_unfindable=False`` only the first refuses: the wizard writes a
     module an operator may install next, as it always did, and ``get`` and
     ``validate`` say so when they read the file before that install.
     """
@@ -229,7 +229,7 @@ def _refuse_a_config_a_scan_refuses(
     try:
         refuse_plugin_modules_a_scan_refuses(ash_config, environment_plugin_modules())
     except PluginModuleImportError as e:
-        if not unfindable:
+        if not refuse_unfindable:
             return
         _refuse_in_the_editors_words(e, frame)
     except ASHConfigValidationError as e:
@@ -1625,13 +1625,13 @@ def update(
     # A config a scan refuses for its plugin modules is not written: get,
     # validate and validate-plugin-dependencies refuse the same entries with
     # exit 3, so a file written with one was reported updated and then refused
-    # by every reader. The wizard's policy (unfindable=False): a module inside
+    # by every reader. The wizard's policy (refuse_unfindable=False): a module inside
     # ASH's plugin namespace that no installed package provides yet is written,
     # since the operator may install it next and the check commands name it
     # until then; refusing it here made a --set of an unrelated key fail on a
     # file the wizard had just written.
     _refuse_a_config_a_scan_refuses(
-        updated_config, f"Not updating {config_path}", unfindable=False
+        updated_config, f"Not updating {config_path}", refuse_unfindable=False
     )
 
     # The file as it is now, read once for the schema line and the keep_from
@@ -2672,7 +2672,7 @@ def wizard(
     # are judged here: a module the FILE lists is still the operator's to drop
     # at the prompts, and the check after them judges what is written.
     _refuse_a_config_a_scan_refuses(
-        AshConfig(), f"Not writing {config_path}", unfindable=False
+        AshConfig(), f"Not writing {config_path}", refuse_unfindable=False
     )
 
     from automated_security_helper.config.environment_record import (
@@ -2802,9 +2802,9 @@ def wizard(
     # write, as get and validate refuse it (exit 3); the wizard wrote it and
     # reported success. A module inside the namespace that no installed package
     # provides yet is written: the operator may install it next, and get and
-    # validate name it until then (unfindable=False).
+    # validate name it until then (refuse_unfindable=False).
     _refuse_a_config_a_scan_refuses(
-        ash_config, f"Not writing {config_path}", unfindable=False
+        ash_config, f"Not writing {config_path}", refuse_unfindable=False
     )
 
     # --- Write config ---
