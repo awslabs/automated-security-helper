@@ -267,8 +267,14 @@ MAX_IGNORE_FILE_BYTES = 32 * 1024 * 1024
 #: Windows. A longer prefix names no file, so it is never built.
 MAX_CANDIDATE_LENGTH = 32_767 if os.name == "nt" else 4_096
 
-#: Longest last component of a candidate, in bytes: ``NAME_MAX``.
+#: Longest last component of a candidate: ``NAME_MAX``, 255 of the unit the
+#: platform's file systems count in (``NAME_MAX_IN_UTF16``).
 MAX_NAME_LENGTH = 255
+
+#: Whether a file name is bounded in UTF-16 code units, as NTFS bounds it, or in
+#: UTF-8 bytes, as Linux and APFS bound it. A name of 100 CJK characters is 100
+#: units and 300 bytes: a valid Windows name that a byte count would drop.
+NAME_MAX_IN_UTF16 = os.name == "nt"
 
 #: Most candidate names, and most characters in all, taken from the tree's
 #: ``.gitleaksignore``. One line splits at every colon, so a few lines of colons
@@ -321,6 +327,19 @@ def _write_private_copy(source: BinaryIO, destination: Path) -> None:
     )
     with os.fdopen(fd, "wb") as out:
         shutil.copyfileobj(source, out)
+
+
+def _name_length(name: str) -> int:
+    """``name``'s length in the unit this platform bounds a file name in.
+
+    UTF-16 code units where ``NAME_MAX_IN_UTF16`` (a character outside the Basic
+    Multilingual Plane is two), UTF-8 bytes elsewhere. The name was decoded with
+    ``surrogateescape``, so an undecodable byte is one lone surrogate: one unit
+    here, and the one byte it was in the byte count.
+    """
+    if NAME_MAX_IN_UTF16:
+        return len(name.encode("utf-16-le", "surrogatepass")) // 2
+    return len(name.encode("utf-8", "surrogateescape"))
 
 
 def gitleaksignore_files(data: bytes) -> List[str]:
@@ -399,7 +418,7 @@ def gitleaksignore_candidates(data: bytes) -> Tuple[List[str], int]:
                 continue
             file_part = joined[:position]
             last = file_part[first_of_last:]
-            if len(last.encode("utf-8", "surrogateescape")) > MAX_NAME_LENGTH:
+            if _name_length(last) > MAX_NAME_LENGTH:
                 continue
             files.append(file_part)
             characters += position

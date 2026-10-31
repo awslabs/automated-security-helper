@@ -163,6 +163,45 @@ def test_a_long_directory_part_does_not_hide_a_short_last_component():
     assert files == [f"{directory}/x.py"]
 
 
+def test_a_name_is_measured_in_utf16_units_where_the_platform_counts_them(monkeypatch):
+    """NTFS bounds a name at 255 UTF-16 units. A name of 100 CJK characters is
+    100 units and 300 UTF-8 bytes, so a byte count dropped a name Windows can
+    hold, and the findings its ``.gitleaksignore`` line hides went unchecked."""
+    monkeypatch.setattr(module, "NAME_MAX_IN_UTF16", True, raising=False)
+    name = chr(0x5B57) * 100
+
+    files, unread = gitleaksignore_candidates(f"{name}:github-pat:1\n".encode())
+
+    assert files == [name]
+    assert unread == 0
+
+
+def test_a_name_past_the_utf16_bound_is_still_dropped(monkeypatch):
+    """A character outside the Basic Multilingual Plane is two units: 127 of
+    them fit 255 units, 128 do not."""
+    monkeypatch.setattr(module, "NAME_MAX_IN_UTF16", True, raising=False)
+    fits = chr(0x1F600) * 127
+    too_long = chr(0x1F600) * 128
+
+    files, _ = gitleaksignore_candidates(
+        f"{fits}:github-pat:1\n{too_long}:github-pat:1\n".encode()
+    )
+
+    assert files == [fits]
+
+
+def test_a_name_is_measured_in_bytes_where_the_platform_counts_them(monkeypatch):
+    """Linux bounds a name at 255 bytes, so the 300 bytes of 100 CJK characters
+    name no file there; this is the other side of the unit change."""
+    monkeypatch.setattr(module, "NAME_MAX_IN_UTF16", False, raising=False)
+    name = chr(0x5B57) * 100
+
+    files, unread = gitleaksignore_candidates(f"{name}:github-pat:1\n".encode())
+
+    assert files == []
+    assert unread == 0
+
+
 def test_a_prefix_longer_than_a_path_is_never_made(monkeypatch):
     monkeypatch.setattr(module, "MAX_CANDIDATE_LENGTH", 20)
     files, unread = gitleaksignore_candidates(b"a/b/c:" + b"x/" * 20 + b":r:1\n")
