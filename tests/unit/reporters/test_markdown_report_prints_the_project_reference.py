@@ -7,7 +7,7 @@ The configuration records a project name read from the environment as the
 reference it was written as, ``${NAME}``, and every report is meant to show that
 reference rather than the value. The Markdown report escapes ``{``, ``}`` and
 ``_`` along with the other Markdown syntax characters, so the project line read
-``$\\{MY\\_NAME\\}``, which is not what the file says. Only a ``${NAME}`` reference
+``\\$\\{MY\\_NAME\\}``, which is not what the file says. Only a ``${NAME}`` reference
 in the project line is written as it is, in a code span, because bare it read as
 emphasis (``${_X_}``) or as math (``${ORG}/${REPO}``); every other character in
 the line, and every other line, is still escaped.
@@ -67,7 +67,8 @@ class TestTheReferenceHelper:
         assert _reference_text("${ORG}/${REPO}") == "`${ORG}`/`${REPO}`"
 
     def test_a_reference_beside_another_dollar_sign_is_still_one_code_span(self):
-        """A bare ``$`` outside a reference is escaped, as in any other text."""
+        """A bare ``$`` touching a reference, on either side, is escaped, and the
+        reference stays its own code span, not run into the escaped text."""
         assert _reference_text("${ORG}-$HOME") == "`${ORG}`-\\$HOME"
         assert _reference_text("$HOME-${ORG}") == "\\$HOME-`${ORG}`"
 
