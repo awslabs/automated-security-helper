@@ -80,7 +80,14 @@ def test_a_shortfall_of_unknown_size_does_not_lose_the_report(
 
     assert "cdk-nag" in document
     assert "coverage unknown" in document
-    assert "None" not in document.split("cdk-nag", 1)[1][:200]
+    # Around every place the phrase is written, not after the first mention of
+    # the scanner: that is its row in the scanner table, which comes before the
+    # shortfall, so a window there would miss a "None" printed lower down.
+    start = 0
+    while (index := document.find("coverage unknown", start)) != -1:
+        around = document[max(index - 60, 0) : index + 60]
+        assert "None" not in around, around
+        start = index + 1
 
 
 @pytest.mark.parametrize("name", sorted(REPORTERS))

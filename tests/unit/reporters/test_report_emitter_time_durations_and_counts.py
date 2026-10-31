@@ -51,6 +51,13 @@ from automated_security_helper.utils.secret_masking import (
     MASKED_LINE,
     mask_secrets_in_results,
 )
+from automated_security_helper.utils.severity_ladder import (
+    result_severity,
+    severity_fails_threshold,
+)
+from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter import (
+    _without_scanner_thresholds,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -73,7 +80,13 @@ def _rows(model: AshAggregatedResults, *, human: bool = True) -> dict:
 class TestAShortfallNeverReadsBelowZero:
     def test_a_failed_count_above_the_attempted_count_is_not_negative(self):
         text = coverage_shortfall_text(2, 5)
-        assert text.startswith("evaluated 0 of 2 target(s)"), text
+        # The whole sentence, not its prefix. It is the reading the renderer has
+        # today for an inconsistent record: the evaluated count is clamped to
+        # zero and the failed count is printed as recorded. Whether such a record
+        # should read "coverage unknown" instead is a design question this
+        # test does not decide; it fails when the sentence changes, so a change
+        # is made on purpose.
+        assert text == "evaluated 0 of 2 target(s); 5 could not be evaluated", text
         assert "-" not in text, text
 
     def test_an_ordinary_shortfall_is_unchanged(self):
@@ -133,7 +146,50 @@ class TestTheAgeOfTheScanKeepsItsOffset:
         parsed = parse_scan_time(text)
         assert parsed is not None, text
         assert parsed.utcoffset() is not None, "the instant carries its zone"
-        assert parsed == instant
+        # Compared to the second: the parser drops fractional seconds today, and
+        # a parser that kept them would not be wrong.
+        assert parsed.replace(microsecond=0) == instant
+
+    @pytest.mark.parametrize(
+        ("text", "instant"),
+        [
+            (
+                "2026-01-15T12:00:00.123456+00:00",
+                datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc),
+            ),
+            (
+                "2026-01-15T12:00:00.123456+05:30",
+                datetime(2026, 1, 15, 6, 30, tzinfo=timezone.utc),
+            ),
+            (
+                "2026-01-15T12:00:00.123456-05:00",
+                datetime(2026, 1, 15, 17, 0, tzinfo=timezone.utc),
+            ),
+        ],
+    )
+    def test_a_fraction_followed_by_an_offset_keeps_its_zone(self, text, instant):
+        """What ``datetime.isoformat()`` writes for an aware time with
+        microseconds, the shape a scan most likely records: a parser that cut
+        the text at the seconds before looking for an offset would lose the
+        zone here and read the wall time as UTC."""
+        parsed = parse_scan_time(text)
+        assert parsed is not None, text
+        assert parsed.replace(microsecond=0) == instant
+
+    def test_the_age_of_a_scan_time_written_with_a_fraction_and_an_offset(self):
+        scanned_at = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(
+            microsecond=123456
+        )
+        model = AshAggregatedResults()
+        model.metadata.generated_at = scanned_at.astimezone(
+            timezone(timedelta(hours=-5))
+        ).isoformat()
+        assert model.metadata.generated_at.endswith("-05:00")
+        assert ".123456" in model.metadata.generated_at
+
+        delta = ReportContentEmitter(model).get_metadata()["time_delta"]
+
+        assert timedelta(hours=1) <= delta < timedelta(hours=1, minutes=2), delta
 
     def test_text_that_is_no_time_is_none(self):
         assert parse_scan_time("yesterday afternoon") is None
@@ -186,14 +242,25 @@ class TestADurationIsOnlyWhatWasMeasured:
         report = TextReporter(context=test_plugin_context).report(
             _model(self._reports())
         )
-        rows = {
-            line.split()[0]: line for line in report.splitlines() if line[:1].isalpha()
-        }
-        assert "1m 30s" in rows["bandit"], rows["bandit"]
-        assert "N/A" in rows["cdk-nag"] and "<1ms" not in rows["cdk-nag"], rows[
-            "cdk-nag"
-        ]
-        assert "N/A" in rows["grype"] and "<1ms" not in rows["grype"], rows["grype"]
+        lines = report.splitlines()
+        header = next(
+            line for line in lines if line.startswith("Scanner") and "Duration" in line
+        )
+        # The duration column is right-aligned under its heading; the table ends
+        # at the first blank line, so a later line that starts with a scanner's
+        # name (a coverage note, an attention list) cannot replace its row.
+        end = header.index("Duration") + len("Duration")
+        durations = {}
+        for line in lines[lines.index(header) + 2 :]:
+            if not line.strip():
+                break
+            durations[line.split()[0]] = line[end - 10 : end].strip()
+        for name, shown in {
+            "bandit": "1m 30s",
+            "cdk-nag": "N/A",
+            "grype": "N/A",
+        }.items():
+            assert durations.get(name) == shown, durations
 
     def test_a_workspace_scan_records_no_scanner_duration(self):
         model = _model(
@@ -235,8 +302,12 @@ class TestTheMastheadCountsEachScannerOnce:
     ):
         # A scanner that completed, and that the completeness record also names
         # (one tree lacked its dependency), is listed for attention.
+        #
+        # The record names grype too, whose row is ERROR, as the real function
+        # does for a scanner that did not complete: a record that listed only
+        # bandit described a state a scan cannot produce.
         incompleteness = SimpleNamespace(
-            scanners=[("bandit", "MISSING")],
+            scanners=[("bandit", "MISSING"), ("grype", "ERROR")],
             converters=[],
             unevaluated_rules=[],
             no_scanner_ran=False,
@@ -269,11 +340,15 @@ class TestTheMastheadCountsEachScannerOnce:
 
         assert summary["completed"] == 1, summary
         assert "bandit" in summary["unavailable"], "it is still named for attention"
+        assert "grype" in summary["unavailable"], summary
         # Only grype did not complete.
         assert summary["unavailable_count"] == 1, summary
+        # The fixture has two scanners, and each is counted once: the three
+        # figures add up to exactly them, so a miscount in either direction fails.
+        assert summary["scanners"] == 2, summary
         assert (
             summary["completed"] + summary["skipped"] + summary["unavailable_count"]
-            <= summary["scanners"]
+            == summary["scanners"]
         ), summary
 
 
@@ -363,6 +438,63 @@ class TestFindingsAnAdditionalReportListsAreCounted:
         assert summary["active"] == 2, summary
         assert summary["below_threshold"] == 0, summary
 
+    def test_a_listed_finding_rated_outside_the_ladder_follows_the_gate_under_high(
+        self,
+    ):
+        """The default MEDIUM gate cannot tell reading an unrated finding as
+        MEDIUM from failing it closed: both make it actionable. Under a HIGH
+        gate they differ. The finding is read as the gate reads a SARIF result
+        with a level it does not know (MEDIUM), so it is below HIGH here, as that
+        result is in the exit code; the listed HIGH finding stays actionable."""
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {
+                        "title": "Hard-coded endpoint",
+                        "description": "A plugin's own finding.",
+                        "severity": "HIGH",
+                        "file_path": "app.py",
+                        "line_start": 3,
+                    },
+                    {
+                        "title": "An odd rating",
+                        "description": "A plugin's own finding, rated outside ASH's levels.",
+                        "severity": "UNRATED",
+                        "file_path": "app.py",
+                        "line_start": 9,
+                    },
+                ],
+            }
+        )
+        model.ash_config = get_default_config()
+        _without_scanner_thresholds(model)
+        model.ash_config.global_settings.severity_threshold = "HIGH"
+        emitter = ReportContentEmitter(model)
+
+        graded = {
+            vuln.title: emitter.is_finding_actionable(vuln)
+            for vuln in emitter.flat_vulns
+        }
+        gate_fails_unknown_level = severity_fails_threshold(
+            result_severity({"level": "not-a-level"}), "HIGH"
+        )
+
+        assert graded == {
+            "Hard-coded endpoint": True,
+            "An odd rating": gate_fails_unknown_level,
+        }, graded
+        assert gate_fails_unknown_level is False
+        summary = emitter.get_scan_summary()
+        assert summary["actionable"] == 1, summary
+        assert summary["below_threshold"] == 1, summary
+
     def test_a_row_marked_with_its_source_report_is_read_by_the_mark_not_its_place(
         self,
     ):
@@ -401,19 +533,26 @@ class TestFindingsAnAdditionalReportListsAreCounted:
                 source_report=source_report,
             )
 
+        # The marked stand-ins carry severities the model's own list (HIGH and
+        # LOW above) does not: a reader that ignored ``flat_vulns`` and
+        # flattened ``additional_reports`` again, or kept a copy from
+        # construction, would answer HIGH and LOW and pass a test whose
+        # stand-ins said the same.
         emitter.flat_vulns = [
             row("CRITICAL", None),
-            row("HIGH", "custom-plugin"),
+            row("MEDIUM", "custom-plugin"),
             row("CRITICAL", None),
-            row("LOW", "custom-plugin"),
+            row("INFO", "custom-plugin"),
         ]
 
         extras = emitter._additional_report_findings()
 
-        assert [vuln.severity for vuln in extras] == ["HIGH", "LOW"], extras
+        assert [vuln.severity for vuln in extras] == ["MEDIUM", "INFO"], extras
         summary = emitter.get_scan_summary()
-        assert summary["counts"]["high"] == 1, summary
-        assert summary["counts"]["low"] == 1, summary
+        assert summary["counts"]["medium"] == 1, summary
+        assert summary["counts"]["info"] == 1, summary
+        assert summary["counts"]["high"] == 0, summary
+        assert summary["counts"]["low"] == 0, summary
         assert summary["counts"]["critical"] == 0, summary
 
     def test_the_flattening_marks_each_listed_row_and_the_summary_reads_the_mark(
@@ -581,6 +720,9 @@ class TestACoverageGapBesideFindingsIsADanger:
     @staticmethod
     def _model(with_finding: bool) -> AshAggregatedResults:
         model = AshAggregatedResults(ash_config=get_default_config())
+        # ``get_default_config`` honours ASH_CONFIG: a threshold it set for bandit
+        # would grade the finding by itself and not by the gate named below.
+        _without_scanner_thresholds(model)
         # The same gate in both variants, so the two differ in the finding alone.
         model.ash_config.global_settings.severity_threshold = "CRITICAL"
         if with_finding:
@@ -604,9 +746,18 @@ class TestACoverageGapBesideFindingsIsADanger:
         return model
 
     def test_actionable_findings_and_a_gap_read_as_danger(self):
-        summary = ReportContentEmitter(self._model(True)).get_scan_summary()
+        emitter = ReportContentEmitter(self._model(True))
+        # The premise, stated: the finding is graded by the gate's rule (an
+        # ``error`` result is CRITICAL), and the cards show the same count the
+        # headline does, so the headline is not 1 over cards marked below the
+        # threshold.
+        assert [vuln.severity for vuln in emitter.flat_vulns] == ["CRITICAL"]
+        cards = sum(emitter.is_finding_actionable(vuln) for vuln in emitter.flat_vulns)
+
+        summary = emitter.get_scan_summary()
+
         assert summary["title"] == "Scan incomplete", summary
-        assert summary["actionable"] == 1, summary
+        assert summary["actionable"] == 1 == cards, summary
         assert summary["tone"] == "danger", summary
 
     def test_a_gap_alone_stays_a_warning(self):
