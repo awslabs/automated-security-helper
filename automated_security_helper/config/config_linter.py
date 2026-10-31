@@ -14,6 +14,7 @@ Provides lint checks that go beyond basic validation, including:
 import json
 import logging
 import re
+import stat
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -864,11 +865,12 @@ class ConfigLinter:
         """The unused suppressions report as a JSON object.
 
         Raises ``ValueError`` (``json.JSONDecodeError`` and ``UnicodeDecodeError``
-        are subclasses) for a file that is not JSON or not UTF-8, and for one
-        whose JSON is not an object, and ``OSError`` for one that cannot be
-        read (a directory, say). One reader for the lint check and for
-        ``--fix-unused``, so a report the check tolerates with a warning never
-        crashes the fix.
+        are subclasses) for a file that is not JSON or not UTF-8, for one
+        whose JSON is not an object, and for one whose ``unused_suppressions``
+        is present and is not a list, and ``OSError`` for one that cannot be
+        read. One reader for the lint check and for ``--fix-unused``, so a
+        report the check tolerates with a warning never crashes the fix, and
+        one the fix refuses never crashes the check.
         """
         with open(report_path, "r", encoding="utf-8") as f:
             report_data = json.load(f)
@@ -876,6 +878,12 @@ class ConfigLinter:
             raise ValueError(
                 f"{report_path} does not hold a JSON object "
                 f"(got {type(report_data).__name__})"
+            )
+        listed = report_data.get("unused_suppressions", [])
+        if not isinstance(listed, list):
+            raise ValueError(
+                f"{report_path} holds 'unused_suppressions' that is not a list "
+                f"(got {type(listed).__name__})"
             )
         return report_data
 
@@ -2499,12 +2507,16 @@ class ConfigLinter:
             # written". ``Path.exists`` before Python 3.14 re-raises every
             # error but "not found", so a directory the user cannot search
             # ended the lint in a traceback; an unreadable path has no report
-            # to read, as for ``is_regular_file``.
+            # to read, as for ``is_regular_file``. Nor has a name that is a
+            # directory, a FIFO or a device: the reader would be handed it
+            # (a FIFO's open waits for a writer).
             try:
-                mtime = report_path.stat().st_mtime
+                status = report_path.stat()
             except (OSError, ValueError):
                 continue
-            report_timestamp = datetime.fromtimestamp(mtime)
+            if not stat.S_ISREG(status.st_mode):
+                continue
+            report_timestamp = datetime.fromtimestamp(status.st_mtime)
             return report_path, report_timestamp
 
         return None, None
