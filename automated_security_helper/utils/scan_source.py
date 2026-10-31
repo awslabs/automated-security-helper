@@ -63,6 +63,7 @@ from automated_security_helper.utils.get_scan_set import (
     git_untracked_paths_below,
     git_worktree_paths,
 )
+from automated_security_helper.utils.output_dir_links import same_by_identity
 from automated_security_helper.utils.scanned_tree import _is_link_stat
 
 #: Set by the container launcher (run_ash_container) to the label it worked out
@@ -121,20 +122,19 @@ def _relative_by_identity(path: Path, root: Path) -> Optional[str]:
 
     By text (``relative_to``) first; when the text says *path* is not below
     *root*, each of *path* and its parents is compared with *root* by identity
-    (``os.path.samefile``), and the parts below the one that is *root* are the
-    answer. A path that does not exist has no identity, so a nonexistent
-    directory is decided by the text, as before.
+    (``same_by_identity``: device and inode), and the parts below the one that is
+    *root* are the answer. A path that does not exist has no identity, so a
+    nonexistent directory is decided by the text, as before. A mount that reports
+    inode 0 for every file gives no identity either: ``os.path.samefile`` read
+    every directory on it as *root*, and an outside directory was labeled as
+    inside the repository.
     """
     try:
         return path.relative_to(root).as_posix()
     except ValueError:
         pass
     for ancestor in (path, *path.parents):
-        try:
-            same = os.path.samefile(ancestor, root)
-        except OSError:
-            continue
-        if same:
+        if same_by_identity(ancestor, root):
             rest = path.parts[len(ancestor.parts) :]
             return PurePosixPath(*rest).as_posix() if rest else "."
     return None

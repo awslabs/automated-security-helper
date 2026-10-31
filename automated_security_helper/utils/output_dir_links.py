@@ -165,6 +165,20 @@ def _identity(path: PathLike) -> Optional[Tuple[int, int]]:
     return (found.st_dev, found.st_ino)
 
 
+def same_by_identity(first: PathLike, second: PathLike) -> bool:
+    """Whether two paths name one file system object, by device and inode.
+
+    Links are followed. False when either has no identity (:func:`_identity`): a
+    path that does not exist, one holding a NUL character, and any path on a file
+    system that reports inode 0 for everything. ``os.path.samefile`` compares
+    ``(st_dev, st_ino)`` and nothing else, so on such a mount it called every
+    directory the same one; callers that decide containment by identity use this
+    instead.
+    """
+    identity = _identity(first)
+    return identity is not None and identity == _identity(second)
+
+
 def _real_path(path: PathLike) -> Path:
     """``os.path.realpath`` of ``path``, without the Win32 extended-length prefix.
 

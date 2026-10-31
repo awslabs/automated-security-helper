@@ -95,8 +95,10 @@ Failure modes and known limitations
   a candidate spelled in another case than the root is the same directory, but
   ``is_relative_to`` compares the text. When the text says "outside", the
   candidate's ancestors are compared with the root by identity
-  (``os.path.samefile``), so such a spelling is accepted where it names the same
-  directory and still rejected on a case-sensitive volume, where it does not.
+  (device and inode, ``output_dir_links.same_by_identity``, which gives no
+  identity on a mount that reports inode 0), so such a spelling is accepted where
+  it names the same directory and still rejected on a case-sensitive volume,
+  where it does not.
   The ``resolved`` field keeps the caller's spelling either way.
 * A rejection message names the candidate and the root as given, never the real
   path the candidate resolves to: the workspace resolver echoes these messages to
@@ -111,6 +113,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Optional, Union
+
+from automated_security_helper.utils.output_dir_links import same_by_identity
 
 PathLike = Union[str, Path]
 
@@ -186,21 +190,21 @@ def _is_within(resolved: Path, resolved_root: Path) -> bool:
 
     By text first (``is_relative_to``), then, when the text says no, by identity:
     *resolved* or one of its parents is the root's own directory
-    (``os.path.samefile``). On a case-insensitive file system a candidate spelled
-    in another case than the root names the same directory and the text alone
-    rejected it; on a case-sensitive one the two are different directories and
-    the identity check says so. A path that does not exist has no identity and
-    is skipped, so a nonexistent candidate is decided by the text, as before.
+    (``same_by_identity``: device and inode). On a case-insensitive file system a
+    candidate spelled in another case than the root names the same directory and
+    the text alone rejected it; on a case-sensitive one the two are different
+    directories and the identity check says so. A path that does not exist has no
+    identity and is skipped, so a nonexistent candidate is decided by the text, as
+    before. A mount that reports inode 0 for every file gives no identity either:
+    ``os.path.samefile`` read every directory on it as the root, and an outside
+    candidate was accepted.
     """
     if resolved.is_relative_to(resolved_root):
         return True
-    for ancestor in (resolved, *resolved.parents):
-        try:
-            if os.path.samefile(ancestor, resolved_root):
-                return True
-        except OSError:
-            continue
-    return False
+    return any(
+        same_by_identity(ancestor, resolved_root)
+        for ancestor in (resolved, *resolved.parents)
+    )
 
 
 def _reject(

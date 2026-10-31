@@ -99,6 +99,7 @@ from automated_security_helper.core.exceptions import ScanSetUnreadableError
 from automated_security_helper.utils.error_text import redact_then_split
 from automated_security_helper.utils.git_command import decode_git_output, git_argv
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import same_by_identity
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
@@ -1031,10 +1032,7 @@ def _spelled_under(candidate: Path, root: Path, root_resolved: Path) -> Optional
 def _same_directory(first: Path, second: Path) -> bool:
     if first == second or _resolved(first) == _resolved(second):
         return True
-    try:
-        return os.path.samefile(first, second)
-    except OSError:
-        return False
+    return same_by_identity(first, second)
 
 
 #: Set by ASH's container launcher (``run_ash_container``): the host's source and
