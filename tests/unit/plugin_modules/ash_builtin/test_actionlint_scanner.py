@@ -1163,6 +1163,61 @@ def test_config_to_avoid_names_a_link_on_a_directory_before_the_file(tmp_path):
 
 
 @pytest.mark.unit
+def test_a_converted_target_is_judged_against_the_scan_root(
+    repo, monkeypatch, on_path, caplog
+):
+    """The converted work directory sits inside the source tree in the default
+    layout, so the source repository's ordinary config is a file of the scanned
+    tree. Judged against the work directory alone it read as outside the tree:
+    the run moved to a copy, losing local ``uses: ./...`` resolution, and the
+    warning told the user to replace a file that was already a regular one."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+    output = repo / ".ash" / "ash_output"
+    work_dir = _converted_target(output, repo / ".github" / "workflows" / "clean.yml")
+    scanner = _scanner(repo, output=output)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=work_dir, target_type="converted")
+
+    ((_, kwargs),) = fake.calls
+    assert Path(kwargs["cwd"]) == work_dir
+    assert "outside the scanned tree" not in caplog.text
+    assert "linted from a copy outside the tree" not in caplog.text
+
+
+@pytest.mark.unit
+def test_config_to_avoid_takes_the_scan_root_as_the_tree_when_it_is_given(tmp_path):
+    """The same judgment without a scan: with no scan root the target alone is
+    the tree, and a config above it is outside; given the scan root that holds
+    both, it is inside. A config outside the scan root too is outside either way."""
+    scan = tmp_path / "scan"
+    (scan / ".github" / "workflows").mkdir(parents=True)
+    (scan / ".git").mkdir()
+    (scan / ".github" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+    work_dir = scan / ".ash" / "converted"
+    work_dir.mkdir(parents=True)
+
+    assert module.config_to_avoid(work_dir, [scan]) == (
+        scan,
+        ".github/actionlint.yaml",
+        "outside the scanned tree",
+    )
+    assert module.config_to_avoid(work_dir, [scan], scan) is None
+
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / ".github" / "workflows").mkdir(parents=True)
+    (elsewhere / ".git").mkdir()
+    (elsewhere / ".github" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+    assert module.config_to_avoid(work_dir, [elsewhere], scan) == (
+        elsewhere,
+        ".github/actionlint.yaml",
+        "outside the scanned tree",
+    )
+
+
+@pytest.mark.unit
 def test_a_target_with_no_project_root_is_not_staged_and_an_exit_3_is_an_error(
     repo, monkeypatch, on_path, caplog
 ):

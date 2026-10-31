@@ -733,7 +733,7 @@ def project_roots(target: Path, workflows: Iterable[str]) -> List[Path]:
 
 
 def config_to_avoid(
-    target: Path, roots: Iterable[Path]
+    target: Path, roots: Iterable[Path], scanned_root: Optional[Path] = None
 ) -> Optional[Tuple[Path, str, str]]:
     """``(root, name, shape)`` for the first repository actionlint config, among
     *roots*, that actionlint would read and ASH must keep it from reading: a
@@ -757,6 +757,14 @@ def config_to_avoid(
     difference is a link on the way. The scanned tree is the target's real path
     for the same reason: a name that merely sits under the target is not a file
     inside it.
+
+    *scanned_root* is the scan's root, which the target is not when the target
+    is a converted work directory: with the default layout that directory sits
+    inside the source tree, and the source repository's own config is a file of
+    the scanned tree, not one outside it. A file is inside when it is under the
+    target or in the scanned tree as ``in_scanned_tree`` judges it, the test
+    ``_reference_outside_the_tree`` applies, so the two agree on what the tree
+    is. With no scan root the target alone is the tree.
     """
     tree = Path(os.path.realpath(target))
     for root in roots:
@@ -772,7 +780,10 @@ def config_to_avoid(
             real = Path(os.path.realpath(path))
             if real != real_root / name:
                 return root, name, "reached through a link"
-            if not real.is_relative_to(tree):
+            if not (
+                real.is_relative_to(tree)
+                or (scanned_root is not None and in_scanned_tree(real, scanned_root))
+            ):
                 return root, name, "outside the scanned tree"
             break
     return None
@@ -1902,7 +1913,14 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # apart from one it accepts; the batch is run again from the copy.
             run_root: Path = Path(target)
             roots = project_roots(Path(target), workflows)
-            avoided = config_to_avoid(Path(target), roots)
+            avoided = config_to_avoid(
+                Path(target),
+                roots,
+                scan_root(
+                    self.context.config if self.context is not None else None,
+                    self._source_dir(),
+                ),
+            )
             retry_from_copy = avoided is None and config_present(roots)
             if avoided is not None:
                 root, name, shape = avoided
