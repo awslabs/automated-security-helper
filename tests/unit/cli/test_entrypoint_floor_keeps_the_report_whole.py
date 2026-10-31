@@ -677,6 +677,58 @@ def test_a_module_app_that_returns_exits_zero(monkeypatch):
     assert exit_info.value.code == 0
 
 
+def _raising_app(error: BaseException) -> typer.Typer:
+    app = typer.Typer()
+
+    @app.command()
+    def run():
+        raise error
+
+    return app
+
+
+@pytest.mark.parametrize(
+    "error",
+    [typer.Abort(), KeyboardInterrupt()],
+    ids=["an abort", "an interrupted prompt"],
+)
+def test_an_aborted_command_under_a_module_app_exits_1_with_one_word(
+    monkeypatch, capsys, error
+):
+    """The `except Abort` branch depends on a name typer exports, and no test
+    reached it: click's Abort, and the KeyboardInterrupt click turns into one,
+    exit 1 with "Aborted!", as click's own handling does."""
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        entrypoint.run_module_app(_raising_app(error))
+
+    assert exit_info.value.code == 1
+    assert "Aborted!" in capsys.readouterr().err
+
+
+def test_an_app_with_no_arguments_prints_its_help_under_a_module_app(
+    monkeypatch, capsys
+):
+    """typer's NoArgsIsHelpError is a usage error that prints nothing itself;
+    the branch prints the help as typer prints it and exits with ASH's usage
+    code, as the root group does."""
+    app = typer.Typer()
+
+    @app.command(no_args_is_help=True)
+    def run():
+        raise AssertionError("the command is not reached when the help is shown")
+
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        entrypoint.run_module_app(app)
+
+    assert exit_info.value.code == ASH_EXIT_USAGE_ERROR
+    output = capsys.readouterr()
+    assert "Usage" in output.out + output.err, output
+
+
 def test_a_commands_click_error_under_a_module_app_is_one_line(monkeypatch, capsys):
     """Outside standalone mode click raises a command's ClickException to the
     caller; only usage errors were caught, so a FileError or a command's own
