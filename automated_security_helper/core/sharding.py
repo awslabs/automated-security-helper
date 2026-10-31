@@ -228,7 +228,7 @@ class ShardAssignment(StrippedRecordModel):
     )
 
     @classmethod
-    def _near_misses(cls, dropped: Sequence[str], data: dict) -> str:
+    def _near_misses(cls, dropped: Sequence[str], data: dict[str, Any]) -> str:
         """The sentence that says a dropped key looks like a misspelled field.
 
         Dropping a key is right for a field a newer ASH added, and wrong for a

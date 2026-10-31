@@ -84,7 +84,7 @@ def _unused_key(preferred: str, taken: Any, qualifier: str) -> str:
     return f"{qualified} #{index}"
 
 
-def _row_keys(converter_instances: List[Any], taken: set) -> Dict[int, str]:
+def _row_keys(converter_instances: List[Any], taken: set[str]) -> Dict[int, str]:
     """The ``converter_results`` key of each instance, by ``id``, each unique.
 
     Computed once, after the filter and before any row is written, so the row a
@@ -752,7 +752,7 @@ class ConvertPhase(EnginePhase):
 
         # The row keys this run has claimed. Rows an earlier run left in the
         # results object are not in it (see _row_keys).
-        keys_in_use: set = set()
+        keys_in_use: set[str] = set()
 
         # Create all converter instances upfront, then filter via the shared helper.
         all_converter_instances = []

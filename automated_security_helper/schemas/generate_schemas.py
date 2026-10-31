@@ -206,7 +206,7 @@ def _is_enum_core(core_schema: Any, definitions: Any = None) -> bool:
     reference is followed through it. That reads the core schema alone, so the
     answer does not depend on the order pydantic generates the definitions in.
     """
-    followed: set = set()
+    followed: set[str] = set()
     while isinstance(core_schema, dict):
         kind = core_schema.get("type")
         if kind == "enum":
@@ -357,7 +357,7 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
         self._under_default: List[bool] = []
         #: The core schema's shared definitions by ref, filled by
         #: :meth:`definitions_schema` before any of them is generated.
-        self._core_definitions: dict = {}
+        self._core_definitions: dict[str, Any] = {}
 
     def definitions_schema(self, schema: Any) -> Any:
         # pydantic generates the shared definitions one after another in the

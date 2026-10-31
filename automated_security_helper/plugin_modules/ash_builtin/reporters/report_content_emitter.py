@@ -172,7 +172,7 @@ class ReportContentEmitter:
         # strictest gate), read once for the same reason.
         self._project_scanner_thresholds = workspace_project_scanner_thresholds(model)
         # The gate each (project, scanner) pair resolves to, filled on first use.
-        self._threshold_cache: Dict[tuple, str] = {}
+        self._threshold_cache: Dict[tuple[Any, ...], str] = {}
         # The projects whose policy-scanner findings were reported and left out
         # of the outcome (policy_scanners_gate explicitly off). The JUnit report
         # reads the same table, so the reports and the exit code grade alike.
