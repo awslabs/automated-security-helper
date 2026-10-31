@@ -1480,7 +1480,10 @@ def _spelled_like(template: Any, source: Any) -> Any:
                 return template.model_copy(update={"expiration": None, **fields})
             except Exception:  # noqa: BLE001 -- keep the option well typed
                 return template
-    if isinstance(template, dict):
+    if isinstance(template, Mapping):
+        # Any mapping, as ``_entry_fields`` reads one: a mapping that is not a
+        # ``dict`` fell through to the template and kept the client's own
+        # reason and expiration under an operator entry.
         if isinstance(source, BaseModel):
             return source.model_dump(exclude_unset=True)
         fields = _operator_fields(source)

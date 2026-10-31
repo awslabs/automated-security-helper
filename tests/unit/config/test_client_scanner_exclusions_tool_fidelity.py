@@ -466,3 +466,36 @@ def test_an_entry_held_in_a_mapping_that_is_not_a_dict_reads_whole():
     assert _entry_fields(entry) == ("vendor", "r", "2000-01-01")
     assert _entry_fields({"path": "vendor"}) == ("vendor", None, None)
     assert _entry_fields("vendor") == ("vendor", None, None)
+
+
+def test_a_client_entry_in_a_mapping_that_is_not_a_dict_takes_the_operators_fields(
+    tmp_path,
+):
+    """The same entry, end to end: a client copy of an unexpired operator entry
+    held in a mapping type that is not a ``dict`` kept its own reason and
+    expiration, because the respelling knew a model, a ``dict`` and a string
+    and returned any other template as it was."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [
+        MappingProxyType(
+            {"path": "shared", "reason": "client says", "expiration": "2099-01-01"}
+        ),
+    ]
+    operator = {
+        "scanners": {
+            "bandit": {
+                "options": {
+                    "excluded_paths": [
+                        {"path": "shared", "reason": "op", "expiration": "2098-12-31"}
+                    ]
+                }
+            }
+        }
+    }
+
+    _strip(config, {}, operator, tmp_path)
+
+    kept = config.scanners.bandit.options.excluded_paths
+    assert len(kept) == 1
+    assert _entry_fields(kept[0]) == ("shared", "op", "2098-12-31")
+    assert config._client_scanner_exclusions == []
