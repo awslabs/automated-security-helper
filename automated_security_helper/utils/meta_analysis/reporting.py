@@ -434,6 +434,18 @@ def _example_file(scanners: Set[str], sarif_dir: str) -> str:
     return f"{root}/reports/ash.sarif"
 
 
+def _shown_match_rate(stats: Dict[str, Any]) -> Optional[float]:
+    """The share of results that matched, as the report shows it: ``match_rate``
+    where the caller gives a number, else the older ``field_preservation_rate``
+    whose value was that share, else None (shown as ``n/a``). A rate a scanner
+    with nothing to compare leaves as None is not read as 0%."""
+    for key in ("match_rate", "field_preservation_rate"):
+        value = stats.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value
+    return None
+
+
 def generate_html_report(
     validation_results: Dict,
     output_path: str,
@@ -593,14 +605,13 @@ def generate_html_report(
     # Add scanner sections. Sorted by name: callers build match_statistics from
     # set iteration, so its insertion order changes with PYTHONHASHSEED.
     for scanner, stats in sorted(validation_results["match_statistics"].items()):
-        # The share of results that matched: match_rate where the caller gives
-        # it, else the older field whose value was that share.
-        match_rate = stats.get("match_rate", stats.get("field_preservation_rate", 0))
+        match_rate = _shown_match_rate(stats)
+        shown_rate = "n/a" if match_rate is None else f"{match_rate:.2%}"
         html.append("    <div class='scanner'>")
         html.append("      <div class='scanner-header'>")
         html.append(f"        <h3>{_escaped(scanner)}</h3>")
         html.append(
-            f"        <div>Match Rate: {stats['matched_results']}/{stats['total_results']} ({match_rate:.2%})</div>"
+            f"        <div>Match Rate: {stats['matched_results']}/{stats['total_results']} ({shown_rate})</div>"
         )
         html.append("      </div>")
 
@@ -685,15 +696,17 @@ def generate_html_report(
     html.append("      </tr>")
 
     for scanner, stats in sorted(validation_results["match_statistics"].items()):
-        match_rate = (
-            stats.get("match_rate", stats.get("field_preservation_rate", 0)) * 100
-        )
+        match_rate = _shown_match_rate(stats)
         html.append("      <tr>")
         html.append(f"        <td>{_escaped(scanner)}</td>")
         html.append(
             f"        <td>{stats['matched_results']}/{stats['total_results']}</td>"
         )
-        html.append(f"        <td>{match_rate:.2f}%</td>")
+        html.append(
+            "        <td>n/a</td>"
+            if match_rate is None
+            else f"        <td>{match_rate * 100:.2f}%</td>"
+        )
         html.append(
             f"        <td class='critical'>{stats.get('critical_fields_missing', 0)}</td>"
         )

@@ -121,7 +121,11 @@ def validate_sarif_aggregation(
     fields of the matched results that the aggregate preserved, from
     ``fields_compared`` and ``fields_missing``). The latter used to be the match
     rate under the other name, so a scanner whose every matched result had lost
-    critical fields still read 1.0. Two scanner names that normalize to one
+    critical fields still read 1.0. It is None, not 0, for a scanner with no
+    matched result: nothing was compared, so no share of it was preserved.
+    (``ash inspect sarif-fields`` writes the same key from its own counts, where
+    each "result" is a field path, so there the match rate is the share of a
+    scanner's fields that reach the aggregate.) Two scanner names that normalize to one
     (``SCANNER_NAME_MAP``) share one entry and their counts add up; each used to
     reset the other's statistics while the summary totals kept both.
 
@@ -176,7 +180,7 @@ def validate_sarif_aggregation(
                 "match_rate": 0,
                 "fields_compared": 0,
                 "fields_missing": 0,
-                "field_preservation_rate": 0,
+                "field_preservation_rate": None,
                 "critical_fields_missing": 0,
                 "important_fields_missing": 0,
                 "informational_fields_missing": 0,
