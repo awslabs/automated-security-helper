@@ -1819,13 +1819,13 @@ class AshAggregatedResults(RecordModel):
         all metrics are aligned and based on the final processed SARIF data.
         """
         # Populate the final metrics right before saving, from the SARIF this
-        # model holds now. Done only when scanner_results was empty, the
-        # scan-phase file (the scan-complete marker) carried all-zero
-        # summary_stats whenever any scanner was skipped, missing, excluded or
-        # errored: those scanners have rows before the rebuild, so the summary
+        # model holds now, on every save. The scan-phase file (the scan-complete
+        # marker) carried all-zero summary_stats whenever any scanner was
+        # skipped, missing, excluded or errored: those scanners have rows before
+        # the rebuild, so a summary filled only when scanner_results was empty
         # was never filled while the SARIF held findings. Recomputing is
         # idempotent, so a model whose metrics were already populated is saved
-        # with the same counts.
+        # with the same counts, in the summary_stats object it already held.
         self._populate_final_metrics()
 
         # No secret value a finding exposes is written to the file; see
@@ -1885,8 +1885,25 @@ class AshAggregatedResults(RecordModel):
             )
 
             # Populate summary_stats from unified metrics using the canonical
-            # module-level helper in core.unified_metrics.
+            # module-level helper in core.unified_metrics. The helper builds a
+            # new SummaryStats and assigns it, so the values are copied back into
+            # the object the model held: a caller holding it (a reporter, a
+            # test) sees the final counts, and a save leaves the same object.
+            held = self.metadata.summary_stats
             _populate_summary_stats_from_unified_metrics(self, unified_metrics)
+            rebuilt = self.metadata.summary_stats
+            if rebuilt is not held:
+                for field_name in SummaryStats.model_fields:
+                    if field_name == "severity_counts":
+                        for severity in (*_SEVERITY_ORDER, "suppressed"):
+                            setattr(
+                                held.severity_counts,
+                                severity,
+                                getattr(rebuilt.severity_counts, severity),
+                            )
+                    else:
+                        setattr(held, field_name, getattr(rebuilt, field_name))
+                self.metadata.summary_stats = held
 
             ASH_LOGGER.debug(
                 f"Populated final metrics for {len(unified_metrics)} scanners"
