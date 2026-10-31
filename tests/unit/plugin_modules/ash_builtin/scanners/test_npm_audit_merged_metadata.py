@@ -245,6 +245,38 @@ def _saved_metadata(scanner) -> dict:
     )["metadata"]
 
 
+def test_a_single_pnpm_lockfile_saves_the_dependency_counts_as_the_map(plugin_context):
+    """The v1 integers were read into npm's map only when a second lockfile was
+    merged; the first report became the saved results as it came, so a scan of
+    one pnpm lockfile wrote ``"dependencies": 5`` and three integers beside it,
+    where the merge's own docstring (and every reader of
+    ``["dependencies"]["total"]``) expects the map."""
+    pnpm = json.loads(PNPM_CAPTURE.read_text(encoding="utf-8"))
+    _package(plugin_context.work_dir / "web", "pnpm-lock.yaml")
+
+    scanner, _ = _scan(
+        plugin_context,
+        {
+            "pnpm": {
+                "stdout": pnpm["stdout"],
+                "stderr": pnpm["stderr"],
+                "returncode": pnpm["returncode"],
+            },
+        },
+    )
+
+    assert scanner.errors == [], scanner.errors
+    metadata = _saved_metadata(scanner)
+    assert metadata["dependencies"] == {
+        "prod": 5,
+        "dev": 0,
+        "optional": 0,
+        "total": 5,
+    }, metadata
+    for v1_key in ("devDependencies", "optionalDependencies", "totalDependencies"):
+        assert v1_key not in metadata, metadata
+
+
 @pytest.mark.parametrize("first", ["npm", "pnpm"])
 def test_the_merge_combines_whichever_report_comes_first(plugin_context, first):
     """The order the lockfiles are found in decides which type is merged into
@@ -447,3 +479,28 @@ def test_merge_metadata_reads_a_v1_report_s_counts_into_the_map_when_a_dict_arri
         "dependencies": {"prod": 7, "dev": 1, "optional": 0, "total": 8},
         "vulnerabilities": {"high": 4, "total": 4},
     }, into
+
+
+def test_a_bare_dependency_integer_alone_is_the_production_count():
+    """A v1 metadata dict whose only count is ``dependencies`` (the other three
+    absent) reads as ``{"prod": 5}``: each of the four keys crosses only when it
+    is present and numeric, and nothing is invented for the rest."""
+    assert NpmAuditScanner._npm_dependency_counts({"dependencies": 5}) == {
+        "dependencies": {"prod": 5}
+    }
+
+
+@pytest.mark.parametrize("integer_first", [True, False])
+def test_a_bare_dependency_integer_merges_with_a_map_in_either_direction(
+    integer_first,
+):
+    """The reading of the bare integer as ``prod`` is the same whichever side it
+    arrives on, so the merged map does not depend on the walk order. The map
+    side's ``total`` stays what that side gave (the bare side has none to add)."""
+    bare = {"dependencies": 5}
+    mapped = {"dependencies": {"prod": 2, "total": 2}}
+    into, incoming = (bare, mapped) if integer_first else (mapped, bare)
+
+    NpmAuditScanner._merge_metadata(into, incoming, "pnpm-lock.yaml")
+
+    assert into == {"dependencies": {"prod": 7, "total": 2}}, into

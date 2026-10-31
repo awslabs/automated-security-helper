@@ -3131,6 +3131,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             # Merge results
                             if not all_results:
                                 all_results = audit_results
+                                # The first report's dependency counts are read
+                                # into npm's map when it is stored, as every
+                                # later one is when it is merged
+                                # (``_merge_metadata``): only the merge did, so
+                                # a scan of one pnpm or yarn lockfile saved
+                                # integers where the docstring promises the map.
+                                if isinstance(all_results, dict) and isinstance(
+                                    all_results.get("metadata"), dict
+                                ):
+                                    all_results["metadata"] = (
+                                        self._npm_dependency_counts(
+                                            all_results["metadata"]
+                                        )
+                                    )
                             else:
                                 # Merge vulnerabilities: by package name, with
                                 # a package vulnerable in two lockfiles keeping
