@@ -1411,6 +1411,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         # the command) and never lacks the skip flags, and an online scan does
         # not skip the update it is about to make. When they agree, as they do
         # in a normal run, the command is unchanged.
+        stale: tuple[str, ...]
+        wanted: tuple[str, ...]
         if self._offline():
             stale, wanted = ONLINE_FLAGS, OFFLINE_FLAGS
         else:

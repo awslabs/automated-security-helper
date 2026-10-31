@@ -2415,7 +2415,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
                     # Create a rule for this vulnerability if it doesn't exist
                     if vuln_id not in rules_dict:
-                        rule_props = {
+                        rule_props: Dict[str, Any] = {
                             "tags": [
                                 "security",
                                 "npm-audit",

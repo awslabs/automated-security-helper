@@ -267,10 +267,12 @@ def discover_templates(
             # target, as its marked twin is through the UnicodeDecodeError arm.
             # Named as a template that could not be parsed, it was counted as
             # nothing; dropped at TRACE before that, it vanished.
-            reason = unmarked_wide_template_reason(text) if text is not None else None
-            if reason is not None:
+            unmarked_reason = (
+                unmarked_wide_template_reason(text) if text is not None else None
+            )
+            if unmarked_reason is not None:
                 result.unreadable.append(
-                    (display_path(path, context.source_dir), reason)
+                    (display_path(path, context.source_dir), unmarked_reason)
                 )
                 continue
             # A file whose structure is a template but whose values the parser

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import re
-from typing import Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -147,7 +147,7 @@ def _configured_severity_threshold(model: "AshAggregatedResults") -> str:
 
 
 def _scanner_threshold(
-    model: "AshAggregatedResults", scanner_name: str, cache: dict
+    model: "AshAggregatedResults", scanner_name: str, cache: dict[str, Any]
 ) -> str | None:
     """The scanner's own ``options.severity_threshold``, normalized, or None.
 
@@ -328,7 +328,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         # memoized here; a project's gate threshold is read off the workspace
         # block per finding.
         configured_threshold = _configured_severity_threshold(model)
-        scanner_thresholds: dict = {}
+        scanner_thresholds: dict[str, Any] = {}
         project_thresholds = workspace_project_thresholds(model)
         # The per-scanner gates each project's verdict recorded, and whether a
         # policy scanner's findings decided it. Both read off the workspace
@@ -550,10 +550,18 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             _normalized_threshold(
                                 getattr(props, "severity_threshold", None)
                             )
-                            or project_scanner_thresholds.get(project, {}).get(
-                                actual_scanner
+                            or (
+                                project_scanner_thresholds.get(project, {}).get(
+                                    actual_scanner
+                                )
+                                if project is not None
+                                else None
                             )
-                            or project_thresholds.get(project)
+                            or (
+                                project_thresholds.get(project)
+                                if project is not None
+                                else None
+                            )
                             or _scanner_threshold(
                                 model, actual_scanner, scanner_thresholds
                             )
@@ -629,6 +637,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         # imports only Error and Skipped; type_ carries the
                         # distinction.
                         level_type = _ERROR_TYPE_BY_LEVEL.get(str(result.level))
+                        error_type: str | None
                         if result.kind in FINDING_KINDS:
                             error_type = level_type or (
                                 "error" if result.kind == "fail" else "note"

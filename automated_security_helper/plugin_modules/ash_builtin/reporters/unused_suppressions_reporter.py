@@ -407,10 +407,10 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
                 report_dir = Path(self.context.output_dir) / "reports"
                 report_dir.mkdir(parents=True, exist_ok=True)
-                written = write_report_file(
+                markdown_path = write_report_file(
                     report_dir, self.MARKDOWN_FILE_NAME, markdown_output
                 )
-                if written is None:
+                if markdown_path is None:
                     # write_report_file has said why. What it cannot say is that
                     # a copy an earlier scan left there is not this scan's.
                     ASH_LOGGER.warning(

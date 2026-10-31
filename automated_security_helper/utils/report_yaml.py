@@ -133,7 +133,7 @@ class NoCommandLineDumper:
         data = "".join(pieces)
         self.column += len(data)  # type: ignore[attr-defined]
         if self.encoding:  # type: ignore[attr-defined]
-            data = data.encode(self.encoding)  # type: ignore[attr-defined]
+            data = data.encode(self.encoding)  # type: ignore[attr-defined, assignment]
         self.stream.write(data)  # type: ignore[attr-defined]
         self.write_indicator('"', False)  # type: ignore[attr-defined]
 

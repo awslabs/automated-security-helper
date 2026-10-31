@@ -220,7 +220,7 @@ class DroppedOverride(NamedTuple):
     reason: str
     #: Its position in the list ``replay_overrides_onto`` was given, so the
     #: caller can read the override as the operator typed it (``landings_of``).
-    index: int
+    index: int  # type: ignore[assignment]  # shadows tuple.index, as it always has
 
 
 class Replay(NamedTuple):
