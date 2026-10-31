@@ -547,8 +547,11 @@ def test_a_link_that_appeared_after_the_check_is_refused_before_the_run(
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege")
 def test_the_link_re_read_judges_the_source_under_its_given_name(tmp_path, commands):
     """The source is named through a link above it and the output through that
-    same name: only the given name shows that the ``.ash`` on the way is a link,
-    and the resolved source does not."""
+    same name: the ``.ash`` link sits below the source, so the rule finds it under
+    the given name and under the real path alike (it walks both), and the output
+    is refused before anything is made through it. The repeat check now receives
+    the given name, as the first check does; this case held before that change
+    too, so it guards the refusal rather than telling the two arguments apart."""
     work = tmp_path / "work"
     (work / "project").mkdir(parents=True)
     named = tmp_path / "work-link"
