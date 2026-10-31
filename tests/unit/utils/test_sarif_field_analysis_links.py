@@ -94,7 +94,7 @@ def test_a_link_to_an_ancestor_is_not_walked(tmp_path, monkeypatch, capsys):
     # directories and more.
     inside = [path for path in walked if str(sarif_dir) in str(path)]
     assert len(inside) <= 8, inside
-    # And the probe saw the walk at all: a walk that does not go through
+    # And the probe saw the walk at all: a walk that is not made with
     # os.scandir would leave this list empty and pass the bound above. It saw the
     # directory that holds the link, and never the link.
     assert str(sarif_dir / "scanners" / "bandit") in inside, inside
