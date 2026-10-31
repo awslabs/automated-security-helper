@@ -159,7 +159,11 @@ def _values(command: list[str], flag: str) -> list[str]:
 
 def _scan_command(scanner) -> list[str]:
     """The argv of one source scan, with the tool replaced by a double that writes
-    no results file; what the scan makes of the missing file is not read here."""
+    no results file; what the scan makes of the missing file is not read here.
+
+    A raise before the tool was reached is not that: with no command recorded the
+    error is re-raised, so a scan that never got as far as the tool fails the
+    test with its own error and not with a failed unpacking of an empty list."""
     commands: list[list[str]] = []
 
     def run(command, *args, **kwargs):
@@ -175,7 +179,9 @@ def _scan_command(scanner) -> list[str]:
         try:
             scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
         except Exception:
-            pass  # the double wrote no results file
+            if not commands:
+                raise
+            # otherwise the double wrote no results file
     (command,) = commands
     return command
 
