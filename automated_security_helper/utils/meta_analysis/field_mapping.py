@@ -117,8 +117,14 @@ def parse_field_path(path: str) -> Optional[List[PathStep]]:
             inner = path[position + 1 : close]
             if inner == "":
                 steps.append(("any", None))
-            elif inner.isdigit():
-                steps.append(("index", int(inner)))
+            elif inner.isascii() and inner.isdigit():
+                # ASCII digits only: str.isdigit admits a superscript, which
+                # int() refuses with a ValueError out of the whole check.
+                try:
+                    steps.append(("index", int(inner)))
+                except ValueError:
+                    # More digits than the interpreter converts.
+                    return None
             else:
                 return None
             position = close + 1

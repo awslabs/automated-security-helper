@@ -14,9 +14,11 @@ def locations_match(loc1: Dict, loc2: Dict) -> bool:
 
     A SARIF location whose ``physicalLocation``, ``artifactLocation`` or
     ``region`` is JSON null is read as one without that part; line numbers given
-    as digit strings are read as the integers they spell. Both forms reach this
-    function from scanner reports and raised TypeError out of the whole
-    aggregation check.
+    as digit strings, or as floats of a whole value, are read as the integers they
+    spell. Both forms reach this function from scanner reports and raised
+    TypeError out of the whole aggregation check. A line that is stated and
+    reads as no line (a fraction, text) makes the locations incompatible: read as
+    an absent line it matched every line in the file.
 
     Args:
         loc1: First location (can be SARIF format or simple format)
@@ -48,6 +50,11 @@ def locations_match(loc1: Dict, loc2: Dict) -> bool:
             return False
     # If one has a file path and the other doesn't, they don't match
     elif file1 or file2:
+        return False
+
+    # A line that is stated and reads as no line (``10.5``, ``"abc"``) is not an
+    # absent one: absent matches at file level, and this would match any line.
+    if _has_unreadable_line(loc1) or _has_unreadable_line(loc2):
         return False
 
     # Extract line ranges
@@ -233,29 +240,56 @@ def _extract_file_path(location: Dict) -> str:
 
 
 def _line_number(value) -> Optional[int]:
-    """*value* as a line number: an integer as given, a string of digits as the
-    integer it spells, anything else (a bool, a float, text) as no line."""
+    """*value* as a line number: an integer as given, a float of a whole value
+    (``10.0``) and a string of decimal digits as the integer each spells, anything
+    else (a bool, a fraction, text) as no line.
+
+    A value that reads as no line is not the same as an absent one: see
+    :func:`_has_unreadable_line`.
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        text = value.strip()
+        # isdecimal, not isdigit: a superscript digit passes isdigit and int()
+        # refuses it.
+        if text.isdecimal():
+            try:
+                return int(text)
+            except ValueError:
+                # More digits than the interpreter converts.
+                return None
     return None
 
 
-def _extract_line_range(location: Dict) -> tuple:
-    """Extract start and end line from location object."""
+def _raw_line_range(location: Dict) -> tuple:
+    """The start and end line of a location object as written, SARIF form first."""
     # SARIF format
     if "physicalLocation" in location:
         phys_loc = _mapping(location["physicalLocation"])
         if "region" in phys_loc:
             region = _mapping(phys_loc["region"])
-            return _line_number(region.get("startLine")), _line_number(
-                region.get("endLine")
-            )
+            return region.get("startLine"), region.get("endLine")
 
     # Simple format
-    return _line_number(location.get("start_line")), _line_number(
-        location.get("end_line")
+    return location.get("start_line"), location.get("end_line")
+
+
+def _has_unreadable_line(location: Dict) -> bool:
+    """Whether a line the location states reads as no line: a fraction, text, a
+    boolean. Such a location names a line this module cannot place, which is not
+    the same as naming none; read as none, it matched any line in its file."""
+    return any(
+        value is not None and _line_number(value) is None
+        for value in _raw_line_range(location)
     )
+
+
+def _extract_line_range(location: Dict) -> tuple:
+    """Extract start and end line from location object."""
+    start, end = _raw_line_range(location)
+    return _line_number(start), _line_number(end)
