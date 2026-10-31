@@ -612,8 +612,10 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         self,
     ):
         """Before Python 3.12 a path has no ``is_junction``: the file attributes
-        of the path itself carry the reparse-point flag (Windows only; elsewhere
-        the attribute is absent and the answer is False)."""
+        and the reparse tag of the path itself say it (Windows only; elsewhere
+        the attributes are absent and the answer is False). The flag alone is
+        not a junction: a cloud-files placeholder or a projected directory is a
+        reparse point with another tag, and a real directory to remove."""
         import stat
 
         from automated_security_helper.core.resource_management.scan_management import (
@@ -623,11 +625,28 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         class OlderPath:
             pass
 
-        def lstat_with(attributes):
-            return lambda path: SimpleNamespace(st_file_attributes=attributes)
+        mount_point_tag = 0xA0000003
+        cloud_files_tag = 0x9000001A
 
-        flagged = SimpleNamespace(lstat=lstat_with(stat.FILE_ATTRIBUTE_REPARSE_POINT))
-        plain = SimpleNamespace(lstat=lstat_with(stat.FILE_ATTRIBUTE_DIRECTORY))
+        def lstat_with(attributes, **extra):
+            return lambda path: SimpleNamespace(st_file_attributes=attributes, **extra)
+
+        flagged = SimpleNamespace(
+            lstat=lstat_with(
+                stat.FILE_ATTRIBUTE_REPARSE_POINT, st_reparse_tag=mount_point_tag
+            )
+        )
+        another_reparse_point = SimpleNamespace(
+            lstat=lstat_with(
+                stat.FILE_ATTRIBUTE_REPARSE_POINT, st_reparse_tag=cloud_files_tag
+            )
+        )
+        flagged_without_a_tag = SimpleNamespace(
+            lstat=lstat_with(stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        )
+        plain = SimpleNamespace(
+            lstat=lstat_with(stat.FILE_ATTRIBUTE_DIRECTORY, st_reparse_tag=0)
+        )
         linux_like = SimpleNamespace(lstat=lambda path: SimpleNamespace())
 
         def unreadable(path):
@@ -635,6 +654,10 @@ class TestALinkOnTheOutputPathIsNotFollowed:
 
         with patch(f"{_MODULE}.os", flagged):
             assert _is_junction(OlderPath()) is True
+        with patch(f"{_MODULE}.os", another_reparse_point):
+            assert _is_junction(OlderPath()) is False
+        with patch(f"{_MODULE}.os", flagged_without_a_tag):
+            assert _is_junction(OlderPath()) is False
         with patch(f"{_MODULE}.os", plain):
             assert _is_junction(OlderPath()) is False
         with patch(f"{_MODULE}.os", linux_like):

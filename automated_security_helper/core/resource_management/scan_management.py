@@ -120,17 +120,28 @@ def _resolved_output_dir(
     return resolved
 
 
-def _is_junction(path: Path) -> bool:
-    """Whether ``path`` is itself a Windows junction (or another reparse point).
+#: The reparse tag of a mount point, which is what a junction is. ``stat`` defines
+#: the name on Windows builds only, so the value is spelled here (the Windows
+#: header's mount-point tag: 0xA in the top four bits, 3 in the low bits) for the
+#: platforms where a test hands the check a status of its own.
+_IO_REPARSE_TAG_MOUNT_POINT = getattr(
+    stat, "IO_REPARSE_TAG_MOUNT_POINT", (0xA << 28) | 3
+)
 
-    ``Path.is_symlink`` is False for a junction before Python 3.12, while
-    ``Path.resolve`` follows it, so a removal that refuses links by
-    ``is_symlink`` alone deletes the junction's target. ``Path.is_junction``
-    answers it from 3.12; before that the file attributes of the path itself
-    (``lstat``, which does not follow it) carry the reparse-point flag, on
-    Windows only: elsewhere the attribute does not exist and the answer is
-    False. A path that cannot be read answers False; the delete that follows
-    reports it.
+
+def _is_junction(path: Path) -> bool:
+    """Whether ``path`` is itself a Windows junction: a mount-point reparse point.
+
+    ``Path.is_symlink`` is False for a junction, while ``Path.resolve`` follows
+    it, so a removal that refuses links by ``is_symlink`` alone deletes the
+    junction's target. ``Path.is_junction``, which sees it, exists only from
+    3.12; before that the status of the path itself (``lstat``, which does not
+    follow it) carries the reparse-point flag and the reparse tag, on Windows
+    only: elsewhere the attributes do not exist and the answer is False. The
+    flag alone is not enough: a cloud-files placeholder or a projected
+    directory is a reparse point too, and a real directory to remove, so the
+    tag must be the mount-point tag. A path that cannot be read answers False;
+    the delete that follows reports it.
     """
     is_junction = getattr(path, "is_junction", None)
     if is_junction is not None:
@@ -139,10 +150,13 @@ def _is_junction(path: Path) -> bool:
         except OSError:
             return False
     try:
-        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+        status = os.lstat(path)
     except OSError:
         return False
-    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    attributes = getattr(status, "st_file_attributes", 0)
+    if not attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        return False
+    return getattr(status, "st_reparse_tag", 0) == _IO_REPARSE_TAG_MOUNT_POINT
 
 
 def _remove_output_tree(output_dir: Path) -> bool:
@@ -604,8 +618,8 @@ async def cleanup_scan_resources(
                     # what it points to: rmtree refuses a link, so the delete
                     # would fail on every retry and keep the entry for good.
                     # A Windows junction is one too, and is_symlink does not
-                    # see it before Python 3.12 while resolve() follows it, so
-                    # the delete below would take its target.
+                    # see it while resolve() follows it, so the delete below
+                    # would take its target.
                     if output_dir.is_symlink() or _is_junction(output_dir):
                         raise _OutputDirectoryInUse(
                             "the output directory is itself a symbolic link or "
