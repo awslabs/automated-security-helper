@@ -303,12 +303,17 @@ def _probe_process(
     Plain subprocess.run, as for every probe in this module: bounded by
     PROBE_TIMEOUT_SECONDS, one running when an MCP server stops ends on its own
     soon after (subprocess_utils.run_ended_with_the_server is for longer runs).
+    The output is read as text with undecodable bytes replaced: a probe's
+    answer is a reason to show, and a byte in it that is not text (a path in
+    bwrap's own words, say) must not raise out of the probe and fail the spawn
+    whose plan asked.
     """
     return subprocess.run(  # nosec B603 - fixed argv built in this module
         list(argv),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=PROBE_TIMEOUT_SECONDS,
         env=dict(env) if env is not None else _probe_env(),
         check=False,

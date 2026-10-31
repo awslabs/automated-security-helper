@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox import backends
 from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox.backends import (
@@ -137,6 +138,25 @@ def test_exit_failure_reads_stdout_when_stderr_is_only_whitespace():
     assert backends._exit_failure(result("out", "err\n")) == "exit 1: err"
     assert backends._exit_failure(result("", "")) == "exit 1: no output"
     assert backends._exit_failure(subprocess.CompletedProcess([], 0)) is None
+
+
+def test_a_probe_whose_output_is_not_text_still_answers():
+    """A probe's stderr holding a byte no text codec decodes is a reason, not a
+    traceback out of the plan that asked (the per-filesystem overlay probe runs
+    inside plan(), and a UnicodeDecodeError there would fail the spawn).
+
+    The one process this file starts is this interpreter, writing one such byte;
+    no sandbox program is involved.
+    """
+    script = "import sys; sys.stderr.buffer.write(b'refused \\x81\\n'); sys.exit(3)"
+
+    failure = backends._probe_run(
+        [sys.executable, "-c", script], env=snapshot_environ()
+    )
+
+    assert failure is not None
+    assert failure.startswith("exit 3: refused ")
+    assert chr(0xFFFD) in failure
 
 
 def test_a_failed_root_export_is_tried_again(layout, monkeypatch):
