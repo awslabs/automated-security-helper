@@ -446,16 +446,18 @@ def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
     )
     monkeypatch.setattr(executor, "_execute_scanner", fake_execute)
 
-    real_safe = ScannerExecutor._safe_execute_scanner
+    # The start check runs in _start_and_run, before _safe_execute_scanner is
+    # called, so a refused start never reaches _safe_execute_scanner. The note
+    # is made on entry to _start_and_run, where the worker for s1 arrives
+    # before the cancel refusal is raised.
+    real_start = ScannerExecutor._start_and_run
 
     def noting_the_start_check(self, scanner_name, scanner_plugin, scan_targets):
         if scanner_name == "s1":
             s1_reached_the_start_check.set()
-        return real_safe(self, scanner_name, scanner_plugin, scan_targets)
+        return real_start(self, scanner_name, scanner_plugin, scan_targets)
 
-    monkeypatch.setattr(
-        ScannerExecutor, "_safe_execute_scanner", noting_the_start_check
-    )
+    monkeypatch.setattr(ScannerExecutor, "_start_and_run", noting_the_start_check)
 
     real_shutdown = ThreadPoolExecutor.shutdown
 
