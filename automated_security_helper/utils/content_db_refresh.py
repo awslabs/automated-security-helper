@@ -113,6 +113,7 @@ failed rather than run against a database that could not be brought up to date.
 
 from __future__ import annotations
 
+import getpass
 import hashlib
 import ntpath
 import os
@@ -487,18 +488,43 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     that name carries no account: a refresh from before this change and one from
     after it, or two accounts that share the temporary directory, still meet at one
     file, which ``exclusive_lock`` opens read-only when it is another's.
+
+    A lock file this account may neither write nor read (another account created
+    it under a restrictive umask, so it is mode 0600) is the one case the read-only
+    route cannot serve: both of ``exclusive_lock``'s opens are refused and the
+    PermissionError ends the scan. A caller whose cache lock is like that takes the
+    shared temporary-directory lock; when that file is unusable too, the temporary
+    lock named for this account, which this account made itself. Two accounts that
+    both end up there do not serialize against each other, which the unusable
+    file could not do for them either.
     """
     cache = Path(cache_dir)
     probe = cache
     while not probe.exists() and probe.parent != probe:
         probe = probe.parent
+    lock = cache / f".ash-{tool}-update.lock"
     # The ancestor has to be a directory the cache can be created under:
     # ``exclusive_lock`` creates the lock's missing parents, which fails under a
     # regular file at the cache's path, so that case takes the temporary lock.
-    if probe.is_dir() and os.access(probe, os.W_OK):
-        return cache / f".ash-{tool}-update.lock"
+    if probe.is_dir() and os.access(probe, os.W_OK) and _lock_is_openable(lock):
+        return lock
     digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
-    return Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}.lock"
+    shared = Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}.lock"
+    if _lock_is_openable(shared):
+        return shared
+    account = str(os.getuid()) if hasattr(os, "getuid") else getpass.getuser()
+    return Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}-{account}.lock"
+
+
+def _lock_is_openable(lock: Path) -> bool:
+    """Whether ``exclusive_lock`` can open ``lock``: it is missing, or readable.
+
+    Its read-write open needs read and write permission and its read-only fallback
+    needs read permission, so a file this account can read is always openable and
+    one it cannot read never is (a write-only file fails both opens). A dangling
+    link counts as unreadable: the open does not follow links.
+    """
+    return os.access(lock, os.R_OK) or not os.path.lexists(lock)
 
 
 def prepare_content_db(

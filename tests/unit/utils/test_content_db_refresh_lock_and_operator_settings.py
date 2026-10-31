@@ -28,6 +28,8 @@ Every command is captured, never run.
 
 from __future__ import annotations
 
+import errno
+import getpass
 import hashlib
 import logging
 import os
@@ -38,6 +40,7 @@ import pytest
 
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils import content_db_refresh as refresh
+from automated_security_helper.utils import file_lock
 from tests.utils.content_db_opt_out_env import TOOL_UPDATE_OPT_OUT_ENV
 
 pytestmark = pytest.mark.unit
@@ -188,6 +191,72 @@ def test_the_temporary_lock_is_named_for_the_cache_alone(tmp_path):
     lock = refresh.update_lock_path("grype", cache)
     digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
     assert lock.name == f"ash-grype-update-{digest}.lock"
+
+
+def _lock_names(cache):
+    """The cache lock's path, the shared temporary lock's and this account's."""
+    digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
+    account = str(os.getuid()) if hasattr(os, "getuid") else getpass.getuser()
+    temporary = Path(tempfile.gettempdir())
+    return (
+        cache / ".ash-grype-update.lock",
+        temporary / f"ash-grype-update-{digest}.lock",
+        temporary / f"ash-grype-update-{digest}-{account}.lock",
+    )
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="a lock file's mode is read on POSIX, by a caller it binds",
+)
+def test_a_lock_file_this_account_can_neither_read_nor_write_takes_the_temp_lock(
+    tmp_path, captured
+):
+    """A lock file another account created under a restrictive umask (mode 0600)
+    refuses both of ``exclusive_lock``'s opens, read-write and read-only, and the
+    PermissionError ended the scan. Mode 0 stands in for another account's 0600
+    here, since the test cannot create a file this user does not own. The caller
+    leaves the cache for the shared temporary lock, and the refresh runs."""
+    cache = tmp_path / "shared-cache"
+    cache.mkdir()
+    lock, shared, _own = _lock_names(cache)
+    lock.write_text("")
+    lock.chmod(0o000)
+    try:
+        assert refresh.update_lock_path("grype", cache) == shared
+        _prepare("grype", cache, tmp_path)
+        assert [what for _argv, _env, what in captured] == ["grype database"]
+    finally:
+        lock.chmod(0o644)
+
+
+@pytest.mark.parametrize("refused_count", [1, 2])
+def test_a_scan_does_not_end_on_a_lock_file_both_opens_refuse(
+    refused_count, tmp_path, monkeypatch, captured
+):
+    """The two opens in ``file_lock._open_lock_file`` are stood in for, so the
+    test runs as any user on any platform: the cache lock, and then the shared
+    temporary lock, are refused, and each time the refresh takes the next lock
+    down (the shared temporary lock, then the one named for this account) rather
+    than letting the PermissionError out of ``prepare_content_db``."""
+    cache = tmp_path / "shared-cache"
+    cache.mkdir()
+    names = _lock_names(cache)
+    refused = set(names[:refused_count])
+    opened = []
+    real_open = file_lock._open_lock_file
+
+    def _open(path):
+        opened.append(path)
+        if path in refused:
+            raise PermissionError(errno.EACCES, "Permission denied", os.fspath(path))
+        return real_open(path)
+
+    monkeypatch.setattr(file_lock, "_open_lock_file", _open)
+    monkeypatch.setattr(refresh, "_lock_is_openable", lambda path: path not in refused)
+    _prepare("grype", cache, tmp_path)
+    assert opened == [names[refused_count]]
+    assert [what for _argv, _env, what in captured] == ["grype database"]
 
 
 def test_the_grype_refresh_runs_with_the_operators_config(tmp_path, captured):
