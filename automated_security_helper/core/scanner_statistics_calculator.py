@@ -638,6 +638,33 @@ class ScannerStatisticsCalculator:
         )
 
     @staticmethod
+    def graded_level_agrees(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> bool:
+        """True when *scanner_name*'s reports record the level they were graded
+        against and a read-back grades its counts at that same level.
+
+        ``graded_level_recorded`` only says a level was recorded. A read-back
+        grades the counts at whatever threshold the configuration record
+        resolves to now (``get_scanner_threshold_info``), and a literal
+        threshold in that record is graded as written, whatever the reports
+        say. When the two differ (the scan graded at LOW, the record now says
+        MEDIUM), the counts graded at MEDIUM say nothing about whether the gate
+        failed at LOW, so a reading that would override the scan's recorded
+        status on them must not run. When they are the same level, nothing
+        actionable is what the scan itself found.
+        """
+        recorded = ScannerStatisticsCalculator._recorded_graded_level(
+            asharp_model, scanner_name
+        )
+        if recorded is None:
+            return False
+        graded_now, _source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            asharp_model, scanner_name
+        )
+        return isinstance(graded_now, str) and graded_now.upper() == recorded.upper()
+
+    @staticmethod
     def _get_scanner_name_from_result(result: Any) -> Optional[str]:
         """Extract the scanner name from a SARIF result.
 

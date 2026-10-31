@@ -19,7 +19,9 @@ grades the LOW finding actionable, so the row stays FAILED on the counts alone.
 The recorded level is graded only when the configuration record holds the
 threshold as an environment reference (the scan read it from the environment, so
 the record keeps the reference, never the level); a literal threshold in the record
-is graded as written, whatever the reports say.
+is graded as written, whatever the reports say. The flip also needs the recorded
+level to be the one the read-back grades at: a report recording LOW beside a record
+that now says MEDIUM keeps the row FAILED.
 """
 
 from __future__ import annotations
@@ -109,6 +111,18 @@ class TestARecordedFailedStaysWithoutARecordedLevel:
             assert _status(model) == "FAILED"
 
     def test_control_a_literal_threshold_in_the_record_is_graded_as_written(self):
-        """A literal MEDIUM in the record outranks the recorded LOW: the LOW finding
-        is nothing actionable at MEDIUM, so the row flips."""
-        assert _status(_model(recorded_level="LOW")) == "PASSED"
+        """A literal MEDIUM in the record outranks the recorded LOW when the counts
+        are graded: the LOW finding is nothing actionable at MEDIUM."""
+        model = _model(recorded_level="LOW")
+        (metrics,) = [
+            m for m in get_unified_scanner_metrics(model) if m.scanner_name == SCANNER
+        ]
+
+        assert metrics.actionable == 0
+
+    def test_a_recorded_level_that_differs_from_the_one_graded_now_keeps_failed(self):
+        """The scan graded at LOW and failed; the record now says MEDIUM, so the
+        read-back's nothing actionable is a reading at another level and says
+        nothing about the scan's gate. Red at the base: the row flipped PASSED on
+        the presence of a recorded level alone."""
+        assert _status(_model(recorded_level="LOW")) == "FAILED"

@@ -747,12 +747,16 @@ def get_unified_scanner_metrics(
             # in raw_results and no severity_counts, so 0 actionable there says
             # nothing, and the row's FAILED is the only evidence the gate failed.
             # And only when the reports record the level they were graded
-            # against: a results file written before that was recorded is
-            # re-graded here at whatever level the configuration record
-            # resolves to now, so a scan that failed at LOW read as 0
-            # actionable at MEDIUM and its row flipped PASSED, and
-            # _populate_scanner_results_from_unified_metrics then wrote PASSED
-            # over the one record of the scan's own graded status.
+            # against and this read-back grades at that same level: a results
+            # file written before that was recorded is re-graded here at
+            # whatever level the configuration record resolves to now, so a
+            # scan that failed at LOW read as 0 actionable at MEDIUM and its row
+            # flipped PASSED, and _populate_scanner_results_from_unified_metrics
+            # then wrote PASSED over the one record of the scan's own graded
+            # status. Recording a level was not enough: a literal threshold in
+            # the record is graded as written whatever the reports say, so a
+            # report recording LOW beside a record that now says MEDIUM flipped
+            # the same way (graded_level_agrees).
             status = (
                 "PASSED"
                 if getattr(recorded_status, "value", recorded_status)
@@ -760,7 +764,7 @@ def get_unified_scanner_metrics(
                 and not ScannerStatisticsCalculator.dict_counts_unrecorded(
                     asharp_model, scanner_name
                 )
-                and ScannerStatisticsCalculator.graded_level_recorded(
+                and ScannerStatisticsCalculator.graded_level_agrees(
                     asharp_model, scanner_name
                 )
                 else recorded_status
