@@ -65,7 +65,8 @@ target goes up from the directory the link is in, and that directory holds no
 link, so the step there is the same by text and on disk.
 
 Nothing here decides a refusal's wording or its platform gate; the callers do
-(``_running_on_windows`` in the sandbox, ``_on_windows`` in the loader).
+(``_running_on_windows`` in the sandbox; the config loader keeps its own copy of
+the reading and its own gate, ``_on_windows``).
 """
 
 from __future__ import annotations

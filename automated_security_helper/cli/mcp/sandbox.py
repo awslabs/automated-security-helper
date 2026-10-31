@@ -855,10 +855,10 @@ def _running_on_windows() -> bool:
     return os.name == "nt"
 
 
-#: The link-chain reading lives in ``utils/link_chain`` (one copy for this module
-#: and the config loader). The names are kept here for this module's tests; the
-#: hop bound is a module attribute so a test can shorten it, and is passed to the
-#: walk at call time.
+#: The link-chain reading lives in ``utils/link_chain``, which this module calls;
+#: the config loader keeps its own copy. The names are kept here for this
+#: module's tests; the hop bound is a module attribute so a test can shorten it,
+#: and is passed to the walk at call time.
 _LINK_HOPS = LINK_HOPS
 _names_a_windows_share = names_a_windows_share
 _is_a_drive_spelling = is_a_drive_spelling
