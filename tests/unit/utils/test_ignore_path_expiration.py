@@ -378,9 +378,11 @@ class TestMalformedExpiration:
         replaced by the default config, for a discovered file as for a named
         one"), so the scan exits 3 instead of running with the file's ignore
         paths and suppressions switched off, and the refusal names the date
-        rule. Whether such a file should instead be contained (warned about
-        and resolved without) is a design question this test does not decide.
-        A config the operator NAMED with the same date raises the same way;
+        rule. This test pins that refusal: it asserts ``resolve_config`` raises,
+        so a change that contains such a file instead (warns about it and
+        resolves without it) turns it red on purpose. Which of the two a scan
+        should do is a question of contract, not of this test; the pin is here
+        so that the change is made knowingly. A config the operator NAMED with the same date raises the same way;
         the workspace policy's own refusal is TestWorkspacePolicy's subject.
         """
         source = tmp_path / "src"
