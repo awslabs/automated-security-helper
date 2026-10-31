@@ -280,6 +280,26 @@ class TestSummaryStatisticsFollowTheStatus:
         assert summary["failed_scanners"] == 1
         assert summary["skipped_scanners"] == 0
 
+    def test_unusable_target_counters_are_counted_as_an_error_like_the_status(self):
+        """get_scanner_status grades a scanner whose stored counters cannot be read
+        (more failures than attempts) ERROR; the summary counted it passed. Red at
+        the base: error_scanners 0, passed_scanners 1."""
+        model = _model()
+        model.additional_reports = {
+            "tool": {
+                "source": _report(
+                    "tool", targets_attempted=3, targets_failed=5, status="PASSED"
+                )
+            }
+        }
+
+        status = ScannerStatisticsCalculator.get_scanner_status(model, "tool")
+        summary = ScannerStatisticsCalculator.get_summary_statistics(model)
+
+        assert status == "ERROR"
+        assert summary["error_scanners"] == 1
+        assert summary["passed_scanners"] == 0
+
     def test_a_clean_scanner_passed(self):
         """Control."""
         summary = self._summary()

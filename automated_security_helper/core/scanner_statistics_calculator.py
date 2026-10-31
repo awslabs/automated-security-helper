@@ -1969,6 +1969,12 @@ class ScannerStatisticsCalculator:
             - total_findings: Total number of non-suppressed findings
             - total_actionable: Total number of actionable findings
         """
+        # Imported here: unified_metrics imports this module at load.
+        from automated_security_helper.core.unified_metrics import (
+            counters_unusable,
+            target_counts,
+        )
+
         scanner_stats = ScannerStatisticsCalculator.extract_scanner_statistics(
             asharp_model
         )
@@ -1996,14 +2002,17 @@ class ScannerStatisticsCalculator:
             # a scanner that produced no usable results is counted as an
             # error ahead of anything else, findings outrank the did-not-run
             # statuses, and a tracking scanner that attempted nothing is
-            # skipped, not passed. Two things unified_metrics reads that this
-            # count does not: the per-target attempted/failed counters (an
-            # unusable one grades the row ERROR there) and the recorded row's
-            # own status (a recorded SKIPPED stays SKIPPED there), so such a
-            # scanner is counted as passed here and shown as ERROR or SKIPPED
-            # in the metrics table. Read with .get: a stats row from an older
-            # writer may carry neither flag, and absence is "no claim".
-            if stats.get("error", False):
+            # skipped, not passed. The per-target attempted/failed counters
+            # are read too, as get_scanner_status and unified_metrics read
+            # them: an unusable one grades the row ERROR, where this count
+            # said passed for the same scanner. One thing unified_metrics
+            # reads that this count does not: the recorded row's own status
+            # (a recorded SKIPPED stays SKIPPED there). Read with .get: a stats
+            # row from an older writer may carry neither flag, and absence is
+            # "no claim".
+            if stats.get("error", False) or counters_unusable(
+                *target_counts(asharp_model, scanner_name)
+            ):
                 error_count += 1
             elif stats["actionable"] > 0:
                 failed_count += 1
