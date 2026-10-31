@@ -1098,7 +1098,19 @@ def test_an_archive_at_a_deep_path_is_extracted_under_a_name_a_file_system_takes
 ):
     tree = Path(test_plugin_context.source_dir)
     deep = tree.joinpath(*(["d" * 50] * 6))
-    deep.mkdir(parents=True)
+    try:
+        deep.mkdir(parents=True)
+    except OSError as error:
+        # The archive's path inside the tree has to pass 255 bytes for its folded
+        # name to be cut, so the source directory is over 300 characters: a Windows
+        # host without long paths enabled cannot create it (WinError 3), and the
+        # converter is never reached. The cut name itself is pinned without a
+        # directory by test_two_deep_archives_get_two_target_names.
+        if sys.platform != "win32":
+            raise
+        pytest.skip(
+            f"this host cannot create a source path this deep ({type(error).__name__})"
+        )
     archive = deep / "x.zip"
     archive.write_bytes(zip_bytes({"a.py": "x = 1\n"}))
     monkeypatch.setattr(f"{ARCHIVE_MODULE}.scan_set", lambda **kwargs: [str(archive)])
