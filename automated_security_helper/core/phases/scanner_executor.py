@@ -2611,6 +2611,16 @@ class ScannerExecutor:
         every three-argument double of it (the loop caught the TypeError as the
         scanner's failure, and no scanner completed), and a double is still
         called, and still gets its SCAN_START, from here.
+
+        The refusal runs twice on this path: here, ahead of the announcement, and
+        again at the top of ``_safe_execute_scanner``. Between the two the
+        SCAN_START subscribers run, so a cancel that arrives while one of them
+        is running is refused by the second check, after the event went out. That
+        window is open for as long as a subscriber takes, and it is left open on
+        purpose: ScanCancelled ends the scan instead of being recorded as this
+        scanner's failure, so the cost is one SCAN_START with no closing event for
+        a scanner the cancel refused, and the second check is what keeps that
+        scanner from starting.
         """
         self._refuse_start_if_cancelled(scanner_name)
         self._notify_scan_start(scanner_name, scanner_plugin, scan_targets)
