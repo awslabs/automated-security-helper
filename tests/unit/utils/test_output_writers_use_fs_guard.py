@@ -22,7 +22,7 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pytest
 
@@ -71,15 +71,142 @@ def _writes_by_mode(mode) -> bool:
     return mode == "?" or (mode is not None and bool(_WRITE_MODE_CHARS & set(mode)))
 
 
-def _names_a_write_flag(node: ast.AST) -> bool:
-    return any(
-        (isinstance(n, ast.Attribute) and n.attr in _WRITE_FLAGS)
-        or (isinstance(n, ast.Name) and n.id in _WRITE_FLAGS)
-        for n in ast.walk(node)
-    )
+#: Name -> every value bound to it in one scope; None for a binding with no value
+#: to follow (a parameter, a loop variable, an import, a def).
+Bindings = Dict[str, List[Optional[ast.AST]]]
 
 
-def _kind(call: ast.Call):
+def _own_nodes(owner: ast.AST):
+    """Every node of a module or function body that belongs to its own scope.
+
+    A nested function, class or lambda is yielded (its name is bound here) but not
+    entered."""
+    pending = list(ast.iter_child_nodes(owner))
+    while pending:
+        node = pending.pop()
+        yield node
+        if not isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+        ):
+            pending.extend(ast.iter_child_nodes(node))
+
+
+def _bindings(owner: ast.AST) -> Bindings:
+    """The names a module or function binds, with the values it gives them."""
+    found: Bindings = {}
+
+    def bind(target: ast.AST, value: Optional[ast.AST]) -> None:
+        if isinstance(target, ast.Name):
+            found.setdefault(target.id, []).append(value)
+        elif isinstance(target, (ast.Tuple, ast.List, ast.Starred)):
+            for inner in ast.iter_child_nodes(target):
+                bind(inner, None)
+
+    if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        arguments = owner.args
+        for argument in [
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            arguments.vararg,
+            arguments.kwarg,
+        ]:
+            if argument is not None:
+                found.setdefault(argument.arg, []).append(None)
+    for node in _own_nodes(owner):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                bind(target, node.value)
+        elif isinstance(node, ast.AnnAssign):
+            bind(node.target, node.value)
+        elif isinstance(node, ast.AugAssign):
+            bind(node.target, node.value)
+        elif isinstance(node, ast.NamedExpr):
+            bind(node.target, node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            bind(node.target, None)
+        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            bind(node.optional_vars, None)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                found.setdefault((alias.asname or alias.name).split(".")[0], []).append(
+                    None
+                )
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            found.setdefault(node.name, []).append(None)
+    return found
+
+
+def _flag_names(node: ast.AST, frames: List[Bindings], seen=frozenset()):
+    """The ``O_*`` names an os.open flags expression is built from.
+
+    None when any part of it cannot be followed to such a name: a parameter, a call
+    result, an attribute of something else, a number other than 0. Names are followed
+    through the enclosing functions and the module, and a name with several
+    bindings stands for all of them."""
+    if isinstance(node, ast.Constant):
+        return set() if node.value == 0 else None
+    if isinstance(node, ast.Attribute):
+        return {node.attr} if node.attr.startswith("O_") else None
+    if isinstance(node, ast.Name):
+        if node.id in seen:
+            return set()
+        for frame in reversed(frames):
+            if node.id in frame:
+                names: set = set()
+                for value in frame[node.id]:
+                    if value is None:
+                        return None
+                    part = _flag_names(value, frames, seen | {node.id})
+                    if part is None:
+                        return None
+                    names |= part
+                return names
+        return {node.id} if node.id.startswith("O_") else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        left = _flag_names(node.left, frames, seen)
+        right = _flag_names(node.right, frames, seen)
+        return None if left is None or right is None else left | right
+    if isinstance(node, ast.IfExp):
+        body = _flag_names(node.body, frames, seen)
+        other = _flag_names(node.orelse, frames, seen)
+        return None if body is None or other is None else body | other
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) in (2, 3)
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+        and node.args[1].value.startswith("O_")
+    ):
+        names = {node.args[1].value}
+        if len(node.args) == 3:
+            default = _flag_names(node.args[2], frames, seen)
+            if default is None:
+                return None
+            names |= default
+        return names
+    return None
+
+
+def _may_write_by_flags(call: ast.Call, frames: List[Bindings]) -> bool:
+    """True unless the os.open flags are provably built from read-only ``O_*`` names.
+
+    Flags the detector cannot follow count as a write: a call that is not seen is the
+    failure that lets an unguarded write in, and a read it cannot prove is one is listed
+    in NOT_WRITES with why."""
+    flags = call.args[1] if len(call.args) > 1 else None
+    for keyword in call.keywords:
+        if keyword.arg == "flags":
+            flags = keyword.value
+    if flags is None:
+        return True
+    names = _flag_names(flags, frames)
+    return names is None or bool(names & _WRITE_FLAGS)
+
+
+def _kind(call: ast.Call, frames: List[Bindings]):
     """What kind of write ``call`` is, or None."""
     func = call.func
     if isinstance(func, ast.Name):
@@ -97,10 +224,7 @@ def _kind(call: ast.Call):
         if owner in ("io", "codecs") and _writes_by_mode(_literal_mode(call, 1)):
             return "open"
         if owner == "os":
-            flags = call.args[1] if len(call.args) > 1 else None
-            return (
-                "os.open" if flags is not None and _names_a_write_flag(flags) else None
-            )
+            return "os.open" if _may_write_by_flags(call, frames) else None
         # Path.open(mode)
         if _writes_by_mode(_literal_mode(call, 0)):
             return "Path.open"
@@ -119,18 +243,21 @@ def write_sites(source: str, module: str) -> List[Site]:
     tree = ast.parse(source)
     sites: List[Site] = []
 
-    def visit(node: ast.AST, scope: List[str]) -> None:
+    def visit(node: ast.AST, scope: List[str], frames: List[Bindings]) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                visit(child, [*scope, child.name])
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                visit(child, [*scope, child.name], [*frames, _bindings(child)])
+                continue
+            if isinstance(child, ast.ClassDef):
+                visit(child, [*scope, child.name], frames)
                 continue
             if isinstance(child, ast.Call):
-                kind = _kind(child)
+                kind = _kind(child, frames)
                 if kind is not None:
                     sites.append((module, ".".join(scope) or "<module>", kind))
-            visit(child, scope)
+            visit(child, scope, frames)
 
-    visit(tree, [])
+    visit(tree, [], [_bindings(tree)])
     return sites
 
 
@@ -157,6 +284,15 @@ _ATOMIC = (
     "guarded directory's descriptor below an output directory and by name outside"
 )
 _FS_GUARD = "fs_guard itself: open() only for a path below no registered root"
+_FS_GUARD_OPEN_REGULAR = (
+    "fs_guard itself: the file open_for_write opens below a registered root, "
+    "relative to the guarded directory's descriptor (or by name where there is "
+    "none), then checked on the descriptor: a regular file with one name"
+)
+_WRITE_PROBE = (
+    "a probe file made in the directory being checked (O_CREAT | O_EXCL, not "
+    "through a link, mode 0600) and removed at once"
+)
 _MCP_SESSIONS = (
     "the MCP server's workspace root: session markers and the lock files that "
     "record live servers and scans"
@@ -217,10 +353,9 @@ _MCP_SESSION_WORKSPACE = (
 #: (module, function, kind) -> (number of such calls, where they write). Each writes
 #: outside every output directory, or is the guarded implementation itself.
 WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
-    # Two, and only one writes: the file `target.open("wb")` creates, and the
-    # urllib opener's `opener.open(url, ...)`, a network call that this detector
-    # cannot tell from a `Path.open` with a mode it cannot read.
-    (_INSTALLER, "download", "Path.open"): (2, _INSTALLS),
+    # Of the two Path.open calls in `download`, this one writes: the file
+    # `target.open("wb")` creates. The other is in NOT_WRITES.
+    (_INSTALLER, "download", "Path.open"): (1, _INSTALLS),
     (_INSTALLER, "extract_member", "Path.open"): (4, _INSTALLS),
     (_INSTALLER, "_prepare_executable", "shutil.copyfile"): (1, _INSTALLS),
     (_INSTALLER, "_commit_executable", "os.replace"): (1, _INSTALLS),
@@ -248,6 +383,10 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     ),
     (f"{_ASH}/config/ash_config.py", "AshConfig.save", "open"): (1, _CONFIG),
     (f"{_ASH}/config/ash_config.py", "AshConfig.save", "write_text"): (1, _CONFIG),
+    (f"{_ASH}/config/ash_config.py", "_staged_beside", "os.open"): (
+        1,
+        _CONFIG_STAGED,
+    ),
     (f"{_ASH}/config/ash_config.py", "_write_checked", "os.fdopen"): (
         1,
         _CONFIG_STAGED,
@@ -299,12 +438,6 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (f"{_ASH}/cli/mcp/source_delivery.py", "_append_zip_chunk", "Path.open"): (
         1,
         "the MCP upload workspace, where a client's source is assembled",
-    ),
-    # Not a write: `zf.open(info)` opens a zip member for reading, but the detector
-    # cannot read the mode of an open() whose first argument is not a literal.
-    (f"{_ASH}/cli/mcp/source_delivery.py", "_finalize_zip_upload", "Path.open"): (
-        1,
-        "nothing: it reads a member of the uploaded zip",
     ),
     (f"{_ASH}/cli/mcp/session_paths.py", "mark_session_workspace", "touch"): (
         1,
@@ -367,11 +500,6 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _MCP_PROFILE_SNAPSHOT,
     ),
-    (f"{_ASH}/cli/mcp_server.py", "_keep_stdout_off_the_wire", "os.open"): (
-        1,
-        _STDOUT_DIVERSION,
-    ),
-    (f"{_ASH}/cli/report.py", "report_command", "os.open"): (1, _STDOUT_DIVERSION),
     (
         f"{_ASH}/plugin_modules/ash_builtin/converters/jupyter_converter.py",
         "JupyterConverter._stage_notebook",
@@ -390,6 +518,10 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "the JSON schemas in the source checkout, a development step",
     ),
     (f"{_ASH}/utils/atomic_write.py", "_replace", "os.replace"): (1, _ATOMIC),
+    (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_atomic_write", "os.open"): (
+        2,
+        _ATOMIC,
+    ),
     (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_atomic_write", "os.fdopen"): (
         1,
         _ATOMIC,
@@ -399,6 +531,11 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         _ATOMIC,
     ),
     (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_write", "open"): (1, _FS_GUARD),
+    (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_write", "os.open"): (1, _FS_GUARD),
+    (f"{_ASH}/utils/sandbox/fs_guard.py", "_open_regular", "os.open"): (
+        2,
+        _FS_GUARD_OPEN_REGULAR,
+    ),
     (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_write", "os.fdopen"): (
         2,
         _FS_GUARD,
@@ -420,19 +557,21 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "os.replace",
     ): (1, _OPERATOR_DESTINATION),
     (f"{_ASH}/utils/cdk_nag_worker.py", "main", "open"): (1, _CDK_NAG_CHILD),
+    (f"{_ASH}/utils/tool_config_dir.py", "write_tool_config", "os.open"): (
+        2,
+        _TOOL_CONFIG_DIR,
+    ),
     (f"{_ASH}/utils/tool_config_dir.py", "write_tool_config", "os.fdopen"): (
         1,
         _TOOL_CONFIG_DIR,
     ),
-    # The os.open there takes its flags from a local name, which the detector does
-    # not follow, so only the os.fdopen is found.
-    (f"{_ASH}/utils/detect_secrets_worker.py", "_write_output", "os.fdopen"): (
+    (f"{_ASH}/utils/detect_secrets_worker.py", "_write_output", "os.open"): (
         1,
         _DETECT_SECRETS_CHILD,
     ),
-    (f"{_ASH}/utils/cdk_nag_wrapper.py", "run_cdk_nag_against_cfn_template", "open"): (
+    (f"{_ASH}/utils/detect_secrets_worker.py", "_write_output", "os.fdopen"): (
         1,
-        "os.devnull",
+        _DETECT_SECRETS_CHILD,
     ),
     (f"{_ASH}/utils/download_utils.py", "_extract_single_member", "Path.open"): (
         2,
@@ -466,9 +605,15 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the install receipts under ASH's home",
     ),
+    # Two opens, both with O_CREAT: read-write first, read-only where the account
+    # may not write a lock file another account made.
     (f"{_ASH}/utils/file_lock.py", "_open_lock_file", "os.open"): (
-        1,
+        2,
         "lock files in the content-database cache",
+    ),
+    (f"{_ASH}/utils/directory_refusals.py", "_write_refused", "os.open"): (
+        1,
+        _WRITE_PROBE,
     ),
     (f"{_ASH}/utils/pre_installed_tool.py", "_stage_nix_metadata", "shutil.copyfile"): (
         1,
@@ -490,6 +635,10 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (_INSTALLER, "install_bundle", "os.replace"): (2, _INSTALLS),
     (_INSTALLER, "install_bundle", "write_text"): (1, _INSTALLS),
     (f"{_ASH}/utils/rules_bundles.py", "extract_bundle", "Path.open"): (
+        1,
+        _RULES_INSTALLS,
+    ),
+    (f"{_ASH}/utils/rules_bundles.py", "extract_bundle", "os.open"): (
         1,
         _RULES_INSTALLS,
     ),
@@ -516,6 +665,60 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "_write_private_copy",
         "os.fdopen",
     ): (1, _TOOL_CONFIG_DIR),
+}
+
+
+_NULL_DEVICE = "the null device (os.devnull): no file is written"
+_READS_WITH_COMPUTED_FLAGS = (
+    "nothing: a read (O_RDONLY) whose other flags are added from names looked up "
+    "at run time, which the detector cannot follow"
+)
+
+#: (module, function, kind) -> (number of such calls, why none of them writes a
+#: file). Calls the detector cannot tell from a write: an open() whose mode it cannot
+#: read, and an os.open() whose flags it cannot follow to read-only ``O_*`` names.
+#: Kept apart from the writes so that table lists only real writes, and limited to the
+#: three kinds that can be mistaken for one (see the test of the kinds below): a
+#: ``write_text`` or an ``os.replace`` is never a read, so none may be listed here.
+NOT_WRITES: Dict[Site, Tuple[int, str]] = {
+    # The other Path.open in `download`: the urllib opener's `opener.open(url, ...)`,
+    # a network call.
+    (_INSTALLER, "download", "Path.open"): (
+        1,
+        "nothing: the urllib opener's opener.open(url, ...), a network call",
+    ),
+    # `zf.open(info)` opens a zip member for reading; the detector cannot read the
+    # mode of an open() whose first argument is not a literal.
+    (f"{_ASH}/cli/mcp/source_delivery.py", "_finalize_zip_upload", "Path.open"): (
+        1,
+        "nothing: it reads a member of the uploaded zip",
+    ),
+    (f"{_ASH}/cli/mcp_server.py", "_keep_stdout_off_the_wire", "os.open"): (
+        1,
+        _STDOUT_DIVERSION,
+    ),
+    (f"{_ASH}/cli/report.py", "report_command", "os.open"): (1, _STDOUT_DIVERSION),
+    (f"{_ASH}/utils/cdk_nag_wrapper.py", "run_cdk_nag_against_cfn_template", "open"): (
+        1,
+        _NULL_DEVICE,
+    ),
+    (f"{_ASH}/cli/entrypoint.py", "_reserve_descriptor", "os.open"): (
+        1,
+        _NULL_DEVICE + "; the caller passes the flags",
+    ),
+    (f"{_ASH}/cli/mcp/__init__.py", "_auth_value_from_file", "os.open"): (
+        1,
+        _READS_WITH_COMPUTED_FLAGS,
+    ),
+    (f"{_ASH}/cli/mcp/progress_monitor.py", "_read_scanner_severity", "os.open"): (
+        1,
+        _READS_WITH_COMPUTED_FLAGS,
+    ),
+    # Both opens are of a directory for reading; the flags take the caller's extra.
+    (f"{_ASH}/utils/scanned_tree.py", "_open_directory", "os.open"): (
+        2,
+        "nothing: O_RDONLY on a directory, with a caller's extra flags",
+    ),
 }
 
 
@@ -570,29 +773,133 @@ def test_the_detector_passes_the_guarded_writes_and_reads():
     assert write_sites(source, "probe.py") == []
 
 
+def test_an_os_open_whose_flags_it_cannot_follow_counts_as_a_write():
+    """Flags held in a parameter, built by a call or looked up at run time are not
+    shown to be read-only, so the open is found; at the base only a literal
+    ``os.O_*`` expression was read and every one of these was passed over."""
+    source = (
+        "import os\n"
+        "def from_a_parameter(path, flags):\n"
+        "    return os.open(path, flags)\n"
+        "def from_a_call(path):\n"
+        "    return os.open(path, compute())\n"
+        "def looked_up_at_run_time(path, names):\n"
+        "    flags = os.O_RDONLY\n"
+        "    for name in names:\n"
+        "        flags |= getattr(os, name, 0)\n"
+        "    return os.open(path, flags)\n"
+        "def by_keyword(path, flags):\n"
+        "    return os.open(path, flags=flags)\n"
+        "def a_number(path):\n"
+        "    return os.open(path, 577)\n"
+    )
+
+    found = write_sites(source, "probe.py")
+
+    assert sorted(function for _module, function, _kind in found) == sorted(
+        [
+            "from_a_parameter",
+            "from_a_call",
+            "looked_up_at_run_time",
+            "by_keyword",
+            "a_number",
+        ]
+    )
+    assert {kind for _module, _function, kind in found} == {"os.open"}
+
+
+def test_an_os_open_whose_flags_are_followed_to_a_write_flag_is_found():
+    """A write flag held in a name counts, a local one and a module's alike, and one
+    binding of the name among several is enough."""
+    source = (
+        "import os\n"
+        "_CREATE = os.O_WRONLY | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0)\n"
+        "def from_a_module_constant(path):\n"
+        "    return os.open(path, _CREATE)\n"
+        "def from_a_local(path):\n"
+        "    flags = os.O_RDONLY\n"
+        "    flags |= os.O_CREAT\n"
+        "    return os.open(path, flags)\n"
+        "def one_binding_of_two(path, exclusive):\n"
+        "    flags = os.O_RDONLY\n"
+        "    if exclusive:\n"
+        "        flags = os.O_RDWR | os.O_EXCL\n"
+        "    return os.open(path, flags, 0o600)\n"
+        "def through_a_conditional(path, writing):\n"
+        "    return os.open(path, os.O_WRONLY if writing else os.O_RDONLY)\n"
+    )
+
+    found = write_sites(source, "probe.py")
+
+    assert sorted(function for _module, function, _kind in found) == sorted(
+        [
+            "from_a_module_constant",
+            "from_a_local",
+            "one_binding_of_two",
+            "through_a_conditional",
+        ]
+    )
+
+
+def test_an_os_open_whose_flags_are_followed_to_read_only_names_is_not_found():
+    source = (
+        "import os\n"
+        "_READ = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_CLOEXEC', 0)\n"
+        "_DIRECTORY = getattr(os, 'O_DIRECTORY', 0)\n"
+        "def from_a_module_constant(path):\n"
+        "    return os.open(path, _READ)\n"
+        "def from_names(path):\n"
+        "    return os.open(path, os.O_RDONLY | _DIRECTORY)\n"
+        "def from_a_local(path, dir_fd):\n"
+        "    flags = os.O_RDONLY\n"
+        "    flags |= _DIRECTORY\n"
+        "    return os.open(path, flags, dir_fd=dir_fd)\n"
+        "def a_name_that_rebinds_itself(path):\n"
+        "    flags = os.O_RDONLY\n"
+        "    flags = flags | _DIRECTORY\n"
+        "    return os.open(path, flags=flags)\n"
+        "def a_read_through_the_path_flag(path):\n"
+        "    return os.open(path, os.O_PATH | os.O_CLOEXEC)\n"
+    )
+
+    assert write_sites(source, "probe.py") == []
+
+
 def test_every_write_in_the_package_is_guarded_or_listed():
     found = _package_sites()
-    listed = Counter(
-        {
-            site: count
-            for site, (count, _where) in WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY.items()
-        }
-    )
+    listed = Counter()
+    for table in (WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY, NOT_WRITES):
+        for site, (count, _where) in table.items():
+            listed[site] += count
 
     unlisted = sorted((found - listed).elements())
     stale = sorted((listed - found).elements())
 
     assert not unlisted, (
-        "These calls write a file without fs_guard. Write them with "
+        "These calls write a file without fs_guard, or open one in a way the "
+        "detector cannot show to be a read. Write them with "
         "fs_guard.open_for_write, fs_guard.open_for_atomic_write or "
-        "write_text_atomically, or, if one writes "
-        "outside every output directory, add it to "
-        f"WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY with where it writes: {unlisted}"
+        "write_text_atomically; if one writes outside every output directory, add it "
+        "to WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY with where it writes; if it writes "
+        f"nothing, add it to NOT_WRITES with why: {unlisted}"
     )
-    assert not stale, f"Listed writes that no longer exist: {stale}"
+    assert not stale, f"Listed calls that no longer exist: {stale}"
 
 
 @pytest.mark.parametrize("site", sorted(WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY))
 def test_each_listed_write_says_where_it_writes(site):
     count, where = WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY[site]
     assert count >= 1 and where.strip(), site
+    assert not where.startswith("nothing"), (
+        f"{site} says it writes nothing; it belongs in NOT_WRITES"
+    )
+
+
+@pytest.mark.parametrize("site", sorted(NOT_WRITES))
+def test_each_listed_non_write_says_why_and_is_a_kind_that_can_be_mistaken(site):
+    count, why = NOT_WRITES[site]
+    assert count >= 1 and why.strip(), site
+    assert site[2] in {"open", "Path.open", "os.open"}, (
+        f"{site}: a {site[2]} is a write whatever it is called on, so it cannot be "
+        "listed as a call that writes nothing"
+    )
