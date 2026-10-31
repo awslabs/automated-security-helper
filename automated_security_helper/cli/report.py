@@ -741,8 +741,12 @@ def report_command(
     # A place the user cannot search is neither found nor absent: it is not a
     # second results file, and it is not skipped either. When nothing else is
     # found the first such place is read, so the open that follows says why it
-    # cannot be (exit 1); when a results file is found elsewhere it is said,
-    # below, that the place was not searched.
+    # cannot be (exit 1). When a results file is found elsewhere, the places are
+    # ranked as listed: one that cannot be searched below the file found is said
+    # to be unsearched below, and the report is made on the file found; one that
+    # ranks above it may hold the scan this command is meant to report on, and
+    # reporting on the lower file instead would be a stale report with exit 0, so
+    # it is refused below.
     presences = [(path, _presence(path)) for path in results_file_paths]
     found_results_files = [path for path, found in presences if found]
     unsearched_results_paths = [path for path, found in presences if found is None]
@@ -1006,6 +1010,25 @@ def report_command(
             listed,
         )
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+    if found_results_files:
+        outranking = [
+            path
+            for path in unsearched_results_paths
+            if results_file_paths.index(path)
+            < results_file_paths.index(found_results_files[0])
+        ]
+        if outranking:
+            # A usage error, like the refusal above: the operator makes the
+            # directory searchable, or names the one that holds the results.
+            _print_refusal(
+                "[red]Error: {} cannot be searched, and a scan results file there, "
+                "if one exists, ranks above {}, which would otherwise be reported "
+                "on. Make the directory searchable, or point --output-dir at the "
+                "directory that holds the one to report on.[/red]",
+                ", ".join(path.as_posix() for path in outranking),
+                found_results_files[0].as_posix(),
+            )
+            raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     if results_file is None:
         searched = ", ".join(path.as_posix() for path in results_file_paths)
         missing = (
