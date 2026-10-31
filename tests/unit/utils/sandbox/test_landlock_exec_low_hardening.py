@@ -308,9 +308,22 @@ def test_the_reap_loop_returns_what_outlived_the_deadline(monkeypatch):
     assert landlock_exec._reap_leftovers(lambda: 1.0) == [777]
     assert killed and killed[0][0] == 777 and os.getpid() in killed[0][1]
 
-    monkeypatch.setattr(landlock_exec, "_descendants", lambda until=None: [])
-    clock.monotonic = lambda: 0.0
+    # Nothing is left: REAP_QUIET_PASSES empty passes in a row end the loop. The
+    # clock moves on at every read, so a loop that lost that rule ends at the
+    # deadline instead of hanging the run; the number of passes tells the two apart.
+    walks = []
+    monkeypatch.setattr(
+        landlock_exec, "_descendants", lambda until=None: walks.append(until) or []
+    )
+    now = [0.0]
+
+    def advancing() -> float:
+        now[0] += 0.01
+        return now[0]
+
+    clock.monotonic = advancing
     assert landlock_exec._reap_leftovers(lambda: 1.0) == []
+    assert len(walks) == landlock_exec.REAP_QUIET_PASSES
 
 
 def test_a_stop_is_passed_on_to_the_scanners_group_and_a_lingering_one_is_killed(
