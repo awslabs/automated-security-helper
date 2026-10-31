@@ -128,28 +128,47 @@ def _start_scan_task(
     scan_id: str,
     runner: Any,
     *,
-    ran: Optional[Dict[str, bool]] = None,
     if_never_run: Optional[Callable[[], None]] = None,
 ) -> None:
     """Start ``runner``, a scan's coroutine, as the scan's task.
 
-    ``ran`` is a marker the runner sets as its first step (``_run_scan_async``),
-    and ``if_never_run`` what to do when the task ends with it unset. A task
-    cancelled before the loop first ran it (the server stopping right after the
-    start) runs no line of the coroutine, its ``finally`` included, so what that
-    ``finally`` would have released -- the session claim, the count against the
-    per-session limit, the PENDING entry -- is released by this callback instead.
+    ``if_never_run`` is what to do when the task ends without the runner having
+    run a line. A task cancelled before the loop first ran it (the server
+    stopping right after the start) runs no line of the coroutine, its
+    ``finally`` included, so what that ``finally`` would have released -- the
+    session claim, the count against the per-session limit, the PENDING entry
+    -- is released by this callback instead.
+
+    Whether the runner ran is this function's own reading: the runner is started
+    through a wrapper that marks the start as its first step, before the first
+    line of the runner, so the mark cannot be left out. Handed in as a marker
+    the caller also had to pass to the runner, a caller that passed it here
+    alone would have had the callback release, a second time, everything a
+    runner that did run released itself.
     """
-    task = asyncio.create_task(runner)
+    ran = False
+
+    async def _mark_then_run() -> None:
+        nonlocal ran
+        ran = True
+        await runner
+
+    task = asyncio.create_task(_mark_then_run())
     _scan_tasks[task] = scan_id
     task.add_done_callback(lambda done: _scan_tasks.pop(done, None))
-    if ran is not None and if_never_run is not None:
 
-        def _release_if_the_runner_never_ran(done: "asyncio.Task[None]") -> None:
-            if not ran.get("value"):
-                if_never_run()
+    def _release_if_the_runner_never_ran(done: "asyncio.Task[None]") -> None:
+        if ran:
+            return
+        # The runner was never awaited: closed here, so nothing warns of an
+        # un-awaited coroutine when it is collected.
+        close = getattr(runner, "close", None)
+        if close is not None:
+            close()
+        if if_never_run is not None:
+            if_never_run()
 
-        task.add_done_callback(_release_if_the_runner_never_ran)
+    task.add_done_callback(_release_if_the_runner_never_ran)
     # The scan's log scope, which the task inherits from this context, is held
     # until the task is done, however it ends: a runner cancelled before the
     # loop first ran it never reaches its own cleanup, and an open scope the
@@ -2320,14 +2339,14 @@ async def mcp_scan_directory(
                     )
                     _logger.warning(f"Scan {scan_id}: {warnings[-1]}")
 
-            # Start the scan process asynchronously. The runner's first step
-            # marks ``runner_ran``; a task cancelled before the loop first ran
-            # it never takes that step, nor its finally, so the task's done
-            # callback gives back what the runner would have: the registered
-            # entry, closed as a scan that did not start, with the previous
-            # results set aside above put back; the count and the claim; and
-            # the end of a session that arrived while the claim was held.
-            runner_ran: Dict[str, bool] = {"value": False}
+            # Start the scan process asynchronously. A task cancelled before
+            # the loop first ran it runs no line of the runner, its finally
+            # included, so the task's done callback gives back what the runner
+            # would have (_start_scan_task reads whether the runner ran): the
+            # registered entry, closed as a scan that did not start, with the
+            # previous results set aside above put back; the count and the
+            # claim; and the end of a session that arrived while the claim was
+            # held.
 
             def _give_back_what_the_runner_never_took() -> None:
                 _give_back_a_scan_that_did_not_start(
@@ -2365,9 +2384,7 @@ async def mcp_scan_directory(
                     scan_counted=counted,
                     scan_timeout_seconds=limits.scan_timeout_seconds or None,
                     environment_values=environment_values,
-                    ran=runner_ran,
                 ),
-                ran=runner_ran,
                 if_never_run=_give_back_what_the_runner_never_took,
             )
             task_started = True
@@ -2728,7 +2745,6 @@ async def _run_scan_async(
     scan_counted: Optional[Any] = None,
     scan_timeout_seconds: Optional[float] = None,
     environment_values: Tuple[str, ...] = (),
-    ran: Optional[Dict[str, bool]] = None,
 ) -> None:
     """Run an ASH scan asynchronously, then release what it held of its session.
 
@@ -2738,13 +2754,11 @@ async def _run_scan_async(
     ``scan_counted``: what counted this scan against the per-session limit (its
     ``MCPSession``, or for a caller with no session the shared
     ``sessions.ScanCount``), uncounted at the same time
-    (:func:`_release_what_the_scan_held`). ``ran`` is the marker
-    :func:`_start_scan_task` reads when the task is done: set here first, so a
-    task cancelled before this coroutine ran a line, whose finally below never
-    runs, is told apart from one that ran and released these itself.
+    (:func:`_release_what_the_scan_held`). A task cancelled before this
+    coroutine ran a line, whose finally below never runs, is told apart from
+    one that ran and released these itself by :func:`_start_scan_task`, which
+    marks the start before the runner's first line.
     """
-    if ran is not None:
-        ran["value"] = True
     try:
         await _run_scan(
             scan_id=scan_id,
