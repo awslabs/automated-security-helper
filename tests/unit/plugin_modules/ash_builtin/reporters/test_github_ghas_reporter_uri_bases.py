@@ -112,3 +112,39 @@ class TestMultiRunBaseIds:
         ]
 
         assert reporter.report(_model(*runs)) is None
+
+
+class TestOnlyReferencedBasesAreDeclared:
+    def test_a_base_no_result_refers_to_is_not_declared(self, reporter):
+        run = _run("R1", {"SRCROOT": "file:///repo/", "UNUSED": "file:///unused/"})
+
+        doc = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        assert doc["originalUriBaseIds"] == {"SRCROOT": {"uri": "file:///repo/"}}
+
+    def test_the_base_a_used_base_is_anchored_to_is_declared_with_it(self, reporter):
+        run = _run(
+            "R1", {"SRCROOT": "src/", "REPOROOT": "file:///repo/", "OTHER": "x/"}
+        )
+        run.originalUriBaseIds["SRCROOT"] = ArtifactLocation(
+            uri="src/", uriBaseId="REPOROOT"
+        )
+
+        doc = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        assert doc["originalUriBaseIds"] == {
+            "SRCROOT": {"uri": "src/", "uriBaseId": "REPOROOT"},
+            "REPOROOT": {"uri": "file:///repo/"},
+        }
+
+    def test_runs_that_disagree_about_an_unused_base_still_share_a_document(
+        self, reporter
+    ):
+        runs = [
+            _run("R1", {"SRCROOT": "file:///repo/", "UNUSED": "file:///a/"}),
+            _run("R2", {"SRCROOT": "file:///repo/", "UNUSED": "file:///b/"}),
+        ]
+
+        doc = json.loads(reporter.report(_model(*runs)))["runs"][0]
+
+        assert doc["originalUriBaseIds"] == {"SRCROOT": {"uri": "file:///repo/"}}

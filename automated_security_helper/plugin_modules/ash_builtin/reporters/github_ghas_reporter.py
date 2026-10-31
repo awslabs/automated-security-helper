@@ -742,6 +742,21 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             )
 
     @staticmethod
+    def _used_uri_base_ids(run: Any) -> set:
+        """The base ids the locations of *run*'s results refer to: the ones the
+        file writes on a location (:meth:`_build_slim_locations`)."""
+        used: set = set()
+        for result in getattr(run, "results", None) or []:
+            for location in getattr(result, "locations", None) or []:
+                physical = getattr(location, "physicalLocation", None)
+                physical = getattr(physical, "root", physical)
+                artifact = getattr(physical, "artifactLocation", None)
+                base_id = getattr(artifact, "uriBaseId", None)
+                if base_id:
+                    used.add(str(base_id))
+        return used
+
+    @staticmethod
     def _merged_uri_base_ids(
         runs: list, project_paths: Dict[int, Optional[str]]
     ) -> Optional[Dict[str, Dict[str, str]]]:
@@ -751,16 +766,34 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         A location keeps its ``uriBaseId`` when its run is not rebased below a
         workspace root, so the table must declare every base such a run uses; it
         used to be written for a one-run document only, and a multi-run
-        document's unrebased runs referred to bases it never declared. Two runs
-        declaring one key differently cannot share a table: None refuses the
-        document, naming the key (the same refusal as an unplaceable project
-        path).
+        document's unrebased runs referred to bases it never declared. Only the
+        bases a result refers to are declared, with the base each of them is
+        anchored to: a scanner's table can list bases none of its results use,
+        and those added nothing to the file but a way for two runs to disagree.
+        Two runs declaring one key differently cannot share a table: None
+        refuses the document, naming the key (the same refusal as an
+        unplaceable project path).
         """
         merged: Dict[str, Dict[str, str]] = {}
         for index, run in enumerate(runs):
             if project_paths.get(index):
                 continue
-            for key, entry in GHASReporter._original_uri_base_ids(run).items():
+            declared = GHASReporter._original_uri_base_ids(run)
+            needed: set = set()
+            pending = [
+                key for key in GHASReporter._used_uri_base_ids(run) if key in declared
+            ]
+            while pending:
+                key = pending.pop()
+                if key in needed:
+                    continue
+                needed.add(key)
+                anchor = declared[key].get("uriBaseId")
+                if anchor in declared:
+                    pending.append(anchor)
+            for key, entry in declared.items():
+                if key not in needed:
+                    continue
                 if merged.setdefault(key, entry) != entry:
                     ASH_LOGGER.error(
                         f"The GHAS report is not written: two runs declare the "
