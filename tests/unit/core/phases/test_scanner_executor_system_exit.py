@@ -39,6 +39,9 @@ from automated_security_helper.core.enums import (
     ScannerToolType,
 )
 from automated_security_helper.core.phases import scanner_executor
+from automated_security_helper.core.phases.scan_result_processor import (
+    ScanResultProcessor,
+)
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -355,6 +358,10 @@ def test_a_parallel_run_records_the_exiting_scanner_and_the_clean_one(
     exiting = _scanner(plugin_context, SystemExit(3))
     clean = _scanner(plugin_context, SystemExit(0))
     clean.scan = lambda *a, **k: {"findings": []}  # type: ignore[method-assign]
+    # The executor files nothing without a results processor (its default is a
+    # no-op that returns the results as given), so the rows asserted on below
+    # would never reach ``additional_reports``. The product wires the real
+    # processor in (ScanPhase); the test does the same.
     executor = ScannerExecutor(
         plugin_context=plugin_context,
         progress_display=MagicMock(),
@@ -363,6 +370,9 @@ def test_a_parallel_run_records_the_exiting_scanner_and_the_clean_one(
             ("clean", clean, _targets(plugin_context)),
         ],
         max_workers=2,
+        process_results_fn=ScanResultProcessor(
+            plugin_context=plugin_context
+        ).process_container,
     )
 
     results = executor.run_parallel(AshAggregatedResults())
