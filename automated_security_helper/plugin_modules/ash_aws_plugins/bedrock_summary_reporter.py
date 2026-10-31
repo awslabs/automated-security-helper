@@ -282,9 +282,12 @@ def _inline_as_written(source: str, content: Optional[str] = None) -> str:
     reading the spans, so a span that crosses a column boundary ends there and the
     HTML after the pipe is outside any span. There the span's pipes are written
     as "\\|", which GFM keeps inside the column and inside the span, and its "<" as
-    text, so the HTML stays inert in a viewer that does not read the escape. A
-    span holding a pipe on any other line is code to every viewer and is left
-    as written: entities are not decoded inside a code span, so a "&lt;" written
+    text, so the HTML stays inert in a viewer that does not read the escape. The
+    same goes for a span that holds a line break and touches a table row on any
+    of its lines, however it starts: the viewer cuts it at the row's end. A span
+    holding a pipe, or a line break, away from every table row is code to every
+    viewer and is left as written, as is a span on one row with no pipe:
+    entities are not decoded inside a code span, so a "&lt;" written
     there would show as the entity. The cost is confined to table rows.
 
     *source* is the block's raw lines, container markers included, so the result
@@ -307,8 +310,14 @@ def _inline_as_written(source: str, content: Optional[str] = None) -> str:
     for start, end in spans:
         pieces.append(_html_as_text(source[position:start]))
         span = source[start:end]
-        on_table_row = table_rows[source.count("\n", 0, start)]
-        if "|" in span and on_table_row:
+        # Every line the span touches, not only the one it starts on: the viewer
+        # splits each table row into columns before it reads spans, so a span that
+        # starts above a table, or on one row and ends on another, is cut at the
+        # row's end and its HTML is outside any span.
+        first_line = source.count("\n", 0, start)
+        last_line = source.count("\n", 0, end)
+        on_table_row = any(table_rows[first_line : last_line + 1])
+        if ("|" in span or first_line != last_line) and on_table_row:
             pieces.append(_UNESCAPED_PIPE.sub(r"\\|", span).replace("<", "&lt;"))
         else:
             pieces.append(_SPAN_LINE_START_TAG.sub(r"\1&lt;", span))

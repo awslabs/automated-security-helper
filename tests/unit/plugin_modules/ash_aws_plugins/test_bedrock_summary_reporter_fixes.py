@@ -265,7 +265,12 @@ def test_html_in_a_code_span_that_holds_a_table_pipe_is_written_as_text():
     so the tag after the pipe would be outside any span and render. The row
     sits in a table (a header and a delimiter row before it): a lone line with
     pipes is prose to the viewer and is left as written."""
-    table = "| rule | note |\n|---|---|\n| rule | `x | <img src=x onerror=alert(1)>` |"
+    # Three columns: the viewer splits the row at the span's pipe into three
+    # parts, so none of them is a part GFM drops for lack of a column.
+    table = (
+        "| rule | note | extra |\n|---|---|---|\n"
+        "| rule | `x | <img src=x onerror=alert(1)>` |"
+    )
 
     written = _markdown_as_written(table)
 

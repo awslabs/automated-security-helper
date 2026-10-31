@@ -79,14 +79,19 @@ def test_a_pipe_span_on_a_table_row_keeps_its_pipe_in_its_column_and_its_html_in
     """On a table row the span's pipe is written as "\\|", which GFM keeps inside
     its column and the span, and its "<" as text, so a viewer that does not read
     the escape still renders no HTML."""
-    table = "| rule | note |\n|---|---|\n| rule | `x | <img src=x onerror=alert(1)>` |"
+    table = (
+        "| rule | note | extra |\n|---|---|---|\n"
+        "| rule | `x | <img src=x onerror=alert(1)>` |"
+    )
 
     written = _markdown_as_written(table)
 
     assert "`x \\| &lt;img src=x onerror=alert(1)>`" in written, written
     assert "<img" not in written, written
     # The header, the delimiter and the column delimiters are untouched.
-    assert written.startswith("| rule | note |\n|---|---|\n| rule | "), written
+    assert written.startswith("| rule | note | extra |\n|---|---|---|\n| rule | "), (
+        written
+    )
     assert written.endswith(" |"), written
 
 
