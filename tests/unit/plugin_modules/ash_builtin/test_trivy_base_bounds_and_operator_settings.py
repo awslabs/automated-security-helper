@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -1661,6 +1662,56 @@ def test_a_bug_in_the_probe_is_not_read_as_a_missing_database(tmp_path, monkeypa
 
     with pytest.raises(AttributeError, match="a bug in the probe"):
         scanner._offline_database_available()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [PermissionError(13, "Permission denied"), FileNotFoundError(2, "No such file")],
+    ids=["permission-denied", "no-such-file"],
+)
+def test_a_probe_the_system_could_not_run_does_not_make_the_scanner_missing(
+    tmp_path, monkeypatch, failure
+):
+    """``OSError`` is what the probe raises for a trivy that cannot be started and
+    for a cache directory it cannot look into. Like a timeout it says nothing about
+    the database: the scan goes on, with a warning, and trivy reports a missing
+    database itself."""
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+
+    def cannot_run(ctx):
+        raise failure
+
+    monkeypatch.setattr(staleness, "_built_from_trivy", cannot_run)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        assert scanner._offline_database_available() is True
+
+    assert not scanner.dependency_unavailable_reason
+    assert [m for m in messages if "could not check" in m], messages
+
+
+@pytest.mark.skipif(
+    shutil.which("trivy") is None, reason="needs a trivy executable on PATH"
+)
+def test_the_real_probe_reads_an_empty_cache_as_a_missing_database(
+    tmp_path, monkeypatch
+):
+    """The tests above replace the probe. This one runs ``trivy version`` against a
+    cache directory with no database in it and expects the scanner to land as
+    MISSING: the probe's ``ContentDatabaseAbsent`` is a ``ValueError``, the arm the
+    check reads as no database."""
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    empty_cache = tmp_path / "cache" / "empty"
+    empty_cache.mkdir(parents=True)
+    monkeypatch.setattr(TrivyRepoScanner, "_trivy_cache_dir", lambda self: empty_cache)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        assert scanner._offline_database_available() is False
+
+    assert "no vulnerability database" in scanner.dependency_unavailable_reason
+    assert not [m for m in messages if "could not check" in m], messages
 
 
 # --- which lockfile entry a result names -------------------------------------------

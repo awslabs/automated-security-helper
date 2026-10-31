@@ -707,6 +707,15 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             _built_from_trivy,
         )
 
+        # What the probe raises (content_db_staleness._built_from_trivy): ValueError
+        # for output it cannot read (nothing printed, no executable, invalid JSON, a
+        # metadata file that exists but cannot be read, an unparsable time) and its
+        # subclass ContentDatabaseAbsent for a cache with no database; OSError for a
+        # trivy that cannot be started and for a cache directory whose metadata file
+        # cannot be checked (PermissionError); TimeoutExpired when it outlives its
+        # bound. It runs the tool with check=False, so a non-zero exit is no
+        # CalledProcessError, and it reads the JSON through isinstance guards, so a
+        # document of another shape is no KeyError. The two arms below hold all of it.
         try:
             _built_from_trivy(self.content_database_probe_context())
         except ValueError as exc:
