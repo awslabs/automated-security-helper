@@ -397,6 +397,22 @@ class TestAMappingOfMappingsIsNotAScanner:
 
         assert set(stats) == {"bandit"}, sorted(stats)
 
+    def test_a_plugins_lowercase_status_word_is_not_a_scanner_either(self):
+        """The match is on the serialized value, not on its case-folded form.
+        ASH writes ``FAILED`` and the like; a plugin's own ``failed`` is its own
+        vocabulary, and read as a report it has no name to take a status from,
+        so it became the phantom ERROR row again."""
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(
+            _model(
+                {
+                    "bandit": {"source": _report("bandit")},
+                    "sbom-meta": {"upload": {"status": "failed"}},
+                }
+            )
+        )
+
+        assert set(stats) == {"bandit"}, sorted(stats)
+
     def test_a_report_naming_no_scanner_still_names_one(self):
         """Control: a results file written before ``scanner_name`` existed carries
         the status alone, and its entry is a scanner as before."""

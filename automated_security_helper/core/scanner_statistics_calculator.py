@@ -371,7 +371,10 @@ class ScannerStatisticsCalculator:
         Counted as a scanner, it became an ERROR row (no status can be taken from
         it) that tripped the completeness gate. A ``status`` key alone is not
         enough: a plugin's own ``{"upload": {"status": "ok"}}`` carries one that is
-        no scanner's, and was the same phantom row.
+        no scanner's, and was the same phantom row. The match is exact: ASH writes
+        the status in the case the enum spells it, so a plugin's own lowercase
+        word (``"failed"``, ``"error"``, ``"passed"``) is not a scanner status
+        either. A live enum member is read through its value.
         """
         if not isinstance(report, dict):
             return False
@@ -379,7 +382,7 @@ class ScannerStatisticsCalculator:
             return True
         status = report.get("status")
         status = getattr(status, "value", status)
-        return isinstance(status, str) and status.upper() in {
+        return isinstance(status, str) and status in {
             known.value for known in ScannerStatus
         }
 
