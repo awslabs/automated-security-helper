@@ -46,6 +46,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PhysicalLocation2,
     PropertyBag,
     Region,
+    ReportingDescriptor,
     Result,
     Run,
     SarifReport,
@@ -525,6 +526,41 @@ class TestVulnerabilityFindingFaults:
             "severity comes from result.level (error is CRITICAL, as in the gate) "
             "and must survive a bad message"
         )
+
+    def test_an_unreadable_rule_id_keeps_the_description_with_rules_declared(
+        self, reporter, metadata
+    ):
+        """The rule lookup uses the id the builder already read under its own
+        guard. It read the id from the result again, outside that guard and
+        inside the message-text handler, so a rule id that cannot be read lost
+        the finding's description as well (``No description``), with or
+        without rules declared. The builder-level case is
+        ``test_unreadable_rule_id_falls_back_to_unknown_rule``."""
+        report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(
+                        driver=ToolComponent(
+                            name="ASH", rules=[ReportingDescriptor(id="R1")]
+                        )
+                    ),
+                    results=[],
+                )
+            ],
+        )
+        rules = ocsf_module._rule_descriptors(report)
+        result = faulty_result(
+            "ruleId", message=Message(root=Message1(text="still readable"))
+        )
+
+        finding = reporter._create_vulnerability_finding(
+            result, metadata, 1, rules=rules
+        )
+
+        assert finding.finding_info.desc == "still readable"
+        assert finding.finding_info.title == "Unknown Rule - still readable"
+        assert finding.vulnerabilities[0].desc == "still readable"
 
     def test_primary_construction_failure_yields_a_low_unknown_fallback(
         self, reporter, metadata, monkeypatch

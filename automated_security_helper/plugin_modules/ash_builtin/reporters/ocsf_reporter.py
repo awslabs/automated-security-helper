@@ -102,16 +102,24 @@ def _file_name(path: str) -> str:
     return parts[-1] if parts else path
 
 
-def _rule_descriptor(result: Any, rules: Optional[Dict[str, Any]] = None) -> Any:
-    """The descriptor of the rule *result* names, from *rules* (rule ids to their
+def _rule_descriptor(
+    rule_id: Optional[str], rules: Optional[Dict[str, Any]] = None
+) -> Any:
+    """The descriptor of the rule *rule_id* names, from *rules* (rule ids to their
     descriptors, :func:`_rule_descriptors`), or None.
 
     A message given by ``id`` alone is resolved against it: SARIF reads such a
     message through the rule's ``messageStrings`` (3.11.10). Without the rule
     the result was titled "R1 - default", the key of the string rather than the
     string.
+
+    *rule_id* is the id the caller already read from the result, under its own
+    guard (None when the result names none, or the read failed). It is not read
+    from the result again here: that read can raise, and this lookup runs inside
+    the message-text handler, so a result whose rule id cannot be read lost its
+    description as well.
     """
-    return (rules or {}).get(result_rule_id(result) or "")
+    return rules.get(rule_id) if rules and rule_id else None
 
 
 def _rule_descriptors(sarif: Any) -> Dict[str, Any]:
@@ -431,10 +439,12 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             alone was counted as a finding read whole.
         """
         rule_id = "Unknown Rule"
+        named_rule: Optional[str] = None
         try:
             # Safely extract rule ID first for logging context
             try:
-                rule_id = result_rule_id(result) or rule_id
+                named_rule = result_rule_id(result)
+                rule_id = named_rule or rule_id
             except Exception as e:
                 ASH_LOGGER.debug(f"Error extracting rule ID: {str(e)}")
 
@@ -446,7 +456,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             desc = ""
             try:
                 desc = result_message_text(
-                    result, _rule_descriptor(result, rules), default=""
+                    result, _rule_descriptor(named_rule, rules), default=""
                 )
                 ASH_LOGGER.debug(
                     f"Extracted message text for {rule_id}: {len(desc)} characters"
@@ -776,8 +786,10 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         """
         # Extract rule ID early for logging context
         rule_id = "Unknown Rule"
+        named_rule: Optional[str] = None
         try:
-            rule_id = result_rule_id(result) or rule_id
+            named_rule = result_rule_id(result)
+            rule_id = named_rule or rule_id
         except Exception:  # nosec B110 — graceful fallback when ruleId attribute missing
             pass
 
@@ -809,7 +821,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             try:
                 # Safely extract message text
                 message_text = result_message_text(
-                    result, _rule_descriptor(result, rules), default=message_text
+                    result, _rule_descriptor(named_rule, rules), default=message_text
                 )
                 ASH_LOGGER.debug(
                     f"Extracted message text for finding info {rule_id}: {len(message_text)} characters"
