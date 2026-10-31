@@ -358,16 +358,21 @@ def test_the_default_ignore_unfixed_says_once_what_it_withholds(tmp_path, caplog
     """The default is true, unlike the builtin trivy scanner's, and the warning is
     given once per scanner, not once per target: ``_process_config_options`` runs
     from the scanner's construction, and trivy-repo's ``scan()`` does not run it
-    again, so two scans add no line."""
+    again, so two scans add no line. The scanner is built from the default
+    configuration: the ``_scanner`` helper writes ``ignore_unfixed`` itself, which
+    is the other case (see the next tests)."""
     assert TrivyRepoScannerConfigOptions().ignore_unfixed is True
+    context = _scanner(tmp_path).context
 
     with caplog.at_level("WARNING"):
-        scanner = _scanner(tmp_path, ignore_unfixed=True)
+        scanner = TrivyRepoScanner(context=context, config=TrivyRepoScannerConfig())
+        scanner.dependencies_satisfied = True
         _scan(scanner, _run_double({"returncode": 0}, EMPTY_SARIF))
         _scan(scanner, _run_double({"returncode": 0}, EMPTY_SARIF))
 
     withheld = [m for m in caplog.messages if "ignore_unfixed" in m and "withheld" in m]
     assert len(withheld) == 1, caplog.messages
+    assert "(the default)" in withheld[0]
 
 
 def test_control_ignore_unfixed_off_is_not_warned_about(tmp_path, caplog):
