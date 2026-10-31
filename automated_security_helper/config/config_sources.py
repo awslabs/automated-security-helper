@@ -401,8 +401,16 @@ def _tool_ash_declared(text: str) -> Optional[int]:
     match = _TOOL_ASH_PATTERN.search(text)
     if match is not None:
         return match.start()
+    scanned_to = 0
     for header in _TOOL_TABLE_HEADER.finditer(text):
+        if header.start() < scanned_to:
+            # Inside a table already read to its end, so inside a value that
+            # table left open: no header, and its lines were searched with the
+            # table's. Reading it again made a file of repeated ``[tool]`` and
+            # open-bracket pairs cost the square of its length.
+            continue
         table_end = _table_end(text, header.end())
+        scanned_to = table_end
         key = _ASH_KEY_LINE.search(text, header.end(), table_end)
         if key is not None:
             return key.start()
