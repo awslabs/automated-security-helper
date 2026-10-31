@@ -3210,7 +3210,7 @@ CANCEL_POLL_SECONDS = 0.25
 PROMPT_STOP_GRACE_SECONDS = 0.5
 
 
-def _stop_grace(cancel_event: threading.Event) -> float:
+def _stop_grace(cancel_event: Optional[threading.Event]) -> float:
     """The grace a child of a cancelled scan gets after SIGTERM before SIGKILL."""
     if getattr(cancel_event, "stop_promptly", False):
         return min(PROMPT_STOP_GRACE_SECONDS, SANDBOX_STOP_GRACE_SECONDS)

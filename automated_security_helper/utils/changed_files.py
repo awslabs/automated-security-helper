@@ -15,7 +15,7 @@ out the same findings.
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Mapping, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, List, Mapping, Optional, Set, Tuple
 from urllib.parse import unquote
 
 from automated_security_helper.utils.finding_identity import CONVERTED_PATH_PROPERTY
@@ -159,7 +159,7 @@ def _filesystem_readings(readings: List[str]) -> List[str]:
     return spellings
 
 
-def _converted_path(result) -> Optional[str]:
+def _converted_path(result: Any) -> Optional[str]:
     """The ``converted_path`` property of a result located in a converted file.
 
     Set by ``utils.scan_output_dirs.mark_converted_results`` on every result a

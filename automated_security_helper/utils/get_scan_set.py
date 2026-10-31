@@ -1326,7 +1326,7 @@ def get_ash_ignorespec_lines(
 
     all_ignores = sorted(set(all_ignores), key=precedence)
 
-    lines = []
+    lines: list[str] = []
     for ignorefile in all_ignores:
         clean = _source_dir_marker(path, ignorefile)
         if ignorefile in named_by_caller:

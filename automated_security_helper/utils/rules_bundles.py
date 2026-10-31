@@ -103,7 +103,7 @@ import zipfile
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -589,7 +589,11 @@ def install_rules_bundle(
 
 
 def _install_locked(
-    bundle: "RulesBundle", root: Path, final: Path, problem: str, download_file
+    bundle: "RulesBundle",
+    root: Path,
+    final: Path,
+    problem: str,
+    download_file: Callable[..., Any],
 ) -> Path:
     """The download, extraction and rename of ``install_rules_bundle``, under its lock."""
     try:

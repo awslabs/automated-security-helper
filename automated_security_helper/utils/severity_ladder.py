@@ -213,7 +213,7 @@ def _rule_default_level(rule: object) -> Optional[str]:
     return effective_sarif_level(configuration)
 
 
-def component_labels(component: object) -> frozenset:
+def component_labels(component: object) -> frozenset[str]:
     """The names a tool component answers to: its ``name`` and ``fullName``,
     lower-cased, empty when it states neither. Compared with
     :func:`result_scanner_labels` to find the component a result's scanner
@@ -226,7 +226,7 @@ def component_labels(component: object) -> frozenset:
     return frozenset(labels)
 
 
-def result_scanner_labels(result: object) -> frozenset:
+def result_scanner_labels(result: object) -> frozenset[str]:
     """The names of the scanner that produced *result*, lower-cased:
     ``properties.scanner_name`` (an attribute or a ``model_extra`` key) and
     ``properties.scanner_details.tool_name`` (a mapping or an object). Empty when
@@ -255,7 +255,7 @@ def result_scanner_labels(result: object) -> frozenset:
     return frozenset(labels)
 
 
-def _first_rule_with_id(rules: list, identifier: object) -> object:
+def _first_rule_with_id(rules: list[Any], identifier: object) -> object:
     """The first rule in *rules* whose ``id`` is *identifier*, or None."""
     for rule in rules:
         if getattr(rule, "id", None) == identifier:
@@ -265,9 +265,9 @@ def _first_rule_with_id(rules: list, identifier: object) -> object:
 
 def _rule_of(
     result: object,
-    components: list,
+    components: list[Any],
     by_id: Dict[Any, object],
-    component_names: Optional[list] = None,
+    component_names: Optional[list[Any]] = None,
 ) -> object:
     """The rule *result* names, read as SARIF 3.27.5 lets a result name one.
 
@@ -294,10 +294,10 @@ def _rule_of(
     reference = getattr(result, "rule", None)
     body = getattr(reference, "root", reference)
     stated_id = getattr(result, "ruleId", None) or getattr(body, "id", None)
-    named_rules: Optional[list] = None
+    named_rules: Optional[list[Any]] = None
     scanner = result_scanner_labels(result) if component_names else frozenset()
 
-    def in_scope(candidate):
+    def in_scope(candidate: Any) -> object:
         """The rule with id *candidate* in the component the reference names, else
         in the component of the result's scanner; None when neither holds it."""
         if named_rules is not None:
@@ -312,7 +312,7 @@ def _rule_of(
                         return found
         return None
 
-    def by_stated_id():
+    def by_stated_id() -> object:
         # The stated id, then each shorter prefix at a "/".
         candidates = []
         candidate = stated_id

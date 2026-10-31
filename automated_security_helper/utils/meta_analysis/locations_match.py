@@ -76,8 +76,8 @@ def _mapping(value) -> Dict:
 def _has_common_fields(loc1: Dict, loc2: Dict) -> bool:
     """Check if two locations have any common fields."""
     # Get all possible field names from both locations
-    fields1 = set()
-    fields2 = set()
+    fields1: set[str] = set()
+    fields2: set[str] = set()
 
     # SARIF format fields
     for location, fields in ((loc1, fields1), (loc2, fields2)):

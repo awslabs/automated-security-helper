@@ -291,7 +291,7 @@ def analyze_sarif_fields(
     # directly under the searched directory, not by any component of its whole
     # path: with an output directory under an ancestor named "scanners" or
     # "reports", every file matched both lists.
-    def _relative_parts(file_path: str) -> tuple:
+    def _relative_parts(file_path: str) -> tuple[str, ...]:
         try:
             return Path(file_path).relative_to(sarif_dir).parts
         except ValueError:
@@ -387,16 +387,16 @@ def analyze_sarif_fields(
     # and followed a link at the output path.
     # Write JSON output for included fields
     json_path = os.path.join(output_dir, "sarif_fields.json")
-    with open_for_write(json_path, root=output_dir) as f:
-        json.dump(results_dict, f, indent=2)
+    with open_for_write(json_path, root=output_dir) as included_json:
+        json.dump(results_dict, included_json, indent=2)
     console.print(
         f"Wrote included fields JSON to [cyan]{escape_markup(json_path)}[/cyan]"
     )
 
     # Write JSON output for excluded fields
     excluded_json_path = os.path.join(output_dir, "sarif_excluded_fields.json")
-    with open_for_write(excluded_json_path, root=output_dir) as f:
-        json.dump(excluded_dict, f, indent=2)
+    with open_for_write(excluded_json_path, root=output_dir) as excluded_json:
+        json.dump(excluded_dict, excluded_json, indent=2)
     console.print(
         "Wrote excluded fields JSON to "
         f"[cyan]{escape_markup(excluded_json_path)}[/cyan]"
@@ -406,8 +406,10 @@ def analyze_sarif_fields(
     csv_path = os.path.join(output_dir, "sarif_fields.csv")
     # UTF-8, as the JSON files are: a field name can hold any character, and the
     # locale's encoding (ASCII under the C locale) cannot write every one.
-    with open_for_write(csv_path, encoding="utf-8", newline="", root=output_dir) as f:
-        writer = csv.writer(f)
+    with open_for_write(
+        csv_path, encoding="utf-8", newline="", root=output_dir
+    ) as included_csv:
+        writer = csv.writer(included_csv)
         writer.writerow(["field", "scanners"])
 
         for field_name, scanners in sorted(results_dict.items()):
@@ -420,8 +422,8 @@ def analyze_sarif_fields(
     excluded_csv_path = os.path.join(output_dir, "sarif_excluded_fields.csv")
     with open_for_write(
         excluded_csv_path, encoding="utf-8", newline="", root=output_dir
-    ) as f:
-        writer = csv.writer(f)
+    ) as excluded_csv:
+        writer = csv.writer(excluded_csv)
         writer.writerow(["field", "scanners", "reason"])
 
         for field_name, scanners in sorted(excluded_dict.items()):

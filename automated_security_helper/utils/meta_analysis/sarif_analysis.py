@@ -5,7 +5,7 @@
 
 import json
 import os
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from automated_security_helper.utils.meta_analysis import SCANNER_NAME_MAP
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
@@ -149,7 +149,7 @@ def validate_sarif_aggregation(
         compare_result_fields,
     )
 
-    validation_results = {
+    validation_results: Dict[str, Any] = {
         "missing_fields": {},
         "match_statistics": {},
         "unmatched_results": {},
@@ -455,7 +455,11 @@ def _locations_equal(
     file_one, file_two = location_info.get("file_path"), other.get("file_path")
     if (file_one is None) != (file_two is None):
         return False
-    if file_one is not None and not file_paths_match(file_one, file_two, scan_root):
+    if (
+        file_one is not None
+        and file_two is not None
+        and not file_paths_match(file_one, file_two, scan_root)
+    ):
         return False
     return all(
         _line_number(location_info.get(key)) == _line_number(other.get(key))

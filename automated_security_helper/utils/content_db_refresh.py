@@ -418,7 +418,7 @@ def grype_update_opt_outs(
 def _env_opt_out(
     env: Mapping[str, str],
     names: Tuple[str, ...],
-    opt_out: frozenset = _GO_TRUE,
+    opt_out: frozenset[str] = _GO_TRUE,
 ) -> Optional[str]:
     for name in names:
         value = env.get(name)
@@ -445,7 +445,7 @@ def _config_opt_out(
     root: Optional[yaml.Node],
     key: Tuple[str, str],
     config_file: Optional[Union[str, Path]],
-    opt_out: frozenset = _GO_TRUE,
+    opt_out: frozenset[str] = _GO_TRUE,
 ) -> Optional[str]:
     """``key`` (``db``, ``skip-update``) in the composed config, as the tool reads it.
 
