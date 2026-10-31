@@ -1144,10 +1144,21 @@ def test_empty_results_warning_carries_no_environment_value(tmp_path, logged, wh
         value = "C:\\Users\\ENVCANARY-winpath\\settings.yaml"
     scanner = _scanner(_context(tmp_path, [value]), execute_scan=_execute_writing(""))
     target = _populated_target(tmp_path)
-    scanner.errors = [f"cannot read {value}"]
+
+    def _tool_ran_and_said_so(*_args, **_kwargs):
+        # The tool's line reaches the error lines while the run is under way,
+        # after scan() has started them afresh for this target, so it is
+        # recorded here and not seeded before the scan. The response carries
+        # the code of a run that ended: a response without one leaves the
+        # target with no exit code, and the scan refuses it before it reads
+        # the results file, never reaching the empty-results warning.
+        scanner.errors.append(f"cannot read {value}")
+        return {"returncode": 0}
 
     with (
-        patch.object(type(scanner), "_run_subprocess", return_value={}),
+        patch.object(
+            type(scanner), "_run_subprocess", side_effect=_tool_ran_and_said_so
+        ),
         pytest.raises(ScannerError, match="nothing to grade") as refused,
     ):
         scanner.scan(target=target, target_type="source")
