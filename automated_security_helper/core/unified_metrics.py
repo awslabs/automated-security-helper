@@ -527,6 +527,11 @@ def coverage_shortfalls(
     unknown size: its entry carries None for both counts. Dropping it would hide a scanner that
     made a coverage claim nobody can read. Both consumers take it: the renderer prints "coverage
     unknown" for it and the report summary reads only the names.
+
+    So is a scanner named by a report that was filed under another scanner's key and carries
+    a coverage claim (``_uncredited_coverage_claims``). The report is read as nobody's, so the
+    lost target or unscanned input it records reaches no row; the named scanner is listed
+    with unknown counts, and a warning names the key and the scanner.
     """
     shortfalls: list[tuple[str, int | None, int | None]] = []
     for scanner_name in sorted(asharp_model.additional_reports or {}):
@@ -537,7 +542,53 @@ def coverage_shortfalls(
         if attempted is None or failed <= 0:
             continue
         shortfalls.append((scanner_name, attempted, failed))
+    listed = {str(name).lower() for name, _attempted, _failed in shortfalls}
+    for recorded, filed_under in sorted(_uncredited_coverage_claims(asharp_model)):
+        ASH_LOGGER.warning(
+            f"A report filed under '{filed_under}' names scanner '{recorded}' and "
+            "carries a coverage claim (target counters or unscanned inputs). It is "
+            f"read as neither scanner's, so the coverage of '{recorded}' is unknown."
+        )
+        if recorded.lower() not in listed:
+            listed.add(recorded.lower())
+            shortfalls.append((recorded, None, None))
     return shortfalls
+
+
+def _uncredited_coverage_claims(
+    asharp_model: AshAggregatedResults,
+) -> set[tuple[str, str]]:
+    """``(recorded scanner name, key it is filed under)`` for each per-target report
+    that makes a coverage claim for one scanner while filed under another's key.
+
+    ``own_target_reports`` reads such a report as nobody's: not the key's scanner's
+    (the report names another) and not the named scanner's (that scanner's reports are
+    looked up under its own key). A lost target or an unscanned input it records is
+    therefore counted for neither, and the named scanner would read as having covered
+    everything. The report is still not credited to either; the caller marks the named
+    scanner's coverage unknown instead.
+    """
+    claims: set[tuple[str, str]] = set()
+    for key, reports in (asharp_model.additional_reports or {}).items():
+        if not isinstance(key, str) or not isinstance(reports, dict):
+            continue
+        for report in reports.values():
+            if not isinstance(report, dict):
+                continue
+            recorded = report.get("scanner_name")
+            if not isinstance(recorded, str) or not recorded:
+                continue
+            if ScannerStatisticsCalculator._same_scanner(recorded, key):
+                continue
+            # A claim is a counter that was written (the zero a non-tracking scanner's
+            # report carries for the failure count is none) or a non-empty list.
+            if (
+                report.get("targets_attempted") is not None
+                or report.get("targets_failed") not in (None, 0)
+                or report.get("inputs_not_scanned")
+            ):
+                claims.add((recorded, key))
+    return claims
 
 
 #: The name :func:`inputs_not_scanned` gives the inputs ASH itself left out of its scan

@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
@@ -27,6 +29,7 @@ from automated_security_helper.core.unified_metrics import (
     ScannerMetrics,
     _populate_scanner_results_from_unified_metrics,
     _populate_summary_stats_from_unified_metrics,
+    coverage_shortfalls,
     inputs_not_scanned,
     target_counts,
     tool_exit_code,
@@ -75,6 +78,59 @@ class TestTheReportReaders:
         assert target_counts(model, "bandit") == (None, 0)
         assert tool_exit_code(model, "bandit") is None
         assert inputs_not_scanned(model) == []
+
+    def test_a_coverage_claim_filed_under_another_scanner_is_marked_unknown(self):
+        """The skipped report above still carries a lost target and an unscanned
+        input. Credited to nobody, the scanner it names would read as having covered
+        everything; its coverage is listed as unknown instead, with a warning."""
+        model = AshAggregatedResults()
+        model.additional_reports = {
+            "bandit": {
+                "source": {
+                    "scanner_name": "semgrep",
+                    "status": "ERROR",
+                    "targets_attempted": 4,
+                    "targets_failed": 1,
+                }
+            }
+        }
+
+        with patch.object(unified_metrics.ASH_LOGGER, "warning") as warning:
+            shortfalls = coverage_shortfalls(model)
+
+        assert shortfalls == [("semgrep", None, None)]
+        message = warning.call_args.args[0]
+        assert "'bandit'" in message and "'semgrep'" in message, message
+
+    def test_a_misfiled_report_that_claims_no_coverage_is_not_a_shortfall(self):
+        """Control: the same misfiled report with only a status says nothing about
+        coverage, so no scanner is listed and nothing is warned."""
+        model = AshAggregatedResults()
+        model.additional_reports = {
+            "bandit": {"source": {"scanner_name": "semgrep", "status": "PASSED"}}
+        }
+
+        with patch.object(unified_metrics.ASH_LOGGER, "warning") as warning:
+            shortfalls = coverage_shortfalls(model)
+
+        assert shortfalls == []
+        warning.assert_not_called()
+
+    def test_a_report_filed_under_its_own_scanner_is_not_marked_unknown(self):
+        """Control: the same claim under the scanner's own key is read as its own."""
+        model = AshAggregatedResults()
+        model.additional_reports = {
+            "semgrep": {
+                "source": {
+                    "scanner_name": "semgrep",
+                    "status": "ERROR",
+                    "targets_attempted": 4,
+                    "targets_failed": 1,
+                }
+            }
+        }
+
+        assert coverage_shortfalls(model) == [("semgrep", 4, 1)]
 
     def test_a_report_naming_no_scanner_is_still_read(self):
         """A report filed under the scanner's key with no ``scanner_name`` (a results
