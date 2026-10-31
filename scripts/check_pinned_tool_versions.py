@@ -165,7 +165,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from http.client import HTTPMessage
 from typing import IO, Any, Callable, Iterable
@@ -1404,7 +1404,7 @@ _COMPOUND_KEYWORDS = frozenset(
 _NEVER_RUNS_A_FILE = frozenset(
     (
         "chmod chown chgrp cat ls stat test [ [[ rm head tail wc grep echo printf "
-        "touch file readlink realpath basename dirname sha256sum md5sum cmp diff"
+        "touch file readlink realpath basename dirname sha256sum md5sum cmp diff dd"
     ).split()
 )
 # The commands that put a file under a second name or path, whose last word is the new
@@ -1463,14 +1463,29 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     ``... && cat x.sh | sh -s jq``): its caller is on the line, so a ``"$@"`` in it is
     the caller's package, installed now.
     """
-    cleaned = _ARITHMETIC.sub(" ", line)
-    segments: list[tuple[int, int, str]] = []  # (start, stop, what ended the command)
+    return [(name, is_file) for name, is_file, _ in _scan_markers(line)]
+
+
+def _command_segments(cleaned: str) -> list[tuple[int, int, str]]:
+    """The commands of a line as (start, end, the separator that ended the command)."""
+    segments: list[tuple[int, int, str]] = []
     start = 0
     for end in _COMMAND_END.finditer(cleaned):
         segments.append((start, end.start(), end.group()))
         start = end.end()
     segments.append((start, len(cleaned), ""))
-    markers: list[tuple[str, bool]] = []
+    return segments
+
+
+def _scan_markers(line: str) -> list[tuple[str, bool, set[str]]]:
+    """The here-documents of a line as (name, is a file's content, files it writes).
+
+    ``_heredoc_markers`` without the files: those names are what a later instruction
+    is looked at for (see ``_file_bodies_a_later_run_runs``).
+    """
+    cleaned = _ARITHMETIC.sub(" ", line)
+    segments = _command_segments(cleaned)
+    markers: list[tuple[str, bool, set[str]]] = []
     for match in _HEREDOC_MARKER.finditer(cleaned):
         first = next(
             (i for i, (_, stop, _) in enumerate(segments) if match.start() < stop),
@@ -1506,7 +1521,7 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
             _other_pipelines(cleaned, segments, sinks), written
         )
         is_file = writes and copies and not shell and quoted and not runs_it
-        markers.append((name, is_file))
+        markers.append((name, is_file, written))
     return markers
 
 
@@ -1671,6 +1686,35 @@ class _RunBlock:
     # all the same, but a positional parameter in them (``"$@"``) is whatever the
     # script's caller passes, not a package this check can look up.
     file_content: bool = False
+    # Which RUN instruction of the file the lines belong to, counted from 1, and, for a
+    # file body, the names of the files the instruction writes it to.
+    instruction: int = 0
+    files: frozenset[str] = frozenset()
+
+
+def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
+    """The blocks, with a file body read as commands when a later RUN runs the file.
+
+    ``RUN cat > /tmp/i.sh <<'EOF'`` in one instruction and ``RUN sh /tmp/i.sh jq`` in
+    another: the second is the caller of the script, so a ``"$@"`` in the body is the
+    package it passes, installed while the image builds. The same rule as for a script
+    the instruction itself runs (``_runs_a_file``), over the instructions after the one
+    that wrote it. The file bodies of other instructions are not looked at: they are
+    files too, run by nothing yet.
+    """
+    result = list(blocks)
+    for index, block in enumerate(blocks):
+        if not (block.file_content and block.files):
+            continue
+        for later in blocks[index + 1 :]:
+            if later.file_content or later.instruction == block.instruction:
+                continue
+            cleaned = _ARITHMETIC.sub(" ", _block_text(later.lines))
+            pipelines = _other_pipelines(cleaned, _command_segments(cleaned), [])
+            if _runs_a_file(pipelines, set(block.files)):
+                result[index] = replace(block, file_content=False)
+                break
+    return result
 
 
 def _run_blocks(text: str) -> list[_RunBlock]:
@@ -1685,27 +1729,36 @@ def _run_blocks(text: str) -> list[_RunBlock]:
     flagged ``file_content``: the file may be run later in the build, so its installs
     are read, not skipped. Those bodies are dropped instead when a comment line
     ``# apt-pin-check: skip`` stands directly above the RUN (blank lines and other
-    comments may come between), for a file that is not a script. An instruction still
-    open at the end of the file is kept.
+    comments may come between), for a file that is not a script. A file body that a
+    later instruction runs is read as commands (``_file_bodies_a_later_run_runs``). An
+    instruction still open at the end of the file is kept.
     """
     blocks: list[_RunBlock] = []
     current: list[tuple[int, str]] | None = None
-    # here-documents (name, body is a file's content) whose body is being read, in the
-    # order the shell reads them
-    terminators: list[tuple[str, bool]] = []
+    # here-documents (name, body is a file's content, files written) whose body is being
+    # read, in the order the shell reads them
+    terminators: list[tuple[str, bool, set[str]]] = []
     file_body: list[tuple[int, str]] = []  # the body being read, if it is a file's
     skip_bodies = False  # a skip comment stands above the next RUN
     run_skips_bodies = False  # the RUN being read has one
+    instruction = 0  # the RUN being read, counted from 1
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if current is not None and terminators:
             if line == terminators[0][0]:
                 if terminators[0][1] and file_body and not run_skips_bodies:
-                    blocks.append(_RunBlock(file_body, file_content=True))
+                    blocks.append(
+                        _RunBlock(
+                            file_body,
+                            file_content=True,
+                            instruction=instruction,
+                            files=frozenset(terminators[0][2]),
+                        )
+                    )
                 file_body = []
                 terminators.pop(0)
                 if not terminators:
-                    blocks.append(_RunBlock(current))
+                    blocks.append(_RunBlock(current, instruction=instruction))
                     current = None
             elif line and not line.startswith("#"):
                 # A command ends at a newline, unless the line ends with a backslash:
@@ -1726,6 +1779,7 @@ def _run_blocks(text: str) -> list[_RunBlock]:
                 skip_bodies = False
                 continue
             current = []
+            instruction += 1
             run_skips_bodies, skip_bodies = skip_bodies, False
             line = line[3:].strip()
         elif not line or line.startswith("#"):
@@ -1737,16 +1791,16 @@ def _run_blocks(text: str) -> list[_RunBlock]:
             continue
         # The command is the whole logical line, as Docker joins it: a shell named on
         # one physical line takes the here-document marker on the next.
-        terminators = _heredoc_markers(" ".join(part for _, part in current))
+        terminators = _scan_markers(" ".join(part for _, part in current))
         if terminators:
             continue
-        blocks.append(_RunBlock(current))
+        blocks.append(_RunBlock(current, instruction=instruction))
         current = None
     if file_body and not run_skips_bodies:
-        blocks.append(_RunBlock(file_body, file_content=True))
+        blocks.append(_RunBlock(file_body, file_content=True, instruction=instruction))
     if current:
-        blocks.append(_RunBlock(current))
-    return blocks
+        blocks.append(_RunBlock(current, instruction=instruction))
+    return _file_bodies_a_later_run_runs(blocks)
 
 
 def _block_text(block: list[tuple[int, str]]) -> str:

@@ -434,6 +434,82 @@ class TestAFileTheSameInstructionRunsIsCommands:
         assert checker._heredoc_markers(line) == expected
 
 
+class TestAFileALaterInstructionRunsIsCommands:
+    """A script written by one RUN and run by a later RUN has its caller on that line.
+
+    The ``"$@"`` in its body is the package the later instruction passes, so the body
+    is read as commands, as it is when the same instruction runs it. A script no later
+    instruction runs is a file the image gets, as before.
+    """
+
+    SCRIPT = "RUN cat > /tmp/i.sh <<'EOF'\napt-get install -y \"$@\"\nEOF\n"
+
+    @pytest.mark.parametrize(
+        "later",
+        [
+            "RUN sh /tmp/i.sh jq",
+            "RUN bash -e /tmp/i.sh jq",
+            "RUN chmod +x /tmp/i.sh && /tmp/i.sh jq",
+            "RUN timeout 300 sh /tmp/i.sh jq",
+            "RUN for p in jq git; do sh /tmp/i.sh $p; done",
+            'RUN ["sh", "/tmp/i.sh", "jq"]',
+            "RUN mv /tmp/i.sh /bin/inst && inst jq",
+            # The later instruction is a shell whose body runs the script.
+            "RUN bash <<'EOF2'\nsh /tmp/i.sh jq\nEOF2",
+        ],
+    )
+    def test_a_positional_parameter_in_a_script_a_later_run_executes_is_refused(
+        self, tmp_path, later
+    ):
+        # Red before: the body was a file's content in its own instruction, its "$@"
+        # was skipped as the caller's, and the later RUN held no install at all, so
+        # the `jq` it passes was installed with the check green.
+        body = f"{self.SCRIPT}{later}\n"
+        with pytest.raises(
+            checker.PinEnumerationError, match=r"Dockerfile:4 installs '\$@'"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    @pytest.mark.parametrize(
+        "later",
+        [
+            "RUN chmod +x /tmp/i.sh",
+            "RUN sh /tmp/other.sh jq",
+            "RUN echo done",
+            "RUN ls -l /tmp/i.sh && test -x /tmp/i.sh",
+            # Another file written under another name, whose body names this one.
+            "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2",
+            # The same name written again is not a run of it.
+            "RUN tee /tmp/i.sh <<'EOF2'\necho ok\nEOF2",
+        ],
+    )
+    def test_a_script_no_later_run_executes_stays_a_file_body(self, tmp_path, later):
+        """Control: green before and after."""
+        assert _pins(tmp_path, f"{self.SCRIPT}{later}\n") == {}
+
+    def test_a_run_before_the_script_is_written_runs_nothing_of_it(self, tmp_path):
+        """Control: only the instructions after the one that wrote the file count."""
+        body = f"RUN sh /tmp/i.sh jq\n{self.SCRIPT}"
+        assert _pins(tmp_path, body) == {}
+
+    def test_a_pin_in_a_script_a_later_run_executes_is_looked_up(self, tmp_path):
+        """Control: green before and after; the pin is read, no parameter is."""
+        body = (
+            "RUN cat > /tmp/i.sh <<'EOF'\n"
+            f"apt-get install -y {CURL}\n"
+            "EOF\n"
+            "RUN sh /tmp/i.sh\n"
+        )
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (4,))}
+
+    def test_the_blocks_say_which_file_body_is_read_as_commands(self):
+        """The flag is the whole decision: a file body, or the instruction's own text."""
+        run = checker._run_blocks(f"{self.SCRIPT}RUN sh /tmp/i.sh jq\n")
+        kept = checker._run_blocks(f"{self.SCRIPT}RUN sh /tmp/other.sh jq\n")
+        assert [block.file_content for block in run] == [False, False, False]
+        assert [block.file_content for block in kept] == [True, False, False]
+
+
 class TestAShellBodyIsStillCommands:
     @pytest.mark.parametrize(
         "first_line",
