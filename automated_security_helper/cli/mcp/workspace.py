@@ -2138,7 +2138,9 @@ async def _execute(
     ``stop`` is the cancel scope the run executes in, and ``cancel_events`` the
     per-project events ``execute_workspace`` scopes each project's worker to (see
     its module docstring). ``on_thread_start`` runs on the thread before the run,
-    which is where the timeout's clock starts. All three are optional.
+    once the session's scan lock is held when the scan takes one
+    (:func:`_under_session_lock`), which is where the timeout's clock starts. All
+    three are optional.
     """
     starts = handoff if handoff is not None else SettleHandoff()
 

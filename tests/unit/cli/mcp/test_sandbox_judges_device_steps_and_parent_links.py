@@ -157,10 +157,11 @@ class TestALinkInAParentComponentIsJudged:
     def test_a_missing_component_stepped_back_over_does_not_hide_a_share_link(
         self, tmp_path
     ):
-        """Red at the first walk: ``granted/missing/../lnk/repo`` ended the walk at
-        ``missing`` with nothing judged, while Win32 collapses ``missing/..`` before
-        any file access and examines ``granted/lnk``, the link to the share. The
-        walk judges the collapsed spelling: the link is found in the parent."""
+        """``granted/missing/../lnk/repo`` is not left unjudged at ``missing``.
+
+        Win32 collapses ``missing/..`` before any file access and examines
+        ``granted/lnk``, the link to the share. The walk judges the collapsed
+        spelling: the link is found in the parent."""
         granted = tmp_path / "granted"
         granted.mkdir()
         (granted / "lnk").symlink_to("\\\\server\\share")

@@ -155,9 +155,8 @@ class TestSessionSandboxRefusesTheIdsEveryOtherBuilderRefuses:
         ``session_sandbox`` validates an id only when it is non-empty (its
         docstring: it raises "if session_id is non-empty but could not name a
         single directory"), so the empty string is the caller that named none:
-        no sandbox root, the local caller's denylist fallback. Asserted as such;
-        an earlier row of the table above expected a raise the product does not
-        make, and read red on every platform that ran it.
+        no sandbox root, the local caller's denylist fallback. Asserted as such:
+        the product makes no raise for an empty id.
         """
         sandbox_of_nobody = session_sandbox("")
 
@@ -566,7 +565,7 @@ class TestWindowsRefusesBeforeResolving:
         (the volume's device object, which ``\\\\.\\C:`` opens raw) are refused with
         the UNC spellings: none is a directory on a local volume the server may
         open. A forward slash is a separator, so a mixed spelling is judged by
-        what it names. At tip15 every non-``UNC`` device read as local.
+        what it names. A device other than ``UNC`` is not read as local.
         """
         assert sandbox._names_a_windows_share(text) is share
 
