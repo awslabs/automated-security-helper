@@ -162,7 +162,7 @@ def test_a_link_at_the_given_directorys_ash_under_cwd_is_refused(tmp_path, monke
     result, reporter = _report(Path("target"))
 
     assert result.exit_code == 3, result.output
-    assert (
+    assert _squeezed(
         f"{(target / '.ash').as_posix()} is a symlink, on the way to the output "
         "directory"
     ) in _squeezed(result.output), result.output
