@@ -26,6 +26,7 @@ configuration built here; nothing is imported from a plugin package.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 from unittest.mock import patch
@@ -152,9 +153,15 @@ class ShippedOnOffHostReporter(ReporterPluginBase[ShippedOnOffHostReporterConfig
 BUILTIN_REPORTERS_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.reporters.stub"
 )
-OptInReporter.__module__ = BUILTIN_REPORTERS_MODULE
-OffHostReporter.__module__ = BUILTIN_REPORTERS_MODULE
-ShippedOnOffHostReporter.__module__ = BUILTIN_REPORTERS_MODULE
+
+
+@pytest.fixture(autouse=True)
+def _reporters_are_built_in(monkeypatch):
+    """Give the stand-in reporters a built-in module name for one test, and put
+    the module they are defined in back after it. Set when this file was
+    imported, the name stayed on the classes for the rest of the session."""
+    for reporter in (OptInReporter, OffHostReporter, ShippedOnOffHostReporter):
+        monkeypatch.setattr(reporter, "__module__", BUILTIN_REPORTERS_MODULE)
 
 
 def _listing(
@@ -201,6 +208,20 @@ def _listing(
             plugin_app, [*args, "--config", str(named)], env=WIDE
         )
     return result
+
+
+def _columns(line: str) -> list:
+    """The columns of one table line, whichever box characters draw it."""
+    return [text.strip() for text in re.split(r"[│┃|]", line)][1:-1]
+
+
+def _enabled(output: str, name: str) -> str:
+    """The Enabled value of the row named *name*, found by the header's column, so
+    a ``True`` or ``False`` in another column of the row cannot answer for it."""
+    header = next(
+        line for line in output.splitlines() if "Name" in line and "Enabled" in line
+    )
+    return _columns(_row(output, name))[_columns(header).index("Enabled")]
 
 
 def _row(output: str, name: str) -> str:
@@ -335,8 +356,7 @@ def test_an_opt_in_plugin_whose_section_omits_enabled_is_listed_off(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    row = _row(result.output, "opt-in")
-    assert " False " in row, row
+    assert _enabled(result.output, "opt-in") == "False", result.output
 
 
 def test_an_opt_in_plugin_whose_section_sets_enabled_true_is_listed_on(tmp_path):
@@ -349,8 +369,7 @@ def test_an_opt_in_plugin_whose_section_sets_enabled_true_is_listed_on(tmp_path)
     )
 
     assert result.exit_code == 0, result.output
-    row = _row(result.output, "opt-in")
-    assert " True " in row, row
+    assert _enabled(result.output, "opt-in") == "True", result.output
 
 
 def test_an_off_host_reporter_the_repository_turned_on_is_listed_off(tmp_path):
@@ -378,8 +397,7 @@ def test_an_off_host_reporter_the_repository_turned_on_is_listed_off(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    row = _row(result.output, "quiet-offhost")
-    assert " False " in row, row
+    assert _enabled(result.output, "quiet-offhost") == "False", result.output
     assert "repo title" not in result.output
 
 
@@ -393,8 +411,7 @@ def test_an_off_host_reporter_the_operator_turned_on_is_listed_on(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    row = _row(result.output, "quiet-offhost")
-    assert " True " in row, row
+    assert _enabled(result.output, "quiet-offhost") == "True", result.output
 
 
 def test_an_off_host_reporter_enabled_by_a_non_boolean_is_listed_off(tmp_path):
@@ -409,8 +426,7 @@ def test_an_off_host_reporter_enabled_by_a_non_boolean_is_listed_off(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    row = _row(result.output, "quiet-offhost")
-    assert " False " in row, row
+    assert _enabled(result.output, "quiet-offhost") == "False", result.output
 
 
 def test_an_off_host_reporter_that_ships_enabled_is_dumped_off_with_no_section(
@@ -426,7 +442,6 @@ def test_an_off_host_reporter_that_ships_enabled_is_dumped_off_with_no_section(
     )
 
     assert result.exit_code == 0, result.output
-    row = _row(result.output, "shipped-on-offhost")
-    assert " False " in row, row
+    assert _enabled(result.output, "shipped-on-offhost") == "False", result.output
     assert '"enabled": false' in result.output, result.output
     assert '"enabled": true' not in result.output, result.output
