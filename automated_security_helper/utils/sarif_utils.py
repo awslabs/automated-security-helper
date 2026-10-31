@@ -1314,7 +1314,10 @@ def _apply_config_suppression(
     # under review has not taken effect, so the entry is applied beside it.
     if suppressions_in_effect(result.suppressions):
         ASH_LOGGER.debug(
-            f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues.",
+            f"A suppression is already in effect for rule '{result.ruleId}' on location '{flat_finding.file_path}'. "
+            "The matching configured suppression is not added, to prevent SARIF ingestion issues. "
+            "A suppression that is rejected or under review is not in effect, so it does not "
+            "prevent the configured one from being added.",
             extra=NO_MARKUP,
         )
         return True
