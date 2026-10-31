@@ -27,6 +27,9 @@ from typing import List
 import pytest
 
 from automated_security_helper.interactions import run_ash_container as rac
+from automated_security_helper.interactions.run_ash_container import (
+    run_cmd_direct as _real_run_cmd_direct,
+)
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
@@ -211,11 +214,13 @@ def test_the_reader_drains_the_pipe_after_a_failed_console_write(monkeypatch):
     assert result.stdout == "one\ntwo\nthree\n"
 
 
-def test_a_runtime_that_cannot_be_started_is_a_run_that_never_started(monkeypatch):
-    def cannot_start(cmd, debug=False, env=None):
-        raise FileNotFoundError(2, "No such file or directory", "/nonexistent/docker")
+def _cannot_spawn(**kwargs):
+    raise FileNotFoundError(2, "No such file or directory", "/nonexistent/docker")
 
-    monkeypatch.setattr(rac, "run_cmd_direct", cannot_start)
+
+def test_a_runtime_that_cannot_be_started_is_a_run_that_never_started(monkeypatch):
+    """Through the real run_cmd_direct: the spawn is what fails."""
+    monkeypatch.setattr(subprocess_utils, "create_process_with_pipes", _cannot_spawn)
 
     result = rac._execute_container(
         ["/nonexistent/docker", "run", "img", "ash"], debug=False
@@ -224,6 +229,27 @@ def test_a_runtime_that_cannot_be_started_is_a_run_that_never_started(monkeypatc
     assert not rac.container_was_started(result)
     assert result.returncode == 1
     assert "could not be started" in result.stderr
+
+
+def _fails_after_the_runtime_started(cmd, debug=False, env=None):
+    raise BrokenPipeError(32, "Broken pipe")
+
+
+def test_an_error_raised_while_the_runtime_ran_is_not_a_run_that_never_started(
+    monkeypatch,
+):
+    """An OSError out of the wait (a signal to the runtime refused, a pipe closed
+    under it) came after the runtime started; it was reported as one that could
+    not be started."""
+    monkeypatch.setattr(rac, "run_cmd_direct", _fails_after_the_runtime_started)
+
+    result = rac._execute_container(
+        ["/nonexistent/docker", "run", "img", "ash"], debug=False
+    )
+
+    assert rac.container_was_started(result)
+    assert result.returncode == 1
+    assert "failed while it ran" in result.stderr
 
 
 def test_the_debug_line_for_a_failed_run_shows_overrides_by_key(monkeypatch, capfd):
@@ -330,6 +356,33 @@ def test_a_build_still_refuses_a_revision_derived_from_the_install(
     assert result.returncode == 1
     assert "Invalid ASH revision" in result.stderr
     assert commands == []
+
+
+def test_the_record_of_a_container_that_may_still_run_is_kept(commands, monkeypatch):
+    """A failure raised while the runtime ran says nothing of its container, so
+    the leftover record stays for the next sweep; run_ash_container dropped it
+    with the record of one that never existed."""
+    discarded = []
+    monkeypatch.setattr(rac, "discard_record", discarded.append)
+    monkeypatch.setattr(rac, "run_cmd_direct", _fails_after_the_runtime_started)
+
+    result = rac.run_ash_container(source_dir="src", build=False, run=True)
+
+    assert result.returncode == 1
+    assert discarded == []
+
+
+def test_the_record_of_a_container_that_never_started_is_dropped(commands, monkeypatch):
+    """Control: no container existed, so its record goes."""
+    discarded = []
+    monkeypatch.setattr(rac, "discard_record", discarded.append)
+    monkeypatch.setattr(rac, "run_cmd_direct", _real_run_cmd_direct)
+    monkeypatch.setattr(subprocess_utils, "create_process_with_pipes", _cannot_spawn)
+
+    result = rac.run_ash_container(source_dir="src", build=False, run=True)
+
+    assert not rac.container_was_started(result)
+    assert len(discarded) == 1
 
 
 def test_no_build_with_a_custom_containerfile_runs_the_custom_image(commands, tmp_path):

@@ -187,6 +187,10 @@ def _validate_ash_revision(revision: str) -> bool:
 #: Set on a result run_ash_container returns before any container ran.
 _NOT_STARTED_ATTR = "ash_container_not_started"
 
+#: Set on a failed result whose container may still be running, so the record of
+#: the container is kept for the next sweep (_execute_container).
+_MAY_STILL_RUN_ATTR = "ash_container_may_still_run"
+
 
 def _not_started(result):
     """Mark ``result`` as a refusal: run_ash_container stopped before the run phase.
@@ -554,6 +558,10 @@ def validate_path(path: str | Path) -> Path:
 # could pass anything on. Shared with Nix mode, which runs its shell the same way.
 _stop_after_interrupt = subprocess_utils.stop_after_interrupt
 
+#: Set on the OSError that ``run_cmd_direct`` raises when the runtime could not be
+#: started, to tell it from an OSError raised once the runtime was running.
+RUNTIME_NOT_STARTED_ATTRIBUTE = "ash_runtime_not_started"
+
 
 def _stop_the_runtime(process, **kwargs) -> bool:
     """:func:`_stop_after_interrupt`, with a kill if it is itself cut short.
@@ -831,12 +839,18 @@ def run_cmd_direct(
     # hand, and released inside the block below (subprocess_utils.HeldInterrupt).
     with subprocess_utils.HeldInterrupt() as held:
         # Create process using subprocess_utils
-        process = subprocess_utils.create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
-            args=args,
-            env=dict(env) if env is not None else None,
-            text=True,
-            shell=shell,
-        )
+        try:
+            process = subprocess_utils.create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                args=args,
+                env=dict(env) if env is not None else None,
+                text=True,
+                shell=shell,
+            )
+        except OSError as error:
+            # The only OSError that means no runtime exists: any raised later
+            # is from a runtime that was running (_execute_container).
+            setattr(error, RUNTIME_NOT_STARTED_ATTRIBUTE, True)
+            raise
         # Line endings untranslated: in universal-newline mode a carriage
         # return ends a line and is read back as a line feed, so every
         # progress redraw the runtime printed became a line of its own on the
@@ -5062,6 +5076,19 @@ def _execute_container(cmd: List[str], debug: bool, env: Dict[str, str] | None =
             )
         return e
     except OSError as e:
+        if not getattr(e, RUNTIME_NOT_STARTED_ATTRIBUTE, False):
+            # Raised after the runtime started (a signal to it refused, a pipe
+            # closed under the wait): the container may be running, so this is
+            # a failed run and not one that never started. Reported as the
+            # non-zero status the caller already handles, with the record of
+            # the container left for the next sweep.
+            message = f"The container runtime failed while it ran: {hidden(str(e))}"
+            echo(message, err=True)
+            failed = create_completed_process(
+                args=[], returncode=1, stdout="", stderr=message
+            )
+            setattr(failed, _MAY_STILL_RUN_ATTR, True)
+            return failed
         # The runtime could not be started (a runner path that is gone, a
         # permission the host refuses). Reported as a run that never started,
         # so the caller exits with the refusal's code instead of a traceback
@@ -5678,9 +5705,12 @@ def run_ash_container(
                         run_cmd, debug=debug, env=_run_environment(outer_run_id)
                     )
                     code = getattr(result, "returncode", None)
-                    if not (isinstance(code, int) and code < 0):
+                    ended_by_signal = isinstance(code, int) and code < 0
+                    may_still_run = getattr(result, _MAY_STILL_RUN_ATTR, False)
+                    if not (ended_by_signal or may_still_run):
                         # A client the kernel ended by a signal says nothing of
-                        # its container.
+                        # its container, and neither does a failure raised while
+                        # the runtime ran: the record stays for the next sweep.
                         discard_record(record)
                     return result
         finally:
