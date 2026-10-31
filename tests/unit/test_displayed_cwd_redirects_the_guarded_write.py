@@ -63,7 +63,10 @@ def test_the_wizards_write_route_lands_in_the_real_cwd(
 
 @pytest.mark.skipif(
     os.name == "nt",
-    reason="ntpath.abspath ignores the faked cwd, so there is nothing to redirect",
+    # Not about abspath: the test builds the displayed path by hand. On Windows
+    # with Python 3.13 and later, ``Path.is_dir`` is the native ``nt._path_isdir``,
+    # which bypasses the redirected ``os.stat`` and reads the kernel.
+    reason="on Windows, Path.is_dir can use the native isdir, which skips os.stat",
 )
 def test_pathlib_reads_a_directory_under_the_displayed_cwd_in_the_real_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
