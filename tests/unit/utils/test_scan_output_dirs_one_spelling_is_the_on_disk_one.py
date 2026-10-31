@@ -98,6 +98,11 @@ def test_control_with_neither_spelling_on_disk_the_first_in_sorted_order_is_kept
     assert _texts(_one_spelling_each([first, second])) == [str(first)]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="pathlib compares Windows paths without regard to case, so the two "
+    "spellings are one path before the function sees them",
+)
 def test_control_on_linux_two_spellings_are_two_directories(tmp_path, monkeypatch):
     base = _tree(tmp_path)
     this_run = base / ".ASH" / "ash_output"
