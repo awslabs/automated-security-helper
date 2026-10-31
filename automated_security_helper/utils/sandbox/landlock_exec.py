@@ -581,10 +581,16 @@ def exec_with_socket_filter(allow_ip: bool, command: List[str]) -> NoReturn:
         os.execvp(command[0], command)
     except OSError as e:
         # The exec did not happen, so the line below is written by this program
-        # with the default SIGPIPE just restored: a stderr whose reader is gone
-        # would end the process with the signal, not with exit 126.
-        _ignore_sigpipe()
+        # with the default SIGPIPE and SIGXFSZ just restored: a stderr whose
+        # reader is gone, or one at a file size limit, would end the process with
+        # the signal, not with exit 126.
+        _ignore_write_signals()
         fail(f"exec {command[0]}: {e}")
+
+
+#: The signals a write to stderr can raise: SIGPIPE for a pipe nobody reads and
+#: SIGXFSZ for a file at the process's size limit (RLIMIT_FSIZE).
+_WRITE_SIGNALS = (signal.SIGPIPE, signal.SIGXFSZ)
 
 
 def _restore_dispositions() -> None:
@@ -594,22 +600,26 @@ def _restore_dispositions() -> None:
     disposition, so without this the scanner would run with them ignored, unlike
     the same scanner started unwrapped (subprocess restores them in every child
     it starts). Both exec routes of this program call it last before the exec.
-    A route whose exec then fails calls ``_ignore_sigpipe`` before it reports.
+    A route whose exec then fails calls ``_ignore_write_signals`` before it
+    reports.
     """
-    for restored in (signal.SIGPIPE, signal.SIGXFSZ):
+    for restored in _WRITE_SIGNALS:
         signal.signal(restored, signal.SIG_DFL)
 
 
-def _ignore_sigpipe() -> None:
-    """Make a write to a closed pipe an error again, not a signal.
+def _ignore_write_signals() -> None:
+    """Make a failed write to stderr an error again, not a signal.
 
     After ``_restore_dispositions`` the default SIGPIPE ends a process that
-    writes to a pipe nobody reads. What this program writes from then on is the
-    report of a step that failed, followed by exit 126, and a child that died of
-    the signal first handed ASH -13 where it owed 126 (``_write_stderr`` drops
-    the error the ignored signal leaves).
+    writes to a pipe nobody reads, and the default SIGXFSZ one that writes past
+    its file size limit. What this program writes from then on is the report of
+    a step that failed, followed by exit 126, and a child that died of the signal
+    first handed ASH -13 (or -25) where it owed 126 (``_write_stderr`` drops the
+    error the ignored signal leaves). The two are undone together, the way
+    ``_restore_dispositions`` restores them.
     """
-    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+    for ignored in _WRITE_SIGNALS:
+        signal.signal(ignored, signal.SIG_IGN)
 
 
 def _children_files(pid: int = 0) -> Optional[List[int]]:
@@ -875,13 +885,14 @@ def _run_child(
     with the interpreter's traceback and 1 (which scanners use for "findings"):
     the exit sits in a ``finally``, so an exception none of the clauses caught,
     the reporting itself failing included, still ends in 126. Every report is
-    written with SIGPIPE ignored again: ``_child_setup`` ends by restoring its
-    default for the scanner, and a stderr whose reader is gone would otherwise
-    end the child with the signal before it could exit 126.
+    written with SIGPIPE and SIGXFSZ ignored again: ``_child_setup`` ends by
+    restoring their defaults for the scanner, and a stderr whose reader is gone
+    (or one at a file size limit) would otherwise end the child with the signal
+    before it could exit 126.
     """
 
     def report(text: str) -> None:
-        _ignore_sigpipe()
+        _ignore_write_signals()
         _note(text)
 
     try:

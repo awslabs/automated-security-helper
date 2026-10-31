@@ -1156,15 +1156,25 @@ class _RecordedStderr:
         pass
 
 
-def _sigpipe_at_the_first_write(events: List[Tuple[str, tuple]]):
-    """The disposition SIGPIPE was last given before the first stderr write."""
+def _disposition_at_the_first_write(events: List[Tuple[str, tuple]], signum: int):
+    """The disposition ``signum`` was last given before the first stderr write."""
     disposition = None
     for name, args in events:
-        if name == "signal" and args[0] == signal.SIGPIPE:
+        if name == "signal" and args[0] == signum:
             disposition = args[1]
         if name == "write":
             return disposition
     raise AssertionError(f"nothing was written: {events}")
+
+
+def _write_signals_at_the_first_write(events: List[Tuple[str, tuple]]):
+    """The dispositions of SIGPIPE and SIGXFSZ at the first stderr write: a write
+    to a closed pipe raises the first and a write past the file size limit the
+    second, and either one left at its default ends the process."""
+    return {
+        signum: _disposition_at_the_first_write(events, signum)
+        for signum in (signal.SIGPIPE, signal.SIGXFSZ)
+    }
 
 
 def _refused_exec(*args) -> None:
@@ -1175,10 +1185,11 @@ def _refused_exec(*args) -> None:
 def test_the_child_reports_a_failure_after_its_setup_with_sigpipe_ignored(
     monkeypatch, wrapper_alive
 ):
-    """``_child_setup`` ends by giving SIGPIPE its default for the scanner. The
-    report of an exec that failed, or of a wrapper that exited before the exec, is
-    written after that, to a stderr that may be a closed pipe: with the default
-    disposition the signal ends the child and ASH reads -13 where it owes 126."""
+    """``_child_setup`` ends by giving SIGPIPE and SIGXFSZ their defaults for the
+    scanner. The report of an exec that failed, or of a wrapper that exited before
+    the exec, is written after that, to a stderr that may be a closed pipe or a
+    file at its size limit: with the default disposition the signal ends the
+    child and ASH reads -13 (or -25) where it owes 126."""
     events: List[Tuple[str, tuple]] = []
 
     def setup(restrict) -> None:
@@ -1197,14 +1208,17 @@ def test_the_child_reports_a_failure_after_its_setup_with_sigpipe_ignored(
     )
 
     assert events[-1] == ("_exit", (126,))
-    assert _sigpipe_at_the_first_write(events) == signal.SIG_IGN
+    assert _write_signals_at_the_first_write(events) == {
+        signal.SIGPIPE: signal.SIG_IGN,
+        signal.SIGXFSZ: signal.SIG_IGN,
+    }
 
 
 def test_the_socket_filter_route_reports_a_failed_exec_with_sigpipe_ignored(
     monkeypatch,
 ):
-    """The same for the route that execs in place: it restores the dispositions,
-    and its exec failing is reported, with exit 126, after that."""
+    """The same for the route that execs in place, SIGXFSZ included: it restores
+    the dispositions, and its exec failing is reported, with exit 126, after that."""
     events: List[Tuple[str, tuple]] = []
     fake_os = _Recording(os, set(), events)
     fake_os.execvp = _refused_exec
@@ -1218,7 +1232,10 @@ def test_the_socket_filter_route_reports_a_failed_exec_with_sigpipe_ignored(
         landlock_exec.exec_with_socket_filter(True, ["/bin/true"])
 
     assert raised.value.code == 126
-    assert _sigpipe_at_the_first_write(events) == signal.SIG_IGN
+    assert _write_signals_at_the_first_write(events) == {
+        signal.SIGPIPE: signal.SIG_IGN,
+        signal.SIGXFSZ: signal.SIG_IGN,
+    }
 
 
 @pytest.mark.parametrize(
