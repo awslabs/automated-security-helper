@@ -1591,6 +1591,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         rules_dict: Dict[str, ReportingDescriptor],
         results: List[Result],
         lockfile: str | None = None,
+        titles: Dict[str, Set[str]] | None = None,
     ) -> None:
         """Rules and results for yarn and pnpm advisories, in the shape npm's take.
 
@@ -1613,17 +1614,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # dedupe in the npm path and ``_widen_result``.
         emitted: Dict[tuple[str, str, Any], Result] = {}
         rule_ids = self._advisory_ids(
-            [
-                (
-                    record["package"],
-                    {
-                        "url": record["url"],
-                        "source": record["id"],
-                        "title": record["title"],
-                    },
-                )
-                for record in records
-            ]
+            [self._record_entry(record) for record in records], titles
         )
         for record, vuln_id in zip(records, rule_ids):
             pkg_name = record["package"]
@@ -1934,29 +1925,54 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         return url.rstrip("/").split("/")[-1] if url else ""
 
     @classmethod
-    def _advisory_ids(cls, entries: Sequence[tuple[str, Dict[str, Any]]]) -> List[str]:
+    def _advisory_titles(
+        cls, entries: Sequence[tuple[str, Dict[str, Any]]]
+    ) -> Dict[str, Set[str]]:
+        """The titles seen under each rule id, over the given ``(package,
+        advisory)`` pairs (``_advisory_ids``)."""
+        titles: Dict[str, Set[str]] = {}
+        for pkg, via in entries:
+            titles.setdefault(cls._advisory_id(pkg, via), set()).add(
+                str(via.get("title") or "")
+            )
+        return titles
+
+    @classmethod
+    def _advisory_ids(
+        cls,
+        entries: Sequence[tuple[str, Dict[str, Any]]],
+        titles: Dict[str, Set[str]] | None = None,
+    ) -> List[str]:
         """The rule id of each ``(package, advisory)`` pair, in order.
 
-        ``_advisory_id`` reads the URL's last segment, and several advisories of
-        one package can share it: a GHSA split into ranges lists one entry per
-        range with one title, and the entries fold into one result, which is
-        right; but a URL that names a collection (``https://x/advisories/``)
-        gives every advisory behind it the one id, and the fold then dropped the
-        second advisory's severity, CWE and CVSS. A segment that one package
-        shares between advisories of different titles is therefore told apart by
-        the tool's own advisory id (``source``), as a URL-less advisory is; the
-        same titles under one segment stay one advisory. With no ``source`` there
-        is nothing to tell them apart by, and the id stays the segment.
+        ``_advisory_id`` reads the URL's last segment, and several advisories can
+        share it: a GHSA split into ranges lists one entry per range with one
+        title, and the entries fold into one result, which is right; but a URL
+        that names a collection (``https://x/advisories/``) gives every advisory
+        behind it the one id, and the fold then dropped the second advisory's
+        severity, CWE and CVSS. A segment shared by advisories of different
+        titles is therefore told apart by the tool's own advisory id
+        (``source``), as a URL-less advisory is; the same titles under one
+        segment stay one advisory. With no ``source`` there is nothing to tell
+        them apart by, and the id stays the segment.
+
+        ``titles`` is what decides "shared by advisories of different titles",
+        and it has to cover every advisory that can meet under one rule: the
+        rules of a report are kept by id, so two packages behind one collection
+        URL, or one package in two lockfiles, are one rule unless their ids
+        differ, and the second advisory's result then read the first one's
+        score. The conversion hands in the titles of its whole report (and
+        ``_convert_per_lockfile`` those of every lockfile's report); left out,
+        they come from ``entries`` alone.
         """
         ids = [cls._advisory_id(pkg, via) for pkg, via in entries]
-        titles: Dict[tuple[str, str], Set[str]] = {}
-        for (pkg, via), rule_id in zip(entries, ids):
-            titles.setdefault((pkg, rule_id), set()).add(str(via.get("title") or ""))
+        if titles is None:
+            titles = cls._advisory_titles(entries)
         told_apart = []
         for (pkg, via), rule_id in zip(entries, ids):
             source = via.get("source")
             if (
-                len(titles[(pkg, rule_id)]) > 1
+                len(titles.get(rule_id, ())) > 1
                 and cls._url_segment(via)
                 and source is not None
                 and source != ""
@@ -1968,13 +1984,65 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     @classmethod
     def _entry_advisory_ids(
-        cls, pkg_name: str, via_items: Sequence[Any]
+        cls,
+        pkg_name: str,
+        via_items: Sequence[Any],
+        titles: Dict[str, Set[str]] | None = None,
     ) -> Dict[int, str]:
         """The rule id of each advisory object of one npm entry's ``via``, keyed
         by the object's identity (``_advisory_ids``)."""
         advisories = [via for via in via_items if isinstance(via, dict)]
-        ids = cls._advisory_ids([(pkg_name, via) for via in advisories])
+        ids = cls._advisory_ids([(pkg_name, via) for via in advisories], titles)
         return {id(via): rule_id for via, rule_id in zip(advisories, ids)}
+
+    @staticmethod
+    def _record_entry(record: Dict[str, Any]) -> tuple[Any, Dict[str, Any]]:
+        """A yarn or pnpm advisory record as the ``(package, advisory)`` pair
+        ``_advisory_ids`` reads: the record's id plays the tool's advisory id."""
+        return (
+            record.get("package"),
+            {
+                "url": record.get("url"),
+                "source": record.get("id"),
+                "title": record.get("title"),
+            },
+        )
+
+    def _report_advisory_entries(
+        self, report: Dict[str, Any]
+    ) -> List[tuple[Any, Dict[str, Any]]]:
+        """Every ``(package, advisory)`` pair of one audit report, whichever
+        shape it is in: npm 7+ entries, yarn records, pnpm's v1 advisories.
+
+        Reads only what the conversion reads, and skips what it would refuse
+        (an entry that is not an object, a ``via`` that is not an advisory), so
+        asking never raises where the conversion would not.
+        """
+        entries: List[tuple[Any, Dict[str, Any]]] = []
+        vulnerabilities = report.get("vulnerabilities")
+        if isinstance(vulnerabilities, dict):
+            for pkg_name, vuln_info in vulnerabilities.items():
+                if not isinstance(vuln_info, dict):
+                    continue
+                via_items = vuln_info.get("via", [])
+                if not isinstance(via_items, list):
+                    via_items = [via_items]
+                entries.extend(
+                    (pkg_name, via) for via in via_items if isinstance(via, dict)
+                )
+        yarn_records = report.get(_YARN_ADVISORIES_KEY)
+        if isinstance(yarn_records, list):
+            entries.extend(
+                self._record_entry(record)
+                for record in yarn_records
+                if isinstance(record, dict)
+            )
+        if "advisories" in report:
+            entries.extend(
+                self._record_entry(record)
+                for record in self._v1_advisory_records(report["advisories"])
+            )
+        return entries
 
     def _root_advisories(
         self,
@@ -1982,8 +2050,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         vulnerabilities: Dict[str, Any],
         lock_rel: str | None,
         lock_index: NpmLockIndex | None,
+        titles: Dict[str, Set[str]] | None = None,
     ) -> List[Dict[str, str]]:
         """The direct findings a transitive package's ``via`` chain leads to.
+
+        ``titles`` are the report's, so a reference carries the rule id the
+        root's own result does (``_advisory_ids``).
 
         One entry per (advisory, installed copy of the advisory's package),
         identified the way that copy's own result is: rule id, ``package_path``
@@ -2009,7 +2081,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             via_items = info.get("via", [])
             if not isinstance(via_items, list):
                 via_items = [via_items]
-            advisory_ids = self._entry_advisory_ids(name, via_items)
+            advisory_ids = self._entry_advisory_ids(name, via_items, titles)
             disagreeing = self._disagreeing_copies(
                 name, info, via_items, lock_rel, lock_index, log=False
             )
@@ -2070,11 +2142,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         SARIF level, which grades a high advisory CRITICAL: the misgrade the
         per-advisory grading is meant to end. The first rule to carry a score
         lends it to the kept rule.
+
+        The rule ids are worked out over every lockfile's advisories together:
+        a segment two lockfiles' advisories share (a collection URL) is told
+        apart by the tool's advisory id when their titles differ, or the one
+        rule kept here would stand for both and grade the second by the first.
         """
         report: SarifReport | None = None
+        titles = self._advisory_titles(
+            [
+                entry
+                for _, audit_results in per_lock_results
+                for entry in self._report_advisory_entries(audit_results)
+            ]
+        )
         for lock_file, audit_results in per_lock_results:
             part = self._convert_npm_audit_to_sarif(
-                audit_results, target_path, lock_file=lock_file
+                audit_results, target_path, lock_file=lock_file, advisory_titles=titles
             )
             if report is None:
                 report = part
@@ -2139,6 +2223,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         npm_audit_results: Dict[str, Any],
         target_path: Path,
         lock_file: Path | None = None,
+        advisory_titles: Dict[str, Set[str]] | None = None,
     ) -> SarifReport:
         """Convert npm audit results to SARIF format.
 
@@ -2148,11 +2233,22 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             lock_file: The lockfile these results were audited from. When it is
                 an npm lockfile under ``target_path``, each result carries
                 ``package_version`` and ``package_path`` from it.
+            advisory_titles: The titles seen under each rule id across every
+                report that is merged with this one (``_advisory_ids``). Left
+                out, they are the titles of this report.
 
         Returns:
             SarifReport: SARIF report containing the scan findings
         """
         lock_rel, lock_index = self._lock_context(lock_file, target_path)
+        # The rule ids are worked out over the whole report (``_advisory_ids``),
+        # not entry by entry: the rules are kept by id, so advisories of two
+        # packages behind one URL segment share one rule unless told apart.
+        titles = (
+            advisory_titles
+            if advisory_titles is not None
+            else self._advisory_titles(self._report_advisory_entries(npm_audit_results))
+        )
         # Create the basic SARIF structure
         tool_component = ToolComponent(
             name="npm-audit",
@@ -2228,7 +2324,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     pkg_name, vuln_info, via_items, lock_rel, lock_index
                 )
                 entry_nodes = self._entry_nodes(pkg_name, vuln_info)
-                advisory_ids = self._entry_advisory_ids(pkg_name, via_items)
+                advisory_ids = self._entry_advisory_ids(pkg_name, via_items, titles)
                 for via in via_items:
                     # Skip if it's just a string reference to another package
                     if isinstance(via, str):
@@ -2414,6 +2510,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         npm_audit_results["vulnerabilities"],
                         lock_rel,
                         lock_index,
+                        titles,
                     )
                     transitive_copies = dependency_only if has_dict_via else entry_nodes
                     for node_path in transitive_copies:
@@ -2464,6 +2561,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 rules_dict,
                 results,
                 lockfile=lock_shown,
+                titles=titles,
             )
 
         # pnpm audit writes npm's v1 report, ``advisories`` and ``metadata``,
@@ -2475,6 +2573,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 rules_dict,
                 results,
                 lockfile=lock_shown,
+                titles=titles,
             )
 
         # Add all rules to the tool component

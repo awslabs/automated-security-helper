@@ -923,6 +923,191 @@ class TestTheNpmConversion:
             ("advisories-1066", "critical"),
         ]
 
+    def test_two_packages_behind_one_collection_url_keep_their_own_rules(
+        self, scanner, monkeypatch
+    ):
+        """The titles that tell advisories apart were worked out per package,
+        so two packages whose advisories sit behind one collection URL each
+        looked like a single advisory and shared the rule id ``advisories``.
+        The rules are kept by id, so the second package's low advisory read the
+        first one's critical score. The titles are the whole report's."""
+        _unknown_versions(monkeypatch)
+        collection = "https://registry.example/advisories/"
+
+        def package(name, severity, score, source, title):
+            return {
+                "name": name,
+                "severity": severity,
+                "isDirect": True,
+                "via": [
+                    _via(
+                        "<2.0.0",
+                        url=collection,
+                        source=source,
+                        title=title,
+                        severity=severity,
+                        cvss={"score": score, "vectorString": "CVSS:3.1/AV:N"},
+                    )
+                ],
+                "effects": [],
+                "range": "<2.0.0",
+                "nodes": [f"node_modules/{name}"],
+                "fixAvailable": True,
+            }
+
+        report = {
+            "auditReportVersion": 2,
+            "vulnerabilities": {
+                "alpha": package("alpha", "critical", 9.8, 7, "Prototype Pollution"),
+                "beta": package("beta", "low", 3.1, 8, "Regular Expression DoS"),
+            },
+            "metadata": {"vulnerabilities": {"critical": 1, "low": 1}},
+        }
+
+        sarif = scanner._convert_npm_audit_to_sarif(report, "/fake")
+
+        rules = {rule.id: rule for rule in sarif.runs[0].tool.driver.rules}
+        assert sorted(rules) == ["advisories-7", "advisories-8"]
+        assert rules["advisories-7"].properties.model_extra["security_severity"] == 9.8
+        assert rules["advisories-8"].properties.model_extra["security_severity"] == 3.1
+        assert {
+            r.ruleId: r.properties.model_extra["severity"]
+            for r in sarif.runs[0].results
+        } == {
+            "advisories-7": "critical",
+            "advisories-8": "low",
+        }
+
+    def test_one_advisory_found_in_two_packages_is_still_one_rule(
+        self, scanner, monkeypatch
+    ):
+        """Control: the same advisory (one title) on two packages behind its
+        URL is one rule, as before; only different titles tell advisories
+        apart."""
+        _unknown_versions(monkeypatch)
+        report = _npm_report([_via("<2.0.0")])
+        report["vulnerabilities"]["other"] = {
+            **report["vulnerabilities"]["minimist"],
+            "name": "other",
+            "nodes": ["node_modules/other"],
+        }
+
+        sarif = scanner._convert_npm_audit_to_sarif(report, "/fake")
+
+        assert [rule.id for rule in sarif.runs[0].tool.driver.rules] == [
+            "GHSA-xvch-5gv4-984h"
+        ]
+        assert len(sarif.runs[0].results) == 2
+
+    def test_one_package_in_two_lockfiles_keeps_each_lockfiles_advisory_rule(
+        self, scanner, monkeypatch
+    ):
+        """Each lockfile is converted on its own and the rules are joined by id,
+        so two lockfiles whose advisories sit behind one collection URL shared
+        the rule id ``advisories`` and the join kept the first lockfile's rule
+        (its title and score) for both. The ids are worked out over every
+        lockfile's report before any is converted."""
+        _unknown_versions(monkeypatch)
+        collection = "https://registry.example/advisories/"
+        first = _npm_report(
+            [
+                _via(
+                    "<2.0.0",
+                    url=collection,
+                    source=7,
+                    title="Prototype Pollution",
+                    cvss={"score": 9.8, "vectorString": "CVSS:3.1/AV:N"},
+                )
+            ]
+        )
+        second = _npm_report(
+            [
+                _via(
+                    "<2.0.0",
+                    url=collection,
+                    source=8,
+                    title="Regular Expression DoS",
+                    severity="low",
+                    cvss={"score": 3.1, "vectorString": "CVSS:3.1/AV:N"},
+                )
+            ]
+        )
+        locks = scanner.context.output_dir / "elsewhere"
+
+        sarif = scanner._convert_per_lockfile(
+            [
+                (locks / "a" / "package-lock.json", first),
+                (locks / "b" / "package-lock.json", second),
+            ],
+            {"metadata": {"vulnerabilities": {}}},
+            scanner.context.source_dir,
+        )
+
+        rules = {rule.id: rule for rule in sarif.runs[0].tool.driver.rules}
+        assert sorted(rules) == ["advisories-7", "advisories-8"]
+        assert rules["advisories-8"].properties.model_extra["security_severity"] == 3.1
+        assert {
+            r.ruleId: r.properties.model_extra["severity"]
+            for r in sarif.runs[0].results
+        } == {
+            "advisories-7": "critical",
+            "advisories-8": "low",
+        }
+
+    def test_two_yarn_lockfiles_behind_one_collection_url_keep_their_own_rules(
+        self, scanner
+    ):
+        def record(record_id, title, severity):
+            return {
+                "package": "lodash",
+                "id": record_id,
+                "title": title,
+                "url": "https://registry.example/advisories/",
+                "severity": severity,
+                "cvss": {},
+                "cwe": [],
+                "vulnerable_versions": "<4.17.12",
+                "patched_versions": None,
+                "versions": {},
+                "paths_key": "dependents",
+            }
+
+        locks = scanner.context.output_dir / "elsewhere"
+
+        sarif = scanner._convert_per_lockfile(
+            [
+                (
+                    locks / "a" / "yarn.lock",
+                    {
+                        _YARN_ADVISORIES_KEY: [
+                            record(1065, "Prototype Pollution", "high")
+                        ],
+                        "metadata": {},
+                    },
+                ),
+                (
+                    locks / "b" / "yarn.lock",
+                    {
+                        _YARN_ADVISORIES_KEY: [
+                            record(1066, "Command Injection", "critical")
+                        ],
+                        "metadata": {},
+                    },
+                ),
+            ],
+            {"metadata": {}},
+            scanner.context.source_dir,
+        )
+
+        assert sorted(rule.id for rule in sarif.runs[0].tool.driver.rules) == [
+            "advisories-1065",
+            "advisories-1066",
+        ]
+        assert sorted(r.ruleId for r in sarif.runs[0].results) == [
+            "advisories-1065",
+            "advisories-1066",
+        ]
+
     def test_a_yarn_record_without_a_url_gets_a_rule_with_no_help_uri(self, scanner):
         record = {
             "package": "lodash",
