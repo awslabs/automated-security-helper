@@ -7,7 +7,7 @@ import json
 import re
 from typing import Literal, TYPE_CHECKING, Any, ClassVar, Dict, List, Tuple
 
-from pydantic import ValidationInfo, field_validator
+from pydantic import PrivateAttr, ValidationInfo, field_validator
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -173,6 +173,12 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         "Run a scan without --ignore-suppressions to evaluate them."
     )
 
+    #: The ``.json`` file name the markdown-under-a-json-name warning was last
+    #: given for. The name is settled twice for a reporter that is built and then
+    #: configured (``model_post_init`` and ``configure``), and the same warning
+    #: was logged by each.
+    _json_name_warned_for: str | None = PrivateAttr(default=None)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = UnusedSuppressionsReporterConfig()
@@ -215,12 +221,16 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         ):
             # Kept, as the operator's choice, but said: the text written under it
             # is markdown, and `ash config lint --fix-unused` reads a file of
-            # this name as JSON.
-            ASH_LOGGER.warning(
-                "The unused-suppressions reporter writes markdown "
-                "(output_format: markdown) under a file name that ends in .json; "
-                "tools that read the report by its name will read markdown as JSON."
-            )
+            # this name as JSON. Once for a name: the reporter settles its name
+            # when it is built and again when it is configured.
+            if self._json_name_warned_for != self.config.extension:
+                self._json_name_warned_for = self.config.extension
+                ASH_LOGGER.warning(
+                    "The unused-suppressions reporter writes markdown "
+                    "(output_format: markdown) under a file name that ends in "
+                    ".json; tools that read the report by its name will read "
+                    "markdown as JSON."
+                )
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The markdown copy, when ``output_format`` is ``both`` (the default)."""

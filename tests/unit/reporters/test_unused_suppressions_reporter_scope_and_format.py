@@ -265,6 +265,70 @@ def test_a_json_extension_the_operator_kept_under_markdown_is_warned_about(tmp_p
     assert any("markdown" in m and ".json" in m for m in messages), messages
 
 
+def _json_name_warnings(build):
+    """The warnings ``build()`` logs about markdown under a ``.json`` name."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    records: list = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.WARNING)
+    ASH_LOGGER.addHandler(handler)
+    try:
+        build()
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+    messages = [record.getMessage() for record in records]
+    return [m for m in messages if "markdown" in m and ".json" in m]
+
+
+def _markdown_config(extension):
+    return UnusedSuppressionsReporterConfig(
+        extension=extension, options={"output_format": "markdown"}
+    )
+
+
+def test_a_reporter_built_and_then_configured_warns_once(tmp_path):
+    """Red at the base: the name is settled when the reporter is built and again
+    when it is configured, and each logged the same warning."""
+
+    def build():
+        reporter = UnusedSuppressionsReporter(
+            context=_context(tmp_path), config=_markdown_config("unused.custom.json")
+        )
+        reporter.configure(_markdown_config("unused.custom.json"))
+
+    assert len(_json_name_warnings(build)) == 1
+
+
+def test_a_different_json_name_given_to_configure_is_warned_about_again(tmp_path):
+    """The control: the warning is once for a name, not once for the reporter."""
+
+    def build():
+        reporter = UnusedSuppressionsReporter(
+            context=_context(tmp_path), config=_markdown_config("unused.first.json")
+        )
+        reporter.configure(_markdown_config("unused.second.json"))
+
+    assert len(_json_name_warnings(build)) == 2
+
+
+def test_the_json_name_is_matched_whatever_its_case(tmp_path):
+    """The upper-case spelling of the extension takes the same branch."""
+
+    def build():
+        UnusedSuppressionsReporter(
+            context=_context(tmp_path), config=_markdown_config("unused.custom.JSON")
+        )
+
+    assert len(_json_name_warnings(build)) == 1
+
+
 def test_no_warning_for_a_name_that_is_not_json_or_a_json_format(tmp_path):
     """The controls: markdown under its own name, and a json report under a
     json name, draw no warning."""
