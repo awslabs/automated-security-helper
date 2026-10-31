@@ -801,16 +801,22 @@ class BwrapBackend(SandboxBackend):
 
     @property
     def caches_are_throwaway(self) -> bool:
-        """Whether the probe found overlays supported and no filesystem a cache was
-        found on has refused one.
+        """Whether the probe found overlays supported, at least one filesystem a
+        cache was found on has been probed, and none of them refused one.
 
         A cache on a filesystem that refuses to be an overlay's lower layer is
         mounted read-only (_overlay_over), so once a plan has met one the answer
         is False for the backend: a caller that trusts True writes into a cache
-        that is read-only. The answer for one cache is ``_overlay_over``'s.
+        that is read-only. Until a plan has probed a filesystem nothing is known
+        about the caches, and the answer is False as well: an empty record is not
+        a record of no refusals. The answer for one cache is ``_overlay_over``'s.
         """
         with self._overlay_lock:
-            return self._overlay and all(self._overlay_devices.values())
+            return (
+                self._overlay
+                and bool(self._overlay_devices)
+                and all(self._overlay_devices.values())
+            )
 
     def _probe(self) -> Optional[str]:
         found = _sandbox_program("bwrap")

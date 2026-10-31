@@ -387,7 +387,8 @@ def test_the_throwaway_property_is_false_once_a_cache_filesystem_refuses(
 ):
     """The property says every cache plans so far was mounted as an overlay: a plan
     that mounted one read-only (its filesystem refused) makes it False, and a
-    backend whose caches all took an overlay keeps True."""
+    backend whose caches all took an overlay keeps True. Before any plan has met a
+    cache filesystem it says nothing is known, which is False for both."""
     cache = layout.tmp / "cache"
     cache.mkdir()
     monkeypatch.setattr(backends, "_true", lambda: "/fake/true")
@@ -395,7 +396,7 @@ def test_the_throwaway_property_is_false_once_a_cache_filesystem_refuses(
 
     monkeypatch.setattr(backends, "_probe_run", lambda argv, env=None: None)
     taking = _bwrap(overlay=True)
-    assert taking.caches_are_throwaway is True
+    assert taking.caches_are_throwaway is False
     plan = taking.plan(["/bin/true"], {}, policy)
     try:
         assert taking.caches_are_throwaway is True
@@ -408,12 +409,62 @@ def test_the_throwaway_property_is_false_once_a_cache_filesystem_refuses(
         lambda argv, env=None: "exit 1: refused" if "--overlay-src" in argv else None,
     )
     refusing = _bwrap(overlay=True)
-    assert refusing.caches_are_throwaway is True
+    assert refusing.caches_are_throwaway is False
     plan = refusing.plan(["/bin/true"], {}, policy)
     try:
         assert refusing.caches_are_throwaway is False
     finally:
         plan.run_cleanup()
+
+
+def test_the_throwaway_property_is_false_until_a_filesystem_has_been_probed(
+    layout, monkeypatch
+):
+    """An empty record of probed filesystems is not a record of no refusals.
+
+    ``all()`` over nothing is True, so the property read True for a backend that
+    had planned nothing, and the first spawn to meet a refusing filesystem was
+    trusted to write into a cache that was mounted read-only. It is False on an
+    empty record, False for a backend whose probe found no overlays, False after
+    a plan with no cache to probe, and True only once a plan has probed a
+    filesystem and the filesystem took the overlay. The stand-in probe records
+    what it is asked and answers; nothing is mounted or started.
+    """
+    cache = layout.tmp / "cache"
+    cache.mkdir()
+    probes = []
+
+    def probe_run(argv, env=None):
+        probes.append(list(argv))
+        return None
+
+    monkeypatch.setattr(backends, "_probe_run", probe_run)
+    monkeypatch.setattr(backends, "_true", lambda: "/fake/true")
+
+    backend = _bwrap(overlay=True)
+    assert backend._overlay_devices == {}
+    assert backend.caches_are_throwaway is False
+
+    # A plan with no cache never asks about a filesystem: still nothing known.
+    plan = backend.plan(["/bin/true"], {}, _policy(layout))
+    plan.run_cleanup()
+    assert [p for p in probes if "--overlay-src" in p] == []
+    assert backend.caches_are_throwaway is False
+
+    # The backend whose probe found no overlay at all is False after a plan too.
+    without_overlay = _bwrap(overlay=False)
+    plan = without_overlay.plan(["/bin/true"], {}, _policy(layout, cache=(cache,)))
+    plan.run_cleanup()
+    assert without_overlay.caches_are_throwaway is False
+
+    # Once a plan has probed a cache's filesystem and it took the overlay: True.
+    plan = backend.plan(
+        ["/bin/true"], {}, _policy(layout, cache=(cache,), cache_env=("UV_CACHE_DIR",))
+    )
+    plan.run_cleanup()
+    assert len([p for p in probes if "--overlay-src" in p]) == 1
+    assert list(backend._overlay_devices.values()) == [True]
+    assert backend.caches_are_throwaway is True
 
 
 @pytest.mark.parametrize(
