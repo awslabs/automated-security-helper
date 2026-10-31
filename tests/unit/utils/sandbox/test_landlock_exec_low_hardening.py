@@ -485,11 +485,17 @@ def test_the_scans_data_is_granted_read_without_exec(monkeypatch):
         abi=3,
     )
 
-    rights = dict(rules)
     read = landlock_exec.FS_READ_FILE | landlock_exec.FS_READ_DIR
-    assert rights["/a"] == read | landlock_exec.FS_EXECUTE
-    assert rights["/b"] == read
-    assert rights["/c"] & landlock_exec.FS_WRITE_FILE
+
+    def rights_of(path):
+        # Landlock rules add up: a path given read with exec and read again without
+        # is executable. Every rule a path was given is read, not the last one.
+        return [access for rule_path, access in rules if rule_path == path]
+
+    assert rights_of("/a") == [read | landlock_exec.FS_EXECUTE]
+    assert rights_of("/b") == [read]
+    (writable,) = rights_of("/c")
+    assert writable & landlock_exec.FS_WRITE_FILE
 
 
 def test_the_wrapper_enters_the_policys_working_directory(monkeypatch, capsys):
