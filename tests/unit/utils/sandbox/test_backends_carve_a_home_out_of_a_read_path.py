@@ -68,9 +68,11 @@ def prefix(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(variable, raising=False)
     # backends imports policy's _passwd_home by name, so each module has its own
-    # binding, and the passwd home is faked in both.
+    # binding, and the passwd home is faked in both. Both bindings must exist: a
+    # rename would otherwise leave a dead attribute here and the real passwd home
+    # in use.
     for module in (policy_module, backends_module):
-        monkeypatch.setattr(module, "_passwd_home", Path.home, raising=False)
+        monkeypatch.setattr(module, "_passwd_home", Path.home)
     monkeypatch.setattr(policy_module, "SYSTEM_READ_PATHS", (root.as_posix(),))
     return SimpleNamespace(root=root, home=home)
 
@@ -136,13 +138,18 @@ def test_landlock_grants_what_sits_beside_the_home_not_the_path_holding_it(
 ):
     """No grant is the home or holds it; the entries beside the way to it are granted.
 
-    A link beside the way that points into the home grants nothing either: the
-    plan reads real paths, and the real path is inside the home.
+    A link beside the way that points into the home adds no grant: links are passed
+    over before any real path is read, and the one in this tree would be passed
+    over by the home check as well (the next test is the one that tells the two
+    apart).
     """
+    policy = _policy(tmp_path / "src")
+    baseline = _landlock_read_grants(policy, tmp_path, monkeypatch)
     (prefix.root / "link").symlink_to(prefix.home / ".ssh")
-    granted = _landlock_read_grants(_policy(tmp_path / "src"), tmp_path, monkeypatch)
+    granted = _landlock_read_grants(policy, tmp_path, monkeypatch)
     home = _real(prefix.home)
 
+    assert granted - baseline == set()
     assert _holding(granted, home) == []
     assert _real(prefix.root / "tool") in granted
     assert _real(prefix.root / "app" / "other") in granted
@@ -163,15 +170,29 @@ def test_landlock_grants_no_link_beside_the_way_by_what_it_names(
     path is whatever it names: a scanned tree that holds the home could place
     ``<prefix>/escape -> /srv/secrets`` or ``<prefix>/app/all -> /`` and be granted
     them. Links are passed over; a tool beside the way is still granted.
+
+    The grants are built once without the links and once with them, and the links
+    add none. A link to "/" that was followed would walk the root and grant its
+    top-level entries, and one to the directory beside ``secrets`` would grant the
+    directory that holds it; neither shows in a check of one path (``/`` is never
+    granted whole, because it holds the home), so no grant may cover the secrets
+    directory either, by being it, holding it or lying inside it.
     """
     secrets = tmp_path / "srv" / "secrets"
     secrets.mkdir(parents=True)
+    policy = _policy(tmp_path / "src")
+    baseline = _landlock_read_grants(policy, tmp_path, monkeypatch)
     (prefix.root / "escape").symlink_to(secrets, target_is_directory=True)
     (prefix.root / "app" / "all").symlink_to(Path("/"), target_is_directory=True)
-    granted = _landlock_read_grants(_policy(tmp_path / "src"), tmp_path, monkeypatch)
+    granted = _landlock_read_grants(policy, tmp_path, monkeypatch)
+    real_secrets = _real(secrets)
 
-    assert _real(secrets) not in granted, sorted(map(str, granted))
-    assert Path("/") not in granted
+    assert granted - baseline == set(), sorted(map(str, granted - baseline))
+    assert not [
+        p
+        for p in granted
+        if p == real_secrets or p in real_secrets.parents or real_secrets in p.parents
+    ]
     assert _real(prefix.root / "tool") in granted
     assert _real(prefix.root / "app" / "other") in granted
 
