@@ -658,9 +658,19 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     def _offline_database_available(self) -> bool:
         """Offline, whether trivy's cache holds a database for a scan that reads it.
 
-        True online, and for a scan whose scanners never open the database. A
-        failed probe records the reason (``dependency_unavailable_reason``) and
-        answers False, so the scanner lands as MISSING with it.
+        True online, and for a scan whose scanners never open the database. When
+        the probe reports that it found no usable database (the ``ValueError`` it
+        raises, ``ContentDatabaseAbsent`` among them) the reason is recorded
+        (``dependency_unavailable_reason``, redacted) and the answer is False, so
+        the scanner lands as MISSING with it.
+
+        A probe that could not run at all (``trivy version`` outlived its bound,
+        or the operating system refused to start it) says nothing about the
+        cache, so it is not graded MISSING: the failure is logged and the scan goes
+        on, as it did before the probe existed, and trivy reports a missing
+        database as a tool error if there is one. Any other exception is a bug in
+        the probe and is not caught, so it fails loudly instead of reading as a
+        missing database.
         """
         if not (self._offline() and self._reads_vulnerability_db()):
             return True
@@ -670,15 +680,30 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
         try:
             _built_from_trivy(self.content_database_probe_context())
-        except Exception as exc:  # noqa: BLE001 - every failure means "no usable database"
-            self.dependency_unavailable_reason = (
+        except ValueError as exc:
+            self.dependency_unavailable_reason = text_without_values(
                 "trivy is in offline mode and has no vulnerability database to read "
                 f"({exc}). Download one with network access (`trivy image "
                 "--download-db-only`, with TRIVY_CACHE_DIR set to the cache this scan "
-                "uses), or turn offline mode off."
+                "uses), or turn offline mode off.",
+                self._values_to_redact(),
             )
             self._plugin_log(self.dependency_unavailable_reason, level=logging.WARNING)
             return False
+        except (
+            OSError,
+            # spawn_run raises it when the probe outlives its bound.
+            subprocess_utils.subprocess.TimeoutExpired,
+        ) as exc:
+            self._plugin_log(
+                text_without_values(
+                    "trivy is in offline mode and ASH could not check that its "
+                    f"vulnerability database exists ({type(exc).__name__}: {exc}); "
+                    "the scan goes on and trivy reports a missing database itself.",
+                    self._values_to_redact(),
+                ),
+                level=logging.WARNING,
+            )
         return True
 
     def _reads_vulnerability_db(self) -> bool:

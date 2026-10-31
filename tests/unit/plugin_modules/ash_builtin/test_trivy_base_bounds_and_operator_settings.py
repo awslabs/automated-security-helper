@@ -1551,6 +1551,67 @@ def test_offline_the_terraform_checks_are_left_out_of_a_set_written_with_config(
     ], args
 
 
+# --- the offline database check ----------------------------------------------------
+
+
+def test_a_probe_that_found_no_database_is_missing_with_a_redacted_reason(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+
+    def no_database(ctx):
+        raise ValueError("no database under /operator/zz-canary-zz")
+
+    monkeypatch.setattr(staleness, "_built_from_trivy", no_database)
+    messages, logging_patch = _logged(scanner)
+
+    with (
+        logging_patch,
+        patch.object(
+            scanner, "_values_to_redact", return_value=["/operator/zz-canary-zz"]
+        ),
+    ):
+        assert scanner._offline_database_available() is False
+
+    reason = scanner.dependency_unavailable_reason
+    assert "no vulnerability database" in reason, reason
+    assert "zz-canary-zz" not in reason, reason
+    assert not [m for m in messages if "zz-canary-zz" in m], messages
+
+
+def test_a_probe_that_timed_out_does_not_make_the_scanner_missing(
+    tmp_path, monkeypatch
+):
+    """A ``trivy version`` that outlives its bound says nothing about the cache. The
+    scan goes on, as it did before the probe existed, and trivy reports a missing
+    database itself; graded MISSING, a scan that could have run was skipped."""
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+
+    def too_slow(ctx):
+        raise subprocess.TimeoutExpired(["trivy", "version"], 60)
+
+    monkeypatch.setattr(staleness, "_built_from_trivy", too_slow)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        assert scanner._offline_database_available() is True
+
+    assert not scanner.dependency_unavailable_reason
+    assert [m for m in messages if "could not check" in m], messages
+
+
+def test_a_bug_in_the_probe_is_not_read_as_a_missing_database(tmp_path, monkeypatch):
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+
+    def broken(ctx):
+        raise AttributeError("a bug in the probe")
+
+    monkeypatch.setattr(staleness, "_built_from_trivy", broken)
+
+    with pytest.raises(AttributeError, match="a bug in the probe"):
+        scanner._offline_database_available()
+
+
 # --- which lockfile entry a result names -------------------------------------------
 
 
