@@ -131,6 +131,10 @@ def _ash_logger() -> logging.Logger:
 #: the same thing hundreds of times.
 _WARNED_OFF_TABLE: Set[str] = set()
 
+#: The types of non-text scanner thresholds that were dropped, warned about once
+#: each per process: the resolver runs once per target.
+_WARNED_DROPPED_SCANNER: Set[str] = set()
+
 # The ladder, as data. Ordered strictest to loosest -- see the module docstring
 # for why that is the opposite of the severity ordering.
 SEVERITY_THRESHOLDS: Tuple[str, ...] = ("ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
@@ -492,6 +496,15 @@ def stricter_of(a: Optional[str], b: Optional[str]) -> Optional[str]:
     return a if _strictness_key(a) <= _strictness_key(b) else b
 
 
+def _gate_is_off(threshold: object) -> bool:
+    """Whether *threshold* turns the gate off: ``None``, or empty text.
+
+    Truthiness was the test, so ``0``, ``False`` and an empty list, which are
+    values an external section can hold, switched the gate off as if no threshold
+    were set, while the same values truthy gated like CRITICAL."""
+    return threshold is None or (isinstance(threshold, str) and not threshold)
+
+
 def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
     """Return True when a finding of *severity* fails the gate at *threshold*.
 
@@ -503,12 +516,13 @@ def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
     Returns:
         True if the finding should fail the scan.
     """
-    if not threshold:
+    if _gate_is_off(threshold):
         return False
     # A value that is not text (a number, a boolean, a list from an external
-    # section) names no rung and gates like any other unrecognised value. It is
-    # not looked up in the table: a list is unhashable, and the warning below
-    # describes it without reading it as text.
+    # section) names no rung and gates like any other unrecognised value, a
+    # falsy one (0, False, an empty list) included: only None and empty text turn
+    # the gate off. It is not looked up in the table: a list is unhashable, and
+    # the warning below describes it without reading it as text.
     on_the_ladder = isinstance(threshold, str) and threshold in _THRESHOLD_MIN_RANK
     if not on_the_ladder:
         _warn_off_table_threshold(threshold)
@@ -568,6 +582,23 @@ def _warn_off_table_threshold(threshold: object) -> None:
     )
 
 
+def _warn_dropped_scanner_threshold(threshold: object) -> None:
+    """Log once per type that a scanner's threshold is not text and is ignored.
+
+    The scanner then grades against the global threshold. That was silent, so a
+    scanner whose section held ``severity_threshold: 5`` or a list was graded
+    against a threshold its owner never wrote and nothing said so. Like the
+    off-table warning, it names the type of the value and never the value."""
+    key = f"<{type(threshold).__name__}>"
+    if key in _WARNED_DROPPED_SCANNER:
+        return
+    _WARNED_DROPPED_SCANNER.add(key)
+    _ash_logger().warning(
+        f"Scanner severity threshold {_threshold_for_log(threshold)} is ignored; "
+        "the global severity threshold applies to that scanner"
+    )
+
+
 def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) -> bool:
     """Return True when a SARIF result at *level* fails the gate at *threshold*.
 
@@ -585,7 +616,7 @@ def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) 
     Returns:
         True if the finding should be treated as actionable.
     """
-    if not threshold:
+    if _gate_is_off(threshold):
         return False
     severity = _SARIF_LEVEL_TO_SEVERITY[effective_sarif_level({"level": level})]
     return severity_fails_threshold(severity, threshold)
@@ -685,6 +716,8 @@ def resolve_scanner_threshold(
             return normalized, "config"
         if scanner_threshold.strip():
             return scanner_threshold, "config"
+    elif scanner_threshold is not None:
+        _warn_dropped_scanner_threshold(scanner_threshold)
     global_settings = getattr(ash_config, "global_settings", None)
     if global_settings is not None and hasattr(global_settings, "severity_threshold"):
         configured = global_settings.severity_threshold

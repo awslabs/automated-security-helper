@@ -179,7 +179,10 @@ def _is_derived_report(file_path: str) -> bool:
 
 
 def _find_sarif_files(
-    sarif_dir: str, top: str, recursive: bool
+    sarif_dir: str,
+    top: str,
+    recursive: bool,
+    unreadable: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """The ``*.sarif`` files below ``sarif_dir/top`` and the links not followed.
 
@@ -194,13 +197,29 @@ def _find_sarif_files(
 
     A name that starts with a dot is left out, as ``glob`` leaves it out, and the
     files come back sorted: directory order varies by filesystem.
+
+    A directory the walk could not list (permission denied) is skipped by
+    ``os.walk`` without a word unless it is given an ``onerror``, so its files
+    were left out and the run could exit 0 over a partial tree. Each such
+    directory is appended to *unreadable* when a list is given. A directory that
+    does not exist is not one: a scan without ``reports/`` has none to read.
     """
     start = os.path.join(sarif_dir, top)
     if os.path.islink(start):
         return [], [start]
     files: list[str] = []
     links: list[str] = []
-    for current, dirnames, filenames in os.walk(start, followlinks=False):
+
+    def _note_unreadable(error: OSError) -> None:
+        if unreadable is None or isinstance(
+            error, (FileNotFoundError, NotADirectoryError)
+        ):
+            return
+        unreadable.append(str(error.filename or start))
+
+    for current, dirnames, filenames in os.walk(
+        start, followlinks=False, onerror=_note_unreadable
+    ):
         dirnames[:] = sorted(name for name in dirnames if not name.startswith("."))
         if recursive:
             links.extend(
@@ -269,14 +288,22 @@ def analyze_sarif_fields(
     # reported and never entered; it counts against the run, as a linked file does.
     all_sarif_files: list[str] = []
     linked_paths: list[str] = []
+    unreadable_dirs: list[str] = []
     for top, recursive in (("reports", False), ("scanners", True)):
-        found_files, found_links = _find_sarif_files(str(sarif_dir), top, recursive)
+        found_files, found_links = _find_sarif_files(
+            str(sarif_dir), top, recursive, unreadable_dirs
+        )
         all_sarif_files.extend(found_files)
         linked_paths.extend(found_links)
     for linked in linked_paths:
         console.print(
             f"Skipping [cyan]{escape_markup(linked)}[/cyan]: a symbolic link, "
             "not followed"
+        )
+    for unread in unreadable_dirs:
+        console.print(
+            f"Skipping [cyan]{escape_markup(unread)}[/cyan]: a directory that "
+            "could not be read"
         )
 
     if not all_sarif_files:
@@ -690,7 +717,16 @@ def analyze_sarif_fields(
             "tree were not followed and are not part of this analysis[/bold red]"
         )
 
-    if has_unexpected_missing_fields or failed_files or linked_paths:
+    # A directory that could not be listed holds files nobody read, so it fails
+    # the run like a link not followed does.
+    if unreadable_dirs:
+        console.print(
+            f"[bold red]WARNING: {len(unreadable_dirs)} director(y/ies) in the "
+            "output tree could not be read and are not part of this "
+            "analysis[/bold red]"
+        )
+
+    if has_unexpected_missing_fields or failed_files or linked_paths or unreadable_dirs:
         raise typer.Exit(code=1)
 
     return results_dict

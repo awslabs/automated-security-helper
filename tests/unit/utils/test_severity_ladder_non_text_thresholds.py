@@ -77,6 +77,72 @@ def test_a_scanner_threshold_that_is_text_is_still_returned_as_given():
     assert resolve_scanner_threshold("high", config) == ("HIGH", "config")
 
 
+#: Falsy and not text: what a section can hold that is neither unset nor blank.
+FALSY_NOT_TEXT = [0, 0.0, False, [], {}]
+
+
+@pytest.mark.parametrize("value", FALSY_NOT_TEXT, ids=repr)
+def test_a_falsy_threshold_that_is_not_text_gates_like_critical(ash_log, value):
+    """Only None and empty text turn the gate off. Tested for truth, a falsy
+    value that is not text did too, though the rule is that a value that is not
+    text gates like any other unrecognised one."""
+    assert severity_fails_threshold("CRITICAL", value) is True
+    assert severity_fails_threshold("HIGH", value) is False
+
+    warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "not shown: not text" in warnings[0]
+
+
+@pytest.mark.parametrize("value", [None, ""], ids=repr)
+def test_no_threshold_still_turns_the_gate_off(ash_log, value):
+    """The control: unset and empty are the two values that mean no gate."""
+    assert severity_fails_threshold("CRITICAL", value) is False
+    assert not [r for r in ash_log.records if r.levelname == "WARNING"]
+
+
+def test_the_sarif_level_gate_does_not_turn_off_for_a_falsy_value_either(ash_log):
+    from automated_security_helper.utils.severity_ladder import (
+        sarif_level_fails_threshold,
+    )
+
+    sarif_level_fails_threshold("error", 0)
+
+    warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+
+
+@pytest.fixture
+def dropped_log(ash_log, monkeypatch):
+    monkeypatch.setattr(severity_ladder, "_WARNED_DROPPED_SCANNER", set())
+    return ash_log
+
+
+@pytest.mark.parametrize("value", [0, False, [], 5, True, ["HIGH"]], ids=repr)
+def test_dropping_a_scanner_threshold_that_is_not_text_is_logged_once(
+    dropped_log, value
+):
+    config = SimpleNamespace(global_settings=SimpleNamespace(severity_threshold="LOW"))
+
+    assert resolve_scanner_threshold(value, config) == ("LOW", "global")
+    assert resolve_scanner_threshold(value, config) == ("LOW", "global")
+
+    warnings = [r.getMessage() for r in dropped_log.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    shown = f"a value of type {type(value).__name__} (not shown: not text)"
+    assert shown in warnings[0]
+    assert "global" in warnings[0]
+
+
+@pytest.mark.parametrize("value", [None, "", "high", "bogus"], ids=repr)
+def test_a_scanner_threshold_that_is_unset_or_text_logs_no_drop(dropped_log, value):
+    config = SimpleNamespace(global_settings=SimpleNamespace(severity_threshold="LOW"))
+
+    resolve_scanner_threshold(value, config)
+
+    assert not [r for r in dropped_log.records if r.levelname == "WARNING"]
+
+
 class _PlainObject:
     """A value that is neither text nor a number nor a container.
 
