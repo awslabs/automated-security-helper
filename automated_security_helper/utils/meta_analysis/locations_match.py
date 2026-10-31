@@ -311,7 +311,10 @@ def _below_resolved_root(path: str, root: str) -> Optional[str]:
     the part below the root is the result. Aggregation does the same when it
     makes a URI relative to the source directory
     (``sarif_utils._relative_to_resolved_root``), and nothing is placed here that
-    it would not place. A path of another system's spelling, or one that does
+    it would not place. The one difference is the root itself: aggregation reads
+    a URI that resolves to the source directory as ``.``, while here a path
+    names a file only below the root, so the directory is not placed, as it is
+    no file of the scan. A path of another system's spelling, or one that does
     not lead into the root either way, is None.
 
     Cached on the pair: a report names the same few paths against every
@@ -375,13 +378,15 @@ def file_paths_match(file1: str, file2: str, scan_root: Optional[str] = None) ->
     root, and an absolute path is made relative to it when it is below it, as
     spelled or through an ancestor that resolves to the root (a report that
     spells a linked directory another way), or by a link that leads into it (to
-    a directory of the root, or to a file in it). The files of the scan are then
-    compared whole. An absolute path the root cannot place is not a file of the
-    scan, so it matches only an identical path and never a relative one: the
-    aggregate writes a relative path only for a file below the source directory,
-    so ``lib/a.py`` is not the file ``/work/app2/lib/a.py`` of a sibling
-    directory. A report written where the scan saw the files under another
-    mount (a container) names no file of the root either; give no root for it.
+    a directory of the root, or to a file in it). A path that names the root
+    directory itself is no file of the scan and is not placed. The files of the
+    scan are then compared whole. An absolute path the root cannot place is not
+    a file of the scan, so it matches only an identical path and never a
+    relative one: the aggregate writes a relative path only for a file below the
+    source directory, so ``lib/a.py`` is not the file ``/work/app2/lib/a.py`` of
+    a sibling directory. A report written where the scan saw the files under
+    another mount (a container) names no file of the root either; give no root
+    for it.
     """
     norm1 = _normalize_file_path(file1)
     norm2 = _normalize_file_path(file2)
