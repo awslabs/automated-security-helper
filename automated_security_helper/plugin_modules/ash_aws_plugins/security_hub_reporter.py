@@ -621,10 +621,6 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         region = options.aws_region
         if not region:
             raise SecurityHubImportError(_missing_region_message())
-        # The scan time orders this import against the stored findings; a
-        # generated_at that does not parse is refused here, before the account
-        # lookup, so that it is not found only once the credentials work.
-        timestamp = _asff_timestamp(model.metadata.generated_at)
         base_key = _target_key(self._scan_target(), _model_project(model))
         # The stored forms: a ProductFields value is cut at
         # MAX_PRODUCT_FIELD_VALUE_LENGTH when a finding is sent, so the
@@ -637,6 +633,14 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         completed, archive_skipped = self._archive_scope(model)
         if options.archive_resolved_findings and self._scan_scope(model) is None:
             self._notify_no_scan_source()
+        elif options.archive_resolved_findings and archive_skipped:
+            # The receipt says why too, but nothing an operator reads at the
+            # default log level did: resolved findings stayed ACTIVE with no
+            # message, as _notify_no_scan_source's docstring records for the
+            # case it covers.
+            ASH_LOGGER.warning(
+                f"aws-security-hub archived nothing from this run: {archive_skipped}"
+            )
         result_count = len(model.sarif.get_all_results()) if model.sarif else 0
         if result_count == 0 and completed is None:
             # BatchImportFindings takes at least one finding, and nothing can be
@@ -655,6 +659,12 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 archive_scanners=None,
             )
 
+        # The scan time orders this import against the stored findings; a
+        # generated_at that does not parse is refused here, before the account
+        # lookup, so that it is not found only once the credentials work. After
+        # the return above: a results file with nothing to send needs no scan
+        # time, and a file written with archiving off may not record one.
+        timestamp = _asff_timestamp(model.metadata.generated_at)
         try:
             session = boto3.Session(
                 profile_name=options.aws_profile,
@@ -682,10 +692,16 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             self.build_asff_findings(model, account_id=account_id, region=region)
         )
         if duplicates:
+            # The identity key tells every result of a run apart (occurrences
+            # and ordinals, utils/finding_identity.identity_keys), so a repeated
+            # Id is not two equal results: it is a defect in how the keys were
+            # made, and the finding is sent once as Security Hub would process
+            # only the first.
             ASH_LOGGER.warning(
-                f"aws-security-hub: {duplicates} finding(s) had the same scanner, "
-                "rule, file, location and fingerprints as an earlier one and were "
-                "sent once"
+                f"aws-security-hub: {duplicates} finding(s) were given an Id an "
+                "earlier finding already had, which the identity key is meant to "
+                "rule out; each Id was sent once. Please report this as an ASH "
+                "defect."
             )
 
         existing: list[dict[str, Any]] = []
@@ -1114,26 +1130,42 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 "inputs_not_scanned), so no scanner looked at everything"
             )
         reports = model.additional_reports or {}
-        completed = frozenset(
+        finished = [
             name
             for name, info in (model.scanner_results or {}).items()
             if str(getattr(info.status, "value", info.status)) in _COMPLETED_STATUSES
             and not getattr(info, "excluded", False)
             and getattr(info, "dependencies_satisfied", True)
+        ]
+
+        def left_out_because(name: str) -> str | None:
+            """Why a finished scanner does not count, or None when it does."""
             # A scanner with an additional_reports entry whose per-target
             # reports the metrics read as nobody's (an empty entry, a slot
             # holding no mapping, reports filed under another scanner's name)
             # has coverage that cannot be checked: the two reads below would
             # see no lost target and no unscanned input in them. Left out
             # rather than trusted.
-            and (name not in reports or own_target_reports(model, name))
-            and target_counts(model, name)[1] == 0
+            if name in reports and not own_target_reports(model, name):
+                return "its per-target reports cannot be read"
+            if target_counts(model, name)[1] != 0:
+                return "lost a target"
             # A scanner that found inputs it did not scan did not look at
             # everything, whatever its status says.
-            and name not in not_scanned_by
-        )
+            if name in not_scanned_by:
+                return "found inputs it did not scan"
+            return None
+
+        reasons = {name: left_out_because(name) for name in finished}
+        completed = frozenset(name for name, why in reasons.items() if why is None)
         if not completed:
-            return None, "no scanner finished without losing a target"
+            left_out = [f"{name} ({why})" for name, why in reasons.items() if why]
+            if not left_out:
+                return None, "no scanner finished without losing a target"
+            return None, (
+                "no scanner finished without losing a target or an input it found: "
+                + ", ".join(left_out)
+            )
         return completed, None
 
     def _scan_scope(self, model: "AshAggregatedResults") -> str | None:

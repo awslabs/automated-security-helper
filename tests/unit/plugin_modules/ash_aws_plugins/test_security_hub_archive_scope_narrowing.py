@@ -49,6 +49,16 @@ def _stale(tmp_path):
     return _stored(_built(_reporter(tmp_path), _result(rule_id="B105", line=5)))
 
 
+def _stale_in_the_converted_tree(tmp_path):
+    """A stored finding with the scope of a scan of the converted tree, the
+    scope the converter tests' models have: with any other scope it would not
+    be archived whatever the converter did, and the test would pass without
+    the rule it is about."""
+    stale = _stale(tmp_path)
+    stale["ProductFields"]["ash/scope"] = "source=.;converted=yes"
+    return stale
+
+
 def test_a_failed_converter_archives_nothing_from_a_converted_tree_scan(tmp_path):
     """The converted tree is missing the failed converter's outputs, so a
     converted-tree finding the scan no longer reports is not fixed; a stored
@@ -63,13 +73,14 @@ def test_a_failed_converter_archives_nothing_from_a_converted_tree_scan(tmp_path
     )
 
     document, imports, _queries = _archive_run(
-        tmp_path, model, [_stale(tmp_path)], expected_sent=1
+        tmp_path, model, [_stale_in_the_converted_tree(tmp_path)], expected_sent=1
     )
 
     assert document["archived"] == 0
     assert document["archive_scanners"] == []
-    assert "converter" in document["archive_skipped"], document["archive_skipped"]
-    assert "jupyter" in document["archive_skipped"], document["archive_skipped"]
+    assert document["archive_skipped"].startswith(
+        "a converter failed this run (jupyter), so the converted tree is missing"
+    ), document["archive_skipped"]
     assert len(imports.findings) == 1
 
 
@@ -103,11 +114,13 @@ def test_an_unavailable_converter_with_inputs_counts_as_failed(tmp_path):
     )
 
     document, _imports, _queries = _archive_run(
-        tmp_path, model, [_stale(tmp_path)], expected_sent=1
+        tmp_path, model, [_stale_in_the_converted_tree(tmp_path)], expected_sent=1
     )
 
     assert document["archived"] == 0
-    assert "archive" in document["archive_skipped"], document["archive_skipped"]
+    assert document["archive_skipped"].startswith(
+        "a converter failed this run (archive), so the converted tree is missing"
+    ), document["archive_skipped"]
 
 
 def test_a_scanner_that_did_not_scan_an_input_archives_nothing(tmp_path):
@@ -127,7 +140,9 @@ def test_a_scanner_that_did_not_scan_an_input_archives_nothing(tmp_path):
 
     assert document["archived"] == 0
     assert document["archive_scanners"] == []
-    assert "no scanner finished" in document["archive_skipped"]
+    # The reason names the scanner and what narrowed it: it finished, and it
+    # found inputs it did not scan.
+    assert "bandit (found inputs it did not scan)" in document["archive_skipped"]
 
 
 def test_inputs_the_scan_set_left_out_refuse_the_archive(tmp_path):
