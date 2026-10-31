@@ -28,6 +28,8 @@ Each test is pinned against the behavior it replaced:
   raised a bare TypeError for an unhashable id, pruned expired cleanup errors in
   only two of their readers, and the context managers recovered their own
   registration with a second lookup by id.
+* A single unregistration cancelled while its cleanup ran left the subscription
+  gone from the registry with no record that the cleanup had not finished.
 """
 
 import asyncio
@@ -395,6 +397,74 @@ class TestACancelledBulkCleanupKeepsWhatItNeverReached:
         }
         assert set(recorded) == {"a", "c"}
         assert "did not run" in recorded["c"]
+
+
+class TestACancelledUnregistrationRecordsItsInterruptedCleanup:
+    """A single unregistration detaches the subscription before its cleanup
+    runs. A cancellation that landed in the cleanup left the subscription gone
+    from the registry with nothing recording that its cleanup had not
+    finished; the bulk cleanups record theirs."""
+
+    @staticmethod
+    async def _cancel_while_cleaning(unregister, started):
+        task = asyncio.create_task(unregister())
+        await asyncio.wait_for(started.wait(), 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    @staticmethod
+    def _assert_recorded_once(manager):
+        errors = manager.get_cleanup_errors()
+        assert [e["subscription_id"] for e in errors] == ["a"]
+        assert "interrupted" in errors[0]["error"]
+        assert "cancelled" in errors[0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_unregister_subscription(self):
+        manager = EventSubscriptionManager()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def blocks():
+            started.set()
+            await release.wait()
+
+        await _register(manager, "a", cleanup_func=blocks)
+
+        await self._cancel_while_cleaning(
+            lambda: manager.unregister_subscription("a"), started
+        )
+
+        assert manager.get_subscription_info("a") is None
+        self._assert_recorded_once(manager)
+
+    @pytest.mark.asyncio
+    async def test_unregister_registration(self):
+        manager = EventSubscriptionManager()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def blocks():
+            started.set()
+            await release.wait()
+
+        await _register(manager, "a", cleanup_func=blocks)
+        registered = manager.get_registration("a")
+
+        await self._cancel_while_cleaning(
+            lambda: manager.unregister_registration(registered), started
+        )
+
+        assert manager.get_subscription_info("a") is None
+        self._assert_recorded_once(manager)
+
+    @pytest.mark.asyncio
+    async def test_a_cleanup_that_finishes_records_nothing(self):
+        """The control: an uninterrupted unregistration adds no error."""
+        manager = EventSubscriptionManager()
+        await _register(manager, "a", cleanup_func=lambda: None)
+
+        assert await manager.unregister_subscription("a") is True
+        assert manager.get_cleanup_errors() == []
 
 
 class TestAnUnhashableSubscriptionIdIsRefusedAsAResourceError:

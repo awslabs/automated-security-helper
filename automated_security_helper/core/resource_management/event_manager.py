@@ -291,6 +291,26 @@ class EventSubscriptionManager:
         finally:
             self._cleanups_running.discard(subscription_id)
 
+    async def _run_cleanup_of_one(self, subscription: EventSubscription) -> bool:
+        """Run one detached subscription's cleanup for a single unregistration.
+
+        True when the cleanup ran (or there was none), False when it raised.
+        A cancellation that lands in the cleanup (a shutdown that gave the
+        unregistration a deadline) goes on after recording the subscription as
+        a cleanup that was interrupted: detached and cancelled partway, it was
+        gone from the registry with nothing recording that its cleanup had not
+        finished, as the bulk cleanups record theirs (``_restore_unreached``).
+        """
+        try:
+            return await self._run_cleanup(subscription) is None
+        except BaseException:
+            self._record_cleanup_failure(
+                subscription,
+                "cleanup was interrupted before it finished: the unregistration "
+                "was cancelled",
+            )
+            raise
+
     def _record_cleanup_failure(
         self, subscription: EventSubscription, error: str
     ) -> None:
@@ -366,9 +386,9 @@ class EventSubscriptionManager:
             self._detach(subscription)
 
         # Execute cleanup function if provided, outside the lock.
-        cleanup_error = await self._run_cleanup(subscription)
+        cleaned = await self._run_cleanup_of_one(subscription)
         self._logger.debug(f"Unregistered subscription {subscription_id}")
-        return cleanup_error is None
+        return cleaned
 
     async def unregister_registration(self, subscription: EventSubscription) -> bool:
         """Unregister exactly ``subscription``, if it is still the one registered.
@@ -391,8 +411,7 @@ class EventSubscriptionManager:
                 )
                 return False
             self._detach(subscription)
-        cleanup_error = await self._run_cleanup(subscription)
-        return cleanup_error is None
+        return await self._run_cleanup_of_one(subscription)
 
     async def _cleanup_detached(
         self,
