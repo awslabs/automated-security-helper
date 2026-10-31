@@ -712,9 +712,9 @@ class ScanRegistry:
         return holding
 
     def _later_scans_inside(self, entry: ScanRegistryEntry) -> List[str]:
-        """The later scans that wrote inside ``entry``'s output tree, oldest first.
+        """The other scans that wrote inside ``entry``'s output tree.
 
-        A later scan whose output directory lies INSIDE this one (a project scan
+        A scan whose output directory lies INSIDE this one (a project scan
         under the output directory of a scan of the workspace root) is not in
         ``later_scan_ids``, which records only scans of the very same directory
         because its other reader, ``check_scan_progress``, hides this scan's own
@@ -722,15 +722,21 @@ class ScanRegistry:
         under ``<output>/projects`` leaves the files at the top of ``<output>``
         as they were. Removing ``entry``'s tree does delete the project scan's
         files, so the removal reads this as well (the caller holds the lock).
-        The later scan counts when it claimed its tree (it ran, as
+        The scan counts when it claimed its tree (it ran, as
         :meth:`_record_supersession` reads it) and did not put the previous
         results back.
+
+        Registration order does not matter here, unlike for the same directory:
+        a later scan of the same directory overwrites the earlier one's files,
+        while a scan of the containing tree clears only its own result entries
+        (``RESULT_ENTRIES``) and never touches ``projects/``, so a project scan
+        registered BEFORE the containing scan keeps its files in the tree the
+        removal deletes. Only live entries are read: the files of a nested scan
+        that was cleaned up without ``remove_output`` are no registered scan's.
         """
         inside: List[str] = []
         for other in self._registry.values():
             if other.scan_id == entry.scan_id:
-                continue
-            if other.registration_seq <= entry.registration_seq:
                 continue
             if entry.canonical_output_directory not in (
                 other.canonical_output_directory.parents

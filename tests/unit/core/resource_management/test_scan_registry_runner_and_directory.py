@@ -427,6 +427,64 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert progress["output_superseded"] is False
         assert "bandit" in progress["scanners"]
 
+    @staticmethod
+    def _project_scan_then_root_scan(registry, tmp_path, project_runs):
+        """The layout of ``_root_scan_and_inner_project`` registered the other
+        way round: the project scan first, then a single scan of the root into
+        the output directory that contains the project's."""
+        root = tmp_path / "ws"
+        project = root / "proj"
+        project.mkdir(parents=True)
+        outer = root / ".ash" / "ash_output"
+        inner = outer / "projects" / "proj-key"
+        project_scan = _register(registry, project, inner)
+        if project_runs:
+            registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+            registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        else:
+            registry.update_scan_status(project_scan, MCScanStatus.CANCELLED)
+        root_scan = _register(registry, root, outer)
+        registry.update_scan_status(root_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(root_scan, MCScanStatus.COMPLETED)
+        return root_scan
+
+    def test_a_finished_scan_registered_first_inside_the_tree_holds_it_too(
+        self, tmp_path
+    ):
+        """A scan of the root clears only its own result entries, never
+        ``projects/``, so the completed project scan registered BEFORE it keeps
+        its files in the tree the root scan's removal deletes."""
+        registry = ScanRegistry()
+        root_scan = self._project_scan_then_root_scan(
+            registry, tmp_path, project_runs=True
+        )
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(root_scan), lambda: ran.append(1) or True
+        )
+
+        assert reason == "a later scan holds its results in this output directory"
+        assert removed is False
+        assert ran == []
+
+    def test_a_project_scan_that_never_ran_holds_nothing_in_the_tree(self, tmp_path):
+        """The control: a project scan cancelled from PENDING never claimed its
+        tree, so the root scan's removal goes ahead."""
+        registry = ScanRegistry()
+        root_scan = self._project_scan_then_root_scan(
+            registry, tmp_path, project_runs=False
+        )
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(root_scan), lambda: ran.append(1) or True
+        )
+
+        assert reason is None
+        assert removed is True
+        assert ran == [1]
+
     def test_a_finished_scan_beside_the_tree_is_not_a_later_scan_of_it(self, tmp_path):
         """By path component: a scan that wrote to ``<output>-backup`` shares
         nothing with ``<output>``, so it holds nothing against the removal."""
