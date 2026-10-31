@@ -493,7 +493,14 @@ def _operator_ca_reads(
     for an entry it is given. A backend that cannot write a link
     (``warns_of_hidden_links``) grants what the link names and warns, once, that
     the written path stays unreadable.
+
+    Only a scanner that has a network is granted anything: a trust root is read to
+    verify a TLS peer, which a scanner with no network never reaches, so for it the
+    grant would only widen what it can read (``SSL_CERT_DIR`` may name a
+    directory under ``~/.config``). The variables are still passed through as listed.
     """
+    if not policy.network:
+        return []
     listed, configured = parse_environment(policy.environment)
     started = startup_environ()
     homes = _homes_to_hide(policy)

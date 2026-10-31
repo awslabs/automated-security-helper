@@ -229,7 +229,9 @@ it needs.
   nothing. A variable the list passes by name is held to the same rule when ASH is
   started with such a value: it is dropped without a message.
 - A certificate setting you made is readable inside the sandbox, on every backend,
-  where bwrap, firejail and Landlock hide the home directory: the files that
+  where bwrap, firejail and Landlock hide the home directory, for a scanner that has
+  a network (a scanner with none never verifies a peer, so it is granted no read,
+  and the variables are still passed): the files that
   `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`
   name, read-only, and each directory `SSL_CERT_DIR` names. The grant is for the value
   ASH started with (or one the list sets), never for a value that appears later in

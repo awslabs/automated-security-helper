@@ -5534,7 +5534,8 @@
   not be opened, and `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`
   and `SSL_CERT_DIR` were granted by none. All four backends now grant, read-only,
   the files and directories named by the values ASH started with, or by a
-  `NAME=value` entry of the environment list. A `SSL_CERT_DIR` entry that is a home directory or
+  `NAME=value` entry of the environment list, to a scanner that has a network (one
+  with none verifies no peer and is granted no read). A `SSL_CERT_DIR` entry that is a home directory or
   holds one is not granted, with a warning. The proxy and certificate names are now
   one environment list that every backend reads, in the shape of a docker-compose
   `environment` list (a name passes the value ASH has, `NAME=value` sets it); a name

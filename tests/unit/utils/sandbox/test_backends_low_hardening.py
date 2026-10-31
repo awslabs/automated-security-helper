@@ -1034,7 +1034,9 @@ def test_every_backend_reads_back_what_the_operators_ca_settings_name(
     env["SSL_CERT_DIR"] = os.pathsep.join([str(first), str(second)])
     monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
 
-    granted = _granted_for(kind, layout, monkeypatch, _policy(layout), env)
+    granted = _granted_for(
+        kind, layout, monkeypatch, _policy(layout, network=True), env
+    )
 
     for path in (*files, first, second):
         assert _real(path).as_posix() in granted, (kind, path.name)
@@ -1051,12 +1053,43 @@ def test_a_ca_value_that_is_not_the_operators_opens_nothing(layout, monkeypatch,
     monkeypatch.setattr(backends, "startup_environ", dict)
     env = {name: str(secret) for name in _CA_FILE_NAMES}
 
-    plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+    plan = _plan_of(kind, layout, monkeypatch, _policy(layout, network=True), env)
     try:
         assert plan.env["REQUESTS_CA_BUNDLE"] == str(secret)
         assert _real(secret).as_posix() not in _read_grants(kind, plan)
     finally:
         plan.run_cleanup()
+
+
+@POSIX
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+def test_a_scanner_with_no_network_is_granted_no_ca_read(layout, monkeypatch, kind):
+    """A trust root is read to verify a TLS peer, and a scanner with no network never
+    reaches one, so the grant would only widen what it can read. The settings are
+    still passed through as listed; the same settings give a scanner with a network
+    the reads.
+
+    ``SSL_CERT_FILE`` is not among the names here: sandbox-exec has a rule of its own
+    for it, outside the grant this test covers."""
+    bundle = layout.home / "corp.pem"
+    bundle.write_text("")
+    certs = layout.home / "certs"
+    certs.mkdir()
+    env = {"REQUESTS_CA_BUNDLE": str(bundle), "SSL_CERT_DIR": str(certs)}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+
+    plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+    try:
+        offline = _read_grants(kind, plan)
+        assert plan.env["REQUESTS_CA_BUNDLE"] == str(bundle)
+        assert plan.env["SSL_CERT_DIR"] == str(certs)
+    finally:
+        plan.run_cleanup()
+    online = _granted_for(kind, layout, monkeypatch, _policy(layout, network=True), env)
+
+    for path in (bundle, certs):
+        assert _real(path).as_posix() not in offline, (kind, path.name)
+        assert _real(path).as_posix() in online, (kind, path.name)
 
 
 @POSIX
@@ -1070,7 +1103,9 @@ def test_a_ca_directory_that_holds_a_home_is_not_granted(
     monkeypatch.setattr(backends, "_ca_unspelled_warned", set())
 
     with caplog.at_level(logging.WARNING, logger="ash"):
-        granted = _granted_for(kind, layout, monkeypatch, _policy(layout), env)
+        granted = _granted_for(
+            kind, layout, monkeypatch, _policy(layout, network=True), env
+        )
 
     assert _real(layout.tmp).as_posix() not in granted
     assert any(
@@ -1090,7 +1125,9 @@ def test_a_ca_directory_that_holds_a_home_is_warned_of_once(
 
     with caplog.at_level(logging.WARNING, logger="ash"):
         for _ in range(3):
-            _granted_for("bwrap", layout, monkeypatch, _policy(layout), env)
+            _granted_for(
+                "bwrap", layout, monkeypatch, _policy(layout, network=True), env
+            )
 
     warned = [
         record
@@ -1139,7 +1176,7 @@ def test_a_ca_path_that_cannot_be_examined_is_passed_on_and_fails_no_plan(
 
     monkeypatch.setattr(os, "stat", stat)
 
-    plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+    plan = _plan_of(kind, layout, monkeypatch, _policy(layout, network=True), env)
     try:
         assert plan.env["SSL_CERT_FILE"] == str(bundle)
         assert plan.env["SSL_CERT_DIR"] == str(certs)
@@ -1175,7 +1212,9 @@ def test_a_ca_entry_the_backend_cannot_spell_is_left_out_not_refused(
 
     with caplog.at_level(logging.WARNING, logger="ash"):
         for _ in range(2):
-            plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+            plan = _plan_of(
+                kind, layout, monkeypatch, _policy(layout, network=True), env
+            )
             try:
                 assert plan.env["SSL_CERT_DIR"] == value
                 granted = _read_grants(kind, plan)
@@ -1219,7 +1258,7 @@ def test_bwrap_recreates_a_ca_link_nested_under_the_home(layout, monkeypatch):
     env = {"SSL_CERT_FILE": str(link)}
     monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
 
-    plan = _plan_of("bwrap", layout, monkeypatch, _policy(layout), env)
+    plan = _plan_of("bwrap", layout, monkeypatch, _policy(layout, network=True), env)
     try:
         assert plan.env["SSL_CERT_FILE"] == str(link)
         assert _symlinks(plan.argv).get(link) == str(target), plan.argv
@@ -1244,7 +1283,9 @@ def test_a_ca_link_outside_the_home_adds_no_link_and_no_warning(
 
     with caplog.at_level(logging.WARNING, logger="ash"):
         for kind in ("bwrap", "firejail"):
-            plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+            plan = _plan_of(
+                kind, layout, monkeypatch, _policy(layout, network=True), env
+            )
             try:
                 assert plan.env["SSL_CERT_FILE"] == str(link)
                 if kind == "bwrap":
@@ -1271,7 +1312,9 @@ def test_firejail_warns_once_of_a_ca_link_it_cannot_show_in_the_home(
 
     with caplog.at_level(logging.WARNING, logger="ash"):
         for _ in range(2):
-            plan = _plan_of("firejail", layout, monkeypatch, _policy(layout), env)
+            plan = _plan_of(
+                "firejail", layout, monkeypatch, _policy(layout, network=True), env
+            )
             try:
                 assert plan.env["SSL_CERT_FILE"] == str(link)
             finally:
@@ -1571,7 +1614,7 @@ def test_a_ca_value_the_list_sets_is_the_operators_and_is_granted(
     bundle = layout.home / "corp.pem"
     bundle.write_text("")
     monkeypatch.setattr(backends, "startup_environ", dict)
-    policy = _policy(layout, environment=(f"SSL_CERT_FILE={bundle}",))
+    policy = _policy(layout, network=True, environment=(f"SSL_CERT_FILE={bundle}",))
 
     granted = _granted_for(kind, layout, monkeypatch, policy, {})
 
@@ -1600,7 +1643,7 @@ def test_a_landlock_plan_reads_the_ca_settings_and_never_runs_them(layout, monke
     }
     monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
 
-    plan = _plan_of("landlock", layout, monkeypatch, _policy(layout), env)
+    plan = _plan_of("landlock", layout, monkeypatch, _policy(layout, network=True), env)
     try:
         document = _landlock_document(plan)
     finally:
