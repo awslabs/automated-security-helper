@@ -1305,9 +1305,11 @@ class TestAReusedPidDoesNotHoldTheDirectory:
             assert entry.a_surviving_tool_is_running() is True
 
     def test_a_start_time_unreadable_now_leaves_the_probe_to_decide(self, tmp_path):
-        """A zombie, or an entry gone from /proc between two reads: with no
-        start time to compare, the probe's answer stands (a zombie's pid is
-        still a process to kill(pid, 0), so it stays held until reaped)."""
+        """An entry gone from /proc between two reads, or a system that reports
+        no start time: with nothing to compare, the probe's answer stands. (A
+        zombie is NOT this case: it keeps its /proc entry and its start time
+        until it is reaped, so it is the same-start-time test above; its pid is
+        still a process to kill(pid, 0), so it stays held until reaped.)"""
         _registry, entry = _stopped_with_a_surviving_tool(tmp_path, started="100")
 
         with (
