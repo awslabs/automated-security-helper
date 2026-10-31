@@ -800,3 +800,49 @@ class TestARuleDescribedByAnAdvisoryTitle:
         mask_secrets_in_results(model)
 
         assert _context(model, 1) == MASKED_LINE + "\n"
+
+
+class TestWhereAReaderOfASourceFileStartsReading:
+    """A key block is found from its BEGIN line. A reader that shows a window
+    deep in a key body asks the masker for the first reported line above it and
+    reads from there, so the BEGIN line is in the text it masks."""
+
+    def _masker(self):
+        return source_snippet_masker(
+            _results(_key_finding(rule_id="CUSTOM-1", tags=["secret"]))
+        )
+
+    def test_the_first_reported_line_above_the_window_is_the_start(self):
+        assert self._masker().earliest_reported_line("keys.py", 25) == 11
+
+    def test_a_reported_line_further_up_than_the_lookback_is_not_asked_for(self):
+        """Control: the reader does not read thousands of lines for a key."""
+        assert self._masker().earliest_reported_line("keys.py", 5000) is None
+
+    def test_a_window_at_or_above_the_reported_line_needs_no_earlier_start(self):
+        """Control: the text the reader already has starts at or above it."""
+        masker = self._masker()
+
+        assert masker.earliest_reported_line("keys.py", 11) is None
+        assert masker.earliest_reported_line("keys.py", 3) is None
+
+    def test_a_file_with_no_reported_line_needs_no_earlier_start(self):
+        """Control: another file says nothing about this one."""
+        assert self._masker().earliest_reported_line("other.py", 25) is None
+
+    def test_a_reported_range_is_clipped_to_the_lookback(self):
+        """A reported range that began further up than the lookback is asked for
+        from the lookback's edge, the first line of it the reader can use."""
+        key = _key_finding()
+        key["locations"][0]["physicalLocation"]["region"]["endLine"] = 9000
+        masker = source_snippet_masker(_results(key))
+
+        assert masker.earliest_reported_line("keys.py", 5000) == 4500
+
+    def test_the_masker_is_still_called_with_a_uri_a_line_and_the_text(self):
+        """The function the browser holds is called as it always was."""
+        shown = self._masker()(
+            "keys.py", 10, "".join([BEFORE_PEM] + PEM_LINES + [AFTER_PEM])
+        )
+
+        assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM

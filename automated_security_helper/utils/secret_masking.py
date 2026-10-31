@@ -2754,7 +2754,30 @@ def _mask_additional_entry(
         _mask_tree(entry, local, set(), skipped_keys=_ENTRY_IDENTIFIERS)
 
 
-def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], str]:
+#: How many lines above the text it shows a reader is asked to read for a PEM
+#: block (``_SourceSnippetMasker.earliest_reported_line``). A key is a few dozen
+#: lines; a block that begins further up than this is not found from below.
+KEY_BLOCK_LOOKBACK_LINES = 500
+
+
+class _SourceSnippetMasker:
+    """The function ``source_snippet_masker`` returns: it masks the text it is
+    given, and says how much further up a reader must read for it to find a key.
+    """
+
+    def __init__(
+        self,
+        mask: Callable[[Any, Optional[int], str], str],
+        earliest_reported_line: Callable[[Any, int], Optional[int]],
+    ) -> None:
+        self._mask = mask
+        self.earliest_reported_line = earliest_reported_line
+
+    def __call__(self, uri: Any, first_line: Optional[int], text: str) -> str:
+        return self._mask(uri, first_line, text)
+
+
+def source_snippet_masker(results: Any) -> _SourceSnippetMasker:
     """A function that masks lines read from a source file as ``results``' snippets are.
 
     For a reader that shows a finding's file from disk when the results hold no
@@ -2764,6 +2787,11 @@ def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], s
     ``results`` found, are masked. ``results`` is read, never changed. The
     function takes the file's URI as the finding names it, the line number of
     the text's first line, and the text.
+
+    A key block is found from its BEGIN line, which the text must show. A reader
+    whose text starts inside a block (a finding deep in a key body) asks
+    ``earliest_reported_line`` where to start reading, masks from there, and cuts
+    the text back to the lines it means to show.
     """
     sarif_report = getattr(results, "sarif", None)
     has_runs = _has_runs(sarif_report)
@@ -2799,7 +2827,23 @@ def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], s
                 text = local.mask_values(text)
         return text
 
-    return mask
+    def earliest_reported_line(uri: Any, line: int) -> Optional[int]:
+        """The first line a secret finding reports in ``uri`` above ``line`` and
+        within ``KEY_BLOCK_LOOKBACK_LINES`` of it, or None."""
+        placed = index.lines_for(uri)
+        if placed is None:
+            return None
+        whole, lines = placed
+        if whole:
+            return None
+        found = [
+            max(start, line - KEY_BLOCK_LOOKBACK_LINES)
+            for start, end in lines.ranges
+            if max(start, line - KEY_BLOCK_LOOKBACK_LINES) <= min(end, line - 1)
+        ]
+        return min(found) if found else None
+
+    return _SourceSnippetMasker(mask, earliest_reported_line)
 
 
 def mask_secret_values_in_tree(

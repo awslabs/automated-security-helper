@@ -361,8 +361,26 @@ def _source_path(file_value: object, scan_root: Path) -> Path:
     return scan_root / undecodable_of_text(str(file_value))
 
 
-def _source_excerpt(finding: dict, scan_root: Optional[Path]) -> Optional[str]:
+def _excerpt_start(line_number: int, read_from: Optional[int]) -> int:
+    """The first line ``_source_excerpt`` reads: the window's, or the earlier line
+    the masker asked to read from (``earliest_reported_line``)."""
+    first = max(1, line_number - _CONTEXT_LINES)
+    return first if read_from is None else min(first, max(1, read_from))
+
+
+def _drop_lines_before(excerpt: str, count: int) -> str:
+    """*excerpt* without its first *count* lines (each ends with a newline)."""
+    return excerpt if count <= 0 else "\n".join(excerpt.split("\n")[count:])
+
+
+def _source_excerpt(
+    finding: dict, scan_root: Optional[Path], read_from: Optional[int] = None
+) -> Optional[str]:
     """The lines around a finding's line, read from its file, or None.
+
+    With *read_from*, an earlier line than the window starts at, the lines run
+    from there: the masker needs the BEGIN line of a key block to find the
+    block, and the caller cuts the lines before the window off after masking.
 
     The file and line are the results', so a scanner's and the scanned repository's
     to name. The file is read only when it is a regular file inside *scan_root*, as
@@ -381,7 +399,7 @@ def _source_excerpt(finding: dict, scan_root: Optional[Path]) -> Optional[str]:
         return None
     if scan_root is None or not file_value or line_number < 1:
         return None
-    first = max(1, line_number - _CONTEXT_LINES)
+    first = _excerpt_start(line_number, read_from)
     try:
         with open_in_scanned_tree(
             _source_path(file_value, scan_root), scan_root, follow_links_inside=True
@@ -1736,15 +1754,39 @@ class FindingsExplorerApp(App):
         file as the results record it, under the scanned directory; the file is
         opened by the name read back from its record form (``_source_path``)."""
         if not finding.get("code_snippet"):
-            excerpt = _source_excerpt(finding, self.scan_root)
+            try:
+                line_number = int(finding["line"])
+            except (KeyError, TypeError, ValueError):
+                line_number = None
+            window = (
+                max(1, line_number - _CONTEXT_LINES)
+                if line_number is not None
+                else None
+            )
+            # A key block is found from its BEGIN line. When a secret finding
+            # reports a line above the window, the lines are read from there, so
+            # a finding deep in a key body is masked as the block it is in, and
+            # the lines above the window are cut off after the masking.
+            earliest = getattr(self.mask_source, "earliest_reported_line", None)
+            read_from = (
+                earliest(finding.get("file"), window)
+                if callable(earliest) and window is not None
+                else None
+            )
+            if not isinstance(read_from, int):
+                read_from = None
+            excerpt = _source_excerpt(finding, self.scan_root, read_from)
             if excerpt is not None:
                 line_chars = _excerpt_line_chars(excerpt)
                 if self.mask_source is not None:
-                    try:
-                        first = max(1, int(finding["line"]) - _CONTEXT_LINES)
-                    except (KeyError, TypeError, ValueError):
-                        first = None
+                    first = (
+                        _excerpt_start(line_number, read_from)
+                        if line_number is not None
+                        else None
+                    )
                     excerpt = self.mask_source(finding.get("file"), first, excerpt)
+                    if first is not None and window is not None:
+                        excerpt = _drop_lines_before(excerpt, window - first)
                 # Cut after the masking, so a value that straddles the cap is
                 # masked whole (_line_text).
                 finding["code_snippet"] = _cut_excerpt_lines(excerpt)
