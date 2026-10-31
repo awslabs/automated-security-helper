@@ -840,7 +840,7 @@ def _firejail_path(path: Path) -> str:
     ):
         raise SandboxUnavailable(
             f"firejail cannot be given the path {text!r}: it reads *, ?, [, ], {{, "
-            "}}, ~ and $ in a path option as a pattern or a macro and offers no way "
+            "}, ~ and $ in a path option as a pattern or a macro and offers no way "
             "to write them literally. Use --sandbox bwrap or --sandbox landlock for "
             "this scan"
         )

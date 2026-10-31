@@ -586,8 +586,13 @@ def test_firejail_refuses_a_path_it_would_read_as_a_pattern(layout):
     odd.mkdir()
     backend = FirejailBackend()
     backend._executable = "/fj"
-    with pytest.raises(SandboxUnavailable, match="pattern"):
+    with pytest.raises(SandboxUnavailable, match="pattern") as refused:
         backend.plan(["/bin/true"], {}, _policy(layout, writable=(odd,)))
+    # The characters are listed as the operator would type them: only the first
+    # piece of the message is an f-string, so a doubled brace in a later piece
+    # would be printed doubled.
+    assert "*, ?, [, ], {, }, ~ and $" in str(refused.value)
+    assert "}}" not in str(refused.value)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="firejail's plan reads os.getuid()")
