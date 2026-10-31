@@ -552,6 +552,42 @@ class TestAnOverlappingFindingsSourceText:
         text = model.sarif.runs[0].results[1].message.root.text
         assert text == "import\n\n```" + (MASKED_LINE + "\n") * 41 + "```"
 
+    @pytest.mark.parametrize(
+        ("example_lines", "neighbor_line", "masked_whole"),
+        [
+            # Ten example lines and the info string: a reach of exactly 10.
+            (10, 12, True),
+            (10, 13, False),
+            # Eleven example lines: a reach of 11, held to 10 by the cap.
+            (11, 12, True),
+            (11, 13, False),
+            # Forty example lines: the cap, not the length, sets the edge.
+            (40, 12, True),
+            (40, 13, False),
+        ],
+    )
+    def test_the_reach_of_a_fenced_block_ends_ten_lines_from_its_finding(
+        self, example_lines, neighbor_line, masked_whole
+    ):
+        """The secret is on line 2. A block's reach is its lines less one, held to
+        ten, so a neighbor on line 12 (ten lines away) is masked whole and one on
+        line 13 (eleven away) is kept, however long the example is. A block of
+        eleven example lines would reach line 2 from line 13 uncapped, so the
+        pair at eleven lines is the one a cap of eleven would flip, and the pair
+        at ten lines the one a cap of nine would."""
+        block = "```python\n" + "x = 1\n" * example_lines + "```"
+        message = "import\n\n" + block
+        model = _results(
+            self._secret(),
+            _result("B404", "app.py", neighbor_line, message, "bandit"),
+        )
+
+        mask_secrets_in_results(model)
+
+        masked_lines = (MASKED_LINE + "\n") * (example_lines + 1)
+        expected = "import\n\n```" + masked_lines + "```" if masked_whole else message
+        assert model.sarif.runs[0].results[1].message.root.text == expected
+
     def test_a_snippet_with_more_lines_than_its_region_is_masked_whole(self):
         """A tool's properties.snippet can carry context lines above the region;
         numbered from the region's first line the secret line escapes the range,
