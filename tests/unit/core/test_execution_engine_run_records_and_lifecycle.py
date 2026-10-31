@@ -390,6 +390,36 @@ def test_a_failed_run_is_reported_as_failed(tmp_path):
     assert "ASH Security Scan Completed" not in infos
 
 
+class _ExitingScanPhase(_StubPhase):
+    def execute(self, **kwargs):
+        raise SystemExit(3)
+
+
+def test_a_run_ended_by_an_exit_is_reported_as_failed(tmp_path):
+    """Red before the fix: a SystemExit from a phase is neither an Exception nor
+    an interrupt, so the completion event said the run succeeded and the banner
+    said it completed while the exit was still propagating."""
+    engine = _engine(tmp_path)
+    engine.show_summary = True
+    manager = _manager()
+    completed = []
+    manager.subscribe(AshEventType.EXECUTION_COMPLETE, _program_handler(completed))
+
+    with (
+        patch(f"{_ENGINE_MODULE}.ASH_LOGGER") as logger,
+        pytest.raises(SystemExit) as raised,
+    ):
+        _run(engine, ["scan"], manager, scan_phase=_ExitingScanPhase)
+
+    assert raised.value.code == 3
+    assert len(completed) == 1
+    assert completed[0]["succeeded"] is False
+    assert "failed after" in completed[0]["message"]
+    infos = " ".join(str(c.args[0]) for c in logger.info.call_args_list)
+    assert "ASH Security Scan Failed after" in infos
+    assert "ASH Security Scan Completed" not in infos
+
+
 def test_a_completed_run_still_says_so(tmp_path):
     """Control: the message and the banner of a run that completed are unchanged."""
     engine = _engine(tmp_path)

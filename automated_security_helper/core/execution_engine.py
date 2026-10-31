@@ -991,6 +991,11 @@ class ScanExecutionEngine:
         # A phase that raised: the run failed, and the finally block says so
         # instead of announcing a completed scan over partial results.
         failed = False
+        # Set as the try's last statement. A SystemExit from a plugin or a
+        # reporter is neither an Exception nor an interrupt, so neither arm
+        # below marks it, and the finally block announced a completed run over
+        # an exit that was still propagating.
+        completed = False
         try:
             # Notify execution start. Inside this try, whose finally is the one
             # place the Live display started above is stopped: a Ctrl-C or a
@@ -1172,6 +1177,7 @@ class ScanExecutionEngine:
                         )
                         self._asharp_model = self._results
 
+            completed = True
         except Exception as e:
             failed = True
             carry_environment_values(e, values)
@@ -1212,6 +1218,10 @@ class ScanExecutionEngine:
             interrupted = True
             raise
         finally:
+            # A run that left the try without finishing it and without being
+            # interrupted ended in an exit the arms above do not name: it failed.
+            if not completed and not interrupted:
+                failed = True
             # Notify execution complete (whether successful or not), unless it was
             # interrupted: then it did not complete, and the caller says so.
             try:
