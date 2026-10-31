@@ -247,6 +247,9 @@ OTHER_PROJECTS_PINS = {
         "  - repo: https://github.com/example/pre-commit-hooks\n"
         "    rev: v4.6.0\n"
     ),
+    "a quoted rev: under another repo": (
+        f'repos:\n  - repo: {OTHER_URL}\n    rev: "v4.6.0"\n'
+    ),
     "a clone of another project": f"git clone --branch v2.0.0 {OTHER_URL}.git\n",
     "a third-party action": "      - uses: actions/checkout@v4.1.2\n",
     "an action whose name ends with this repository's": (
@@ -401,6 +404,26 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
             ("--branch", 'git clone --branch  v3.3.0 "$ASH_REPO_URL"\n'),
             ("--branch", 'git clone --branch\tv3.3.0 "$ASH_REPO_URL"\n'),
             ("--branch", 'git clone -b  v3.3.0 "$ASH_REPO_URL"\n'),
+            # A quoted value, a YAML key with more blanks than the anchor reads, the
+            # build flag with `=`, and the short flag with no blank: red at the base,
+            # where the prefix of each was the exact text of the anchored form, or only
+            # one of `--branch` and `rev:` was widened.
+            ("rev:", f'- {{repo: {ASH_URL}, rev: "v3.3.0"}}\n'),
+            ("rev:", f"- repo: {ASH_URL}\n  rev: 'v3.3.0'\n"),
+            ("ash-version:", 'with:\n  ash-version: "v3.3.0"\n'),
+            ("ash-version:", "with:\n  ash-version:  v3.3.0\n"),
+            ("ash-version:", "with:\n  ash-version:\tv3.3.0\n"),
+            (
+                "--ash-revision-to-install",
+                "ash build-image --ash-revision-to-install=v3.3.0\n",
+            ),
+            (
+                "--ash-revision-to-install",
+                'ash build-image --ash-revision-to-install "v3.3.0"\n',
+            ),
+            ("--branch", 'git clone -bv3.3.0 "$ASH_REPO_URL"\n'),
+            ("--branch", 'git clone --branch "v3.3.0" "$ASH_REPO_URL"\n'),
+            ("--branch", "git clone --branch='v3.3.0' \"$ASH_REPO_URL\"\n"),
         ],
         ids=[
             "rev-before-repo",
@@ -413,6 +436,16 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
             "branch-two-spaces",
             "branch-tab",
             "short-flag-two-spaces",
+            "rev-double-quoted",
+            "rev-single-quoted",
+            "ash-version-quoted",
+            "ash-version-two-spaces",
+            "ash-version-tab",
+            "ash-revision-equals",
+            "ash-revision-quoted",
+            "short-flag-stuck",
+            "branch-quoted",
+            "branch-equals-quoted",
         ],
     )
     def test_a_pin_in_a_shape_no_anchor_knows_is_listed_not_dropped(self, form, text):
@@ -439,6 +472,9 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
         assert manager.unrecognized_pins("prev: v3.3.0\nweb-b v3.3.0\n") == []
         # The wider gap after a flag does not widen the net past the flag's own name.
         assert manager.unrecognized_pins("web-b  v3.3.0\nxbranch  v3.3.0\n") == []
+        # Nor does a quote, an `=` or a missing blank: the same boundaries hold.
+        assert manager.unrecognized_pins("web-bv3.3.0\nxbranch=v3.3.0\n") == []
+        assert manager.unrecognized_pins('prev: "v3.3.0"\n') == []
 
     @pytest.mark.parametrize(
         "text", list(OTHER_PROJECTS_PINS.values()), ids=list(OTHER_PROJECTS_PINS)

@@ -737,8 +737,17 @@ def test_the_readers_see_no_pin_across_two_code_spans(html):
         ("rev:", f"- rev: v3.3.0\n  repo: {REPO_URL}\n"),
         ("rev:", f"- {{repo: {REPO_URL}, rev: v3.3.0}}\n"),
         ("--branch", 'git clone --branch v3.3.0 "$ASH_REPO_URL"\n'),
+        # A quoted value and a key with two blanks: spellings the anchors do not read.
+        ("rev:", f'- repo: {REPO_URL}\n  rev: "v3.3.0"\n'),
+        ("ash-version:", "with:\n  ash-version:  v3.3.0\n"),
     ],
-    ids=["rev-before-repo", "flow-style", "url-in-a-variable"],
+    ids=[
+        "rev-before-repo",
+        "flow-style",
+        "url-in-a-variable",
+        "rev-quoted",
+        "ash-version-two-spaces",
+    ],
 )
 def test_a_pin_in_a_shape_no_pattern_knows_fails_the_check(form, text):
     """Red before: the readers counted only the anchored shapes and said nothing about

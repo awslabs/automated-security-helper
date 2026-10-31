@@ -80,13 +80,17 @@ def _in_an_ash_command(prefix: str) -> Tuple[str, str]:
 _FORM_PREFIX = {name: prefix for name, prefix, _branch in INSTALL_REF_FORMS}
 
 # What unrecognized_pins looks for where the install form has more spellings than the
-# anchored patterns read: a YAML value may follow `rev:` after any run of blanks, and a
-# clone takes its tag as `--branch v1`, `--branch=v1` or `-b v1`, with one blank or a
-# run of them after the flag. The safety net has to be looser than the anchors, or a
-# pin in a spelling nobody anchored is never seen.
+# anchored patterns read: a YAML value may follow `rev:` or `ash-version:` after any
+# run of blanks and be quoted, and a clone takes its tag as `--branch v1`,
+# `--branch=v1`, `-b v1` or `-bv1`, with a run of blanks after the flag, as does the
+# build flag with `=`. The safety net has to be looser than the anchors, or a pin in a
+# spelling nobody anchored is never seen. A quote sits inside the prefix, in front of
+# the `v` that unrecognized_pins appends.
 _LOOSE_PREFIX = {
-    "--branch": r"(?:--branch(?:[ \t]+|=)|(?<![\w-])-b[ \t]+)",
-    "rev:": r"(?<![\w-])rev:[ \t]+",
+    "--branch": r"(?:--branch(?:[ \t]+|=)|(?<![\w-])-b[ \t]*)[\"']?",
+    "rev:": r"(?<![\w-])rev:[ \t]+[\"']?",
+    "--ash-revision-to-install": r"--ash-revision-to-install(?:[ \t]+|=)[\"']?",
+    "ash-version:": r"ash-version:[ \t]+[\"']?",
 }
 
 # For every form of INSTALL_REF_FORMS, the patterns that match a release pin of ASH in
