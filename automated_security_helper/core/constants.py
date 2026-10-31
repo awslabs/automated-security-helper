@@ -188,30 +188,62 @@ def xdg_directory(variable: str, *under_home: str) -> Optional[Path]:
     return home.joinpath(*under_home)
 
 
+def _fallback_home_is_a_root() -> bool:
+    """Whether the home an unset HOME (USERPROFILE) falls back to is a root.
+
+    That is the passwd entry's home on POSIX, and the home ``os.path.expanduser``
+    builds from HOMEDRIVE and HOMEPATH on Windows. It is a root when it is
+    anchored (it names a location by itself) and :func:`usable_home` still refuses
+    it, which :func:`usable_home` does only for a filesystem or drive root.
+    """
+    if os.name == "nt":
+        home = os.path.expanduser("~")
+        return home != "~" and is_anchored(home) and _is_filesystem_root(home)
+    try:
+        import pwd
+
+        home = pwd.getpwuid(os.getuid()).pw_dir
+    except (ImportError, KeyError, AttributeError, OSError):
+        return False
+    return bool(home) and is_anchored(home) and _is_filesystem_root(home)
+
+
 def warn_if_home_unusable() -> None:
     """Say, once per value, that nothing under ``~`` is used for an unusable HOME."""
     if usable_home() is not None:
         return
     variable = "USERPROFILE" if os.name == "nt" else "HOME"
     value = os.environ.get(variable)
+    at_root = False
     if value is None:
-        described = (
-            "not set, and HOMEDRIVE and HOMEPATH name no absolute home directory"
-            if os.name == "nt"
-            else "not set, and the passwd entry names no absolute home directory"
-        )
+        at_root = _fallback_home_is_a_root()
+        if at_root:
+            # The fallback names a home, and it is a root: "no absolute home
+            # directory" would be wrong for it (RHEL's nobody has "/", a mapped
+            # home drive is "H:\").
+            described = (
+                "not set, and HOMEDRIVE and HOMEPATH name a drive's root"
+                if os.name == "nt"
+                else "not set, and the passwd entry's home directory is the "
+                "filesystem root"
+            )
+        else:
+            described = (
+                "not set, and HOMEDRIVE and HOMEPATH name no absolute home directory"
+                if os.name == "nt"
+                else "not set, and the passwd entry names no absolute home directory"
+            )
     elif not value:
         described = "empty"
     elif is_anchored(value):
         # Anchored, yet no home: only a filesystem root is refused after that.
+        at_root = True
         described = "the filesystem root"
     elif os.name == "nt":
         described = "not an absolute path"
     else:
         described = f"the relative path {value!r}"
-    advice = "an absolute path" + (
-        " other than the filesystem root" if described == "the filesystem root" else ""
-    )
+    advice = "an absolute path" + (" other than the filesystem root" if at_root else "")
     # An unset variable and an empty one are two settings with two messages, so
     # they are keyed apart: the empty string stood for both, and the second
     # warning in a process was suppressed. A NUL cannot be in an environment value.
