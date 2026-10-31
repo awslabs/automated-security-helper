@@ -1878,26 +1878,54 @@ def _host_path_length_limit() -> Optional[int]:
 #: host does not have. Read at call time, so a test can set it.
 _PATH_LENGTH_LIMIT: Optional[int] = _host_path_length_limit()
 
+#: The longest directory path, in UTF-16 code units, the host creates, or None
+#: where it meets none: on Windows without long paths, CreateDirectory takes a path
+#: of MAX_PATH less 12 (248, counting the terminating NUL), room left to add a
+#: file's 8.3 name, so a directory of 248 to 259 units fails to be made though a
+#: file of that length would open. Read at call time, so a test can set it.
+_DIRECTORY_LENGTH_LIMIT: Optional[int] = (
+    248 if _PATH_LENGTH_LIMIT == 260 and _on_windows() else None
+)
+
+
+def _utf16_length(text: str) -> int:
+    """``text``'s length in UTF-16 code units, which is what MAX_PATH counts: a
+    character past the basic plane is two, where ``len`` counts one. A lone
+    surrogate (a byte tarfile read as an escape) is one unit, as the host would
+    count the name it is written as."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
 
 def _written_path_over_limit(
     member_name: str, kind: Optional[Literal["zip", "tar"]], target_path: Path
 ) -> Optional[str]:
     """What is over the limit, as the detail of the refusal's log line, when the
     path the member is written to (``target_path``, a separator, its written path
-    below it; _member_written_path) is at or past _PATH_LENGTH_LIMIT; None when it
-    is under the limit or the host has none. The length counts characters, as the
-    limit does. A member placed in a numbered directory beside an earlier one
-    (_renamed_member_name) is a few characters longer than its name as read, so
-    inspect_members asks again with the placed name."""
+    below it; _member_written_path) is at or past _PATH_LENGTH_LIMIT, or the
+    directory it is written in is at or past _DIRECTORY_LENGTH_LIMIT; None when
+    both are under or the host has none. Both count UTF-16 code units, as the host
+    does, not characters. Only the member's own directory is measured against the
+    directory limit: its parents are shorter. A member placed in a numbered
+    directory beside an earlier one (_renamed_member_name) is a few characters
+    longer than its name as read, so inspect_members asks again with the placed
+    name."""
     limit = _PATH_LENGTH_LIMIT
     if limit is None:
         return None
-    length = (
-        len(os.fspath(target_path)) + 1 + len(_member_written_path(member_name, kind))
-    )
-    if length < limit:
-        return None
-    return f"{length} characters with the extraction directory, limit {limit}"
+    written = _member_written_path(member_name, kind)
+    head = _utf16_length(os.fspath(target_path)) + 1
+    length = head + _utf16_length(written)
+    if length >= limit:
+        return f"{length} UTF-16 units with the extraction directory, limit {limit}"
+    directory_limit = _DIRECTORY_LENGTH_LIMIT
+    if directory_limit is not None and "/" in written:
+        directory = head + _utf16_length(written.rsplit("/", 1)[0])
+        if directory >= directory_limit:
+            return (
+                f"a directory of {directory} UTF-16 units with the extraction "
+                f"directory, limit {directory_limit}"
+            )
+    return None
 
 
 #: The zip general-purpose flag that marks a member as encrypted.

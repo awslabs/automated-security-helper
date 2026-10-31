@@ -731,6 +731,82 @@ def test_a_duplicate_whose_numbered_placement_fits_the_host_limit_is_still_renam
     assert second.name == "vendor/m~2/m.js"
 
 
+def _utf16_units(text: str) -> int:
+    """The test's own count of what MAX_PATH counts."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def test_a_member_name_is_measured_in_utf16_units_against_the_host_limit(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """MAX_PATH counts UTF-16 code units, so a name of characters past the basic
+    plane is twice as long to the host as ``len`` says: counted in characters it
+    passed a check it then failed at the open (ENOENT, the whole archive lost as a
+    tool error). Four such characters and ``.js`` are 7 characters and 11 units;
+    the limit sits between. The control, of 7 units, is admitted."""
+    converter = _converter(test_plugin_context)
+    monkeypatch.setattr(
+        archive_converter,
+        "_PATH_LENGTH_LIMIT",
+        _utf16_units(str(tmp_path)) + 1 + 10,
+    )
+    astral = zipfile.ZipInfo(chr(0x1D538) * 4 + ".js")
+    plain = zipfile.ZipInfo("abcd.js")
+    assert len(astral.filename) == len(plain.filename) == 7
+
+    kept = converter.inspect_members(
+        [astral, plain], target_path=tmp_path, archive="a.zip"
+    )
+
+    assert kept == [plain]
+    (refused,) = converter.refused_inputs
+    assert refused.member == astral.filename
+
+
+def test_a_members_directory_is_measured_against_the_hosts_directory_limit(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """A host that makes a directory only up to MAX_PATH less 12 refuses to make
+    one of 248 to 259 units though a file of that length would open, so a member
+    whose whole path fits the file limit but whose directory does not failed the
+    archive when its directory was made. It is refused alone. The controls: a
+    shallow directory, and a member with no directory of its own, whose long file
+    name fits the file limit, are admitted."""
+    converter = _converter(test_plugin_context)
+    head = _utf16_units(str(tmp_path)) + 1
+    monkeypatch.setattr(archive_converter, "_PATH_LENGTH_LIMIT", head + 100)
+    monkeypatch.setattr(archive_converter, "_DIRECTORY_LENGTH_LIMIT", head + 20)
+    deep = zipfile.ZipInfo("d" * 25 + "/x.js")
+    shallow = zipfile.ZipInfo("ddd/x.js")
+    flat = zipfile.ZipInfo("f" * 30 + ".js")
+
+    kept = converter.inspect_members(
+        [deep, shallow, flat], target_path=tmp_path, archive="a.zip"
+    )
+
+    assert kept == [shallow, flat]
+    (refused,) = converter.refused_inputs
+    assert refused.member == deep.filename
+    assert "path length limit" in refused.reason
+
+
+def test_a_host_without_a_directory_limit_admits_a_deep_directory(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """The control: with no directory limit (a host with long paths, or POSIX) the
+    same deep member is admitted."""
+    converter = _converter(test_plugin_context)
+    head = _utf16_units(str(tmp_path)) + 1
+    monkeypatch.setattr(archive_converter, "_PATH_LENGTH_LIMIT", head + 100)
+    monkeypatch.setattr(archive_converter, "_DIRECTORY_LENGTH_LIMIT", None)
+    deep = zipfile.ZipInfo("d" * 25 + "/x.js")
+
+    kept = converter.inspect_members([deep], target_path=tmp_path, archive="a.zip")
+
+    assert kept == [deep]
+    assert converter.refused_inputs == []
+
+
 def test_a_member_refused_for_its_path_length_is_also_a_failed_input_the_gate_counts(
     test_plugin_context, tmp_path, monkeypatch
 ):
