@@ -395,6 +395,68 @@ def test_a_probe_that_works_after_a_failed_one_is_not_marked_transient():
     assert backend.probe_was_transient is False
 
 
+def test_the_window_ends_at_its_edge_and_a_second_timeout_opens_a_second(
+    fresh_cache, monkeypatch, clock
+):
+    """One second inside the window is still served from memory; past it the
+    probe runs, and when it times out again that answer is kept for a window of
+    its own, so two probes in all serve a stretch of calls."""
+    probes = _probe_answers(monkeypatch, [scope.TransientProbeFailure(TIMED_OUT)])
+
+    def refused():
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scope.resolve_backend("bwrap")
+
+    refused()
+    clock.advance(scope._TRANSIENT_RETRY_SECONDS - 1.0)
+    refused()
+    assert probes == ["bwrap"]
+
+    clock.advance(2.0)
+    refused()
+    refused()
+    assert probes == ["bwrap", "bwrap"]
+
+    clock.advance(scope._TRANSIENT_RETRY_SECONDS - 1.0)
+    refused()
+    assert probes == ["bwrap", "bwrap"]
+
+
+def test_under_auto_a_bwrap_that_times_out_again_is_probed_with_its_peers(
+    fresh_cache, monkeypatch, clock
+):
+    """The joined refusal is transient as a whole: past the window every backend
+    is probed again, and the answer after a second timeout is again the joined
+    one."""
+    monkeypatch.setattr(
+        scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
+    )
+    answers = {
+        "bwrap": scope.TransientProbeFailure(TIMED_OUT),
+        "firejail": SandboxUnavailable("firejail is not installed"),
+    }
+    probes: list = []
+
+    def probe(name):
+        probes.append(name)
+        raise answers[name]
+
+    monkeypatch.setattr(scope, "_probe_backend", probe)
+
+    for _ in range(2):
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scope.resolve_backend("auto")
+    assert probes == ["bwrap", "firejail"]
+
+    clock.advance(PAST_THE_WINDOW)
+    with pytest.raises(scope.SandboxBackendUnavailable) as again:
+        scope.resolve_backend("auto")
+
+    assert probes == ["bwrap", "firejail", "bwrap", "firejail"]
+    assert "timed out" in str(again.value)
+    assert "firejail is not installed" in str(again.value)
+
+
 def test_a_missing_backend_is_remembered(fresh_cache, monkeypatch, clock):
     """A missing program has no window: it is remembered for the process."""
     probes = _probe_answers(monkeypatch, [SandboxUnavailable(NOT_INSTALLED)])
