@@ -274,6 +274,31 @@ def test_a_scanner_with_its_own_stricter_threshold_is_judged_by_it(
     assert rollup["semgrep"]["actionable_finding_count"] == 0
 
 
+def _threshold_values_named(node, value, path=""):
+    """The paths of every key containing ``threshold`` whose value is ``value``."""
+    found = []
+    if isinstance(node, dict):
+        for key, child in node.items():
+            here = f"{path}/{key}"
+            if "threshold" in str(key).lower() and child == value:
+                found.append(here)
+            found.extend(_threshold_values_named(child, value, here))
+    elif isinstance(node, list):
+        for index, child in enumerate(node):
+            found.extend(_threshold_values_named(child, value, f"{path}[{index}]"))
+    return found
+
+
+def test_the_walk_that_looks_for_a_published_threshold_finds_one():
+    """Control, green on both sides: the walk reports a value it is asked for."""
+    document = {"a": [{"scanner_thresholds": {"x": 1}, "severity_threshold": "CRITICAL"}]}
+
+    assert _threshold_values_named(document, "CRITICAL") == [
+        "/a[0]/severity_threshold"
+    ]
+    assert _threshold_values_named(document, "HIGH") == []
+
+
 def test_a_threshold_read_from_the_environment_grades_and_is_not_published(
     tmp_path, monkeypatch
 ):
@@ -314,6 +339,9 @@ def test_a_threshold_read_from_the_environment_grades_and_is_not_published(
     written = unified["workspace"]["projects"][0]
     assert "bandit" not in written["scanner_thresholds"]
     assert "CRITICAL" not in written["scanner_thresholds"].values()
+    # The sibling blocks too: no key naming a threshold, anywhere in the file,
+    # holds the value read from the environment.
+    assert _threshold_values_named(unified, "CRITICAL") == []
     assert written["severity_threshold"] == "MEDIUM"
     assert written["withheld_scanner_thresholds"] == ["bandit"]
     # Red at the base: nothing said the fallback was not the verdict's gate, so
