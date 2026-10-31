@@ -26,7 +26,11 @@ Properties of ``utils/download_utils.py`` that nothing else pins:
 - ``unquarantine_macos_binary`` names the file alone and reports a non-zero exit;
 - a receipt level that is a link, or cannot be examined, is untrusted, and the
   receipt store is never written through a link;
-- an installed binary without its execute bit is not "already installed";
+- an installed binary whose bytes still match its receipt but lost its execute bit
+  gets the bit back, set on the one descriptor its digest was read from, and one
+  with a second name is reinstalled rather than repaired;
+- a FIFO at the install, staging, cache or receipt path is refused without
+  blocking, and a test of that never hangs the worker that runs it;
 - archive members are matched on either separator and a zip symlink entry is not
   an executable;
 - a relative tool download cache is not used; a directory at an asset's name is
@@ -41,15 +45,15 @@ Properties of ``utils/download_utils.py`` that nothing else pins:
 from __future__ import annotations
 
 import errno
+import hashlib
 import io
 import logging
 import os
-import platform
 import ssl
 import stat
 import sys
 import tempfile
-import time
+import threading
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -78,6 +82,13 @@ class _Body(io.BytesIO):
         # _copy_whole_body reads the response headers for Content-Length; a
         # stand-in without them raised AttributeError at the copy.
         self.headers: dict = {}
+        # How many bytes the code under test took from the body.
+        self.bytes_read = 0
+
+    def read(self, size=-1):
+        data = super().read(size)
+        self.bytes_read += len(data)
+        return data
 
     def __enter__(self):
         return self
@@ -103,10 +114,71 @@ def _single_attempt(monkeypatch):
     monkeypatch.setattr(du.time, "sleep", lambda _s: None)
 
 
+def _no_request(monkeypatch):
+    """Fail the test if the code under test opens a URL: a refusal that moved to
+    after the request made real requests, with real backoff sleeps."""
+
+    def refuse(*args, **kwargs):
+        pytest.fail("a request was made where the URL has to be refused first")
+
+    monkeypatch.setattr(du.urllib.request, "urlopen", refuse)
+
+
+class _ResetAfterFirstChunk(_Body):
+    """A body the peer resets after the first read, with the temporary files
+    that existed at that moment recorded: the failure happens mid-transfer."""
+
+    def __init__(self, payload: bytes, landed_at=None, watch: tuple = ()):
+        super().__init__(payload, landed_at)
+        self._reads = 0
+        self._watch = watch
+        self.files_during: list = []
+
+    def read(self, size=-1):
+        self._reads += 1
+        if self._reads > 1:
+            self.files_during = [
+                entry
+                for directory in self._watch
+                if directory.is_dir()
+                for entry in directory.iterdir()
+            ]
+            raise ConnectionResetError(errno.ECONNRESET, "Connection reset by peer")
+        return super().read(size)
+
+
+def _bounded(call, fifo: Path, seconds: float = 5.0) -> dict:
+    """Run ``call`` on a daemon thread and return ``{"value": ...}`` or
+    ``{"error": ...}``. A call that blocks opening the FIFO is the failure these
+    tests pin, and run on the worker itself it hung the worker until the runner's
+    timeout: here the join gives up after ``seconds``, a non-blocking write-open
+    releases the reader, and the test fails instead of hanging."""
+    outcome: dict = {}
+
+    def run() -> None:
+        try:
+            outcome["value"] = call()
+        except BaseException as exc:  # noqa: BLE001 - handed back to the test
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        try:
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+        thread.join(seconds)
+        pytest.fail(f"the call blocked for more than {seconds} s on {fifo}")
+    return outcome
+
+
 # --- the URL, before anything is made -----------------------------------------
 
 
-def test_a_refused_scheme_creates_no_destination_directory(tmp_path):
+def test_a_refused_scheme_creates_no_destination_directory(monkeypatch, tmp_path):
+    _no_request(monkeypatch)
     destination = tmp_path / "never-made"
     with pytest.raises(ValueError):
         du.download_file("http://example.com/tool", destination)
@@ -117,10 +189,13 @@ def test_a_download_redirected_off_https_is_refused_before_it_lands(
     monkeypatch, tmp_path
 ):
     _single_attempt(monkeypatch)
-    _fetch(monkeypatch, b"payload", landed_at="http://mirror.example.com/tool")
+    body = _Body(b"payload", "http://mirror.example.com/tool")
+    monkeypatch.setattr(du.urllib.request, "urlopen", lambda url, timeout=None: body)
     with pytest.raises(ValueError) as raised:
         du.download_file("https://example.com/tool", tmp_path)
     assert "http://mirror.example.com/tool" in str(raised.value)
+    # Refused before a byte was taken from the response, not after the copy.
+    assert body.bytes_read == 0
     assert not (tmp_path / "tool").exists()
 
 
@@ -174,7 +249,10 @@ def test_the_installed_name_is_the_decoded_last_path_segment():
         "https://x.example",
     ],
 )
-def test_a_url_naming_a_directory_is_refused_where_the_url_is_named(url, tmp_path):
+def test_a_url_naming_a_directory_is_refused_where_the_url_is_named(
+    url, monkeypatch, tmp_path
+):
+    _no_request(monkeypatch)
     with pytest.raises(ValueError) as raised:
         du.download_file(url, tmp_path / "dest")
     assert "rename_to" in str(raised.value)
@@ -197,6 +275,27 @@ def test_a_failed_download_leaves_no_temporary_file(monkeypatch, tmp_path):
     with pytest.raises(urllib.error.HTTPError):
         du.download_file("https://example.com/tool", tmp_path / "dest")
     assert list(temp_root.iterdir()) == []
+
+
+def test_a_connection_reset_after_the_first_chunk_leaves_nothing_behind(
+    monkeypatch, tmp_path
+):
+    """The failure the test above has before any byte is taken leaves nothing to
+    clean; this one comes after the first chunk, with a partial file on disk."""
+    _single_attempt(monkeypatch)
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+    destination = tmp_path / "dest"
+    body = _ResetAfterFirstChunk(b"the first chunk", watch=(temp_root, destination))
+    monkeypatch.setattr(du.urllib.request, "urlopen", lambda url, timeout=None: body)
+    with pytest.raises(ConnectionResetError):
+        du.download_file("https://example.com/tool", destination)
+    # The control: a partial file did exist when the connection dropped, so the
+    # empty directories below are a cleanup and not a transfer that never began.
+    assert body.files_during, "no temporary file existed mid-transfer"
+    assert list(temp_root.iterdir()) == []
+    assert not destination.exists() or list(destination.iterdir()) == []
 
 
 # --- what lands, and with which mode -------------------------------------------
@@ -226,8 +325,6 @@ def test_download_file_lands_a_program_executable_when_the_caller_says_so(
 
 @POSIX_ONLY
 def test_install_binary_from_url_lands_an_executable(monkeypatch, tmp_path):
-    import hashlib
-
     payload = b"#!/bin/sh\nexit 0\n"
     _fetch(monkeypatch, payload)
     installed = du.install_binary_from_url(
@@ -246,7 +343,6 @@ def test_install_binary_from_url_lands_the_mode_on_the_staged_file(
     rename, as the pinned-tool install sets it: no by-name make_executable after
     the landing, which reopened the file by name and, bailing, left a 0o644 binary
     behind a successful receipt."""
-    import hashlib
 
     def never(path):
         raise AssertionError(f"make_executable reopened {path} by name")
@@ -266,8 +362,6 @@ def test_install_binary_from_url_lands_the_mode_on_the_staged_file(
 def test_a_link_swapped_in_at_the_target_after_the_rename_is_refused(
     monkeypatch, tmp_path
 ):
-    import hashlib
-
     payload = b"the verified bytes"
     staging = tmp_path / "staging"
     staging.write_bytes(payload)
@@ -299,8 +393,15 @@ def test_a_staging_file_that_cannot_be_made_removes_the_source(tmp_path):
     # file's directory cannot be created, so no staging file is.
     (tmp_path / "blocked").write_bytes(b"")
     target = tmp_path / "blocked" / "tool"
+    # The source's real digest: a made-up one would fail on the digest and never
+    # reach the staging directory this test is about.
     with pytest.raises(OSError):
-        du._replace_atomically(source, target, expected_sha256=DIGEST_A, mode=0o755)
+        du._replace_atomically(
+            source,
+            target,
+            expected_sha256=hashlib.sha256(b"x").hexdigest(),
+            mode=0o755,
+        )
     assert not source.exists()
     assert (tmp_path / "blocked").is_file()
 
@@ -402,7 +503,10 @@ def test_the_receipt_store_is_not_written_through_a_link(receipt_home, tmp_path)
     root = du.receipt_root()
     root.parent.mkdir(parents=True, exist_ok=True)
     elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir(mode=0o755)
+    # mkdir's mode is masked by the umask; the mode the assertion below reads back
+    # is set outright.
+    elsewhere.mkdir()
+    elsewhere.chmod(0o755)
     root.symlink_to(elsewhere)
     with pytest.raises(OSError):
         du._private_dir(root / "key")
@@ -420,20 +524,30 @@ def test_a_link_swapped_into_the_receipt_store_after_the_check_is_not_chmodded(
     root = du.receipt_root()
     root.parent.mkdir(parents=True, exist_ok=True)
     elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir(mode=0o755)
+    elsewhere.mkdir()
+    elsewhere.chmod(0o755)
+    # The level exists before the call, so the swap below has a directory to
+    # replace; a missing level made the rmdir fail and the test pass on that.
+    root.mkdir(exist_ok=True)
     real_is_symlink = Path.is_symlink
+    swapped: list = []
 
     def swap_then_answer(self):
         answer = real_is_symlink(self)
-        if self == root and not answer:
+        if self == root and not answer and not swapped:
             self.rmdir()
             self.symlink_to(elsewhere)
+            swapped.append(self)
             return False
         return answer
 
     monkeypatch.setattr(Path, "is_symlink", swap_then_answer)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as raised:
         du._private_dir(root / "key")
+    # The swap happened, and it is the no-follow open that refused it.
+    assert swapped == [root]
+    assert raised.value.errno == errno.ELOOP
+    assert raised.value.__cause__ is not None
     assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o755
 
 
@@ -443,6 +557,9 @@ def test_a_receipt_that_is_a_link_is_not_read(receipt_home, tmp_path):
     destination.mkdir()
     written = du.write_receipt(destination, "tool", {"url": "u", "sha256": DIGEST_A})
     assert written is not None
+    # The control: the receipt as written is read, so the None below is the link
+    # refused and not a store this test could never read.
+    assert du.read_receipt(destination, "tool") is not None
     elsewhere = tmp_path / "forged.json"
     elsewhere.write_text('{"url": "u", "sha256": "%s"}' % DIGEST_A)
     elsewhere.chmod(0o600)
@@ -457,8 +574,6 @@ def test_a_verified_binary_that_lost_its_execute_bit_gets_it_back(
 ):
     """The bytes still match the receipt, so the install is kept and the mode
     put back, rather than the file downloaded again."""
-    import hashlib
-
     destination = tmp_path / "bin"
     destination.mkdir()
     payload = b"binary"
@@ -544,8 +659,6 @@ def test_the_repair_hashes_and_sets_the_mode_on_one_descriptor(
     (O_NOFOLLOW), never through a second path lookup: the install directory may
     be writable by others, and a file swapped in between a path-based hash and a
     path-based chmod would have had its mode set on bytes nobody hashed."""
-    import hashlib
-
     destination = tmp_path / "bin"
     destination.mkdir()
     payload = b"binary"
@@ -576,14 +689,53 @@ def test_the_repair_hashes_and_sets_the_mode_on_one_descriptor(
 
 
 @POSIX_ONLY
+def test_the_repair_opens_the_installed_file_once_by_any_route(receipt_home, tmp_path):
+    """The recording ``os`` above sees only opens made through ``du.os``; a
+    ``Path.open``, ``open()`` or ``io.open`` of the installed file would pass it
+    unseen. The interpreter's own audit event sees every route."""
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    target = destination / "tool"
+    target.write_bytes(payload)
+    target.chmod(0o644)
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    watched = os.fspath(target)
+    seen: list = []
+    listening = True
+
+    def hook(event, args):
+        # Audit hooks cannot be removed: this one goes quiet when the test ends.
+        if listening and event == "open":
+            try:
+                opened = os.fspath(args[0])
+            except TypeError:
+                return
+            if opened == watched:
+                seen.append(args[1:])
+
+    sys.addaudithook(hook)
+    try:
+        assert du._already_installed(
+            destination, "tool", "https://x.example/tool", digest
+        )
+    finally:
+        listening = False
+    assert len(seen) == 1, seen
+
+
+@POSIX_ONLY
 def test_a_file_with_a_second_name_is_reinstalled_not_repaired(
     receipt_home, tmp_path, caplog
 ):
     """A hard link shares its mode with its other name, so the repair would
     change a file outside the install directory; the install replaces the name
     instead."""
-    import hashlib
-
     destination = tmp_path / "bin"
     destination.mkdir()
     payload = b"binary"
@@ -617,26 +769,26 @@ def test_a_fifo_at_the_install_path_is_refused_without_blocking(
     must be refused by the regular-file check; an open that followed the FIFO's
     own rules would block there, with no writer ever coming, and the check would
     never return."""
-    import hashlib
-
     destination = tmp_path / "bin"
     destination.mkdir()
     payload = b"binary"
     digest = hashlib.sha256(payload).hexdigest()
-    os.mkfifo(destination / "tool")
+    fifo = destination / "tool"
+    os.mkfifo(fifo)
     du.write_receipt(
         destination,
         "tool",
         {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
     )
-    started = time.monotonic()
     with caplog.at_level(logging.WARNING):
-        assert not du._already_installed(
-            destination, "tool", "https://x.example/tool", digest
+        outcome = _bounded(
+            lambda: du._already_installed(
+                destination, "tool", "https://x.example/tool", digest
+            ),
+            fifo,
         )
-    # Promptly: a blocked open would hold the test until its runner's timeout,
-    # which is the failure this pins; the bound only has to be far below that.
-    assert time.monotonic() - started < 5
+    assert "error" not in outcome, outcome
+    assert not outcome["value"]
     assert "not a regular file" in caplog.text
     # The control: the same path holding a regular file with those bytes is
     # installed.
@@ -658,10 +810,11 @@ def test_a_fifo_renamed_over_the_staging_name_is_refused_without_blocking(
     staging = tmp_path / ".tool.staged.ash-partial"
     os.mkfifo(staging)
     target = tmp_path / "tool"
-    started = time.monotonic()
-    with pytest.raises(ToolDownloadIntegrityError, match="not a regular file"):
-        du._finalize_staged(staging, target, DIGEST_A, mode=0o755)
-    assert time.monotonic() - started < 5
+    outcome = _bounded(
+        lambda: du._finalize_staged(staging, target, DIGEST_A, mode=0o755), staging
+    )
+    assert isinstance(outcome.get("error"), ToolDownloadIntegrityError), outcome
+    assert "not a regular file" in str(outcome["error"])
     assert not target.exists()
 
 
@@ -670,10 +823,9 @@ def test_a_fifo_renamed_over_the_staging_name_is_refused_without_blocking(
 def test_make_executable_refuses_a_fifo_without_blocking(tmp_path, caplog):
     fifo = tmp_path / "tool"
     os.mkfifo(fifo, 0o600)
-    started = time.monotonic()
     with caplog.at_level(logging.WARNING):
-        du.make_executable(fifo)
-    assert time.monotonic() - started < 5
+        outcome = _bounded(lambda: du.make_executable(fifo), fifo)
+    assert "error" not in outcome, outcome
     assert "not a regular file" in caplog.text
     # No execute bit was set on it.
     assert stat.S_IMODE(os.stat(fifo).st_mode) & 0o111 == 0
@@ -699,10 +851,9 @@ def test_a_fifo_swapped_in_at_the_receipt_path_is_not_read(
         return True if self == written else real_is_file(self)
 
     monkeypatch.setattr(Path, "is_file", answer_present)
-    started = time.monotonic()
     with caplog.at_level(logging.WARNING):
-        assert du.read_receipt(destination, "tool") is None
-    assert time.monotonic() - started < 5
+        outcome = _bounded(lambda: du.read_receipt(destination, "tool"), written)
+    assert outcome == {"value": None}
     assert "is not a file" in caplog.text
 
 
@@ -730,7 +881,10 @@ def test_a_zip_symlink_entry_is_not_a_regular_file():
 
 def test_a_relative_cache_is_not_used_and_says_so_once(monkeypatch, caplog):
     monkeypatch.setenv(du._TOOL_DOWNLOAD_CACHE_ENV, "relative/cache")
-    du._warned_relative_cache.discard("relative/cache")
+    # A fresh set for this test, restored after it: discarding one key from the
+    # module's set left the rest of the process's record in place and put the
+    # key back only on the next warning.
+    monkeypatch.setattr(du, "_warned_relative_cache", set())
     with caplog.at_level(logging.WARNING):
         assert du._tool_download_cache() is None
         assert du._tool_download_cache() is None
@@ -750,8 +904,6 @@ def test_a_directory_at_an_assets_name_is_discarded(monkeypatch, tmp_path, caplo
 
 
 def test_a_staging_side_failure_keeps_the_cache_entry(monkeypatch, tmp_path, caplog):
-    import hashlib
-
     cache = tmp_path / "cache"
     cache.mkdir()
     payload = b"the asset"
@@ -773,8 +925,6 @@ def test_a_staging_copy_that_fails_at_its_close_keeps_the_cache_entry(
     """The error a buffered write defers to the close (ENOSPC on the last chunk,
     EDQUOT or EIO on a quota or network TMPDIR) is a staging-side failure: the entry
     is kept and the caller downloads. It used to escape the function uncaught."""
-    import hashlib
-
     cache = tmp_path / "cache"
     cache.mkdir()
     payload = b"the asset"
@@ -826,10 +976,19 @@ def test_an_absent_rename_travels_as_an_empty_argument():
 
 @pytest.mark.parametrize(
     "digest",
-    ["0x" + "a" * 62, "a" * 63 + " ", "+" + "a" * 63, "a_" + "a" * 62],
+    [
+        "0x" + "a" * 62,
+        "a" * 63 + " ",
+        "+" + "a" * 63,
+        "a_" + "a" * 62,
+        # A trailing newline: ``$`` in a regex matches before it, ``\Z`` does not.
+        "a" * 64 + "\n",
+        # Arabic-Indic digits: ``int(c, 16)`` and ``str.isdigit`` take them, hex does not.
+        "٣" * 64,
+        "a" * 63 + "٣",
+    ],
 )
 def test_a_digest_that_is_not_plain_hex_is_refused(digest):
-    assert len(digest) == 64
     with pytest.raises(ValueError):
         du.create_url_download_command(
             url="https://example.com/tool", expected_sha256=digest
@@ -838,9 +997,12 @@ def test_a_digest_that_is_not_plain_hex_is_refused(digest):
 
 @POSIX_ONLY
 def test_a_backslash_in_a_posix_destination_is_kept(monkeypatch):
-    monkeypatch.setattr(du.os, "name", "posix")
+    # Only the module's own view of ``os`` is replaced: ``du.os`` is the real
+    # ``os`` module, and setting ``os.name`` on it changed how pathlib and the rest
+    # of the process read every path until the test ended.
+    monkeypatch.setattr(du, "os", SimpleNamespace(name="posix"))
     assert du._destination_text(Path("/opt/odd\\name")) == "/opt/odd\\name"
-    monkeypatch.setattr(du.os, "name", "nt")
+    monkeypatch.setattr(du, "os", SimpleNamespace(name="nt"))
     assert du._destination_text("C:\\ash\\bin") == "C:/ash/bin"
 
 
@@ -853,13 +1015,12 @@ def test_opengrep_on_windows_arm64_gets_the_x86_64_build_it_runs_under_emulation
     with caplog.at_level(logging.INFO):
         url = du.get_opengrep_url("windows", "arm64")
     assert url.endswith("opengrep_windows_x86.exe")
-    assert "emulation" in caplog.text
-    # The control: the one Windows build it has, asked for by its own name.
-    assert du.get_opengrep_url("windows", "amd64") == url
+    notes = [r for r in caplog.records if "emulation" in r.getMessage()]
+    assert len(notes) == 1, [r.getMessage() for r in caplog.records]
+    # The control: the one Windows build it has, asked for by its own name, needs
+    # no note, so the count stays at one.
+    with caplog.at_level(logging.INFO):
+        assert du.get_opengrep_url("windows", "amd64") == url
+    assert len([r for r in caplog.records if "emulation" in r.getMessage()]) == 1
     with pytest.raises(ValueError):
         du.get_opengrep_url("windows", "mips")
-
-
-def test_platform_module_is_the_one_patched():
-    # Guards the fake above: unquarantine reads platform.system through the module.
-    assert du.platform is platform
