@@ -1604,11 +1604,16 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         # made a scanner skipped for missing dependencies indistinguishable from
         # one that ran clean. These two keys come from scanner_results in the
         # aggregated output, which records the real status for every scanner ASH
-        # considered. Empty while the scan is still running.
+        # considered. Empty while the scan is still running. The reason a
+        # scanner did not run can quote an exception, so it is redacted with
+        # the values this run read from its environment, as the registry's own
+        # poll does with the same call.
         status_summary = (
             {"scanner_statuses": {}, "skipped_scanners": []}
             if previous_only
-            else summarize_scanner_statuses(output_dir)
+            else summarize_scanner_statuses(
+                output_dir, environment_values=entry.environment_values
+            )
         )
         progress_info["scanner_statuses"] = status_summary["scanner_statuses"]
         progress_info["skipped_scanners"] = status_summary["skipped_scanners"]

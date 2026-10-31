@@ -113,7 +113,10 @@ def _call(
     monkeypatch.setattr(
         mcp_server,
         "summarize_scanner_statuses",
-        lambda output_dir: {"scanner_statuses": {}, "skipped_scanners": []},
+        lambda output_dir, environment_values=(): {
+            "scanner_statuses": {},
+            "skipped_scanners": [],
+        },
     )
     result = asyncio.run(mcp_server.get_scan_progress(_ctx(), scan_id))
     assert "error" not in result, result
@@ -159,3 +162,51 @@ def test_the_files_counts_are_summed_only_when_the_producer_gives_none(
     assert counts["unknown"] == 3, counts
     assert counts["high"] == 1, counts
     assert counts["critical"] == 0, counts
+
+
+def test_a_skipped_scanners_reason_is_redacted_on_the_tool_path(
+    tmp_path, monkeypatch
+) -> None:
+    """The tool computes ``skipped_scanners`` itself and replaces the registry
+    poll's list with it, so the redaction the poll applies never reached a
+    client unless the tool passes the scan's environment values too. The reason
+    a scanner did not run can quote an exception that quotes such a value.
+    Nothing here stands in for the summary: the real function reads a real
+    results file."""
+    from automated_security_helper.cli import mcp_server
+
+    secret = "s3cr3t-Value-zqxj-ptlm-rwvn"
+    output = tmp_path / "project" / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    scan_id = get_scan_registry().register_scan(
+        str(tmp_path / "project"),
+        str(output),
+        session_id=DEFAULT_SESSION_ID,
+        environment_values=(secret,),
+    )
+    _write(
+        output / "ash_aggregated_results.json",
+        {
+            "scanner_results": {
+                "bandit": {
+                    "status": "MISSING",
+                    "dependencies_satisfied": True,
+                    "missing_reason": f"could not build: {secret} was refused",
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "mcp_get_scan_progress",
+        AsyncMock(return_value=_producer(scan_id)),
+    )
+
+    result = asyncio.run(mcp_server.get_scan_progress(_ctx(), scan_id))
+
+    assert "error" not in result, result
+    assert [row["scanner"] for row in result["skipped_scanners"]] == ["bandit"]
+    detail = result["skipped_scanners"][0]["detail"]
+    assert "was refused" in detail, detail
+    assert secret not in detail, detail
+    assert secret not in json.dumps(result), "the value reached the client"

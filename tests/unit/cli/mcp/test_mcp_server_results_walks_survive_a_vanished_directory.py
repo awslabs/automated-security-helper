@@ -116,7 +116,10 @@ def test_a_scanners_directory_removed_under_the_walk_does_not_fail_the_poll(
     monkeypatch.setattr(
         mcp_server,
         "summarize_scanner_statuses",
-        lambda output_dir: {"scanner_statuses": {}, "skipped_scanners": []},
+        lambda output_dir, environment_values=(): {
+            "scanner_statuses": {},
+            "skipped_scanners": [],
+        },
     )
     _vanish_on_listing(monkeypatch, scan["output"] / "scanners")
 
@@ -134,7 +137,7 @@ def test_a_pending_scan_reads_nothing_from_its_output_directory(
     scan = _progress(tmp_path, monkeypatch, "pending")
     summaries: List[Path] = []
 
-    def recording(output_dir: Path) -> Dict[str, Any]:
+    def recording(output_dir: Path, environment_values: Any = ()) -> Dict[str, Any]:
         summaries.append(output_dir)
         return {"scanner_statuses": {}, "skipped_scanners": []}
 
