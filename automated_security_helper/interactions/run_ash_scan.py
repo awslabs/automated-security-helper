@@ -1173,6 +1173,21 @@ def incomplete_converters(
     return listed
 
 
+def _gate_clears_the_exit(
+    could_not_stop: Sequence[object],
+    unevaluated_rules: Sequence[object],
+    stale_database_records: Sequence[object],
+) -> bool:
+    """Whether declining ``fail_on_incomplete_scanners`` would clear the exit.
+
+    A tool ASH could not halt, a rule that could not be evaluated and a stale
+    content database each fail the run whatever the gate says. The console's
+    gated advice and the log line's remedy both ask this, so they offer the
+    gate flag in the same runs.
+    """
+    return not (could_not_stop or unevaluated_rules or stale_database_records)
+
+
 def print_incompleteness_message(
     incomplete_scanner_rows: List[tuple[str, str]],
     incomplete_converter_rows: Sequence[Union["IncompleteConverter", tuple[str, str]]],
@@ -1248,8 +1263,8 @@ def print_incompleteness_message(
     # content database each fail the run whatever the gate says
     # (_compute_exit_code; their own arms below name what clears them), so
     # beside any of them the gated advice ends without the flag.
-    gate_clears_the_exit = not (
-        could_not_stop or unevaluated_rules or stale_database_records
+    gate_clears_the_exit = _gate_clears_the_exit(
+        could_not_stop, unevaluated_rules, stale_database_records
     )
 
     def ways_out(*ways: str) -> str:
@@ -7080,7 +7095,18 @@ def _compute_exit_code(
             ran = ", ".join(f"{name} ({status})" for name, status in observed)
             ASH_LOGGER.error(
                 shown_on_one_line(
-                    nothing_to_scan_message(results, nothing_to_scan)
+                    nothing_to_scan_message(
+                        results,
+                        nothing_to_scan,
+                        # The console's rule for the same remedy
+                        # (print_incompleteness_message): the gate's way out is
+                        # offered only when declining the gate clears the exit.
+                        accept_remedy=_gate_clears_the_exit(
+                            incompleteness.could_not_stop,
+                            incompleteness.unevaluated_rules,
+                            incompleteness.stale_content_databases,
+                        ),
+                    )
                     if nothing_to_scan
                     else f"Scan ran no scanners: {ran}. Every scanner was skipped, "
                     "so this run has shown the target to be neither clean nor dirty "

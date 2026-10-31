@@ -848,6 +848,51 @@ def test_the_log_line_and_the_console_text_are_one_helper():
     assert "--no-fail-on-incomplete-scanners" not in shown
 
 
+def _logged_nothing_to_scan_line(tmp_path, monkeypatch, **causes) -> str:
+    """The line `_compute_exit_code` logs for a run whose scanners all had
+    nothing to scan, with *causes* (extra fields of ScanIncompleteness) beside it."""
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    logged = []
+    monkeypatch.setattr(
+        ras.ASH_LOGGER, "error", lambda message, *a, **k: logged.append(str(message))
+    )
+    monkeypatch.setattr(
+        ras, "scanners_with_nothing_to_scan", lambda results: ["bandit"]
+    )
+    incompleteness = ras.ScanIncompleteness(
+        no_scanner_ran=True, observed=(("bandit", "SKIPPED"),), **causes
+    )
+    monkeypatch.setattr(ras, "scan_incompleteness", lambda *a, **k: incompleteness)
+    opts = ras.ScanOptions(source_dir=tmp_path / "src", output_dir=tmp_path / "out")
+
+    assert ras._compute_exit_code(AshAggregatedResults(), opts) == 1
+
+    (line,) = [text for text in logged if "No selected scanner" in text]
+    return line
+
+
+def test_the_logged_line_offers_the_gates_way_out_where_the_console_does(
+    tmp_path, monkeypatch
+):
+    line = _logged_nothing_to_scan_line(tmp_path, monkeypatch)
+
+    assert "--no-fail-on-incomplete-scanners" in line
+
+
+def test_the_logged_line_withholds_the_gates_way_out_beside_a_cause_it_cannot_clear(
+    tmp_path, monkeypatch
+):
+    """A tool that could not be stopped fails the run whatever the gate says;
+    the console withholds the flag beside it, and the log line said the
+    opposite."""
+    line = _logged_nothing_to_scan_line(
+        tmp_path, monkeypatch, could_not_stop=(("semgrep", "still running"),)
+    )
+
+    assert "--no-fail-on-incomplete-scanners" not in line
+
+
 def test_control_every_scanner_skipped_for_another_reason_keeps_the_advice(capsys):
     print_incompleteness_message(
         [],
