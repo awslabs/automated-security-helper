@@ -271,6 +271,15 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         accessor = getattr(pathlib, "_NormalAccessor", None)  # Python 3.10 only
         if accessor is not None and hasattr(accessor, "getcwd"):
             mp.setattr(accessor, "getcwd", staticmethod(lambda: native_cwd))
+        if accessor is not None:
+            # Python 3.10 binds ``stat`` (and, before 3.10, ``lstat``) into the
+            # accessor class once, at import, so ``Path.is_dir`` and its siblings
+            # never see the ``os`` names rebound above. Point the accessor at the
+            # redirected functions, read after the loop; ``staticmethod`` keeps the
+            # accessor from passing itself as the first argument.
+            for name in ("stat", "lstat"):
+                if hasattr(accessor, name):
+                    mp.setattr(accessor, name, staticmethod(getattr(os, name)))
         probe = pathlib.Path("probe").absolute()
         if pathlib.PurePath(DISPLAYED_CWD, "probe") != probe:
             raise AssertionError(

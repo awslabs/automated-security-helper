@@ -61,6 +61,28 @@ def test_the_wizards_write_route_lands_in_the_real_cwd(
     )
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="ntpath.abspath ignores the faked cwd, so there is nothing to redirect",
+)
+def test_pathlib_reads_a_directory_under_the_displayed_cwd_in_the_real_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ``Path.is_dir`` goes through ``os.stat`` by module attribute on Python 3.11
+    # and later, but through a class attribute bound at import on 3.10; the
+    # harness redirects both, so a directory made in the real cwd reads as one
+    # under the displayed name on every supported Python.
+    (tmp_path / "bin").mkdir()
+    monkeypatch.chdir(tmp_path)
+    with displayed_cwd(monkeypatch):
+        below = Path(DISPLAYED_CWD) / "bin"
+        assert below.is_dir()
+        assert below.stat().st_mode == (tmp_path / "bin").stat().st_mode
+        assert not (Path(DISPLAYED_CWD) / "absent").is_dir()
+
+    assert not Path(DISPLAYED_CWD).exists()
+
+
 def test_control_a_path_elsewhere_is_written_where_it_says(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
