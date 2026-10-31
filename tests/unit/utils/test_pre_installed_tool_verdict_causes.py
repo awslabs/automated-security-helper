@@ -100,25 +100,58 @@ class TestFindToolInterpreter:
 
 
 class TestTheUserSiteCheck:
-    def test_the_platforms_preferred_user_scheme_is_asked(self, tmp_path, monkeypatch):
-        """``pip install --user`` puts scripts where the platform's preferred user
-        scheme says (``osx_framework_user`` on a macOS framework build, whose
-        scripts sit under ``~/Library/Python``), not where ``<os.name>_user``
-        would; a copy there was judged against the wrong environment."""
+    def test_a_copy_in_any_user_schemes_scripts_directory_is_in_the_user_site(
+        self, tmp_path, monkeypatch
+    ):
+        """The directory decides, not the scheme's name: a script in the scripts
+        directory of any user scheme the platform defines is a user-site script,
+        and one in the interpreter's own prefix is not."""
         import sysconfig
 
-        asked = []
+        directories = {
+            "posix_prefix": tmp_path / "prefix" / "bin",
+            "posix_user": tmp_path / "posix_user" / "bin",
+            "osx_framework_user": tmp_path / "framework" / "bin",
+        }
+        for directory in directories.values():
+            directory.mkdir(parents=True)
+        monkeypatch.setattr(sysconfig, "get_scheme_names", lambda: tuple(directories))
+        monkeypatch.setattr(
+            sysconfig,
+            "get_path",
+            lambda name, scheme=None, *args, **kwargs: str(directories[scheme]),
+        )
+
+        assert _in_user_site(str(directories["posix_user"] / "bandit")) is True
+        assert _in_user_site(str(directories["osx_framework_user"] / "bandit")) is True
+        assert _in_user_site(str(directories["posix_prefix"] / "bandit")) is False
+
+    def test_a_scheme_naming_no_scripts_directory_is_skipped(
+        self, tmp_path, monkeypatch
+    ):
+        """A user scheme that has no scripts entry, or an empty one, matches
+        nothing, and the next scheme is still read."""
+        import sysconfig
+
+        real = tmp_path / "bin"
+        real.mkdir()
+        answers = {
+            "broken_user": KeyError("scripts"),
+            "empty_user": "",
+            "ok_user": real,
+        }
 
         def get_path(name, scheme=None, *args, **kwargs):
-            asked.append((name, scheme))
-            return str(tmp_path)
+            answer = answers[scheme]
+            if isinstance(answer, Exception):
+                raise answer
+            return str(answer)
 
-        monkeypatch.setattr(
-            sysconfig, "get_preferred_scheme", lambda key: "osx_framework_user"
-        )
+        monkeypatch.setattr(sysconfig, "get_scheme_names", lambda: tuple(answers))
         monkeypatch.setattr(sysconfig, "get_path", get_path)
-        assert _in_user_site(str(tmp_path / "bandit")) is True
-        assert asked == [("scripts", "osx_framework_user")]
+
+        assert _in_user_site(str(real / "bandit")) is True
+        assert _in_user_site(str(tmp_path / "elsewhere" / "bandit")) is False
 
 
 class TestAnExtraTheInstalledVersionDoesNotDeclare:

@@ -292,23 +292,29 @@ def _in_user_site(executable: str) -> bool:
     describe the environment that provides it."""
     import sysconfig
 
+    # The directory is what is compared, never a scheme's name: posix_user and
+    # osx_framework_user both put scripts at ``{userbase}/bin``, and the
+    # running interpreter's own userbase is already ~/Library/Python/X.Y on a
+    # macOS framework build, so asking for one scheme rather than the other
+    # returns the same directory. Every user scheme's scripts directory is
+    # offered, so a platform whose preferred scheme differs from ``os.name``'s
+    # still matches. What this does not see is a copy ``pip install --user``
+    # put in another Python's user scripts directory (another version's
+    # ~/Library/Python/X.Y/bin): that directory is not this process's.
     try:
-        # The platform's own user scheme: "<os.name>_user" is posix_user on
-        # every POSIX platform, but a macOS framework build (python.org,
-        # Homebrew) installs user scripts under osx_framework_user, below
-        # ~/Library/Python, and a copy there was judged against the system
-        # interpreter's environment.
-        scripts = sysconfig.get_path("scripts", sysconfig.get_preferred_scheme("user"))
-    except (KeyError, ValueError):
-        return False
-    if not scripts:
-        return False
-    try:
-        return Path(os.path.realpath(executable)).parent == Path(
-            os.path.realpath(scripts)
-        )
+        parent = Path(os.path.realpath(executable)).parent
     except (OSError, ValueError):
         return False
+    for scheme in sysconfig.get_scheme_names():
+        if not scheme.endswith("_user"):
+            continue
+        try:
+            scripts = sysconfig.get_path("scripts", scheme)
+            if scripts and parent == Path(os.path.realpath(scripts)):
+                return True
+        except (KeyError, ValueError, OSError):
+            continue
+    return False
 
 
 def _read_head(path: Path) -> Optional[str]:
