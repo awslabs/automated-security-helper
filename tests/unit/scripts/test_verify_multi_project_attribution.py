@@ -233,9 +233,17 @@ class TestUriBase:
         assert gate._uri_base_to_path(uri_base) == root
 
     def test_a_windows_drive_root_keeps_no_stray_separator(self, gate):
-        assert gate._uri_base_to_path("file:///C:/ws/project-a/") == Path(
-            "C:/ws/project-a/"
-        )
+        """The reduction drops the URI's leading slash before a drive letter.
+
+        The gate reads URIs written by a scan on its own host, so a drive URI
+        reaches this function on a POSIX host only through this test. The result
+        is built by ``Path`` on whichever host runs it (a relative path here, a
+        WindowsPath on Windows), so the assertions state what holds on both: it
+        equals the drive-first path, and it does not start with a separator.
+        """
+        result = gate._uri_base_to_path("file:///C:/ws/project-a/")
+        assert result == Path("C:/ws/project-a/")
+        assert not str(result).startswith(("/", "\\"))
 
 
 class TestRunRootIsTheProjects:
