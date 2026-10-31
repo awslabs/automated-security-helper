@@ -83,9 +83,9 @@ NEVER_ENDING_ABSOLUTE = "/scan/" + NEVER_ENDING_TEXT
 TINY_TIMEOUT = 0.5
 #: The bound a fast bounded call must finish under, a worker start included.
 #: Where the start method is ``spawn`` (Windows, macOS) that start is a fresh
-#: interpreter importing this package, seconds on a loaded venue (5.0 lost three
-#: ids on a Windows run of eight workers), so the bound is generous: a green call
-#: returns in milliseconds, and no test asserts elapsed time against it.
+#: interpreter importing this package, which takes seconds on a loaded venue,
+#: so the bound is generous: a green call returns in milliseconds, and no test
+#: asserts elapsed time against it.
 FAST_TIMEOUT = 60.0
 #: How long a test waits for the bounded call before reading it as unbounded.
 GUARD_LIMIT = 20.0
@@ -126,8 +126,8 @@ def _outcome_of(
     """What ``function(*args)`` did, read from a child of the test's own.
 
     The bounded call is made in a forked child so a bound that does not hold
-    (the thread of the first cut, which the search never returned to) leaves a
-    hanging child the test kills after ``limit`` seconds, not a hanging test.
+    (a wait that ignores its deadline) leaves a hanging child the test kills
+    after ``limit`` seconds, not a hanging test.
     Where there is no ``fork`` the call is made inline: the bound under test
     holds there too, and the guard is only against the unbounded shape.
     """
@@ -218,8 +218,7 @@ def test_a_slow_skip_path_is_stopped_at_the_bound():
 def test_a_fast_skip_path_answers_under_the_bound():
     """The answer comes back through the bounded path. The bound is generous:
     the test shows the result crosses the bound, not that the search is fast,
-    and a 20 ms bound failed at random on a loaded worker whose thread was not
-    scheduled in time."""
+    and it covers a worker start."""
     assert (
         checkov_skips(
             "vend.r", "/scan/vendor/x.tf", "vendor/x.tf", timeout=FAST_TIMEOUT
@@ -496,81 +495,116 @@ def test_a_client_pattern_under_a_null_scan_timeout_never_runs_in_this_process()
 # ---------------------------------------------------------------------------
 
 
-def _evaluation_workers() -> list:
-    return [
-        child
-        for child in multiprocessing.active_children()
-        if child.name == "ash-pattern-evaluation"
-    ]
-
-
-def test_a_budget_reuses_one_worker_across_its_evaluations():
+@pytest.fixture
+def pass_budget():
+    """A budget the test closes at teardown, so a failed assertion leaves no
+    worker process behind for the next test's checks."""
     budget = EvaluationBudget()
+    try:
+        yield budget
+    finally:
+        budget.close()
+
+
+def _process_of(budget: EvaluationBudget) -> Any:
+    """The worker's process object, held so a later check reads this process
+    and not a pid, which the operating system may hand to a new process once
+    the old one has been joined."""
+    return budget._worker._process
+
+
+def test_a_budget_reuses_one_worker_across_its_evaluations(pass_budget):
+    budget = pass_budget
     assert budget.worker_pid is None
 
     first = budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+    process = _process_of(budget)
     second = budget.evaluate(FAST_TIMEOUT, "s", "k2", os.getpid)
     third = budget.evaluate(FAST_TIMEOUT, "s", "k3", operator.add, 2, 3)
 
     assert first == second != os.getpid()
     assert budget.worker_pid == first
+    assert _process_of(budget) is process
     assert third == 5
     budget.close()
     assert budget.worker_pid is None
-    assert _evaluation_workers() == []
+    assert process.exitcode is not None
 
 
-def test_a_closed_budget_starts_a_new_worker_when_asked_again():
-    budget = EvaluationBudget()
-    first = budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+def test_a_closed_budget_starts_a_new_worker_when_asked_again(pass_budget):
+    budget = pass_budget
+    budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+    first = _process_of(budget)
     budget.close()
+    assert first.exitcode is not None
 
     again = budget.evaluate(FAST_TIMEOUT, "s", "k2", os.getpid)
 
-    assert again != first
+    assert _process_of(budget) is not first
     assert again != os.getpid()
-    budget.close()
 
 
-def test_a_worker_killed_at_the_deadline_is_replaced():
-    budget = EvaluationBudget()
-    first = budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+def test_a_worker_killed_at_the_deadline_is_replaced(pass_budget):
+    budget = pass_budget
+    budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+    first = _process_of(budget)
 
     with pytest.raises(EvaluationTimedOut):
         budget.evaluate(TINY_TIMEOUT, "s", "slow", time.sleep, 10)
     assert budget.worker_pid is None
+    assert first.exitcode is not None
     replaced = budget.evaluate(FAST_TIMEOUT, "s", "k3", os.getpid)
 
-    assert replaced != first
+    assert _process_of(budget) is not first
     assert replaced != os.getpid()
     assert budget.timed_out == ("slow",)
-    budget.close()
 
 
-def test_a_worker_hands_an_error_back_and_stays_alive():
-    budget = EvaluationBudget()
+def test_a_worker_hands_an_error_back_and_stays_alive(pass_budget):
+    budget = pass_budget
 
     with pytest.raises(KeyError):
         budget.evaluate(FAST_TIMEOUT, "s", "k1", _missing_key)
     pid = budget.worker_pid
+    process = _process_of(budget)
 
     assert pid is not None
     assert budget.evaluate(FAST_TIMEOUT, "s", "k2", os.getpid) == pid
-    budget.close()
+    assert _process_of(budget) is process
 
 
-def test_evaluated_within_leaves_no_worker_behind():
+def test_evaluated_within_leaves_no_worker_behind(monkeypatch):
+    """The processes it starts are counted through the context they come from,
+    not found by their name among every child of the test process."""
+    real = exclusions_module._process_context()
+    started: list = []
+
+    class _CountingContext:
+        Pipe = staticmethod(real.Pipe)
+        get_start_method = staticmethod(real.get_start_method)
+
+        @staticmethod
+        def Process(*args, **kwargs):
+            process = real.Process(*args, **kwargs)
+            started.append(process)
+            return process
+
+    monkeypatch.setattr(exclusions_module, "_process_context", lambda: _CountingContext)
+
     assert evaluated_within(FAST_TIMEOUT, "x", os.getpid) != os.getpid()
 
-    assert _evaluation_workers() == []
+    assert len(started) == 1
+    assert started[0].exitcode is not None
 
 
 def test_a_budget_used_as_a_context_manager_closes_on_exit():
     with EvaluationBudget() as budget:
         pid = budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
         assert budget.worker_pid == pid
+        process = _process_of(budget)
 
     assert budget.worker_pid is None
+    assert process.exitcode is not None
 
 
 @pytest.mark.skipif(
