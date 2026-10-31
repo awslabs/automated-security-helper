@@ -357,6 +357,13 @@ def test_no_warning_for_a_name_that_is_not_json_or_a_json_format(tmp_path):
                 extension="unused.custom.json", options={"output_format": "json"}
             ),
         )
+        # Markdown under a name an operator chose that does not end in .json.
+        UnusedSuppressionsReporter(
+            context=_context(tmp_path),
+            config=UnusedSuppressionsReporterConfig(
+                extension="unused.custom", options={"output_format": "markdown"}
+            ),
+        )
     finally:
         ASH_LOGGER.removeHandler(handler)
 

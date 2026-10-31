@@ -96,7 +96,26 @@ class TestUnmatchedDirectoryWarning:
             [literal, deeper, doubled], used_ids=set()
         )
 
-        assert len(ash_warnings) == 3
+        messages = [record.getMessage() for record in ash_warnings]
+        assert len(messages) == 3, messages
+        for path in ("build/", "build/**/*/", "a/b/**//"):
+            assert any(f"'{path}'" in message for message in messages), (path, messages)
+
+    @pytest.mark.parametrize("path", ["./", ".\\"])
+    def test_a_path_that_reduces_to_the_current_directory_raises_nothing(
+        self, ash_warnings, path
+    ):
+        """The path's components are never empty (``str.split`` returns at least
+        one, and only a ``**`` pair is dropped), so ``./`` and ``.\\`` reach the
+        trailing-slash warning like any literal directory and do not raise
+        IndexError in the pass that reads the last component."""
+        suppression = AshSuppression(path=path, rule_id="R1", reason="r")
+
+        warn_unmatched_directory_suppressions([suppression], used_ids=set())
+
+        messages = [record.getMessage() for record in ash_warnings]
+        assert len(messages) == 1, messages
+        assert f"'{path}'" in messages[0], messages
 
     def test_a_path_read_from_the_environment_is_quoted_by_its_reference(
         self, ash_warnings

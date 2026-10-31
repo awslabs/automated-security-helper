@@ -187,11 +187,17 @@ def test_a_cr_between_the_comment_marker_and_the_word_is_no_directive(tmp_path, 
 
 # --- the quoted-string scan is linear in the line ---
 
-# The expression the scan replaced, kept here as the reference for what a
-# quoted string is: the same spans on every line it finishes on. A quote opens
-# a string only at a word boundary, or after a one- or two-letter string prefix
-# that is itself at a word start (``f"``, ``rb'``); an apostrophe glued to a
-# word opens nothing.
+# The reference expression for what a quoted string is: written when the scan
+# was a regular expression and kept as the second, independent statement of the
+# rule, so the one-pass scan is checked against another reading of it on every
+# line below. It is not the expression the scan replaced byte for byte: both were
+# edited together for the word-character rule, and the one-pass scan departs from
+# it in one place, a closing quote glued to a keyword or a ``_`` (``"x"in env``,
+# ``"abc"_s``), which ends its string there; none of the lines below has one, and
+# tests/unit/utils/test_suppression_matcher_markers_in_strings.py pins that case.
+# A quote opens a string only at a word boundary, or after a one- or two-letter
+# string prefix that is itself at a word start (``f"``, ``rb'``); an apostrophe
+# glued to a word opens nothing.
 _OPENER = r"(?:(?<!\w)|(?<=\b[rRbBfFuU])|(?<=\b[rRbBfFuU]{2}))"
 
 

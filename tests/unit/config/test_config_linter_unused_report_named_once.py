@@ -104,16 +104,18 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
     config = tmp_path / ".ashrc.yaml"
     config.write_text("project_name: demo\n", encoding="utf-8")
     merged = dict(NAMED_BY_A_BASE)
+    # Fixable, as lint marks an unused suppression it can list from a report.
     issue = LintIssue(
         severity=LintSeverity.INFO,
         category=LintCategory.SUPPRESSION_UNUSED,
         message="Unused suppression: path='src/a.py', rule_id='B101'",
+        fixable=True,
     )
     monkeypatch.setattr(
         ConfigLinter,
         "lint",
         staticmethod(
-            lambda **_: LintResult(
+            lambda *_a, **_k: LintResult(
                 issues=[issue], config_path=config, resolved_data=merged
             )
         ),
@@ -135,9 +137,9 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
         config_app, ["lint", "--config", str(config), "--fix-unused", "-y"]
     )
 
-    assert result.exception is None or isinstance(result.exception, SystemExit)
-    assert seen["age"] is merged
-    assert seen["fix"] is merged
+    assert result.exit_code == 0, result.output
+    assert seen.get("age") is merged, seen
+    assert seen.get("fix") is merged, seen
 
 
 def test_lint_records_the_report_it_read(tmp_path):
@@ -214,12 +216,13 @@ def test_the_command_hands_the_report_lint_read_to_the_age_read_and_the_fixer(
         severity=LintSeverity.INFO,
         category=LintCategory.SUPPRESSION_UNUSED,
         message="Unused suppression: path='src/a.py', rule_id='B101'",
+        fixable=True,
     )
     monkeypatch.setattr(
         ConfigLinter,
         "lint",
         staticmethod(
-            lambda **_: LintResult(
+            lambda *_a, **_k: LintResult(
                 issues=[issue], config_path=config, unused_report_path=listed
             )
         ),
@@ -241,6 +244,6 @@ def test_the_command_hands_the_report_lint_read_to_the_age_read_and_the_fixer(
         config_app, ["lint", "--config", str(config), "--fix-unused", "-y"]
     )
 
-    assert result.exception is None or isinstance(result.exception, SystemExit)
-    assert seen["age"] == listed
-    assert seen["fix"] == listed
+    assert result.exit_code == 0, result.output
+    assert seen.get("age") == listed, seen
+    assert seen.get("fix") == listed, seen

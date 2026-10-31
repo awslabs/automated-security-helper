@@ -854,7 +854,8 @@ class TestExpiryWarningsCoverScannerOptionLists:
 
         (expired,) = [w for w in warnings if "have expired" in w]
         assert f"{subject} 'old' expired on 2026-06-01" in expired, expired
-        assert "vendor" not in expired, expired
+        # In no warning at all, not only the one about expired entries.
+        assert not any("vendor" in w for w in warnings), warnings
 
     @pytest.mark.parametrize(
         "scanner,field,subject",
@@ -1708,9 +1709,15 @@ class TestEveryReaderFiltersExpiredEntries:
     def test_a_field_classified_filtered_at_read_is_filtered_where_it_is_read(self):
         """``filtered-at-read`` is a claim about the code: every read of the field
         is either inside an ``active_ignore_paths(...)`` call, or is an argument
-        of a call to a function of the same module that calls it. Without this the
-        classification in ENTRY_FIELDS is a comment, and a new read that applies
-        the stored list as it is would pass."""
+        of a call to a function of the same module whose body calls it somewhere.
+        Without this the classification in ENTRY_FIELDS is a comment, and a new
+        read that applies the stored list as it is would pass.
+
+        This is the coarse check, and says so: it does not ask whether that
+        function filters the argument it was handed (the sibling test above does,
+        by the parameter that receives it), and a function is found by its bare
+        name across the module, so a same-named method of another class counts.
+        It stays as the check that also covers a read inside a nested call."""
         claimed = [
             (rel, name)
             for (rel, name), how in sorted(self.ENTRY_FIELDS.items())

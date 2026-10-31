@@ -33,20 +33,61 @@ def _write(tmp_path: Path, text: str) -> Path:
     return path
 
 
+def _best_scan_seconds(tmp_path, count):
+    """The least of three timed scans of a line of ``count`` markers inside
+    strings, each checked to find the one directive after them and no other."""
+    strings = '"# ash-ignore: A", ' * count
+    source = _write(tmp_path, f"x = [{strings}]  # ash-ignore: R1 why\n")
+    best = None
+    for _ in range(3):
+        started = time.perf_counter()
+        found = find_inline_suppressions(source)
+        elapsed = time.perf_counter() - started
+        assert found == [InlineSuppression(line_number=1, rule_id="R1", reason="why")]
+        best = elapsed if best is None else min(best, elapsed)
+    return best
+
+
 def test_a_line_of_many_markers_inside_strings_is_scanned_once(tmp_path):
     """Red at the base: each of the markers inside a string ran a match attempt
-    to the end of the line, so this one line (about 2.7 million characters)
-    took time quadratic in its length, far past the bound asserted. The
-    directive after the strings is still found, and none inside them is."""
-    strings = '"# ash-ignore: A", ' * 150_000
-    source = _write(tmp_path, f"x = [{strings}]  # ash-ignore: R1 why\n")
+    to the end of the line, so the time grew with the square of the line's
+    length. A line four times as long is scanned in about four times the time
+    when the scan reads each character once, and sixteen times when it does not;
+    the bound sits between them at nine. A ratio, not a number of seconds: an
+    absolute bound fails on a loaded runner or under coverage with no
+    regression. The directive after the strings is found, and none inside them
+    is (each scan is checked for that)."""
+    small = _best_scan_seconds(tmp_path, 20_000)
+    large = _best_scan_seconds(tmp_path, 80_000)
 
-    started = time.perf_counter()
-    found = find_inline_suppressions(source)
-    elapsed = time.perf_counter() - started
+    assert large < 9 * small, (small, large)
 
-    assert found == [InlineSuppression(line_number=1, rule_id="R1", reason="why")]
-    assert elapsed < 10, elapsed
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        pytest.param(
+            "x = 'a'if c else '# ash-ignore: X'\n", id="single-quote-then-if-else"
+        ),
+        pytest.param('x = "s"and "# ash-ignore: X"\n', id="double-quote-then-and"),
+        pytest.param('y = "abc"_s + "# ash-ignore: X"\n', id="literal-suffix"),
+    ],
+)
+def test_a_marker_in_a_string_after_a_keyword_glued_closer_is_not_a_directive(
+    tmp_path, line
+):
+    """The inverse of the directive that was swallowed: when the first string was
+    left open by a closing quote glued to a keyword, it ran to the opening quote
+    of the second literal and the marker inside that literal read as a
+    directive, which applied a suppression."""
+    assert find_inline_suppressions(_write(tmp_path, line)) == []
+
+
+def test_a_closing_quote_glued_to_a_keyword_ends_its_string():
+    from automated_security_helper.utils.suppression_matcher import _quoted_spans
+
+    assert _quoted_spans("'a'if c else 'b'") == [(0, 3), (13, 16)]
+    assert _quoted_spans('"x"in env') == [(0, 3)]
 
 
 @pytest.mark.parametrize(
