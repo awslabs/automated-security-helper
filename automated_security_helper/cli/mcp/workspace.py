@@ -1036,11 +1036,29 @@ def _session_config_refusal(error: Exception, operation: str) -> Dict[str, Any]:
     category of the writer's error, and a warning in the server log for the
     operator. As a config refusal an unwritable workspace read as the caller's
     own fault and left nothing in the log.
+
+    A session whose workspace another request holds for the sweep's removal
+    (``SessionWorkspaceBusyError``, a ``RuntimeError``) is not a config refusal
+    either: the file is gone and not written again under that removal, so it is
+    answered as the other tools answer the hold, under the error's own
+    ``error_type`` and with exit 1, for the client to send the request again.
     """
     if getattr(error, "workspace_unwritable", False):
         from automated_security_helper.cli.mcp_tools import _bound_profile_unavailable
 
         return _bound_profile_unavailable(error, operation)
+    from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
+
+    if isinstance(error, SessionWorkspaceBusyError):
+        from automated_security_helper.cli.mcp_tools import (
+            REFUSED_INTERNAL_EXIT_CODE,
+        )
+
+        response = _error_response(
+            error, operation, exit_code=REFUSED_INTERNAL_EXIT_CODE
+        )
+        response["error_type"] = error.error_type
+        return response
     return _error_response(
         error,
         operation,
