@@ -1727,96 +1727,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
             self._post_scan(target=target, target_type=target_type)
 
-            # Say "timed out" rather than "No such file or directory".
-            #
-            # A killed tool never writes its results file, so _read_results_file
-            # below raises FileNotFoundError, which the except clause turns into
-            # "<Scanner> scan failed: [Errno 2] No such file or directory". That
-            # reads as a path bug and sends the reader looking in the wrong place.
-            # The cause is a timeout and the message should say so, along with the
-            # knob to change it.
-            if isinstance(response, dict) and response.get("timed_out"):
-                # The limit through the shared token (_timeout_limit_token),
-                # redacted here: this error's text is recorded as it is
-                # raised, and the token is what keeps an environment-derived
-                # number out of it. "Was killed" only when the stop worked:
-                # _run_subprocess recorded a stop that failed on
-                # scan_could_not_stop, and a message saying the tool is gone
-                # would be the one wrong thing to tell the operator then.
-                if self.scan_could_not_stop is not None:
-                    ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
-                else:
-                    ending = f"{WAS_KILLED_ENDING}, so it produced no"
-                # The ONE guarded read of the values hook for this message (the
-                # rule of _values_to_redact): a hook that raised or gave no
-                # usable answer must not replace the timeout as the scan's
-                # error, and cannot be trusted to hide the limit or the
-                # option's name, so a value-free note takes their place.
-                read = guarded_values_read(self)
-                if read.values is None:
-                    raise ScannerError(
-                        f"{self.__class__.__name__} timed out{ending} results "
-                        "file. The limit is not shown: the plugin's values hook "
-                        f"{read.failure()}. Raise the scanner's scan_timeout "
-                        "option if this target legitimately needs longer."
-                    )
-                limit = timeout_limit_token(effective_timeout, read.values)
-                raise ScannerError(
-                    text_without_values(
-                        f"{self.__class__.__name__} timed out after "
-                        f"{limit}{ending} "
-                        f"results file. Raise scanners.{getattr(self.config, 'name', '<scanner>')}"
-                        ".options.scan_timeout if this target legitimately needs "
-                        "longer, or set it to null to leave this scanner unbounded.",
-                        read.values,
-                    )
-                )
-
-            # Likewise "could not start" rather than the missing results file. The
-            # exit code is 127, which no scanner accepts, so this is reported as
-            # an error either way; this check only makes the message name it.
-            # The headline carries none of the run's text. Each spawn-failure
-            # path in _run_subprocess (the uv refusal, the OS refusal, the
-            # handler's own response) goes through _process_command_response
-            # before it reaches this check, which stores the stderr in
-            # self.errors redacted, with the full uv layer for a uv run, and
-            # _describe_scan_failure's Stderr part shows that copy (or reads the
-            # stderr log under the same redaction). Quoting the stderr here as
-            # well showed the same text a second time: as written by this
-            # method, and where the executor redacts the whole message only
-            # through the plain-value layer, which matches a value as written
-            # and so misses what uv respells and the plugin-built --from and
-            # --with inputs that hold one. A scanner that keeps its stderr out of
-            # its errors on purpose (gitleaks) names its log in the message
-            # instead of quoting it.
-            if isinstance(response, dict) and response.get("spawn_failed"):
-                raise ScannerError(
-                    f"{self.__class__.__name__} could not start its tool, so it "
-                    "produced no results file."
-                )
-
-            # And for a tool that ran when ASH could not record its output: its
-            # results file may be complete, but the run is not graded on it.
-            if isinstance(response, dict) and response.get("post_run_error"):
-                raise ScannerError(
-                    self._text_without_hooked_values(
-                        f"{self.__class__.__name__} ran, but ASH could not record "
-                        f"the scanner's output: {response.get('error')}",
-                        f"{self.__class__.__name__} ran, but ASH could not record "
-                        "the scanner's output",
-                    )
-                )
-
-            # And for a tool a signal ASH did not send ended: it never finished, so
-            # whatever results file it left is not the whole scan.
-            if isinstance(response, dict) and response.get("signaled"):
-                raise ScannerError(
-                    self._text_without_hooked_values(
-                        f"{self.__class__.__name__} did not finish: "
-                        f"{response.get('error')}",
-                        f"{self.__class__.__name__} did not finish",
-                    )
-                )
+            # A run the subprocess layer flagged says what happened before the
+            # results file it may never have written is read.
+            self._refuse_flagged_response(response, effective_timeout)
 
             # Before the results file is read: a failed tool's file decides nothing.
             self._record_target_exit_code(response)
@@ -1889,6 +1802,93 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 self.end_time = datetime.now(timezone.utc)
             raise ScannerError(
                 self._describe_scan_failure(e, results_file, tool_started=tool_started)
+            )
+
+    def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
+        """Raise for a run the subprocess layer flagged, before its file is read.
+
+        The four readings ``scan()`` makes for every template scanner, and the
+        method a scanner that overrides ``scan()`` calls instead of keeping a
+        copy of them (the copies read the values hook bare, where this reads it
+        once, guarded). The exit code alone does not say any of them: a flagged
+        response keeps the tool's own code, 0 included.
+
+        * Timed out: say "timed out" rather than "No such file or directory". A
+          killed tool never writes its results file, so reading it raises
+          FileNotFoundError, which the scan turns into "<Scanner> scan failed:
+          [Errno 2] No such file or directory". That reads as a path bug and
+          sends the reader looking in the wrong place. The limit goes through
+          the shared token (``timeout_limit_token``), redacted: this error's
+          text is recorded as it is raised, and the token is what keeps an
+          environment-derived number out of it. "Was killed" only when the
+          kill worked: ``_run_subprocess`` recorded a kill that failed on
+          ``scan_could_not_stop``, and a message saying the tool is gone would
+          be the one wrong thing to tell the operator then. The values hook is
+          read once, guarded: a hook that raised or gave no usable answer must
+          not replace the timeout as the scan's error, and cannot be trusted to
+          hide the limit or the option's name, so a value-free note takes their
+          place.
+        * Could not start: the headline carries none of the run's text. Each
+          spawn-failure path in ``_run_subprocess`` goes through
+          ``_process_command_response`` before it reaches this check, which
+          stores the stderr in ``self.errors`` redacted, with the full uv layer
+          for a uv run, and ``_describe_scan_failure``'s Stderr part shows that
+          copy (or reads the stderr log under the same redaction). Quoting the
+          stderr here as well showed the same text a second time, where the
+          executor redacts the whole message only through the plain-value
+          layer, which matches a value as written and so misses what uv
+          respells and the plugin-built ``--from`` and ``--with`` inputs that
+          hold one. A scanner that keeps its stderr out of its errors on
+          purpose (gitleaks) names its log in the message instead of quoting it.
+        * Ran, but ASH could not record its output: the results file may be
+          complete, and the run is not graded on it.
+        * Ended on a signal ASH did not send: it never finished, so whatever
+          results file it left is not the whole scan.
+        """
+        if not isinstance(response, dict):
+            return
+        name = self.__class__.__name__
+        if response.get("timed_out"):
+            if self.scan_could_not_stop is not None:
+                ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
+            else:
+                ending = f"{WAS_KILLED_ENDING}, so it produced no"
+            read = guarded_values_read(self)
+            if read.values is None:
+                raise ScannerError(
+                    f"{name} timed out{ending} results file. The limit is not "
+                    f"shown: the plugin's values hook {read.failure()}. Raise the "
+                    "scanner's scan_timeout option if this target legitimately "
+                    "needs longer."
+                )
+            limit = timeout_limit_token(timeout, read.values)
+            raise ScannerError(
+                text_without_values(
+                    f"{name} timed out after {limit}{ending} results file. Raise "
+                    f"scanners.{getattr(self.config, 'name', '<scanner>')}"
+                    ".options.scan_timeout if this target legitimately needs "
+                    "longer, or set it to null to leave this scanner unbounded.",
+                    read.values,
+                )
+            )
+        if response.get("spawn_failed"):
+            raise ScannerError(
+                f"{name} could not start its tool, so it produced no results file."
+            )
+        if response.get("post_run_error"):
+            raise ScannerError(
+                self._text_without_hooked_values(
+                    f"{name} ran, but ASH could not record the scanner's output: "
+                    f"{response.get('error')}",
+                    f"{name} ran, but ASH could not record the scanner's output",
+                )
+            )
+        if response.get("signaled"):
+            raise ScannerError(
+                self._text_without_hooked_values(
+                    f"{name} did not finish: {response.get('error')}",
+                    f"{name} did not finish",
+                )
             )
 
     def _text_without_hooked_values(self, text: str, withheld: str) -> str:
