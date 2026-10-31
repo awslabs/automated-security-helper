@@ -424,6 +424,15 @@ class VersionTemplateManager:
         return [name for name, _prefix, _branch in INSTALL_REF_FORMS if name in pinned]
 
     @staticmethod
+    def names_this_repository(text: str) -> bool:
+        """Whether text names this repository, as a URL or a path (_ASH_REPOSITORY).
+
+        An allowance for another project's pin must never excuse an entry that names
+        this repository: the pin in it is ASH's, in a shape no anchor reads.
+        """
+        return re.search(_ASH_REPOSITORY, text) is not None
+
+    @staticmethod
     def unrecognized_pins(text: str) -> List[UnrecognizedPin]:
         """Every pin ASH_PIN_PATTERNS rejects, with the line and entry that hold it.
 

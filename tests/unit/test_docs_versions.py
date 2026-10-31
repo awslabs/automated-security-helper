@@ -905,13 +905,86 @@ def test_an_allowance_still_excuses_the_pin_of_its_own_command_in_a_chain(text):
 
 
 @pytest.mark.unit
-def test_a_bare_tag_in_the_allowance_excuses_a_pin_of_this_repository():
-    """The reason the entry must carry the project: a tag alone matches ASH's own
-    entry as well, so the check would pass the stale pin it exists to catch."""
+@pytest.mark.parametrize(
+    "text, allowed",
+    [
+        # A bare tag matches ASH's own entry as well as the other project's.
+        (f"- rev: v3.3.0\n  repo: {REPO_URL}\n", ("rev: v3.3.0",)),
+        (f"- rev: v3.3.0\n  repo: {REPO_URL}\n", ("v3.3.0",)),
+        (f"- {{repo: {REPO_URL}, rev: v3.3.0}}\n", ("v3.3.0",)),
+        # This repository's own URL as an allowance.
+        (f"- rev: v3.3.0\n  repo: {REPO_URL}\n", (REPO_URL,)),
+        (f"git clone --branch  v3.3.0 {REPO_URL}.git\n", (REPO_URL,)),
+        (f"git clone --branch  v3.3.0 {REPO_URL}.git\n", ("v3.3.0",)),
+    ],
+    ids=[
+        "a-prefix-and-a-tag",
+        "a-tag",
+        "a-tag-in-a-flow-entry",
+        "this-repository-s-url",
+        "this-repository-s-url-in-a-clone",
+        "a-tag-in-a-clone",
+    ],
+)
+def test_an_allowance_never_excuses_an_entry_that_names_this_repository(text, allowed):
+    """Red before: an allowance that matched the entry excused it, so a bare tag, or
+    this repository's own URL, added to KNOWN_THIRD_PARTY_PINS passed the stale pin of
+    this repository that the check exists to catch."""
     manager = _manager()
-    text = f"- rev: v3.3.0\n  repo: {REPO_URL}\n"
     assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
-    assert dv.unrecognized_pin_problems(manager, text, "page/", ("rev: v3.3.0",)) == []
+    problems = dv.unrecognized_pin_problems(manager, text, "page/", allowed)
+    assert len(problems) == 1, problems
+    assert "names this repository" in problems[0], problems
+
+
+def _allowance_problems(manager, allowed):
+    """What is wrong with each allowance: it must name a project, not a pin or ASH."""
+    problems = []
+    for entry in allowed:
+        if "/" not in entry:
+            problems.append(f"{entry!r} has no `/`, so it names no project")
+        if manager.unrecognized_pins(entry) or manager.release_pins(entry):
+            problems.append(f"{entry!r} is a prefix and a version, not a project")
+        if manager.names_this_repository(entry):
+            problems.append(f"{entry!r} names this repository")
+    return problems
+
+
+@pytest.mark.unit
+def test_every_known_third_party_pin_names_a_project():
+    """Each allowance names the project whose pin it keeps, with a `/` and without a
+    version or this repository: a bare tag would match every pin of that tag."""
+    assert _allowance_problems(_manager(), dv.KNOWN_THIRD_PARTY_PINS) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "rev: v3.3.0",
+        "v3.3.0",
+        "--branch v3.3.0",
+        "other-project",
+        "example/other-project@v2.0.0",
+        REPO_URL,
+    ],
+    ids=[
+        "prefix-and-tag",
+        "tag",
+        "flag-and-tag",
+        "no-slash",
+        "pinned",
+        "this-repository",
+    ],
+)
+def test_an_allowance_that_names_no_project_is_found(entry):
+    """The control for the test above: it can fail, on each way an allowance goes wrong."""
+    assert _allowance_problems(_manager(), (entry,)) != []
+
+
+@pytest.mark.unit
+def test_an_allowance_that_names_a_project_is_not_found():
+    assert _allowance_problems(_manager(), ("example/other-project",)) == []
 
 
 @pytest.mark.unit

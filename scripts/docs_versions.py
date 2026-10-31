@@ -646,10 +646,12 @@ def page_text(content: bytes, *, commands_only: bool = False) -> str:
 #: `\`-continued clone is all its lines (see _entry_around in
 #: scripts/version_template_manager.py). So the project's URL excuses a `rev:` that sits
 #: on the line below it, and a bare tag would excuse every pin of that tag, ASH's
-#: included, so name the project. The pin readers count only the pins of this
-#: repository, so a pin they reject is either one of these or a pin of this repository
-#: in a shape scripts/version_template_manager.py does not know, which no template or
-#: check would ever move. None exists today.
+#: included, so name the project: an entry holds a `/` and no version, and
+#: tests/unit/test_docs_versions.py checks every entry here for both. An entry that
+#: names this repository is never excused, whatever an allowance says. The pin readers
+#: count only the pins of this repository, so a pin they reject is either one of these
+#: or a pin of this repository in a shape scripts/version_template_manager.py does not
+#: know, which no template or check would ever move. None exists today.
 KNOWN_THIRD_PARTY_PINS: tuple[str, ...] = ()
 
 
@@ -666,19 +668,26 @@ def unrecognized_pin_problems(
     flow-style entry, a clone of a URL held in a variable); the pages would render it
     stale on every build and pass the pins check. So a rejected pin fails the check
     unless the entry or command holding it names an entry of allowed
-    (KNOWN_THIRD_PARTY_PINS).
+    (KNOWN_THIRD_PARTY_PINS), and an entry that names this repository is never
+    excused: its pin is ASH's, whatever the allowance says.
     """
     if allowed is None:
         allowed = KNOWN_THIRD_PARTY_PINS
     problems = []
     for pin in manager.unrecognized_pins(text):
-        if any(entry in pin.entry for entry in allowed):
+        named = any(entry in pin.entry for entry in allowed)
+        if named and not manager.names_this_repository(pin.entry):
             continue
+        refused = (
+            "; its entry names this repository, which no allowance excuses"
+            if named
+            else ""
+        )
         problems.append(
             f"{where} has a {pin.form} pin of {pin.version} that no pattern of "
             f"ASH_PIN_PATTERNS accepts: {pin.line!r}; if it is another project's, add it "
             "to KNOWN_THIRD_PARTY_PINS in scripts/docs_versions.py, otherwise add its "
-            "shape to scripts/version_template_manager.py"
+            f"shape to scripts/version_template_manager.py{refused}"
         )
     return problems
 
