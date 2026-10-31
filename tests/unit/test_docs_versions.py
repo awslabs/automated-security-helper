@@ -810,6 +810,56 @@ def test_an_allowance_does_not_excuse_the_next_entry():
     assert "pin of 3.3.0" in problems[0], problems
 
 
+# A clone of another project and a clone of this repository, in one command line or in
+# one backslash-continued command, in each order. The pin is this repository's, with its
+# URL held in a variable so that no anchor reads it: only the safety net lists it.
+OTHER_CLONE = f"git clone {OTHER_PROJECT_URL}.git"
+ASH_CLONE = 'git clone --branch v3.3.0 "$ASH_REPO_URL"'
+CHAINED_CLONES = {
+    "continued after another project's clone": f"{OTHER_CLONE} && \\\n  {ASH_CLONE}\n",
+    "continued before another project's clone": f"{ASH_CLONE} && \\\n  {OTHER_CLONE}\n",
+    "continued after a semicolon": f"{OTHER_CLONE}; \\\n  {ASH_CLONE}\n",
+    "on one line after &&": f"{OTHER_CLONE} && {ASH_CLONE}\n",
+    "on one line after ||": f"{OTHER_CLONE} || {ASH_CLONE}\n",
+    "on one line before a pipe": f"{ASH_CLONE} | tee clone.log; {OTHER_CLONE}\n",
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text", list(CHAINED_CLONES.values()), ids=list(CHAINED_CLONES)
+)
+def test_an_allowance_does_not_excuse_the_next_command_of_a_chain(text):
+    """Red before: a command continued with a backslash was one entry from its first
+    line to its last, and a command line was one entry whole, so the project named in
+    one clone excused the pin of the other, and a stale pin of this repository passed
+    the check that exists to catch it."""
+    manager = _manager()
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git && \\\n  git clone {REPO_URL}.git\n",
+        f"git clone {REPO_URL}.git && \\\n  git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n",
+    ],
+    ids=["the allowed project first", "the allowed project last"],
+)
+def test_an_allowance_still_excuses_the_pin_of_its_own_command_in_a_chain(text):
+    """The control: cutting the entry at the separators narrows it to the command that
+    holds the pin, which is the one that names the allowed project."""
+    manager = _manager()
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    allowed = ("example/other-project",)
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+
+
 @pytest.mark.unit
 def test_a_bare_tag_in_the_allowance_excuses_a_pin_of_this_repository():
     """The reason the entry must carry the project: a tag alone matches ASH's own

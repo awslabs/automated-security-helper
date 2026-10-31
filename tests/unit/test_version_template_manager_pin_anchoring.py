@@ -447,7 +447,9 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
         found = VersionTemplateManager(REPO_ROOT).unrecognized_pins(text)
         assert len(found) == 1, found
         assert found[0].line in text
-        assert found[0].line in found[0].entry
+        # The entry is the command around the pin, cut at the separators of a chain, so
+        # it need not hold the whole line; it holds the pin.
+        assert f"v{found[0].version}" in found[0].entry
 
     @pytest.mark.parametrize(
         "text, entry",
@@ -471,10 +473,27 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
                 f"echo hi\ngit clone \\\n  --branch v2.0.0 \\\n  {OTHER_URL}.git\n",
                 f"git clone \\\n  --branch v2.0.0 \\\n  {OTHER_URL}.git",
             ),
-            # Prose stays one line.
+            # Prose stays one line, cut at the code span that holds the command.
             (
                 f"Intro line.\nRun `git clone --branch v2.0.0 {OTHER_URL}.git`.\nOutro.\n",
-                f"Run `git clone --branch v2.0.0 {OTHER_URL}.git`.",
+                f"git clone --branch v2.0.0 {OTHER_URL}.git",
+            ),
+            # A chain of commands is cut at its separators: the pin is in the second
+            # clone, so the first clone's project is not in its entry. Red at the base,
+            # where the entry was both lines.
+            (
+                f'git clone {OTHER_URL}.git && \\\n  git clone --branch v3.3.0 "$X"\n',
+                ' \\\n  git clone --branch v3.3.0 "$X"',
+            ),
+            # The pin comes first: the entry ends at the separator after it.
+            (
+                f'git clone --branch v3.3.0 "$X" && \\\n  git clone {OTHER_URL}.git\n',
+                'git clone --branch v3.3.0 "$X" ',
+            ),
+            # The same on one line, and with a semicolon.
+            (
+                f'git clone {OTHER_URL}.git; git clone --branch v3.3.0 "$X"\n',
+                ' git clone --branch v3.3.0 "$X"',
             ),
             # A rev: written after a list nested under a sibling key: the entry still
             # runs up to its repo: line. Red at the base, where the walk stopped at the
@@ -487,7 +506,16 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
                 f"  - repo: {OTHER_URL}\n    hooks:\n      - id: x\n    rev: v4.6.0",
             ),
         ],
-        ids=["block", "rev-first", "continued", "prose", "below-a-nested-item"],
+        ids=[
+            "block",
+            "rev-first",
+            "continued",
+            "prose",
+            "below-a-nested-item",
+            "chained-pin-last",
+            "chained-pin-first",
+            "chained-on-one-line",
+        ],
     )
     def test_the_entry_around_a_listed_pin_is_the_whole_entry_or_command(
         self, text, entry

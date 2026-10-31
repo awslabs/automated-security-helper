@@ -214,16 +214,28 @@ def _indent(line: str) -> int:
     return len(line) - len(line.lstrip(" \t"))
 
 
-def _entry_around(lines: List[str], index: int) -> str:
-    """The YAML list entry or the shell command that holds lines[index].
+# What ends one shell command and starts another inside a line, or inside a run of
+# `\`-continued lines: the separators _SAME_COMMAND stops at, and the backtick that
+# opens or closes a code span. _entry_around cuts at the nearest one on each side of
+# the pin.
+_COMMAND_BREAKS = ";&|`"
 
-    A command continued with a trailing backslash is whole. A line of a YAML list entry
-    is read up to the `- ` line that starts the entry and down through the lines
-    indented deeper than it, so a pre-commit `rev:` comes with the `repo:` line above
-    it, and a `- rev:` with the `repo:` below it. A list item nested deeper than the
-    `rev:` (the `- id:` lines under a `hooks:` key) belongs to a sibling key and is
-    walked past, so the `repo:` line above it is still found. Prose and other text stay
-    one line.
+
+def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
+    """The YAML list entry or the shell command that holds the pin on lines[index].
+
+    begin and finish are where the pin starts and ends in that line. A command
+    continued with a trailing backslash is whole. A line of a YAML list entry is read
+    up to the `- ` line that starts the entry and down through the lines indented
+    deeper than it, so a pre-commit `rev:` comes with the `repo:` line above it, and a
+    `- rev:` with the `repo:` below it. A list item nested deeper than the `rev:` (the
+    `- id:` lines under a `hooks:` key) belongs to a sibling key and is walked past, so
+    the `repo:` line above it is still found. Prose and other text stay one line.
+
+    Whatever the entry is, it is cut at the nearest `;`, `&`, `|` or backtick on each
+    side of the pin (see _COMMAND_BREAKS): `git clone <another project> && \\` and the
+    clone on the next line are two commands, and a project named in the first must not
+    excuse the pin of the second.
     """
     start = index
     while start > 0 and lines[start - 1].rstrip().endswith("\\"):
@@ -252,7 +264,12 @@ def _entry_around(lines: List[str], index: int) -> str:
             and _indent(lines[end + 1]) > entry_indent
         ):
             end += 1
-    return "\n".join(lines[start : end + 1])
+    entry = "\n".join(lines[start : end + 1])
+    where = sum(len(line) + 1 for line in lines[start:index])
+    before = max(entry.rfind(mark, 0, where + begin) for mark in _COMMAND_BREAKS)
+    after = [entry.find(mark, where + finish) for mark in _COMMAND_BREAKS]
+    until = min((found for found in after if found >= 0), default=len(entry))
+    return entry[before + 1 : until]
 
 
 class FileResult(enum.Enum):
@@ -420,12 +437,18 @@ class VersionTemplateManager:
                 if match.start("version") in recognized:
                     continue
                 index = text.count("\n", 0, match.start())
+                line_start = text.rfind("\n", 0, match.start()) + 1
                 found.append(
                     UnrecognizedPin(
                         name,
                         match.group("version"),
                         lines[index].strip(),
-                        _entry_around(lines, index),
+                        _entry_around(
+                            lines,
+                            index,
+                            match.start() - line_start,
+                            match.end() - line_start,
+                        ),
                     )
                 )
         return found
