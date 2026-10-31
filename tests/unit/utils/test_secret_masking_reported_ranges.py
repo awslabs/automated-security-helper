@@ -320,6 +320,48 @@ class TestAKeyBlocksRangeOnLaterMaskings:
 
         assert model.model_dump_json() == before
 
+    def test_a_producers_end_line_past_the_end_line_survives_a_reload(self):
+        """The scanner reports the key as lines 11-20 and an END line shows on
+        line 14. The record kept on the finding says 14, and the larger of that
+        and the scanner's own end wins after a reload too: lines 15 to 20 stay
+        masked."""
+        key = _key_finding()
+        key["locations"][0]["physicalLocation"]["region"]["endLine"] = 20
+        model = _results(
+            key,
+            _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES + [AFTER_PEM]),
+            _neighbor("keys.py", 40, 40, [FAR_LINE]),
+        )
+        mask_secrets_in_results(model)
+        loaded = AshAggregatedResults.model_validate_json(model.model_dump_json())
+
+        mask_secrets_in_results(loaded)
+        later = [f"l{number} = {number}\n" for number in range(15, 23)]
+        shown = source_snippet_masker(loaded)(
+            "keys.py", 10, "".join([BEFORE_PEM] + PEM_LINES + later)
+        )
+
+        assert shown == BEFORE_PEM + (MASKED_LINE + "\n") * 10 + "".join(later[6:])
+        recorded = loaded.sarif.runs[0].results[0].properties.model_dump()
+        assert recorded["masked_block_end"] == [14]
+
+    def test_a_record_earlier_than_a_visible_end_line_does_not_cut_the_range(self):
+        """A stale or foreign ``masked_block_end`` of 12 on the finding, while a
+        snippet shows the END line on 14: the END line that can be read wins, and
+        the finding then records it."""
+        key = _key_finding()
+        key["properties"]["masked_block_end"] = [12]
+        model = _results(
+            key,
+            _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES + [AFTER_PEM]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
+        recorded = model.sarif.runs[0].results[0].properties.model_dump()
+        assert recorded["masked_block_end"] == [14]
+
 
 class TestTheEndLineOfAnotherFileOfTheSameName:
     def test_an_earlier_end_line_in_another_file_does_not_cut_the_range(self):
