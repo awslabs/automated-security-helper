@@ -8540,6 +8540,35 @@
   config a scan of the current directory would use, instead of always
   `.ash/.ash.yaml`.
 
+- **Container and nix mode refuse a discovered config file they cannot read, before
+  the previous run's output is cleared.** With no `--config`, a config file that
+  discovery selects but this user cannot open (a `.ash.yaml` with no read
+  permission, say) now ends the run with exit code 3 and `could not read <file>:
+  <error>`, the words a local scan uses for the same file. The run used to clear the
+  previous output and start the shell first, and the scan inside refused the file
+  only then. An error that names some other file keeps the old path.
+
+- **On Windows under the MCP server, a config path is read for a share one
+  component at a time.** A link anywhere on the way to a config source, not only at
+  its last name, is read before anything under it is looked up, so a link that leads
+  to a network share or a device path is refused without a connection being made. A
+  relative link target is walked name by name from the directory the link is in. The
+  directory searched for a config is judged first, whether or not a config name is
+  there: one that leads to a share, or through a link ASH cannot read, is refused
+  with the directory named as given, and one with a component that cannot be examined
+  is refused as unreadable ("Make the directory readable") and not as a refusal of
+  what the caller may read. A cloud placeholder or deduplicated entry on the way to a
+  config source inside the scanned tree is read as a link here, and refused.
+
+- **A config source the MCP server admitted is read as the file that was checked.**
+  The file is opened by the path the check judged and not by the name it was found
+  under, so a link re-pointed between the check and the open cannot make the read
+  reach a file outside what the caller may read. A name that leads somewhere else by
+  the time it is read is refused as changed after it was checked, and a difference in
+  letter case alone, which a case-insensitive file system can report for the same
+  file, is not such a change. A root config replaced while a refused environment
+  reference is being reported is refused the same way.
+
 ### Removed
 
 - **`ScannerValidationManager.retry_scanner_registration()`.** It re-registered
