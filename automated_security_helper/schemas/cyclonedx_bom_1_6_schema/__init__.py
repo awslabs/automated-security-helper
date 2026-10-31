@@ -42,8 +42,10 @@ def _spdx_id_text(value: object) -> object:
 LicenseId = Annotated[Union[spdx.Schema, str], AfterValidator(_spdx_id_text)]
 
 # Not from the codegen: the two members of a 0 - 1 number field
-# (ComponentIdentityEvidence.confidence, Conformance.score), each with the
-# schema's bounds, so a BOM's integer stays an integer and its fraction a float.
+# (ComponentIdentityEvidence.confidence, Conformance.score, Method.confidence,
+# Confidence.score), each with the schema's bounds, so a BOM's integer stays an
+# integer and its fraction a float. Every 0 - 1 field of the module uses them;
+# typed float alone, a BOM's integer 1 was re-emitted as 1.0.
 ZeroToOneInt = Annotated[int, Field(ge=0, le=1)]
 ZeroToOneFloat = Annotated[float, Field(ge=0.0, le=1.0)]
 
@@ -98,12 +100,10 @@ class Confidence(BaseModel):
         extra="forbid",
     )
 
-    score: Optional[float] = Field(
+    score: Optional[Union[ZeroToOneInt, ZeroToOneFloat]] = Field(
         None,
         description="The confidence of the claim between and inclusive of 0 and 1, where 1 is 100% confidence.",
         title="Score",
-        ge=0.0,
-        le=1.0,
     )
     rationale: Optional[str] = Field(
         None, description="The rationale for the confidence score.", title="Rationale"
@@ -1403,12 +1403,10 @@ class Method(BaseModel):
         description="The technique used in this method of analysis.",
         title="Technique",
     )
-    confidence: float = Field(
+    confidence: Union[ZeroToOneInt, ZeroToOneFloat] = Field(
         ...,
         description="The confidence of the evidence from 0 - 1, where 1 is 100% confidence. Confidence is specific to the technique used. Each technique of analysis can have independent confidence.",
         title="Confidence",
-        ge=0.0,
-        le=1.0,
     )
     value: Optional[str] = Field(
         None, description="The value or contents of the evidence.", title="Value"
