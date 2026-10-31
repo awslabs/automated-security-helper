@@ -41,8 +41,10 @@ class _OutputDirectoryInUse(Exception):
     """The output directory must not be removed now; the message says why."""
 
 
-def _output_dir_within(output_dir: Path, canonical_output_directory: Path) -> bool:
-    """Whether ``output_dir`` still resolves to the output tree the scan registered.
+def _resolved_output_dir(
+    output_dir: Path, canonical_output_directory: Path
+) -> Optional[Path]:
+    """``output_dir`` resolved, when it still resolves into the registered output tree.
 
     The output directory is stored as a string at registration and removed by
     that path later; the registry fixed its resolved form at registration as
@@ -58,6 +60,12 @@ def _output_dir_within(output_dir: Path, canonical_output_directory: Path) -> bo
     A link that stays inside the tree is admitted: the delete then removes a
     directory the scan owned.
 
+    The caller deletes the path this returns, never the stored spelling: the
+    kernel resolves a path again when the delete opens it, so a link on the
+    stored spelling retargeted between this check and the delete would land
+    the recursive delete in the new target. The resolved path holds no link
+    when it is read.
+
     The comparison is against the OUTPUT tree, not the scanned directory. A
     single MCP scan writes under its source (``<source>/.ash/ash_output``), but
     a workspace scan registers each project with
@@ -66,18 +74,19 @@ def _output_dir_within(output_dir: Path, canonical_output_directory: Path) -> bo
     directory, every workspace entry's cleanup refused the removal and blamed
     a symbolic link that was not there.
 
-    False when the path cannot be resolved at all (a link loop, a NUL byte):
-    nothing is removed through a path that cannot be read.
+    None when the path cannot be resolved at all (a link loop, a NUL byte), or
+    resolves outside the registered tree: nothing is removed through a path
+    that cannot be read.
     """
     try:
         resolved = output_dir.resolve()
     except (OSError, RuntimeError, ValueError):
-        return False
+        return None
     try:
         resolved.relative_to(canonical_output_directory)
     except ValueError:
-        return False
-    return True
+        return None
+    return resolved
 
 
 def _remove_output_tree(output_dir: Path) -> bool:
@@ -512,18 +521,28 @@ async def cleanup_scan_resources(
                     # workspace's output_dir, not under the project's own
                     # directory. Nothing serializes this check with the delete
                     # but their order on this thread.
-                    if not _output_dir_within(
+                    resolved = _resolved_output_dir(
                         output_dir, entry.canonical_output_directory
-                    ):
+                    )
+                    if resolved is None:
                         raise _OutputDirectoryInUse(
                             "the output path now resolves outside the output "
                             "directory the scan registered (a component of it "
                             "became a symbolic link)"
                         )
+                    # A link as the last component is left in place, with
+                    # what it points to: rmtree refuses a link, so the delete
+                    # would fail on every retry and keep the entry for good.
+                    if output_dir.is_symlink():
+                        raise _OutputDirectoryInUse(
+                            "the output directory is itself a symbolic link, "
+                            "which is left in place with what it points to"
+                        )
                     # The stats and the recursive delete, on the worker thread
-                    # this remover runs on; True when the tree is absent
-                    # afterwards, an already-absent one included.
-                    return _remove_output_tree(output_dir)
+                    # this remover runs on, of the path that was just checked
+                    # and not of the stored spelling; True when the tree is
+                    # absent afterwards, an already-absent one included.
+                    return _remove_output_tree(resolved)
 
                 # Every scan of one source directory writes the same output
                 # tree under it, so this scan's output directory is also every

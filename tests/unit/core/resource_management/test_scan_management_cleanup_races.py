@@ -425,6 +425,83 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         assert "outside the output directory" in result["output_dir_error"]
         assert (elsewhere / "proj-key" / "keep.txt").exists()
 
+    def test_the_delete_lands_on_the_resolved_path_not_the_stored_spelling(
+        self, registry, tmp_path
+    ):
+        """The check resolved the stored path and the delete was handed the
+        stored string, which the kernel resolves again when it opens it: a link
+        on the stored spelling retargeted between the two moved the recursive
+        delete. The path that was checked is the path that is deleted."""
+        if not hasattr(os, "symlink"):
+            pytest.skip("symlinks are not available on this platform")
+        real = tmp_path / "real"
+        (real / ".ash" / "ash_output").mkdir(parents=True)
+        link = tmp_path / "link"
+        try:
+            link.symlink_to(real)
+        except OSError:
+            pytest.skip("this platform refuses to create a symlink here")
+        entry = ScanRegistryEntry(
+            scan_id="scan-1",
+            directory_path=str(link),
+            output_directory=str(link / ".ash" / "ash_output"),
+        )
+        entry.status = MCScanStatus.COMPLETED
+        entry.has_runner = False
+        registry.get_scan.return_value = entry
+        removed_paths = []
+
+        def remove_tree(path):
+            removed_paths.append(path)
+            return True
+
+        with _use(registry), patch(f"{_MODULE}._remove_output_tree", remove_tree):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["removed_output"] is True
+        assert removed_paths == [real.resolve() / ".ash" / "ash_output"]
+
+    def test_an_output_directory_that_is_itself_a_link_is_left_and_the_entry_goes(
+        self, registry, tmp_path
+    ):
+        """An output directory that was a link when the scan registered has
+        the link's target as its registered tree, so the path still resolves
+        inside it. rmtree refuses a link, so the removal failed the same way
+        on every retry and the entry stayed for good. It is a deliberate
+        refusal like the other link cases: the link and its target are left
+        in place and the entry is removed."""
+        if not hasattr(os, "symlink"):
+            pytest.skip("symlinks are not available on this platform")
+        source = tmp_path / "src"
+        (source / ".ash").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "keep.txt").write_text("keep", encoding="utf-8")
+        output = source / ".ash" / "ash_output"
+        try:
+            output.symlink_to(elsewhere)
+        except OSError:
+            pytest.skip("this platform refuses to create a symlink here")
+        entry = ScanRegistryEntry(
+            scan_id="scan-1",
+            directory_path=str(source),
+            output_directory=str(output),
+        )
+        entry.status = MCScanStatus.COMPLETED
+        entry.has_runner = False
+        assert entry.canonical_output_directory == elsewhere.resolve()
+        registry.get_scan.return_value = entry
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is True
+        assert result["removed_from_registry"] is True
+        assert result["removed_output"] is False
+        assert "symbolic link" in result["output_dir_error"]
+        assert (elsewhere / "keep.txt").exists()
+        assert output.is_symlink()
+
     def test_a_real_output_tree_is_still_removed(self, registry, tmp_path):
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         output = _output_of(entry)
