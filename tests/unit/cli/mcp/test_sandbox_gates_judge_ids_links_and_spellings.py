@@ -298,6 +298,34 @@ class TestTheServerConfigDirIsRefusedInAnotherCase:
         assert validate_scan_target_in_sandbox(mine, session_id=OWN) is None
 
 
+def _record_what_is_touched(monkeypatch):
+    """Record the path handed to every call that can open a share given its name.
+
+    On Windows each of ``Path.resolve``, ``os.lstat``, ``os.stat`` and
+    ``os.path.realpath`` opens the host a UNC name carries, and the last two
+    follow a link they are given. The gate resolves with ``os.path.realpath``, so
+    a recorder on ``Path.resolve`` alone cannot see it move. The paths are kept
+    per call, as strings, so a test can ask which call saw a path.
+    """
+    touched = {"resolve": [], "lstat": [], "stat": [], "realpath": []}
+    real_resolve = Path.resolve
+
+    def recording_resolve(self, strict=False):
+        touched["resolve"].append(str(self))
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", recording_resolve)
+    for module, name in ((os, "lstat"), (os, "stat"), (os.path, "realpath")):
+        real = getattr(module, name)
+
+        def recording(path, *args, _real=real, _name=name, **kwargs):
+            touched[_name].append(os.fspath(path))
+            return _real(path, *args, **kwargs)
+
+        monkeypatch.setattr(module, name, recording)
+    return touched
+
+
 class TestWindowsRefusesBeforeResolving:
     @pytest.fixture(autouse=True)
     def _on_windows(self, monkeypatch):
@@ -345,24 +373,32 @@ class TestWindowsRefusesBeforeResolving:
     def test_a_link_to_a_network_share_is_refused_unresolved(
         self, monkeypatch, tmp_path, spelling
     ):
-        """The link's name is read, never resolved: no resolve sees the server."""
+        """The link's name is read, never resolved: nothing follows the link.
+
+        ``Path.resolve``, ``os.path.realpath`` and ``os.stat`` all follow the link
+        they are given, so none of them may be handed the link's own path before
+        the refusal (``os.lstat`` may: it opens the link's entry, not its
+        target). The regression this pins is the resolve that moves above the
+        pre-resolve check and opens the share it was meant to refuse; a recorder
+        on ``Path.resolve`` alone saw nothing of it once the gate resolved with
+        ``os.path.realpath``, and what it stored was the link's own path, which
+        never holds the server's name.
+        """
         link = tmp_path / "link"
         link.symlink_to(spelling)
-        resolved = []
-        real_resolve = Path.resolve
-
-        def recording_resolve(self, strict=False):
-            resolved.append(str(self))
-            return real_resolve(self, strict=strict)
-
-        monkeypatch.setattr(Path, "resolve", recording_resolve)
+        touched = _record_what_is_touched(monkeypatch)
 
         refusal = validate_scan_target_in_sandbox(link, session_id=OWN)
 
         assert refusal is not None
         assert "is a link that leads to a network share" in str(refusal)
         assert refusal.context["resolved_path"] == str(link)
-        assert all("server" not in p for p in resolved), resolved
+        following = touched["resolve"] + touched["stat"] + touched["realpath"]
+        assert str(link) not in following, touched
+        assert touched["lstat"], "the walk examined nothing"
+        assert all("server" not in p for paths in touched.values() for p in paths), (
+            touched
+        )
 
     def test_a_chain_of_links_ending_at_a_share_is_refused(self, tmp_path):
         """Every hop is read: a local link to a link to a share is the share."""
@@ -549,21 +585,23 @@ class TestWindowsRefusesBeforeResolving:
     def test_a_device_namespace_path_is_refused_without_resolving(
         self, monkeypatch, spelling
     ):
-        """A client-named path in the device namespace never reaches a resolve."""
-        resolved = []
-        real_resolve = Path.resolve
+        """A client-named path in the device namespace reaches no filesystem call.
 
-        def recording_resolve(self, strict=False):
-            resolved.append(str(self))
-            return real_resolve(self, strict=strict)
-
-        monkeypatch.setattr(Path, "resolve", recording_resolve)
+        Judged by its text alone: ``Path.resolve``, ``os.lstat``, ``os.stat`` and
+        ``os.path.realpath`` are all recorded, and none is handed the spelling
+        (a relative name here, so a call on it carries the spelling inside the
+        working directory's path). ``Path.resolve`` alone was recorded before,
+        and the gate resolves with ``os.path.realpath``.
+        """
+        touched = _record_what_is_touched(monkeypatch)
 
         refusal = validate_scan_target_in_sandbox(spelling, session_id=OWN)
 
         assert refusal is not None
         assert "network share or a device path" in str(refusal)
-        assert all("server" not in p and "pipe" not in p for p in resolved), resolved
+        assert not [p for paths in touched.values() for p in paths if spelling in p], (
+            touched
+        )
 
     def test_a_drive_letter_extended_path_is_judged_as_before(self, tmp_path):
         """Control: the extended form of a local path is not refused by spelling.

@@ -47,35 +47,50 @@ class TestTheTargetIsResolvedOnce:
         the test's own call to the count it was checking.
 
         The gate resolves with ``os.path.realpath`` (``Path.resolve`` raised on a
-        looping link on Python 3.12 and older), so that is the call recorded: a
+        looping link on Python 3.12 and older), so that is the call it makes; a
         recorder on ``Path.resolve`` alone counted nothing once the gate moved.
+        Both are recorded, by name: ``Path.resolve`` is called with the target
+        too if a second resolution comes back, and the list reads
+        ``["realpath"]`` only when the gate's one call is the whole of it.
         """
         target = tmp_path / "checkout"
         target.mkdir()
         expected = target.resolve()
         seen = []
         real_realpath = os.path.realpath
+        real_resolve = Path.resolve
 
         def recording_realpath(path, *args, **kwargs):
             if os.fspath(path) == str(target):
-                seen.append(os.fspath(path))
+                seen.append("realpath")
             return real_realpath(path, *args, **kwargs)
 
+        def recording_resolve(self, strict=False):
+            if str(self) == str(target):
+                seen.append("resolve")
+            return real_resolve(self, strict=strict)
+
         monkeypatch.setattr(os.path, "realpath", recording_realpath)
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
 
         resolution = resolve_scan_target(target)
 
         assert resolution.error is None
         assert resolution.resolved == expected
-        assert len(seen) == 1, seen
+        assert seen == ["realpath"], seen
 
     def test_the_resolved_path_is_the_one_the_sandbox_judged(
         self, monkeypatch, tmp_path
     ):
         """The sandbox's resolution is returned, not a resolution made here.
 
-        The link is re-pointed by the first resolution, so a second one would
-        land elsewhere; the path returned is where the gate looked.
+        The link is re-pointed right after the gate's resolution, so a second
+        one would land elsewhere; the path returned is where the gate looked.
+        The hook is on ``os.path.realpath``, the call the gate makes (a hook on
+        ``Path.resolve`` never ran once the gate moved, and the equality below
+        held whatever the code did); the test asserts that the hook ran and that
+        the link leads elsewhere afterwards, so it cannot pass without the
+        re-pointing it exists to survive.
         """
         first = tmp_path / "first"
         second = tmp_path / "second"
@@ -83,21 +98,27 @@ class TestTheTargetIsResolvedOnce:
         second.mkdir()
         link = tmp_path / "link"
         link.symlink_to(first)
-        real_resolve = Path.resolve
+        first_resolved = first.resolve()
+        second_resolved = second.resolve()
+        real_realpath = os.path.realpath
+        repointed = []
 
-        def repointing_resolve(self, strict=False):
-            result = real_resolve(self, strict=strict)
-            if self == link and result == first.resolve():
+        def repointing_realpath(path, *args, **kwargs):
+            result = real_realpath(path, *args, **kwargs)
+            if os.fspath(path) == str(link) and not repointed:
+                repointed.append(result)
                 link.unlink()
                 link.symlink_to(second)
             return result
 
-        monkeypatch.setattr(Path, "resolve", repointing_resolve)
+        monkeypatch.setattr(os.path, "realpath", repointing_realpath)
 
         resolution = resolve_scan_target(link)
 
         assert resolution.error is None
-        assert resolution.resolved == first.resolve()
+        assert repointed == [str(first_resolved)], "the gate never resolved the link"
+        assert Path(real_realpath(link)) == second_resolved
+        assert resolution.resolved == first_resolved
 
     def test_a_refusal_is_still_a_refusal(self, tmp_path):
         """Control: a refused target returns the error and no path."""
