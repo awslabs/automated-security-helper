@@ -122,14 +122,25 @@ def pytest_collection_modifyitems(config, items):
     ``pytest_collection_modifyitems`` receives *every* item in the session, not
     only the ones under the conftest that defines the hook. The name-based rules
     below were unscoped, so any test anywhere in the repository whose name
-    contained "workflow", "lifecycle" or "end_to_end" was marked slow -- and
-    ``tests/conftest.py`` then skips slow tests unless ``--run-slow`` is passed.
-    Any unit test whose name matched was therefore silently not running in a
-    full-suite run, including CI gates whose whole job is to fail when a workflow
-    drifts from its documented budget. Every affected test passes when executed
-    directly, which is how they were verified when written, so nothing was
-    hiding a real failure; they were simply providing no coverage while appearing
-    to.
+    contained "workflow", "lifecycle" or "end_to_end" was marked slow.
+
+    What that mark does depends on hook order. The hook in ``tests/conftest.py``
+    that skips slow tests unless ``--run-slow`` is passed is registered with
+    ``tryfirst=True``, and this hook has no ordering marker, so the skip pass
+    has already finished by the time this hook adds any mark. Today the mark
+    therefore does not decide whether a test runs; it shows up in ``-m``
+    expressions, in marker reports and in the slow count, and an unscoped rule
+    mislabels tests in all three.
+
+    That was not always the order. When the unscoped rule was found, the root
+    hook had no ordering marker, this hook ran first, and a slow mark did skip
+    the test: any unit test whose name matched was silently not running in a
+    full-suite run, including CI gates whose whole job is to fail when a
+    workflow drifts from its documented budget. Every affected test passed when
+    executed directly, which is how they were verified when written, so nothing
+    was hiding a real failure; they were simply providing no coverage while
+    appearing to. The scoping stays right for the labels, and the account stays
+    because the way it was found still applies.
 
     The failure mode is worth naming because it is invisible from either end. The
     test file gives no hint it will be skipped, and the conftest that skips it
@@ -152,14 +163,18 @@ def pytest_collection_modifyitems(config, items):
 
     A NOTE FOR ANYONE ADDING A TEST TO THIS DIRECTORY
     -------------------------------------------------
-    The slow rule below is a second gate, not a label. A test whose *function
-    name* contains "workflow", "lifecycle" or "end_to_end" needs both
-    ``--run-integration`` and ``--run-slow`` to execute, and running with only
-    the first produces a green result that silently skipped it. The MCP protocol,
-    scan and stdio modules therefore avoid those three words in their function
-    names on purpose, and test_marker_gating.py asserts that they still do. Name
-    a test for the property it checks rather than for the shape of the flow, and
-    it stays reachable with one flag.
+    The slow rule below is a label applied by name, not by measurement. A test
+    whose *function name* contains "workflow", "lifecycle" or "end_to_end" gets
+    the slow mark, which selects it into ``-m slow`` and out of ``-m "not
+    slow"``. It still executes under ``--run-integration`` alone, because the
+    root skip pass runs before this hook adds the mark (see above); if that
+    ordering is ever lost, the mark would also need ``--run-slow`` to execute
+    and a run with only the first flag would report green without running it.
+    The MCP protocol, scan and stdio modules avoid those three words in their
+    function names on purpose, and test_marker_gating.py asserts that they still
+    do, with one named exemption, so almost no test here depends on that
+    ordering. Name a test for the property it checks rather than for the shape
+    of the flow, and its label stays honest.
     """
     # This directory, not tests/integration: pytest loads this conftest only when it
     # collects tests/integration/cli, so a wider root would mark a test in a sibling
