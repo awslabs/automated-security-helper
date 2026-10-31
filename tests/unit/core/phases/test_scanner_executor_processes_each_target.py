@@ -179,15 +179,18 @@ def _run(
     return seen, executor
 
 
-def _run_with_substituted_runner(plugin_context, tmp_path, parallel: bool):
+def _run_with_substituted_runner(
+    plugin_context, tmp_path, parallel: bool, raise_on_every_item: bool = False
+):
     """Run one scanner whose ``_execute_scanner`` is replaced by a fake that hands
     the processor a plain string instead of a results row; the processor raises on
-    it. Returns the containers the processor saw and the executor."""
+    it. With ``raise_on_every_item`` it raises on the fresh failure row the handler
+    builds as well. Returns the containers the processor saw and the executor."""
     seen: list = []
 
     def process(container, aggregated):
         seen.append(container)
-        if not isinstance(container, ScanResultsContainer):
+        if raise_on_every_item or not isinstance(container, ScanResultsContainer):
             raise ValueError("not a results row")
         return aggregated
 
@@ -453,15 +456,32 @@ class TestARefiledRowReachesTheReport:
         assert heads, fresh.errors
         assert fresh.errors.index(recorded) < max(heads), fresh.errors
 
-    def test_control_a_fresh_failure_row_gets_no_second_offer(
+    def test_control_a_fresh_failure_row_is_offered_once(
         self, plugin_context, tmp_path
     ):
         """A row the handler built fresh (a substituted runner handed the processor
-        no row) carries nothing of the scan's, so a raise on it is logged once."""
+        no row) is offered once, and the processor accepts it."""
         seen, _ = _run_with_substituted_runner(plugin_context, tmp_path, False)
 
         fresh_rows = [c for c in seen if isinstance(c, ScanResultsContainer)]
         assert len(fresh_rows) == 1, seen
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_a_fresh_failure_row_that_raises_gets_no_second_offer(
+        self, plugin_context, tmp_path, parallel
+    ):
+        """A row the handler built fresh carries nothing of the scan's, so a raise
+        on it is logged once and the row is not offered again: with the processor
+        raising on every item, exactly one container is offered after the string.
+        The accepting control above cannot tell a handler that retries the fresh
+        row from one that does not."""
+        seen, _ = _run_with_substituted_runner(
+            plugin_context, tmp_path, parallel, raise_on_every_item=True
+        )
+
+        fresh_rows = [c for c in seen if isinstance(c, ScanResultsContainer)]
+        assert len(fresh_rows) == 1, seen
+        assert seen[0] == "not-a-results-row"
 
 
 def test_every_target_merged_completes_the_scanner(plugin_context, tmp_path):
