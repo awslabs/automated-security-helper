@@ -26,10 +26,6 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporte
     _FINDING_UID_NAMESPACE,
     OcsfReporter,
 )
-from automated_security_helper.plugin_modules.ash_builtin.reporters.shared_finding_ids import (
-    flat_describes_result,
-    shared_ids_by_position,
-)
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Level,
@@ -39,6 +35,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Region,
     Result,
+)
+from automated_security_helper.utils.shared_finding_ids import (
+    flat_describes_result,
+    shared_ids_by_position,
 )
 
 pytestmark = pytest.mark.unit
