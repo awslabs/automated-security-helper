@@ -1784,9 +1784,10 @@ def get_scan_progress_info(
                 # Not a results document yet; see create_scan_progress_from_files.
                 return {**_partial_progress_info(output_dir), "results_pending": True}
 
-            # Every container is read as absent when it is null or the wrong
-            # type: validate_result_structure accepts a null scanner_results or
-            # metadata beside a SARIF, and a run whose results is null.
+            # Every container is read as absent when it is null or of the
+            # wrong type, because validate_result_structure accepts a null
+            # scanner_results or metadata beside a SARIF, and a run whose
+            # results is null.
             findings = [
                 result for _, result in _sarif_run_results(results.get("sarif"))
             ]
