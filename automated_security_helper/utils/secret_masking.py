@@ -2547,7 +2547,29 @@ def _mask_additional_reports(additional: Dict[str, Any], index: _SecretIndex) ->
     like.
     """
     if index.values or index.shapes:
-        _mask_tree(additional, index, set())
+        # The whole mapping, with each entry's placing fields kept by name
+        # (_ENTRY_IDENTIFIERS), as the local pass below keeps them: one pass over
+        # the mapping as a plain tree rewrote an entry's file_path and rule_id
+        # before the entry pass read them, and the entry lost its place.
+        for scanner_name in list(additional):
+            entries = additional[scanner_name]
+            parent = scanner_name if isinstance(scanner_name, str) else None
+            if isinstance(entries, list):
+                for position, entry in enumerate(entries):
+                    if isinstance(entry, dict):
+                        _mask_tree(
+                            entry, index, set(), parent, skipped_keys=_ENTRY_IDENTIFIERS
+                        )
+                    else:
+                        masked = _mask_tree(entry, index, set(), parent)
+                        if _changed(entry, masked):
+                            entries[position] = masked
+            else:
+                masked = _mask_tree(entries, index, set(), parent)
+                if _changed(entries, masked):
+                    additional[scanner_name] = masked
+            if isinstance(scanner_name, str):
+                _rename_masked_key(additional, scanner_name, index)
     for scanner_name, entries in additional.items():
         if not isinstance(entries, list):
             continue
