@@ -2810,9 +2810,17 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
 _MARKDOWN_CHARACTER = re.compile(r"([\\`*_\[\]{}#|~])")
 
 #: In a JSON or YAML string the character before a value can be the letter of
-#: an escape (``\n``, ``\t``, ``\r``, ``\b``, ``\f``, ``\uXXXX``); a token
-#: boundary that read it as part of a word kept the value.
-_AFTER_AN_ESCAPE = r"(?<=\\[ntrbf])|(?<=\\u[0-9a-fA-F]{4})"
+#: an escape: JSON's ``\n``, ``\t``, ``\r``, ``\b``, ``\f`` and ``\uXXXX``, and
+#: YAML's ``\xHH``, ``\UHHHHHHHH`` and the single letters ``\0 \a \e \v \N \L
+#: \P \_`` (``\_`` is how the YAML report writes a non-breaking space); a token
+#: boundary that read it as part of a word kept the value. Each alternative has
+#: a fixed width, as Python's lookbehind needs.
+_AFTER_AN_ESCAPE = (
+    r"(?<=\\[ntrbf0aevNLP_])"
+    r"|(?<=\\u[0-9a-fA-F]{4})"
+    r"|(?<=\\x[0-9a-fA-F]{2})"
+    r"|(?<=\\U[0-9a-fA-F]{8})"
+)
 
 
 def _text_token_pattern(form: str) -> str:
