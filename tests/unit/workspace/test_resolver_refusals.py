@@ -176,6 +176,12 @@ class TestEntriesAreComparedAsDirectoriesNotAsText:
         _project(tmp_path, "api")
         _project(tmp_path, "docs")
         workspace = _workspace(tmp_path, ["api", "docs"])
+        # The control that the stub is in force: ``resolver.os`` is the ``os``
+        # module, so the patch is process-wide, and under it two directories that
+        # are not the same one read as the same one to ``samefile``. Without it a
+        # resolver that read identity some way the patch does not reach would
+        # pass this test whatever it did with an inode of 0.
+        assert os.path.samefile(tmp_path / "api", tmp_path / "docs")
 
         plan = resolve_workspace(workspace)
 
@@ -202,8 +208,10 @@ class TestEntriesAreComparedAsDirectoriesNotAsText:
         resolve_workspace(workspace)
 
         # 8 entries plus their 8 ``teamN`` parents: 16 reads; a pairwise samefile
-        # walk to ``/`` made several hundred.
-        assert len(misses) <= 3 * len(entries), misses
+        # walk to ``/`` made several hundred. The lower bound is the wrapper's
+        # control: with ``_directory_identity`` renamed or inlined no read reaches
+        # it, ``misses`` stays empty, and the upper bound alone would pass.
+        assert len(entries) <= len(misses) <= 3 * len(entries), misses
 
 
 class TestKeysThatDifferOnlyByCaseAreRefused:
