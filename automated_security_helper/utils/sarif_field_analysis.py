@@ -122,16 +122,36 @@ def _flatten_object(
                 result[new_prefix] = True
 
 
-def get_scanner_name_from_path(file_path: str) -> str:
+def get_scanner_name_from_path(file_path: str, root: str | None = None) -> str:
     """
     Extract scanner name from file path.
 
+    With *root*, the output directory the file was found under, the scanner is
+    the directory right below ``<root>/scanners``: ASH's layout is
+    ``<output dir>/scanners/<scanner>/...``, and a ``scanners`` directory deeper
+    (a scanner that mirrors a scanned tree) is that scanner's own output and does
+    not rename the file. A file elsewhere below *root* (``reports/ash.sarif``) is
+    named by its stem. This is the rule ``analyze_sarif_fields`` names every
+    file by. Without *root* the path is read as a whole, and the scanner is the
+    directory under its LAST ``scanners`` component.
+
     Args:
         file_path: Path to the SARIF file
+        root: The directory the analysis searched, or None
 
     Returns:
         str: The scanner name
     """
+    if root is not None:
+        try:
+            below_root = Path(file_path).relative_to(root).parts
+        except ValueError:
+            below_root = None
+        if below_root is not None:
+            if len(below_root) > 2 and below_root[0] == "scanners":
+                return below_root[1]
+            return Path(file_path).stem
+
     path_parts = Path(file_path).parts
 
     # The scanner is the directory under the LAST "scanners" component: ASH's
@@ -316,16 +336,12 @@ def analyze_sarif_fields(
         for file_path in sarif_files:
             console.print(f"Analyzing [cyan]{escape_markup(file_path)}[/cyan]")
 
-            # Get scanner name from the file's path below the searched directory.
-            # Below that directory ASH's layout is scanners/<scanner>/..., so the
-            # scanner is the component right after the FIRST "scanners": anything
-            # deeper is the scanner's own output, and a "scanners" directory in
-            # it (a scanner that mirrors a scanned tree) must not rename the file.
-            relative_parts = _relative_parts(file_path)
-            if len(relative_parts) > 1 and relative_parts[0] == "scanners":
-                scanner_name = relative_parts[1]
-            else:
-                scanner_name = get_scanner_name_from_path(os.path.join(*relative_parts))
+            # Get scanner name from the file's path below the searched directory
+            # (get_scanner_name_from_path with the root): the component right
+            # after the FIRST "scanners", since anything deeper is the scanner's
+            # own output and a "scanners" directory in it (a scanner that mirrors
+            # a scanned tree) must not rename the file.
+            scanner_name = get_scanner_name_from_path(file_path, root=str(sarif_dir))
 
             try:
                 # Load the SARIF file. Read under the guard, as every read of a
