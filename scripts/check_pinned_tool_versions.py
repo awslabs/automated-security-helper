@@ -1397,6 +1397,19 @@ _WRAPPER_VALUE_OPTIONS = {
 _COMPOUND_KEYWORDS = frozenset(
     {"do", "then", "else", "elif", "if", "while", "until", "!"}
 )
+# The commands that only read, change or look at a file they are given by name, and so
+# do not run it. A command that is not one of these and names a file the instruction
+# wrote is taken to run it: ``timeout 300 sh x.sh``, ``xargs sh x.sh``, ``setsid x.sh``,
+# a ``case`` arm (``amd64) sh x.sh``).
+_NEVER_RUNS_A_FILE = frozenset(
+    (
+        "chmod chown chgrp cat ls stat test [ [[ rm head tail wc grep echo printf "
+        "touch file readlink realpath basename dirname sha256sum md5sum cmp diff"
+    ).split()
+)
+# The commands that put a file under a second name or path, whose last word is the new
+# one: ``mv x.sh inst``, ``cp x.sh /usr/local/bin/inst``, ``ln -s x.sh inst``.
+_GIVES_A_FILE_ANOTHER_NAME = frozenset({"mv", "cp", "ln", "install"})
 _ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=\S*")
 # A shell redirection among the arguments of the install: "> /dev/null", "2>".
 _REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
@@ -1555,6 +1568,14 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
     ``! sh x.sh jq``). The names are matched without their directory, so a different
     directory is taken for the same file: the body is then read as commands, which is
     the side of caution.
+
+    The decision fails closed on the file's name, not open on the program: a command
+    that names a written file, or is piped a command that does, runs it unless it is one
+    that only reads or changes a file (``_NEVER_RUNS_A_FILE``). So a wrapper this does
+    not list (``timeout 300 sh x.sh``, ``setsid``, ``chroot``), ``xargs sh x.sh``, a
+    ``case`` arm and a function body all run it. A file given another name by ``mv``,
+    ``cp``, ``ln`` or ``install`` (or by ``tee`` down a pipe) is followed under the new
+    name for the rest of the line.
     """
     wanted = {path.rsplit("/", 1)[-1] for path in files} - {""}
     for pipeline in pipelines:
@@ -1568,16 +1589,33 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
             program = _program(words)
             if program in wanted:
                 return True
+            named = _base_names(words)
+            piped = _base_names(fed)
             if program in _SHELLS or program in {".", "source"}:
-                named = (w.strip("()").rsplit("/", 1)[-1] for w in words + fed)
-                if any(name in wanted for name in named):
+                if (named | piped) & wanted:
                     return True
                 # A script given as a string names the file somewhere in it.
                 script = words[words.index("-c") + 1 :] if "-c" in words else []
                 if any(name in word for word in script for name in wanted):
                     return True
+            elif program in _GIVES_A_FILE_ANOTHER_NAME:
+                if _base_names(words[:-1]) & wanted:
+                    wanted |= _base_names(words[-1:])
+            elif program == "tee":
+                if piped & wanted:
+                    # _program read the name the same way, so the word is there.
+                    tails = [w.strip("(){}").rsplit("/", 1)[-1] for w in words]
+                    after_tee = words[tails.index("tee") + 1 :]
+                    wanted |= _base_names(w for w in after_tee if not w.startswith("-"))
+            elif program not in _NEVER_RUNS_A_FILE and (named | piped) & wanted:
+                return True
             fed.extend(words)
     return False
+
+
+def _base_names(words: Iterable[str]) -> set[str]:
+    """The words as file names without their directory, parentheses or quotes."""
+    return {w.strip("()'\"").rsplit("/", 1)[-1] for w in words} - {""}
 
 
 def _program(words: list[str]) -> str:

@@ -288,6 +288,26 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "RUN cat > i.sh <<'EOF' && if :; then :; elif sh i.sh jq; then :; fi",
             "RUN cat > /tmp/i.sh <<'EOF' && ! sh /tmp/i.sh jq",
             "RUN cat > i.sh <<'EOF' && for p in jq; do if :; then . i.sh $p; fi; done",
+            # A wrapper this check does not list runs the shell that runs the file.
+            "RUN cat > /tmp/i.sh <<'EOF' && timeout 300 sh /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && chroot /mnt sh /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && setsid sh /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && stdbuf -oL sh /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && flock /tmp/l sh /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | timeout 5 sh -s jq",
+            # Another command hands the file's name on to a shell.
+            "RUN cat > /tmp/i.sh <<'EOF' && echo jq | xargs sh /tmp/i.sh",
+            "RUN cat > /tmp/i.sh <<'EOF' && find . -name x -exec sh /tmp/i.sh {} \\;",
+            "RUN cat > /tmp/i.sh <<'EOF' && parallel sh /tmp/i.sh ::: jq git",
+            # The run is the arm of a case, which opens with a pattern, no keyword.
+            "RUN cat > /tmp/i.sh <<'EOF' && "
+            'case "$(dpkg --print-architecture)" in amd64) sh /tmp/i.sh jq;; esac',
+            # The file is run under the name another command gave it.
+            "RUN cat > /tmp/i.sh <<'EOF' && mv /tmp/i.sh /bin/inst && inst jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && cp /tmp/i.sh /bin/inst && inst jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && ln -s /tmp/i.sh /bin/inst && inst jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | tee /bin/inst >/dev/null "
+            "&& inst jq",
         ],
     )
     def test_a_positional_parameter_in_a_script_the_run_executes_is_refused(
@@ -316,6 +336,16 @@ class TestAFileTheSameInstructionRunsIsCommands:
             # A loop or a conditional that runs another file, or none, runs none of it.
             "RUN cat > /tmp/i.sh <<'EOF' && for p in jq; do sh /tmp/other.sh $p; done",
             "RUN cat > /tmp/i.sh <<'EOF' && if :; then echo ok; fi",
+            # A wrapper, a case arm or a rename that never reaches the file runs none.
+            "RUN cat > /tmp/i.sh <<'EOF' && timeout 300 sh /tmp/other.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && echo jq | xargs sh /tmp/other.sh",
+            "RUN cat > /tmp/i.sh <<'EOF' && case $a in b) sh /tmp/other.sh;; esac",
+            "RUN cat > /tmp/i.sh <<'EOF' && mv /tmp/i.sh /bin/inst",
+            "RUN cat > /tmp/i.sh <<'EOF' && mv /tmp/other /bin/inst && inst jq",
+            # Commands that only look at the file or change its mode run nothing.
+            "RUN cat > /tmp/i.sh <<'EOF' && ls -l /tmp/i.sh && stat /tmp/i.sh",
+            "RUN cat > /tmp/i.sh <<'EOF' && [ -f /tmp/i.sh ] && test -s /tmp/i.sh",
+            "RUN cat > /tmp/i.sh <<'EOF' && chown root /tmp/i.sh && chmod 755 /tmp/i.sh",
         ],
     )
     def test_a_script_that_is_only_written_stays_a_file_body(
@@ -379,6 +409,21 @@ class TestAFileTheSameInstructionRunsIsCommands:
             ("cat > /x <<'EOF' && ! sh /x jq", [("EOF", False)]),
             ("cat > /x <<'EOF' && { sh /x jq; }", [("EOF", False)]),
             ("cat > /x <<'EOF' && for p in a; do sh /y $p; done", [("EOF", True)]),
+            # A program no list names, a case arm, and a renamed copy still run it.
+            ("cat > /x <<'EOF' && timeout 300 sh /x jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && echo jq | xargs sh /x", [("EOF", False)]),
+            ("cat > /x <<'EOF' && case $a in b) sh /x;; esac", [("EOF", False)]),
+            ("cat > /x <<'EOF' && mv /x /y && y jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && cp /x /y && sh /y jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && cat /x | tee /y >/dev/null && y", [("EOF", False)]),
+            ("cat > /x <<'EOF' && cat /x | timeout 5 sh -s jq", [("EOF", False)]),
+            # The same shapes that never reach the file leave it a kept one.
+            ("cat > /x <<'EOF' && timeout 300 sh /y jq", [("EOF", True)]),
+            ("cat > /x <<'EOF' && case $a in b) sh /y;; esac", [("EOF", True)]),
+            ("cat > /x <<'EOF' && mv /x /y", [("EOF", True)]),
+            ("cat > /x <<'EOF' && mv /z /y && y jq", [("EOF", True)]),
+            ("cat > /x <<'EOF' && ls /x && [ -x /x ] && test -f /x", [("EOF", True)]),
+            ("cat > /x <<'EOF' && cat /x | tee /y >/dev/null", [("EOF", True)]),
             # Each marker is judged by its own file: bash reads B, no file is named, so
             # A's stays a file; and only B's file (/b) is the one sh runs.
             ("cat > /a <<'A'; bash <<'B'", [("A", True), ("B", False)]),
