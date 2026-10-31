@@ -241,7 +241,9 @@ class AshTyperGroup(TyperGroup):
         """Whether *args* names one of this group's commands, read as click reads
         them: the first token that is neither an option nor an option's value."""
         params = list(self.get_params(ctx))
-        owners = {opt: param for param in params for opt in _spellings(param)}
+        owners: dict[str, Any] = {
+            opt: param for param in params for opt in _spellings(param)
+        }
         expecting_value = False
         for token in args:
             if expecting_value:

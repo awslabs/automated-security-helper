@@ -129,7 +129,7 @@ def _stream_codec() -> tuple[str | None, str]:
         "" if sys.flags.ignore_environment else os.environ.get("PYTHONIOENCODING", "")
     )
     encoding, _, errors = requested.partition(":")
-    if not encoding and getattr(sys.flags, "utf8_mode", 0):
+    if not encoding and getattr(sys.flags, "utf8_mode", False):
         encoding = "utf-8"
     return encoding or None, errors or "backslashreplace"
 
@@ -750,7 +750,7 @@ def _ash_traceback(exc_type, exc, tb) -> None:
     # name is bound to this read and nothing else in the module: the locals check
     # (tests/unit/utils/test_debug_locals_on_ci.py) accepts a setting read back
     # from typer's tag only through such a name.
-    tag = getattr(exc, _typer_developer_exception_attr_name, None)
+    tag: Any = getattr(exc, _typer_developer_exception_attr_name, None)
 
     from rich.traceback import Traceback
 

@@ -745,7 +745,9 @@ class SessionBoundary:
                 await self._end(session)
 
 
-def _sweep_keeping_open_streams(ttl_seconds: float, open_streams: FrozenSet[str]):
+def _sweep_keeping_open_streams(
+    ttl_seconds: float, open_streams: FrozenSet[str]
+) -> list[str]:
     """Run the TTL sweep with the open event streams' sessions kept and marked used.
 
     On the worker thread the sweep runs on. Each open stream's workspace is

@@ -218,6 +218,7 @@ from typing import (
     Sized,
     Tuple,
     Type,
+    cast,
 )
 
 import typer
@@ -1597,9 +1598,13 @@ def _merge_timing(
     # The parse (_parse_instant) accepts those two spellings on Python 3.10 too,
     # whose fromisoformat refuses them, so the fallback is not the rule there.
     if starts and all(isinstance(value, str) for value in starts):
-        base.metadata.summary_stats.start = min(starts, key=_instant_key(starts))
+        base.metadata.summary_stats.start = min(
+            starts, key=_instant_key(cast(Sequence[str], starts))
+        )
     if ends and all(isinstance(value, str) for value in ends):
-        base.metadata.summary_stats.end = max(ends, key=_instant_key(ends))
+        base.metadata.summary_stats.end = max(
+            ends, key=_instant_key(cast(Sequence[str], ends))
+        )
     if durations:
         base.metadata.summary_stats.duration = max(durations)
 
@@ -1935,7 +1940,7 @@ def _merge_converter_rows(rows: Sequence[ConverterStatusInfo]) -> ConverterStatu
     """
     base = rows[0]
     update: Dict[str, Any] = {}
-    fields_set: set = set()
+    fields_set: set[str] = set()
     for row in rows:
         fields_set |= row.model_fields_set
 

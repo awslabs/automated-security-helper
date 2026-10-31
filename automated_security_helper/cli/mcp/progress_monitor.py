@@ -10,7 +10,7 @@ import json
 import os
 import stat
 from pathlib import Path
-from typing import Awaitable, Callable, Dict, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from mcp.server.mcpserver import Context
 
@@ -59,7 +59,7 @@ async def _safe_send(
         return False
 
 
-def _in_session(session_id: Optional[str]) -> Dict[str, str]:
+def _in_session(session_id: Optional[str]) -> Dict[str, Any]:
     """The keyword that reads the scan in the session that started it.
 
     The registry shows a scan only to its own session, so the monitor asks as

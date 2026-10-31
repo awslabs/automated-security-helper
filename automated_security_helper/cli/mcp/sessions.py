@@ -58,7 +58,17 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Collection, Dict, Iterator, List, Optional, Set
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    TypeGuard,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
@@ -1107,7 +1117,7 @@ def _is_the_stdio_session(session_id: str) -> bool:
     return session_id == DEFAULT_SESSION_ID
 
 
-def _publishes_scan_presence(session_id: Optional[str]) -> bool:
+def _publishes_scan_presence(session_id: Optional[str]) -> TypeGuard[str]:
     """Whether a scan of ``session_id`` is marked for the other servers sharing the root.
 
     Every session with a workspace is, the stdio session included: every stdio
@@ -1563,7 +1573,7 @@ class StdioServerPresence:
         return live
 
     @staticmethod
-    def a_server_is_live(*, if_none: Optional[Callable[[], None]] = None) -> bool:
+    def a_server_is_live(*, if_none: Optional[Callable[[], object]] = None) -> bool:
         """Whether any stdio server holds a locked entry in the presence registry.
 
         Read under the registry's lock file, as the exit check is, and

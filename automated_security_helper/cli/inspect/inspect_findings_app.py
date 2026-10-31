@@ -1796,9 +1796,10 @@ class FindingsExplorerApp(App):
                 # file was OPENED by holds the name read back from its record form
                 # (_source_path), and shown it drew that name's escape where the
                 # results spell the six characters of the record form.
-                finding[SNIPPET_READ_FROM] = str(
-                    self.scan_root / str(finding.get("file"))
-                )
+                if self.scan_root is not None:
+                    finding[SNIPPET_READ_FROM] = str(
+                        self.scan_root / str(finding.get("file"))
+                    )
         self.push_screen(FindingDetailScreen(finding))
 
     def on_select_changed(self, event) -> None:
