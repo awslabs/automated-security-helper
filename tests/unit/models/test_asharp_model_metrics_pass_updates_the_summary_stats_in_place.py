@@ -127,6 +127,30 @@ def test_only_what_was_set_on_the_source_reaches_the_target():
     assert target.suppressed == 3
 
 
+def test_the_off_host_payload_carries_the_severity_counts_after_the_pass():
+    model = _model(_result("R1"), _result("R2", suppressed=True))
+    held = model.metadata.summary_stats
+    assert "severity_counts" not in held.model_fields_set
+
+    populate_metrics_from_unified_source(model)
+
+    sent = model.to_simple_dict()["metadata"]["summary_stats"]
+    assert sent["severity_counts"]["critical"] == 1
+    assert sent["severity_counts"]["suppressed"] == 1
+    assert model.metadata.summary_stats is held
+
+
+def test_the_counts_object_the_target_holds_is_kept_when_it_is_marked_set():
+    target = SummaryStats()
+    counts = target.severity_counts
+
+    _copy_set_fields(target, SummaryStats(critical=2))
+
+    assert target.severity_counts is counts
+    assert "severity_counts" in target.model_fields_set
+    assert counts.critical == 2
+
+
 def test_an_extra_field_of_the_source_reaches_the_target():
     target = SummaryStats()
 

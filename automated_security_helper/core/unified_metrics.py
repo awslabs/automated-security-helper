@@ -1129,12 +1129,17 @@ def _copy_set_fields(target: Any, source: Any) -> None:
     Only what *source* set is copied, so a key *source* did not set is not added to
     *target*, and the dumps that leave unset fields out (the CloudWatch Logs and S3
     payloads) carry the same keys as before. The severity counts are copied the
-    same way, into the counts object *target* holds.
+    same way, into the counts object *target* holds, and the field that holds them
+    is assigned back on *target* so it counts as set there too: a dump that leaves
+    out unset fields leaves out a parent whose own fields are unset, whatever its
+    child has set.
     """
     for name in source.model_fields_set:
         value = getattr(source, name)
         if isinstance(value, ScannerSeverityCount):
-            _copy_set_fields(getattr(target, name), value)
+            held = getattr(target, name)
+            _copy_set_fields(held, value)
+            setattr(target, name, held)
         else:
             setattr(target, name, value)
     for name, value in (source.model_extra or {}).items():
