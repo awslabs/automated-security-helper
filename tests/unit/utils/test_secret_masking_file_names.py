@@ -125,23 +125,29 @@ class TestAnArtifactNamedByIndex:
 
         assert _snippet(model, 1) == MASKED_LINE + "\n"
 
-    def test_the_location_gains_the_artifacts_uri(self):
+    def test_the_location_is_left_as_written(self):
+        """The artifact's uri is read for the location, not written onto it: the
+        results are read, never changed, beyond the masking itself."""
         model = _results(
             _result("B105", 5, HARDCODED + f"'{VALUE}'", artifact={"index": 0}),
+            _result("B404", 5, "import", snippet=SECRET_LINE),
             artifacts=[{"location": {"uri": "app.py", "uriBaseId": "SRCROOT"}}],
         )
-
-        mask_secrets_in_results(model)
-
         location = (
             model.sarif.runs[0]
             .results[0]
             .locations[0]
             .physicalLocation.root.artifactLocation
         )
-        assert location.uri == "app.py"
-        assert location.uriBaseId == "SRCROOT"
+        before = location.model_dump_json()
+
+        mask_secrets_in_results(model)
+
+        assert location.model_dump_json() == before
+        assert location.uri is None
+        assert location.uriBaseId is None
         assert location.index == 0
+        assert _snippet(model, 1) == MASKED_LINE + "\n"
 
     def test_an_index_past_the_artifacts_is_left_alone(self):
         """Control: nothing is invented for an index the run does not have."""

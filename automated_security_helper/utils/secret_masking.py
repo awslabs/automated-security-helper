@@ -607,20 +607,40 @@ def _physical_locations_of(result: Any, related: bool = False) -> Iterable[Any]:
             yield physical
 
 
+#: id(artifact location) -> (the location, its artifact's uri, its uriBaseId), for
+#: a location that names its file by index into the run's artifacts and carries
+#: no uri of its own (``_resolve_artifact_uris``). ``_uri_of`` reads it in place
+#: of the location's own uri, so the location is left as written. The location
+#: is kept with its entry so its id is not reused while the map holds it; each
+#: ``_resolve_artifact_uris`` rebuilds the map for the report it indexes.
+_RESOLVED_ARTIFACT_URIS: Dict[int, Tuple[Any, str, Any]] = {}
+
+
 def _uri_of(physical: Any) -> Any:
-    return getattr(getattr(physical, "artifactLocation", None), "uri", None)
+    """The uri of a node's ``artifactLocation``: its own, or the one its artifact
+    index resolved to (``_resolve_artifact_uris``)."""
+    location = getattr(physical, "artifactLocation", None)
+    uri = getattr(location, "uri", None)
+    if uri is None and location is not None:
+        resolved = _RESOLVED_ARTIFACT_URIS.get(id(location))
+        if resolved is not None and resolved[0] is location:
+            return resolved[1]
+    return uri
 
 
 def _resolve_artifact_uris(sarif_report: Any) -> None:
-    """Write the URI of every artifact location that names its file by index only.
+    """Record the URI of every artifact location that names its file by index only.
 
     SARIF lets a location name its artifact through ``artifactLocation.index``
     into the run's ``artifacts`` array with no ``uri`` of its own. The maskings
-    below read the URI, so such a location was neither indexed as a secret
-    location nor placed for masking. The URI (and ``uriBaseId``) the artifact
-    carries is written onto the location, which names the same file the log
-    already does.
+    below read the URI (``_uri_of``), so such a location was neither indexed as
+    a secret location nor placed for masking. The URI (and ``uriBaseId``) the
+    artifact carries is recorded for the location in ``_RESOLVED_ARTIFACT_URIS``
+    and read from there, not written onto the location: the results are read,
+    never changed, by the masker that only reads them
+    (``source_snippet_masker``), and a location is left as the scanner wrote it.
     """
+    _RESOLVED_ARTIFACT_URIS.clear()
     for container in list(getattr(sarif_report, "runs", None) or []) + list(
         _external_properties_of(sarif_report)
     ):
@@ -646,9 +666,10 @@ def _resolve_artifact_uris_in(node: Any, artifacts: List[Any], seen: Set[int]) -
                 location = getattr(artifacts[index], "location", None)
                 uri = getattr(location, "uri", None)
                 if isinstance(uri, str) and uri:
-                    node.uri = uri
-                    if getattr(node, "uriBaseId", None) is None:
-                        node.uriBaseId = getattr(location, "uriBaseId", None)
+                    base = getattr(node, "uriBaseId", None)
+                    if base is None:
+                        base = getattr(location, "uriBaseId", None)
+                    _RESOLVED_ARTIFACT_URIS[id(node)] = (node, uri, base)
             return
         for name in fields:
             _resolve_artifact_uris_in(getattr(node, name, None), artifacts, seen)
@@ -667,6 +688,13 @@ def _external_properties_of(sarif_report: Any) -> List[Any]:
     """The ``inlineExternalProperties`` of a SARIF log: results, artifacts and
     tool components a log carries outside its runs."""
     return list(getattr(sarif_report, "inlineExternalProperties", None) or [])
+
+
+def _has_runs(sarif_report: Any) -> bool:
+    """Whether a SARIF log holds anything to index: runs, or external property sets."""
+    return sarif_report is not None and bool(
+        getattr(sarif_report, "runs", None) or _external_properties_of(sarif_report)
+    )
 
 
 def _all_results(sarif_report: Any) -> List[Any]:
@@ -2111,9 +2139,7 @@ def _mask_tree(
         seen.add(id(node))
         fields = type(node).model_fields
         if "artifactLocation" in fields and "contextRegion" in fields:
-            placed = index.lines_for(
-                getattr(getattr(node, "artifactLocation", None), "uri", None)
-            )
+            placed = index.lines_for(_uri_of(node))
             if placed is not None:
                 _mask_region(getattr(node, "region", None), placed)
                 _mask_region(getattr(node, "contextRegion", None), placed)
@@ -2126,18 +2152,14 @@ def _mask_tree(
                     _mask_region(region, placed)
         elif "artifactLocation" in fields and "regions" in fields:
             # An attachment: regions of interest in the file it names.
-            placed = index.lines_for(
-                getattr(getattr(node, "artifactLocation", None), "uri", None)
-            )
+            placed = index.lines_for(_uri_of(node))
             if placed is not None:
                 for region in getattr(node, "regions", None) or []:
                     _mask_region(region, placed)
         elif "artifactLocation" in fields and "replacements" in fields:
             # A fix's change to one file: its deleted regions are placed by
             # their lines; what it inserts at a reported line is masked whole.
-            placed = index.lines_for(
-                getattr(getattr(node, "artifactLocation", None), "uri", None)
-            )
+            placed = index.lines_for(_uri_of(node))
             if placed is not None:
                 whole, lines = placed
                 for replacement in getattr(node, "replacements", None) or []:
@@ -2303,9 +2325,7 @@ def _mask_report(
     ``values`` and ``shapes`` are masked as well as what the report's own secret
     findings expose; every value's shape joins the index's shapes.
     """
-    has_runs = sarif_report is not None and bool(
-        getattr(sarif_report, "runs", None) or _external_properties_of(sarif_report)
-    )
+    has_runs = _has_runs(sarif_report)
     # Indexed before the messages are masked, which removes the values from them.
     index = _index_secrets(sarif_report) if has_runs else _SecretIndex()
     index.add_values(values)
@@ -2542,7 +2562,7 @@ def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], s
     the text's first line, and the text.
     """
     sarif_report = getattr(results, "sarif", None)
-    has_runs = sarif_report is not None and bool(getattr(sarif_report, "runs", None))
+    has_runs = _has_runs(sarif_report)
     index = _index_secrets(sarif_report) if has_runs else _SecretIndex()
     index.add_values(exposed_secret_values(results))
     index.add_shapes(getattr(results, "secret_value_shapes", None) or [])
