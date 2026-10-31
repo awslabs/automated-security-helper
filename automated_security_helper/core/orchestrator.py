@@ -1619,7 +1619,10 @@ class ASHScanOrchestrator(BaseModel):
         # set aside for the caller to settle, as the CLI's own write after its
         # own check left them. With True the caller settles nothing later (that
         # is what True says), so they are put back here: left set aside, a
-        # cancel at the write stranded them in the held directory.
+        # cancel at the write stranded them in the held directory. A write that
+        # fails has already put them back inside _write_results_file, so this
+        # second call finds nothing held and is a no-op (PreviousResults.restore
+        # returns when it holds nothing).
         try:
             self._write_results_file(phases, results)
         except BaseException:
@@ -1648,14 +1651,17 @@ class ASHScanOrchestrator(BaseModel):
         being written takes the file this run wrote with it: a client polling a
         cancelled scan reads that file as finished results. Either way the
         cancel propagates from here, outside execute_scan's arm that puts the
-        previous results back. execute_scan puts them back when it settles (its
-        ``settle_on_success``), and otherwise they stay set aside for the caller
-        to settle, as the CLI's single write (after its own check) left them.
+        previous results back. For a cancel, execute_scan puts them back when it
+        settles (its ``settle_on_success``), and otherwise they stay set aside
+        for the caller to settle, as the CLI's single write (after its own
+        check) left them.
 
         A write that FAILS is a failed scan, as it was when the write sat inside
-        _execute_scan: the previous results are put back here, and the failure
-        is raised as ASHValidationError with the run's environment values
-        redacted and carried, the shape _execute_scan's own arm gives a failure.
+        _execute_scan: this method is the owner of that put-back and does it
+        whatever ``settle_on_success`` says (execute_scan's later call, when it
+        settles, finds nothing held and does nothing). The failure is raised as
+        ASHValidationError with the run's environment values redacted and
+        carried, the shape _execute_scan's own arm gives a failure.
         """
         if not self._writes_results_file(phases or []):
             return
