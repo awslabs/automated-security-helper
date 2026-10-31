@@ -151,9 +151,11 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
     assert seen.get("age") is merged, seen
     assert seen.get("fix") is merged, seen
     # Lint did not look here (the result was built by hand), so no path is
-    # pinned; the keyword is passed all the same, as None.
+    # pinned and the age read is asked with the keyword as None. The report it
+    # finds is then the one the fixer is handed, so the age read, the check on
+    # the report and the fixer all read one file.
     assert seen.get("age_path") is None, seen
-    assert seen.get("fix_path") is None, seen
+    assert seen.get("fix_path") == report, seen
 
 
 def test_lint_records_the_report_it_read(tmp_path):
