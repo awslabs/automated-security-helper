@@ -682,15 +682,21 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
             ),
             pytest.param(
                 {"finding_count": "3", "severity_counts": {"high": 3}},
-                0,
+                3,
                 {"high": 3},
-                id="string-finding_count-is-not-a-count-the-buckets-still-are",
+                id="string-finding_count-is-not-a-count-the-buckets-are-summed",
             ),
             pytest.param(
                 {"finding_count": -1, "severity_counts": {"high": 2}},
-                0,
+                2,
                 {"high": 2},
                 id="negative-finding_count-is-not-a-count",
+            ),
+            pytest.param(
+                {"severity_counts": {"high": 2, "suppressed": 4}},
+                2,
+                {"high": 2, "suppressed": 4},
+                id="no-count-sums-the-buckets-without-the-suppressed-one",
             ),
             pytest.param(
                 {"finding_count": 4, "severity_counts": ["high", "high"]},
@@ -750,8 +756,9 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
     ):
         """What a metadata-only file may carry and what the view makes of it.
         A finding_count that is not a non-negative int is no count, and the
-        total then falls back to the findings array (none here, so 0), never
-        to this view's arithmetic over the buckets; a bucket whose value is not
+        total then is the non-suppressed sum of the recorded buckets (as the
+        aggregated path reads the same scanner), else the findings array
+        (none here, so 0); a bucket whose value is not
         a non-negative int is dropped; a bucket name the model lacks lands in
         ``unknown``; and the recorded finding_count is the total even when the
         buckets do not sum to it (the scanner's record wins), less its own

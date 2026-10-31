@@ -657,9 +657,11 @@ def _progress_counts_of_document(
     differed). The buckets are the ones the scanner recorded
     (``severity_counts``, folded into the named buckets with anything else
     under ``unknown``), else the ones the findings array gives. The count is the
-    recorded ``finding_count`` when the document carries one, else the length of
-    the findings array; the buckets are never summed into a count the scanner
-    did not record (``test_malformed_counts_are_read_defensively``).
+    recorded ``finding_count`` when the document carries one. Without one it is
+    the non-suppressed sum of the recorded buckets, the count the aggregated
+    path gives the same scanner (``_add_aggregated_scanner_progress``), and
+    failing both the length of the findings array
+    (``test_malformed_counts_are_read_defensively``).
 
     The one adjustment: a recorded count beside recorded buckets has the
     ``suppressed`` bucket taken out of it. The per-target file ASH writes counts
@@ -689,7 +691,12 @@ def _progress_counts_of_document(
     else:
         counts = extract_findings_summary(findings)
     if recorded_count is None:
-        count = len(findings)
+        if recorded_counts is not None:
+            count = sum(
+                value for bucket, value in counts.items() if bucket != "suppressed"
+            )
+        else:
+            count = len(findings)
     elif recorded_counts is not None:
         count = max(recorded_count - counts["suppressed"], 0)
         ungraded = count - (sum(counts.values()) - counts["suppressed"])
