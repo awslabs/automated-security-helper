@@ -66,6 +66,26 @@ def _policy_argument(tmp_path: Path, cwd) -> Tuple[str, Path, Path]:
         plan.run_cleanup()
 
 
+def _read_paths(document) -> list:
+    """The paths a policy document grants for reading: ``read_only`` is required
+    and ``read_data`` is optional, so a document may leave the second out."""
+    return document["read_only"] + document.get("read_data", [])
+
+
+def test_a_document_without_read_data_is_accepted_and_read_for_its_paths():
+    """The wrapper treats ``read_data`` as optional (``_parse_policy`` requires
+    only ``read_only``, ``writable`` and ``network``), so a correct document that
+    names no data path must not fail the contract with a KeyError."""
+    text = json.dumps(
+        {"read_only": ["/usr"], "writable": ["/var/out"], "network": False}
+    )
+
+    parsed = landlock_exec._parse_policy(text)
+
+    assert "read_data" not in parsed
+    assert _read_paths(parsed) == ["/usr"]
+
+
 @pytest.mark.parametrize("with_cwd", [False, True])
 def test_the_backends_policy_document_passes_the_wrappers_check(tmp_path, with_cwd):
     """With no working directory (a version probe: the backend names its private
@@ -86,7 +106,7 @@ def test_the_backends_policy_document_passes_the_wrappers_check(tmp_path, with_c
         assert all(Path(p).is_absolute() for p in document.get(key, []))
     # The lists are not empty: the scanned tree is read, the results directory is
     # written, and both are named as the wrapper will resolve them.
-    assert os.path.realpath(source) in document["read_only"] + document["read_data"]
+    assert os.path.realpath(source) in _read_paths(document)
     assert os.path.realpath(results) in document["writable"]
     if with_cwd:
         assert "cwd" not in document
