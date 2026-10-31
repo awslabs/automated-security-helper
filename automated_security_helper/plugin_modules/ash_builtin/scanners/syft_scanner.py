@@ -34,7 +34,10 @@ from automated_security_helper.config.path_trust import (
     resolved_path,
 )
 from automated_security_helper.utils.link_exclusions import syft_excludes
-from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.error_text import (
+    text_without_values,
+    traceback_text,
+)
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -589,9 +592,18 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             self.end_time = datetime.now(timezone.utc)
             # Redacted, as the module's other error paths are: the text can quote
             # a path the configuration read from the environment.
+            values = self._values_to_redact()
             failure = text_without_values(
-                f"{self.__class__.__name__} scan failed: {str(e)}",
-                self._values_to_redact(),
+                f"{self.__class__.__name__} scan failed: {str(e)}", values
+            )
+            # The new error carries no traceback (below), so a bug inside the try
+            # (an AttributeError in ASH's own code, say) would leave only the
+            # one-line message. The stack goes to the debug log, redacted the way
+            # the message is.
+            ASH_LOGGER.debug(
+                f"{self.__class__.__name__} scan failed; the original traceback:\n"
+                + traceback_text(e, values=values),
+                extra=NO_MARKUP,
             )
         # Raised outside the except block, so the original exception, whose text
         # is not redacted, is attached to the new one neither as __context__ nor

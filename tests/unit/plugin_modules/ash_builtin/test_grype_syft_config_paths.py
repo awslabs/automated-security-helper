@@ -34,6 +34,7 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.config.path_trust import reset_path_refusal_warnings
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
     GrypeScanner,
     GrypeScannerConfig,
@@ -292,6 +293,41 @@ def test_syft_refusal_warning_stands_alone_when_an_earlier_scan_logged_the_refus
     assert "scanners.syft.options.config_file" in not_used, not_used
     assert "inside the scanned tree" in not_used, not_used
     assert "warning above" not in not_used, not_used
+
+
+def test_syft_failure_keeps_a_redacted_traceback_in_the_debug_log(
+    context, monkeypatch, caplog
+):
+    """The ScannerError raised for a failed scan carries no traceback, so an
+    AttributeError in ASH's own code reached the log as a one-line message. The
+    stack is logged at DEBUG, with the environment's values removed."""
+    scanner = _syft(context)
+
+    def broken(self, *args, **kwargs):
+        raise AttributeError("a bug in ASH zz-canary-zz")
+
+    monkeypatch.setattr(type(scanner), "_run_subprocess", broken)
+    monkeypatch.setattr(
+        type(scanner), "validate_plugin_dependencies", lambda self: True
+    )
+    monkeypatch.setattr(
+        type(scanner), "_values_to_redact", lambda self: ["zz-canary-zz"]
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="ash"):
+        with pytest.raises(ScannerError) as raised:
+            scanner.scan(target=context.source_dir, target_type="source")
+
+    tracebacks = [
+        record.getMessage()
+        for record in caplog.records
+        if "Traceback (most recent call last)" in record.getMessage()
+    ]
+    assert tracebacks, [record.getMessage() for record in caplog.records]
+    assert "AttributeError" in tracebacks[0], tracebacks[0]
+    assert "zz-canary-zz" not in tracebacks[0], tracebacks[0]
+    assert "zz-canary-zz" not in str(raised.value), str(raised.value)
+    assert raised.value.__cause__ is None and raised.value.__context__ is None
 
 
 # --- grype's declared database bound reads the operator's file as grype does ------
