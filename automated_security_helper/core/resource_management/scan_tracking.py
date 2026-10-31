@@ -466,8 +466,9 @@ class ScanProgress:
         Not every payload field called ``total_scanners`` counts the same
         thing, and the difference is part of what a client reads. This
         property, and the partial progress info built from the files on disk,
-        count the scanners seen so far: every scanner that has written a file,
-        finished or not. The completed progress info and ``get_scan_results``
+        count the scanners seen so far: every scanner with a per-scanner file,
+        or a row in the aggregated results, finished or not. The completed
+        progress info and ``get_scan_results``
         count the scanners that ran to an end, PASSED or FAILED, so a MISSING,
         SKIPPED or ERROR scanner is in the first count and not in the second.
         In ``result_filters``, ``scanner_summary.total_scanners`` counts every
