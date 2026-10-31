@@ -317,6 +317,33 @@ def test_every_spelling_of_a_path_outside_the_tree_hides_nothing(
     )
 
 
+@pytest.mark.parametrize(
+    "sibling",
+    ["vendor_old/x.py", "vendor.py", "vendors/x.py", "avendor/x.py"],
+)
+def test_a_bandit_entry_for_a_directory_hides_none_of_its_namesakes(sibling):
+    """bandit rewrites an ``--exclude`` value that names an existing directory
+    to ``<dir>/*`` and only then tests it as a substring of the walked path. The
+    entries the builder emits are never a bare existing directory (a glob with
+    ``/*``, or the name with one bracketed character), so no rewrite changes
+    what they match: ``vendor`` hides the files under ``vendor/`` and not the
+    ones whose names merely start or end with it."""
+    entry = ClientScannerExclusion(
+        scanner="bandit",
+        option="excluded_paths",
+        kind="bandit",
+        pattern="vendor",
+        reason="r",
+    )
+    assert not entry.hides(relative=sibling, absolute=f"/s/{sibling}", rule_id=None)
+    assert entry.hides(
+        relative="vendor/x.py", absolute="/s/vendor/x.py", rule_id=None
+    )
+    assert entry.hides(
+        relative="pkg/vendor/x.py", absolute="/s/pkg/vendor/x.py", rule_id=None
+    )
+
+
 def test_an_id_only_trivy_entry_still_hides_a_finding_outside_the_scan_root():
     entry = ClientScannerExclusion(
         scanner="trivy-repo",
