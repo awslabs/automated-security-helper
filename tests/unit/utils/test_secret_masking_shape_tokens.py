@@ -42,8 +42,10 @@ def _derived(label, length):
 NAME = "pass" + "word"
 HARDCODED = "Possible hardcoded " + NAME + ": "
 #: Eight characters, first ``p``, last ``d``: the shape of ``password`` and
-#: ``provided``, and a value that propagates (digits, entropy above the floor).
-SHAPED = "p" + _derived("shape-tokens-value", 6) + "d"
+#: ``provided``, and a value that propagates: a literal digit, so it is never
+#: letters alone whatever the derived part reads, and seven distinct characters,
+#: an entropy well above the floor rather than on it.
+SHAPED = "p" + _derived("shape-tokens-values", 5) + "9" + "d"
 #: Another token of that shape that could be a value: the same characters.
 OTHER_SHAPED = "p" + SHAPED[1:7][::-1] + "d"
 NEIGHBOR_MESSAGE = "A default was provided for the call"
@@ -93,6 +95,21 @@ class TestWordsOfAShape:
 
         assert _message(model, 0) == HARDCODED + "'" + _mask_secret_value(SHAPED) + "'"
         assert _message(model, 1) == NEIGHBOR_MESSAGE
+
+    def test_a_token_that_could_be_the_value_is_masked_in_a_neighbor(self):
+        """The shape fires inside ``mask_secrets_in_results``, not only in the
+        tree control below: a token of the shape that could be a value is masked
+        in a neighbor's message and the prose around it keeps its words."""
+        model = _results(
+            _result("B105", 2, HARDCODED + "'" + SHAPED + "'"),
+            _result("B404", 7, NEIGHBOR_MESSAGE + " " + OTHER_SHAPED),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _message(model, 1) == (
+            NEIGHBOR_MESSAGE + " " + _mask_secret_value(OTHER_SHAPED)
+        )
 
     def test_a_word_like_value_masked_on_the_first_pass_masks_no_words_on_the_next(
         self,
