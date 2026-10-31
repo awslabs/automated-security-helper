@@ -23,7 +23,10 @@ while composing, how many nodes its aliases add once each is written out in its
 place (the excess of the written-out document over the composed one), and raises
 :class:`AliasExpansionError`, a composer error too, at the first alias past
 :data:`MAX_EXPANDED_NODES`, so the cost of such a file is its read, never its
-product. A large document with no alias is not refused here. Imports only yaml.
+product. A large document with no alias is not refused for its size in nodes
+until it holds :data:`MAX_COMPOSED_NODES` of them, a bound on the nodes composed
+at all (:class:`DocumentSizeError`) that the loader keeps for a caller with no
+bound on the bytes it reads. Imports only yaml.
 """
 
 from __future__ import annotations
@@ -44,6 +47,16 @@ if TYPE_CHECKING:
 #: chain's expansion budget (config_sources.refuse_past_expansion_bound) counts
 #: the loaded places and does not tell the two apart.
 MAX_EXPANDED_NODES = 100_000
+
+#: The most nodes a document may hold as composed, aliases not counted: every
+#: mapping, sequence and scalar written in it. The alias bound above counts only
+#: what aliases add, so a document with no alias at all is composed without
+#: limit by it, and each node costs two marks and an event in memory, many times
+#: the bytes that wrote it. This is the bound for a read that has no byte cap of
+#: its own. The config chain caps a file at ``ASH_CONFIG_MAX_FILE_BYTES`` (1 MiB),
+#: which holds about half a million nodes at the most (two bytes to a flow
+#: scalar), so a configuration is far under it and a document past it is not one.
+MAX_COMPOSED_NODES = 1_000_000
 
 #: The attribute the expanded node count is kept on, on each composed node.
 _SIZE_ATTR = "_ash_expanded_nodes"
@@ -66,9 +79,18 @@ class AliasExpansionError(ComposerError):
     """
 
 
+class DocumentSizeError(ComposerError):
+    """A document that holds more nodes than the bound, aliases or not.
+
+    The problem mark is the node that took the document past the bound. As for
+    RecursiveAliasError, the class name is what a config refusal shows.
+    """
+
+
 class NoRecursiveAliasLoader(yaml.SafeLoader):
-    """``yaml.SafeLoader``, refusing a recursive alias (RecursiveAliasError) and
-    a document whose aliases expand past the bound (AliasExpansionError) while
+    """``yaml.SafeLoader``, refusing a recursive alias (RecursiveAliasError), a
+    document whose aliases expand past the bound (AliasExpansionError) and one
+    that holds more nodes than MAX_COMPOSED_NODES (DocumentSizeError) while
     composing.
 
     The anchors of the nodes being composed are the open ones; an alias to one
@@ -84,6 +106,7 @@ class NoRecursiveAliasLoader(yaml.SafeLoader):
         # yaml.load_all stream, so a total kept across documents refused a stream
         # whose documents each sit under the bound.
         self.__dict__["_ash_aliased_total"] = 0
+        self.__dict__["_ash_composed_total"] = 0
         return super().compose_document()
 
     def compose_node(self, parent: Any, index: Any) -> Any:
@@ -106,6 +129,7 @@ class NoRecursiveAliasLoader(yaml.SafeLoader):
             node = super().compose_node(parent, index)
             self._charge_expansion(getattr(node, _SIZE_ATTR, 1), event.start_mark)
             return node
+        self._charge_composed(event.start_mark)
         anchor = event.anchor
         if anchor is None:
             return self._sized(super().compose_node(parent, index))
@@ -127,6 +151,23 @@ class NoRecursiveAliasLoader(yaml.SafeLoader):
             )
         setattr(node, _SIZE_ATTR, size)
         return node
+
+    def _charge_composed(self, mark: Any) -> None:
+        """Count one node composed in place against MAX_COMPOSED_NODES.
+
+        The check runs as each node starts, so the composer stops at the first
+        node past the bound and never builds the rest of the document.
+        """
+        total = self.__dict__.get("_ash_composed_total", 0) + 1
+        self.__dict__["_ash_composed_total"] = total
+        if total > MAX_COMPOSED_NODES:
+            raise DocumentSizeError(
+                "while composing the document",
+                None,
+                f"found a node that takes the document past {MAX_COMPOSED_NODES} "
+                "nodes (aliases not counted)",
+                cast("Optional[Mark]", mark),
+            )
 
     def _charge_expansion(self, size: int, mark: Any) -> None:
         """Count *size* nodes, the whole of the node an alias names, against the bound.
