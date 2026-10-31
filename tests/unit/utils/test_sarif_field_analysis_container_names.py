@@ -6,8 +6,13 @@
 An empty container was recorded under its own path (``...locations``) while a
 non-empty one was recorded only through its children
 (``...locations[].physicalLocation...``). A scanner result with an empty
-``locations`` list whose aggregate filled it, or the reverse, was reported as
-missing a field the aggregate had kept, and the run exited 1.
+``locations`` list whose aggregate filled it was reported as missing a field the
+aggregate had kept, and the run exited 1.
+
+The other direction, a scanner result with a filled ``locations`` list whose
+aggregate holds it empty, is a real loss: the aggregate dropped the children, and
+the run reports them missing. A container name standing in for the fields it
+holds would hide that.
 """
 
 from __future__ import annotations
@@ -93,3 +98,41 @@ def test_an_aggregate_that_filled_an_empty_container_kept_the_field(
     # aggregate, which had it filled.
     assert "unexpectedly missing" not in out
     assert exit_code == 0
+
+
+def test_an_aggregate_that_emptied_a_filled_container_lost_its_children(
+    tmp_path, monkeypatch, capsys
+):
+    """The reverse of the test above, which is not a kept field: the scanner
+    holds ``locations`` and what is in it, the aggregate holds ``locations``
+    alone, so the fields inside are gone from it and the run says so."""
+    monkeypatch.setenv("COLUMNS", "200")
+    sarif_dir: Path = tmp_path / "ash_output"
+    (sarif_dir / "reports").mkdir(parents=True)
+    (sarif_dir / "scanners" / "bandit").mkdir(parents=True)
+    (sarif_dir / "scanners" / "bandit" / "bandit.sarif").write_text(
+        json.dumps(
+            {"runs": [{"results": [{"ruleId": "R1", "locations": [LOCATION]}]}]}
+        ),
+        encoding="utf-8",
+    )
+    (sarif_dir / "reports" / "ash.sarif").write_text(
+        json.dumps({"runs": [{"results": [{"ruleId": "R1", "locations": []}]}]}),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "out"
+
+    exit_code = 0
+    try:
+        analyze_sarif_fields(sarif_dir=str(sarif_dir), output_dir=str(output_dir))
+    except typer.Exit as raised:
+        exit_code = raised.exit_code
+
+    out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+    assert exit_code == 1
+    assert "unexpectedly missing" in out
+    fields = json.loads((output_dir / "sarif_fields.json").read_text("utf-8"))
+    child = f"{RESULT}.locations[].physicalLocation.artifactLocation.uri"
+    # The container is in both; what it held is in the scanner only.
+    assert set(fields[f"{RESULT}.locations"]) == {"ash", "bandit"}
+    assert set(fields[child]) == {"bandit"}

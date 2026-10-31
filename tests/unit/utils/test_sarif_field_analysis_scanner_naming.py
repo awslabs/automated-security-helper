@@ -49,7 +49,15 @@ def test_a_path_not_below_the_root_is_read_as_a_whole():
 
 
 def test_without_a_root_the_whole_path_is_read_as_before():
-    """The compatibility rule: the directory under the LAST scanners component."""
+    """The compatibility rule: the directory under the LAST scanners component.
+
+    Kept on purpose, and the misattribution above is its known cost. A path alone
+    cannot say which ``scanners`` component is the output layout's, so a caller
+    that has no searched directory gets the older reading. The helper is
+    re-exported by the inspect CLI module and called without a root by three other
+    test modules; the analysis, the only caller in the product, always passes the
+    root it searched. Making the root required is a change to that public helper
+    and is not made here."""
     mirrored = "out/scanners/bandit/scanners/mirror/r.sarif"
     under_an_ancestor = "/x/scanners/out/scanners/bandit/r.sarif"
 

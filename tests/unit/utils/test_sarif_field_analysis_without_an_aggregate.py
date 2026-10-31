@@ -31,11 +31,15 @@ def _write(path: Path, result: dict) -> None:
     path.write_text(json.dumps({"runs": [{"results": [result]}]}), encoding="utf-8")
 
 
-def _tree(tmp_path: Path, aggregate: dict | None) -> Path:
+def _tree(
+    tmp_path: Path, aggregate: dict | None, scanner_result: dict | None = None
+) -> Path:
     sarif_dir = tmp_path / "ash_output"
     _write(
         sarif_dir / "scanners" / "bandit" / "bandit.sarif",
-        {"ruleId": "R1", "level": "error"},
+        {"ruleId": "R1", "level": "error"}
+        if scanner_result is None
+        else scanner_result,
     )
     if aggregate is not None:
         _write(sarif_dir / "reports" / "ash.sarif", aggregate)
@@ -74,6 +78,38 @@ def test_with_an_aggregate_the_columns_are_counts_as_before(
     out = _run(_tree(tmp_path, aggregate), tmp_path / "out", capsys, monkeypatch)
 
     assert _bandit_row(out)[1:] == ["2", "2", "1", "0", "50.0%"]
+
+
+def test_the_intentional_column_does_not_depend_on_the_aggregate(
+    tmp_path, capsys, monkeypatch
+):
+    """Missing (Intentional) counts the scanner's own fields that aggregation
+    leaves out on purpose (ruleIndex), which is a property of the scanner's
+    report. It is a count with or without an aggregate, where the two columns
+    that compare against one are n/a. The fixtures above hold no such field, so
+    their 0 could not tell the two apart."""
+    scanner = {"ruleId": "R1", "level": "error", "ruleIndex": 0}
+
+    without = _bandit_row(
+        _run(
+            _tree(tmp_path / "a", None, scanner),
+            tmp_path / "out-a",
+            capsys,
+            monkeypatch,
+        )
+    )
+    with_aggregate = _bandit_row(
+        _run(
+            _tree(tmp_path / "b", {"ruleId": "R1"}, scanner),
+            tmp_path / "out-b",
+            capsys,
+            monkeypatch,
+        )
+    )
+
+    # Scanner, Total, Unique, Missing (Unexpected), Missing (Intentional), %.
+    assert without[1:] == ["2", "2", "n/a", "1", "n/a"]
+    assert with_aggregate[1:] == ["2", "2", "1", "1", "50.0%"]
 
 
 def test_the_report_is_told_whether_an_aggregate_was_read(tmp_path, monkeypatch):

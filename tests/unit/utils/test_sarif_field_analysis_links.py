@@ -22,10 +22,12 @@ import typer
 
 from automated_security_helper.utils.sarif_field_analysis import analyze_sarif_fields
 
-pytestmark = [
-    pytest.mark.unit,
-    pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges"),
-]
+pytestmark = pytest.mark.unit
+
+#: Only the tests that make a link: the others run on Windows too.
+needs_symlinks = pytest.mark.skipif(
+    sys.platform == "win32", reason="symlinks need privileges"
+)
 
 
 def _sarif(rule_id: str = "R1") -> str:
@@ -66,6 +68,7 @@ def test_a_tree_with_no_link_is_read_whole(tmp_path, monkeypatch, capsys):
     assert set(fields["runs[].results[].ruleId"]) == {"ash", "bandit"}
 
 
+@needs_symlinks
 def test_a_link_to_an_ancestor_is_not_walked(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("COLUMNS", "200")
     sarif_dir = _tree(tmp_path)
@@ -91,12 +94,18 @@ def test_a_link_to_an_ancestor_is_not_walked(tmp_path, monkeypatch, capsys):
     # directories and more.
     inside = [path for path in walked if str(sarif_dir) in str(path)]
     assert len(inside) <= 8, inside
+    # And the probe saw the walk at all: a walk that does not go through
+    # os.scandir would leave this list empty and pass the bound above. It saw the
+    # directory that holds the link, and never the link.
+    assert str(sarif_dir / "scanners" / "bandit") in inside, inside
+    assert not any("loop" in Path(path).parts for path in inside), inside
     assert out.count("Skipping") == 1
     assert set(fields["runs[].results[].ruleId"]) == {"ash", "bandit"}
     # It is a part of the output tree that was not read, so the run fails.
     assert exit_code == 1
 
 
+@needs_symlinks
 @pytest.mark.parametrize("kind", ["file", "directory"])
 def test_a_linked_file_and_a_linked_directory_end_the_run_alike(
     tmp_path, monkeypatch, capsys, kind
@@ -107,8 +116,13 @@ def test_a_linked_file_and_a_linked_directory_end_the_run_alike(
     (outside / "leaked.sarif").write_text(_sarif("LEAKED"), encoding="utf-8")
     sarif_dir = _tree(tmp_path)
     if kind == "file":
+        # Under a directory of its own: a file read as a scanner "linkedfile"
+        # shows in the fields, where one under bandit/ only repeated what
+        # bandit.sarif already holds and the check below passed either way.
+        (sarif_dir / "scanners" / "linkedfile").mkdir()
         os.symlink(
-            outside / "leaked.sarif", sarif_dir / "scanners" / "bandit" / "x.sarif"
+            outside / "leaked.sarif",
+            sarif_dir / "scanners" / "linkedfile" / "x.sarif",
         )
     else:
         os.symlink(outside, sarif_dir / "scanners" / "linked", target_is_directory=True)
@@ -121,6 +135,7 @@ def test_a_linked_file_and_a_linked_directory_end_the_run_alike(
     assert scanners == {"ash", "bandit"}
 
 
+@needs_symlinks
 def test_a_link_in_the_place_of_a_searched_directory_is_not_followed(
     tmp_path, monkeypatch, capsys
 ):

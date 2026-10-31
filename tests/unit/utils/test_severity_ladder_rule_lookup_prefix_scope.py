@@ -78,13 +78,20 @@ def test_the_own_scanners_exact_id_still_wins():
     assert _graded("CA1001/sub", "Trivy") == "error"
 
 
+def test_the_own_scanners_prefix_matches_a_deeper_id():
+    """Grype holds ``CA1001``, which is a prefix of ``CA1001/sub/deeper``: a hit in
+    the scanner's own scope, not the global fallback."""
+    assert _graded("CA1001/sub/deeper", "Grype") == "note"
+
+
 def test_a_result_with_no_scanner_still_reads_the_longest_id_across_components():
     """The control: with no scope to read, the longest prefix any component holds."""
     assert _graded("CA1001/sub", None) == "error"
     assert _graded("CA1001/other", None) == "note"
 
 
-def test_a_prefix_no_scanner_holds_is_found_globally():
-    assert _graded("CA1001/sub/deeper", "Grype") == "note"
-    # Nothing in Trivy's scope matches: the global fallback reads the shorter id.
+def test_a_prefix_the_scanner_does_not_hold_is_found_globally():
+    # Trivy holds only ``CA1001/sub``, which is not a prefix of ``CA1001/other``:
+    # nothing in its own scope matches, so the global fallback reads the shorter
+    # id Grype holds.
     assert _graded("CA1001/other", "Trivy") == "note"

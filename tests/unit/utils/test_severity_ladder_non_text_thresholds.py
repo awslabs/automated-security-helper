@@ -61,10 +61,14 @@ def test_the_warning_for_a_value_that_is_not_text_names_its_type_only(ash_log, v
     )
 
 
-@pytest.mark.parametrize("value", [0, False, [], 5, True, ["HIGH"]], ids=repr)
+@pytest.mark.parametrize(
+    "value", [0, 0.0, False, [], {}, "", 5, True, ["HIGH"]], ids=repr
+)
 def test_a_scanner_threshold_that_is_not_text_falls_through_to_the_global_one(value):
     """Returned as given, 0, False and [] were falsy and turned the gate off for
-    the scanner; the resolver's promise is that it never returns such a value."""
+    the scanner; the resolver's promise is that it never returns such a value.
+    The empty string is text, and a blank one reads as unset: it falls through to
+    the global threshold too, and is not returned as the falsy ``""``."""
     config = SimpleNamespace(global_settings=SimpleNamespace(severity_threshold="LOW"))
 
     assert resolve_scanner_threshold(value, config) == ("LOW", "global")
@@ -118,7 +122,7 @@ def dropped_log(ash_log, monkeypatch):
     return ash_log
 
 
-@pytest.mark.parametrize("value", [0, False, [], 5, True, ["HIGH"]], ids=repr)
+@pytest.mark.parametrize("value", [0, 0.0, False, [], {}, 5, True, ["HIGH"]], ids=repr)
 def test_dropping_a_scanner_threshold_that_is_not_text_is_logged_once(
     dropped_log, value
 ):
