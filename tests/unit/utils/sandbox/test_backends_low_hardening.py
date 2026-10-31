@@ -1806,3 +1806,40 @@ def test_a_landlock_plan_reads_the_ca_settings_and_never_runs_them(layout, monke
     for left_out in (not_a_file, missing, visible):
         assert _real(left_out).as_posix() not in read_data
     assert not any(path.endswith("relative/corp.pem") for path in read_data)
+
+
+@POSIX
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+def test_a_scanner_that_wrote_the_uv_tool_lock_is_warned_of(
+    layout, monkeypatch, caplog, kind
+):
+    """The lock is the one host file outside the results directory a sandbox may
+    write, and it outlives the spawn. Every plan's cleanup says so when its size or
+    time changed while the scanner ran; a lock left as it was draws no warning (the
+    control), and the warning names the file and the scanner without quoting what
+    was written."""
+    lock = layout.tmp / "tools" / ".lock"
+    lock.parent.mkdir()
+    lock.write_text("")
+    policy = _policy(layout, uv_tool_locks=(lock,))
+
+    def lock_warnings():
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if "uv tools lock" in record.getMessage()
+        ]
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        plan = _plan_of(kind, layout, monkeypatch, policy, {})
+        plan.run_cleanup()
+        assert lock_warnings() == []
+
+        plan = _plan_of(kind, layout, monkeypatch, policy, {})
+        lock.write_text("MARKER-left-for-a-later-run")
+        plan.run_cleanup()
+
+    [warning] = lock_warnings()
+    assert lock.as_posix() in warning, warning
+    assert "sandboxed scanner probe" in warning, warning
+    assert "MARKER-left-for-a-later-run" not in warning, warning

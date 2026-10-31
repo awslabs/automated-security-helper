@@ -426,8 +426,13 @@ class SandboxPolicy:
     sandbox_exec_env: Dict[str, str] = field(default_factory=dict)
     unpack_dir_env: Optional[str] = None
     #: uv's tools-directory lock file, which ``uv tool run`` opens read-write before
-    #: it looks for an installed tool. The file, not the directory: writing the
-    #: lock changes nothing a later run reads.
+    #: it looks for an installed tool. The file, not the directory. uv keeps nothing
+    #: in it, so no later run reads what a scanner writes there, but it is a host
+    #: file outside the results directory that the sandbox can write and that
+    #: outlives the spawn. Only bwrap could bind a private file over it (firejail's
+    #: bind is root's; Landlock and sandbox-exec grant a real path), so the grant
+    #: stays and every plan watches the file (``backends._uv_lock_watch``), warning
+    #: when a scanner changed it.
     uv_tool_locks: Tuple[Path, ...] = ()
     #: Directories the tool may not read even where a path the policy shows holds
     #: them: the source and output directories, and every other root of the active

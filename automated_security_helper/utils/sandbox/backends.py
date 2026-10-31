@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.process_env import startup_environ
 from automated_security_helper.utils.sandbox.policy import (
     CA_BUNDLE_DIR_ENV_NAMES,
@@ -40,6 +40,7 @@ from automated_security_helper.utils.sandbox.policy import (
     _passwd_home,
     parse_environment,
 )
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 PROBE_TIMEOUT_SECONDS = 20
 
@@ -90,8 +91,9 @@ def _private_caches(
     write reaching the host. Every other backend mounts ``policy.cache`` read-only
     and calls this, which points each variable in ``policy.cache_env``
     (``UV_CACHE_DIR``, and what the scanner declares) at its own empty directory:
-    a fresh directory under the results directory, the one place the scanner may
-    write, removed once the process has exited. A tool redirected this way starts
+    a fresh directory under the results directory, the place the scanner may write
+    (besides uv's tools lock, one host file the plans watch: ``_uv_lock_watch``),
+    removed once the process has exited. A tool redirected this way starts
     from an empty cache, so online it fetches what it needs and offline it has
     nothing cached. A cache that is only read, such as a scanner's database,
     is not redirected and stays read-only.
@@ -140,6 +142,50 @@ def _private_caches(
         shutil.rmtree(root, ignore_errors=True)
         raise
     return [lambda: shutil.rmtree(root, ignore_errors=True)], [root]
+
+
+def _uv_lock_watch(policy: SandboxPolicy) -> List[Callable[[], None]]:
+    """The cleanup step that says so when a scanner wrote the uv tools lock.
+
+    ``policy.uv_tool_locks`` is the one host file outside the results directory
+    that a sandbox may write, and it outlives the spawn: a scanner could leave
+    bytes in it for a later run, or truncate it. Only bwrap could bind a private
+    file over it (firejail's bind is root's, Landlock and sandbox-exec grant a
+    real path), so the grant stays and this watches it. uv takes an advisory lock
+    on the file and keeps nothing in it, so a change of size or modification time
+    between the plan and the end of the spawn means something wrote to it. A
+    warning only: the file is the operator's, and ASH does not rewrite it.
+    """
+    before: Dict[Path, Tuple[int, int]] = {}
+    for lock in policy.uv_tool_locks:
+        try:
+            info = os.stat(lock)
+        except OSError:
+            continue
+        before[lock] = (info.st_size, info.st_mtime_ns)
+    if not before:
+        return []
+
+    def check() -> None:
+        for lock, was in before.items():
+            try:
+                info = os.stat(lock)
+            except OSError:
+                continue
+            if (info.st_size, info.st_mtime_ns) != was:
+                ASH_LOGGER.warning(
+                    shown_on_one_line(
+                        f"The uv tools lock {lock.as_posix()} was written while the "
+                        f"sandboxed scanner {policy.scanner_name} ran (size {was[0]} "
+                        f"to {info.st_size} bytes). The sandbox may write this one "
+                        "host file so that `uv tool run` can take uv's lock, and uv "
+                        "keeps nothing in it, so a change means the scanner wrote "
+                        "to it."
+                    ),
+                    extra=NO_MARKUP,
+                )
+
+    return [check]
 
 
 def _on_an_overlaid_cache(
@@ -1046,6 +1092,7 @@ class BwrapBackend(SandboxBackend):
             cleanup, private_dirs = _private_caches(
                 policy, child_env, overlaid, read_only_caches
             )
+        cleanup += _uv_lock_watch(policy)
         return SpawnPlan(
             argv=cmd, env=child_env, cleanup=cleanup, private_dirs=private_dirs
         )
@@ -1366,6 +1413,7 @@ class FirejailBackend(SandboxBackend):
         cmd.append("--")
         cmd.extend(_with_socket_filter(argv))
         cleanup, private_dirs = _private_caches(policy, child_env)
+        cleanup += _uv_lock_watch(policy)
         # firejail does not call setsid, so the spawner starts it as the leader
         # of a session of its own and the stop paths' group signals reach the
         # tool and what it starts, not firejail alone.
@@ -1579,6 +1627,7 @@ class LandlockBackend(SandboxBackend):
         child_env["HOME"] = private_home.as_posix()
         caches, private_dirs = _private_caches(policy, child_env)
         private_cleanup += caches
+        private_cleanup += _uv_lock_watch(policy)
         return SpawnPlan(
             argv=cmd,
             env=child_env,
@@ -2014,6 +2063,7 @@ class SandboxExecBackend(SandboxBackend):
         # to install and runs it from, so the profile lets that one run programs.
         caches, private_dirs = _private_caches(policy, child_env)
         cleanup += caches
+        cleanup += _uv_lock_watch(policy)
         private_uv_cache = (
             Path(child_env["UV_CACHE_DIR"])
             if "UV_CACHE_DIR" in policy.cache_env and child_env.get("UV_CACHE_DIR")
