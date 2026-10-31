@@ -39,7 +39,7 @@ def write_text_atomically(
     encoding: str = "utf-8",
     *,
     root: Optional[Path] = None,
-    newline: Optional[str] = None,
+    newline: Optional[str] = "",
 ) -> None:
     """Write ``content`` to ``path`` so that readers see the old file or the new one.
 
@@ -54,11 +54,14 @@ def write_text_atomically(
     output directory a file at ``path`` that another name refers to is refused
     (``OutputHardLinkRefused``), as fs_guard's in-place writer refuses it.
 
-    ``newline`` is open()'s: by default a ``\\n`` in ``content`` is written as the
-    platform's line ending, as a plain text write writes it, so content that
-    already holds ``\\r\\n`` (a CSV report, a report rewritten with its secrets
-    masked) is written with ``\\r\\r\\n`` on Windows. A caller whose content carries
-    its own line endings passes ``newline=""`` and the bytes are written as given.
+    ``newline`` is open()'s, and defaults to ``""``: ``content`` is written as
+    given, with no line ending translated, on every platform. Every caller hands
+    this function complete content that already carries the line endings it wants
+    (a CSV report's ``\\r\\n`` rows, a report rewritten with its secrets masked, a
+    JSON document), and the translation open() does by default would turn each
+    ``\\n`` into ``\\r\\n`` on Windows, so a ``\\r\\n`` already in the content came
+    out as ``\\r\\r\\n``: a blank line after every CSV row. A caller that wants the
+    platform's line ending passes ``newline=None``.
 
     Below a registered output directory (``fs_guard``), or below ``root`` when the
     caller names the directory it writes in, the directory is opened without

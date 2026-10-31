@@ -1195,7 +1195,7 @@ def replace_without_following(
     path: Union[str, Path],
     content: str,
     encoding: str = "utf-8",
-    newline: Optional[str] = None,
+    newline: Optional[str] = "",
 ) -> None:
     """Write ``content`` to ``path`` as a new file renamed over it, never through a link.
 
@@ -1208,9 +1208,10 @@ def replace_without_following(
     content. A link that appears at ``path`` between the check and the rename is
     replaced, not followed.
 
-    ``newline`` is open()'s: None translates ``\\n`` to the platform's line ending
-    on write, so a caller that wants the file's bytes the same on every platform
-    (a guide shipped with LF endings) passes ``"\\n"``, as it would to open().
+    ``newline`` is open()'s and defaults to ``""``: ``content`` is written as
+    given, so the file's bytes are the same on every platform (a guide shipped with
+    LF endings stays LF on Windows). A caller that wants the platform's line ending
+    passes ``None``, which translates ``\\n`` on write as open() does.
     """
     path = Path(os.path.abspath(path))
     try:
@@ -1311,7 +1312,8 @@ def open_for_atomic_write(
     permissions a plain open gives (0o666 less the umask). ``encoding``, ``errors``
     and ``newline`` are open()'s, for text, as they are for open_for_write; the
     staging handle is the one they shape, so the bytes renamed over ``path`` are
-    the bytes open() would have written there. When the block ends
+    the bytes open() would have written there. ``newline`` with ``binary`` raises
+    ValueError, as open() raises it. When the block ends
     without an exception the file is renamed over ``path``, so a reader of ``path``
     opens the old complete file or the new complete one and never a partial write.
     When the block raises, the staging file is removed and ``path`` is left as it
@@ -1344,6 +1346,10 @@ def open_for_atomic_write(
     the rename, and the rename is retried for a bounded time while a reader holds
     the file open (atomic_write._replace).
     """
+    if binary and newline is not None:
+        # open() refuses this too; a silently dropped argument would hide a caller
+        # that expects the bytes translated.
+        raise ValueError("binary mode doesn't take a newline argument")
     # Not at the top: atomic_write imports this module when it writes.
     from automated_security_helper.utils.atomic_write import _replace
 
@@ -1459,7 +1465,8 @@ def open_for_write(
     open(path, "w") ("a", "wb" or "ab" as asked), except that with a ``mode`` other
     than the default the file is opened with O_NOFOLLOW, as the callers that pass
     one always did. Permissions are ``mode`` less the umask, 0o666 by default as
-    open() uses. ``newline`` is open()'s, for text. With ``make_parents``, missing
+    open() uses. ``newline`` is open()'s, for text; with ``binary`` it raises
+    ValueError, as open() does. With ``make_parents``, missing
     directories are created there too, as ``mkdir(parents=True)`` creates them.
 
     ``root`` guards this open only and registers nothing, for a writer that knows
@@ -1478,6 +1485,8 @@ def open_for_write(
     """
     if exclusive and append:
         raise ValueError("exclusive creates the file; it cannot also append")
+    if binary and newline is not None:
+        raise ValueError("binary mode doesn't take a newline argument")
     open_mode = ("x" if exclusive else "a" if append else "w") + ("b" if binary else "")
     text: Dict[str, Any] = (
         {} if binary else {"encoding": encoding, "errors": errors, "newline": newline}
