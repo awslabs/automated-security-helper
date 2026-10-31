@@ -229,18 +229,15 @@ class LintResult:
     # second time to give the reason.
     fix_refused_for_environment: bool = False
     # The unused suppressions report the lint found (``check_unused``), or None
-    # when it found none or did not look (``unused_report_checked`` tells which).
-    # The age read and ``--fix-unused`` take this file and do not name a report a
-    # second time: they resolved the chain again without the scanned tree
-    # (``--source-dir``), which can name another report than the one lint listed
-    # the entries from.
+    # when it found none or did not look (a lint without ``check_unused``, or a
+    # document that is not a mapping, ends before the check). The age read and
+    # ``--fix-unused`` take this file and do not name a report a second time:
+    # they resolved the chain again without the scanned tree (``--source-dir``),
+    # which can name another report than the one lint listed the entries from.
+    # None is therefore "no report to read" in every case: a lookup of their own
+    # could find a report the operator was never shown and comment entries out
+    # of it.
     unused_report_path: Optional[Path] = None
-    # Whether the lint looked for the report (``check_unused``). With
-    # ``unused_report_path`` None this is the difference between "looked and
-    # found none" and "did not look": ``--fix-unused`` stops at the first, where
-    # a second lookup of its own could find a report the operator was never
-    # shown and comment entries out of it.
-    unused_report_checked: bool = False
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: ``<value>`` when
@@ -2329,7 +2326,6 @@ class ConfigLinter:
             config_path, output_dir, named_by
         )
         result.unused_report_path = report_path
-        result.unused_report_checked = True
 
         if report_path is None:
             result.issues.append(

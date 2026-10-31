@@ -2130,7 +2130,6 @@ def lint(
                     if isinstance(lint_result.resolved_data, dict)
                     else None,
                     report_path=lint_result.unused_report_path,
-                    report_checked=lint_result.unused_report_checked,
                 )
                 or applied
             )
@@ -2263,7 +2262,6 @@ def _apply_unused_fixes(
     color: bool,
     report_config: Any = None,
     report_path: Path | None = None,
-    report_checked: bool = False,
 ) -> bool:
     """Comment out unused suppressions in the config file. Returns whether the
     file was written. A list the fixer cannot edit (a repeated key, a flow
@@ -2280,9 +2278,9 @@ def _apply_unused_fixes(
     each of them then named a report by its own resolution, which can be another
     file than the one lint listed the entries from.
 
-    ``report_checked`` is whether lint looked for the report
-    (``LintResult.unused_report_checked``). Lint having looked and found none,
-    this says so and stops: a second lookup here could name a report lint did
+    ``report_path`` None means there is no report to read: lint looked and found
+    none, or it ended before the check (a document that is not a mapping). This
+    says so and stops, because a second lookup here could name a report lint did
     not list, and the entries it commented out would be ones the operator was
     never shown (with ``-y`` nothing is asked)."""
     from automated_security_helper.config.config_linter import (
@@ -2293,7 +2291,7 @@ def _apply_unused_fixes(
     no_report = (
         "⚠️  No unused suppressions report found. Run a scan first to generate the report."
     )
-    if report_checked and report_path is None:
+    if report_path is None:
         secho(no_report, fg=typer.colors.YELLOW)
         return False
 

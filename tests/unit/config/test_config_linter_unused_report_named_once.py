@@ -111,21 +111,26 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
         message="Unused suppression: path='src/a.py', rule_id='B101'",
         fixable=True,
     )
+    seen = {}
+    # The report lint names is read before the fixer is asked (the command says
+    # why it comments nothing out of one it cannot read), so the file sits where
+    # the result names it: an empty report, complete.
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"unused_suppressions": []}), encoding="utf-8")
+    # The result was built by hand, so it names the report it read, as a lint
+    # with ``check_unused`` does; a result that names none has no report to read.
     monkeypatch.setattr(
         ConfigLinter,
         "lint",
         staticmethod(
             lambda *_a, **_k: LintResult(
-                issues=[issue], config_path=config, resolved_data=merged
+                issues=[issue],
+                config_path=config,
+                resolved_data=merged,
+                unused_report_path=report,
             )
         ),
     )
-    seen = {}
-    # The report the age read hands back is read before the fixer is asked
-    # (the command says why it comments nothing out of one it cannot read), so
-    # the file sits where the stub names it: an empty report, complete.
-    report = tmp_path / "report.json"
-    report.write_text(json.dumps({"unused_suppressions": []}), encoding="utf-8")
     # What a call that names no report path would see, so a keyword left out of
     # the call is told from one passed as None.
     not_passed = "report_path was not passed"
@@ -150,11 +155,9 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
     assert result.exit_code == 0, result.output
     assert seen.get("age") is merged, seen
     assert seen.get("fix") is merged, seen
-    # Lint did not look here (the result was built by hand), so no path is
-    # pinned and the age read is asked with the keyword as None. The report it
-    # finds is then the one the fixer is handed, so the age read, the check on
-    # the report and the fixer all read one file.
-    assert seen.get("age_path") is None, seen
+    # The age read, the check on the report and the fixer all read the one file
+    # lint named.
+    assert seen.get("age_path") == report, seen
     assert seen.get("fix_path") == report, seen
 
 
@@ -181,24 +184,9 @@ def test_lint_without_a_report_records_none(tmp_path):
     )
 
     assert result.unused_report_path is None
-    # None is not "did not look": lint looked and found none.
-    assert result.unused_report_checked is True
 
 
-def test_lint_records_that_it_looked_for_the_report(tmp_path):
-    """Red at the base: the result had no such field, so a path of None could not
-    be told from a lint that never looked."""
-    config, reports = _layout(tmp_path)
-    (reports / "ash.unused-suppressions.json").write_text(REPORT, encoding="utf-8")
-
-    result = ConfigLinter.lint(
-        config, output_dir=tmp_path / ".ash" / "ash_output", check_unused=True
-    )
-
-    assert result.unused_report_checked is True
-
-
-def test_lint_that_does_not_check_unused_records_that_it_did_not_look(tmp_path):
+def test_lint_that_does_not_check_unused_records_no_report(tmp_path):
     """The positive control: without ``check_unused`` nothing is looked for, and
     the report that sits there is not recorded either."""
     config, reports = _layout(tmp_path)
@@ -208,8 +196,30 @@ def test_lint_that_does_not_check_unused_records_that_it_did_not_look(tmp_path):
         config, output_dir=tmp_path / ".ash" / "ash_output", check_unused=False
     )
 
-    assert result.unused_report_checked is False
     assert result.unused_report_path is None
+
+
+def test_a_config_that_is_not_a_mapping_leaves_no_report_to_read(tmp_path, monkeypatch):
+    """Red at the base: lint ends before the unused check for a document that is
+    not a mapping, and the fix block still ran: the command looked for a report
+    of its own (the age read and the fixer are stubbed to fail if asked), which
+    could ask the stale-report question about a report lint never named. With no
+    report named there is none to read, and the scan's refusal is the exit."""
+    config = tmp_path / ".ashrc.yaml"
+    config.write_text("- not\n- a mapping\n", encoding="utf-8")
+
+    def asked(*_a, **_k):
+        raise AssertionError("the command looked for a report lint never named")
+
+    monkeypatch.setattr(ConfigLinter, "get_unused_report_age", staticmethod(asked))
+    monkeypatch.setattr(ConfigLinter, "fix_unused_suppressions", staticmethod(asked))
+
+    result = CliRunner().invoke(
+        config_app, ["lint", "--config", str(config), "--fix-unused", "-y"]
+    )
+
+    assert result.exit_code == 3, (result.output, repr(result.exception))
+    assert "No unused suppressions to comment out" not in result.output, result.output
 
 
 def test_the_age_read_and_the_fixer_take_the_file_lint_read(tmp_path):
