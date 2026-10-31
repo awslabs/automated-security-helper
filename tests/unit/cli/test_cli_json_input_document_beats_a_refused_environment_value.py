@@ -17,10 +17,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import click.testing
 import pytest
 import typer
-import typer.main
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.json_input import CliJsonInputCommand
@@ -30,11 +29,13 @@ pytestmark = pytest.mark.unit
 VARIABLE = "ASH_TEST_DOCUMENT_COUNT"
 
 
-def _app(captured: dict) -> typer.Typer:
+def _app(captured: dict, on_count=None) -> typer.Typer:
     demo = typer.Typer()
 
     @demo.command(cls=CliJsonInputCommand)
-    def run(count: int = typer.Option(7, "--count", envvar=VARIABLE)):
+    def run(
+        count: int = typer.Option(7, "--count", envvar=VARIABLE, callback=on_count),
+    ):
         captured.update(count=count)
 
     @demo.command()
@@ -42,6 +43,17 @@ def _app(captured: dict) -> typer.Typer:
         pass
 
     return demo
+
+
+def _one_command(monkeypatch, demo: typer.Typer):
+    """The click command every invocation below uses.
+
+    CliRunner builds the command from the Typer app on each call, so two runs
+    never met the same parameter objects: what one parse did to them could not
+    show in the next. Here the command is built once and handed back each time."""
+    command = get_command(demo)
+    monkeypatch.setattr("typer.testing._get_command", lambda _app: command)
+    return command
 
 
 def _document(tmp_path: Path, payload: dict) -> str:
@@ -75,44 +87,52 @@ def test_the_environment_is_still_refused_when_the_document_omits_the_key(tmp_pa
 
 
 def test_the_environment_variable_is_read_again_after_a_document_set_the_key(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
     """The command's parameter objects outlive one invocation: the variable
-    suspended for a parse the document set must be back for the next one.
-
-    The click command is built ONCE and invoked twice: typer's runner rebuilds
-    the options from the function signature on every invoke, so an unrestored
-    suspension would have gone unseen."""
+    set aside for a parse the document set must be back for the next one. Both
+    runs use the one command object, as a server running many scans in one
+    process does."""
     captured: dict = {}
-    command = typer.main.get_command(_app(captured))
-    first = click.testing.CliRunner().invoke(
-        command,
+    demo = _app(captured)
+    _one_command(monkeypatch, demo)
+    first = CliRunner().invoke(
+        demo,
         ["run", "--cli-json-input", _document(tmp_path, {"count": 3})],
         env={VARIABLE: "5"},
     )
     assert first.exit_code == 0, first.output
     assert captured == {"count": 3}
 
-    second = click.testing.CliRunner().invoke(command, ["run"], env={VARIABLE: "5"})
+    second = CliRunner().invoke(demo, ["run"], env={VARIABLE: "5"})
     assert second.exit_code == 0, second.output
     assert captured == {"count": 5}
 
 
-def test_the_environment_variable_is_restored_after_a_parse_that_failed(tmp_path):
-    """The restore runs in a finally: a parse that fails after the document set
-    the key (here on an option the command does not have) must leave the
-    variable in place for the next invocation."""
+def test_the_environment_variable_is_read_again_after_a_parse_that_failed(
+    tmp_path, monkeypatch
+):
+    """A parse the document set the key for can still end in a usage error (a
+    bad value on the command line). The variable must be back for the next run
+    then too."""
     captured: dict = {}
-    command = typer.main.get_command(_app(captured))
-    first = click.testing.CliRunner().invoke(
-        command,
-        ["run", "--cli-json-input", _document(tmp_path, {"count": 3}), "--nope"],
+    demo = _app(captured)
+    _one_command(monkeypatch, demo)
+    failed = CliRunner().invoke(
+        demo,
+        [
+            "run",
+            "--cli-json-input",
+            _document(tmp_path, {"count": 3}),
+            "--count",
+            "nine",
+        ],
         env={VARIABLE: "5"},
     )
-    assert first.exit_code == 2, first.output
+    assert failed.exit_code == 2, failed.output
     assert captured == {}
 
-    second = click.testing.CliRunner().invoke(command, ["run"], env={VARIABLE: "5"})
+    second = CliRunner().invoke(demo, ["run"], env={VARIABLE: "5"})
     assert second.exit_code == 0, second.output
     assert captured == {"count": 5}
 
@@ -142,3 +162,33 @@ def test_a_key_set_to_null_does_not_hide_a_refused_environment_value(tmp_path):
 
     assert result.exit_code == 2, result.output
     assert captured == {}
+
+
+def test_the_commands_own_parameter_objects_keep_their_variable_during_a_parse(
+    tmp_path, monkeypatch
+):
+    """The parameter objects belong to the command, which a server shares between
+    scans running at once. A parse that set the variable aside by clearing it on
+    those objects hid it from every other parse in flight; the variable is set
+    aside on this parse's own copy, and the command's parameter keeps it."""
+    seen: list = []
+    holder: dict = {}
+
+    def on_count(value: int):
+        parameter = next(p for p in holder["command"].params if p.name == "count")
+        seen.append(parameter.envvar)
+        return value
+
+    captured: dict = {}
+    demo = _app(captured, on_count=on_count)
+    holder["command"] = _one_command(monkeypatch, demo)
+
+    result = CliRunner().invoke(
+        demo,
+        ["run", "--cli-json-input", _document(tmp_path, {"count": 3})],
+        env={VARIABLE: "nine"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {"count": 3}
+    assert seen == [VARIABLE]

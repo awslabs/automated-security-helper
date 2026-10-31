@@ -46,6 +46,7 @@ import json
 import math
 import re
 import warnings
+from copy import copy as shallow_copy
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
@@ -562,6 +563,20 @@ def _meta_options() -> list[Parameter]:
     ]
 
 
+#: The ``ctx.meta`` key, made per context, under which a parse keeps its copies of
+#: the parameters whose environment variable the document set aside.
+_ENV_SET_ASIDE = "ash.cli_json_input.env_set_aside"
+
+
+def _without_environment(param: Parameter) -> Parameter:
+    """A copy of *param* that reads no environment variable."""
+    copy = shallow_copy(param)
+    copy.envvar = None
+    if isinstance(copy, TyperOption):
+        copy.allow_from_autoenv = False
+    return copy
+
+
 class CliJsonInputCommand(TyperCommand):
     """A Typer command that also takes its parameters from a JSON document."""
 
@@ -600,25 +615,31 @@ class CliJsonInputCommand(TyperCommand):
         # ASH_SHARD_INDEX of "nine") was a usage error before the re-processing
         # ran, with the document's valid value never read. So for the parameters
         # the document sets, the environment is not read at all (rule 2 over
-        # rule 3): their variables are suspended for the parse and put back
-        # after it, because the parameter objects are the command's and outlive
-        # this invocation.
-        suspended: list[tuple[Parameter, Any, bool | None]] = []
-        for param in self.get_params(ctx):
-            if param.name not in supplied:
-                continue
-            auto = param.allow_from_autoenv if isinstance(param, TyperOption) else None
-            suspended.append((param, param.envvar, auto))
-            param.envvar = None
-            if isinstance(param, TyperOption):
-                param.allow_from_autoenv = False
+        # rule 3). The parse reads copies of those parameters that have no
+        # variable (get_params below): the parameter objects are the command's,
+        # shared by every invocation of it, so clearing the variable on them hid
+        # it from a parse running at the same time and relied on a restore that
+        # an error could skip.
+        set_aside_key = f"{_ENV_SET_ASIDE}:{id(ctx)}"
+        if supplied:
+            ctx.meta[set_aside_key] = {
+                param.name: _without_environment(param)
+                for param in super().get_params(ctx)
+                if param.name in supplied
+            }
         try:
             return super().parse_args(ctx, args)
         finally:
-            for param, envvar, auto in suspended:
-                param.envvar = envvar
-                if auto is not None:
-                    param.allow_from_autoenv = auto
+            ctx.meta.pop(set_aside_key, None)
+
+    def get_params(self, ctx: Context) -> list[Parameter]:
+        params = super().get_params(ctx)
+        set_aside = ctx.meta.get(f"{_ENV_SET_ASIDE}:{id(ctx)}")
+        if not set_aside:
+            return params
+        # The same copy each time this parse asks: click sorts the parameters
+        # it processes by comparing them with the ones its parser returned.
+        return [set_aside.get(param.name, param) for param in params]
 
 
 __all__ = [
