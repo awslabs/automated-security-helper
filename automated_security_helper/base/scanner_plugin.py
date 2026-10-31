@@ -93,6 +93,22 @@ _NOTIFICATIONS_READ_LIMIT = 5 * 1024 * 1024
 _RESULTS_FILE_READ_LIMIT = 1 << 30
 
 
+class _AshInvocation(Invocation):
+    """The invocation record ASH writes first in ``runs[0].invocations``.
+
+    It has every field of :class:`Invocation` and writes the same SARIF. It is a
+    class of its own so that ``_inject_invocation``, run again on the same
+    report, can tell its own earlier record from an invocation the tool wrote:
+    the record's ``executionSuccessful`` is ASH's outcome, and reading it as the
+    tool's would hand ASH's earlier answer back as the tool's. The private flag
+    keeps what the tool itself said about the invocation this record replaced,
+    which no longer exists in the list; a private attribute is not part of the
+    written SARIF.
+    """
+
+    _tool_said_unsuccessful: bool = PrivateAttr(default=False)
+
+
 def _error_notifications(results_file: Path, values: Iterable[str] = ()) -> str:
     """The text of the error-level toolExecutionNotifications in a SARIF file.
 
@@ -1275,42 +1291,67 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # executionSuccessful the tool set to false. Replacing the list outright
         # discarded both, so a run the tool itself called unsuccessful read as a
         # complete one with no notifications.
-        tool_own_invocations = list(sarif_report.runs[0].invocations or [])
-        tool_notifications: List[Any] = []
-        tool_said_unsuccessful = False
+        #
+        # Only the invocation ASH's record REPLACES gives up its notifications and
+        # its outcome to it. The tool's later invocations stay in the list below
+        # as they are, notifications included; copying theirs into ASH's record
+        # as well reported each of them twice.
+        #
+        # Run again on the same report, ASH's own earlier record is first in the
+        # list. It is not the tool's: its executionSuccessful is ASH's outcome, so
+        # it is left out of what the tool said. It stands in for the invocation it
+        # replaced, so its notifications are what is carried on, and the tool's
+        # own outcome on that invocation is read from the flag it kept.
+        existing_invocations = list(sarif_report.runs[0].invocations or [])
+        earlier_ash_record = (
+            existing_invocations[0]
+            if existing_invocations
+            and isinstance(existing_invocations[0], _AshInvocation)
+            else None
+        )
+        if earlier_ash_record is not None:
+            tool_own_invocations = existing_invocations[1:]
+            replaced = earlier_ash_record
+            tool_said_unsuccessful = earlier_ash_record._tool_said_unsuccessful
+        else:
+            tool_own_invocations = existing_invocations
+            replaced = existing_invocations[0] if existing_invocations else None
+            tool_said_unsuccessful = False
+        tool_notifications: List[Any] = list(
+            getattr(replaced, "toolExecutionNotifications", None) or []
+        )
         for own in tool_own_invocations:
-            notes = getattr(own, "toolExecutionNotifications", None)
-            if notes:
-                tool_notifications.extend(notes)
             if getattr(own, "executionSuccessful", None) is False:
                 tool_said_unsuccessful = True
         if tool_notifications and "toolExecutionNotifications" not in extras:
             extras = {**extras, "toolExecutionNotifications": tool_notifications}
-        sarif_report.runs[0].invocations = [
-            Invocation(  # type: ignore[call-arg]
-                commandLine=command_line,
-                arguments=recorded_arguments,
-                startTimeUtc=self.start_time,
-                endTimeUtc=self.end_time,
-                # The graded rule, not the exit code alone: a scanner that
-                # counted a failed target, or whose run was stopped or whose
-                # output ASH could not record, reported executionSuccessful
-                # true whenever its tool's code was an accepted one, and the
-                # unevaluated-rules gate read that as a complete run.
-                executionSuccessful=(
-                    self._exit_code_accepted(success_codes)
-                    and self._sarif_execution_successful()
-                    and not tool_said_unsuccessful
-                ),
-                exitCode=self.exit_code,
-                exitCodeDescription="\n".join(self.errors) if self.errors else "",
-                workingDirectory=working_dir,
-                **extras,
+        ash_record = _AshInvocation(  # type: ignore[call-arg]
+            commandLine=command_line,
+            arguments=recorded_arguments,
+            startTimeUtc=self.start_time,
+            endTimeUtc=self.end_time,
+            # The graded rule, not the exit code alone: a scanner that
+            # counted a failed target, or whose run was ended early or whose
+            # output ASH could not record, reported executionSuccessful
+            # true whenever its tool's code was an accepted one, and the
+            # unevaluated-rules gate read that as a complete run.
+            executionSuccessful=(
+                self._exit_code_accepted(success_codes)
+                and self._sarif_execution_successful()
+                and not tool_said_unsuccessful
             ),
+            exitCode=self.exit_code,
+            exitCodeDescription="\n".join(self.errors) if self.errors else "",
+            workingDirectory=working_dir,
+            **extras,
+        )
+        ash_record._tool_said_unsuccessful = tool_said_unsuccessful
+        sarif_report.runs[0].invocations = [
+            ash_record,
             # Whatever the tool recorded after its first invocation stays, after
             # ASH's own: the list was replaced outright before, which dropped
             # every further invocation a tool wrote.
-            *tool_own_invocations[1:],
+            *existing_invocations[1:],
         ]
         # Mirror the un-migrated scanner pattern: attach per-result and
         # tool-driver scanner_details so downstream consumers (and the
