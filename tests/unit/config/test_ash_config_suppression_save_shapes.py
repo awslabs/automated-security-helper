@@ -233,15 +233,25 @@ def test_the_full_rewrite_reads_references_from_the_text_it_edits(
     )
     config_path.write_text(before, encoding="utf-8")
 
+    real_read = config_sources.read_config_bytes
+    reads: list = []
+
     def refused_read(*args, **kwargs):
         raise PermissionError("planted: a second read of the config fails")
 
-    # Only config_sources' own module-level names: the save's first read goes
-    # through Path.read_bytes, which this leaves alone. Both are planted, the
+    def first_read_only(*args, **kwargs):
+        # The save's own first read goes through read_config_bytes. It is
+        # let through; every read after it fails.
+        if not reads:
+            reads.append(args)
+            return real_read(*args, **kwargs)
+        return refused_read()
+
+    # Only config_sources' own module-level names. Both are planted, the
     # builtin open and read_config_bytes, so the test holds whichever of the
     # two a second read of the file goes through.
     monkeypatch.setattr(config_sources, "open", refused_read, raising=False)
-    monkeypatch.setattr(config_sources, "read_config_bytes", refused_read)
+    monkeypatch.setattr(config_sources, "read_config_bytes", first_read_only)
 
     with pytest.raises(ValueError) as refused:
         add_suppression_to_config(config_path, NEW)

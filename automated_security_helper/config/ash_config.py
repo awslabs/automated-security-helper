@@ -4150,6 +4150,7 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     from automated_security_helper.config.config_sources import (
         is_json_file,
         is_toml_file,
+        read_config_bytes,
         refuse_unless_a_file,
         unparsed_config_reason,
     )
@@ -4177,10 +4178,23 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         raise _left_unchanged(not_a_file, config_path)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     # The file's bytes as they are: what a failed write puts back, and where
-    # its own line ending is read from.
-    earlier: Optional[bytes] = (
-        config_path.read_bytes() if config_path.exists() else None
-    )
+    # its own line ending is read from. Read as the recheck before the replace
+    # reads (read_config_bytes, so the same size bound): the two reads must
+    # agree about a file's size, or a config past the bound whose first read
+    # succeeded would always be refused at the recheck as changed meanwhile.
+    # A config past the bound is refused here, in the bound's own words.
+    earlier: Optional[bytes] = None
+    too_large: Optional[str] = None
+    if config_path.exists():
+        try:
+            earlier = read_config_bytes(config_path)
+        except ASHConfigSourceError as e:
+            # Without the bound's closing period: the refusal adds its own
+            # promise after a semicolon.
+            too_large = str(e).rstrip(".")
+    if too_large is not None:
+        # Outside the handler, so the bound's error is not its context.
+        raise _left_unchanged(too_large, config_path)
     eol = _line_ending(earlier)
     if is_json_file(config_path):
         json_text: Optional[str] = None
