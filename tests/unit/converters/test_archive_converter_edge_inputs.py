@@ -389,6 +389,71 @@ def test_the_trailing_record_says_every_member_was_extracted(
     assert "the 8 bytes after the end of its gzip data" in refused.reason
 
 
+def test_the_trailing_record_does_not_say_every_member_was_extracted_after_a_refusal(
+    test_plugin_context, monkeypatch
+):
+    """Where a member of the archive was refused, the sentence that every member
+    was extracted contradicts that refusal, in the same results row. The tail is
+    still recorded by its count, and the reason says only that the gzip data was
+    read to its end."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        data = b"x = 1\n"
+        member = tarfile.TarInfo("a.py")
+        member.size = len(data)
+        archive.addfile(member, io.BytesIO(data))
+        link = tarfile.TarInfo("link.py")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "a.py"
+        archive.addfile(link)
+    raw = buffer.getvalue() + b"TRAILER\n"
+
+    converter, _ = _convert_one(test_plugin_context, monkeypatch, "src.tar.gz", raw)
+
+    (link_refusal,) = [r for r in converter.refused_inputs if r.member == "link.py"]
+    assert "symbolic or hard link" in link_refusal.reason
+    (tail,) = [r for r in converter.refused_inputs if r.member is None]
+    assert "every member" not in tail.reason
+    assert tail.reason.startswith("its gzip data was read to its end")
+    assert "the 8 bytes after the end of its gzip data" in tail.reason
+    assert tail.limit is None
+
+
+def test_the_trailing_record_does_not_say_every_member_was_extracted_for_a_cut_tar(
+    test_plugin_context, monkeypatch
+):
+    """A tar that ends at a member boundary, with no end-of-archive block, is
+    recorded as extracted in part (its members past the cut may be missing), so
+    the tail's record does not say every member was extracted either."""
+    plain = tar_bytes({"a.py": "x = 1\n"})
+    cut = plain[: 2 * tarfile.BLOCKSIZE]
+    raw = gzip.compress(cut) + b"TRAILER\n"
+
+    converter, _ = _convert_one(test_plugin_context, monkeypatch, "src.tar.gz", raw)
+
+    assert converter.failed_inputs
+    (tail,) = [r for r in converter.refused_inputs if r.member is None]
+    assert "every member" not in tail.reason
+    assert tail.reason.startswith("its gzip data was read to its end")
+
+
+def test_the_trailing_record_names_whether_every_member_was_extracted(
+    test_plugin_context,
+):
+    """The sentence follows the argument: every member where the archive was
+    extracted whole (the default), only the read to the end where it was not."""
+    converter = _converter(test_plugin_context)
+
+    converter._record_trailing_bytes("whole.tar.gz", 8)
+    converter._record_trailing_bytes("partial.tar.gz", 8, whole=False)
+
+    whole, partial = converter.refused_inputs
+    assert whole.reason.startswith("every member of its gzip data was extracted; the 8")
+    assert partial.reason.startswith("its gzip data was read to its end; the 8")
+    assert partial.reason.endswith("and were not read, so no scanner reads them")
+    assert (whole.limit, partial.limit) == (None, None)
+
+
 def test_the_bounded_tar_stream_reports_its_sources_trailing_bytes():
     """The count the converter records is read through the bounded stream's own
     method, not out of its wrapped source: 0 until the source has been read to

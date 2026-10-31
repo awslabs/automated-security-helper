@@ -2154,7 +2154,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     )
                 )
 
-    def _record_trailing_bytes(self, archive: str, trailing: int) -> None:
+    def _record_trailing_bytes(
+        self, archive: str, trailing: int, whole: bool = True
+    ) -> None:
         """Record the ``trailing`` bytes after ``archive``'s gzip data: not another
         gzip member, so the stream ended there (as gzip(1) does, "trailing garbage
         ignored") and nothing read them. Dropping them silently counted the
@@ -2162,16 +2164,24 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         left it out, and a reader of the results saw nothing of the bytes. A
         refusal, so the results name the count and archives_extracted_whole
         leaves the archive out; without a limit, so the completeness gate is not
-        failed by it: every member the gzip data held was extracted, and the
-        reason says so first, because a refusal record is read as something the
-        scan left out, and here what was left out is the tail, not a member.
+        failed by it.
+
+        ``whole`` is whether every member the gzip data held was extracted: the
+        reason then says so first, because a refusal record is read as something
+        the scan left out, and here what was left out is the tail, not a member.
+        Where a member was refused, left out, or the listing ended early, the
+        sentence would contradict that archive's other records, so the reason
+        says only that the gzip data was read to its end.
         """
+        if whole:
+            opening = "every member of its gzip data was extracted; the "
+        else:
+            opening = "its gzip data was read to its end; the "
         self.record_refused_input(
             TreeInputRefused(
                 archive,
-                f"every member of its gzip data was extracted; the {trailing} "
-                "bytes after the end of its gzip data are not another gzip member "
-                "and were not read, so no scanner reads them",
+                f"{opening}{trailing} bytes after the end of its gzip data are not "
+                "another gzip member and were not read, so no scanner reads them",
             )
         )
 
@@ -2789,10 +2799,20 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 _copy_tar_members(tar_ref, safe_members, target_path)
                         # Bytes after a .tar.gz's gzip data ended the stream
                         # (_GzipMembersStream.trailing); recorded, so the archive is
-                        # not read as extracted whole with bytes nothing read.
+                        # not read as extracted whole with bytes nothing read. It
+                        # says every member was extracted only where this archive
+                        # has no other record of a member left out.
                         trailing = tar_stream.trailing_bytes()
                         if trailing:
-                            self._record_trailing_bytes(archive_display, trailing)
+                            self._record_trailing_bytes(
+                                archive_display,
+                                trailing,
+                                whole=(
+                                    len(self.refused_inputs) == refused_before
+                                    and not unscannable
+                                    and not (unreadable or stopped or ended)
+                                ),
+                            )
                         if unreadable or stopped or ended:
                             # Nothing is charged after a listing stops, and a spent
                             # budget stops a listing well before its own limit, so
