@@ -724,9 +724,11 @@ def test_the_rule_id_is_the_urls_last_segment_or_the_packages_own_id():
     gives one. A URL whose last segment is a collection, not an advisory
     ("https://x/advisories/"), is read as that segment: no shape of an advisory
     id is assumed, because a word-shape rule (a segment with no digit is not an
-    id, say) would misfile real GHSA ids, so every advisory from such a URL
-    shares the rule id ``advisories``. That choice is asserted here so a change
-    of it is a seen change, not a quiet one."""
+    id, say) would misfile real GHSA ids, so ``_advisory_id`` alone gives every
+    advisory from such a URL the id ``advisories``. That choice is asserted here
+    so a change of it is a seen change, not a quiet one. The conversion tells
+    two advisories of different titles behind one segment apart by the tool's
+    own id (``TestTheNpmConversion``), so they do not fold into one result."""
     assert NpmAuditScanner._advisory_id("lodash", {"url": "///"}) == "npm-lodash"
     assert NpmAuditScanner._advisory_id("lodash", {"url": ""}) == "npm-lodash"
     assert NpmAuditScanner._advisory_id("lodash", {"url": "", "source": 42}) == (
@@ -782,6 +784,140 @@ class TestTheNpmConversion:
         assert sorted(r.ruleId for r in sarif.runs[0].results) == [
             "npm-minimist-1179",
             "npm-minimist-1180",
+        ]
+
+    def test_two_advisories_behind_one_collection_url_stay_two_results(
+        self, scanner, monkeypatch
+    ):
+        """A URL that names a collection (``.../advisories/``) gave every
+        advisory behind it the rule id ``advisories``, and the dedupe by (rule,
+        place) folded the second into the first: its severity, CWE and CVSS
+        were gone from the report. Advisories of different titles behind one
+        segment are told apart by the tool's own id, as a URL-less one is."""
+        _unknown_versions(monkeypatch)
+        collection = "https://registry.example/advisories/"
+        report = _npm_report(
+            [
+                _via(
+                    "<0.2.4",
+                    url=collection,
+                    source=7,
+                    title="Prototype Pollution",
+                    severity="critical",
+                    cwe=["CWE-1321"],
+                ),
+                _via(
+                    ">=1.0.0 <1.2.6",
+                    url=collection,
+                    source=8,
+                    title="Regular Expression DoS",
+                    severity="low",
+                    cwe=["CWE-1333"],
+                ),
+            ]
+        )
+
+        sarif = scanner._convert_npm_audit_to_sarif(report, "/fake")
+
+        assert sorted(rule.id for rule in sarif.runs[0].tool.driver.rules) == [
+            "advisories-7",
+            "advisories-8",
+        ]
+        by_rule = {r.ruleId: r.properties.model_extra for r in sarif.runs[0].results}
+        assert sorted(by_rule) == ["advisories-7", "advisories-8"]
+        assert by_rule["advisories-8"]["severity"] == "low"
+        assert by_rule["advisories-8"]["cwe"] == ["CWE-1333"]
+        assert by_rule["advisories-8"]["vulnerable_versions"] == ">=1.0.0 <1.2.6"
+
+    def test_one_advisory_with_two_sources_behind_its_own_url_is_still_one_rule(
+        self, scanner, monkeypatch
+    ):
+        """Control: a GHSA split into ranges lists one entry per range with its
+        own source and ONE title. That is one advisory, and it stays one rule
+        and one result naming both ranges."""
+        _unknown_versions(monkeypatch)
+        report = _npm_report(
+            [_via("<0.2.4", source=1179), _via(">=1.0.0 <1.2.6", source=1180)]
+        )
+
+        sarif = scanner._convert_npm_audit_to_sarif(report, "/fake")
+
+        assert [rule.id for rule in sarif.runs[0].tool.driver.rules] == [
+            "GHSA-xvch-5gv4-984h"
+        ]
+        (result,) = sarif.runs[0].results
+        assert (
+            result.properties.model_extra["vulnerable_versions"]
+            == "<0.2.4 || >=1.0.0 <1.2.6"
+        )
+
+    def test_the_root_refs_of_a_dependent_name_the_told_apart_rule_ids(
+        self, scanner, monkeypatch
+    ):
+        """A suppression of the advisory reaches the dependent through the refs
+        of its roots, which have to carry the ids the roots' own results do."""
+        _unknown_versions(monkeypatch)
+        collection = "https://registry.example/advisories/"
+        report = _npm_report(
+            [
+                _via("<0.2.4", url=collection, source=7, title="One"),
+                _via(">=1.0.0 <1.2.6", url=collection, source=8, title="Two"),
+            ]
+        )
+        report["vulnerabilities"]["mkdirp"] = {
+            "name": "mkdirp",
+            "severity": "critical",
+            "via": ["minimist"],
+            "range": "0.4.1 - 0.5.1",
+            "nodes": ["node_modules/mkdirp"],
+            "fixAvailable": True,
+        }
+
+        sarif = scanner._convert_npm_audit_to_sarif(report, "/fake")
+
+        (transitive,) = [
+            r
+            for r in sarif.runs[0].results
+            if r.ruleId.startswith("npm-audit-transitive")
+        ]
+        refs = transitive.properties.model_extra["root_advisories"]
+        assert sorted(ref["rule_id"] for ref in refs) == [
+            "advisories-7",
+            "advisories-8",
+        ]
+
+    def test_two_yarn_records_behind_one_collection_url_stay_two_rules(self, scanner):
+        def record(record_id, title, severity):
+            return {
+                "package": "lodash",
+                "id": record_id,
+                "title": title,
+                "url": "https://registry.example/advisories/",
+                "severity": severity,
+                "cvss": {},
+                "cwe": [],
+                "vulnerable_versions": "<4.17.12",
+                "patched_versions": None,
+                "versions": {},
+                "paths_key": "dependents",
+            }
+
+        rules, results = {}, []
+        scanner._add_yarn_results(
+            [
+                record(1065, "Prototype Pollution", "high"),
+                record(1066, "Command Injection", "critical"),
+            ],
+            rules,
+            results,
+        )
+
+        assert sorted(rules) == ["advisories-1065", "advisories-1066"]
+        assert sorted(
+            (r.ruleId, r.properties.model_extra["severity"]) for r in results
+        ) == [
+            ("advisories-1065", "high"),
+            ("advisories-1066", "critical"),
         ]
 
     def test_a_yarn_record_without_a_url_gets_a_rule_with_no_help_uri(self, scanner):

@@ -1605,13 +1605,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # The result kept per (rule id, URI, installed version): see the
         # dedupe in the npm path and ``_widen_result``.
         emitted: Dict[tuple[str, str, Any], Result] = {}
-        for record in records:
+        rule_ids = self._advisory_ids(
+            [
+                (
+                    record["package"],
+                    {
+                        "url": record["url"],
+                        "source": record["id"],
+                        "title": record["title"],
+                    },
+                )
+                for record in records
+            ]
+        )
+        for record, vuln_id in zip(records, rule_ids):
             pkg_name = record["package"]
             severity = str(record["severity"])
             level = _SEVERITY_LEVEL.get(severity, "warning")
-            vuln_id = self._advisory_id(
-                pkg_name, {"url": record["url"], "source": record["id"]}
-            )
             title = record["title"] or f"Vulnerability in {pkg_name}"
             score = _usable_cvss_score(record["cvss"])
             grade = {} if score is not None else _grade_properties(severity)
@@ -1868,14 +1878,62 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         package fell back to the same id, and the dedupe by (rule, place) folded
         the second into the first, dropping its severity, CWE and CVSS.
         """
-        url = str(via.get("url") or "")
-        segment = url.rstrip("/").split("/")[-1] if url else ""
+        segment = NpmAuditScanner._url_segment(via)
         if segment:
             return segment
         source = via.get("source")
         if source is None or source == "":
             return f"npm-{pkg_name}"
         return f"npm-{pkg_name}-{source}"
+
+    @staticmethod
+    def _url_segment(via: Dict[str, Any]) -> str:
+        """The last path segment of an advisory's URL, trailing slashes dropped."""
+        url = str(via.get("url") or "")
+        return url.rstrip("/").split("/")[-1] if url else ""
+
+    @classmethod
+    def _advisory_ids(cls, entries: Sequence[tuple[str, Dict[str, Any]]]) -> List[str]:
+        """The rule id of each ``(package, advisory)`` pair, in order.
+
+        ``_advisory_id`` reads the URL's last segment, and several advisories of
+        one package can share it: a GHSA split into ranges lists one entry per
+        range with one title, and the entries fold into one result, which is
+        right; but a URL that names a collection (``https://x/advisories/``)
+        gives every advisory behind it the one id, and the fold then dropped the
+        second advisory's severity, CWE and CVSS. A segment that one package
+        shares between advisories of different titles is therefore told apart by
+        the tool's own advisory id (``source``), as a URL-less advisory is; the
+        same titles under one segment stay one advisory. With no ``source`` there
+        is nothing to tell them apart by, and the id stays the segment.
+        """
+        ids = [cls._advisory_id(pkg, via) for pkg, via in entries]
+        titles: Dict[tuple[str, str], Set[str]] = {}
+        for (pkg, via), rule_id in zip(entries, ids):
+            titles.setdefault((pkg, rule_id), set()).add(str(via.get("title") or ""))
+        told_apart = []
+        for (pkg, via), rule_id in zip(entries, ids):
+            source = via.get("source")
+            if (
+                len(titles[(pkg, rule_id)]) > 1
+                and cls._url_segment(via)
+                and source is not None
+                and source != ""
+            ):
+                told_apart.append(f"{rule_id}-{source}")
+            else:
+                told_apart.append(rule_id)
+        return told_apart
+
+    @classmethod
+    def _entry_advisory_ids(
+        cls, pkg_name: str, via_items: Sequence[Any]
+    ) -> Dict[int, str]:
+        """The rule id of each advisory object of one npm entry's ``via``, keyed
+        by the object's identity (``_advisory_ids``)."""
+        advisories = [via for via in via_items if isinstance(via, dict)]
+        ids = cls._advisory_ids([(pkg_name, via) for via in advisories])
+        return {id(via): rule_id for via, rule_id in zip(advisories, ids)}
 
     def _root_advisories(
         self,
@@ -1905,13 +1963,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             via_items = info.get("via", [])
             if not isinstance(via_items, list):
                 via_items = [via_items]
+            advisory_ids = self._entry_advisory_ids(name, via_items)
             for via in via_items:
                 if isinstance(via, str):
                     pending.append(via)
                     continue
                 if not isinstance(via, dict):
                     continue
-                rule_id = self._advisory_id(name, via)
+                rule_id = advisory_ids[id(via)]
                 # One ref per copy, placed as the copy's own result is
                 # (``_node_place``), so the ref and the result share URI and
                 # identity. A root npm lists no node for has one result by
@@ -2111,6 +2170,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     pkg_name, vuln_info, via_items, lock_rel, lock_index
                 )
                 entry_nodes = self._entry_nodes(pkg_name, vuln_info)
+                advisory_ids = self._entry_advisory_ids(pkg_name, via_items)
                 for via in via_items:
                     # Skip if it's just a string reference to another package
                     if isinstance(via, str):
@@ -2131,7 +2191,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     has_dict_via = True
 
                     # Extract vulnerability details
-                    vuln_id = self._advisory_id(pkg_name, via)
+                    vuln_id = advisory_ids[id(via)]
                     title = via.get("title", f"Vulnerability in {pkg_name}")
                     description = f"Vulnerability in {pkg_name}: {title}"
                     # The advisory's own severity and range where it gives
