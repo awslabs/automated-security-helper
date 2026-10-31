@@ -1648,9 +1648,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # The record of which of the error lines are ASH's own goes with them.
         self._reset_errors()
 
-        # Only a directory can be empty: listing a file target raised
-        # NotADirectoryError out of scan(), and a file is something to scan.
-        if not target.exists() or (target.is_dir() and not any(target.iterdir())):
+        if self._target_is_empty(target):
             self._plugin_log(
                 f"Target directory {target} is empty or doesn't exist. Skipping scan.",
                 target_type=target_type,
@@ -1803,6 +1801,25 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             raise ScannerError(
                 self._describe_scan_failure(e, results_file, tool_started=tool_started)
             )
+
+    @staticmethod
+    def _target_is_empty(target: Path) -> bool:
+        """Whether ``target`` is missing, or a directory with nothing in it.
+
+        Only a directory can be empty: listing a file target raised
+        NotADirectoryError out of ``scan()``, and a file is something to scan.
+        A directory that cannot be listed (a permission, a vanished mount) is
+        left to the tool, which says why it cannot read it: the probe used to
+        raise that error out of ``scan()`` before its error handling began. The
+        method a scanner that overrides ``scan()`` calls instead of keeping its
+        own copy of this probe.
+        """
+        try:
+            if not target.exists():
+                return True
+            return target.is_dir() and not any(target.iterdir())
+        except OSError:
+            return False
 
     def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
         """Raise for a run the subprocess layer flagged, before its file is read.
