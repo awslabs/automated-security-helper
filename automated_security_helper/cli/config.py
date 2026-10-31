@@ -1843,7 +1843,14 @@ def lint(
     scan_root = _source_dir(source_dir)
     config_path = _config_path_or_discovered(config, scan_root)
     output_dir_path = Path(output_dir) if output_dir else None
-    if output_dir_path is None and source_dir is not None:
+
+    if config_path is None:
+        _report_no_config_found(scan_root)
+        raise typer.Exit(1)
+    if not _config_name_exists(config_path):
+        _refuse_missing_config(config_path)
+
+    if output_dir_path is None and source_dir is not None and fix_unused:
         # Where a scan of --source-dir writes the report: its output directory is
         # under the scanned tree, not beside the config file, which --config can
         # name anywhere. Only when the caller named the scanned tree: without
@@ -1851,23 +1858,21 @@ def lint(
         # config describes (a lint run from one project against another's file),
         # so the linter's own search beside the file stays the default there,
         # as it does when the scanned tree holds no report.
+        # Only for --fix-unused, the one option that reads the report, and only
+        # for a config that exists and is a regular file: the lookup reads the
+        # config (to name the report), and it ran before the documented exit-3
+        # checks for a config that is missing, a FIFO or unreadable.
         scan_output_dir = scan_root / ConfigLinter.DEFAULT_OUTPUT_DIR
         # Looked for under the name the config gives the report (its
         # reporters.unused-suppressions.extension), as the linter's own lookup
         # names it: checked under the default name alone, a configured
         # extension with --config outside the scanned tree never set this.
-        if config_path is not None:
+        if is_regular_file(config_path):
             found, _written_at = ConfigLinter.find_unused_report(
                 Path(config_path), scan_output_dir
             )
             if found is not None and is_regular_file(found):
                 output_dir_path = scan_output_dir
-
-    if config_path is None:
-        _report_no_config_found(scan_root)
-        raise typer.Exit(1)
-    if not _config_name_exists(config_path):
-        _refuse_missing_config(config_path)
 
     # Both refusals name the caller's path: one line, whatever it holds. The
     # --fix refusal for a TOML file waits for the lint: a TOML file with nothing
