@@ -208,6 +208,9 @@ class DetectSecretsScanSettingsPluginsUsed(RedactedSection):
     # Built directly from a baseline's entries, so a refused value must not be
     # quoted in the error's text (a baseline's entry can hold a secret).
     model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
+    # The baseline segments keep no external plugin's raw config in their
+    # extras, so a reference left in one leaves validation as plain text.
+    _downcast_extras: ClassVar[bool] = True
     name: str | None = None
     limit: float | None = None
     keyword_exclude: str | None = None
@@ -215,6 +218,7 @@ class DetectSecretsScanSettingsPluginsUsed(RedactedSection):
 
 class DetectSecretsScanSettingsFiltersUsed(RedactedSection):
     model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
+    _downcast_extras: ClassVar[bool] = True
     path: str | None = None
     min_level: int | None = None
     keyword_exclude: str | None = None
@@ -222,11 +226,13 @@ class DetectSecretsScanSettingsFiltersUsed(RedactedSection):
 
 class DetectSecretsScanSettingsResults(RedactedSection):
     model_config = ConfigDict(extra="allow")
+    _downcast_extras: ClassVar[bool] = True
     __pydantic_extra__: Dict[str, List[Any]] = {}
 
 
 class DetectSecretsScanSettings(RedactedSection):
     model_config = ConfigDict(extra="allow")
+    _downcast_extras: ClassVar[bool] = True
     version: str | None = None
     generated_at: str | None = None
     plugins_used: List[DetectSecretsScanSettingsPluginsUsed] = []
