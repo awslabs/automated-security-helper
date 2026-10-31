@@ -241,6 +241,38 @@ def test_a_results_file_elsewhere_does_not_vouch_for_the_put_back_results(tmp_pa
     assert (output / RESTORED_MARKER_NAME).exists()
 
 
+def test_a_marker_that_cannot_be_removed_is_reported_above_debug(tmp_path, monkeypatch):
+    """The marker beside this run's fresh results makes a later reader take them
+    for an earlier scan's; the failed removal was logged at debug only."""
+    opts = _opts(tmp_path)
+    _put_back_results(opts.output_dir)
+    opts.existing_results = str(opts.output_dir / "ash_aggregated_results.json")
+
+    def refuse(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    logger = MagicMock()
+
+    module._drop_restore_marker_after_a_completed_run(opts, logger)
+
+    assert RESTORED_MARKER_NAME in str(logger.warning.call_args_list)
+    logger.debug.assert_not_called()
+
+
+def test_a_marker_that_is_removed_says_nothing(tmp_path):
+    """Control."""
+    opts = _opts(tmp_path)
+    _put_back_results(opts.output_dir)
+    opts.existing_results = str(opts.output_dir / "ash_aggregated_results.json")
+    logger = MagicMock()
+
+    module._drop_restore_marker_after_a_completed_run(opts, logger)
+
+    assert not (opts.output_dir / RESTORED_MARKER_NAME).exists()
+    logger.warning.assert_not_called()
+
+
 def test_only_the_output_directorys_own_file_is_a_request_for_it(tmp_path):
     """Control: the file the inner run reads, spelled directly or through the
     directory's parent, is the request the marker steps aside for."""

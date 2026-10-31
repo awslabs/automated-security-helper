@@ -5027,7 +5027,17 @@ def _drop_restore_marker_after_a_completed_run(opts: ScanOptions, logger) -> Non
     try:
         (opts.output_dir / RESTORED_MARKER_NAME).unlink(missing_ok=True)
     except OSError as error:
-        logger.debug(f"Could not remove {RESTORED_MARKER_NAME}: {error}")
+        # Said at the level an operator sees: a marker left beside this run's
+        # results makes a later reader (holds_restored_results) take them for an
+        # earlier scan's put back, and the run itself reported nothing wrong.
+        logger.warning(
+            shown_on_one_line(
+                f"Could not remove {RESTORED_MARKER_NAME} from the output "
+                f"directory ({error}); a later run that reads these results may "
+                "take them for an earlier scan's, which ASH put back. Remove "
+                "the file."
+            )
+        )
 
 
 # The statuses the in-container CLI reaches from a results file, and therefore the only
