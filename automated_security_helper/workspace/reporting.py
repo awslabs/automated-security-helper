@@ -311,7 +311,8 @@ def _dependencies_unsatisfied(instance: ReporterPluginBase) -> bool:
     except Exception as exc:  # noqa: BLE001 -- a broken check must not stop the step
         ASH_LOGGER.warning(
             f"Reporter {_reporter_name(instance)} raised while validating its "
-            f"dependencies and is treated as unavailable: {exc}"
+            f"dependencies and is treated as unavailable: "
+            f"{type(exc).__name__}: {error_text(exc)}"
         )
         return True
 

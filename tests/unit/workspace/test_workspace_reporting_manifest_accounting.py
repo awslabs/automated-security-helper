@@ -688,6 +688,32 @@ class TestAnUnbuildableReporterIsRefusedBeforeAnythingIsScanned:
         )
 
 
+class _RaisingDependencyCheck:
+    """A reporter whose own dependency check raises an error carrying a secret."""
+
+    config = _RaisingConfig()
+
+    def validate_plugin_dependencies(self) -> bool:
+        error = RuntimeError(f"token {CANARY} leaked")
+        carry_environment_values(error, (CANARY,))
+        raise error
+
+
+class TestADependencyCheckThatRaisesIsLoggedWithoutItsSecrets:
+    def test_the_warning_hides_an_environment_value_the_error_carries(self, caplog):
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
+
+        assert reporting._dependencies_unsatisfied(_RaisingDependencyCheck()) is True
+
+        assert "raised while validating its dependencies" in caplog.text, caplog.text
+        assert "RuntimeError" in caplog.text, caplog.text
+        assert CANARY not in caplog.text, caplog.text
+
+
 class TestFailuresAreRecordedNotRaised:
     def test_a_merged_reporter_that_raised_covers_no_project(self, workspace):
         _, output_dir, _ = workspace
