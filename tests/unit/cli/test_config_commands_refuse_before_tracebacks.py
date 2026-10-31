@@ -42,6 +42,13 @@ USAGE_ERROR_EXIT = 5
 
 VALID_CONFIG = "project_name: demo\nfail_on_findings: true\n"
 
+# A directory cannot be removed while it is the working directory on Windows,
+# a link needs a privilege there, and a mode of 0o444 does not make a file
+# unwritable there. (Root, which ignores the mode, is skipped inside that test.)
+NOT_ON_WINDOWS = pytest.mark.skipif(
+    os.name == "nt", reason="a working directory cannot be removed, or a link made"
+)
+
 
 @pytest.fixture(autouse=True)
 def _no_ambient_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,6 +131,7 @@ def test_init_writes_the_config_when_dot_ash_is_a_regular_file(tmp_path):
     assert "is not a directory" in result.output, result.output
 
 
+@NOT_ON_WINDOWS
 def test_init_does_not_write_the_gitignore_through_a_dangling_link(tmp_path):
     """exists() is False for a dangling link, so the write went through it."""
     ash_dir = tmp_path / ".ash"
@@ -153,6 +161,7 @@ def test_init_reports_an_unwritable_target_on_one_line(tmp_path):
 # --- a deleted working directory ---
 
 
+@NOT_ON_WINDOWS
 def test_get_refuses_a_deleted_working_directory_with_the_usage_exit(tmp_path):
     """Path.cwd() raised FileNotFoundError before the source-directory refusal."""
     gone = tmp_path / "gone"
@@ -182,6 +191,7 @@ def _invoke_in_a_deleted_directory(tmp_path, args):
         os.chdir(before)
 
 
+@NOT_ON_WINDOWS
 def test_the_wizard_refuses_a_deleted_working_directory_before_any_prompt(
     tmp_path, monkeypatch
 ):
@@ -197,6 +207,7 @@ def test_the_wizard_refuses_a_deleted_working_directory_before_any_prompt(
     assert "deleted" in result.output, result.output
 
 
+@NOT_ON_WINDOWS
 def test_init_with_a_relative_config_refuses_a_deleted_working_directory(tmp_path):
     """Red at the base: `init --config rel.yaml` resolved the path with
     config_path.absolute() outside any try, a FileNotFoundError traceback."""
@@ -383,6 +394,7 @@ def test_update_renders_keep_from_from_the_bytes_it_compared(config_file, monkey
     assert data["fail_on_findings"] is True
 
 
+@NOT_ON_WINDOWS
 def test_update_does_not_replace_a_file_the_user_may_not_write(config_file):
     """Red at the base: the staged write renamed over a read-only file, because a
     rename asks the directory, not the file. The write is made in place for such
@@ -503,7 +515,12 @@ def test_validate_shows_an_unexpected_errors_text(config_file, monkeypatch):
 
     assert result.exit_code == 1, result.output
     assert "Error validating config" in result.output, result.output
-    assert "\x1b" not in result.output, repr(result.output)
+    # The text is shown (both halves of it), and the one escape it carried is
+    # not: the check is for that sequence, not for any escape in the output,
+    # which a colored line of the command's own would also hold.
+    assert "boom" in result.output, repr(result.output)
+    assert "after" in result.output, repr(result.output)
+    assert "\x1b[2J" not in result.output, repr(result.output)
 
 
 # --- lint ---
