@@ -354,6 +354,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     # the baseline's against the baseline's own anchor (_baseline_anchor).
     _operator_filter_ids: Set[int] = PrivateAttr(default_factory=set)
 
+    # The same entries by position in ``filters_used``, and the list's length when
+    # they were recorded. The base ``_pre_scan`` rebuilds ``self.config`` from a
+    # dump of the config it is given, which makes new filter objects with new
+    # ``id()`` values in the same order; the position is what survives that
+    # (``_rekey_operator_filter_ids``).
+    _operator_filter_positions: Set[int] = PrivateAttr(default_factory=set)
+    _operator_filter_total: int = PrivateAttr(default=0)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = DetectSecretsScannerConfig()
@@ -483,16 +491,41 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         passes the very config the scanner was built from, whose settings that
         pass already filled in, so the swap changes nothing there; a config
         that differs is processed as a constructed one is.
+
+        The swap does build new filter objects even when the dumps match, so
+        the record of which ``filters_used`` entries are the operator's, kept
+        by object identity, would point at objects that are gone: every entry
+        then read as the baseline's, and the operator's exclude patterns were
+        matched at the baseline's anchor. When the dumps match, the record is
+        carried over by position instead.
         """
         before = None if config is None else self.config.model_dump(by_alias=True)
         validated = super()._pre_scan(target, target_type, config, *args, **kwargs)
-        if (
-            validated
-            and before is not None
-            and self.config.model_dump(by_alias=True) != before
-        ):
-            self._process_config_options()
+        if validated and before is not None:
+            if self.config.model_dump(by_alias=True) != before:
+                self._process_config_options()
+            else:
+                self._rekey_operator_filter_ids()
         return validated
+
+    def _rekey_operator_filter_ids(self) -> None:
+        """Point the operator-authorship record at the entries the config swap made.
+
+        The swap keeps the order and the length of ``filters_used``, so an entry
+        recorded at a position is the entry at that position now. A list whose
+        length is not the recorded one was changed after it was recorded, and
+        nothing is carried over: those entries read as the baseline's, the
+        one-anchor behavior ``_exclude_patterns_by_author`` documents.
+        """
+        entries = list(self.config.options.scan_settings.filters_used)
+        if len(entries) != self._operator_filter_total:
+            self._operator_filter_ids = set()
+            return
+        self._operator_filter_ids = {
+            id(item)
+            for position, item in enumerate(entries)
+            if position in self._operator_filter_positions
+        }
 
     def _configured_baseline_file(self) -> Path | str | None:
         """The ``baseline_file`` option, or None when it names nothing.
@@ -1017,11 +1050,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # The operator's entries that survived both rules, by identity (the
         # rules rebuild the list but keep the objects); the scan reads this to
         # match each exclude pattern where its author wrote it.
+        survivors = list(self.config.options.scan_settings.filters_used)
         self._operator_filter_ids = {
-            id(item)
-            for item in self.config.options.scan_settings.filters_used
+            id(item) for item in survivors if id(item) in config_filter_ids
+        }
+        self._operator_filter_positions = {
+            position
+            for position, item in enumerate(survivors)
             if id(item) in config_filter_ids
         }
+        self._operator_filter_total = len(survivors)
 
         # Skipped when the library is absent: the plugin list has to be read out of
         # detect-secrets itself, and there is no scan to configure for a scanner that
