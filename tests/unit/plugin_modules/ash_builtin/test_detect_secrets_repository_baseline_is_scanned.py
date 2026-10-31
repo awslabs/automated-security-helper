@@ -309,6 +309,7 @@ def test_the_operators_own_baseline_keeps_its_name_filter(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
     source = Path(context.source_dir)
+    (source / "kept.py").write_text("x = 1\n", encoding="utf-8")
     baseline = tmp_path / "operator.baseline"
     _write_baseline(
         source,
