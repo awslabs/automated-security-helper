@@ -26,8 +26,9 @@ them out.
 from __future__ import annotations
 
 import os
+from bisect import bisect_left
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Mapping, Sequence
+from typing import Callable, Collection, Dict, Iterable, List, Mapping, Sequence
 
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -237,7 +238,10 @@ def ignored_entries(
     all ignored (a pnpm ``node_modules/foo`` leading into ``node_modules/.pnpm``)
     is itself returned with a trailing ``/``, unless a directory holding it is, so
     the tool skips the ignored files under the link's name as well as under their
-    own.
+    own. A link that is not returned whole still leads to the ignored files and
+    directories in its destination, which the tool reads under the link's name
+    too; each is returned under that name as well (``_names_behind_links``), so
+    the link is not hidden and its ignored entries are.
 
     Empty when ``target`` is not ``source_dir`` or a directory below it (ASH's work
     directory for converted files): the patterns name paths below the source
@@ -317,7 +321,62 @@ def ignored_entries(
     entries = [f"{directory}/" for directory in whole if not _under_whole(directory)]
     entries += [f"{link}/" for link in links_to_ignored if not _under_whole(link)]
     entries += [relative for relative in ignored if not _under_whole(relative)]
+    # A link that is not returned whole still leads to the ignored entries behind
+    # it, and a tool that follows it reads them under the link's name.
+    entries += [
+        alias
+        for alias in _names_behind_links(entries, links, whole)
+        if not _under_whole(alias.rstrip("/"))
+    ]
     return sorted(entries)
+
+
+#: How many links deep ``_names_behind_links`` follows an ignored entry, which
+#: also ends a chain of links that leads back to itself.
+_LINK_HOPS = 4
+
+#: The most names ``_names_behind_links`` adds. Past it the rest are left out:
+#: the tool then reads them, and ASH drops their findings, as before.
+_MAX_NAMES_BEHIND_LINKS = 10000
+
+
+def _names_behind_links(
+    entries: Sequence[str], links: Mapping[str, str], whole: Collection[str]
+) -> List[str]:
+    """The names, under links, of *entries* that sit in a link's destination.
+
+    A link to a directory inside the tree is followed by syft, so an ignored file
+    under the link's destination is also read as ``<link>/<rest>``. A link whose
+    destination is hidden whole is returned itself and needs none. For the rest
+    (*links* whose destination is not in *whole*, because it holds a link to
+    scanned files and so cannot be hidden whole) each entry under the destination
+    is repeated under the link's name, directories keeping their trailing ``/``.
+    A name is itself repeated under any link whose destination holds it (a link
+    to a directory holding a link), up to ``_LINK_HOPS`` links deep.
+    """
+    open_links = {
+        link: leads_to for link, leads_to in links.items() if leads_to not in whole
+    }
+    known = set(entries)
+    frontier = sorted(known)
+    found: List[str] = []
+    for _ in range(_LINK_HOPS):
+        added: List[str] = []
+        for link, leads_to in open_links.items():
+            low = bisect_left(frontier, f"{leads_to}/")
+            high = bisect_left(frontier, f"{leads_to}0")
+            for entry in frontier[low:high]:
+                alias = f"{link}/{entry[len(leads_to) + 1 :]}"
+                if alias not in known:
+                    known.add(alias)
+                    added.append(alias)
+                    if len(found) + len(added) >= _MAX_NAMES_BEHIND_LINKS:
+                        return found + added
+        if not added:
+            break
+        found += added
+        frontier = sorted(known)
+    return found
 
 
 def _ignore_entries(

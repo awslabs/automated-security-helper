@@ -30,6 +30,7 @@ from types import SimpleNamespace
 import pytest
 
 from automated_security_helper.utils.link_exclusions import (
+    _LINK_HOPS,
     _ignore_entries,
     grep_ignore_names,
     ignored_entries,
@@ -158,7 +159,9 @@ def test_a_link_to_an_ignored_directory_holding_a_link_to_scanned_files_is_not_h
     ignored, but that directory holds a further link to scanned files, which syft
     reaches through ``src/vendored`` too. Written as ``./src/vendored/**``, the
     exclusion hid those scanned files; the link's target must be a directory that
-    is hidden whole in its own right before the link is."""
+    is hidden whole in its own right before the link is. Not hiding the link whole
+    does not leave its ignored file readable: syft reaches ``vendored.py`` as
+    ``src/vendored/vendored.py`` too, so that name is excluded as well."""
     tree = Path(os.path.realpath(tmp_path))
     target = tree / "proj"
     (target / "third_party" / "lib").mkdir(parents=True)
@@ -176,7 +179,56 @@ def test_a_link_to_an_ignored_directory_holding_a_link_to_scanned_files_is_not_h
 
     values = syft_excludes(target, target, _ignore("third_party/"))
 
-    assert values == ["./third_party/lib/vendored.py"]
+    assert values == [
+        "./src/vendored/vendored.py",
+        "./third_party/lib/vendored.py",
+    ]
+
+
+def test_an_ignored_directory_behind_a_link_is_excluded_under_the_links_name(
+    tmp_path,
+):
+    """A directory inside ``third_party/lib`` whose every file is ignored is hidden
+    whole under its own name; ``src/vendored`` leads to ``lib``, which cannot be
+    hidden whole (it holds a link to scanned files), so syft reads that directory
+    as ``src/vendored/gen`` too and the whole directory is excluded there as well."""
+    tree = Path(os.path.realpath(tmp_path))
+    target = tree / "proj"
+    (target / "third_party" / "lib" / "gen").mkdir(parents=True)
+    (target / "third_party" / "lib" / "gen" / "a.py").write_text("", encoding="utf-8")
+    (target / "third_party" / "lib" / "gen" / "b.py").write_text("", encoding="utf-8")
+    (target / "other").mkdir()
+    (target / "other" / "c.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "third_party" / "lib" / "inner").symlink_to(
+        target / "other", target_is_directory=True
+    )
+    (target / "src").mkdir()
+    (target / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "src" / "vendored").symlink_to(
+        target / "third_party" / "lib", target_is_directory=True
+    )
+
+    values = syft_excludes(target, target, _ignore("third_party/"))
+
+    assert values == ["./src/vendored/gen/**", "./third_party/lib/gen/**"]
+
+
+def test_a_link_that_leads_back_into_itself_is_followed_a_bounded_number_of_times():
+    files = ["a/ignored.txt", "a/keep.txt"]
+
+    # The default ``matches`` is ``ignore_path_matches``, which the tests above use
+    # with an exact file pattern; the link leads to its own parent.
+    entries = ignored_entries(
+        Path("/does/not/matter"),
+        Path("/does/not/matter"),
+        _ignore("a/ignored.txt"),
+        files,
+        directory_links={"a/loop": "a"},
+    )
+
+    assert entries == ["a/ignored.txt"] + [
+        "a/" + "loop/" * hops + "ignored.txt" for hops in range(1, _LINK_HOPS + 1)
+    ]
 
 
 def test_a_chain_of_links_to_scanned_files_is_followed_back_to_the_first_link(
@@ -209,7 +261,17 @@ def test_a_chain_of_links_to_scanned_files_is_followed_back_to_the_first_link(
 
     values = syft_excludes(target, target, _ignore("third_party/"))
 
-    assert values == ["./third_party/hub/vendor.py", "./third_party/lib/vendored.py"]
+    # The ignored files, each under every name the links give it: ``bridge``
+    # leads to ``hub`` from inside ``lib``, and ``src/vendored`` leads to ``lib``,
+    # so ``hub/vendor.py`` is also read as ``lib/bridge/vendor.py`` and as
+    # ``src/vendored/bridge/vendor.py``.
+    assert values == [
+        "./src/vendored/bridge/vendor.py",
+        "./src/vendored/vendored.py",
+        "./third_party/hub/vendor.py",
+        "./third_party/lib/bridge/vendor.py",
+        "./third_party/lib/vendored.py",
+    ]
 
 
 @pytest.mark.parametrize("function", [ignored_entries, _ignore_entries])
