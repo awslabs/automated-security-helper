@@ -165,9 +165,32 @@ class LiveProgressDisplay:
         # Live display
         self.live = None
 
+        # The console sink put on the logger when a shown display ends.
+        self._sink_after_stop: logging.Handler | None = None
+
+    def _restore_panel_handler(self) -> None:
+        """Put the panel's handler back on the logger for a display that starts again.
+
+        A display that has ended took the panel handler off and, if it was
+        shown, put a console sink in its place. Started again, it builds a new
+        ``Live`` over the same panel, so the panel's handler goes back on and the
+        sink comes off: the sink wrote to the standard error it captured before
+        the new ``Live`` redirected the streams, and left on, it would mix its
+        lines into the redraws and print every line twice beside the panel.
+        """
+        sink, self._sink_after_stop = self._sink_after_stop, None
+        if sink is not None and sink in ASH_LOGGER.handlers:
+            ASH_LOGGER.removeHandler(sink)
+        handler = self.log_handler
+        if isinstance(handler, LiveDisplayLogHandler) and (
+            handler not in ASH_LOGGER.handlers
+        ):
+            ASH_LOGGER.addHandler(handler)
+
     def start(self):
         """Start the live display if progress is enabled."""
         if self.show_progress and (self.live is None):
+            self._restore_panel_handler()
             try:
                 # Use auto_refresh=True and vertical_overflow="visible" to allow the panel to adjust its height
                 self.live = Live(
@@ -285,7 +308,14 @@ class LiveProgressDisplay:
         if shown:
             self.live.__exit__(None, None, None)
             self.live = None
-            ASH_LOGGER.addHandler(self._console_sink(getattr(handler, "level", 15)))
+            # Kept, so a display that starts again takes it off (start()), and
+            # the end of a second shown display replaces it where it used to add
+            # another.
+            previous, self._sink_after_stop = self._sink_after_stop, None
+            if previous is not None and previous in ASH_LOGGER.handlers:
+                ASH_LOGGER.removeHandler(previous)
+            self._sink_after_stop = self._console_sink(getattr(handler, "level", 15))
+            ASH_LOGGER.addHandler(self._sink_after_stop)
 
     def add_task(
         self, phase: ExecutionPhase, description: str, total: int = 100
