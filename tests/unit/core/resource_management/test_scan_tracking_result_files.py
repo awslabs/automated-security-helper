@@ -707,8 +707,20 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
             pytest.param(
                 {"finding_count": 7, "severity_counts": {"high": 1, "low": 1}},
                 7,
-                {"high": 1, "low": 1},
-                id="a-mismatched-sum-keeps-finding_count-as-the-total",
+                {"high": 1, "low": 1, "unknown": 5},
+                id="a-mismatched-sum-keeps-finding_count-and-grades-the-rest-unknown",
+            ),
+            pytest.param(
+                {"finding_count": 3, "severity_counts": {}},
+                3,
+                {"unknown": 3},
+                id="an-empty-bucket-object-grades-the-count-unknown",
+            ),
+            pytest.param(
+                {"finding_count": 5, "severity_counts": {"high": 1, "suppressed": 2}},
+                3,
+                {"high": 1, "suppressed": 2, "unknown": 2},
+                id="the-rest-is-counted-without-the-suppressed-bucket",
             ),
             pytest.param(
                 {"finding_count": 2, "severity_counts": {"high": -5, "low": 2}},
@@ -743,7 +755,8 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
         a non-negative int is dropped; a bucket name the model lacks lands in
         ``unknown``; and the recorded finding_count is the total even when the
         buckets do not sum to it (the scanner's record wins), less its own
-        suppressed bucket, which the aggregated total leaves out too. A
+        suppressed bucket, which the aggregated total leaves out too, with
+        the part of it no bucket accounts for graded ``unknown``. A
         recorded count beside NO usable buckets is graded by the findings
         array and the rest lands in ``unknown`` (the module's rule: never in
         the total and in no bucket), as the aggregated path counts the same

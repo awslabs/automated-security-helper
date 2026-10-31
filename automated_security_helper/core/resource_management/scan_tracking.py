@@ -676,7 +676,9 @@ def _progress_counts_of_document(
     array does not account for lands in ``unknown``: the module's rule is that
     a finding is never in the total and in no bucket, and the aggregated path
     puts such a count under ``unknown`` too, so the breakdown does not change
-    when the aggregated file appears.
+    when the aggregated file appears. The same holds for a recorded count
+    beside buckets that do not add up to it: the difference lands in
+    ``unknown``, where it used to stay in the total and in no bucket.
     """
     findings = _findings_of_document(document)
     recorded_count, recorded_counts = _counts_of_document(document)
@@ -690,6 +692,9 @@ def _progress_counts_of_document(
         count = len(findings)
     elif recorded_counts is not None:
         count = max(recorded_count - counts["suppressed"], 0)
+        ungraded = count - (sum(counts.values()) - counts["suppressed"])
+        if ungraded > 0:
+            counts[UNKNOWN_SEVERITY] += ungraded
     else:
         count = recorded_count
         ungraded = recorded_count - sum(counts.values())
