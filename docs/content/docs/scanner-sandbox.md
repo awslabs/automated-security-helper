@@ -221,10 +221,11 @@ it needs.
   `NAME=value` sets it. Every backend reads the same list, and a list you write
   replaces the default one, as a compose list replaces an image's (see
   [Pass other variables](#environment)). A proxy setting is passed only to a scanner
-  that has a network. A name the rule above drops, `TMPDIR` (each backend gives a
-  scanner a private temporary directory of its own, so a listed value would only point
-  it elsewhere) and ASH's own run id are refused with the name, so the list is not a
-  channel for secrets. A `NAME=value` entry whose value carries
+  that has a network. A name the rule above drops, `TMPDIR`, `TEMP` and `TMP` (each
+  backend gives a scanner a private temporary directory of its own, so a listed value
+  would only point it elsewhere), `HOME` (the sandbox sets it to the scanner's private
+  home, so an entry would do nothing) and ASH's own run id are refused with the name,
+  so the list is not a channel for secrets. A `NAME=value` entry whose value carries
   `user:password@` in a URL is refused with the variable named and no value shown,
   because the sandbox would drop it from every scanner and the entry would do
   nothing. A variable the list passes by name is held to the same rule when ASH is
@@ -463,10 +464,11 @@ is no separate flag.
 A `NAME=value` entry sets a variable in every sandboxed scanner, `LD_PRELOAD` and
 `NODE_OPTIONS` included, so the setting grants access like the others below and
 follows the same rule about who may set it. A name that marks a credential, `TMPDIR`,
-ASH's own run id and a `NAME=value` entry whose value is a URL with a user name and
-password (a proxy such as `http://user:password@proxy:3128`) are refused when the
-config is read, with the variable named and no value shown. A scanner that needs a credential is granted it with
-`sandbox.env_scanners` and its own variable names instead.
+`TEMP`, `TMP`, `HOME`, ASH's own run id and a `NAME=value` entry whose value is a URL
+with a user name and password (a proxy such as `http://user:password@proxy:3128`)
+are refused when the config is read, with the variable named and no value shown. A
+scanner that needs a credential is granted it with `sandbox.env_scanners` and its own
+variable names instead.
 
 #### Who may grant
 

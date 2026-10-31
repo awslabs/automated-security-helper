@@ -1567,6 +1567,21 @@ def test_a_listed_temp_or_tmp_is_refused_like_tmpdir(layout, entry):
     assert not {"TMPDIR", "TEMP", "TMP"} & set(passed)
 
 
+@pytest.mark.parametrize("entry", ["HOME", "HOME=/somewhere"])
+def test_a_listed_home_is_refused_because_the_sandbox_sets_it(layout, entry):
+    """``filter_env`` sets HOME to the sandbox's private home after the list is
+    applied, so a listed value would pass validation and change nothing."""
+    with pytest.raises(ValueError, match="HOME") as refused:
+        policy_module.parse_environment(["MY_VAR", entry])
+    assert "/somewhere" not in str(refused.value)
+
+    with pytest.raises(SandboxUnavailable, match="HOME"):
+        _policy(layout, environment=("MY_VAR", entry))
+
+    passed = _policy(layout).filter_env({"HOME": "/caller"})
+    assert passed["HOME"] == layout.home.as_posix()
+
+
 def test_the_tmpdir_refusal_says_what_each_backend_does():
     """Only Landlock and sandbox-exec set TMPDIR; bwrap and firejail give each
     scanner a private /tmp and set no variable, so the text must not say that every

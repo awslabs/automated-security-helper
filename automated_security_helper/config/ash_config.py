@@ -1749,8 +1749,8 @@ class SandboxConfig(RedactedSection):
                 "with a network read. A list here REPLACES the default, as a compose list replaces "
                 "an image's: [MY_VAR] alone drops the proxy and CA variables, so "
                 "list them too. A name that marks a credential (TOKEN, PASSWORD, "
-                "SECRET and the like), TMPDIR and ASH's own run id are refused with "
-                "the name; a scanner that needs a credential is granted it with "
+                "SECRET and the like), TMPDIR, TEMP, TMP, HOME and ASH's own run id "
+                "are refused with the name; a scanner that needs a credential is granted it with "
                 "env_scanners. Honored only from --config-overrides or a config "
                 "file outside every git checkout and the scanned directory."
             )

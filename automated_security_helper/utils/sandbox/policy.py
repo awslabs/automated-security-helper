@@ -276,6 +276,9 @@ def parse_environment(
     backends set none, so a listed ``TMPDIR`` would reach the scanner under two of
     the four, and a listed ``TEMP`` or ``TMP`` is what Python's ``tempfile`` reads
     wherever ``TMPDIR`` is unset.
+    ``HOME`` is refused as well: ``filter_env`` sets it to the sandbox's private home
+    after the list is applied, so a listed value would pass validation and do
+    nothing.
     The error names the variable and never shows a value, which may be a secret:
     an entry whose part before the first ``=`` is not a variable name is named by
     its position, never by that part, because the entry may be a value written
@@ -283,10 +286,10 @@ def parse_environment(
 
     Raises:
         ValueError: The list is a string or a mapping, or an entry is not text,
-            names no variable, names a credential, a dropped variable or a
-            temporary-directory variable, carries a NUL in its value, or sets a URL
-            with a user name and password (``filter_env`` would drop it from every
-            scanner).
+            names no variable, names a credential, a dropped variable, a
+            temporary-directory variable or ``HOME``, carries a NUL in its value, or
+            sets a URL with a user name and password (``filter_env`` would drop it
+            from every scanner).
     """
     names: Dict[str, None] = {}
     values: Dict[str, str] = {}
@@ -313,6 +316,12 @@ def parse_environment(
                 "firejail give each scanner a private /tmp, so a listed value "
                 "would send temporary files somewhere the sandbox did not make "
                 "for the scanner"
+            )
+        if name == "HOME":
+            raise ValueError(
+                f"environment entry {name!r} is refused: the sandbox sets HOME to "
+                "the scanner's private home whatever the list says, so the entry "
+                "would do nothing"
             )
         marker = next((m for m in CREDENTIAL_MARKERS if m in name.upper()), None)
         if marker is not None:
