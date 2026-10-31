@@ -6,7 +6,10 @@
 The config linter reads raw YAML dicts, where ``rule_id: 1234`` or
 ``package_version: 2.0`` arrive as numbers, and the id joined them as they were:
 a TypeError out of ``ash config lint --fix-unused``. Every part is text now, and
-a number reads as the text its config would have held.
+a number is rendered with ``str()``. That is the text of the value YAML loaded,
+not of what was typed: ``package_version: 2.10`` is the float ``2.1`` by the time
+the linter reads it, and its id says ``2.1``. A version whose trailing zero
+matters is written as text (``"2.10"``) in the config, and keeps it.
 """
 
 from __future__ import annotations
@@ -22,6 +25,18 @@ def test_a_numeric_rule_id_and_package_version_render_as_text():
     assert (
         suppression_id({"path": "a.py", "rule_id": 1234, "package_version": 2.0})
         == "a.py|1234|*|*|*@2.0@*"
+    )
+
+
+def test_a_version_loaded_as_a_float_renders_the_float_not_what_was_typed():
+    """``package_version: 2.10`` reaches the linter as ``2.1``; the id says so.
+    Written as text, the zero is kept."""
+    assert (
+        suppression_id({"path": "a.py", "package_version": 2.1}) == "a.py|*|*|*|*@2.1@*"
+    )
+    assert (
+        suppression_id({"path": "a.py", "package_version": "2.10"})
+        == "a.py|*|*|*|*@2.10@*"
     )
 
 
