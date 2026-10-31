@@ -24,9 +24,10 @@ at the deadline a killed search reads ``ScannerError``, a search the bound could
 not end reads as no answer within the limit.
 
 A suppression pass asks every entry about every finding, so the bound is spent
-once over the pass, not once per call: ``EvaluationBudget`` opens one deadline
-per ``scan_timeout`` the first time it is used, hands each later search what is
-left, and remembers an entry that ran out so it is not searched again. The SARIF
+once over the pass, not once per call: ``EvaluationBudget`` keeps one balance
+per ``scan_timeout``, charges it the time each search took in the worker (not
+the time the pass spent elsewhere), hands each later search what is left, and
+remembers an entry that ran out so it is not searched again. The SARIF
 pass creates one budget and hands it down through ``matching_exclusion`` and
 ``hides``; the tests here pin each hop with a budget that records what it saw.
 
@@ -47,6 +48,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import pytest
@@ -331,31 +333,82 @@ class _RecordingBudget(EvaluationBudget):
         return function(*args)
 
 
-def test_a_budget_spends_one_deadline_over_a_pass():
-    budget = EvaluationBudget()
-    # Start the worker under a deadline of its own, so the one-second deadline
-    # below is spent on the sleeps and not on a spawn platform's interpreter start.
-    assert budget.evaluate(FAST_TIMEOUT, "warm", "warm", _five) == 5
-    started = time.monotonic()
+class _FakeWorker:
+    """A worker that answers at once and reports a fixed search time, so the
+    budget's arithmetic is tested without a clock or a child process."""
 
-    budget.evaluate(1.0, "first", "k1", time.sleep, 0.6)
+    pid = None
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        self.last_search_seconds = 0.0
+
+    def evaluate(self, wait, timeout, source, function, args):
+        self.last_search_seconds = min(self.seconds, wait)
+        if self.seconds >= wait:
+            raise EvaluationTimedOut(
+                f"{source} ran past {timeout} seconds, the scan_timeout"
+            )
+        return function(*args)
+
+    def close(self, graceful: bool = True) -> None:
+        pass
+
+
+def test_a_budget_spends_one_balance_over_a_pass():
+    budget = EvaluationBudget()
+    budget._worker = _FakeWorker(0.6)
+
+    assert budget.evaluate(1.0, "first", "k1", _five) == 5
+    assert budget.remaining(1.0) == pytest.approx(0.4)
     with pytest.raises(ScannerError) as second:
-        budget.evaluate(1.0, "second", "k2", time.sleep, 0.6)
-    spent_at = time.monotonic() - started
+        budget.evaluate(1.0, "second", "k2", _five)
     with pytest.raises(ScannerError) as repeated:
         budget.evaluate(1.0, "second again", "k2", _five)
-    # Past the deadline for certain, whichever side of it the kill landed on.
-    time.sleep(0.05)
     with pytest.raises(ScannerError) as late:
         budget.evaluate(1.0, "third", "k3", _five)
 
-    assert spent_at < 1.5
-    assert time.monotonic() - started - spent_at < 0.3
     assert "second" in str(second.value)
     assert "scan_timeout" in str(second.value)
     assert "not searched again" in str(repeated.value)
     assert "spent" in str(late.value)
     assert budget.timed_out == ("k2", "k3")
+
+
+def test_time_the_parent_spends_between_searches_is_not_charged(monkeypatch):
+    """The balance is the time the worker took on each search. The parent's own
+    work between two searches (the other matching, symbol reads, git reads, the
+    pipe) is not regular-expression time: charged to a wall-clock deadline that
+    opened at the first search, two seconds of it failed every later match of
+    a scanner whose scan_timeout was one. The clock here is moved by hand, two
+    seconds between the searches and a tenth of a second inside each."""
+    clock = {"now": 100.0}
+    monkeypatch.setattr(
+        exclusions_module, "time", SimpleNamespace(monotonic=lambda: clock["now"])
+    )
+
+    class _Pipe:
+        def send(self, job) -> None:
+            pass
+
+        def poll(self, wait) -> bool:
+            return True
+
+        def recv(self):
+            clock["now"] += 0.1
+            return True, 5
+
+    worker = exclusions_module._EvaluationWorker()
+    monkeypatch.setattr(worker, "_started", lambda: _Pipe())
+    budget = EvaluationBudget()
+    budget._worker = worker
+
+    assert budget.evaluate(1.0, "first", "k1", _five) == 5
+    clock["now"] += 2.0
+    assert budget.evaluate(1.0, "second", "k2", _five) == 5
+
+    assert budget.timed_out == ()
+    assert budget.remaining(1.0) == pytest.approx(0.8)
 
 
 def test_a_budget_remembers_an_entry_that_ran_out(monkeypatch):
@@ -378,16 +431,15 @@ def test_a_budget_remembers_an_entry_that_ran_out(monkeypatch):
     assert budget.timed_out == ("k",)
 
 
-def test_a_budget_opens_one_deadline_per_scan_timeout():
+def test_a_budget_keeps_one_balance_per_scan_timeout():
     budget = EvaluationBudget()
+    budget._worker = _FakeWorker(0.25)
 
-    first = budget.remaining(10.0)
-    time.sleep(0.05)
-    again = budget.remaining(10.0)
-    other = budget.remaining(3.0)
+    assert budget.remaining(10.0) == 10.0
+    budget.evaluate(10.0, "s", "k1", _five)
 
-    assert again < first
-    assert 2.9 < other <= 3.0
+    assert budget.remaining(10.0) == pytest.approx(9.75)
+    assert budget.remaining(3.0) == 3.0
 
 
 def test_a_budget_with_no_bound_runs_inline():

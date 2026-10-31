@@ -442,19 +442,23 @@ class EvaluationTimedOut(ScannerError):
 
 
 class EvaluationBudget:
-    """One deadline for every bounded search of a suppression pass, with a memory.
+    """One time balance for every bounded search of a suppression pass, with a memory.
 
     A pass over a SARIF run asks each client-supplied exclusion about each
     finding (``matching_exclusion`` -> ``hides`` -> ``checkov_skips``). Bounded
     per call, one entry could spend a whole ``scan_timeout`` on every finding,
     so a run of a thousand findings waited a thousand timeouts before the pass
-    failed, where checkov itself would have been killed once. The budget starts
-    one deadline per distinct ``scan_timeout`` the first time an entry with it
-    is evaluated, and every later evaluation under that timeout gets what is
-    left of it. An entry whose search ran to the deadline is remembered by its
+    failed, where checkov itself would have been killed once. The budget keeps
+    one balance per distinct ``scan_timeout``, and every evaluation under that
+    timeout is charged the time its search took in the worker, no more: the
+    rest of the pass (the other matching, the symbol reads, the git reads, the
+    pipe, a spawned interpreter's start) is not regular-expression time, and
+    charged to a wall-clock deadline that opened at the first search it failed
+    every later match of a pass that simply ran longer than the timeout. An
+    entry whose search ran to the end of the balance is remembered by its
     ``key``, and a later question about it fails at once with the same answer
     instead of starting another search; so does any evaluation once the
-    deadline has passed.
+    balance is spent.
 
     The searches run in ONE child process the budget starts at its first
     bounded evaluation and reuses for the rest (``_EvaluationWorker``): a
@@ -473,7 +477,8 @@ class EvaluationBudget:
     """
 
     def __init__(self) -> None:
-        self._deadlines: Dict[float, float] = {}
+        #: Seconds of search time spent so far, per ``scan_timeout``.
+        self._spent: Dict[float, float] = {}
         self._timed_out: Dict[str, str] = {}
         self._worker = _EvaluationWorker()
         self._finalizer = weakref.finalize(self, self._worker.close)
@@ -497,10 +502,8 @@ class EvaluationBudget:
         return self._worker.pid
 
     def remaining(self, timeout: float) -> float:
-        """Seconds left of the deadline ``timeout`` opened, opening it now if new."""
-        now = time.monotonic()
-        deadline = self._deadlines.setdefault(timeout, now + timeout)
-        return deadline - now
+        """Seconds of search time left under ``timeout``: the timeout less what the worker spent."""
+        return timeout - self._spent.get(timeout, 0.0)
 
     @property
     def timed_out(self) -> Tuple[str, ...]:
@@ -541,7 +544,14 @@ class EvaluationBudget:
             return self._worker.evaluate(remaining, timeout, source, function, args)
         except EvaluationTimedOut:
             self._timed_out[key] = source
+            # Ran to the end of what was left: nothing is left whatever the
+            # clock read when the kill landed.
+            self._spent[timeout] = timeout
             raise
+        finally:
+            self._spent[timeout] = (
+                self._spent.get(timeout, 0.0) + self._worker.last_search_seconds
+            )
 
 
 class _EvaluationWorker:
@@ -573,6 +583,10 @@ class _EvaluationWorker:
     def __init__(self) -> None:
         self._process: Any = None
         self._connection: Any = None
+        #: How long the last ``evaluate`` waited on the child for its answer,
+        #: from the request sent to the answer (or the kill): the search itself,
+        #: without the start of a child that was not running yet.
+        self.last_search_seconds = 0.0
 
     @property
     def pid(self) -> Optional[int]:
@@ -593,7 +607,9 @@ class _EvaluationWorker:
         ``wait`` is what is left of ``timeout``, the scanner's ``scan_timeout``,
         which the error names.
         """
+        self.last_search_seconds = 0.0
         connection = self._started()
+        began = time.monotonic()
         try:
             connection.send((function, args))
             if not connection.poll(wait):
@@ -613,6 +629,8 @@ class _EvaluationWorker:
                 f"The evaluation of a regular expression from {source} ended without "
                 "an answer, so the scan fails rather than guess at one."
             ) from None
+        finally:
+            self.last_search_seconds = time.monotonic() - began
         if answered:
             return payload
         raise payload
@@ -770,7 +788,7 @@ def checkov_skips(
     regular-expression syntax is searched under it, in a child process, and a
     search still running at the deadline raises ScannerError naming the option.
     With a ``budget`` (the suppression pass's, ``EvaluationBudget``) the search
-    gets what is left of the pass's one deadline and an entry that ran out is
+    gets what is left of the pass's one scan_timeout and an entry that ran out is
     not searched again; without one the search is bounded on its own
     (``evaluated_within``). None, a literal pattern, or one that did not
     compile is searched inline.
