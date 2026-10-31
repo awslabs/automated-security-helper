@@ -1613,6 +1613,19 @@ class AshAggregatedResults(RecordModel):
         # narrowed since the row was written) would keep its old count while the
         # summary above dropped, so it is reset. Only a row of the declared type
         # that still holds a count is touched: any other row is left as it is.
+        #
+        # The flattened findings name a scanner by its result's properties and
+        # then by the run's tool name; the metrics name it by the result's
+        # properties and then by its tags. A result with no scanner_name can be
+        # one scanner's for the metrics and another's here, so a row missing from
+        # the flattened counts is set to the count the metrics give it, which is
+        # zero only when they find no suppressed finding for it either. The
+        # findings appended from additional_reports below are never suppressed
+        # (from_additional_report), so taking the counts before them loses none.
+        from automated_security_helper.core.scanner_statistics_calculator import (
+            ScannerStatisticsCalculator,
+        )
+
         for row_name, row in self.scanner_results.items():
             if (
                 isinstance(row, ScannerTargetStatusInfo)
@@ -1620,8 +1633,11 @@ class AshAggregatedResults(RecordModel):
                 and row_name.lower() not in suppressed_by_scanner
                 and (row.suppressed_finding_count or row.severity_counts.suppressed)
             ):
-                row.suppressed_finding_count = 0
-                row.severity_counts.suppressed = 0
+                counted = ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
+                    self, row_name
+                )[0]
+                row.suppressed_finding_count = counted
+                row.severity_counts.suppressed = counted
 
         for scanner_name, results in self.additional_reports.items():
             if results is None:
