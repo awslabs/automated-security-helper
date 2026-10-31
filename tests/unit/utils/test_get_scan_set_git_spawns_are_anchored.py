@@ -180,9 +180,12 @@ def test_the_core_worktree_read_for_git_dir_alone_is_anchored_too(
     """GIT_DIR without GIT_WORK_TREE makes the root lookup and the diff ask the
     repository whether ``core.worktree`` names its tree; that read runs the
     resolved git with the anchored environment and no location variable of its
-    own. The recorder answers every call with an empty stdout, so the key reads as
-    unset and the lookup itself then drops the variables as before."""
-    monkeypatch.setenv("GIT_DIR", str(tmp_path / "repo.git"))
+    own, and reads the git directory's own config file (``config --file
+    <git_dir>/config``, as git's setup does) rather than every scope through
+    ``--git-dir``. The recorder answers every call with an empty stdout, so the
+    key reads as unset and the lookup itself then drops the variables as before."""
+    git_dir = str(tmp_path / "repo.git")
+    monkeypatch.setenv("GIT_DIR", git_dir)
     monkeypatch.delenv("GIT_WORK_TREE", raising=False)
     monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
 
@@ -191,8 +194,14 @@ def test_the_core_worktree_read_for_git_dir_alone_is_anchored_too(
     assert len(recorded) == 2, [argv for argv, _ in recorded]
     probe_argv, probe_kwargs = recorded[0]
     assert probe_argv[0] == RESOLVED
-    assert probe_argv[-3:] == ["config", "--get", "core.worktree"]
-    assert "--git-dir" in probe_argv
+    assert probe_argv[-5:] == [
+        "config",
+        "--file",
+        os.path.join(git_dir, "config"),
+        "--get",
+        "core.worktree",
+    ]
+    assert "--git-dir" not in probe_argv
     assert not set(probe_kwargs["env"]) & set(LOCATION_VARIABLES)
     _lookup_argv, lookup_kwargs = recorded[1]
     assert not set(lookup_kwargs["env"]) & set(LOCATION_VARIABLES)
@@ -202,9 +211,11 @@ def test_the_core_worktree_read_for_git_dir_alone_is_anchored_too(
 def test_each_helper_leaves_the_index_and_object_store_overrides_out(
     tmp_path, monkeypatch, recorded, ask
 ):
-    """GIT_INDEX_FILE replaces the index the diff reads the working tree through,
-    and the object-store variables replace where revisions are read from; with
-    no layout named, every helper reads the discovered repository's own."""
+    """The object-store variables replace where revisions are read from, and
+    GIT_INDEX_FILE replaces the index. The commit-to-commit diff reads no index,
+    so that variable is left out as defense in depth: no git this module starts
+    reads an index exported for another purpose. With no layout named, every
+    helper reads the discovered repository's own."""
     for name in STATE_VARIABLES:
         monkeypatch.setenv(name, str(tmp_path / "elsewhere" / name.lower()))
     for name in LOCATION_VARIABLES:
@@ -224,8 +235,9 @@ def test_a_kept_layout_drops_the_index_override_and_keeps_the_object_stores(
     """With a layout the caller names (GIT_DIR and an existing GIT_WORK_TREE), the
     copy git is started with keeps the object-store variables (a pre-receive
     hook's quarantine is readable only through them) and never GIT_INDEX_FILE:
-    the diff's working-tree side is read through the named repository's own
-    index."""
+    the diff compares two commits and reads no index, and the variable is left
+    out as defense in depth, so no git started here reads an index exported for
+    another purpose."""
     bare, tree = _name_a_deployed_tree(tmp_path, monkeypatch)
     objects = str(tmp_path / "quarantine")
     monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "foreign.index"))

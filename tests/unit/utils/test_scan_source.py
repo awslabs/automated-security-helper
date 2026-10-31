@@ -952,6 +952,69 @@ def test_a_hook_scanning_a_subdirectory_joins_the_diff_onto_the_real_root(
     assert all(p.is_file() for p in joined), joined
 
 
+@pytest.mark.integration
+def test_a_main_repositorys_core_worktree_is_not_read_for_a_linked_worktree(
+    isolated_tmp, monkeypatch
+):
+    """git takes ``core.worktree`` from the git directory's own config file alone,
+    and a linked worktree's admin dir has none (it holds ``commondir`` instead),
+    so for a hook's ``GIT_DIR=<admin dir>`` git ignores the main repository's
+    ``core.worktree`` and calls the current directory the top (git 2.50.1). A
+    probe that read the setting through every config scope saw the main
+    repository's absolute tree, which holds the scanned directory, kept GIT_DIR
+    alone, and re-opened the hook bug: the top was ``<worktree>/src`` while the
+    diff named ``src/app.py``, so nothing matched."""
+    root = _repo_with_a_commit(isolated_tmp / "super")
+    _git("config", "core.worktree", root.as_posix(), cwd=root)
+    _git("worktree", "add", "-q", "-b", "side", "wt/x", cwd=root)
+    worktree = root / "wt" / "x"
+    src = worktree / "src"
+    src.mkdir()
+    (src / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git("add", "src/app.py", cwd=worktree)
+    _git("commit", "-qm", "add app", cwd=worktree)
+    monkeypatch.setenv("GIT_DIR", (root / ".git" / "worktrees" / "x").as_posix())
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(src)
+    changed = get_changed_files("HEAD~1", cwd=src)
+
+    assert found_root == worktree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+    assert all((found_root / p).is_file() for p in changed), changed
+
+
+@pytest.mark.integration
+def test_a_configured_tree_is_not_honored_from_a_repository_nested_in_it(
+    isolated_tmp, monkeypatch
+):
+    """A dotfiles repository (``GIT_DIR=~/.cfg`` with ``core.worktree=$HOME``) names
+    a tree that holds every project under it. From inside such a project git
+    honors the exported GIT_DIR: the configured tree is the top and the dotfiles
+    history is the diff, while discovery from the scanned directory finds the
+    project's own ``.git`` first. The exported GIT_DIR is honored only when no
+    ``.git`` entry sits between the scanned directory and the configured tree,
+    which is the deploy case the setting exists for."""
+    cfg = _repo_with_a_commit(isolated_tmp / "cfg")
+    _git("config", "core.worktree", isolated_tmp.as_posix(), cwd=cfg)
+    project = _repo_with_a_commit(isolated_tmp / "proj")
+    src = project / "src"
+    src.mkdir()
+    (src / "app.py").write_text("y = 1\n", encoding="utf-8")
+    _git("add", "src/app.py", cwd=project)
+    _git("commit", "-qm", "add app", cwd=project)
+    monkeypatch.setenv("GIT_DIR", (cfg / ".git").as_posix())
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(src)
+    changed = get_changed_files("HEAD~1", cwd=src)
+
+    assert found_root == project.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
 def _bare_repository_with_a_deployed_tree(parent: Path) -> "tuple[Path, Path]":
     """A bare clone and a checkout-less tree of its tip: (bare, tree).
 

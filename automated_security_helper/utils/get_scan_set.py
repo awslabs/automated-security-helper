@@ -2224,13 +2224,13 @@ def _git_executable() -> Optional[str]:
 #: Variables that point git at a repository whatever its working directory is.
 _GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
 
-#: Variables that replace a repository's own state: the index the diff reads the
-#: working tree through, and the object stores. ``git diff --name-only <commit>``
-#: lists the index's entries, not the directory's files, so a foreign
-#: GIT_INDEX_FILE (a pre-commit hook's temporary index, a stale export, a path
-#: that is gone) made the diff name another set of files, or none at all and at
-#: exit 0, and the scan then kept or discarded findings by that set. A foreign
-#: GIT_OBJECT_DIRECTORY makes the named revision unreadable ("bad revision").
+#: Variables that replace a repository's own state: the object stores, and the
+#: index. A foreign GIT_OBJECT_DIRECTORY makes the named revision unreadable
+#: ("bad revision", measured), so the diff reports nothing. The diff compares two
+#: commits (``<base>...HEAD``) and reads no index, and the nesting lookups left
+#: GIT_INDEX_FILE out already; it is dropped here as defense in depth, so that no
+#: git this module starts reads an index exported for another purpose (a
+#: pre-commit hook's temporary index, a stale export, a path that is gone).
 _GIT_STATE_ENV = (
     "GIT_INDEX_FILE",
     "GIT_OBJECT_DIRECTORY",
@@ -2265,58 +2265,140 @@ def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
     return {key: value for key, value in child_environ().items() if key not in dropped}
 
 
-def _core_worktree_names_a_tree(git_dir: str, started_in: str) -> bool:
-    """Whether the repository at *git_dir* sets ``core.worktree`` to a directory
-    that holds *started_in*.
+#: What the git directories read so far name in ``core.worktree``, kept for the
+#: run: the read starts a git process, and a scan asks about one GIT_DIR several
+#: times (the root lookup, the diff, the root's problem clause, each workspace
+#: project). Locked because a workspace scans its projects in threads.
+_core_worktrees: Dict[str, Optional[str]] = {}
+_core_worktrees_lock = threading.Lock()
 
-    With ``core.worktree`` set, GIT_DIR alone describes the layout in full: git
-    takes its working directory for the top of the tree only when none of
-    ``--work-tree``, GIT_WORK_TREE and ``core.worktree`` is given. Read with ``git
-    --git-dir <dir> config --get core.worktree``, which exits 0 and prints the
-    value as written when it is set and 1 when it is not (128 when the value
-    names a directory that is gone: git enters the configured tree before it
-    answers). A relative value is relative to the git directory itself, not to
-    the directory git is started in, so it is joined onto *git_dir* before the
-    check. A git that cannot be started, is missing or times out, an answer that
-    is not text, a value naming no directory, and a value naming a directory that
-    does not hold *started_in* all read as False, which drops the variable and
-    lets discovery answer.
 
-    The containment check is the same one the GIT_DIR and GIT_WORK_TREE pair gets
-    in :func:`_layout_environ`, for the same reason: a GIT_DIR left exported for
-    another repository (a hook's, a dotfiles checkout's) whose config names its
-    own tree would otherwise make the root lookup and the diff describe that
-    tree while the scan reads this one, and the changed set would intersect the
-    scanned directory to nothing. git honors such a GIT_DIR from any directory;
-    the scan honors it only where git's and the scan's trees are the same.
+def _core_worktree_of(git_dir: str) -> Optional[str]:
+    """The absolute tree the repository at *git_dir* names in ``core.worktree``,
+    or None, read once per git directory for the run.
+
+    Read as git's own setup reads it: from the git directory's own config file
+    (``<git_dir>/config``) alone, with ``git config --file``, never from the
+    global or system scope, an include or ``-c``. A linked worktree's admin dir
+    (``<repo>/.git/worktrees/<name>``, which holds ``commondir``) has no config
+    file of its own, and git takes no ``core.worktree`` for it, not even the
+    main repository's (git 2.50.1: with such a GIT_DIR and no GIT_WORK_TREE,
+    ``rev-parse --show-toplevel`` names the current directory whatever the main
+    config says); so none is read there either. ``--get`` exits 0 and prints the
+    value as written when it is set, 1 when it is not or the file is missing. A
+    relative value is relative to the git directory itself, not to the directory
+    git is started in, so it is joined onto *git_dir*. A git that cannot be
+    started, is missing or times out, and an answer that is not text or is
+    empty, read as None; a timeout is said in a debug line, since the lookup
+    then goes on without the exported layout.
     """
+    with _core_worktrees_lock:
+        if git_dir in _core_worktrees:
+            return _core_worktrees[git_dir]
+    work_tree = _read_core_worktree(git_dir)
+    with _core_worktrees_lock:
+        _core_worktrees[git_dir] = work_tree
+    return work_tree
+
+
+def _read_core_worktree(git_dir: str) -> Optional[str]:
+    """One read of ``core.worktree`` for :func:`_core_worktree_of`."""
+    if os.path.exists(os.path.join(git_dir, "commondir")):
+        return None
+    config = os.path.join(git_dir, "config")
     git = _git_executable()
     if git is None:
-        return False
+        return None
     try:
         result = subprocess.run(
             # git_argv: the repository's config names no program git runs here.
             git_argv(  # nosec B603 B607
-                "--git-dir", git_dir, "config", "--get", "core.worktree", program=git
+                "config", "--file", config, "--get", "core.worktree", program=git
             ),
             capture_output=True,
             stdin=subprocess.DEVNULL,
             timeout=30,
             env=_git_environ(),
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    except subprocess.TimeoutExpired:
+        ASH_LOGGER.debug(
+            f"Reading core.worktree from {config} did not finish in 30 seconds; "
+            "the exported GIT_DIR is not honored for this scan",
+            extra=NO_MARKUP,
+        )
+        return None
+    except OSError:
+        return None
     if result.returncode != 0:
-        return False
+        return None
     try:
         work_tree = _git_text(result.stdout).strip()
     except UnicodeDecodeError:
-        return False
+        return None
     if not work_tree:
-        return False
+        return None
     if not os.path.isabs(work_tree):
         work_tree = os.path.join(git_dir, work_tree)
-    return os.path.isdir(work_tree) and _is_at_or_below(started_in, work_tree)
+    return work_tree
+
+
+def _core_worktree_names_a_tree(git_dir: str, started_in: str) -> bool:
+    """Whether the repository at *git_dir* sets ``core.worktree`` to a directory
+    that holds *started_in*, with no other repository between the two.
+
+    With ``core.worktree`` set, GIT_DIR alone describes the layout in full: git
+    takes its working directory for the top of the tree only when none of
+    ``--work-tree``, GIT_WORK_TREE and ``core.worktree`` is given. The value is
+    read as git reads it (:func:`_core_worktree_of`). A value naming no
+    directory, or a directory that does not hold *started_in*, reads as False,
+    which drops the variable and lets discovery answer.
+
+    The containment check is the same one the GIT_DIR and GIT_WORK_TREE pair gets
+    in :func:`_layout_environ`, for the same reason: a GIT_DIR left exported for
+    another repository (a hook's, a dotfiles checkout's) whose config names its
+    own tree would otherwise make the root lookup and the diff describe that
+    tree while the scan reads this one, and the changed set would intersect the
+    scanned directory to nothing. Containment alone is no defense when the
+    configured tree holds everything (``GIT_DIR=~/.cfg`` with
+    ``core.worktree=$HOME``): git honors that GIT_DIR from any project under the
+    home directory, and the scan would read the dotfiles history for the
+    project. So the variable is also honored only when no ``.git`` entry sits in
+    any directory from *started_in* up to, and excluding, the configured tree
+    (:func:`_no_git_entry_between`): that is the deploy case the setting exists
+    for, a tree with no repository of its own, and where discovery would find a
+    repository first, discovery answers.
+    """
+    work_tree = _core_worktree_of(git_dir)
+    if work_tree is None:
+        return False
+    if not (os.path.isdir(work_tree) and _is_at_or_below(started_in, work_tree)):
+        return False
+    return _no_git_entry_between(started_in, work_tree)
+
+
+def _no_git_entry_between(started_in: str, work_tree: str) -> bool:
+    """Whether no directory from *started_in* up to, and excluding, *work_tree*
+    holds a ``.git`` entry of any kind, both read through their real paths.
+
+    An entry that cannot be checked (unreadable, a loop, a name too long) counts
+    as one: it is not proof that there is no repository there, and discovery is
+    the side the scan errs to. *started_in* is at or below *work_tree*, so the
+    walk reaches it; a walk that does not (the two were not read the same way)
+    also reads as a repository between, for the same reason.
+    """
+    top = Path(os.path.normcase(os.path.realpath(work_tree)))
+    current = Path(os.path.normcase(os.path.realpath(started_in)))
+    for directory in (current, *current.parents):
+        if directory == top:
+            return True
+        try:
+            os.lstat(directory / ".git")
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError:
+            return False
+        return False
+    return False
 
 
 def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
@@ -2361,10 +2443,11 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     exported with an empty value is read as unset (and left out of the copy):
     git itself refuses the empty string as a path.
 
-    A kept copy never carries GIT_INDEX_FILE: the diff lists the index's entries,
-    and the index of the layout the caller names is the named repository's own,
-    never one exported for another purpose (a pre-commit hook's temporary index
-    names the files being committed, not the tree). The object-store overrides
+    A kept copy never carries GIT_INDEX_FILE: the diff compares two commits and
+    reads no index, so the variable is left out as defense in depth, and no git
+    started here reads an index exported for another purpose (a pre-commit
+    hook's temporary index names the files being committed, not the tree). The
+    object-store overrides
     (GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES) are kept with a kept
     layout: a pre-receive hook's quarantine puts the pushed objects in a directory
     only those two variables name, and dropping them there made the named
