@@ -1190,6 +1190,49 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         assert (step.kinds, step.executionOrder) == (["return"], 5)
         assert (step.module, step.importance) == ("m", "unimportant")
 
+    def test_an_inline_step_that_states_a_default_reads_as_unset(self):
+        """The documented edge of the fill: the dumped step carries a field it
+        never set as its default, so a step that STATES the default (an
+        ``executionOrder`` of -1, SARIF's own "no order" value, or an empty
+        ``kinds``) cannot be told from one that left it out, and takes the row's
+        value. A step stating a value that is not the default keeps it, which is
+        the control: 0 is a real order and is not replaced."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+
+        def step_with(**stated):
+            return SarifReport(
+                runs=[
+                    _run_with_tables(
+                        "tool",
+                        [
+                            _finding(
+                                "T-1",
+                                codeFlows=[
+                                    {
+                                        "threadFlows": [
+                                            {"locations": [{"index": 0, **stated}]}
+                                        ]
+                                    }
+                                ],
+                            )
+                        ],
+                        steps=[
+                            {"module": "m", "kinds": ["call"], "executionOrder": 3}
+                        ],
+                    )
+                ]
+            )
+
+        aggregated.merge_sarif_report(step_with(executionOrder=-1, kinds=[]))
+        aggregated.merge_sarif_report(step_with(executionOrder=0))
+
+        stated_default, stated_zero = (
+            result.codeFlows[0].threadFlows[0].locations[0]
+            for result in aggregated.runs[0].results
+        )
+        assert (stated_default.executionOrder, stated_default.kinds) == (3, ["call"])
+        assert (stated_zero.executionOrder, stated_zero.kinds) == (0, ["call"])
+
     def test_an_index_only_address_takes_the_rows_absolute_address(self):
         """``absoluteAddress`` defaults to -1, so the dumped address carried -1 as
         a value and a None-only fill left the row's offset behind while taking
