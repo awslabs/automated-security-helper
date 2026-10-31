@@ -414,8 +414,10 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             project_paths = self._workspace_project_paths(model, runs)
             if project_paths is None:
                 return None
-            # Logged before the base-id refusal below, so a document that is not
-            # written still says how many open and review results it held.
+            # Logged before the base-id refusal below, so a document refused for
+            # its base ids still says how many open and review results it held.
+            # A document refused for its project paths, above, returns first
+            # and says nothing of them.
             self._log_unjudged_kinds(runs)
             uri_bases = self._merged_uri_base_ids(runs, project_paths)
             if uri_bases is None:
