@@ -419,6 +419,9 @@ def test_a_load_with_many_different_stray_shapes_logs_a_bounded_number_of_lines(
     assert logger.warning.call_count == cap + 1
     summary = logger.warning.call_args_list[-1].args[0]
     assert f"More than {cap} different license entry shapes" in summary
+    assert "in this license list or BOM" in summary, (
+        "this list is validated outside a BOM load, so the line cannot say BOM alone"
+    )
 
 
 def test_control_a_well_formed_list_warns_nothing():

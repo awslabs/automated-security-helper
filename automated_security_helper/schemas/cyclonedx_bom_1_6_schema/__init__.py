@@ -403,8 +403,9 @@ class LicenseChoice(RootModel):
                     ASH_LOGGER.warning(
                         "More than "
                         f"{_SHAPES_WARNED_PER_LOAD} different license entry "
-                        "shapes fit neither license form in this BOM; further "
-                        "shapes are kept as written without a warning."
+                        "shapes fit neither license form in this license list "
+                        "or BOM; further shapes are kept as written without a "
+                        "warning."
                     )
                 continue
             seen.add(shape)
