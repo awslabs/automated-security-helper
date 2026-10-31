@@ -1669,9 +1669,12 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
         yield search_dir / ASH_PYPROJECT_FILE_NAME
 
 
-#: Links followed before a chain is given up on as unjudgeable: the bound
+#: Links read before a judgment is given up on as unjudgeable: the bound
 #: ``os.path.realpath`` applies to a chain of links before it stops following.
-#: The reading itself is ``utils/link_chain`` (the one copy, shared with the MCP
+#: It is ONE budget for the whole walk of a path, not a limit per chain: every
+#: link read draws on it, those among the path's own components and those among
+#: the parents of a link's target alike (``utils/link_chain._Hops``). The
+#: reading itself is ``utils/link_chain`` (the one copy, shared with the MCP
 #: sandbox gates); the bound is a module attribute so a test can shorten it, and
 #: it is passed to the walk at call time.
 _LINK_HOPS = LINK_HOPS
@@ -1693,7 +1696,7 @@ def _unsafe_before_resolving(path: Path) -> Optional[UnsafeLink]:
 
 
 def _refused_before_resolving(path: Path) -> bool:
-    """Whether resolving `path` on Windows could connect to a host, or cannot be ruled out.
+    """Whether resolving `path` on Windows could reach a host or cannot be ruled out.
 
     Resolving a path there opens what it names, so this reads the path from text
     and from ``os.lstat`` / ``os.readlink`` alone (``utils/link_chain``), which
@@ -1704,7 +1707,8 @@ def _refused_before_resolving(path: Path) -> bool:
       step behind a device prefix);
     - a link on the way, ANY component from the anchor down and not only the
       last, or a link that link leads to, names a share or a device, or its
-      target cannot be read, or its chain is longer than ``_LINK_HOPS``;
+      target cannot be read, or the walk has read more than ``_LINK_HOPS`` links
+      in all (one budget shared by every link it meets, not a limit per chain);
     - a component that is there cannot be examined, so whether it is a link
       cannot be told.
 
@@ -1981,7 +1985,7 @@ def discover_config_source(
 
 
 def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> None:
-    """Refuse a discovered config file that resolves to one ``permit_base`` does not permit.
+    """Refuse a discovered config file that resolves outside what ``permit_base`` permits.
 
     See "Base paths". Nothing is checked without ``permit_base``. Raises
     ``ASHConfigInputNotPermittedError`` naming ``path`` as it was found, never the
@@ -1992,9 +1996,11 @@ def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> No
     ``Path.resolve`` raised a bare RuntimeError on one on Python 3.10 to 3.12
     in place of a config refusal. A loop resolves to itself and is judged as
     the path it was found at. Judged by ``_permitted``, the check discovery
-    makes of each candidate, so on Windows a found file that is a link is
-    refused unresolved: resolving it can open a connection to the host a UNC
-    target names, which discovery's own check never does.
+    makes of each candidate, so on Windows a found file is refused unresolved
+    when a link on the way leads to a share or a device, or cannot be read:
+    resolving it can open a connection to the host a UNC target names, which
+    discovery's own check never does. A link that leads only to local names is
+    resolved and judged as the file it names.
     """
     if permit_base is None or _permitted(Path(path), permit_base):
         return
