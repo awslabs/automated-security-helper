@@ -20,6 +20,7 @@ from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     confined_report_path,
+    enabled_value_kind,
     off_host_reporter_refused,
     reporter_companion_file_names,
     reporter_file_name,
@@ -345,7 +346,7 @@ def _warn_if_configured_but_not_enabled(
     # The value's type, never the value: a config file can read it from the
     # environment.
     value = plugin_config["enabled"]
-    kind = "null" if value is None else f"a {type(value).__name__}"
+    kind = enabled_value_kind(value)
     ASH_LOGGER.warning(
         f"Reporter '{name}' sends findings off the host and is not run: its config "
         f"section sets enabled to {kind}, and only the boolean true turns it on "

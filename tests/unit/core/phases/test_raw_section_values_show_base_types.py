@@ -23,6 +23,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from automated_security_helper.base.reporter_plugin import (
+    enabled_value_kind,
+    reset_unenabled_off_host_section_warnings,
+    warn_off_host_section_without_enabled,
+)
 from automated_security_helper.core.phases.report_phase import (
     _warn_if_configured_but_not_enabled,
 )
@@ -38,7 +43,10 @@ VARIABLE = "ASH_ENABLED_CANARY"
 class _OffHostReporter:
     """A reporter class shape the warning helper reads: a config key comes from
     the class name (``plugin_config_key``), and an empty requested-format list
-    selects every reporter (``reporter_matches_requested_formats``)."""
+    selects every reporter (``reporter_matches_requested_formats``). It sends
+    findings off the host, as the reporters this warning is for do."""
+
+    sends_off_host = True
 
 
 def test_the_warning_names_the_base_type_of_an_env_read_value(caplog):
@@ -61,7 +69,36 @@ def test_the_warning_still_names_a_real_non_string_type(caplog):
     with caplog.at_level(logging.WARNING):
         _warn_if_configured_but_not_enabled(_OffHostReporter(), {"enabled": 7}, [])
 
-    assert "sets enabled to a int" in caplog.text, caplog.text
+    assert "sets enabled to an int" in caplog.text, caplog.text
+
+
+@pytest.mark.parametrize(
+    "value",
+    [7, 1.5, "yes", None, ["true"], env_resolved_scalar(CANARY, VARIABLE)],
+    ids=["int", "float", "str", "null", "list", "env-read-str"],
+)
+def test_the_two_warnings_name_the_type_in_the_same_words(caplog, value):
+    """The report phase and the shared reporter warning name the type
+    ``enabled`` was set to through one helper, so the article and the marker
+    class cannot drift between them ("a int" against "an int", or the marker's
+    own name in one)."""
+    reset_unenabled_off_host_section_warnings()
+    section = {"enabled": value}
+    with caplog.at_level(logging.WARNING):
+        _warn_if_configured_but_not_enabled(_OffHostReporter(), section, [])
+        phase_text = caplog.text
+        caplog.clear()
+        reset_unenabled_off_host_section_warnings()
+        warn_off_host_section_without_enabled(_OffHostReporter, section)
+        shared_text = caplog.text
+    reset_unenabled_off_host_section_warnings()
+
+    expected = f"sets enabled to {enabled_value_kind(value)},"
+    assert expected in phase_text, phase_text
+    assert expected in shared_text, shared_text
+    for text in (phase_text, shared_text):
+        assert "EnvResolvedScalar" not in text, text
+        assert CANARY not in text, text
 
 
 class _InventoryScanner:

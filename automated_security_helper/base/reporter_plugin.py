@@ -80,6 +80,7 @@ from automated_security_helper.base.plugin_config import (
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.redacted_model import without_env_scalars
 
 
 class ReporterWorkspaceBehaviour(str, Enum):
@@ -476,6 +477,24 @@ def _sets_something(value: object) -> bool:
     return value not in (None, "", {}, [])
 
 
+def enabled_value_kind(value: object) -> str:
+    """How a warning names the type a section set ``enabled`` to.
+
+    ``null`` for None, otherwise the type's name with its article: ``a str``,
+    ``an int``. The value is never named, since a config file can read it from
+    the environment, and the resolver's marker class is looked through
+    (:func:`without_env_scalars`), so a string read from the environment is
+    ``a str`` and not the marker's own name. Every warning that names the type
+    calls this, so the wording cannot drift between them.
+    """
+    value = without_env_scalars(value)
+    if value is None:
+        return "null"
+    type_name = type(value).__name__
+    article = "an" if type_name[:1].lower() in "aeiou" else "a"
+    return f"{article} {type_name}"
+
+
 def warn_off_host_section_without_enabled(
     reporter_class: type, plugin_config: object
 ) -> None:
@@ -510,12 +529,7 @@ def warn_off_host_section_without_enabled(
         value = plugin_config["enabled"]
         if isinstance(value, bool):
             return
-        if value is None:
-            kind = "null"
-        else:
-            type_name = type(value).__name__
-            article = "an" if type_name[:1] in "aeiou" else "a"
-            kind = f"{article} {type_name}"
+        kind = enabled_value_kind(value)
         cause = "not-a-bool"
         message = (
             f"Reporter '{key}' sends findings off the host and is not run: its "
