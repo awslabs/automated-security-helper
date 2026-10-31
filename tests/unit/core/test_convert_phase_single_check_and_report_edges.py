@@ -116,6 +116,21 @@ def _descriptions(progress: MagicMock) -> List[str]:
     ]
 
 
+def _scope_double(**fields: Any) -> SimpleNamespace:
+    """What ``converter_run_scope`` yields: the four loss fields a real scope
+    carries, each at its default unless given, so no test hands the phase a
+    narrower shape than the one it reads."""
+    return SimpleNamespace(
+        **{
+            "refused_spawns": 0,
+            "last_refusal": None,
+            "failed_spawns": 0,
+            "last_failure": None,
+            **fields,
+        }
+    )
+
+
 def _converter(
     name: str,
     *,
@@ -446,7 +461,7 @@ class TestRefusedSpawnsAreNotNothingToConvert:
     def refused(self, monkeypatch):
         @contextlib.contextmanager
         def scope(plugin, context):
-            yield SimpleNamespace(refused_spawns=2, last_refusal="denied by the test")
+            yield _scope_double(refused_spawns=2, last_refusal="denied by the test")
 
         monkeypatch.setattr(convert_phase, "converter_run_scope", scope)
 
@@ -483,9 +498,7 @@ class TestFailedPlansAreNotRefusals:
     def failed(self, monkeypatch):
         @contextlib.contextmanager
         def scope(plugin, context):
-            yield SimpleNamespace(
-                refused_spawns=0,
-                last_refusal=None,
+            yield _scope_double(
                 failed_spawns=1,
                 last_failure="FileNotFoundError: no program named 'tool' was found",
             )
@@ -516,7 +529,7 @@ class TestFailedPlansAreNotRefusals:
     ):
         @contextlib.contextmanager
         def scope(plugin, context):
-            yield SimpleNamespace(
+            yield _scope_double(
                 refused_spawns=2,
                 last_refusal="denied by the test",
                 failed_spawns=1,
@@ -580,7 +593,7 @@ class TestTheSandboxLossIsRedactedLikeEveryOtherFailureText:
 
         @contextlib.contextmanager
         def scope(plugin, context):
-            yield SimpleNamespace(
+            yield _scope_double(
                 refused_spawns=1,
                 last_refusal=f"no grant for the bucket {ENV_VALUE}",
                 failed_spawns=1,
