@@ -88,10 +88,16 @@ def test_stdin_that_is_not_utf_8_is_the_same_refusal_a_file_gets():
 
 def test_a_file_uri_is_decoded_before_the_file_is_read(tmp_path):
     """The prefix alone was stripped, so a percent-escaped name was read as
-    the literal escaped text and not found."""
+    the literal escaped text and not found.
+
+    The URI is built as a URI (``file:///tmp/x/par%20ams.json``, or
+    ``file:///C:/x/par%20ams.json`` on Windows), so it is decoded on every
+    platform; a drive path quoted as plain text begins with neither ``/`` nor
+    ``localhost/`` and is read as written, which the relative-name test below
+    pins."""
     path = _document(tmp_path, {"offline": True}, name="par ams.json")
 
-    result, mock_run = _scan(["--cli-json-input", "file://" + quote(str(path))])
+    result, mock_run = _scan(["--cli-json-input", path.as_uri()])
 
     assert result.exit_code == 0, result.output
     assert mock_run.call_args.kwargs["offline"] is True
