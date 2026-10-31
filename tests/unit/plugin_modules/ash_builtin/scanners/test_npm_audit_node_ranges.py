@@ -450,7 +450,8 @@ def test_a_dependent_of_a_mixed_root_points_only_at_results_that_exist(
     references answered to no result, and the suppression pass leaves a
     dependent visible when a reference matches nothing: suppressing the
     advisory could not suppress it. The references name the copy the advisory
-    covers, for the dependent and for the root's own transitive result."""
+    covers, for the dependent. The root's own transitive result stems from its
+    dependency, which this report gives no entry for, so it carries none."""
     covered, outside = "node_modules/a/node_modules/minimist", "node_modules/minimist"
     _versions(monkeypatch, {covered: "1.5.0", outside: "2.3.0"})
     document = _with_dependent(
@@ -461,12 +462,76 @@ def test_a_dependent_of_a_mixed_root_points_only_at_results_that_exist(
 
     report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
 
-    for package in ("d", "minimist"):
-        refs, dangling = _refs_of(report, package)
-        assert dangling == [], (package, dangling)
-        assert [(ref["rule_id"], ref["package_path"]) for ref in refs] == [
-            ("GHSA-xvch-5gv4-984h", covered)
-        ], (package, refs)
+    refs, dangling = _refs_of(report, "d")
+    assert dangling == [], dangling
+    assert [(ref["rule_id"], ref["package_path"]) for ref in refs] == [
+        ("GHSA-xvch-5gv4-984h", covered)
+    ], refs
+
+
+def _transitive_of(report, package):
+    (transitive,) = [
+        r
+        for r in report.runs[0].results
+        if r.ruleId == f"npm-audit-transitive-{package}"
+    ]
+    return transitive
+
+
+def test_the_transitive_result_of_a_mixed_entry_stems_from_its_dependency_only(
+    scanner, monkeypatch
+):
+    """The copy at 2.3.0 is listed for the dependency; the entry's own advisory
+    does not cover it. Its result carried a reference to that advisory on the
+    other copy as well, and the suppression pass silences a transitive result
+    only when EVERY reference is suppressed, so suppressing the dependency's
+    advisory, the real cause, left it visible. It points at the dependency's
+    advisory alone."""
+    covered, outside = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {covered: "1.5.0", outside: "2.3.0"})
+    document = _mixed_report_with_dependencies({"mkdirp": "low"})
+    document["vulnerabilities"]["minimist"]["nodes"] = [covered, outside]
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    refs, dangling = _refs_of(report, "minimist")
+    assert dangling == [], dangling
+    assert [ref["rule_id"] for ref in refs] == ["GHSA-mkdirp-mkdirp-mkdirp"], refs
+
+
+def test_the_transitive_result_of_a_mixed_entry_with_no_dependency_entry_has_no_roots(
+    scanner, monkeypatch
+):
+    """The dependency the entry names has no entry in the report, so nothing
+    is known to stem the copy from. A reference to the entry's own advisory
+    stood in for the cause, and suppressing that advisory then hid a result it
+    does not explain. With no reference the result is never suppressed with
+    the roots (an empty list is not read as 'all of them suppressed')."""
+    covered, outside = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {covered: "1.5.0", outside: "2.3.0"})
+
+    report = scanner._convert_npm_audit_to_sarif(
+        _mixed_report([covered, outside]), scanner.context.source_dir
+    )
+
+    extra = _transitive_of(report, "minimist").properties.model_extra
+    assert not extra.get("root_advisories"), extra
+
+
+def test_a_transitive_only_entry_keeps_the_references_to_its_roots(scanner):
+    """Control: an entry with no advisory of its own stems from its
+    dependencies' advisories, as before."""
+    document = _with_dependent(
+        _report(["node_modules/minimist"], ranges=("<2.0.0",)),
+        ["node_modules/mkdirp"],
+    )
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    extra = _transitive_of(report, "mkdirp").properties.model_extra
+    assert [ref["rule_id"] for ref in extra["root_advisories"]] == [
+        "GHSA-xvch-5gv4-984h"
+    ]
 
 
 def test_a_dependent_of_a_two_advisory_root_points_each_advisory_at_its_own_copy(

@@ -2094,6 +2094,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     ) -> List[Dict[str, str]]:
         """The direct findings a transitive package's ``via`` chain leads to.
 
+        The chain is the packages named in ``pkg_name``'s own ``via``, and
+        theirs in turn; ``pkg_name``'s own advisories are not part of it.
+
         ``titles`` are the report's, so a reference carries the rule id the
         root's own result does (``_advisory_ids``).
 
@@ -2111,7 +2114,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         """
         roots: Dict[tuple[str, str, str], Dict[str, str]] = {}
         seen: set[str] = set()
-        pending = [pkg_name]
+        # The walk starts at what the package depends on, never at the
+        # package's own advisories: a result of this package that is
+        # transitive stems from its dependencies. For an entry with an
+        # advisory of its own as well, the transitive result is the copy that
+        # advisory does not cover, so a reference to the advisory named a cause
+        # the copy does not have: suppressing the real cause (the
+        # dependency's advisory) did not silence it, and with the dependency
+        # missing from the report the own advisory alone hid it.
+        start = vulnerabilities.get(pkg_name) or {}
+        start_via = start.get("via", [])
+        if not isinstance(start_via, list):
+            start_via = [start_via]
+        pending = [via for via in start_via if isinstance(via, str)]
         while pending:
             name = pending.pop()
             if name in seen:
