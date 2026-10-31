@@ -974,7 +974,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
                 config = config.model_dump(by_alias=True)
-            self.config = self.config.__class__.model_validate(config)
+            # A config that says what this one already says is not swapped in:
+            # building it again from its dump makes every nested entry a new
+            # object (an entry that carries an identity the dump does not write
+            # got a new one on each scan) and drops the private state the first
+            # build recorded. Only a config that differs replaces it.
+            if config != self.config.model_dump(by_alias=True):
+                self.config = self.config.__class__.model_validate(config)
         self._plugin_log(
             f"config setting: {self._setting_names(config)}",
             target_type=target_type,
